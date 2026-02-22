@@ -1,0 +1,81 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mozaiks"
+version = "0.1.0"
+description = "Mozaiks Stack - Runtime, orchestration, and contracts for AI-native applications"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+authors = [
+    {name = "BlocUnited LLC", email = "mike@blocunited.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Framework :: FastAPI",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+keywords = ["mozaiks", "ai", "orchestration", "workflows", "agents"]
+
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "sqlalchemy[asyncio]>=2.0.25",
+    "asyncpg>=0.29.0",
+    "aiosqlite>=0.19.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "python-jose[cryptography]>=3.3.0",
+    "websockets>=12.0",
+    "httpx>=0.26.0",
+    "structlog>=24.1.0",
+    "ag2>=0.4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.0",
+    "mypy>=1.8.0",
+]
+falkordb = [
+    "falkordb>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/BlocUnited-LLC/mozaiks"
+Repository = "https://github.com/BlocUnited-LLC/mozaiks"
+Documentation = "https://github.com/BlocUnited-LLC/mozaiks#readme"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mozaiks"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/mozaiks"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
