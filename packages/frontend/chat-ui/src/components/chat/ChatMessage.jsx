@@ -1,6 +1,7 @@
 import React from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
+import "./ChatMessage.css";
 
 // Local debug flag helper (duplicated intentionally to avoid cross-file import churn)
 const debugFlag = (k) => { try { return ['1','true','on','yes'].includes((localStorage.getItem(k)||'').toLowerCase()); } catch { return false; } };

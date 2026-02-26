@@ -1,0 +1,106 @@
+/* ============================================================================
+   ChatMessage — bubble layout styles
+   Custom CSS classes used by ChatMessage.jsx.
+   Colors use CSS variables set by applyTheme() from brand.json.
+   ============================================================================ */
+
+/* ── Shared message wrapper ─────────────────────────────────────────────── */
+.message {
+  max-width: 75%;
+  min-width: 120px;
+  border-radius: 14px;
+  padding: 10px 14px;
+  backdrop-filter: blur(8px);
+  position: relative;
+  word-break: break-word;
+}
+
+/* ── User bubble ────────────────────────────────────────────────────────── */
+.user-message {
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-primary-rgb, 6, 182, 212), 0.22) 0%,
+    rgba(var(--color-secondary-rgb, 139, 92, 246), 0.18) 100%
+  );
+  border: 1px solid rgba(var(--color-primary-rgb, 6, 182, 212), 0.35);
+  color: var(--color-text-primary, #e6eef8);
+  box-shadow: 0 4px 20px rgba(var(--color-primary-rgb, 6, 182, 212), 0.12);
+  margin-left: auto;
+}
+
+/* ── Agent bubble ───────────────────────────────────────────────────────── */
+.agent-message {
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(var(--color-border-subtle-rgb, 30, 41, 59), 0.8);
+  color: var(--color-text-primary, #e6eef8);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+/* ── Latest message glow ────────────────────────────────────────────────── */
+.message.latest {
+  border-color: rgba(var(--color-primary-rgb, 6, 182, 212), 0.5);
+  box-shadow: 0 4px 24px rgba(var(--color-primary-rgb, 6, 182, 212), 0.18);
+}
+
+/* ── Message header row (name pill + optional trace button) ─────────────── */
+.message-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+
+/* ── Message body ───────────────────────────────────────────────────────── */
+.message-body {
+  font-size: 0.93rem;
+  line-height: 1.55;
+  color: var(--color-text-primary, #e6eef8);
+}
+
+.message-body p {
+  margin: 0 0 0.5em;
+}
+
+.message-body p:last-child {
+  margin-bottom: 0;
+}
+
+/* ── Name pills ─────────────────────────────────────────────────────────── */
+.name-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px 2px 6px;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1.6;
+}
+
+.name-pill.user {
+  background: rgba(var(--color-primary-rgb, 6, 182, 212), 0.18);
+  border: 1px solid rgba(var(--color-primary-rgb, 6, 182, 212), 0.4);
+  color: var(--color-primary, #06b6d4);
+}
+
+.name-pill.agent {
+  background: rgba(var(--color-secondary-rgb, 139, 92, 246), 0.14);
+  border: 1px solid rgba(var(--color-secondary-rgb, 139, 92, 246), 0.35);
+  color: var(--color-secondary, #8b5cf6);
+}
+
+/* ── Pill emoji avatar ──────────────────────────────────────────────────── */
+.pill-avatar {
+  font-size: 0.85em;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+/* ── Thinking / streaming indicator ────────────────────────────────────── */
+.message-body .thinking-text {
+  opacity: 0.6;
+  font-style: italic;
+  font-size: 0.88rem;
+}
