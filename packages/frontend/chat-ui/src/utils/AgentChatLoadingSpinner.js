@@ -3,9 +3,10 @@ import { useBranding } from '../providers/BrandingProvider';
 
 const LoadingSpinner = () => {
   // Read logo from brand.json → assets.logo; falls back to mozaik_logo.svg
-  const branding = useBranding?.();
-  const _logo    = branding?.assets?.logo;
-  if (!_logo) {
+  // useBranding() returns the full context value: { branding, loading, ... }
+  const ctx   = useBranding?.();
+  const _logo = ctx?.branding?.assets?.logo;
+  if (!ctx?.loading && !_logo) {
     console.warn('⚠️ [THEME] branding.assets.logo not set — using fallback: mozaik_logo.svg');
   }
   const logoSrc  = _logo ? `/assets/${_logo}` : '/assets/mozaik_logo.svg';

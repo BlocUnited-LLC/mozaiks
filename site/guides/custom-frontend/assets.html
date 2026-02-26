@@ -1,0 +1,483 @@
+<!DOCTYPE html><!DOCTYPE html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</html></body><script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-markup.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script></footer>  </div>    <a href="https://mozaiks.ai" target="_blank" rel="noopener">mozaiks.ai</a>    <a href="https://github.com/BlocUnited-LLC/mozaiks" target="_blank" rel="noopener">GitHub</a>  <div style="display:flex;gap:20px">  <span>&copy; 2026 BlocUnited LLC</span><footer class="site-footer"></div>  </main>    </div>      </a>        <span class="nav-title">Step 5: Wiring &amp; Backend</span>        <span class="nav-dir">Next &rarr;</span>      <a href="wiring.html" class="right">      </a>        <span class="nav-title">Step 3: ui.json</span>        <span class="nav-dir">&larr; Back</span>      <a href="ui-json.html">    <div class="page-nav">    </div>      </p>        for most viewport sizes.        balance of visual fidelity and load time. A 1400 × 900px source is sufficient        For the chat background image, use WebP at roughly 80% quality for the best      <p>      <span class="callout-icon">💡</span>    <div class="callout tip">    </p>      where needed.      Color theming does not apply — use fully composed images with alpha transparency      <code>&lt;img&gt;</code> tags. There is no SVG inline injection for these.      Non-vector assets (wordmarks, backgrounds, favicons) are loaded as standard    <p>    <h2 id="png-webp">PNG and WebP assets</h2>    <!-- PNG & WebP -->    </table>      </tbody>        <tr><td>sparkle.svg</td><td>Discover / action button</td><td>SVG currentColor 24 × 24</td></tr>        <tr><td>logout.svg</td><td>Sign out menu item</td><td>SVG currentColor 24 × 24</td></tr>        <tr><td>settings.svg</td><td>Profile menu items</td><td>SVG currentColor 24 × 24</td></tr>        <tr><td>notifications.svg</td><td>Notifications button icon</td><td>SVG currentColor 24 × 24</td></tr>        <tr><td>profile.svg</td><td>Profile button fallback avatar</td><td>SVG currentColor 24 × 24</td></tr>        <tr><td>chat_bg.png</td><td>Chat area background</td><td>PNG/WebP, 1400px+ wide</td></tr>        <tr><td>favicon.png</td><td>Browser tab icon</td><td>PNG 32 × 32 or 64 × 64</td></tr>        <tr><td>wordmark.png</td><td>Header expanded layout</td><td>PNG transparent, max 200 × 40px</td></tr>        <tr><td>logo.svg</td><td>Loading screen, header fallback</td><td>SVG with currentColor</td></tr>      <tbody>      <thead><tr><th>Filename</th><th>Used in</th><th>Recommended format</th></tr></thead>    <table class="ref-table">    <p>These are the filenames referenced by the default <code>ui.json</code> template. Replace them with your own assets:</p>    <h2 id="starter-assets">Starter asset checklist</h2>    <!-- Starter asset list -->    </div>&lt;/svg&gt;</code></pre>  &lt;path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/&gt;      <pre><code class="language-xml">&lt;svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"&gt;      <div class="codeblock-header xml">Correct SVG template</div>    <div class="codeblock">    </div>      </div>        </div>          fills. Use it selectively inside paths that should be transparent.          <strong>No <code>fill="none"</code> on outer elements</strong> if you want solid icon        <div class="step-body">        <div class="step-num">4</div>      <div class="step-item">      </div>        </div>          Illustrator comments, and any embedded raster data to keep file sizes minimal.          <strong>Strip editor metadata</strong> — remove <code>xmlns:xlink</code>,        <div class="step-body">        <div class="step-num">3</div>      <div class="step-item">      </div>        </div>          controls size via CSS.          Remove fixed <code>width</code> and <code>height</code> attributes — the component          <strong>Set <code>viewBox="0 0 24 24"</code></strong> (or your asset's native grid).        <div class="step-body">        <div class="step-num">2</div>      <div class="step-item">      </div>        </div>          This lets the icon inherit whatever CSS <code>color</code> is applied by the parent.          <strong>Use <code>fill="currentColor"</code></strong> — not a hardcoded hex value.        <div class="step-body">        <div class="step-num">1</div>      <div class="step-item">    <div class="steps">    these rules:</p>    the current text color via CSS. For color to inherit correctly, your SVGs must follow    <p>Icons are rendered inline by the <code>ActionIcon</code> component, which applies    <h2 id="svg-format">SVG format requirements</h2>    <!-- SVG format -->    </div>      </p>        profile menu items, the profile button icon, and the notifications icon.        This rule applies to every icon field in <code>ui.json</code>: header actions,      <p>      <span class="callout-icon">⚠️</span>    <div class="callout warn">    </p>      fallback rendering of wrong icons.      a console warning and renders nothing. This is intentional — it prevents silent      If you pass a non-filename string (no dot in the value), <code>ActionIcon</code> logs    <p>    </div>      </div>"icon": "icons/sparkle"</code></pre>"icon": "SparkleIcon"        <pre style="font-size:13px;margin:0"><code class="language-json">"icon": "sparkle"        <h4 style="color:var(--error)">✗ Invalid — logs warning, renders null</h4>      <div class="card">      </div>"icon": "settings.svg"</code></pre>"icon": "logo.png"        <pre style="font-size:13px;margin:0"><code class="language-json">"icon": "sparkle.svg"        <h4 style="color:var(--success)">✓ Valid</h4>      <div class="card">    <div class="two-col">    </p>      <strong>must contain a dot</strong> (i.e. it must look like a filename with an extension).      directory using the filename value from config. It applies a strict check: the value      The <code>ActionIcon</code> component resolves icons from the <code>/assets/</code>    <p>    <h2 id="action-icon">The ActionIcon filename rule</h2>    <!-- ActionIcon rule -->    </div>      </p>        The runtime prepends the <code>/assets/</code> path automatically.        (e.g. <code>"logo.svg"</code>, not <code>"/assets/logo.svg"</code>).        In <code>brand.json</code> and <code>ui.json</code>, reference asset filenames only      <p>      <span class="callout-icon">ℹ️</span>    <div class="callout info">    </div>    └── FagrakInline.otf         →  /fonts/FagrakInline.otf</code></pre>└── fonts/│   └── profile.svg              →  /assets/profile.svg│   ├── notifications.svg        →  /assets/notifications.svg│   ├── logout.svg               →  /assets/logout.svg│   ├── settings.svg             →  /assets/settings.svg│   ├── sparkle.svg              →  /assets/sparkle.svg│   ├── chat_bg.png              →  /assets/chat_bg.png│   ├── favicon.png              →  /assets/favicon.png│   ├── wordmark.png             →  /assets/wordmark.png│   ├── logo.svg                 →  /assets/logo.svg├── assets/├── ui.json├── brand.json      <pre><code class="language-text">brands/public/      <div class="codeblock-header">Directory structure</div>    <div class="codeblock">    <p>All brand assets live inside <code>brands/public/</code>. They are served statically from the app root.</p>    <h2 id="file-layout">File layout</h2>    <!-- File layout -->    </div>      <div class="step-dot"></div>      <div class="step-line"></div>      <div class="step-dot current"></div>      <div class="step-line done"></div>      <div class="step-dot done"></div>      <div class="step-line done"></div>      <div class="step-dot done"></div>      <div class="step-line done"></div>      <div class="step-dot done"></div>    <div class="step-progress">    </p>      <code>ActionIcon</code> component requires a filename — not a token.      Where to place image files, how SVG icons must be formatted, and why the    <p class="subtitle">    <h1>Assets &amp; Icons</h1>    <p class="page-eyebrow">Customization Guide · Step 4 of 5</p>  <main class="content">  </nav>    </div>      <a href="#png-webp"        class="nav-link sub">PNG &amp; WebP</a>      <a href="#starter-assets"  class="nav-link sub">Starter asset list</a>      <a href="#svg-format"      class="nav-link sub">SVG format</a>      <a href="#action-icon"     class="nav-link sub">ActionIcon rule</a>      <a href="#file-layout"     class="nav-link sub">File layout</a>      <div class="nav-label">On this page</div>    <div class="nav-group" style="margin-top:12px">    </div>      <a href="wiring.html" class="nav-link"><span class="step-badge">5</span> Wiring &amp; Backend</a>      <a href="assets.html" class="nav-link active"><span class="step-badge">4</span> Assets &amp; Icons</a>      <a href="ui-json.html" class="nav-link"><span class="step-badge">3</span> ui.json</a>      <a href="brand-json.html" class="nav-link"><span class="step-badge">2</span> brand.json</a>      <a href="./" class="nav-link"><span class="step-badge">1</span> Overview &amp; Quick Start</a>      <div class="nav-label">Customization Guide</div>    <div class="nav-group">    </div>      <a href="/" class="nav-link">Home</a>      <div class="nav-label">Documentation</div>    <div class="nav-group">  <nav class="sidebar"><div class="layout"></header>  </nav>    <a href="https://github.com/BlocUnited-LLC/mozaiks" target="_blank" rel="noopener">GitHub</a>    <a href="/">Home</a>  <nav class="header-nav">  </a>    Mozaiks Docs    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>  <a class="site-logo" href="/"><header class="site-header"><body></head>  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" />  <link rel="stylesheet" href="../../css/docs.css" />  <title>Step 4: Assets &amp; Icons — Mozaiks Docs</title>  <link rel="canonical" href="https://docs.mozaiks.ai/guides/custom-frontend/assets.html" />  <meta name="description" content="Step 4 — How to add SVG icons and static assets to a custom Mozaiks chat-ui brand." />  <meta name="viewport" content="width=device-width, initial-scale=1.0" />  <meta charset="UTF-8" /><head><html lang="en"><html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Step 4 — Managing SVG icons and static assets in a custom Mozaiks chat-ui brand." />
+  <link rel="canonical" href="https://docs.mozaiks.ai/guides/custom-frontend/assets.html" />
+  <title>Step 4: Assets &amp; Icons — Mozaiks Docs</title>
+  <link rel="stylesheet" href="../../css/docs.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" />
+</head>
+<body>
+
+<header class="site-header">
+  <a class="site-logo" href="/">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+    Mozaiks Docs
+  </a>
+  <nav class="header-nav">
+    <a href="/">Home</a>
+    <a href="https://github.com/BlocUnited-LLC/mozaiks" target="_blank" rel="noopener">GitHub</a>
+  </nav>
+</header>
+
+<div class="layout">
+  <nav class="sidebar">
+    <div class="nav-group">
+      <div class="nav-label">Documentation</div>
+      <a href="/" class="nav-link">Home</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">Customization Guide</div>
+      <a href="./"              class="nav-link"><span class="step-badge">1</span> Overview &amp; Quick Start</a>
+      <a href="brand-json.html" class="nav-link"><span class="step-badge">2</span> brand.json</a>
+      <a href="ui-json.html"    class="nav-link"><span class="step-badge">3</span> ui.json</a>
+      <a href="assets.html"     class="nav-link active"><span class="step-badge">4</span> Assets &amp; Icons</a>
+      <a href="wiring.html"     class="nav-link"><span class="step-badge">5</span> Wiring &amp; Backend</a>
+    </div>
+    <div class="nav-group" style="margin-top:12px">
+      <div class="nav-label">On this page</div>
+      <a href="#file-placement"  class="nav-link sub">File placement</a>
+      <a href="#action-icon"     class="nav-link sub">ActionIcon rules</a>
+      <a href="#svg-format"      class="nav-link sub">SVG format</a>
+      <a href="#raster"          class="nav-link sub">PNG &amp; WebP</a>
+      <a href="#starter-list"    class="nav-link sub">Starter asset list</a>
+    </div>
+  </nav>
+
+  <main class="content">
+    <p class="page-eyebrow">Customization Guide · Step 4 of 5</p>
+    <h1>Assets &amp; Icons</h1>
+    <p class="subtitle">
+      Place icon SVGs and raster images, follow the ActionIcon filename contract, and know the rendering rules.
+    </p>
+
+    <div class="step-progress">
+      <div class="step-dot done"></div>
+      <div class="step-line done"></div>
+      <div class="step-dot done"></div>
+      <div class="step-line done"></div>
+      <div class="step-dot done"></div>
+      <div class="step-line done"></div>
+      <div class="step-dot current"></div>
+      <div class="step-line"></div>
+      <div class="step-dot"></div>
+    </div>
+
+    <!-- File placement -->
+    <h2 id="file-placement">File placement</h2>
+
+    <div class="codeblock">
+      <div class="codeblock-header text">brands/public directory layout</div>
+      <pre><code class="language-text">brands/
+└── public/                 ← served at /
+    ├── brand.json
+    ├── ui.json
+    ├── assets/             ← served at /assets/
+    │   ├── logo.svg
+    │   ├── favicon.png
+    │   ├── chat_bg.png
+    │   ├── sparkle.svg
+    │   ├── settings.svg
+    │   ├── logout.svg
+    │   ├── notifications.svg
+    │   └── profile.svg
+    └── fonts/              ← served at /fonts/
+        └── YourFont.otf</code></pre>
+    </div>
+
+    <p>
+      The dev server (<code>npx serve brands/public -p 3001</code>) maps the root to
+      <code>brands/public/</code>, so <code>/assets/logo.svg</code> resolves to
+      <code>brands/public/assets/logo.svg</code>.
+    </p>
+
+    <!-- ActionIcon rules -->
+    <h2 id="action-icon">ActionIcon rules</h2>
+
+    <p>
+      All icon references in <code>ui.json</code> — <code>header.actions[*].icon</code>,
+      <code>profile.menu[*].icon</code>, <code>notifications.icon</code>, and
+      <code>profile.icon</code> — are passed to the <code>ActionIcon</code> component.
+    </p>
+
+    <div class="callout warn">
+      <span class="callout-icon">⚠️</span>
+      <div>
+        <p><strong>Filename required.</strong> The value must contain a dot (e.g. <code>"sparkle.svg"</code>).</p>
+        <p>If you pass a bare name like <code>"sparkle"</code>, ActionIcon logs a console warning and renders
+           <code>null</code> — no icon appears. This is intentional; token strings are not supported.</p>
+      </div>
+    </div>
+
+    <p>How ActionIcon resolves an icon value:</p>
+
+    <ol class="steps">
+      <li>If the value contains a dot, the icon is treated as a filename.</li>
+      <li>The component requests <code>/assets/&lt;filename&gt;</code> from the brand server.</li>
+      <li>The SVG source is fetched, sanitized, and rendered inline — inheriting the current <code>color</code> via <code>fill="currentColor"</code>.</li>
+      <li>Size is controlled by the parent context (header toolbar, menu row, etc.).</li>
+    </ol>
+
+    <!-- SVG format -->
+    <h2 id="svg-format">SVG format requirements</h2>
+
+    <p>Icons rendered via ActionIcon must follow these rules for correct color inheritance:</p>
+
+    <table class="ref-table">
+      <thead><tr><th>Rule</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Use <code>fill="currentColor"</code></td>
+          <td>So the icon inherits the button/text color from CSS. Hard-coded hex values break theme switching.</td>
+        </tr>
+        <tr>
+          <td>Set <code>viewBox="0 0 24 24"</code></td>
+          <td>Standard 24 × 24 viewport ensures predictable scaling. Other sizes are supported but 24 × 24 is expected.</td>
+        </tr>
+        <tr>
+          <td>No <code>width</code> / <code>height</code> attributes on the <code>&lt;svg&gt;</code> tag</td>
+          <td>The parent container controls rendered size. Fixed dimensions override CSS sizing.</td>
+        </tr>
+        <tr>
+          <td>Single-color paths only</td>
+          <td>Multi-color icons won't respond to <code>currentColor</code>. Use a raster image instead for multi-color logos.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Minimal valid SVG example</h3>
+    <div class="codeblock">
+      <div class="codeblock-header xml">assets/sparkle.svg</div>
+      <pre><code class="language-xml">&lt;svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"&gt;
+  &lt;path d="M12 2L9.5 9.5 2 12l7.5 2.5L12 22l2.5-7.5L22 12l-7.5-2.5Z"/&gt;
+&lt;/svg&gt;</code></pre>
+    </div>
+
+    <!-- Raster -->
+    <h2 id="raster">PNG &amp; WebP</h2>
+
+    <p>
+      Raster images (PNG, WebP, JPEG) are used for the chat background, wordmark, and favicon —
+      not for icon buttons. They are referenced directly via <code>&lt;img&gt;</code> tags and
+      do not go through ActionIcon.
+    </p>
+
+    <table class="ref-table">
+      <thead><tr><th>Asset</th><th>Format</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>assets.backgroundImage</code></td>
+          <td>PNG / WebP</td>
+          <td>Chat area background. Recommended resolution: 1440 × 900 or larger. Falls back to <code>chat_bg_template.png</code> if the file is absent.</td>
+        </tr>
+        <tr>
+          <td><code>assets.wordmark</code></td>
+          <td>PNG / SVG</td>
+          <td>Logotype. Transparent background recommended. Will be rendered at natural aspect ratio up to a max height.</td>
+        </tr>
+        <tr>
+          <td><code>assets.favicon</code></td>
+          <td>PNG / ICO</td>
+          <td>Injected as <code>&lt;link rel="icon"&gt;</code>. 32 × 32 or 64 × 64 PNG works across all browsers.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Starter list -->
+    <h2 id="starter-list">Starter asset list</h2>
+
+    <p>Copy the template assets and rename them for your brand. The keys in the table match the
+       <code>icon</code> field values in the default <code>ui.json</code>.</p>
+
+    <table class="ref-table">
+      <thead><tr><th>Filename</th><th>Used in</th><th>Format</th></tr></thead>
+      <tbody>
+        <tr><td><code>logo.svg</code></td><td><code>brand.json → assets.logo</code></td><td>SVG</td></tr>
+        <tr><td><code>wordmark.png</code></td><td><code>brand.json → assets.wordmark</code></td><td>PNG</td></tr>
+        <tr><td><code>favicon.png</code></td><td><code>brand.json → assets.favicon</code></td><td>PNG</td></tr>
+        <tr><td><code>chat_bg.png</code></td><td><code>brand.json → assets.backgroundImage</code></td><td>PNG / WebP</td></tr>
+        <tr><td><code>profile.svg</code></td><td><code>ui.json → profile.icon</code></td><td>SVG w/ currentColor</td></tr>
+        <tr><td><code>notifications.svg</code></td><td><code>ui.json → notifications.icon</code></td><td>SVG w/ currentColor</td></tr>
+        <tr><td><code>settings.svg</code></td><td><code>ui.json → profile.menu[*].icon</code></td><td>SVG w/ currentColor</td></tr>
+        <tr><td><code>logout.svg</code></td><td><code>ui.json → profile.menu signout item</code></td><td>SVG w/ currentColor</td></tr>
+        <tr><td><code>sparkle.svg</code></td><td><code>ui.json → header.actions[*].icon</code></td><td>SVG w/ currentColor</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout tip">
+      <span class="callout-icon">💡</span>
+      <p>The template brand ships all starter SVGs. Swap individual files without touching the JSON until you're ready to rename.</p>
+    </div>
+
+    <div class="page-nav">
+      <a href="ui-json.html">
+        <span class="nav-dir">&larr; Back</span>
+        <span class="nav-title">Step 3: ui.json</span>
+      </a>
+      <a href="wiring.html" class="right">
+        <span class="nav-dir">Next &rarr;</span>
+        <span class="nav-title">Step 5: Wiring &amp; Backend</span>
+      </a>
+    </div>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <span>&copy; 2026 BlocUnited LLC</span>
+  <div style="display:flex;gap:20px">
+    <a href="https://github.com/BlocUnited-LLC/mozaiks" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://mozaiks.ai" target="_blank" rel="noopener">mozaiks.ai</a>
+  </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-markup.min.js"></script>
+</body>
+</html>

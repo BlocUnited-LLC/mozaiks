@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Mozaiks developer documentation — build AI-powered workflows with a fully branded frontend." />
+  <link rel="canonical" href="https://docs.mozaiks.ai/" />
+  <title>Mozaiks Docs</title>
+  <link rel="stylesheet" href="css/docs.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" />
+</head>
+<body>
+<header class="site-header">
+  <a class="site-logo" href="/">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+    Mozaiks Docs
+  </a>
+  <nav class="header-nav">
+    <a href="guides/custom-frontend/">Customization Guide</a>
+    <a href="https://github.com/BlocUnited-LLC/mozaiks" target="_blank" rel="noopener">GitHub</a>
+  </nav>
+</header>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="nav-group">
+      <div class="nav-label">Documentation</div>
+      <a href="/" class="nav-link active">Home</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">Customization Guide</div>
+      <a href="guides/custom-frontend/" class="nav-link"><span class="step-badge">1</span> Overview &amp; Quick Start</a>
+      <a href="guides/custom-frontend/brand-json.html" class="nav-link"><span class="step-badge">2</span> brand.json</a>
+      <a href="guides/custom-frontend/ui-json.html" class="nav-link"><span class="step-badge">3</span> ui.json</a>
+      <a href="guides/custom-frontend/assets.html" class="nav-link"><span class="step-badge">4</span> Assets &amp; Icons</a>
+      <a href="guides/custom-frontend/wiring.html" class="nav-link"><span class="step-badge">5</span> Wiring &amp; Backend</a>
+    </div>
+  </nav>
+  <main class="content">
+    <p class="page-eyebrow">Mozaiks Developer Docs</p>
+    <h1>Build something yours.</h1>
+    <p class="subtitle">Mozaiks gives you a fully brandable AI chat runtime. This documentation walks you through customizing every part of your frontend — colors, menus, icons, and backend wiring.</p>
+    <div class="callout info">
+      <span class="callout-icon">ℹ️</span>
+      <p>Everything in the UI shell is driven by two JSON config files. No code changes needed for most customizations.</p>
+    </div>
+    <h2 id="guide">Customizing Your Frontend</h2>
+    <p>Work through the five steps in order for a complete custom-branded app.</p>
+    <div class="two-col">
+      <a href="guides/custom-frontend/" class="card" style="text-decoration:none">
+        <h4>Step 1 — Overview &amp; Quick Start</h4>
+        <p>Understand the two-file config system and get your dev environment running in minutes.</p>
+      </a>
+      <a href="guides/custom-frontend/brand-json.html" class="card" style="text-decoration:none">
+        <h4>Step 2 — brand.json</h4>
+        <p>Set your colors, typography, shadows, and asset filenames. Full field reference included.</p>
+      </a>
+      <a href="guides/custom-frontend/ui-json.html" class="card" style="text-decoration:none">
+        <h4>Step 3 — ui.json</h4>
+        <p>Configure the header, profile dropdown, notifications, footer links, and chat modes.</p>
+      </a>
+      <a href="guides/custom-frontend/assets.html" class="card" style="text-decoration:none">
+        <h4>Step 4 — Assets &amp; Icons</h4>
+        <p>Icon format requirements, file placement, and how the <code>ActionIcon</code> component works.</p>
+      </a>
+    </div>
+    <a href="guides/custom-frontend/wiring.html" class="card" style="text-decoration:none;display:block;max-width:400px">
+      <h4>Step 5 — Wiring &amp; Backend</h4>
+      <p>Connect real user auth, route the <code>onAction</code> handler, and integrate your backend.</p>
+    </a>
+    <h2 id="structure">Repository structure</h2>
+    <div class="codeblock">
+      <div class="codeblock-header bash">Template layout</div>
+      <pre><code class="language-bash">packages/frontend/chat-ui/
+  template/
+    vite.config.js        # publicDir: brands/public/
+    brands/
+      public/             # Served at /
+        brand.json        # Visual identity
+        ui.json           # Chrome config
+        assets/           # Icons + images</code></pre>
+    </div>
+    <h2 id="config-split">The config split</h2>
+    <div class="two-col">
+      <div class="card"><h4>brand.json</h4><p>Colors &middot; typography &middot; shadows &middot; asset filenames.<br/>Controls what the UI <em>looks like</em>.</p></div>
+      <div class="card"><h4>ui.json</h4><p>Header actions &middot; profile menu &middot; notifications &middot; footer.<br/>Controls <em>what appears</em> in the shell.</p></div>
+    </div>
+    <div class="page-nav">
+      <span></span>
+      <a href="guides/custom-frontend/" class="right">
+        <span class="nav-dir">Start Guide &rarr;</span>
+        <span class="nav-title">Step 1: Overview &amp; Quick Start</span>
+      </a>
+    </div>
+  </main>
+</div>
+<footer class="site-footer">
+  <span>&copy; 2026 BlocUnited LLC</span>
+  <div style="display:flex;gap:20px">
+    <a href="https://github.com/BlocUnited-LLC/mozaiks" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://mozaiks.ai" target="_blank" rel="noopener">mozaiks.ai</a>
+  </div>
+</footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Step 2 — Complete brand.json reference for customizing Mozaiks chat-ui visual identity." />
+  <link rel="canonical" href="https://docs.mozaiks.ai/guides/custom-frontend/brand-json.html" />
+  <title>Step 2: brand.json — Mozaiks Docs</title>
+  <link rel="stylesheet" href="../../css/docs.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" />
+</head>
+<body>
+
+<header class="site-header">
+  <a class="site-logo" href="/">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+    Mozaiks Docs
+  </a>
+  <nav class="header-nav">
+    <a href="/">Home</a>
+    <a href="https://github.com/BlocUnited-LLC/mozaiks" target="_blank" rel="noopener">GitHub</a>
+  </nav>
+</header>
+
+<div class="layout">
+  <nav class="sidebar">
+    <div class="nav-group">
+      <div class="nav-label">Documentation</div>
+      <a href="/" class="nav-link">Home</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">Customization Guide</div>
+      <a href="./" class="nav-link"><span class="step-badge">1</span> Overview &amp; Quick Start</a>
+      <a href="brand-json.html" class="nav-link active"><span class="step-badge">2</span> brand.json</a>
+      <a href="ui-json.html" class="nav-link"><span class="step-badge">3</span> ui.json</a>
+      <a href="assets.html" class="nav-link"><span class="step-badge">4</span> Assets &amp; Icons</a>
+      <a href="wiring.html" class="nav-link"><span class="step-badge">5</span> Wiring &amp; Backend</a>
+    </div>
+    <div class="nav-group" style="margin-top:12px">
+      <div class="nav-label">On this page</div>
+      <a href="#full-example"  class="nav-link sub">Full example</a>
+      <a href="#identity"      class="nav-link sub">name &amp; tagline</a>
+      <a href="#assets-ref"    class="nav-link sub">assets</a>
+      <a href="#fonts-ref"     class="nav-link sub">fonts</a>
+      <a href="#colors-ref"    class="nav-link sub">colors</a>
+      <a href="#shadows-ref"   class="nav-link sub">shadows</a>
+    </div>
+  </nav>
+
+  <main class="content">
+    <p class="page-eyebrow">Customization Guide · Step 2 of 5</p>
+    <h1>brand.json</h1>
+    <p class="subtitle">
+      Define your visual identity — colors, typography, shadows, and asset filenames.
+      No UI structure or menu configuration belongs here.
+    </p>
+
+    <div class="step-progress">
+      <div class="step-dot done"></div>
+      <div class="step-line done"></div>
+      <div class="step-dot current"></div>
+      <div class="step-line"></div>
+      <div class="step-dot"></div>
+      <div class="step-line"></div>
+      <div class="step-dot"></div>
+      <div class="step-line"></div>
+      <div class="step-dot"></div>
+    </div>
+
+    <div class="callout info">
+      <span class="callout-icon">📁</span>
+      <p>File location: <code>brands/public/brand.json</code> — served at <code>/brand.json</code></p>
+    </div>
+
+    <!-- Full example -->
+    <h2 id="full-example">Full example</h2>
+
+    <div class="codeblock">
+      <div class="codeblock-header json">brands/public/brand.json</div>
+      <pre><code class="language-json">{
+  "name": "YourApp",
+  "tagline": "AI-Powered Everything",
+
+  "assets": {
+    "logo":            "logo.svg",
+    "wordmark":        "wordmark.png",
+    "favicon":         "favicon.png",
+    "backgroundImage": "chat_bg.png"
+  },
+
+  "fonts": {
+    "body": {
+      "family":        "Rajdhani",
+      "fallbacks":     "ui-sans-serif, system-ui, sans-serif",
+      "googleFont":    "https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600&display=swap",
+      "tailwindClass": "font-sans"
+    },
+    "heading": {
+      "family":        "Orbitron",
+      "fallbacks":     "Rajdhani, sans-serif",
+      "googleFont":    "https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap",
+      "tailwindClass": "font-heading"
+    },
+    "logo": {
+      "family":        "Fagrak Inline",
+      "localFont":     true,
+      "src":           "/fonts/FagrakInline.otf",
+      "tailwindClass": "font-logo"
+    }
+  },
+
+  "colors": {
+    "primary":    { "main": "#06b6d4", "light": "#67e8f9", "dark": "#0e7490",  "name": "cyan"    },
+    "secondary":  { "main": "#8b5cf6", "light": "#a78bfa", "dark": "#6d28d9",  "name": "violet"  },
+    "accent":     { "main": "#f59e0b", "light": "#fbbf24", "dark": "#d97706",  "name": "amber"   },
+    "success":    { "main": "#10b981", "light": "#34d399", "dark": "#059669",  "name": "emerald" },
+    "warning":    { "main": "#f59e0b", "light": "#fbbf24", "dark": "#d97706",  "name": "amber"   },
+    "error":      { "main": "#ef4444", "light": "#f87171", "dark": "#dc2626",  "name": "red"     },
+    "background": {
+      "base":     "#0b1220",
+      "surface":  "#0f1724",
+      "elevated": "#131d33",
+      "overlay":  "rgba(13, 23, 42, 0.72)"
+    },
+    "border": {
+      "subtle": "#1e293b",
+      "strong": "#334155",
+      "accent": "#06b6d4"
+    },
+    "text": {
+      "primary":   "#e6eef8",
+      "secondary": "#94a3b8",
+      "muted":     "#64748b",
+      "onAccent":  "#f8fafc"
+    }
+  },
+
+  "shadows": {
+    "primary":   "0 20px 45px rgba(6, 182, 212, 0.24)",
+    "secondary": "0 20px 45px rgba(139, 92, 246, 0.24)",
+    "accent":    "0 18px 40px rgba(245, 158, 11, 0.32)",
+    "success":   "0 18px 40px rgba(16, 185, 129, 0.24)",
+    "warning":   "0 18px 45px rgba(245, 158, 11, 0.34)",
+    "error":     "0 18px 45px rgba(239, 68, 68, 0.3)",
+    "elevated":  "0 24px 60px rgba(11, 18, 32, 0.55)",
+    "focus":     "0 0 0 3px rgba(8, 145, 178, 0.55)"
+  }
+}</code></pre>
+    </div>
+
+    <!-- name & tagline -->
+    <h2 id="identity">name &amp; tagline</h2>
+
+    <table class="ref-table">
+      <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>name</td>
+          <td><span class="type">string</span> <span class="req">required</span></td>
+          <td>App display name. Used in page titles and screen reader labels throughout the shell.</td>
+        </tr>
+        <tr>
+          <td>tagline</td>
+          <td><span class="type">string</span> <span class="opt">optional</span></td>
+          <td>Short tagline shown in login screens or splash contexts. Not shown in the main shell by default.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- assets -->
+    <h2 id="assets-ref">assets</h2>
+    <p>Filenames for images served from <code>/assets/</code>. Do not include the path prefix — just the filename.</p>
+
+    <table class="ref-table">
+      <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>assets.logo</td>
+          <td><span class="type">string</span> <span class="req">required</span></td>
+          <td>Primary logomark (SVG or PNG). Used in the loading spinner and any context requiring the logo icon. Example: <code>"logo.svg"</code></td>
+        </tr>
+        <tr>
+          <td>assets.wordmark</td>
+          <td><span class="type">string</span> <span class="opt">optional</span></td>
+          <td>Full wordmark / logotype image — used where horizontal layout allows more space.</td>
+        </tr>
+        <tr>
+          <td>assets.favicon</td>
+          <td><span class="type">string</span> <span class="opt">optional</span></td>
+          <td>Favicon filename. Injected into <code>&lt;link rel="icon"&gt;</code> at app boot.</td>
+        </tr>
+        <tr>
+          <td>assets.backgroundImage</td>
+          <td><span class="type">string</span> <span class="opt">optional</span></td>
+          <td>Chat area background image. Falls back to <code>chat_bg_template.png</code> if missing. Example: <code>"chat_bg.png"</code></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- fonts -->
+    <h2 id="fonts-ref">fonts</h2>
+    <p>Three font slots: <code>body</code>, <code>heading</code>, <code>logo</code>. Each is independent.</p>
+
+    <table class="ref-table">
+      <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>fonts.*.family</td>
+          <td><span class="type">string</span></td>
+          <td>CSS font-family value for this slot (e.g. <code>"Rajdhani"</code>).</td>
+        </tr>
+        <tr>
+          <td>fonts.*.fallbacks</td>
+          <td><span class="type">string</span></td>
+          <td>Comma-separated CSS fallback fonts appended after the primary family.</td>
+        </tr>
+        <tr>
+          <td>fonts.*.googleFont</td>
+          <td><span class="type">string</span> <span class="opt">optional</span></td>
+          <td>Full Google Fonts URL. Injected as a <code>&lt;link rel="stylesheet"&gt;</code> at boot. Omit if using a local font.</td>
+        </tr>
+        <tr>
+          <td>fonts.*.localFont</td>
+          <td><span class="type">boolean</span> <span class="opt">optional</span></td>
+          <td>Set <code>true</code> for self-hosted fonts. Requires <code>src</code> to be set.</td>
+        </tr>
+        <tr>
+          <td>fonts.*.src</td>
+          <td><span class="type">string</span> <span class="opt">optional</span></td>
+          <td>Path to the font file from the public root (e.g. <code>"/fonts/MyFont.otf"</code>). Used to generate a <code>@font-face</code> block.</td>
+        </tr>
+        <tr>
+          <td>fonts.*.tailwindClass</td>
+          <td><span class="type">string</span> <span class="opt">optional</span></td>
+          <td>Tailwind utility class applied to the relevant element (e.g. <code>"font-heading"</code>).</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout tip">
+      <span class="callout-icon">💡</span>
+      <p>Place self-hosted font files in <code>brands/public/fonts/</code> — they'll be served at <code>/fonts/&lt;file&gt;</code>.</p>
+    </div>
+
+    <!-- colors -->
+    <h2 id="colors-ref">colors</h2>
+    <p>
+      All color entries are applied as CSS custom properties (e.g. <code>--color-primary</code>,
+      <code>--color-primary-light</code>). Components reference these vars, so changing a token
+      here affects the entire UI.
+    </p>
+
+    <h3>Semantic tokens</h3>
+    <p>Each of <code>primary</code>, <code>secondary</code>, <code>accent</code>, <code>success</code>,
+    <code>warning</code>, <code>error</code> uses this shape:</p>
+    <div class="codeblock">
+      <div class="codeblock-header json">Color token shape</div>
+      <pre><code class="language-json">{
+  "main":  "#06b6d4",   // Primary use
+  "light": "#67e8f9",   // Hover, highlight, tint
+  "dark":  "#0e7490",   // Active, pressed state
+  "name":  "cyan"       // Human-readable label (informational)
+}</code></pre>
+    </div>
+
+    <h3>Background, border, text</h3>
+    <table class="ref-table">
+      <thead><tr><th>Key</th><th>Sub-keys</th></tr></thead>
+      <tbody>
+        <tr><td>background</td><td><code>base</code> · <code>surface</code> · <code>elevated</code> · <code>overlay</code></td></tr>
+        <tr><td>border</td><td><code>subtle</code> · <code>strong</code> · <code>accent</code></td></tr>
+        <tr><td>text</td><td><code>primary</code> · <code>secondary</code> · <code>muted</code> · <code>onAccent</code></td></tr>
+      </tbody>
+    </table>
+
+    <!-- shadows -->
+    <h2 id="shadows-ref">shadows</h2>
+    <p>Named box-shadow values applied as CSS custom properties (e.g. <code>--shadow-primary</code>).
+    Accepts any valid CSS <code>box-shadow</code> string.</p>
+
+    <table class="ref-table">
+      <thead><tr><th>Key</th><th>Typical use</th></tr></thead>
+      <tbody>
+        <tr><td>primary</td><td>Glow on primary-colored elements (cyan by default)</td></tr>
+        <tr><td>secondary</td><td>Glow on secondary-colored elements (violet)</td></tr>
+        <tr><td>accent</td><td>Glow on accent elements (amber)</td></tr>
+        <tr><td>elevated</td><td>General elevated card shadow</td></tr>
+        <tr><td>focus</td><td>Focus ring for keyboard navigation</td></tr>
+      </tbody>
+    </table>
+
+    <div class="page-nav">
+      <a href="./">
+        <span class="nav-dir">&larr; Back</span>
+        <span class="nav-title">Step 1: Overview</span>
+      </a>
+      <a href="ui-json.html" class="right">
+        <span class="nav-dir">Next &rarr;</span>
+        <span class="nav-title">Step 3: ui.json</span>
+      </a>
+    </div>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <span>&copy; 2026 BlocUnited LLC</span>
+  <div style="display:flex;gap:20px">
+    <a href="https://github.com/BlocUnited-LLC/mozaiks" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://mozaiks.ai" target="_blank" rel="noopener">mozaiks.ai</a>
+  </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+</body>
+</html>

@@ -58,3 +58,11 @@ pip-delete-this-directory.txt
 # OS
 .DS_Store
 Thumbs.db
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+*.local
+
+nul

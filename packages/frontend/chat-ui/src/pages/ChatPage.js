@@ -522,7 +522,7 @@ const ChatPage = () => {
     process.env.REACT_APP_DEFAULT_app_id ||
     implicitDevAppId ||
     null;
-  const { theme: chatTheme } = useTheme(currentAppId);
+  const { theme: chatTheme, loading: themeLoading } = useTheme(currentAppId);
   const currentUserId = user?.id || config?.chat?.defaultUserId || '56132';
   const [generalSessionsLoading, setGeneralSessionsLoading] = useState(false);
   // Workflow completion state
@@ -3903,6 +3903,7 @@ useEffect(() => {
       <Header 
         user={user}
         chatTheme={chatTheme}
+        themeLoading={themeLoading}
         onNotificationClick={handleNotificationClick}
         onAction={handleHeaderAction}
       />

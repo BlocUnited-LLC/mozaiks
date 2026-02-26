@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Step 3 — Complete ui.json reference for configuring the Mozaiks chat-ui chrome." />
+  <link rel="canonical" href="https://docs.mozaiks.ai/guides/custom-frontend/ui-json.html" />
+  <title>Step 3: ui.json — Mozaiks Docs</title>
+  <link rel="stylesheet" href="../../css/docs.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" />
+</head>
+<body>
+
+<header class="site-header">
+  <a class="site-logo" href="/">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+    Mozaiks Docs
+  </a>
+  <nav class="header-nav">
+    <a href="/">Home</a>
+    <a href="https://github.com/BlocUnited-LLC/mozaiks" target="_blank" rel="noopener">GitHub</a>
+  </nav>
+</header>
+
+<div class="layout">
+  <nav class="sidebar">
+    <div class="nav-group">
+      <div class="nav-label">Documentation</div>
+      <a href="/" class="nav-link">Home</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">Customization Guide</div>
+      <a href="./" class="nav-link"><span class="step-badge">1</span> Overview &amp; Quick Start</a>
+      <a href="brand-json.html" class="nav-link"><span class="step-badge">2</span> brand.json</a>
+      <a href="ui-json.html" class="nav-link active"><span class="step-badge">3</span> ui.json</a>
+      <a href="assets.html" class="nav-link"><span class="step-badge">4</span> Assets &amp; Icons</a>
+      <a href="wiring.html" class="nav-link"><span class="step-badge">5</span> Wiring &amp; Backend</a>
+    </div>
+    <div class="nav-group" style="margin-top:12px">
+      <div class="nav-label">On this page</div>
+      <a href="#full-example"    class="nav-link sub">Full example</a>
+      <a href="#chat"            class="nav-link sub">chat</a>
+      <a href="#header"          class="nav-link sub">header</a>
+      <a href="#header-actions"  class="nav-link sub">header.actions</a>
+      <a href="#profile"         class="nav-link sub">profile</a>
+      <a href="#profile-menu"    class="nav-link sub">profile.menu</a>
+      <a href="#notifications"   class="nav-link sub">notifications</a>
+      <a href="#footer"          class="nav-link sub">footer</a>
+    </div>
+  </nav>
+
+  <main class="content">
+    <p class="page-eyebrow">Customization Guide · Step 3 of 5</p>
+    <h1>ui.json</h1>
+    <p class="subtitle">
+      Configure the header, profile dropdown, notifications button, footer links, and chat mode styling.
+      No colors or font definitions belong here.
+    </p>
+
+    <div class="step-progress">
+      <div class="step-dot done"></div>
+      <div class="step-line done"></div>
+      <div class="step-dot done"></div>
+      <div class="step-line done"></div>
+      <div class="step-dot current"></div>
+      <div class="step-line"></div>
+      <div class="step-dot"></div>
+      <div class="step-line"></div>
+      <div class="step-dot"></div>
+    </div>
+
+    <div class="callout info">
+      <span class="callout-icon">📁</span>
+      <p>File location: <code>brands/public/ui.json</code> — served at <code>/ui.json</code></p>
+    </div>
+
+    <!-- Full example -->
+    <h2 id="full-example">Full example</h2>
+
+    <div class="codeblock">
+      <div class="codeblock-header json">brands/public/ui.json</div>
+      <pre><code class="language-json">{
+  "chat": {
+    "modes": {
+      "ask":      { "tint": "#06b6d4", "label": "Ask" },
+      "workflow": { "tint": "#8b5cf6", "label": "Workflow" }
+    },
+    "bubbleRadius": "18px"
+  },
+
+  "header": {
+    "logo": {
+      "src":      "mozaik_logo.svg",
+      "wordmark": "mozaik.png",
+      "alt":      "App logo",
+      "href":     "https://yourapp.com"
+    },
+    "actions": [
+      {
+        "id":      "discover",
+        "label":   "Discover",
+        "icon":    "sparkle.svg",
+        "variant": "gradient",
+        "visible": true
+      }
+    ]
+  },
+
+  "profile": {
+    "icon":         "profile.svg",
+    "show":         true,
+    "defaultLabel": "Commander",
+    "sublabel":     "Mission Control",
+    "menu": [
+      {
+        "id":     "profile-settings",
+        "label":  "Profile Settings",
+        "icon":   "settings.svg",
+        "action": "navigate",
+        "href":   "/profile"
+      },
+      {
+        "id":     "preferences",
+        "label":  "Preferences",
+        "icon":   "settings.svg",
+        "action": "navigate",
+        "href":   "/preferences"
+      },
+      {
+        "id":   "divider-before-signout",
+        "type": "divider"
+      },
+      {
+        "id":      "signout",
+        "label":   "Sign Out",
+        "icon":    "logout.svg",
+        "action":  "signout",
+        "variant": "danger"
+      }
+    ]
+  },
+
+  "notifications": {
+    "icon":      "notifications.svg",
+    "show":      true,
+    "emptyText": "No alerts"
+  },
+
+  "footer": {
+    "links": [
+      { "label": "Legal Notice",     "href": "/legal" },
+      { "label": "Terms of Service", "href": "/terms" },
+      { "label": "Cookie Policy",    "href": "/cookies" }
+    ],
+    "visible":   true,
+    "poweredBy": null
+  }
+}</code></pre>
+    </div>
+
+    <!-- chat -->
+    <h2 id="chat">chat</h2>
+
+    <table class="ref-table">
+      <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>chat.modes.ask.tint</td>
+          <td><span class="type">string</span></td>
+          <td>Accent color for the "Ask" mode pill/indicator. Any valid CSS color.</td>
+        </tr>
+        <tr>
+          <td>chat.modes.ask.label</td>
+          <td><span class="type">string</span></td>
+          <td>Human-readable label for Ask mode (e.g. <code>"Ask"</code>, <code>"Chat"</code>).</td>
+        </tr>
+        <tr>
+          <td>chat.modes.workflow.tint</td>
+          <td><span class="type">string</span></td>
+          <td>Accent color for the "Workflow" mode indicator.</td>
+        </tr>
+        <tr>
+          <td>chat.modes.workflow.label</td>
+          <td><span class="type">string</span></td>
+          <td>Human-readable label for Workflow mode.</td>
+        </tr>
+        <tr>
+          <td>chat.bubbleRadius</td>
+          <td><span class="type">string</span> <span class="opt">optional</span></td>
+          <td>CSS border-radius for chat message bubbles. Default: <code>"18px"</code>.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- header -->
+    <h2 id="header">header</h2>
+
+    <table class="ref-table">
+      <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>header.logo.src</td>
+          <td><span class="type">string</span></td>
+          <td>Logo icon filename — resolved from <code>/assets/</code>. Example: <code>"logo.svg"</code></td>
+        </tr>
+        <tr>
+          <td>header.logo.wordmark</td>
+          <td><span class="type">string</span> <span class="opt">optional</span></td>
+          <td>Wordmark image filename shown next to or instead of the icon in expanded layout.</td>
+        </tr>
+        <tr>
+          <td>header.logo.alt</td>
+          <td><span class="type">string</span></td>
+          <td>Alt text for the logo image (accessibility).</td>
+        </tr>
+        <tr>
+          <td>header.logo.href</td>
+          <td><span class="type">string</span> <span class="opt">optional</span></td>
+          <td>URL the logo links to. Defaults to <code>"/"</code> if omitted.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 id="header-actions">header.actions</h2>
+
+    <p>
+      An ordered array of action buttons rendered in the right side of the header toolbar.
+      Each visible action with a valid icon renders as a button.
+    </p>
+
+    <table class="ref-table">
+      <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>[*].id</td>
+          <td><span class="type">string</span> <span class="req">required</span></td>
+          <td>Unique identifier. Passed to <code>onAction(id, item)</code> when clicked.</td>
+        </tr>
+        <tr>
+          <td>[*].label</td>
+          <td><span class="type">string</span></td>
+          <td>Button label text shown next to the icon.</td>
+        </tr>
+        <tr>
+          <td>[*].icon</td>
+          <td><span class="type">string</span> <span class="req">required</span></td>
+          <td>
+            Icon filename — <strong>must include a dot</strong> (e.g. <code>"sparkle.svg"</code>).
+            Token strings like <code>"sparkle"</code> are not supported and log a warning.
+          </td>
+        </tr>
+        <tr>
+          <td>[*].variant</td>
+          <td><span class="type">string</span> <span class="opt">optional</span></td>
+          <td><code>"gradient"</code> renders a cyan–violet gradient button. Omit for a plain ghost button.</td>
+        </tr>
+        <tr>
+          <td>[*].visible</td>
+          <td><span class="type">boolean</span> <span class="opt">optional</span></td>
+          <td>Set to <code>false</code> to hide without removing. Defaults to <code>true</code>.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- profile -->
+    <h2 id="profile">profile</h2>
+
+    <table class="ref-table">
+      <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>profile.icon</td>
+          <td><span class="type">string</span></td>
+          <td>Fallback avatar icon filename when the user has no photo (e.g. <code>"profile.svg"</code>).</td>
+        </tr>
+        <tr>
+          <td>profile.show</td>
+          <td><span class="type">boolean</span></td>
+          <td>Set to <code>false</code> to hide the profile button entirely.</td>
+        </tr>
+        <tr>
+          <td>profile.defaultLabel</td>
+          <td><span class="type">string</span></td>
+          <td>Display name shown when no authenticated user is present (e.g. <code>"Guest"</code>).</td>
+        </tr>
+        <tr>
+          <td>profile.sublabel</td>
+          <td><span class="type">string</span> <span class="opt">optional</span></td>
+          <td>Secondary line (plan tier, role). Shown under the name in the dropdown header.</td>
+        </tr>
+        <tr>
+          <td>profile.menu</td>
+          <td><span class="type">array</span></td>
+          <td>Ordered array of menu items. See below.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 id="profile-menu">profile.menu</h2>
+    <p>Three item types: action items, dividers. All rendered in declaration order.</p>
+
+    <h3>Action item</h3>
+    <div class="codeblock">
+      <div class="codeblock-header json">Navigate item</div>
+      <pre><code class="language-json">{
+  "id":     "profile-settings",
+  "label":  "Profile Settings",
+  "icon":   "settings.svg",
+  "action": "navigate",
+  "href":   "/profile"
+}</code></pre>
+    </div>
+
+    <div class="codeblock">
+      <div class="codeblock-header json">Destructive action (danger variant)</div>
+      <pre><code class="language-json">{
+  "id":      "signout",
+  "label":   "Sign Out",
+  "icon":    "logout.svg",
+  "action":  "signout",
+  "variant": "danger"
+}</code></pre>
+    </div>
+
+    <div class="codeblock">
+      <div class="codeblock-header json">Divider</div>
+      <pre><code class="language-json">{
+  "id":   "divider-1",
+  "type": "divider"
+}</code></pre>
+    </div>
+
+    <table class="ref-table">
+      <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>id</td>
+          <td><span class="type">string</span> <span class="req">required</span></td>
+          <td>Unique key (used as React key).</td>
+        </tr>
+        <tr>
+          <td>type</td>
+          <td><span class="type">string</span> <span class="opt">optional</span></td>
+          <td>Set to <code>"divider"</code> to render a horizontal rule. All other fields ignored.</td>
+        </tr>
+        <tr>
+          <td>label</td>
+          <td><span class="type">string</span> <span class="req">required</span></td>
+          <td>Visible menu label text.</td>
+        </tr>
+        <tr>
+          <td>icon</td>
+          <td><span class="type">string</span> <span class="opt">optional</span></td>
+          <td>Icon filename (must contain a dot). See <a href="assets.html">Step 4 — Assets</a>.</td>
+        </tr>
+        <tr>
+          <td>action</td>
+          <td><span class="type">string</span></td>
+          <td>Passed to <code>onAction(action, item)</code>. Built-in: <code>"navigate"</code>, <code>"signout"</code>. Custom values are forwarded as-is.</td>
+        </tr>
+        <tr>
+          <td>href</td>
+          <td><span class="type">string</span> <span class="opt">optional</span></td>
+          <td>Route path for <code>navigate</code> actions. Passed inside the item object to <code>onAction</code>.</td>
+        </tr>
+        <tr>
+          <td>variant</td>
+          <td><span class="type">string</span> <span class="opt">optional</span></td>
+          <td><code>"danger"</code> renders in the error/red color. Use for destructive actions.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- notifications -->
+    <h2 id="notifications">notifications</h2>
+
+    <table class="ref-table">
+      <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>notifications.icon</td>
+          <td><span class="type">string</span></td>
+          <td>Icon filename for the notification button (e.g. <code>"notifications.svg"</code>).</td>
+        </tr>
+        <tr>
+          <td>notifications.show</td>
+          <td><span class="type">boolean</span></td>
+          <td>Set to <code>false</code> to hide the notification button entirely.</td>
+        </tr>
+        <tr>
+          <td>notifications.emptyText</td>
+          <td><span class="type">string</span> <span class="opt">optional</span></td>
+          <td>Text rendered in the notification panel when there are no items.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- footer -->
+    <h2 id="footer">footer</h2>
+
+    <table class="ref-table">
+      <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>footer.links</td>
+          <td><span class="type">array</span></td>
+          <td>Array of <code>{ "label": string, "href": string }</code> rendered as footer links.</td>
+        </tr>
+        <tr>
+          <td>footer.visible</td>
+          <td><span class="type">boolean</span></td>
+          <td>Set <code>false</code> to hide the footer bar entirely.</td>
+        </tr>
+        <tr>
+          <td>footer.poweredBy</td>
+          <td><span class="type">string | null</span> <span class="opt">optional</span></td>
+          <td>"Powered by …" attribution text. Set <code>null</code> to omit.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="page-nav">
+      <a href="brand-json.html">
+        <span class="nav-dir">&larr; Back</span>
+        <span class="nav-title">Step 2: brand.json</span>
+      </a>
+      <a href="assets.html" class="right">
+        <span class="nav-dir">Next &rarr;</span>
+        <span class="nav-title">Step 4: Assets &amp; Icons</span>
+      </a>
+    </div>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <span>&copy; 2026 BlocUnited LLC</span>
+  <div style="display:flex;gap:20px">
+    <a href="https://github.com/BlocUnited-LLC/mozaiks" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://mozaiks.ai" target="_blank" rel="noopener">mozaiks.ai</a>
+  </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+</body>
+</html>

@@ -49,6 +49,7 @@ const ActionIcon = ({ icon, className = "w-5 h-5" }) => {
 const Header = ({
   user = null,
   chatTheme = null,
+  themeLoading = false,
   onNotificationClick = () => {},
   onAction = () => {},
 }) => {
@@ -72,13 +73,13 @@ const Header = ({
   const profileDefaultLabel = chatTheme?.profile?.defaultLabel || 'User';
   const profileSublabel     = chatTheme?.profile?.sublabel     || null;
   const profileMenu         = chatTheme?.profile?.menu         || [];
-  if (showProfile && !profileIcon) {
+  if (!themeLoading && showProfile && !profileIcon) {
     console.warn('⚠️ [HEADER] profile.show is true but profile.icon is not set in ui.json — profile button hidden');
   }
 
   const notificationIcon  = chatTheme?.notifications?.icon ? resolveIconSource(chatTheme.notifications.icon) : null;
   const showNotifications = chatTheme?.notifications?.show !== false;
-  if (showNotifications && !notificationIcon) {
+  if (!themeLoading && showNotifications && !notificationIcon) {
     console.warn('⚠️ [HEADER] notifications.show is true but notifications.icon is not set in ui.json — notification button hidden');
   }
 

@@ -1,0 +1,7 @@
+# Local dev — points to the mozaiks package in this repository.
+# When mozaiks is published to PyPI, replace this with:
+#   mozaiks
+-e ../..
+
+# Server
+uvicorn[standard]>=0.27.0

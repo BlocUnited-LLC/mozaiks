@@ -29,7 +29,6 @@ export async function loadBrand() {
   const faviconFile= declared.favicon          || 'favicon.ico';
   const bgFile     = declared.backgroundImage  || null;
   const loadingFile= declared.loadingIcon      || null;
-  const profileFile= declared.profileFallback  || null;
 
   function resolveAsset(file) { return file ? `${ASSETS_PATH}/${file}` : null; }
 
@@ -39,7 +38,6 @@ export async function loadBrand() {
     favicon:         await assetExists(`${ASSETS_PATH}/${faviconFile}`)             ? `${ASSETS_PATH}/${faviconFile}`   : resolveAsset(logoFile),
     backgroundImage: bgFile && await assetExists(`${ASSETS_PATH}/${bgFile}`)       ? `${ASSETS_PATH}/${bgFile}`        : null,
     loadingIcon:     loadingFile && await assetExists(`${ASSETS_PATH}/${loadingFile}`) ? `${ASSETS_PATH}/${loadingFile}` : null,
-    profileFallback: profileFile && await assetExists(`${ASSETS_PATH}/${profileFile}`) ? `${ASSETS_PATH}/${profileFile}` : null,
   };
 
   return {
@@ -211,7 +209,6 @@ export function applyBrand(brand) {
     root.style.removeProperty('--brand-bg-url');
   }
   if (brand.assets?.logo)            root.style.setProperty('--brand-logo-url', brand.assets.logo);
-  if (brand.assets?.profileFallback) root.style.setProperty('--brand-profile-fallback-url', brand.assets.profileFallback);
 
   console.log(`🎨 Brand applied: ${brand.name}`);
 }

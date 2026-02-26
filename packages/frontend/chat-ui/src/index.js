@@ -58,6 +58,12 @@ export { default as NavigationProvider } from './providers/NavigationProvider';
 // Registry
 export { default as componentRegistry } from './registry/componentRegistry';
 
+// App shell — top-level application wrapper
+export { default as MozaiksApp } from './app/MozaiksApp';
+
+// Development adapter — stubs all API/WS calls without a backend
+export { default as mockApiAdapter } from './adapters/mockApiAdapter';
+
 // Side-effect: registers core pages (ChatPage) in the component registry.
 // Consumers should import this once in their entry point.
 import './registry/coreComponents';

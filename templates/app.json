@@ -1,0 +1,6 @@
+{
+  "appName": "My App",
+  "appId": "my-app",
+  "defaultWorkflow": "hello_world",
+  "apiUrl": "http://localhost:8000"
+}

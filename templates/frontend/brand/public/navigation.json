@@ -1,0 +1,16 @@
+{
+  "version": "1.0.0",
+  "routes": [
+    {
+      "path": "/",
+      "component": "ChatPage",
+      "exact": true,
+      "meta": {
+        "title": "Chat",
+        "requiresAuth": false
+      }
+    }
+  ],
+  "sidebar": { "items": [] },
+  "topNav":  { "items": [] }
+}

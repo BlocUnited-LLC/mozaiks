@@ -2,8 +2,11 @@ import { defineConfig, transformWithEsbuild } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const appConfig = require('../app.json');
 
 export default defineConfig({
   plugins: [
@@ -20,6 +23,14 @@ export default defineConfig({
     },
     // Include .js files — chat-ui/src uses .js with JSX syntax
     react({ include: /\.(jsx|js)$/ }),
+    // ── HTML token injection ─────────────────────────────────────────────────
+    // Replaces %APP_NAME% in index.html with the value from app.json.
+    {
+      name: 'html-inject-app-config',
+      transformIndexHtml(html) {
+        return html.replace(/%APP_NAME%/g, appConfig.appName);
+      },
+    },
     // ── Mock API ────────────────────────────────────────────────────────────
     // Returns sensible stub responses so the app degrades cleanly without a
     // running backend. Remove this block (and restore the proxy below) once
@@ -45,16 +56,15 @@ export default defineConfig({
       },
     },
   ],
-  publicDir: './brands/public',
+  publicDir: './brand/public',
   resolve: {
-    // When chat-ui/src (outside this project root) imports packages like
-    // 'react-icons', 'marked', 'dompurify', resolution must find the
-    // node_modules that npm installed here in the template directory.
-    modules: [path.resolve(__dirname, 'node_modules'), 'node_modules'],
+    // chat-ui/src files live outside this project root and import shared packages.
+    // All dependencies are installed in chat-ui/node_modules — resolve from there.
+    modules: [path.resolve(__dirname, '../../packages/frontend/chat-ui/node_modules'), 'node_modules'],
     alias: {
       // Resolves @mozaiks/chat-ui to the local source during development.
       // In a published app this would be the installed npm package.
-      '@mozaiks/chat-ui': path.resolve(__dirname, '../src/index.js'),
+      '@mozaiks/chat-ui': path.resolve(__dirname, '../../packages/frontend/chat-ui/src/index.js'),
       '@chat-workflows':  path.resolve(__dirname, 'workflows'),
     },
   },
@@ -72,8 +82,8 @@ export default defineConfig({
     port: 3000,
     // Proxy to your backend — uncomment when your backend is running:
     // proxy: {
-    //   '/api': { target: process.env.VITE_API_URL || 'http://localhost:8000', changeOrigin: true },
-    //   '/ws':  { target: process.env.VITE_WS_URL  || 'ws://localhost:8000',  ws: true },
+    //   '/api': { target: appConfig.apiUrl, changeOrigin: true },
+    //   '/ws':  { target: appConfig.apiUrl.replace('http', 'ws'), ws: true },
     // },
   },
   // chat-ui/src uses .js files that contain JSX — pre-bundle them correctly.

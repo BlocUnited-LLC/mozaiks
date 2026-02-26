@@ -102,13 +102,10 @@ function resolveHeaderIconValue(basePath, value) {
  *
  * @param {object} brandConfig  — visual identity (colors, fonts, shadows, assets).
  * @param {object} uiConfig     — UI chrome (header, footer, profile menu, notifications, chat).
- *                                Falls back to brandConfig for backward-compat with single-file setups.
  * @param {string} basePath     — absolute URL prefix for relative asset filenames, e.g. '/assets'.
  */
 function brandConfigToTheme(brandConfig, uiConfig, basePath) {
-  // Backward compat: if called as brandConfigToTheme(config, basePath) (old 2-arg form)
-  if (typeof uiConfig === 'string') { basePath = uiConfig; uiConfig = brandConfig; }
-  const ui       = uiConfig   || brandConfig;
+  const ui = uiConfig;
   const fallback = BARE_FALLBACK_THEME;
 
   // --- Visual assets (brand.json) ---
@@ -216,22 +213,15 @@ async function loadThemeFromBrand() {
   const assetsPath = '/assets';
   try {
     // Fetch brand.json (visual identity) and ui.json (chrome config) in parallel.
-    // ui.json is optional — missing ui.json falls back to reading UI fields from brand.json
-    // for backward compatibility with single-file setups.
     const [brandRes, uiRes] = await Promise.all([
       fetch('/brand.json'),
-      fetch('/ui.json').catch(() => null),
+      fetch('/ui.json'),
     ]);
     if (!brandRes.ok) throw new Error(`/brand.json not found (${brandRes.status})`);
+    if (!uiRes.ok)    throw new Error(`/ui.json not found (${uiRes.status})`);
     const brandConfig = await brandRes.json();
-
-    let uiConfig = brandConfig; // fallback: read UI fields from brand.json
-    if (uiRes?.ok) {
-      uiConfig = await uiRes.json();
-      console.log('🎛️ [THEME] Loaded ui.json (UI chrome config)');
-    } else {
-      console.warn('⚠️ [THEME] /ui.json not found — reading UI config from brand.json (backward-compat mode)');
-    }
+    const uiConfig    = await uiRes.json();
+    console.log('🎛️ [THEME] Loaded brand.json + ui.json');
 
     const theme = brandConfigToTheme(brandConfig, uiConfig, assetsPath);
     console.log(`🎨 [THEME] Loaded brand theme: ${brandConfig.name || 'default'}`);
@@ -521,8 +511,7 @@ function updateCSSVariables(themeColors, themeShadows, themeChat) {
 // Structural-only fallback — no brand data baked in.
 export { BARE_FALLBACK_THEME };
 
-// Backwards-compat alias: callers that import DEFAULT_THEME get the bare fallback.
-// Actual brand values always come from brand.json at runtime.
+// Structural fallback — no brand data baked in. Actual values come from brand.json + ui.json at runtime.
 export const DEFAULT_THEME = BARE_FALLBACK_THEME;
 
 export const DEFAULT_HEADER_CONFIG = BARE_FALLBACK_THEME.header;

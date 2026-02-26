@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Step 1 — Overview and quick start guide for customizing the Mozaiks chat-ui frontend." />
+  <link rel="canonical" href="https://docs.mozaiks.ai/guides/custom-frontend/" />
+  <title>Step 1: Overview &amp; Quick Start — Mozaiks Docs</title>
+  <link rel="stylesheet" href="../../css/docs.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" />
+</head>
+<body>
+
+<header class="site-header">
+  <a class="site-logo" href="/">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+    Mozaiks Docs
+  </a>
+  <nav class="header-nav">
+    <a href="/">Home</a>
+    <a href="https://github.com/BlocUnited-LLC/mozaiks" target="_blank" rel="noopener">GitHub</a>
+  </nav>
+</header>
+
+<div class="layout">
+
+  <nav class="sidebar">
+    <div class="nav-group">
+      <div class="nav-label">Documentation</div>
+      <a href="/" class="nav-link">Home</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">Customization Guide</div>
+      <a href="./" class="nav-link active">
+        <span class="step-badge">1</span> Overview &amp; Quick Start
+      </a>
+      <a href="brand-json.html" class="nav-link">
+        <span class="step-badge">2</span> brand.json
+      </a>
+      <a href="ui-json.html" class="nav-link">
+        <span class="step-badge">3</span> ui.json
+      </a>
+      <a href="assets.html" class="nav-link">
+        <span class="step-badge">4</span> Assets &amp; Icons
+      </a>
+      <a href="wiring.html" class="nav-link">
+        <span class="step-badge">5</span> Wiring &amp; Backend
+      </a>
+    </div>
+    <div class="nav-group" style="margin-top:12px">
+      <div class="nav-label">On this page</div>
+      <a href="#how-it-works" class="nav-link sub">How it works</a>
+      <a href="#file-layout"  class="nav-link sub">File layout</a>
+      <a href="#quick-start"  class="nav-link sub">Quick start</a>
+      <a href="#dev-server"   class="nav-link sub">Dev server</a>
+    </div>
+  </nav>
+
+  <main class="content">
+    <p class="page-eyebrow">Customization Guide · Step 1 of 5</p>
+    <h1>Overview &amp; Quick Start</h1>
+    <p class="subtitle">
+      Understand the two-file config system and get a branded dev environment running
+      in under five minutes.
+    </p>
+
+    <!-- Step progress -->
+    <div class="step-progress">
+      <div class="step-dot current"></div>
+      <div class="step-line"></div>
+      <div class="step-dot"></div>
+      <div class="step-line"></div>
+      <div class="step-dot"></div>
+      <div class="step-line"></div>
+      <div class="step-dot"></div>
+      <div class="step-line"></div>
+      <div class="step-dot"></div>
+    </div>
+
+    <!-- ─── How it works ─── -->
+    <h2 id="how-it-works">How it works</h2>
+
+    <p>
+      The <code>chat-ui</code> template reads all brand and layout configuration from two static
+      JSON files served from the app's <strong>public directory</strong>. At startup,
+      <code>themeProvider.js</code> fetches both files in parallel, merges them into a single
+      theme object, and applies CSS custom properties across the entire app.
+    </p>
+
+    <div class="two-col">
+      <div class="card">
+        <h4>brand.json — Visual Identity</h4>
+        <p>Colors, typography, shadows, and asset filenames.
+        Controls what the UI <em>looks like</em>.
+        <br/><a href="brand-json.html" style="font-size:.85rem">→ Full reference</a></p>
+      </div>
+      <div class="card">
+        <h4>ui.json — Chrome Config</h4>
+        <p>Header actions, profile menu, notifications, footer links, chat modes.
+        Controls <em>what appears</em> in the shell.
+        <br/><a href="ui-json.html" style="font-size:.85rem">→ Full reference</a></p>
+      </div>
+    </div>
+
+    <p>
+      If a config file or individual key is missing, the runtime falls back to the built-in
+      <code>BARE_FALLBACK_THEME</code> and logs a <code>console.warn</code>.
+      The app always renders — missing config is visible in DevTools, not in crashes.
+    </p>
+
+    <div class="callout info">
+      <span class="callout-icon">ℹ️</span>
+      <p><strong>Zero code changes required</strong> for most customizations.
+      Edit JSON, drop in assets, done.</p>
+    </div>
+
+    <!-- ─── File layout ─── -->
+    <h2 id="file-layout">File layout</h2>
+
+    <div class="codeblock">
+      <div class="codeblock-header bash">Template directory</div>
+      <pre><code class="language-bash">packages/frontend/chat-ui/
+  template/                        ← copy this into your app
+    vite.config.js                 # publicDir → "brands/public"
+    package.json
+    src/
+      main.jsx
+      App.jsx
+    brands/
+      public/                      ← Vite publicDir — served at /
+        brand.json                 # Visual identity
+        ui.json                    # UI chrome config
+        assets/
+          mozaik_logo.svg          # brand.json → assets.logo
+          mozaik.png               # brand.json → assets.wordmark
+          chat_bg_template.png     # brand.json → assets.backgroundImage
+          profile.svg              # ui.json → profile.icon
+          notifications.svg        # ui.json → notifications.icon
+          sparkle.svg              # ui.json → header.actions icon
+          settings.svg             # ui.json → profile.menu icons
+          logout.svg               # ui.json → profile.menu icons</code></pre>
+    </div>
+
+    <p>
+      Because <code>brands/public/</code> is the Vite <code>publicDir</code>, all files inside
+      are served at <code>/</code>. A file at <code>brands/public/assets/sparkle.svg</code>
+      is accessed as <code>/assets/sparkle.svg</code>. JSON config references use this path.
+    </p>
+
+    <!-- ─── Quick start ─── -->
+    <h2 id="quick-start">Quick start</h2>
+
+    <ol class="steps">
+      <li>
+        <strong>Copy the template</strong> into your app root.
+        The template directory is your starting point — don't edit files inside
+        <code>packages/frontend/chat-ui/src/</code> directly.
+      </li>
+      <li>
+        <strong>Install dependencies</strong> in the template directory:
+        <div class="codeblock" style="margin-top:10px">
+          <div class="codeblock-header bash">Terminal</div>
+          <pre><code class="language-bash">cd template
+npm install</code></pre>
+        </div>
+      </li>
+      <li>
+        <strong>Edit <code>brands/public/brand.json</code></strong> — swap in your colors,
+        fonts, and asset filenames. See <a href="brand-json.html">Step 2</a> for the full spec.
+      </li>
+      <li>
+        <strong>Edit <code>brands/public/ui.json</code></strong> — configure your header actions,
+        profile dropdown menu, and footer links. See <a href="ui-json.html">Step 3</a>.
+      </li>
+      <li>
+        <strong>Drop your assets</strong> into <code>brands/public/assets/</code>.
+        All icon values in JSON must be filenames (e.g. <code>"bell.svg"</code>).
+        See <a href="assets.html">Step 4</a>.
+      </li>
+      <li>
+        <strong>Wire up navigation and auth</strong> via the <code>onAction</code> prop.
+        See <a href="wiring.html">Step 5</a>.
+      </li>
+    </ol>
+
+    <!-- ─── Dev server ─── -->
+    <h2 id="dev-server">Start the dev server</h2>
+
+    <div class="codeblock">
+      <div class="codeblock-header bash">Terminal</div>
+      <pre><code class="language-bash">cd packages/frontend/chat-ui/template
+npm run dev
+# → http://localhost:3000</code></pre>
+    </div>
+
+    <p>
+      Changes to <code>brand.json</code> and <code>ui.json</code> are picked up on browser
+      reload. Asset file changes (SVGs, images) are reflected immediately because they are
+      served directly from the public directory.
+    </p>
+
+    <div class="callout warn">
+      <span class="callout-icon">⚠️</span>
+      <p><strong>Icon values must be filenames.</strong>
+      Values like <code>"bell"</code> or <code>"sparkle"</code> are <em>not</em> built-in tokens.
+      Always use filenames: <code>"bell.svg"</code>, <code>"sparkle.svg"</code>.
+      A non-filename value logs a console warning and renders nothing.</p>
+    </div>
+
+    <div class="page-nav">
+      <a href="/">
+        <span class="nav-dir">&larr; Back</span>
+        <span class="nav-title">Home</span>
+      </a>
+      <a href="brand-json.html" class="right">
+        <span class="nav-dir">Next &rarr;</span>
+        <span class="nav-title">Step 2: brand.json</span>
+      </a>
+    </div>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <span>&copy; 2026 BlocUnited LLC</span>
+  <div style="display:flex;gap:20px">
+    <a href="https://github.com/BlocUnited-LLC/mozaiks" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://mozaiks.ai" target="_blank" rel="noopener">mozaiks.ai</a>
+  </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+</body>
+</html>
