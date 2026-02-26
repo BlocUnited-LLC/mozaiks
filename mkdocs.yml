@@ -1,0 +1,105 @@
+site_name: Mozaiks
+site_description: Unified agentic stack — contracts, core runtime, and orchestration
+site_url: https://docs.mozaiks.ai
+repo_url: https://github.com/BlocUnited-LLC/mozaiks
+repo_name: BlocUnited-LLC/mozaiks
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/BlocUnited-LLC/mozaiks
+  generator: false
+
+theme:
+  name: material
+  logo: assets/mozaik_logo.svg
+  favicon: assets/mozaik.png
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: cyan
+      accent: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: cyan
+      accent: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+
+plugins:
+  - search
+  - autorefs
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Agent Bootstrap: AGENT_BOOTSTRAP_PROMPT.md
+  - Architecture:
+      - Events:
+          - Overview: architecture/events/README.md
+          - Declarative Runtime: architecture/events/DECLARATIVE_RUNTIME_SYSTEM.md
+          - Event System Inventory: architecture/events/EVENT_SYSTEM_INVENTORY.md
+      - Orchestration: architecture/orchestration-and-decomposition.md
+      - UI Components: architecture/UI_COMPONENT_DISCOVERY.md
+      - Source of Truth:
+          - Overview: architecture/source-of-truth/README.md
+          - App Creation Guide: architecture/source-of-truth/APP_CREATION_GUIDE.md
+          - Canonical App Structure: architecture/source-of-truth/CANONICAL_APP_STRUCTURE.md
+          - Event System Architecture: architecture/source-of-truth/EVENT_SYSTEM_ARCHITECTURE.md
+          - Event Taxonomy: architecture/source-of-truth/EVENT_TAXONOMY.md
+          - Graph Injection Contract: architecture/source-of-truth/GRAPH_INJECTION_CONTRACT.md
+          - Learning Loop: architecture/source-of-truth/LEARNING_LOOP_ARCHITECTURE.md
+          - Process & Event Map: architecture/source-of-truth/PROCESS_AND_EVENT_MAP.md
+          - UI Surface & Layout: architecture/source-of-truth/UI_SURFACE_AND_LAYOUT_ARCHITECTURE.md
+          - Workflow Architecture: architecture/source-of-truth/WORKFLOW_ARCHITECTURE.md
+  - Frontend:
+      - Customization Guide:
+          - Overview: guides/customizing-frontend/01-overview.md
+          - Brand JSON: guides/customizing-frontend/02-brand-json.md
+          - UI JSON: guides/customizing-frontend/03-ui-json.md
+          - Assets: guides/customizing-frontend/04-assets.md
+          - Wiring: guides/customizing-frontend/05-wiring.md

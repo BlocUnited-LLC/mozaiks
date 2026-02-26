@@ -1,106 +1,205 @@
 /* ============================================================================
-   ChatMessage — bubble layout styles
-   Custom CSS classes used by ChatMessage.jsx.
-   Colors use CSS variables set by applyTheme() from brand.json.
+   ChatMessage — Futuristic Chat Bubble Styles
+   Ported from the original shell/src/index.css (archived version).
+   CSS variables are set by applyTheme() / themeProvider.js from brand.json.
    ============================================================================ */
 
-/* ── Shared message wrapper ─────────────────────────────────────────────── */
-.message {
-  max-width: 75%;
-  min-width: 120px;
-  border-radius: 14px;
-  padding: 10px 14px;
-  backdrop-filter: blur(8px);
-  position: relative;
-  word-break: break-word;
+:root {
+  --chat-bubble-radius: 18px;
+  --chat-bubble-padding-y: 0.95rem;
+  --chat-bubble-padding-x: 1.15rem;
+  --chat-bubble-line-height: 1.45;
+  --chat-bubble-shadow: 0 18px 40px rgba(2, 6, 23, 0.35);
+  --chat-user-bg: linear-gradient(140deg, rgba(6, 182, 212, 0.35), rgba(14, 116, 144, 0.45));
+  --chat-agent-bg: linear-gradient(140deg, rgba(12, 21, 38, 0.9), rgba(23, 37, 84, 0.9));
+  --chat-user-border: rgba(103, 232, 249, 0.45);
+  --chat-agent-border: rgba(99, 102, 241, 0.35);
 }
 
-/* ── User bubble ────────────────────────────────────────────────────────── */
+/* ==========================
+   Futuristic Chat Message Styles
+   ========================== */
+
+/* User chat bubble */
 .user-message {
-  background: linear-gradient(
-    135deg,
-    rgba(var(--color-primary-rgb, 6, 182, 212), 0.22) 0%,
-    rgba(var(--color-secondary-rgb, 139, 92, 246), 0.18) 100%
-  );
-  border: 1px solid rgba(var(--color-primary-rgb, 6, 182, 212), 0.35);
-  color: var(--color-text-primary, #e6eef8);
-  box-shadow: 0 4px 20px rgba(var(--color-primary-rgb, 6, 182, 212), 0.12);
-  margin-left: auto;
+  background: var(--chat-user-bg);
+  border: 1.5px solid rgba(103, 232, 249, 0.5);
+  box-shadow:
+    0 6px 24px rgba(5, 15, 28, 0.5),
+    0 0 35px rgba(45, 212, 191, 0.18),
+    inset 0 0 0 1px rgba(103, 232, 249, 0.25);
+  color: var(--color-text-primary);
+  font-family: 'Oxanium', 'Rajdhani', sans-serif;
+  font-weight: 500;
+  padding: var(--chat-bubble-padding-y) var(--chat-bubble-padding-x);
+  line-height: var(--chat-bubble-line-height);
+  font-size: 1rem;
+  border-radius: var(--chat-bubble-radius);
+  display: inline-block;
+  max-width: min(680px, 90%);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
+  backdrop-filter: blur(12px);
+  position: relative;
+  isolation: isolate;
 }
 
-/* ── Agent bubble ───────────────────────────────────────────────────────── */
+.user-message::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  border: 1px solid rgba(125, 249, 255, 0.6);
+  box-shadow:
+    0 0 10px rgba(103, 232, 249, 0.35),
+    0 0 30px rgba(34, 211, 238, 0.18);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Agent chat bubble */
 .agent-message {
-  background: rgba(15, 23, 42, 0.55);
-  border: 1px solid rgba(var(--color-border-subtle-rgb, 30, 41, 59), 0.8);
-  color: var(--color-text-primary, #e6eef8);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  background: var(--chat-agent-bg);
+  border: 1px solid var(--chat-agent-border);
+  box-shadow: var(--chat-bubble-shadow), 0 0 0 1px rgba(99, 102, 241, 0.25) inset;
+  color: var(--color-text-primary);
+  font-family: 'Oxanium', 'Rajdhani', sans-serif;
+  padding: var(--chat-bubble-padding-y) var(--chat-bubble-padding-x);
+  line-height: var(--chat-bubble-line-height);
+  font-size: 1rem;
+  border-radius: var(--chat-bubble-radius);
+  display: inline-block;
+  max-width: min(680px, 90%);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
+  backdrop-filter: blur(12px);
 }
 
-/* ── Latest message glow ────────────────────────────────────────────────── */
-.message.latest {
-  border-color: rgba(var(--color-primary-rgb, 6, 182, 212), 0.5);
-  box-shadow: 0 4px 24px rgba(var(--color-primary-rgb, 6, 182, 212), 0.18);
-}
-
-/* ── Message header row (name pill + optional trace button) ─────────────── */
+/* In-bubble header + name pill styles */
 .message-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 5px;
+  justify-content: space-between;
+  margin-bottom: 6px;
 }
 
-/* ── Message body ───────────────────────────────────────────────────────── */
-.message-body {
-  font-size: 0.93rem;
-  line-height: 1.55;
-  color: var(--color-text-primary, #e6eef8);
-}
+.user-message .message-header { justify-content: flex-end; }
+.agent-message .message-header { justify-content: flex-start; }
+.user-message .message-body { text-align: right; }
+.agent-message .message-body { text-align: left; }
 
-.message-body p {
-  margin: 0 0 0.5em;
-}
-
-.message-body p:last-child {
-  margin-bottom: 0;
-}
-
-/* ── Name pills ─────────────────────────────────────────────────────────── */
 .name-pill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 2px 9px 2px 6px;
-  border-radius: 20px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  line-height: 1.6;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  font-family: 'Orbitron', sans-serif;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.06) inset;
 }
 
 .name-pill.user {
-  background: rgba(var(--color-primary-rgb, 6, 182, 212), 0.18);
-  border: 1px solid rgba(var(--color-primary-rgb, 6, 182, 212), 0.4);
-  color: var(--color-primary, #06b6d4);
+  color: #04212a;
+  background: linear-gradient(135deg, rgba(0,255,231,0.9), rgba(0,200,255,0.9));
+  border: 1px solid rgba(0, 255, 255, 0.35);
 }
 
 .name-pill.agent {
-  background: rgba(var(--color-secondary-rgb, 139, 92, 246), 0.14);
-  border: 1px solid rgba(var(--color-secondary-rgb, 139, 92, 246), 0.35);
-  color: var(--color-secondary, #8b5cf6);
+  color: #dbeafe;
+  background: linear-gradient(135deg, rgba(13, 26, 56, 0.75), rgba(0, 17, 51, 0.75));
+  border: 1px solid rgba(77,166,255,0.25);
 }
 
-/* ── Pill emoji avatar ──────────────────────────────────────────────────── */
-.pill-avatar {
-  font-size: 0.85em;
-  line-height: 1;
-  opacity: 0.9;
+.message-body {
+  color: #e6f6ff;
+  line-height: var(--chat-bubble-line-height);
+  font-size: 0.97rem;
 }
 
-/* ── Thinking / streaming indicator ────────────────────────────────────── */
-.message-body .thinking-text {
-  opacity: 0.6;
-  font-style: italic;
-  font-size: 0.88rem;
+.message-body p { margin: 0; }
+.message-body p + p,
+.message-body ul + p,
+.message-body ol + p,
+.message-body pre + p { margin-top: 0.85rem; }
+.message-body ul,
+.message-body ol { margin: 0.5rem 0 0.5rem 1.25rem; line-height: inherit; }
+.message-body li + li { margin-top: 0.25rem; }
+.message-body strong { color: var(--color-primary-light); }
+
+/* Subtle entry animation for latest message */
+.message.latest { animation: rise-in 260ms ease-out; }
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.995); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Hide standalone name labels (replaced by in-bubble pills) */
+.user-name, .agent-name { display: none !important; }
+
+/* Tighter message spacing */
+.message { margin-top: 0.0625rem; margin-bottom: 0.0625rem; }
+.message-container { margin-bottom: 0.0625rem; }
+.message-container + .message-container { margin-top: 0.85rem !important; }
+
+/* Always align user messages right, agent left */
+.message-container { display: flex; width: 100%; }
+.message-container .user-message { margin-left: auto !important; margin-right: 0 !important; }
+.message-container .agent-message { margin-right: auto !important; margin-left: 0 !important; }
+
+.user-message { text-align: left; }
+.agent-message { text-align: left; }
+
+/* Latest-only shadow */
+.message.latest { box-shadow: var(--chat-bubble-shadow) !important; }
+.message:not(.latest) { box-shadow: none !important; }
+
+/* Desktop max width */
+@media (min-width: 1024px) {
+  .user-message,
+  .agent-message {
+    width: auto !important;
+    max-width: min(720px, 70%) !important;
+  }
+}
+
+/* Mobile */
+@media (max-width: 640px) {
+  .user-message,
+  .agent-message {
+    padding: 10px 12px;
+    font-size: 0.98rem;
+    width: 90% !important;
+    max-width: none !important;
+  }
+  .user-message {
+    margin-left: auto;
+    margin-right: .01px;
+    border-radius: var(--chat-bubble-radius);
+    box-shadow: 0 0 12px rgba(0,230,255,0.16);
+  }
+  .agent-message {
+    margin-right: auto;
+    margin-left: .01px;
+    border-radius: var(--chat-bubble-radius);
+    box-shadow: 0 0 8px rgba(77,166,255,0.10);
+  }
+}
+
+/* Desktop chat-feed-shell-ask overrides */
+@media (min-width: 1024px) {
+  .chat-feed-shell-ask .user-message,
+  .chat-feed-shell-ask .agent-message {
+    max-width: min(760px, 92%);
+  }
+  .chat-feed-shell-ask .message-container {
+    padding-inline: clamp(0.75rem, 3vw, 1.85rem);
+  }
 }
