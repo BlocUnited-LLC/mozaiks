@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base document styling driven entirely by brand.json CSS variables.
+   These values are set at runtime by applyBrand() — nothing is hardcoded here.
+   The var() fallbacks match the template brand (brand.json) so the page
+   renders correctly before applyBrand() fires. */
+
+html, body, #root {
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--color-background, #0b1220);
+  color: var(--color-text-primary, #e6eef8);
+  font-family: var(--font-body, 'Rajdhani'), ui-sans-serif, system-ui, sans-serif;
+}

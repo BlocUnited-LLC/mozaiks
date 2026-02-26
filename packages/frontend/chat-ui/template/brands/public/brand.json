@@ -1,0 +1,56 @@
+{
+  "name": "MozaiksAI",
+  "tagline": "AI-Powered Workflows",
+
+  "assets": {
+    "logo": "mozaik_logo.svg",
+    "wordmark": "mozaik.png",
+    "favicon": "mozaik.png",
+    "backgroundImage": "chat_bg_template.png"
+  },
+
+  "fonts": {
+    "body": {
+      "family": "Rajdhani",
+      "fallbacks": "ui-sans-serif, system-ui, -apple-system, sans-serif",
+      "googleFont": "https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&display=swap",
+      "tailwindClass": "font-sans"
+    },
+    "heading": {
+      "family": "Orbitron",
+      "fallbacks": "Rajdhani, ui-sans-serif, system-ui, sans-serif",
+      "googleFont": "https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&display=swap",
+      "tailwindClass": "font-heading"
+    },
+    "logo": {
+      "family": "Fagrak Inline",
+      "fallbacks": "Rajdhani, ui-sans-serif, system-ui, sans-serif",
+      "localFont": true,
+      "src": "/fonts/Fagrak Inline.otf",
+      "tailwindClass": "font-logo"
+    }
+  },
+
+  "colors": {
+    "primary":    { "main": "#06b6d4", "light": "#67e8f9", "dark": "#0e7490", "name": "cyan" },
+    "secondary":  { "main": "#8b5cf6", "light": "#a78bfa", "dark": "#6d28d9", "name": "violet" },
+    "accent":     { "main": "#f59e0b", "light": "#fbbf24", "dark": "#d97706", "name": "amber" },
+    "success":    { "main": "#10b981", "light": "#34d399", "dark": "#059669", "name": "emerald" },
+    "warning":    { "main": "#f59e0b", "light": "#fbbf24", "dark": "#d97706", "name": "amber" },
+    "error":      { "main": "#ef4444", "light": "#f87171", "dark": "#dc2626", "name": "red" },
+    "background": { "base": "#0b1220", "surface": "#0f1724", "elevated": "#131d33", "overlay": "rgba(13, 23, 42, 0.72)" },
+    "border":     { "subtle": "#1e293b", "strong": "#334155", "accent": "#06b6d4" },
+    "text":       { "primary": "#e6eef8", "secondary": "#94a3b8", "muted": "#64748b", "onAccent": "#f8fafc" }
+  },
+
+  "shadows": {
+    "primary":   "0 20px 45px rgba(6, 182, 212, 0.24)",
+    "secondary": "0 20px 45px rgba(139, 92, 246, 0.24)",
+    "accent":    "0 18px 40px rgba(245, 158, 11, 0.32)",
+    "success":   "0 18px 40px rgba(16, 185, 129, 0.24)",
+    "warning":   "0 18px 45px rgba(245, 158, 11, 0.34)",
+    "error":     "0 18px 45px rgba(239, 68, 68, 0.3)",
+    "elevated":  "0 24px 60px rgba(11, 18, 32, 0.55)",
+    "focus":     "0 0 0 3px rgba(8, 145, 178, 0.55)"
+  }
+}

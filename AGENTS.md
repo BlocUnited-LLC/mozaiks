@@ -1,161 +1,154 @@
-# mozaiks — Agent Operating Guide
+# mozaiks - Agent Operating Guide
 
-> **Last updated:** 2026-02-22  
-> **Repo identity:** The Mozaiks Stack (unified)
+> Last updated: 2026-02-26
+> Repo identity: Unified Mozaiks Stack
 
-You are a **stateless** coding agent inside the `mozaiks` repository.
+You are a stateless coding agent inside the `mozaiks` repository.
+Work from repository state and source-of-truth docs.
 
----
+## 0 - Identity
 
-## 1 — Identity
+`mozaiks` is the unified stack:
 
-`mozaiks` is the **unified Mozaiks stack** — contracts, runtime, and orchestration in one package.
+- `mozaiks.contracts`
+- `mozaiks.core`
+- `mozaiks.orchestration`
 
-This repo was created by collapsing three separate repos:
-- `mozaiks-kernel` (contracts) → `mozaiks.contracts`
-- `mozaiks-core` (runtime) → `mozaiks.core`
-- `mozaiks-ai` (orchestration) → `mozaiks.orchestration`
+Principle:
 
----
+> Contracts + Runtime + Orchestration live here. Consuming apps build product UX on top.
 
-## 2 — Package Structure
+## 1 - Repository Shape
 
-```
+```text
 mozaiks/
 ├── src/mozaiks/
-│   ├── __init__.py           # Package root, re-exports
-│   │
-│   ├── contracts/            # Pure data models, no I/O
-│   │   ├── events.py         # EventEnvelope, DomainEvent
-│   │   ├── ports/            # Abstract interfaces (AIWorkflowRunnerPort, etc.)
-│   │   ├── artifacts.py
-│   │   ├── replay.py
-│   │   ├── sandbox.py
-│   │   └── tools.py
-│   │
-│   ├── core/                 # Runtime infrastructure
-│   │   ├── api/              # FastAPI routes
-│   │   ├── auth/             # JWT validation, WebSocket auth
-│   │   ├── bootstrap/        # Startup initialization
-│   │   ├── config/           # Settings (pydantic-settings)
-│   │   ├── context/          # RuntimeContext
-│   │   ├── db/               # SQLAlchemy async
-│   │   ├── engine/           # EngineFacade
-│   │   ├── events/           # Event handling
-│   │   ├── logging/          # Structured logging
-│   │   ├── main.py           # create_app() factory
-│   │   ├── persistence/      # EventStore, checkpoints
-│   │   ├── plugins/          # Plugin system
-│   │   ├── registry/         # Workflow registry
-│   │   ├── runtime/          # Runtime context management
-│   │   ├── secrets/          # Secrets vault
-│   │   ├── streaming/        # WebSocket transport
-│   │   ├── tools/            # Tool execution
-│   │   └── workflows/        # Workflow execution
-│   │
-│   └── orchestration/        # AI workflow execution
-│       ├── adapters/         # AG2, mock runners
-│       ├── domain/           # TaskDAG, AgentSpec
-│       ├── interfaces/       # Orchestration interfaces
-│       ├── runner.py         # KernelAIWorkflowRunner
-│       ├── scheduling/       # Deterministic scheduler, state machine
-│       └── tools/            # Tool registry, auto_invoke
-│
-├── tests/
-├── docs/
-├── pyproject.toml
-└── README.md
+│   ├── contracts/
+│   ├── core/
+│   └── orchestration/
+├── packages/frontend/chat-ui/
+├── docs/architecture/source-of-truth/
+└── tests/
 ```
 
----
+## 2 - Layer Rules
 
-## 3 — Layer Rules
+| Layer | Contains | Depends on | Never contains |
+|---|---|---|---|
+| `contracts` | envelopes, types, ports, schemas | nothing | runtime side effects |
+| `core` | API, persistence, auth, streaming, runtime services | `contracts` | orchestration execution logic |
+| `orchestration` | runner, scheduler, adapters, execution state machine | `contracts`, `core` | HTTP route ownership |
 
-| Layer | Contains | Depends On | Never Contains |
-|-------|----------|------------|----------------|
-| `contracts` | EventEnvelope, DomainEvent, ports, schemas | Nothing (pure) | I/O, database, HTTP |
-| `core` | FastAPI, persistence, auth, streaming | `contracts` | Orchestration logic, AG2 |
-| `orchestration` | Scheduler, AG2 adapters, tool registry | `contracts`, `core` | HTTP endpoints |
+Import direction:
 
-### Import Direction
-
-```
-contracts  ←  core  ←  orchestration
-    ↑          ↑           ↑
-    └──────────┴───────────┘
-         Applications
+```text
+contracts <- core <- orchestration
 ```
 
----
+Hard rule: `core` must never import from `orchestration`.
 
-## 4 — What This Repo Owns
+## 3 - Ownership Boundaries
 
-- Event envelope and domain event schemas
-- Abstract port interfaces (AIWorkflowRunnerPort, SandboxPort, etc.)
-- FastAPI application factory (`create_app`)
-- Event persistence (EventStore, checkpoints)
-- WebSocket streaming (transport layer)
-- Authentication (JWT, WebSocket auth)
-- Workflow registry and plugin system
-- AI workflow runner (`KernelAIWorkflowRunner`)
-- Deterministic scheduler
-- AG2 adapters
-- Tool registry and auto-invoke
+### Stack-owned
 
----
+1. Contracts and event model
+2. Runtime lifecycle, persistence, streaming, tool execution
+3. Orchestration runtime/scheduling/adapters
+4. Shared frontend runtime semantics in `packages/frontend/chat-ui`
 
-## 5 — What This Repo Does NOT Own
+### App-owned
 
-| Responsibility | Where It Belongs |
-|----------------|------------------|
-| Application workflows | `mozaiks-platform` or other apps |
-| Feature domains (billing, hosting) | `mozaiks-platform` |
-| UI components | `mozaiks-platform` |
-| Platform config | `mozaiks-platform` |
+1. Product page composition and domain UX
+2. App-specific workflows/business logic
+3. App bootstrap, routing, release operations
+4. Sandbox provider operations/policies
 
----
+Rule:
 
-## 6 — Consumers
+> `mozaiks` defines portable runtime/state semantics; consuming apps define product UX.
 
-The primary consumer is `mozaiks-platform`:
+## 4 - Execution Modes
 
-```python
-# mozaiks-platform imports
-from mozaiks.contracts import EventEnvelope, DomainEvent
-from mozaiks.core.auth import get_user_context
-from mozaiks.core.persistence import EventStore
-from mozaiks.orchestration import KernelAIWorkflowRunner
-```
+- Mode 1: AI Workflow (chat -> agent -> artifact)
+- Mode 2: Triggered Action (button/API -> function or mini-run)
+- Mode 3: Plain App (pages/CRUD/settings without AI orchestration)
 
----
+Artifacts bridge the modes.
 
-## 7 — Development
+## 5 - Canonical UI Surface Contract
+
+Source: `docs/architecture/source-of-truth/UI_SURFACE_AND_LAYOUT_ARCHITECTURE.md`
+
+- `conversationMode`: `ask | workflow`
+- `layoutMode`: `full | split | minimized | view`
+- `surfaceMode`: `ASK | WORKFLOW | VIEW`
+
+Boundary:
+
+- `view` is a UI mode
+- `view` is not sandbox runtime
+
+Key paths:
+
+- `packages/frontend/chat-ui/src/state/uiSurfaceReducer.js`
+- `packages/frontend/chat-ui/src/components/chat/FluidChatLayout.jsx`
+- `packages/frontend/chat-ui/src/components/chat/MobileArtifactDrawer.jsx`
+- `packages/frontend/chat-ui/src/pages/ChatPage.js`
+
+## 6 - Source-of-Truth Precedence
+
+Authoritative docs:
+
+- `docs/architecture/source-of-truth/README.md`
+- `docs/architecture/source-of-truth/UI_SURFACE_AND_LAYOUT_ARCHITECTURE.md`
+- `docs/architecture/source-of-truth/WORKFLOW_ARCHITECTURE.md`
+- `docs/architecture/source-of-truth/PROCESS_AND_EVENT_MAP.md`
+- `docs/architecture/source-of-truth/EVENT_TAXONOMY.md`
+- `docs/architecture/source-of-truth/EVENT_SYSTEM_ARCHITECTURE.md`
+- `docs/architecture/source-of-truth/GRAPH_INJECTION_CONTRACT.md`
+- `docs/architecture/source-of-truth/LEARNING_LOOP_ARCHITECTURE.md`
+- `docs/architecture/source-of-truth/APP_CREATION_GUIDE.md`
+
+If code and docs diverge, update both in one change set.
+
+## 7 - Drift Prevention
+
+Before adding modules, verify the capability does not already exist:
 
 ```bash
-# Create venv
-python -m venv .venv
-.venv\Scripts\Activate.ps1  # Windows
-source .venv/bin/activate   # Unix
+rg -n "symbol_or_feature" src packages docs
+```
 
-# Install in editable mode with dev deps
-pip install -e ".[dev]"
+Prefer extending existing modules over introducing duplicates.
 
-# Run tests
+## 8 - Development Verification
+
+Run:
+
+```bash
 pytest tests/ -v
-
-# Type check
 mypy src/mozaiks/
-
-# Lint
 ruff check src/
 ```
 
----
+When touching public APIs, add import smoke coverage in `tests/test_public_api_contract.py`.
 
-## 8 — Common Agent Failure Modes
+## 9 - Required Output for Changes
 
-| Failure | Prevention |
-|---------|------------|
-| Adding app-level code | This is the stack. Apps go in `mozaiks-platform`. |
-| Breaking layer dependencies | `contracts` must stay pure. Check imports. |
-| Duplicating what applications should own | Workflows, UI, config belong in consumer apps. |
+Every completed change should include:
+
+1. Scope (what changed and why)
+2. Boundary (what was intentionally not changed)
+3. Verification evidence (tests/commands)
+4. API impact (imports/exports added/removed/renamed)
+5. Doc alignment notes
+
+## 10 - Common Failure Modes
+
+| Failure | Symptom | Fix |
+|---|---|---|
+| Split-repo assumptions reintroduced | old package boundaries used as if still split | use unified `src/mozaiks/*` layout |
+| Layer boundary drift | `core` starts owning orchestration behavior | move execution logic to `orchestration` |
+| UI boundary drift | `view` treated as sandbox runtime | keep UI mode and sandbox lifecycle separate |
+| Declarative/runtime drift | YAML contracts no longer match runtime behavior | update docs + runtime together |
+| Duplicate primitives | new module reimplements existing behavior | search and extend existing modules |

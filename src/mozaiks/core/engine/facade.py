@@ -91,21 +91,26 @@ class AIEngineFacade:
         if self._runner is not None:
             return self._runner
 
-        module = self._try_import("mozaiks_ai")
+        module_name = "mozaiks.orchestration"
+        module = self._try_import(module_name)
         if module is None:
-            raise AIUnavailableError("mozaiks-ai is not installed.")
+            raise AIUnavailableError(
+                "No orchestration runner module found. Expected 'mozaiks.orchestration'."
+            )
 
         factory = self._resolve_factory(module)
         if factory is None:
-            raise AIUnavailableError("mozaiks-ai does not expose create_ai_workflow_runner() or create_runner().")
+            raise AIUnavailableError(
+                f"{module_name} does not expose create_ai_workflow_runner() or create_runner()."
+            )
 
         try:
             candidate = self._call_sync(factory, {"adapter": self._adapter})
         except Exception as exc:
-            raise AIUnavailableError(f"Failed to initialize mozaiks-ai runner: {exc}") from exc
+            raise AIUnavailableError(f"Failed to initialize runner from {module_name}: {exc}") from exc
 
         if not isinstance(candidate, AIWorkflowRunnerPort):
-            raise AIUnavailableError("mozaiks-ai runner does not implement AIWorkflowRunnerPort.")
+            raise AIUnavailableError(f"{module_name} runner does not implement AIWorkflowRunnerPort.")
 
         self._runner = candidate
         return candidate

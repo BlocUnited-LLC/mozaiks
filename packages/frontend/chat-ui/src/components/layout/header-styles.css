@@ -1,0 +1,493 @@
+.profile_container {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 0px 0px 0px 20px;
+  padding: 8px 15px 8px 15px;
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  align-self: stretch;
+  flex-shrink: 0;
+  position: relative;
+  box-shadow: 0px 0px 10px 0px rgba(255, 255, 255, 1);
+  backdrop-filter: blur(10px);
+}
+
+.avatar_container {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  position: relative;
+  border-radius: 30px;
+  box-shadow: 0px 0px 10px 0px rgba(255, 255, 255, 1);
+}
+
+.avatar_inner_container {
+  width: 40px;
+  height: 40px;
+  position: absolute;
+  left: 0px;
+  top: 0px;
+}
+
+.avatar_inner_container img {
+  border-radius: 161.5px;
+  border-style: solid;
+  border-color: #ffffff;
+  border-width: 3px;
+  width: 40px;
+  height: 40px;
+  position: absolute;
+  left: 0px;
+  top: 0px;
+}
+
+.profile_container_inner {
+  display: flex;
+  flex-direction: row;
+  gap: 2px;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 105px;
+  position: relative;
+}
+
+.profile_container_inner_name {
+  color: #ffffff;
+  text-align: left;
+  font: 400 20px "Techfont", sans-serif;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.bell_icon {
+  flex-shrink: 0;
+  position: relative;
+  overflow: visible;
+  filter: drop-shadow(0px 0px 2px rgba(var(--color-primary-rgb, 6, 182, 212), 1));
+  cursor: pointer;
+}
+
+.profile_container_rec {
+  background: #ffffff;
+  border-radius: 26.44px;
+  padding: 8.25px;
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-start;
+  flex-shrink: 0;
+  width: 150px;
+  position: relative;
+  box-shadow: 0px 0px 10px 0px rgba(255, 255, 255, 1);
+  backdrop-filter: blur(10px);
+}
+
+.app_card {
+  color: var(--black, #000000);
+  text-align: center;
+  font: var(--little-text, 400 15px "Techfont", sans-serif);
+  position: relative;
+  width: 90px;
+}
+
+.app_card_svg {
+  flex-shrink: 0;
+  position: relative;
+  overflow: visible;
+}
+
+.active_container {
+  width: 8px;
+  height: 8px;
+  position: relative;
+}
+
+.active_dot {
+  width: 8px;
+  height: 8px;
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  border-radius: 4px;
+  background: var(--color-primary-light, #67e8f9);
+}
+
+/* Sleeker Header Styles */
+
+/* Refined sci-fi animations */
+@keyframes cosmic-glow {
+  0%, 100% { 
+    box-shadow: 0 0 15px rgba(var(--color-primary-rgb, 6, 182, 212), 0.2), 0 0 30px rgba(var(--color-primary-rgb, 6, 182, 212), 0.1); 
+  }
+  50% { 
+    box-shadow: 0 0 25px rgba(var(--color-primary-rgb, 6, 182, 212), 0.4), 0 0 50px rgba(var(--color-primary-rgb, 6, 182, 212), 0.15); 
+  }
+}
+
+@keyframes geometric-scan {
+  0% { transform: translateX(-100%); opacity: 0; }
+  50% { opacity: 1; }
+  100% { transform: translateX(100%); opacity: 0; }
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.33);
+    opacity: 1;
+  }
+  80%, 100% {
+    transform: scale(2.33);
+    opacity: 0;
+  }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes scan-line {
+  0% { transform: translateX(-100%) skewX(-15deg); }
+  100% { transform: translateX(200%) skewX(-15deg); }
+}
+
+/* Enhanced geometric clip-paths for reference image style */
+.geometric-nav-button {
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 100%, 12px 100%);
+  background: linear-gradient(135deg, rgba(var(--color-primary-light-rgb, 103, 232, 249), 0.06), rgba(var(--color-primary-dark-rgb, 14, 116, 144), 0.03));
+  border: 1px solid rgba(var(--color-primary-rgb, 6, 182, 212), 0.2);
+  position: relative;
+  overflow: hidden;
+}
+
+.geometric-nav-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(var(--color-primary-rgb, 6, 182, 212), 0.15), transparent);
+  animation: scan-line 2s ease-in-out infinite;
+}
+
+.geometric-nav-button:hover { border-color: rgba(var(--color-primary-rgb, 6, 182, 212), 0.35); }
+
+/* Enhanced Discovery Button - Solid Elongated Hexagon with Purple Theme */
+.discovery-enhanced {
+  /* Elongated hexagon shape - more prominent and clearly actionable */
+  clip-path: polygon(20px 0, calc(100% - 20px) 0, 100% 50%, calc(100% - 20px) 100%, 20px 100%, 0 50%);
+  
+  /* Purple-themed solid, prominent background - clearly stands out */
+  background: linear-gradient(135deg, 
+    rgba(var(--color-secondary-dark-rgb, 109, 40, 217), 0.85), 
+    rgba(var(--color-secondary-rgb, 139, 92, 246), 0.7),
+    rgba(var(--color-secondary-light-rgb, 167, 139, 250), 0.8)
+  );
+  
+  /* Strong purple border for definition */
+  border: 2px solid rgba(var(--color-secondary-rgb, 139, 92, 246), 0.9);
+  
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    
+  position: relative;
+  overflow: hidden;
+  transform: translateZ(0); /* GPU acceleration */
+}
+
+.discovery-enhanced::before {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  clip-path: inherit;
+  
+  /* Inner purple glow effect */
+  background: linear-gradient(135deg, 
+    rgba(255, 255, 255, 0.1), 
+    transparent,
+    rgba(var(--color-secondary-rgb, 139, 92, 246), 0.15)
+  );
+  
+  border-radius: 2px;
+}
+
+.discovery-enhanced::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  transform: skewX(-20deg);
+  transition: left 0.5s ease-out;
+}
+
+.discovery-enhanced:hover::after {
+  left: 100%;
+}
+
+.discovery-enhanced:hover {
+  /* Enhanced purple hover state - even more prominent */
+  background: linear-gradient(135deg, 
+    rgba(var(--color-secondary-dark-rgb, 109, 40, 217), 0.95), 
+    rgba(var(--color-secondary-rgb, 139, 92, 246), 0.85),
+    rgba(var(--color-secondary-light-rgb, 167, 139, 250), 0.9)
+  );
+  
+  border-color: rgba(var(--color-secondary-light-rgb, 167, 139, 250), 1);
+  
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+/* My Apps Button - Architectural Unique Styling */
+button[style*="clipPath"]:hover {
+  transform: translateY(-2px) scale(1.02) !important;
+  box-shadow: 
+    0 0 35px rgba(var(--color-primary-rgb, 6, 182, 212), 0.5),
+    0 6px 20px rgba(var(--color-primary-dark-rgb, 14, 116, 144), 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3) !important;
+  
+  background: linear-gradient(135deg, 
+    rgba(var(--color-primary-light-rgb, 103, 232, 249), 0.35), 
+    rgba(var(--color-primary-dark-rgb, 14, 116, 144), 0.25), 
+    rgba(var(--color-primary-rgb, 6, 182, 212), 0.3)
+  ) !important;
+  
+  border-color: rgba(var(--color-primary-rgb, 6, 182, 212), 0.8) !important;
+}
+
+/* Profile section enhancements */
+.profile-enhanced {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(var(--color-primary-rgb, 6, 182, 212), 0.2);
+  backdrop-filter: blur(10px);
+}
+
+.profile-enhanced:hover { border-color: rgba(var(--color-primary-rgb, 6, 182, 212), 0.35); }
+
+/* Header backdrop effects */
+.cosmic-header {
+  position: relative;
+  overflow: hidden;
+}
+
+.cosmic-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 300%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(var(--color-primary-rgb, 6, 182, 212), 0.1),
+    transparent
+  );
+  animation: shimmer 3s infinite;
+}
+
+/* Enhanced glow effects */
+.glow-cyan { animation: none; }
+
+.float-animation { animation: none; }
+
+/* Neural interface styling */
+.neural-button {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, rgba(var(--color-primary-rgb, 6, 182, 212), 0.1), rgba(var(--color-secondary-rgb, 139, 92, 246), 0.1));
+  border: 1px solid rgba(var(--color-primary-rgb, 6, 182, 212), 0.3);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.neural-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.1),
+    transparent
+  );
+  transition: left 0.5s;
+}
+
+.neural-button:hover::before {
+  left: 100%;
+}
+
+.neural-button:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: rgba(var(--color-primary-rgb, 6, 182, 212), 0.6);
+}
+
+/* Phase status holographic effect */
+.phase-hologram {
+  position: relative;
+  background: linear-gradient(135deg, 
+    rgba(var(--color-accent-rgb, 245, 158, 11), 0.2), 
+    rgba(var(--color-secondary-rgb, 139, 92, 246), 0.2),
+    rgba(var(--color-primary-rgb, 6, 182, 212), 0.2)
+  );
+  border: 1px solid rgba(var(--color-accent-rgb, 245, 158, 11), 0.4);
+  border-radius: 9999px;
+  backdrop-filter: blur(10px);
+}
+
+.phase-hologram::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, 
+    rgba(var(--color-accent-rgb, 245, 158, 11), 0.5), 
+    rgba(var(--color-secondary-rgb, 139, 92, 246), 0.5),
+    rgba(var(--color-primary-rgb, 6, 182, 212), 0.5)
+  );
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: xor;
+  -webkit-mask-composite: xor;
+}
+
+/* Notification pulse effect */
+.notification-pulse {
+  position: relative;
+}
+
+.notification-pulse::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  border-radius: inherit;
+  background: linear-gradient(45deg, rgba(var(--color-error-rgb, 239, 68, 68), 1), rgba(var(--color-warning-rgb, 245, 158, 11), 0.85), rgba(var(--color-error-rgb, 239, 68, 68), 1));
+  animation: pulse-ring 2s ease-out infinite;
+  z-index: -1;
+}
+
+/* Mission Control Interface Brand Font */
+.cosmic-module-header-brand {
+  font-family: 'Orbitron', 'Oxanium', sans-serif;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  text-shadow: none;
+  font-size: inherit;
+  margin-bottom: 0;
+  color: inherit;
+}
+
+/* Minimal header utility container */
+.header-minimal {
+  background: rgba(var(--color-background-rgb, 15, 23, 32), 0.15);
+  border-bottom: 1px solid rgba(var(--color-primary-rgb, 6, 182, 212), 0.15);
+  backdrop-filter: blur(8px);
+}
+
+/* Responsive futuristic adjustments */
+@media (max-width: 1024px) {
+  .phase-hologram {
+    font-size: 0.75rem;
+    padding: 0.5rem 1rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .cosmic-header::before {
+    animation-duration: 2s;
+  }
+  
+  .neural-button {
+    padding: 0.5rem 0.75rem;
+  }
+}
+
+/* Dark mode enhancements */
+@media (prefers-color-scheme: dark) {
+  .neural-button {
+    background: linear-gradient(135deg, rgba(var(--color-primary-rgb, 6, 182, 212), 0.15), rgba(var(--color-secondary-rgb, 139, 92, 246), 0.15));
+  }
+  
+  .phase-hologram {
+    background: linear-gradient(135deg, 
+      rgba(var(--color-accent-rgb, 245, 158, 11), 0.25), 
+      rgba(var(--color-secondary-rgb, 139, 92, 246), 0.25),
+      rgba(var(--color-primary-rgb, 6, 182, 212), 0.25)
+    );
+  }
+}
+
+/* Responsive styles */
+@media (max-width: 768px) {
+  .profile_container {
+    padding: 4px 8px;
+    gap: 8px;
+  }
+  
+  .profile_container_inner {
+    width: auto;
+    min-width: 80px;
+  }
+  
+  .profile_container_inner_name {
+    font-size: 16px;
+  }
+  
+  .profile_container_rec {
+    width: 120px;
+    padding: 6px;
+  }
+  
+  .app_card {
+    font-size: 13px;
+    width: 70px;
+  }
+}
+
+/* Subtle Discovery Button Effects - More On Theme */
+.discovery-subtle {
+  position: relative;
+  overflow: hidden;
+}
+
+.discovery-subtle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.1),
+    transparent
+  );
+  transition: left 0.5s;
+}
+
+.discovery-subtle:hover::before {
+  left: 100%;
+}

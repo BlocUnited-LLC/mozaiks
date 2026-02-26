@@ -82,11 +82,6 @@ _STATUS_BY_EVENT_TYPE: dict[str, str] = {
     "process.completed": "completed",
     "process.failed": "failed",
     "process.cancelled": "cancelled",
-    "run.started": "running",
-    "run.running": "running",
-    "run.completed": "completed",
-    "run.failed": "failed",
-    "run.cancelled": "cancelled",
     "task.started": "running",
     "task.retrying": "running",
     "task.completed": "running",
@@ -232,7 +227,7 @@ def _domain_to_envelope(*, run_id: str, domain_event: DomainEvent) -> EventEnvel
 
 def _extract_result(event: EventEnvelope) -> dict[str, Any] | None:
     event_type = event.event_type.lower()
-    if event_type not in {"run.completed", "process.completed"}:
+    if event_type != "process.completed":
         return None
 
     payload = dict(event.payload)
@@ -561,7 +556,7 @@ def create_app(
             ledger=EventStoreLedger(store),
             control_plane=EventStoreControlPlane(store),
             clock=SystemClock(),
-            logger=StandardLogger("mozaiks_core.runtime"),
+            logger=StandardLogger("mozaiks.core.runtime"),
             sandbox=sandbox_adapter,
             secrets=secrets,
             metadata=runtime_metadata,

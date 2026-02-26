@@ -15,7 +15,7 @@ This is a public OSS implementation guide.
 Out of scope for this doc set:
 
 - private automation prompt chains
-- proprietary generator internals
+- organization-specific generator internals
 - private deployment tooling details
 
 ---
