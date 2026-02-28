@@ -1,95 +1,161 @@
-&nbsp;
+# Mozaiks
 
 <div align="center">
-  <img src="assets/mozaik_logo.svg" alt="Mozaiks" width="160"/>
-  <h1 style="margin-top: 1rem; font-size: 2.4rem; font-weight: 800; letter-spacing: -0.5px;">Mozaiks</h1>
-  <p style="font-size: 1.15rem; color: #94a3b8; max-width: 560px; margin: 0 auto 1.5rem;">
-    Open-source runtime, orchestration, and contracts for AI-native applications.
-    Drop in a fully branded chat interface in minutes.
-  </p>
+
+<img src="assets/mozaik_logo.svg" alt="Mozaiks Logo" width="180"/>
+
+**Open-source runtime, orchestration, and contracts for AI-native applications**
+
+[![Version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/CHANGELOG.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://www.python.org/)
+[![AG2](https://img.shields.io/badge/AG2-Autogen-green)](https://github.com/ag2ai/ag2)
+
+</div>
+
+> **Note**: This is the unified Mozaiks stack. BlocUnited offers a managed platform with app generation tools at [mozaiks.ai](https://mozaiks.ai), but you're welcome to self-host and build everything yourself.
+
+---
+
+## What is Mozaiks?
+
+Mozaiks is the unified stack for building AI-native applications. It provides:
+
+- **Contracts** — Event envelopes, domain events, and port interfaces
+- **Core Runtime** — FastAPI server, persistence, WebSocket streaming, authentication
+- **Orchestration** — AI workflow execution, AG2 adapters, deterministic scheduling
+
+---
+
+## 🎨 See It In Action
+
+<div align="center">
+
+### 🔀 Dual-Mode Interface
+
+| Workflow Mode | Ask Mode |
+|:---:|:---:|
+| ![Workflow Mode](assets/ArtifactLayout.png) | ![Ask Mode](assets/AskMozaiks.png) |
+| *Chat + Artifact split view* | *Full chat with history sidebar* |
+
+---
+
+### 💬 Embeddable Floating Widget
+
+<video width="100%" controls style="border-radius: 8px; margin: 1rem 0;">
+  <source src="https://github.com/user-attachments/assets/32bc7ec8-f550-42f7-b287-3b015c5df235" type="video/mp4">
+  <em>Drop a floating assistant anywhere in your app — click the button to expand/collapse the chat interface</em>
+</video>
+
+*Drop a floating assistant anywhere in your app — click the button to expand/collapse the chat interface*
+
 </div>
 
 ---
 
-## What you can build
+## 🎯 What is MozaiksAI?
 
-Mozaiks gives you a production-ready AI chat interface that's completely yours to brand and extend.
+**MozaiksAI Runtime** is a production-ready orchestration engine that transforms AG2 (Microsoft Autogen) into an app-grade platform with:
 
-| | |
-|---|---|
-| 💬 **Conversational AI** | Full chat UI with streaming, history, and agent responses |
-| 🎨 **Full Brand Control** | Colors, fonts, logos, icons — all from JSON files, no code changes |
-| ⚡ **Workflow Mode** | Split-screen artifact view for structured AI workflows |
-| 🧩 **Embeddable Widget** | Drop a floating assistant into any existing app |
-| 🔌 **Bring Your Own Backend** | Wire to any FastAPI/REST backend with a single config |
+- ✅ **Event-Driven Architecture** → Every action flows through unified event pipeline
+- ✅ **Real-Time WebSocket Transport** → Live streaming to React frontends
+- ✅ **Persistent State Management** → Resume conversations exactly where they left off
+- ✅ **Multi-Tenant Isolation** → app-scoped data and execution contexts
+- ✅ **Dynamic UI Integration** → Agents can invoke React components during workflows
+- ✅ **Declarative Workflows** → JSON manifests, no code changes needed
+- ✅ **Comprehensive Observability** → Built-in metrics, logging, and token tracking
+
+**MozaiksAI = AG2 + Production Infrastructure + Event-Driven Core**
 
 ---
 
-## Frontend Customization Guide
+## Quick Start
 
-Everything you need to take the template from default → fully branded.
+```bash
+# 1. Clone and install
+git clone https://github.com/BlocUnited-LLC/mozaiks.git
+cd mozaiks
+pip install -r requirements.txt
+
+# 2. Configure
+cp .env.example .env
+# Edit .env: set OPENAI_API_KEY and MONGO_URI
+
+# 3. Start MongoDB
+docker compose -f infra/compose/docker-compose.yml up mongo -d
+
+# 4. Start backend
+python run_server.py
+
+# 5. Start frontend (separate terminal)
+cd app && npm install && npm run dev
+```
+
+Visit [http://localhost:3000](http://localhost:3000) — the HelloWorld workflow is ready to run.
+
+---
+
+## Repository Layout
+
+```text
+mozaiks/
+  mozaiksai/        ← runtime engine (transport, orchestration, persistence)
+  chat-ui/          ← UI library (React, WebSocket adapter, ChatPage)
+  app/              ← your app shell (brand it, extend it)
+  workflows/        ← declarative workflow definitions
+  shared_app.py     ← FastAPI server entry point
+  run_server.py     ← start the server
+  app.json          ← app name, API URL, default workflow
+  .env.example      ← environment variable reference
+  docs/             ← this documentation
+```
+
+---
+
+## Architecture
+
+Layer direction is strict:
+
+```text
+contracts ← core ← orchestration
+```
+
+`core` does not import from `orchestration`.
+
+### Execution Modes
+
+1. **Workflow Mode** — chat → agent → artifact (split-screen UI)
+2. **Ask Mode** — conversational agent with session history sidebar
+3. **Widget Mode** — floating assistant embedded in any page
+
+---
+
+## Next Steps
 
 <div class="grid cards" markdown>
 
--   :fontawesome-solid-rocket: **1 — Overview & Quick Start**
+-   :fontawesome-solid-rocket: **Get Started**
 
     ---
 
-    Understand the template structure, file layout, and get running in under 5 minutes.
+    Clone, configure, and run the full stack in minutes.
 
-    [:octicons-arrow-right-24: Start here](guides/customizing-frontend/01-overview.md)
+    [:octicons-arrow-right-24: Getting Started](getting-started.md)
 
--   :fontawesome-solid-palette: **2 — Brand JSON**
-
-    ---
-
-    Set your colors, typography, gradients, and shadows from a single JSON file.
-
-    [:octicons-arrow-right-24: Customize brand](guides/customizing-frontend/02-brand-json.md)
-
--   :fontawesome-solid-sliders: **3 — UI JSON**
+-   :fontawesome-solid-sitemap: **Add a Workflow**
 
     ---
 
-    Configure header actions, profile menu, notifications, and footer links.
+    Build your own AG2 workflow and wire it to the frontend.
 
-    [:octicons-arrow-right-24: Configure UI](guides/customizing-frontend/03-ui-json.md)
+    [:octicons-arrow-right-24: Adding a Workflow](guides/adding-a-workflow.md)
 
--   :fontawesome-solid-images: **4 — Assets**
-
-    ---
-
-    Add your logo, background images, custom fonts, and icon SVGs.
-
-    [:octicons-arrow-right-24: Add assets](guides/customizing-frontend/04-assets.md)
-
--   :fontawesome-solid-plug: **5 — Wiring**
+-   :fontawesome-solid-palette: **Brand Your App**
 
     ---
 
-    Connect your frontend to the Mozaiks runtime and go live.
+    Colors, fonts, logo, and nav from JSON files — no code changes.
 
-    [:octicons-arrow-right-24: Wire it up](guides/customizing-frontend/05-wiring.md)
+    [:octicons-arrow-right-24: Customize Frontend](guides/customizing-frontend/01-overview.md)
 
 </div>
-
----
-
-## How it works
-
-```
-templates/
-  app.json          ← appName, appId, apiUrl, defaultWorkflow
-  frontend/
-    brand/public/
-      brand.json    ← colors, fonts, shadows
-      ui.json       ← icons, header actions, nav
-      assets/       ← logo, background, fonts
-```
-
-At startup `themeProvider.js` fetches `brand.json` and `ui.json`, merges them into a theme object, and stamps CSS custom properties across the entire app. Change the JSON → change the look. No rebuilds needed for brand updates.
-
----
-
-!!! tip "New here?"
-    Jump straight to [Step 1 — Overview & Quick Start](guides/customizing-frontend/01-overview.md) to get a live branded app running in minutes.
