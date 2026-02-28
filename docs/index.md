@@ -1,8 +1,6 @@
 # Mozaiks
 
-<div align="center">
-
-<img src="assets/mozaik_logo.svg" alt="Mozaiks Logo" width="180"/>
+![Logo](assets/mozaik_logo.svg){ width=160 align=center }
 
 **Open-source runtime, orchestration, and contracts for AI-native applications**
 
@@ -10,8 +8,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://www.python.org/)
 [![AG2](https://img.shields.io/badge/AG2-Autogen-green)](https://github.com/ag2ai/ag2)
-
-</div>
 
 > **Note**: This is the unified Mozaiks stack. BlocUnited offers a managed platform with app generation tools at [mozaiks.ai](https://mozaiks.ai), but you're welcome to self-host and build everything yourself.
 
@@ -29,8 +25,6 @@ Mozaiks is the unified stack for building AI-native applications. It provides:
 
 ## 🎨 See It In Action
 
-<div align="center">
-
 ### 🔀 Dual-Mode Interface
 
 | Workflow Mode | Ask Mode |
@@ -38,18 +32,11 @@ Mozaiks is the unified stack for building AI-native applications. It provides:
 | ![Workflow Mode](assets/ArtifactLayout.png) | ![Ask Mode](assets/AskMozaiks.png) |
 | *Chat + Artifact split view* | *Full chat with history sidebar* |
 
----
-
 ### 💬 Embeddable Floating Widget
 
-<video width="100%" controls style="border-radius: 8px; margin: 1rem 0;">
-  <source src="https://github.com/user-attachments/assets/32bc7ec8-f550-42f7-b287-3b015c5df235" type="video/mp4">
-  <em>Drop a floating assistant anywhere in your app — click the button to expand/collapse the chat interface</em>
-</video>
+![Widget demo](assets/widgetAction.gif)
 
 *Drop a floating assistant anywhere in your app — click the button to expand/collapse the chat interface*
-
-</div>
 
 ---
 
