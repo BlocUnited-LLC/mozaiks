@@ -1,0 +1,31 @@
+tools:
+- agent: GreeterAgent
+  file: greet.py
+  function: greet
+  description: >-
+    Records the user's name and the greeting message in context variables.
+    Returns a friendly greeting string displayed as a GreetingCard in the UI.
+  tool_type: UI_Tool
+  auto_invoke: true
+  ui:
+    component: GreetingCard
+    mode: inline
+
+# lifecycle_tools run automatically at agent lifecycle events (before_agent / after_agent).
+# They are NOT called by the LLM — the runtime triggers them directly.
+#
+# To add one, uncomment and fill in the block below, then create the tool file
+# under workflows/HelloWorld/tools/:
+#
+# lifecycle_tools:
+# - trigger: before_agent          # before_agent | after_agent
+#   agent: GreeterAgent            # which agent triggers this
+#   file: my_lifecycle_tool.py
+#   function: my_lifecycle_function
+#   description: What this hook does
+#   tool_type: Agent_Tool          # Agent_Tool | UI_Tool
+#   auto_invoke: true
+#   ui:
+#     component: null
+#     mode: null
+lifecycle_tools: []

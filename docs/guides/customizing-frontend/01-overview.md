@@ -25,58 +25,58 @@ and logs a `console.warn`. The app always renders.
 ## File layout
 
 ```
-templates/
-  app.json                         ← shared config (appName, appId, apiUrl, defaultWorkflow)
-  frontend/
-    vite.config.js                 # publicDir → "brand/public"
-    package.json
-    App.jsx
-    main.jsx
-    brand/
-      public/                      ← Vite publicDir — served at /
-        brand.json
-        ui.json
-        navigation.json
-        assets/
-          mozaik_logo.svg
-          mozaik.png
-          chat_bg_template.png
-          profile.svg
-          notifications.svg
-          sparkle.svg
-          settings.svg
-          logout.svg
-        fonts/
-          Fagrak Inline.otf
-    workflows/
-      index.js                     # auto-discovers workflow folders
-      hello_world/
-        index.js
-        HelloWorldArtifact.jsx
-  backend/
-    main.py
-    workflows/
-      hello_world/__init__.py
+app.json                           ← shared config (appName, appId, apiUrl, defaultWorkflow)
+app/
+  vite.config.js                   # publicDir → "brand/public"
+  package.json
+  App.jsx
+  main.jsx
+  brand/
+    public/                        ← Vite publicDir — served at /
+      brand.json
+      ui.json
+      navigation.json
+      assets/
+        mozaik_logo.svg
+        mozaik.png
+        chat_bg_template.png
+        profile.svg
+        notifications.svg
+        sparkle.svg
+        settings.svg
+        logout.svg
+      fonts/
+        Fagrak Inline.otf
+workflows/
+  HelloWorld/                      # each folder = one backend workflow
+    orchestrator.yaml
+    agents.yaml
+    tools/
+chat-ui/src/workflows/
+  index.js                         # frontend workflow component registry
+  HelloWorld/
+    components/
+      GreetingCard.js
+      index.js
 ```
 
 ---
 
 ## Quick start
 
-1. **Copy the template** — copy `templates/frontend/` and `templates/backend/` into your app root.
-2. **Set your app identity** — edit `templates/app.json` (`appName`, `appId`, `defaultWorkflow`, `apiUrl`).
-3. **Install dependencies**: `cd templates/frontend && npm install`
-4. **Edit `brand/public/brand.json`** — your colors, fonts, assets. → [Step 2](02-brand-json.md)
-5. **Edit `brand/public/ui.json`** — your header, profile menu, footer. → [Step 3](03-ui-json.md)
-6. **Drop your assets** into `brand/public/assets/`. → [Step 4](04-assets.md)
-7. **Wire navigation and auth** via `onAction`. → [Step 5](05-wiring.md)
+1. **Set your app identity** — edit `app.json` at the repo root (`appName`, `appId`, `defaultWorkflow`, `apiUrl`).
+2. **Install dependencies**: `cd app && npm install`
+3. **Edit `app/brand/public/brand.json`** — your colors, fonts, assets. → [Step 2](02-brand-json.md)
+4. **Edit `app/brand/public/ui.json`** — your header, profile menu, footer. → [Step 3](03-ui-json.md)
+5. **Drop your assets** into `app/brand/public/assets/`. → [Step 4](04-assets.md)
+6. **Wire navigation and auth** via `onAction`. → [Step 5](05-wiring.md)
 
 ---
 
 ## Start the dev server
 
 ```bash
-cd templates/frontend
+cd app
 npm run dev
 # → http://localhost:3000
 ```

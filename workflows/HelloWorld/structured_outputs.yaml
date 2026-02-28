@@ -1,0 +1,31 @@
+# Structured outputs define typed Pydantic-style response schemas that agents
+# can use to produce validated, structured data instead of free-form text.
+#
+# The runtime loads this file and makes the models available to agents that
+# declare `structured_output: <ModelName>` in agents.yaml.
+#
+# To add a structured output, define it under `structured_outputs.models`:
+#
+# structured_outputs:
+#   models:
+#     GreetingResult:
+#       type: model
+#       fields:
+#         name:
+#           type: str
+#           description: The user's name.
+#         message:
+#           type: str
+#           description: The full greeting message.
+#         language:
+#           type: union
+#           variants:
+#             - str
+#             - 'null'
+#           description: Language of the greeting, or null if unknown.
+
+structured_outputs:
+  models: {}
+  
+registry:
+  InterviewAgent: null

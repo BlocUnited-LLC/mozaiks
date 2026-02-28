@@ -1,0 +1,59 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: mozaiksai-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mozaiksai_mongo_data:/data/db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "mongodb://127.0.0.1:27017/admin", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build:
+      context: ../..    # repo root
+      dockerfile: infra/docker/Dockerfile
+    image: mozaiksai-app:latest
+    pull_policy: never
+    container_name: mozaiksai-app
+    command: >
+      watchmedo auto-restart 
+      --patterns="*.py" 
+      --recursive -- 
+      python run_server.py
+    env_file:
+      - ../../.env
+    ports:
+      - "8000:8000"
+      #433: "443:443"   # Uncomment if using HTTPS
+    environment:
+      # Local dev default: disable auth so ChatUI can call APIs without tokens.
+      # Override in ../../.env if you want to test real JWT/OIDC behavior.
+      AUTH_ENABLED: "false"
+      AG2_RUNTIME_LOGGING: "sqlite"
+      LOGS_BASE_DIR: /app/logs/logs
+      DOCKERIZED: "true"
+      # In docker mode, use the compose-network mongo service.
+      # Override by setting MONGO_URI in the repo-root .env (or your shell env).
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/MozaiksAI}
+      # AZURE_* still supplied via env_file
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ../../:/app
+      - ../../logs/logs:/app/logs/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',8000)); print('ok')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  mozaiksai_mongo_data:
+

@@ -1,0 +1,50 @@
+{
+  "branding": {
+    "logo_url": "/mozaik_logo.svg",
+    "favicon_url": "/mozaik.png",
+    "app_name": "Hello World"
+  },
+  "available_themes": [
+    {
+      "name": "Light (Default)",
+      "id": "light",
+      "colors": {
+        "primary": "#10b981",
+        "primary_light": "#6ee7b7",
+        "primary_dark": "#059669",
+        "secondary": "#3b82f6",
+        "accent": "#10b981",
+        "background": "#f8fafc",
+        "surface": "#ffffff",
+        "surface_alt": "#f1f5f9",
+        "text_primary": "#0f172a",
+        "text_secondary": "#475569",
+        "text_muted": "#64748b",
+        "text_on_accent": "#f8fafc",
+        "border_subtle": "#d1fae5",
+        "border_strong": "#6ee7b7"
+      }
+    },
+    {
+      "name": "Midnight Dark",
+      "id": "dark",
+      "colors": {
+        "primary": "#10b981",
+        "primary_light": "#6ee7b7",
+        "primary_dark": "#059669",
+        "secondary": "#3b82f6",
+        "accent": "#10b981",
+        "background": "#0b1220",
+        "surface": "#0f1724",
+        "surface_alt": "#131d33",
+        "text_primary": "#e6eef8",
+        "text_secondary": "#94a3b8",
+        "text_muted": "#64748b",
+        "text_on_accent": "#f8fafc",
+        "border_subtle": "#1a3a2a",
+        "border_strong": "#10b981"
+      }
+    }
+  ],
+  "default_theme": "dark"
+}

@@ -1,0 +1,58 @@
+{
+  "workflow_name": "TestDatabaseSchema_74b68f6402",
+  "orchestrator_output": {
+    "workflow_name": "TestDatabaseSchema_74b68f6402",
+    "startup_mode": "BackendOnly"
+  },
+  "agents_output": {
+    "agents": []
+  },
+  "handoffs_output": {
+    "handoff_rules": []
+  },
+  "database_schema_output": {
+    "DatabaseSchema": {
+      "schema": {
+        "tables": [
+          {
+            "name": "users",
+            "columns": [
+              {
+                "name": "_id",
+                "type": "ObjectId",
+                "constraints": [
+                  "PK"
+                ]
+              },
+              {
+                "name": "email",
+                "type": "String",
+                "constraints": [
+                  "Not Null"
+                ]
+              }
+            ],
+            "constraints": {
+              "unique": [
+                "email"
+              ]
+            },
+            "indices": [
+              "email"
+            ]
+          }
+        ]
+      },
+      "seed": {
+        "users": [
+          {
+            "_id": {
+              "$oid": "507f1f77bcf86cd799439011"
+            },
+            "email": "demo@example.com"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+handoff_rules:
+- source_agent: user
+  target_agent: InterviewAgent
+  handoff_type: condition
+  condition_type: expression
+  condition_scope: null
+  condition: ${greeting_complete} == False
+  transition_target: AgentTarget
+
+- source_agent: InterviewAgent
+  target_agent: user
+  handoff_type: after_work
+  condition_type: null
+  condition_scope: null
+  condition: null
+  transition_target: RevertToUserTarget

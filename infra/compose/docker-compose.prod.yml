@@ -1,0 +1,58 @@
+services:
+  # ---------------------------------------------------------------------------
+  # MongoDB - Chat persistence and session storage
+  # ---------------------------------------------------------------------------
+  mongo:
+    image: mongo:7
+    container_name: mozaiksai-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mozaiksai_mongo_data:/data/db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "mongodb://127.0.0.1:27017/admin", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  # ---------------------------------------------------------------------------
+  # MozaiksAI Runtime - Workflow execution engine
+  # ---------------------------------------------------------------------------
+  runtime:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    image: mozaiks/runtime:latest
+    container_name: mozaiksai-runtime
+    env_file:
+      - ../../.env
+    ports:
+      - "8000:8000"
+    environment:
+      # MongoDB connection (uses compose network)
+      MONGO_URI: "mongodb://mongo:27017/MozaiksAI"
+      # Runtime settings
+      AG2_RUNTIME_LOGGING: "sqlite"
+      LOGS_BASE_DIR: /app/logs
+      DOCKERIZED: "true"
+      # Multi-tenant settings (override in .env for production)
+      # DEFAULT_APP_ID: "your-app-id"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      # Persist logs outside container
+      - ../../logs:/app/logs
+      # Mount workflows for hot-reload (dev only, remove in prod)
+      # - ../../workflows:/app/workflows:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  mozaiksai_mongo_data:

@@ -1,0 +1,9 @@
+hooks: []
+# To add a hook, uncomment and fill in the block below, then create the hook file
+# under workflows/HelloWorld/tools/:
+#
+# hooks:
+# - hook_type: update_agent_state
+#   hook_agent: InterviewAgent
+#   filename: my_hook.py
+#   function: inject_context

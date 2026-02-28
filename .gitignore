@@ -65,4 +65,20 @@ dist/
 .vite/
 *.local
 
+# Runtime outputs
+logs/logs/
+logs/agent_outputs/
+generated_apps/
+uploads/
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+
+# Docs build
+site/
+
+# Misc
 nul
+*.log
