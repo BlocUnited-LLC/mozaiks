@@ -1,4 +1,54 @@
 services:
+  # ---------------------------------------------------------------------------
+  # Keycloak Postgres — user/realm/session persistence
+  # ---------------------------------------------------------------------------
+  keycloak-db:
+    image: postgres:16-alpine
+    container_name: mozaiksai-keycloak-db
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KC_DB_PASSWORD:-keycloak}
+    volumes:
+      - mozaiksai_keycloak_db:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # Keycloak — Identity provider (OIDC / PKCE)
+  # ---------------------------------------------------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: mozaiksai-keycloak
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USER:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:-admin}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD:-keycloak}
+      KC_HOSTNAME: localhost
+      KC_HTTP_PORT: 8080
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080; echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; timeout 1 cat <&3 | grep -q '200\\|UP'"]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
   mongo:
     image: mongo:7
     container_name: mozaiksai-mongo
@@ -31,9 +81,10 @@ services:
       - "8000:8000"
       #433: "443:443"   # Uncomment if using HTTPS
     environment:
-      # Local dev default: disable auth so ChatUI can call APIs without tokens.
-      # Override in ../../.env if you want to test real JWT/OIDC behavior.
-      AUTH_ENABLED: "false"
+      # Keycloak auth — enabled when Keycloak is healthy.
+      # Set AUTH_ENABLED=false in .env to skip JWT validation during dev.
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}
+      MOZAIKS_OIDC_AUTHORITY: http://keycloak:8080/realms/mozaiks
       AG2_RUNTIME_LOGGING: "sqlite"
       LOGS_BASE_DIR: /app/logs/logs
       DOCKERIZED: "true"
@@ -43,6 +94,8 @@ services:
       # AZURE_* still supplied via env_file
     depends_on:
       mongo:
+        condition: service_healthy
+      keycloak:
         condition: service_healthy
     volumes:
       - ../../:/app
@@ -56,4 +109,5 @@ services:
 
 volumes:
   mozaiksai_mongo_data:
+  mozaiksai_keycloak_db:
 

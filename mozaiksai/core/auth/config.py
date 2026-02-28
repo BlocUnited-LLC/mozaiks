@@ -1,7 +1,10 @@
 """
-Authentication configuration - provider-agnostic via environment variables.
+Authentication configuration.
 
-Default values are for Mozaiks CIAM, but self-hosted deployments can override.
+Resolution order (highest priority wins):
+    1. Environment variables (deployment overrides)
+    2. auth.json file values (app-level defaults from brand/public/auth.json)
+    3. Built-in Keycloak defaults (self-hosted fallback)
 
 OIDC Discovery:
     By default, jwks_uri and issuer are derived from OIDC discovery.
@@ -13,14 +16,21 @@ from dataclasses import dataclass, field
 from typing import Optional, List
 from functools import lru_cache
 
+from logs.logging_config import get_core_logger
+
+_logger = get_core_logger("auth.config")
+
 
 @dataclass(frozen=True)
 class AuthConfig:
-    """Immutable auth configuration loaded from environment."""
+    """Immutable auth configuration loaded from auth.json + environment."""
 
     # Core settings
     enabled: bool = True
-    
+
+    # Auth provider (informational — "keycloak" | "azure_ad" | "custom_oidc")
+    provider: str = "keycloak"
+
     # OIDC discovery settings (provider-agnostic)
     oidc_authority: str = ""
     oidc_tenant_id: str = ""
@@ -56,11 +66,20 @@ class AuthConfig:
         return not (self.issuer_override and self.jwks_url_override)
 
 
-# Mozaiks CIAM defaults
-_DEFAULT_OIDC_AUTHORITY = "https://mozaiks.ciamlogin.com"
-_DEFAULT_OIDC_TENANT_ID = "9d0073d5-42e8-46f0-a325-5b4be7b1a38d"
-_DEFAULT_AUDIENCE = "api://mozaiks-auth"
-_DEFAULT_SCOPE = "access_as_user"
+# ---------------------------------------------------------------------------
+# Built-in Keycloak defaults (OSS self-hosted)
+# These are used when NEITHER auth.json NOR env vars supply a value.
+# ---------------------------------------------------------------------------
+_DEFAULT_KEYCLOAK_AUTHORITY = "http://localhost:8080/realms/mozaiks"
+_DEFAULT_AUDIENCE = "mozaiks-app"
+_DEFAULT_SCOPE = "openid"
+
+# Legacy Mozaiks CIAM defaults (used only when MOZAIKS_OIDC_TENANT_ID is set,
+# indicating a managed/cloud deployment rather than self-hosted Keycloak).
+_LEGACY_CIAM_AUTHORITY = "https://mozaiks.ciamlogin.com"
+_LEGACY_CIAM_TENANT_ID = "9d0073d5-42e8-46f0-a325-5b4be7b1a38d"
+_LEGACY_CIAM_AUDIENCE = "api://mozaiks-auth"
+_LEGACY_CIAM_SCOPE = "access_as_user"
 
 
 def _parse_bool(value: str) -> bool:
@@ -76,38 +95,85 @@ def _none_if_empty(value: Optional[str]) -> Optional[str]:
     return stripped if stripped else None
 
 
+def _load_auth_json_defaults() -> dict:
+    """
+    Load defaults from auth.json (if present).
+
+    Returns a flat dict with keys matching AuthConfig fields.
+    Returns empty dict if auth.json is not found or fails to load.
+    """
+    try:
+        from mozaiksai.core.auth.auth_config_loader import derive_auth_env
+        derived = derive_auth_env()
+        if derived:
+            _logger.debug("Auth defaults loaded from auth.json")
+        return derived
+    except Exception as exc:
+        _logger.debug(f"Could not load auth.json defaults: {exc}")
+        return {}
+
+
 @lru_cache(maxsize=1)
 def get_auth_config() -> AuthConfig:
     """
-    Load auth configuration from environment variables.
+    Load auth configuration with layered resolution.
 
-    OIDC Discovery Variables:
-        MOZAIKS_OIDC_AUTHORITY: Base authority URL (default: https://mozaiks.ciamlogin.com)
-        MOZAIKS_OIDC_TENANT_ID: Tenant ID for discovery URL computation
-        MOZAIKS_OIDC_DISCOVERY_URL: Explicit discovery URL (overrides authority/tenant)
+    Priority: env vars > auth.json > built-in Keycloak defaults.
 
-    Override Variables (skip discovery):
-        AUTH_ISSUER: If set, use this issuer instead of discovery
-        AUTH_JWKS_URL: If set, use this JWKS URL instead of discovery
+    Environment Variables:
+        AUTH_ENABLED: Enable/disable auth (default: true, false for local dev bypass)
 
-    Validation Variables:
-        AUTH_ENABLED: Enable/disable auth (default: true, set to false for local dev)
-        AUTH_AUDIENCE: Expected audience claim
-        AUTH_REQUIRED_SCOPE: Required scope for user endpoints (e.g., access_as_user)
+        MOZAIKS_OIDC_AUTHORITY: OIDC authority URL
+            Keycloak default: http://localhost:8080/realms/mozaiks
+        MOZAIKS_OIDC_TENANT_ID: Tenant ID (Azure AD only — leave blank for Keycloak)
+        MOZAIKS_OIDC_DISCOVERY_URL: Explicit discovery URL override
 
-    Claim Mapping Variables:
-        AUTH_USER_ID_CLAIM: Claim name for user ID (default: sub)
-        AUTH_EMAIL_CLAIM: Claim name for email (default: email)
-        AUTH_ROLES_CLAIM: Claim name for roles (default: roles)
+        AUTH_ISSUER: Explicit issuer (skip discovery if set with AUTH_JWKS_URL)
+        AUTH_JWKS_URL: Explicit JWKS URL (skip discovery if set with AUTH_ISSUER)
 
-    Cache Variables:
-        AUTH_JWKS_CACHE_TTL: JWKS cache TTL in seconds (default: 3600)
-        AUTH_DISCOVERY_CACHE_TTL: Discovery cache TTL in seconds (default: 86400)
+        AUTH_AUDIENCE: JWT audience (default: mozaiks-app)
+        AUTH_REQUIRED_SCOPE: Required scope (default: openid)
 
-    Other Variables:
-        AUTH_ALGORITHMS: Comma-separated list of allowed algorithms (default: RS256)
-        AUTH_CLOCK_SKEW: Clock skew tolerance in seconds (default: 120)
+        AUTH_USER_ID_CLAIM: User ID claim (default: sub)
+        AUTH_EMAIL_CLAIM: Email claim (default: email)
+        AUTH_ROLES_CLAIM: Roles claim (default: realm_access for Keycloak)
+
+        AUTH_JWKS_CACHE_TTL: JWKS cache seconds (default: 3600)
+        AUTH_DISCOVERY_CACHE_TTL: Discovery cache seconds (default: 86400)
+        AUTH_ALGORITHMS: Signing algorithms (default: RS256)
+        AUTH_CLOCK_SKEW: Clock skew seconds (default: 120)
     """
+    # Load auth.json defaults (empty dict if not found)
+    file_defaults = _load_auth_json_defaults()
+
+    # Helper: env var > auth.json > fallback
+    def _resolve(env_key: str, json_key: str, fallback: str) -> str:
+        env_val = os.getenv(env_key)
+        if env_val is not None and env_val.strip():
+            return env_val.strip()
+        json_val = file_defaults.get(json_key)
+        if json_val is not None and str(json_val).strip():
+            return str(json_val).strip()
+        return fallback
+
+    # Detect if this is a managed/CIAM deployment (tenant ID set)
+    tenant_id = os.getenv("MOZAIKS_OIDC_TENANT_ID", "").strip()
+    is_ciam = bool(tenant_id)
+
+    # Select defaults based on deployment mode
+    if is_ciam:
+        default_authority = _LEGACY_CIAM_AUTHORITY
+        default_audience = _LEGACY_CIAM_AUDIENCE
+        default_scope = _LEGACY_CIAM_SCOPE
+        default_roles_claim = "roles"
+        _logger.info("Auth mode: Managed CIAM (Azure AD B2C)")
+    else:
+        default_authority = _DEFAULT_KEYCLOAK_AUTHORITY
+        default_audience = _DEFAULT_AUDIENCE
+        default_scope = _DEFAULT_SCOPE
+        default_roles_claim = "realm_access"
+        _logger.info("Auth mode: Self-hosted Keycloak")
+
     # Check if auth is enabled (allow local dev bypass)
     enabled_str = os.getenv("AUTH_ENABLED", "true")
     enabled = _parse_bool(enabled_str)
@@ -116,22 +182,26 @@ def get_auth_config() -> AuthConfig:
     algorithms_str = os.getenv("AUTH_ALGORITHMS", "RS256")
     algorithms = [a.strip() for a in algorithms_str.split(",") if a.strip()]
 
+    # Resolve provider name
+    provider = _resolve("MOZAIKS_AUTH_PROVIDER", "provider", "keycloak")
+
     return AuthConfig(
         enabled=enabled,
+        provider=provider,
         # OIDC discovery settings
-        oidc_authority=os.getenv("MOZAIKS_OIDC_AUTHORITY", _DEFAULT_OIDC_AUTHORITY),
-        oidc_tenant_id=os.getenv("MOZAIKS_OIDC_TENANT_ID", _DEFAULT_OIDC_TENANT_ID),
-        oidc_discovery_url=os.getenv("MOZAIKS_OIDC_DISCOVERY_URL", ""),
+        oidc_authority=_resolve("MOZAIKS_OIDC_AUTHORITY", "authority", default_authority),
+        oidc_tenant_id=tenant_id or _none_if_empty(file_defaults.get("tenant_id")) or "",
+        oidc_discovery_url=_resolve("MOZAIKS_OIDC_DISCOVERY_URL", "discovery_url", ""),
         # Override settings
         issuer_override=_none_if_empty(os.getenv("AUTH_ISSUER")),
         jwks_url_override=_none_if_empty(os.getenv("AUTH_JWKS_URL")),
         # Audience and scope
-        audience=os.getenv("AUTH_AUDIENCE", _DEFAULT_AUDIENCE),
-        required_scope=os.getenv("AUTH_REQUIRED_SCOPE", _DEFAULT_SCOPE),
+        audience=_resolve("AUTH_AUDIENCE", "audience", default_audience),
+        required_scope=_resolve("AUTH_REQUIRED_SCOPE", "required_scope", default_scope),
         # Claim mappings
-        user_id_claim=os.getenv("AUTH_USER_ID_CLAIM", "sub"),
-        email_claim=os.getenv("AUTH_EMAIL_CLAIM", "email"),
-        roles_claim=os.getenv("AUTH_ROLES_CLAIM", "roles"),
+        user_id_claim=_resolve("AUTH_USER_ID_CLAIM", "user_id_claim", "sub"),
+        email_claim=_resolve("AUTH_EMAIL_CLAIM", "email_claim", "email"),
+        roles_claim=_resolve("AUTH_ROLES_CLAIM", "roles_claim", default_roles_claim),
         # Cache TTLs
         jwks_cache_ttl_seconds=int(os.getenv("AUTH_JWKS_CACHE_TTL", "3600")),
         discovery_cache_ttl_seconds=int(os.getenv("AUTH_DISCOVERY_CACHE_TTL", "86400")),

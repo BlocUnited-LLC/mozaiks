@@ -1,10 +1,13 @@
 """Core Package Root
 =====================
-Aggregated exports for primary subsystems (workflow, transport, observability, data, events).
+Aggregated exports for primary subsystems (workflow, transport, observability,
+data, events) **and** the application factory.
+
 Downstream code should prefer importing from specific submodules for clarity, but
 these re-exports are provided for convenience and a stable public surface.
 """
 
+from .factory import create_app  # noqa: F401  — public API for platform / self-hosted
 from .workflow import (
 	run_workflow_orchestration,
 	create_ag2_pattern,
@@ -30,6 +33,8 @@ from .events import (
 )
 
 __all__ = [
+	# App factory
+	"create_app",
 	# Workflow
 	"run_workflow_orchestration",
 	"create_ag2_pattern",

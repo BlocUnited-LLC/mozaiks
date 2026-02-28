@@ -215,9 +215,20 @@ class JWTValidator:
 
         email = claims.get(self._config.email_claim)
         
-        # Roles can be a list or missing
+        # Extract roles — supports multiple JWT layouts:
+        #   Keycloak:  {"realm_access": {"roles": ["user", "admin"]}}
+        #   Azure AD:  {"roles": ["user", "admin"]}
+        #   Flat list: {"roles": ["user", "admin"]}
         roles_raw = claims.get(self._config.roles_claim, [])
-        roles = roles_raw if isinstance(roles_raw, list) else []
+        if isinstance(roles_raw, dict):
+            # Keycloak realm_access / resource_access shape: {"roles": [...]}
+            roles = roles_raw.get("roles", [])
+            if not isinstance(roles, list):
+                roles = []
+        elif isinstance(roles_raw, list):
+            roles = roles_raw
+        else:
+            roles = []
 
         # Scopes: Azure uses "scp" as space-separated string
         scopes_raw = claims.get("scp", "")

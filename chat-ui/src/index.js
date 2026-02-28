@@ -46,6 +46,7 @@ export { default as WorkflowUIRouter } from './core/WorkflowUIRouter';
 // Adapters
 export { ApiAdapter, WebSocketApiAdapter, RestApiAdapter, appApi } from './adapters/api';
 export * from './adapters/auth';
+export { KeycloakAuthAdapter, createKeycloakAuthAdapter } from './adapters/keycloakAuth';
 
 // Config
 export { default as config } from './config';

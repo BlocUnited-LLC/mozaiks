@@ -76,6 +76,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - AI-Assisted Setup: setup-prompt.md
   - Getting Started: getting-started.md
   - Adding a Workflow: guides/adding-a-workflow.md
   - Customizing Frontend:
@@ -84,7 +85,9 @@ nav:
       - UI JSON: guides/customizing-frontend/03-ui-json.md
       - Assets: guides/customizing-frontend/04-assets.md
       - Wiring: guides/customizing-frontend/05-wiring.md
+      - Auth JSON: guides/customizing-frontend/06-auth-json.md
   - Architecture:
+      - Keycloak Auth: architecture/keycloak-auth.md
       - Frontend UI:
           - Overview: architecture/frontend/index.md
           - UI Surface Model: architecture/frontend/ui-surface-model.md

@@ -40,8 +40,8 @@ OPEN SOURCE & MODULARITY (strategic posture)
   - Run with minimal external deps (Mongo + OpenAI key) and feature toggles via env.
 
 TRUSTED CONTEXT (Ground truth)
-- Use the repository’s current code and JSON configs as the source of truth.
 - Architecture docs are informative but not authoritative if they conflict with code.
+- Docs are old and "source of truth" outlined in docs\architecture\source-of-truth doesnt necessarily mean source of truth. You maust understand the code itself whe comparing it to any source of truth documetnaiton
 - The platform is multi-tenant (app_id, user_id) with session persistence and event streaming.
 - CONTEXT_AWARE controls platform-level concept awareness; do not assume open source.
 

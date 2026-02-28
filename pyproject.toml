@@ -1,5 +1,9 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "mozaiks-runtime"
+name = "mozaiks"
 version = "1.0.0"
 description = "Mozaiks AG2 Runtime — production-ready multi-tenant workflow execution backend"
 readme = "README.md"
@@ -68,6 +72,76 @@ Documentation = "https://github.com/BlocUnited-LLC/mozaiks#readme"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+# ---------------------------------------------------------------------------
+# Package mapping
+# ---------------------------------------------------------------------------
+# On disk the code lives under mozaiksai/.  The package-dir mapping lets
+# external consumers (mozaiks-platform, self-hosted apps) import via the
+# public "mozaiks" namespace:
+#
+#   from mozaiks.core import create_app
+#
+# The "mozaiksai" packages are ALSO listed so that the existing 154+ internal
+# imports (from mozaiksai.core.…) keep working during the gradual migration
+# to the public "mozaiks.*" namespace.
+# ---------------------------------------------------------------------------
+[tool.setuptools.package-dir]
+"mozaiks" = "mozaiksai"
+
+[tool.setuptools]
+packages = [
+    # ── public API namespace (for external consumers) ──
+    "mozaiks",
+    "mozaiks.core",
+    "mozaiks.core.artifacts",
+    "mozaiks.core.auth",
+    "mozaiks.core.capabilities",
+    "mozaiks.core.data",
+    "mozaiks.core.data.persistence",
+    "mozaiks.core.data.themes",
+    "mozaiks.core.events",
+    "mozaiks.core.multitenant",
+    "mozaiks.core.observability",
+    "mozaiks.core.runtime",
+    "mozaiks.core.transport",
+    "mozaiks.core.workflow",
+    "mozaiks.core.workflow.agents",
+    "mozaiks.core.workflow.context",
+    "mozaiks.core.workflow.execution",
+    "mozaiks.core.workflow.messages",
+    "mozaiks.core.workflow.outputs",
+    "mozaiks.core.workflow.pack",
+    "mozaiks.core.workflow.validation",
+    "mozaiks.orchestration",
+    "mozaiks.platform",
+    # ── internal namespace (backward compat — migrate over time) ──
+    "mozaiksai",
+    "mozaiksai.core",
+    "mozaiksai.core.artifacts",
+    "mozaiksai.core.auth",
+    "mozaiksai.core.capabilities",
+    "mozaiksai.core.data",
+    "mozaiksai.core.data.persistence",
+    "mozaiksai.core.data.themes",
+    "mozaiksai.core.events",
+    "mozaiksai.core.multitenant",
+    "mozaiksai.core.observability",
+    "mozaiksai.core.runtime",
+    "mozaiksai.core.transport",
+    "mozaiksai.core.workflow",
+    "mozaiksai.core.workflow.agents",
+    "mozaiksai.core.workflow.context",
+    "mozaiksai.core.workflow.execution",
+    "mozaiksai.core.workflow.messages",
+    "mozaiksai.core.workflow.outputs",
+    "mozaiksai.core.workflow.pack",
+    "mozaiksai.core.workflow.validation",
+    "mozaiksai.orchestration",
+    "mozaiksai.platform",
+    # ── support packages (repo-root modules used by mozaiksai) ──
+    "logs",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

@@ -1,17 +1,18 @@
 """
 MozaiksAI Authentication Module (Transport-Level Only).
 
+Mozaiks ships with **Keycloak** as the native identity provider.
+Configuration is loaded from `brand/public/auth.json` with env var overrides.
+
 This module provides **authentication**, not authorization.
 
     MozaiksAI authenticates requests but does not authorize behavior.
     Authorization is delegated to the host control plane (MozaiksCore or customer app).
 
-See: docs/source_of_truth/04_AUTH_BOUNDARY.md
-
 What This Module Does (Authentication):
-    - Validates JWT signatures via OIDC discovery / JWKS
+    - Validates JWT signatures via OIDC discovery / JWKS (Keycloak default)
     - Verifies issuer, audience, expiration
-    - Extracts identity claims (sub, email, scopes)
+    - Extracts identity claims (sub, email, scopes, realm_access.roles)
     - Rejects anonymous/invalid traffic
 
 What This Module Does NOT Do (Authorization):
@@ -19,6 +20,13 @@ What This Module Does NOT Do (Authorization):
     - Subscription/entitlement checks
     - "Is user allowed to run workflow X?" decisions
     - Billing or feature gating
+
+Configuration:
+    Primary: `brand/public/auth.json` (declarative, per-app config)
+    Override: Environment variables (deployment-specific)
+    Fallback: Built-in Keycloak defaults (localhost:8080/realms/mozaiks)
+
+    See `auth.json` reference: docs/guides/customizing-frontend/06-auth-json.md
 
 Quick Start:
     # HTTP route protection
@@ -40,29 +48,12 @@ Quick Start:
         await websocket.accept()
         # websocket.state.user_id is now set
 
-Configuration (environment variables):
-    # OIDC Discovery (recommended - provider-agnostic)
-    MOZAIKS_OIDC_AUTHORITY=https://mozaiks.ciamlogin.com
-    MOZAIKS_OIDC_TENANT_ID=9d0073d5-42e8-46f0-a325-5b4be7b1a38d
-    MOZAIKS_OIDC_DISCOVERY_URL=    # Optional explicit override
-
-    # Override (skip discovery for these if set)
-    AUTH_ISSUER=                   # Explicit issuer override
-    AUTH_JWKS_URL=                 # Explicit JWKS URL override
-
-    # Validation
-    AUTH_ENABLED=true              # Set false for local dev bypass
-    AUTH_AUDIENCE=api://mozaiks-auth
-    AUTH_REQUIRED_SCOPE=access_as_user
-
-    # Claim mappings
-    AUTH_USER_ID_CLAIM=sub
-    AUTH_EMAIL_CLAIM=email
-    AUTH_ROLES_CLAIM=roles
-
-    # Caching
-    AUTH_JWKS_CACHE_TTL=3600       # JWKS cache TTL (seconds)
-    AUTH_DISCOVERY_CACHE_TTL=86400 # Discovery cache TTL (seconds)
+Environment Variables (override auth.json when set):
+    AUTH_ENABLED=false              # Bypass auth for local dev
+    MOZAIKS_OIDC_AUTHORITY=http://localhost:8080/realms/mozaiks
+    AUTH_AUDIENCE=mozaiks-app       # Keycloak client ID
+    AUTH_REQUIRED_SCOPE=openid
+    AUTH_ROLES_CLAIM=realm_access   # Keycloak role claim
 """
 
 # Configuration
@@ -70,6 +61,15 @@ from mozaiksai.core.auth.config import (
     AuthConfig,
     get_auth_config,
     clear_auth_config_cache,
+)
+
+# File-based config loader (auth.json)
+from mozaiksai.core.auth.auth_config_loader import (
+    load_auth_json,
+    clear_auth_json_cache,
+    derive_auth_env,
+    get_keycloak_branding,
+    get_keycloak_realm_config,
 )
 
 # OIDC Discovery
@@ -132,6 +132,12 @@ __all__ = [
     "AuthConfig",
     "get_auth_config",
     "clear_auth_config_cache",
+    # File-based config (auth.json)
+    "load_auth_json",
+    "clear_auth_json_cache",
+    "derive_auth_env",
+    "get_keycloak_branding",
+    "get_keycloak_realm_config",
     # OIDC Discovery
     "OIDCDiscoveryClient",
     "CachedDiscovery",

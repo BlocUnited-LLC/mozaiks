@@ -1,5 +1,55 @@
 services:
   # ---------------------------------------------------------------------------
+  # Keycloak Postgres — user/realm/session persistence
+  # ---------------------------------------------------------------------------
+  keycloak-db:
+    image: postgres:16-alpine
+    container_name: mozaiksai-keycloak-db
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KC_DB_PASSWORD}
+    volumes:
+      - mozaiksai_keycloak_db:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # Keycloak — Identity provider (OIDC / PKCE)
+  # ---------------------------------------------------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: mozaiksai-keycloak
+    command: start --import-realm --optimized
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USER}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD}
+      KC_HOSTNAME: ${KC_HOSTNAME}
+      KC_PROXY_HEADERS: xforwarded
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080; echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; timeout 1 cat <&3 | grep -q '200\\|UP'"]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
   # MongoDB - Chat persistence and session storage
   # ---------------------------------------------------------------------------
   mongo:
@@ -32,6 +82,9 @@ services:
     environment:
       # MongoDB connection (uses compose network)
       MONGO_URI: "mongodb://mongo:27017/MozaiksAI"
+      # Auth
+      AUTH_ENABLED: "true"
+      MOZAIKS_OIDC_AUTHORITY: http://keycloak:8080/realms/mozaiks
       # Runtime settings
       AG2_RUNTIME_LOGGING: "sqlite"
       LOGS_BASE_DIR: /app/logs
@@ -40,6 +93,8 @@ services:
       # DEFAULT_APP_ID: "your-app-id"
     depends_on:
       mongo:
+        condition: service_healthy
+      keycloak:
         condition: service_healthy
     volumes:
       # Persist logs outside container
@@ -56,3 +111,4 @@ services:
 
 volumes:
   mozaiksai_mongo_data:
+  mozaiksai_keycloak_db:

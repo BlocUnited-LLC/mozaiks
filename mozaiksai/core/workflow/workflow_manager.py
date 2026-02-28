@@ -5,6 +5,7 @@
 # ==============================================================================
 
 import json
+import os
 import yaml
 import importlib
 from typing import Dict, Any, List, Optional, Tuple, Callable, Awaitable, Set
@@ -56,7 +57,9 @@ class UnifiedWorkflowManager:
         if hasattr(self, "_initialized"):
             return
         # Core caches / registries
-        self.workflows_base_path = Path(workflows_base_path)
+        # Allow MOZAIKS_WORKFLOWS_PATH env var to override the default path
+        env_path = os.environ.get("MOZAIKS_WORKFLOWS_PATH")
+        self.workflows_base_path = Path(env_path) if env_path else Path(workflows_base_path)
         self._workflows: Dict[str, WorkflowInfo] = {}
         self._config_cache: Dict[str, Dict[str, Any]] = {}
         self._ui_registry: Dict[str, Dict[str, Any]] = {}

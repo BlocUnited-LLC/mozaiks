@@ -21,9 +21,8 @@ from logs.logging_config import get_core_logger
 logger = get_core_logger("auth.discovery")
 
 
-# Mozaiks CIAM defaults
-_DEFAULT_AUTHORITY = "https://mozaiks.ciamlogin.com"
-_DEFAULT_TENANT_ID = "9d0073d5-42e8-46f0-a325-5b4be7b1a38d"
+# Keycloak defaults (OSS self-hosted)
+_DEFAULT_AUTHORITY = "http://localhost:8080/realms/mozaiks"
 _DEFAULT_DISCOVERY_CACHE_TTL = 86400  # 24 hours (discovery rarely changes)
 
 
@@ -65,7 +64,8 @@ class OIDCDiscoveryClient:
 
         Args:
             discovery_url: Direct URL to discovery document. If None, computed from
-                           MOZAIKS_OIDC_AUTHORITY and MOZAIKS_OIDC_TENANT_ID.
+                           MOZAIKS_OIDC_AUTHORITY (and optionally MOZAIKS_OIDC_TENANT_ID
+                           for Azure AD).
             cache_ttl: Cache TTL in seconds (default: 86400 = 24h)
         """
         # Allow explicit override via MOZAIKS_OIDC_DISCOVERY_URL
@@ -76,10 +76,15 @@ class OIDCDiscoveryClient:
         elif discovery_url:
             self._discovery_url = discovery_url
         else:
-            # Compute from authority + tenant
             authority = os.getenv("MOZAIKS_OIDC_AUTHORITY", _DEFAULT_AUTHORITY).rstrip("/")
-            tenant_id = os.getenv("MOZAIKS_OIDC_TENANT_ID", _DEFAULT_TENANT_ID)
-            self._discovery_url = f"{authority}/{tenant_id}/v2.0/.well-known/openid-configuration"
+            tenant_id = os.getenv("MOZAIKS_OIDC_TENANT_ID", "").strip()
+
+            if tenant_id:
+                # Azure AD / B2C: {authority}/{tenant}/v2.0/.well-known/openid-configuration
+                self._discovery_url = f"{authority}/{tenant_id}/v2.0/.well-known/openid-configuration"
+            else:
+                # Keycloak (default): authority already contains /realms/<realm>
+                self._discovery_url = f"{authority}/.well-known/openid-configuration"
 
         self._cache_ttl = cache_ttl or int(
             os.getenv("AUTH_DISCOVERY_CACHE_TTL", str(_DEFAULT_DISCOVERY_CACHE_TTL))
