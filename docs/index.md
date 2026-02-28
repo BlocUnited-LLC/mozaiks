@@ -13,13 +13,19 @@
 
 ---
 
-## What is Mozaiks?
+## 🎯 What is MozaiksAI?
 
-Mozaiks is the unified stack for building AI-native applications. It provides:
+**MozaiksAI Runtime** is a production-ready orchestration engine that transforms AG2 (Microsoft Autogen) into an app-grade platform with:
 
-- **Contracts** — Event envelopes, domain events, and port interfaces
-- **Core Runtime** — FastAPI server, persistence, WebSocket streaming, authentication
-- **Orchestration** — AI workflow execution, AG2 adapters, deterministic scheduling
+- ✅ **Event-Driven Architecture** → Every action flows through unified event pipeline
+- ✅ **Real-Time WebSocket Transport** → Live streaming to React frontends
+- ✅ **Persistent State Management** → Resume conversations exactly where they left off
+- ✅ **Multi-Tenant Isolation** → app-scoped data and execution contexts
+- ✅ **Dynamic UI Integration** → Agents can invoke React components during workflows
+- ✅ **Declarative Workflows** → JSON manifests, no code changes needed
+- ✅ **Comprehensive Observability** → Built-in metrics, logging, and token tracking
+
+**MozaiksAI = AG2 + Production Infrastructure + Event-Driven Core**
 
 ---
 
@@ -37,22 +43,6 @@ Mozaiks is the unified stack for building AI-native applications. It provides:
 ![Widget demo](assets/widgetAction.gif)
 
 *Drop a floating assistant anywhere in your app — click the button to expand/collapse the chat interface*
-
----
-
-## 🎯 What is MozaiksAI?
-
-**MozaiksAI Runtime** is a production-ready orchestration engine that transforms AG2 (Microsoft Autogen) into an app-grade platform with:
-
-- ✅ **Event-Driven Architecture** → Every action flows through unified event pipeline
-- ✅ **Real-Time WebSocket Transport** → Live streaming to React frontends
-- ✅ **Persistent State Management** → Resume conversations exactly where they left off
-- ✅ **Multi-Tenant Isolation** → app-scoped data and execution contexts
-- ✅ **Dynamic UI Integration** → Agents can invoke React components during workflows
-- ✅ **Declarative Workflows** → JSON manifests, no code changes needed
-- ✅ **Comprehensive Observability** → Built-in metrics, logging, and token tracking
-
-**MozaiksAI = AG2 + Production Infrastructure + Event-Driven Core**
 
 ---
 
