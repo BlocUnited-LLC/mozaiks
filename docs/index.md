@@ -1,6 +1,8 @@
 # Mozaiks
 
-![Logo](assets/mozaik_logo.svg){ width=160 align=center }
+<p align="center">
+  <img src="assets/mozaik_logo.svg" width="160" alt="Mozaiks">
+</p>
 
 [![Version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/LICENSE)
@@ -44,67 +46,6 @@
 ![Widget demo](assets/widgetAction.gif)
 
 *Drop a floating assistant anywhere in your app — click the button to expand/collapse the chat interface*
-
----
-
-## Quick Start
-
-```bash
-# 1. Clone and install
-git clone https://github.com/BlocUnited-LLC/mozaiks.git
-cd mozaiks
-pip install -r requirements.txt
-
-# 2. Configure
-cp .env.example .env
-# Edit .env: set OPENAI_API_KEY and MONGO_URI
-
-# 3. Start MongoDB
-docker compose -f infra/compose/docker-compose.yml up mongo -d
-
-# 4. Start backend
-python run_server.py
-
-# 5. Start frontend (separate terminal)
-cd app && npm install && npm run dev
-```
-
-Visit [http://localhost:3000](http://localhost:3000) — the HelloWorld workflow is ready to run.
-
----
-
-## Repository Layout
-
-```text
-mozaiks/
-  mozaiksai/        ← runtime engine (transport, orchestration, persistence)
-  chat-ui/          ← UI library (React, WebSocket adapter, ChatPage)
-  app/              ← your app shell (brand it, extend it)
-  workflows/        ← declarative workflow definitions
-  shared_app.py     ← FastAPI server entry point
-  run_server.py     ← start the server
-  app.json          ← app name, API URL, default workflow
-  .env.example      ← environment variable reference
-  docs/             ← this documentation
-```
-
----
-
-## Architecture
-
-Layer direction is strict:
-
-```text
-contracts ← core ← orchestration
-```
-
-`core` does not import from `orchestration`.
-
-### Execution Modes
-
-1. **Workflow Mode** — chat → agent → artifact (split-screen UI)
-2. **Ask Mode** — conversational agent with session history sidebar
-3. **Widget Mode** — floating assistant embedded in any page
 
 ---
 

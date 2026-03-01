@@ -1,9 +1,7 @@
 site_name: Mozaiks
 site_description: Unified agentic stack — contracts, core runtime, and orchestration
 site_url: https://docs.mozaiks.ai
-repo_url: https://github.com/BlocUnited-LLC/mozaiks
-repo_name: BlocUnited-LLC/mozaiks
-edit_uri: edit/main/docs/
+edit_uri: ""
 
 docs_dir: docs
 
