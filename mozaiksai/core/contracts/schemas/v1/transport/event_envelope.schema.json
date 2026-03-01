@@ -1,0 +1,73 @@
+{
+  "$id": "https://schemas.mozaiks.dev/contracts/events/v1/event_envelope.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "x-contract-frozen": true,
+  "x-protocol-version": "1.0.0",
+  "title": "DomainEventEnvelopeV1",
+  "description": "Canonical stream envelope for DomainEvent records.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_type",
+    "seq",
+    "occurred_at",
+    "payload",
+    "schema_version",
+    "correlation_id",
+    "process_id",
+    "causation_id"
+  ],
+  "properties": {
+    "event_type": {
+      "type": "string",
+      "minLength": 3,
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+      "description": "Canonical event name, e.g. process.started."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic sequence per stream. Must strictly increase for each emitted event."
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Event timestamp in UTC."
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Correlation identifier for grouping related events."
+    },
+    "process_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Canonical process/stream grouping identifier."
+    },
+    "causation_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Event or operation identifier that directly caused this event."
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "$id": "https://schemas.mozaiks.dev/contracts/events/v1/resume_request.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReplayResumeRequestV1",
+  "description": "Resume request contract for replaying a stream from a cursor.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "cursor",
+    "stream_id",
+    "run_id"
+  ],
+  "properties": {
+    "cursor": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Last fully consumed sequence number."
+    },
+    "stream_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "last_seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Alias for cursor; normalize to cursor immediately."
+    },
+    "from_seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Alias for cursor; normalize to cursor immediately."
+    }
+  }
+}

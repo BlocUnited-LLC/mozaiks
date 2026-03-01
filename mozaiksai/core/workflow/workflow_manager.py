@@ -14,6 +14,13 @@ from dataclasses import dataclass
 
 from logs.logging_config import get_workflow_logger
 
+# Contracts / Ports — used to satisfy WorkflowRegistry protocol
+from mozaiksai.core.ports.registry import (
+    WorkflowHandler,
+    WorkflowNotFoundError,
+    WorkflowAlreadyRegisteredError,
+)
+
 logger = get_workflow_logger(workflow_name="unified_workflow_manager")
 
 @dataclass
@@ -806,7 +813,61 @@ class UnifiedWorkflowManager:
         return config
 
     # ========================================================================
-    # RUNTIME HANDLER REGISTRY
+    # WorkflowRegistry PROTOCOL (mozaiksai.core.ports.registry)
+    # ========================================================================
+    # These three methods satisfy the structural @runtime_checkable
+    # WorkflowRegistry protocol so that:
+    #     isinstance(workflow_manager, WorkflowRegistry) → True
+    #
+    # Existing register_workflow_handler / get_workflow_handler are kept
+    # intact to avoid breaking call-sites. The new methods provide the
+    # generic, protocol-compliant surface.
+    # ========================================================================
+
+    def register(
+        self,
+        name: str,
+        handler: WorkflowHandler,
+        *,
+        replace: bool = False,
+    ) -> WorkflowHandler:
+        """Register a workflow handler by name (WorkflowRegistry protocol).
+
+        Parameters
+        ----------
+        name:
+            Canonical workflow name (lower-cased internally).
+        handler:
+            Async callable that executes the workflow.
+        replace:
+            If ``True``, silently overwrite an existing registration.
+            If ``False`` (default), raise ``WorkflowAlreadyRegisteredError``.
+        """
+        key = name.lower()
+        if not replace and key in self._handlers:
+            raise WorkflowAlreadyRegisteredError(name)
+        self._handlers[key] = handler
+        self._handler_metadata.setdefault(key, {
+            "human_loop": self.has_human_in_the_loop(name),
+            "transport": "websocket",
+        })
+        logger.debug(f"[WorkflowRegistry] Registered handler '{name}' (replace={replace})")
+        return handler
+
+    def get(self, name: str) -> WorkflowHandler:
+        """Return a registered handler or raise ``WorkflowNotFoundError`` (WorkflowRegistry protocol)."""
+        key = name.lower()
+        try:
+            return self._handlers[key]
+        except KeyError as exc:
+            raise WorkflowNotFoundError(name) from exc
+
+    def list(self) -> list[str]:
+        """Return sorted names of all registered workflow handlers (WorkflowRegistry protocol)."""
+        return sorted(self._handlers.keys())
+
+    # ========================================================================
+    # RUNTIME HANDLER REGISTRY (legacy decorator API)
     # ========================================================================
     def register_workflow_handler(self, workflow_name: str, *, human_loop: bool = False, transport: str = "websocket"):
         """Decorator to register a custom async handler for a workflow.
@@ -1012,5 +1073,8 @@ __all__ = [
     "get_workflow_transport",
     "workflow_status_summary",
     "get_workflow_tools",
+    # Re-exported contract / port helpers
+    "WorkflowNotFoundError",
+    "WorkflowAlreadyRegisteredError",
 ]
 

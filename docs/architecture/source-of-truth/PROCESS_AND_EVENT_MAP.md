@@ -25,7 +25,7 @@ It answers:
 
 ### Process 2: Core runtime API server
 
-- Factory: `create_app()` in `src/mozaiks/core/api/app.py`
+- Factory: `build_runtime()` in `src/mozaiks/core/api/app.py`
 - Hosts API routes, WebSocket stream endpoint, persistence calls, event publication
 - Uses `RunStreamHub` for per-run pub/sub (`src/mozaiks/core/streaming/hub.py`)
 - Uses orchestration runner through `AIEngineFacade`

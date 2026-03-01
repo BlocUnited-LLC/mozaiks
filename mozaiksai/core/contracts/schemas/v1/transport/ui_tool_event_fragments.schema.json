@@ -1,0 +1,292 @@
+{
+  "$id": "https://schemas.mozaiks.dev/contracts/events/v1/ui_tool_event_fragments.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UiToolEventFragmentsV1",
+  "description": "Canonical payload fragments and emission constraints for ui.tool.* events.",
+  "x-protocol-version": "1.0.0",
+  "$defs": {
+    "ui_tool_requested_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ui_tool_id",
+        "tool_name",
+        "component",
+        "display",
+        "props"
+      ],
+      "properties": {
+        "ui_tool_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tool_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "component": {
+          "type": "string",
+          "minLength": 1
+        },
+        "display": {
+          "type": "string",
+          "enum": [
+            "inline",
+            "artifact",
+            "fullscreen"
+          ]
+        },
+        "props": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "artifact_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "blocking": {
+          "type": "boolean"
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "x-invariants": [
+        "ui_tool_id is stable for the lifecycle of a single UI tool interaction.",
+        "display controls rendering mode and must not change after ui.tool.rendered without a new request."
+      ],
+      "x-causation-rule": "causation_id SHOULD be null for initial request and MAY reference a triggering runtime event."
+    },
+    "ui_tool_rendered_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ui_tool_id",
+        "component",
+        "display"
+      ],
+      "properties": {
+        "ui_tool_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "component": {
+          "type": "string",
+          "minLength": 1
+        },
+        "display": {
+          "type": "string",
+          "enum": [
+            "inline",
+            "artifact",
+            "fullscreen"
+          ]
+        },
+        "artifact_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "client_render_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "x-invariants": [
+        "Rendered event reflects a prior ui.tool.requested for the same ui_tool_id."
+      ],
+      "x-causation-rule": "causation_id MUST reference the request event sequence."
+    },
+    "ui_tool_input_submitted_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ui_tool_id",
+        "submission_id",
+        "values"
+      ],
+      "properties": {
+        "ui_tool_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "submission_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "artifact_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "x-invariants": [
+        "submission_id is unique per ui_tool_id for non-duplicate submissions.",
+        "Duplicate submissions must preserve identical values payload."
+      ],
+      "x-causation-rule": "causation_id MUST reference ui.tool.requested or ui.tool.rendered."
+    },
+    "ui_tool_completed_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ui_tool_id",
+        "result"
+      ],
+      "properties": {
+        "ui_tool_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "result": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "artifact_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "submission_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "x-invariants": [
+        "Exactly one terminal event (completed|failed|dismissed) SHOULD close a ui_tool_id interaction."
+      ],
+      "x-causation-rule": "causation_id MUST reference the accepted ui.tool.input.submitted."
+    },
+    "ui_tool_failed_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ui_tool_id",
+        "error_code",
+        "error_message"
+      ],
+      "properties": {
+        "ui_tool_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "error_code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "error_message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifact_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "submission_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "x-invariants": [
+        "error_code is stable machine-readable classification.",
+        "error_message is human-readable and may be localized by the client."
+      ],
+      "x-causation-rule": "causation_id MUST reference ui.tool.input.submitted or an execution event derived from it."
+    },
+    "ui_tool_dismissed_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ui_tool_id",
+        "reason"
+      ],
+      "properties": {
+        "ui_tool_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifact_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "x-invariants": [
+        "Dismissed is optional and usually client-emitted to close interactive surfaces."
+      ],
+      "x-causation-rule": "causation_id SHOULD reference the most recent event for the same ui_tool_id."
+    },
+    "ui_tool_emitters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ui.tool.requested": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "const": [
+            "ai",
+            "core"
+          ]
+        },
+        "ui.tool.rendered": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "const": [
+            "client"
+          ]
+        },
+        "ui.tool.input.submitted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "const": [
+            "client"
+          ]
+        },
+        "ui.tool.completed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "const": [
+            "core",
+            "ai"
+          ]
+        },
+        "ui.tool.failed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "const": [
+            "core",
+            "ai"
+          ]
+        },
+        "ui.tool.dismissed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "const": [
+            "client"
+          ]
+        }
+      }
+    }
+  }
+}

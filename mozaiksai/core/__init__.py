@@ -7,7 +7,7 @@ Downstream code should prefer importing from specific submodules for clarity, bu
 these re-exports are provided for convenience and a stable public surface.
 """
 
-from .factory import create_app  # noqa: F401  — public API for platform / self-hosted
+from .factory import build_runtime  # noqa: F401  — public API for platform / self-hosted
 from .workflow import (
 	run_workflow_orchestration,
 	create_ag2_pattern,
@@ -34,7 +34,7 @@ from .events import (
 
 __all__ = [
 	# App factory
-	"create_app",
+	"build_runtime",
 	# Workflow
 	"run_workflow_orchestration",
 	"create_ag2_pattern",
@@ -55,5 +55,9 @@ __all__ = [
 	"emit_business_event",
 	"emit_ui_tool_event",
 	"get_event_dispatcher",
+	# Contracts (kernel integration)
+	"contracts",
+	# Ports (kernel integration)
+	"ports",
 ]
 

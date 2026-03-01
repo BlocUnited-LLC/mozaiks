@@ -80,7 +80,7 @@ target-version = "py311"
 # external consumers (mozaiks-platform, self-hosted apps) import via the
 # public "mozaiks" namespace:
 #
-#   from mozaiks.core import create_app
+#   from mozaiks.core import build_runtime
 #
 # The "mozaiksai" packages are ALSO listed so that the existing 154+ internal
 # imports (from mozaiksai.core.…) keep working during the gradual migration
@@ -97,12 +97,14 @@ packages = [
     "mozaiks.core.artifacts",
     "mozaiks.core.auth",
     "mozaiks.core.capabilities",
+    "mozaiks.core.contracts",
     "mozaiks.core.data",
     "mozaiks.core.data.persistence",
     "mozaiks.core.data.themes",
     "mozaiks.core.events",
     "mozaiks.core.multitenant",
     "mozaiks.core.observability",
+    "mozaiks.core.ports",
     "mozaiks.core.runtime",
     "mozaiks.core.transport",
     "mozaiks.core.workflow",
@@ -121,12 +123,14 @@ packages = [
     "mozaiksai.core.artifacts",
     "mozaiksai.core.auth",
     "mozaiksai.core.capabilities",
+    "mozaiksai.core.contracts",
     "mozaiksai.core.data",
     "mozaiksai.core.data.persistence",
     "mozaiksai.core.data.themes",
     "mozaiksai.core.events",
     "mozaiksai.core.multitenant",
     "mozaiksai.core.observability",
+    "mozaiksai.core.ports",
     "mozaiksai.core.runtime",
     "mozaiksai.core.transport",
     "mozaiksai.core.workflow",

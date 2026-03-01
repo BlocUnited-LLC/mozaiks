@@ -32,6 +32,13 @@ from mozaiksai.core.workflow.pack.journey_orchestrator import JourneyOrchestrato
 from logs.logging_config import get_core_logger, get_workflow_logger
 from mozaiksai.core.events.event_serialization import serialize_event_content
 
+# Contracts — DomainEvent / EventEnvelope
+from mozaiksai.core.contracts.events import (
+    DomainEvent,
+    EventEnvelope,
+    EVENT_SCHEMA_VERSION,
+)
+
 logger = get_core_logger("unified_event_dispatcher")
 wf_logger = get_workflow_logger("event_dispatcher")
 
@@ -105,7 +112,7 @@ class SessionPausedEvent:
     category: str = field(default="runtime")
 
 
-EventType = Union[BusinessLogEvent, UIToolEvent, SessionPausedEvent]
+EventType = Union[BusinessLogEvent, UIToolEvent, SessionPausedEvent, DomainEvent]
 
 class EventHandler(ABC):
     @abstractmethod
@@ -135,6 +142,27 @@ class UIToolHandler(EventHandler):
         if not isinstance(event, UIToolEvent):
             return False
         logger.debug(f"[UI_TOOL] id={event.ui_tool_id} workflow={event.workflow_name} display={event.display}")
+        return True
+
+
+class DomainEventHandler(EventHandler):
+    """Handler that bridges ``DomainEvent`` (Pydantic contract) into the dispatcher.
+
+    This converts the canonical typed DomainEvent into the emit() path
+    so that registered ``event_type``-based listeners (e.g. ``"chat.run_complete"``)
+    are triggered automatically.
+    """
+
+    def can_handle(self, event: EventType) -> bool:
+        return isinstance(event, DomainEvent)
+
+    async def handle(self, event: EventType) -> bool:
+        if not isinstance(event, DomainEvent):
+            return False
+        logger.info(
+            "[DOMAIN_EVENT] type=%s run_id=%s seq=%s",
+            event.event_type, event.run_id, event.seq,
+        )
         return True
 
 class UnifiedEventDispatcher:
@@ -174,6 +202,7 @@ class UnifiedEventDispatcher:
     def _setup_default_handlers(self):
         self.register_handler(BusinessLogHandler())
         self.register_handler(UIToolHandler())
+        self.register_handler(DomainEventHandler())
 
     def register_handler(
         self,
@@ -271,6 +300,30 @@ class UnifiedEventDispatcher:
         event = UIToolEvent(ui_tool_id=ui_tool_id, payload=payload, workflow_name=workflow_name, display=display, chat_id=chat_id)
         return await self.dispatch(event)
 
+    async def emit_domain_event(self, event: DomainEvent) -> bool:
+        """Dispatch a canonical ``DomainEvent`` through the handler chain.
+
+        Also fans the event out to any registered ``event_type``-based
+        listeners (e.g. ``"chat.run_complete"``) via :meth:`emit`.
+        """
+        success = await self.dispatch(event)
+        # Fan-out to event_type-based listeners
+        await self.emit(event.event_type, event.model_dump())
+        return success
+
+    def domain_event_to_envelope(self, event: DomainEvent) -> Dict[str, Any]:
+        """Convert a ``DomainEvent`` into a WebSocket-shaped transport envelope.
+
+        Returns the same dict structure as ``build_outbound_event_envelope``
+        so it can plug directly into the transport layer.
+        """
+        return {
+            "type": event.event_type,
+            "data": event.model_dump(mode="json"),
+            "chat_id": event.metadata.get("chat_id") if event.metadata else None,
+            "timestamp": event.occurred_at.isoformat(),
+        }
+
     def build_outbound_event_envelope(
         self,
         *,
@@ -288,6 +341,10 @@ class UnifiedEventDispatcher:
         
         The 'kind' -> 'type' namespace mapping ensures frontend receives consistent event names.
         """
+        # ─── DomainEvent fast-path ───────────────────────────────────
+        if isinstance(raw_event, DomainEvent):
+            return self.domain_event_to_envelope(raw_event)
+        # ─── Legacy dict-with-kind path ──────────────────────────────
         if not (isinstance(raw_event, dict) and 'kind' in raw_event):
             return None
         timestamp = datetime.now(UTC).isoformat()

@@ -2,10 +2,10 @@
 
 Public entry-point for both mozaiks-platform and self-hosted deployments:
 
-    from mozaiks.core import create_app
+    from mozaiks.core import build_runtime
     from mozaiks.orchestration import create_ai_workflow_runner
 
-    app = create_app(ai_engine=create_ai_workflow_runner())
+    app = build_runtime(ai_engine=create_ai_workflow_runner())
 
 The factory wires up:
   • FastAPI instance with metadata
@@ -75,7 +75,7 @@ class _PrincipalHeaderMiddleware(BaseHTTPMiddleware):
 # Factory
 # ---------------------------------------------------------------------------
 
-def create_app(
+def build_runtime(
     *,
     ai_engine: Optional[Callable[..., Any]] = None,
     title: str = "MozaiksAI Runtime",

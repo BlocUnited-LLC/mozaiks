@@ -1,0 +1,39 @@
+{
+  "protocol": "mozaiks.events.v1",
+  "protocol_version": "1.0.0",
+  "schema_version": "1.0.0",
+  "seq_semantics": {
+    "scope": "per stream_id",
+    "start_value": 0,
+    "rule": "strictly_increasing",
+    "gaps_allowed": false,
+    "description": "For a given stream_id, each emitted event seq must be previous_seq + 1."
+  },
+  "resume_semantics": {
+    "request_schema": "resume_request.schema.json",
+    "required_fields_for_resumability": [
+      "cursor",
+      "stream_id",
+      "run_id"
+    ],
+    "resume_behavior": "resume_from_next_seq",
+    "details": "Server resumes from cursor + 1 for the given stream_id and run_id."
+  },
+  "transport_events": {
+    "snapshot": {
+      "event_type": "transport.snapshot",
+      "schema": "transport.snapshot.event.schema.json",
+      "description": "Marks an externally durable snapshot and replay cursor."
+    },
+    "replay_boundary": {
+      "event_type": "transport.replay_boundary",
+      "schema": "transport.replay_boundary.event.schema.json",
+      "description": "Emitted when replay reaches a boundary (head/snapshot/checkpoint/time)."
+    }
+  },
+  "compatibility": {
+    "alias_mapping": "event_type_aliases.json",
+    "normalization_rule": "aliases_must_be_normalized_to_canonical_names_immediately",
+    "canonical_envelope_schema": "event_envelope.schema.json"
+  }
+}

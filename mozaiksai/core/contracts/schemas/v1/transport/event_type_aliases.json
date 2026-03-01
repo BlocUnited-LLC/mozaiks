@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0.0",
+  "normalization_required": true,
+  "normalization_strategy": "map_alias_to_canonical_immediately",
+  "aliases": {
+    "workflow.started": "process.started",
+    "workflow.completed": "process.completed",
+    "workflow.failed": "process.failed",
+    "step.started": "task.started",
+    "step.completed": "task.completed",
+    "step.failed": "task.failed",
+    "function.called": "tool.called",
+    "function.succeeded": "tool.succeeded",
+    "function.failed": "tool.failed",
+    "asset.created": "artifact.created",
+    "asset.updated": "artifact.updated",
+    "asset.state.replaced": "artifact.state.replaced",
+    "asset.state.patched": "artifact.state.patched",
+    "execution.started": "process.started",
+    "execution.completed": "process.completed",
+    "execution.failed": "process.failed"
+  }
+}

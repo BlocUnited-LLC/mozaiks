@@ -1,0 +1,76 @@
+{
+  "schema_version": "1.0.0",
+  "canonical_pattern": "<family>.<action>[.<qualifier>...]",
+  "allowed_regex": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+  "families": [
+    {
+      "family": "process",
+      "examples": [
+        "process.started",
+        "process.completed",
+        "process.failed"
+      ]
+    },
+    {
+      "family": "task",
+      "examples": [
+        "task.started",
+        "task.completed",
+        "task.failed"
+      ]
+    },
+    {
+      "family": "tool",
+      "examples": [
+        "tool.called",
+        "tool.succeeded",
+        "tool.failed"
+      ]
+    },
+    {
+      "family": "artifact",
+      "examples": [
+        "artifact.created",
+        "artifact.updated",
+        "artifact.state.replaced",
+        "artifact.state.patched"
+      ]
+    },
+    {
+      "family": "sandbox",
+      "examples": [
+        "sandbox.exec_started",
+        "sandbox.exec_succeeded",
+        "sandbox.exec_failed"
+      ]
+    },
+    {
+      "family": "deploy",
+      "examples": [
+        "deploy.requested",
+        "deploy.succeeded",
+        "deploy.failed"
+      ]
+    },
+    {
+      "family": "ui",
+      "examples": [
+        "ui.delta",
+        "ui.panel_updated",
+        "ui.toast_published"
+      ]
+    },
+    {
+      "family": "transport",
+      "examples": [
+        "transport.snapshot",
+        "transport.replay_boundary"
+      ]
+    }
+  ],
+  "rules": [
+    "Use lowercase snake_case segments only.",
+    "Use stable family names; avoid vendor-specific namespaces.",
+    "New event names must stay within family taxonomy or add a new family with governance review."
+  ]
+}

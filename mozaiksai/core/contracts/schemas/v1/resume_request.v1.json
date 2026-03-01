@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Request payload for resuming a workflow run.",
+  "properties": {
+    "app_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "App Id"
+    },
+    "chat_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Chat Id"
+    },
+    "checkpoint_id": {
+      "default": "latest",
+      "minLength": 1,
+      "title": "Checkpoint Id",
+      "type": "string"
+    },
+    "last_seq": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Last Seq",
+      "type": "integer"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "user_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "User Id"
+    },
+    "workflow_name": {
+      "default": "unknown",
+      "minLength": 1,
+      "title": "Workflow Name",
+      "type": "string"
+    },
+    "workflow_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Workflow Version"
+    }
+  },
+  "required": [
+    "run_id"
+  ],
+  "title": "ResumeRequest",
+  "type": "object",
+  "x-kernel-contract": "mozaiks-runtime",
+  "x-protocol-version": "1.0.0"
+}

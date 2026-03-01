@@ -6,17 +6,55 @@ obtain a workflow orchestration runner:
     from mozaiks.orchestration import create_ai_workflow_runner
 
     runner = create_ai_workflow_runner()      # → async callable
-    app    = core_create_app(ai_engine=runner)
+    app    = core_build_runtime(ai_engine=runner)
 
 Internally the runner is currently ``run_workflow_orchestration`` from the
 core workflow module.  Wrapping it in a factory allows the orchestration
 layer to evolve independently (pluggable engines, rate-limiting, tracing)
 without breaking the platform contract.
+
+Phase 4 additions:
+
+    from mozaiks.orchestration import get_universal_orchestrator
+
+    orchestrator = get_universal_orchestrator()  # → UniversalOrchestrator
+    # Implements OrchestrationPort (run, resume, cancel, capabilities)
+
+The UniversalOrchestrator sits at Layer 1.5: between single-GroupChat
+execution and cross-workflow pack orchestration.  It adds decomposition
+(pause → spawn N parallel sub-GroupChats → merge → resume parent).
 """
 
 from __future__ import annotations
 
 from typing import Any, Callable, Optional
+
+# Phase 4: UniversalOrchestrator public API
+from mozaiksai.orchestration.decomposition import (
+    AgentSignalDecomposition,
+    ConfigDrivenDecomposition,
+    DecompositionContext,
+    DecompositionPlan,
+    DecompositionStrategy,
+    ExecutionMode,
+    SubTask,
+)
+from mozaiksai.orchestration.groupchat_pool import GroupChatPool
+from mozaiksai.orchestration.merge import (
+    ChildResult,
+    ConcatenateMerge,
+    MergeContext,
+    MergeResult,
+    MergeStrategy,
+    StructuredMerge,
+)
+from mozaiksai.orchestration.universal import (
+    OrchestratorRun,
+    RunState,
+    UniversalOrchestrator,
+    get_universal_orchestrator,
+    reset_universal_orchestrator,
+)
 
 
 def create_ai_workflow_runner(
@@ -73,4 +111,30 @@ def _is_coro(fn: Any) -> bool:
     return asyncio.iscoroutinefunction(fn)
 
 
-__all__ = ["create_ai_workflow_runner"]
+__all__ = [
+    # Original
+    "create_ai_workflow_runner",
+    # Phase 4 — Decomposition
+    "DecompositionStrategy",
+    "DecompositionPlan",
+    "DecompositionContext",
+    "SubTask",
+    "ExecutionMode",
+    "ConfigDrivenDecomposition",
+    "AgentSignalDecomposition",
+    # Phase 4 — Merge
+    "MergeStrategy",
+    "MergeResult",
+    "MergeContext",
+    "ChildResult",
+    "ConcatenateMerge",
+    "StructuredMerge",
+    # Phase 4 — Pool
+    "GroupChatPool",
+    # Phase 4 — Orchestrator
+    "UniversalOrchestrator",
+    "OrchestratorRun",
+    "RunState",
+    "get_universal_orchestrator",
+    "reset_universal_orchestrator",
+]
