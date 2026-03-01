@@ -37,20 +37,23 @@
 
 <div align="center">
 
+### 💬 Embeddable Floating Widget
+
+<video controls muted loop playsinline preload="metadata" width="700">
+	<source src="./docs/assets/widgetAction_compressed.mp4" type="video/mp4">
+	Your browser does not support the video tag.
+</video>
+
+*Drop a floating assistant anywhere in your app - click the button to expand/collapse the chat interface*
+
+---
+
 ### 🔀 Dual-Mode Interface
 
 | Workflow Mode | Ask Mode |
 |:---:|:---:|
 | ![Workflow Mode](./docs/assets/ArtifactLayout.png) | ![Ask Mode](./docs/assets/AskMozaiks.png) |
 | *Chat + Artifact split view* | *Full chat with history sidebar* |
-
----
-
-### 💬 Embeddable Floating Widget
-
-https://github.com/user-attachments/assets/32bc7ec8-f550-42f7-b287-3b015c5df235
-
-*Drop a floating assistant anywhere in your app - click the button to expand/collapse the chat interface*
 
 </div>
 
