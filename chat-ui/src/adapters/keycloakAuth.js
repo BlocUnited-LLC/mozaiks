@@ -196,7 +196,7 @@ export async function createKeycloakAuthAdapter(overrides = {}) {
   const initOptions = {
     onLoad: 'check-sso',
     pkceMethod: kcConfig.pkce !== false ? 'S256' : undefined,
-    silentCheckSsoRedirectUri: window.location.origin + '/silent-check-sso.html',
+    silentCheckSsoRedirectUri: window.location.origin + '/_system/silent-check-sso.html',
     checkLoginIframe: false, // disable iframe check (doesn't work well with SPAs)
   };
 

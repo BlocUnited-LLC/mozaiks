@@ -1,12 +1,26 @@
 # Step 3 — ui.json
 
-> **Guide:** Customizing Your Frontend · Step 3 of 5  
-> **Live:** https://docs.mozaiks.ai/guides/custom-frontend/ui-json.html
+> **Guide:** Customizing Your Frontend · Step 3 of 5
 
 File location: `brand/public/ui.json` — served at `/ui.json`
 
 Configures the header, profile dropdown, notifications, footer links, and chat mode styling.
 No colors or font definitions belong here — those live in `brand.json`.
+
+---
+
+!!! tip "New to Development?"
+
+    **Let AI configure your ui.json!** Copy this prompt into Claude Code:
+
+    ```
+    I want to configure ui.json for my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/custom-brand-integration/03-ui-json.md
+
+    I want to customize: [header / profile menu / footer / all]
+    ```
 
 ---
 

@@ -242,10 +242,10 @@ class TestConfigDrivenDecomposition:
         assert plan.execution_mode == ExecutionMode.SEQUENTIAL
         assert plan.sub_tasks[1].depends_on == ("step1",)
 
-    def test_pack_graph_nested_chats(self):
+    def test_pack_graph_journeys(self):
         strategy = ConfigDrivenDecomposition()
         ctx = _make_context(pack_config={
-            "nested_chats": [{
+            "journeys": [{
                 "trigger_agent": "Planner",
                 "children": ["sub_a", "sub_b"],
                 "resume_agent": "Merger",
@@ -255,12 +255,12 @@ class TestConfigDrivenDecomposition:
         assert plan is not None
         assert plan.task_count == 2
         assert plan.resume_agent == "Merger"
-        assert plan.reason == "pack-graph nested_chats"
+        assert plan.reason == "pack-graph journeys"
 
     def test_pack_graph_with_dict_children(self):
         strategy = ConfigDrivenDecomposition()
         ctx = _make_context(pack_config={
-            "nested_chats": [{
+            "journeys": [{
                 "children": [
                     {"name": "wf_x", "initial_message": "do X"},
                     {"name": "wf_y"},
@@ -282,7 +282,7 @@ class TestConfigDrivenDecomposition:
                 },
             },
             pack_config={
-                "nested_chats": [{
+                "journeys": [{
                     "children": ["from_pack"],
                 }],
             },

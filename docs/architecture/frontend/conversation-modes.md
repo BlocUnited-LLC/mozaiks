@@ -30,12 +30,48 @@ A structured agentic run. The user is working through a defined workflow — a m
 
 The mode is stored in `ChatUIContext` as `conversationMode` and persisted to `localStorage` under `mozaiks.conversation_mode` so it survives page reloads.
 
-It is changed by:
+### Initial mode on first load
 
-- The user clicking an "Ask Mode" or "Workflow Mode" toggle in the UI
+The bootstrap effect in ChatPage determines the starting mode using this priority:
+
+1. **URL query param** — `?mode=ask` or `?mode=workflow` always wins (used by widget navigation and deep links)
+2. **`startup_mode` from `navigation.json`** — `"ask"` or `"workflow"`. This is the app-level default that controls what the user sees when they first open the app
+3. **Fallback** — if `startup_mode` is not set, the app defaults to `workflow`
+
+The HelloWorld example ships with `startup_mode: "ask"`, so the app opens in ask mode. The user can toggle to workflow mode at any time, and the entry_point workflow (HelloWorld) will start automatically.
+
+### Mode changes after load
+
+After the initial bootstrap, the mode is changed by:
+
+- The user clicking the Ask / Workflow toggle in the UI
 - A URL query param (`?mode=ask` or `?mode=workflow`) on navigation to ChatPage
 - The widget's left button, which navigates to ChatPage with the appropriate mode set
 - Backend events that signal a workflow has started (`agui.lifecycle.RunStarted`)
+
+---
+
+## Switching from Ask to Workflow mode
+
+When the user clicks the workflow toggle from ask mode, the handler (`handleConversationModeChange`) follows this sequence:
+
+1. Checks for an existing IN_PROGRESS workflow session (`GET /api/sessions/oldest/{appId}/{userId}`)
+2. **If one exists** — resumes it (restores the chat_id, reconnects the WebSocket)
+3. **If none exists** — looks up the entry_point workflow (the workflow with `entry_point: true` in its `orchestrator.yaml`) and starts a fresh session for it
+4. **If no entry_point workflow is configured** — the toggle does nothing (logs a warning)
+
+The toggle is always safe to click. It either picks up where the user left off or starts a clean session for the designated entry_point workflow.
+
+---
+
+## How `startup_mode` and `entry_point` relate
+
+These are two separate settings that work together:
+
+- **`startup_mode`** (in `navigation.json`) — decides which **mode** the ChatPage opens in. It doesn't know or care about specific workflows.
+- **`entry_point`** (in a workflow's `orchestrator.yaml`) — decides which **workflow** runs when the app needs one. It doesn't know or care about modes.
+
+The connection: when `startup_mode` is `"ask"` and the user toggles to workflow mode, the app needs to know *which* workflow to start — that's where `entry_point` comes in. When `startup_mode` is `"workflow"`, the entry_point workflow connects immediately on load.
 
 ---
 

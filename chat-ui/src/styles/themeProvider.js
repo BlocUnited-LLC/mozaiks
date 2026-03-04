@@ -212,16 +212,26 @@ function brandConfigToTheme(brandConfig, uiConfig, basePath) {
 async function loadThemeFromBrand() {
   const assetsPath = '/assets';
   try {
-    // Fetch brand.json (visual identity) and ui.json (chrome config) in parallel.
-    const [brandRes, uiRes] = await Promise.all([
-      fetch('/brand.json'),
-      fetch('/ui.json'),
-    ]);
+    // brand.json is required; ui.json is optional and can safely fall back.
+    const brandRes = await fetch('/brand.json');
     if (!brandRes.ok) throw new Error(`/brand.json not found (${brandRes.status})`);
-    if (!uiRes.ok)    throw new Error(`/ui.json not found (${uiRes.status})`);
+
     const brandConfig = await brandRes.json();
-    const uiConfig    = await uiRes.json();
-    console.log('🎛️ [THEME] Loaded brand.json + ui.json');
+    let uiConfig = {};
+
+    try {
+      const uiRes = await fetch('/ui.json');
+      if (uiRes.ok) {
+        uiConfig = await uiRes.json();
+        console.log('🎛️ [THEME] Loaded brand.json + ui.json');
+      } else if (uiRes.status === 404) {
+        console.warn('⚠️ [THEME] /ui.json not found — using default UI chrome fallback');
+      } else {
+        console.warn(`⚠️ [THEME] /ui.json load failed (${uiRes.status}) — using default UI chrome fallback`);
+      }
+    } catch (uiErr) {
+      console.warn('⚠️ [THEME] Could not parse /ui.json — using default UI chrome fallback:', uiErr?.message || uiErr);
+    }
 
     const theme = brandConfigToTheme(brandConfig, uiConfig, assetsPath);
     console.log(`🎨 [THEME] Loaded brand theme: ${brandConfig.name || 'default'}`);
@@ -260,52 +270,67 @@ function cacheTheme(appId, theme, meta = null) {
 // ---------------------------------------------------------------------------
 
 /**
- * Try to load an app-specific theme from the API.
- * Falls back to brand.json when the API returns 404 or fails.
+ * Deep-merge utility: overlay values win; nested objects recurse.
  */
-async function loadThemeFromAPI(appId) {
-  const normalizedId = normalizeAppId(appId);
-  const controller   = new AbortController();
-  const timeout      = globalThis.setTimeout(() => controller.abort(), 8000);
+function deepMerge(base, overlay) {
+  if (!overlay || typeof overlay !== 'object') return base;
+  const result = { ...base };
+  for (const key of Object.keys(overlay)) {
+    if (
+      overlay[key] &&
+      typeof overlay[key] === 'object' &&
+      !Array.isArray(overlay[key]) &&
+      base[key] &&
+      typeof base[key] === 'object' &&
+      !Array.isArray(base[key])
+    ) {
+      result[key] = deepMerge(base[key], overlay[key]);
+    } else {
+      result[key] = overlay[key];
+    }
+  }
+  return result;
+}
+
+/**
+ * Try to fetch platform-level theme overrides from the API.
+ * Returns the override theme object or null when unavailable.
+ *
+ * This only applies in multi-tenant platform mode — when the backend
+ * mounts /api/themes (via RUNTIME_PLATFORM_EXTENSIONS).  In local/
+ * single-app dev the endpoint won't exist and this returns null.
+ */
+async function fetchPlatformOverrides(appId) {
+  const controller = new AbortController();
+  const timeout    = globalThis.setTimeout(() => controller.abort(), 4000);
 
   try {
-    const response = await fetch(`/api/themes/${encodeURIComponent(normalizedId)}`, {
+    const response = await fetch(`/api/themes/${encodeURIComponent(appId)}`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
       signal: controller.signal,
     });
 
-    if (response.status === 404) {
-      // No app-specific theme — load from brand.json
-      return loadThemeFromBrand();
-    }
-
-    if (!response.ok) {
-      throw new Error(`Theme API error (${response.status})`);
-    }
+    if (!response.ok) return null;   // 404 / 503 / etc — no overrides
 
     const data  = await response.json();
     const theme = data?.theme;
 
-    if (!theme || typeof theme !== 'object') throw new Error('Theme API returned invalid payload');
+    if (!theme || typeof theme !== 'object') return null;
 
     return {
       theme,
       meta: {
         source:    data?.source    || 'api',
-        appId:     data?.app_id    || normalizedId,
+        appId:     data?.app_id    || appId,
         updatedAt: data?.updatedAt || null,
         updatedBy: data?.updatedBy || null,
       },
     };
-  } catch (err) {
-    if (err?.name === 'AbortError') {
-      console.warn(`⏱️ [THEME] Theme request timed out for ${normalizedId}`);
-    } else {
-      console.warn(`⚠️ [THEME] API load failed for ${normalizedId}:`, err.message);
-    }
-    // Fall back to brand.json
-    return loadThemeFromBrand();
+  } catch {
+    // Network error, timeout, JSON parse failure — all expected when
+    // the platform API isn't available. Silently return null.
+    return null;
   } finally {
     globalThis.clearTimeout(timeout);
   }
@@ -315,12 +340,36 @@ async function loadThemeFromAPI(appId) {
 // Public API
 // ---------------------------------------------------------------------------
 
+/**
+ * Load the theme for a given app.
+ *
+ * Load order:
+ *   1. brand.json + ui.json  — always the base (local, declarative, user-editable).
+ *   2. /api/themes/{appId}   — platform overrides merged on top (multi-tenant only).
+ *
+ * This guarantees brand.json is the source of truth in local dev.  In
+ * platform mode the API can overlay tenant-specific customisation on top
+ * without wiping out the full brand definition.
+ */
 export async function getTheme(appId = 'default') {
   const normalizedId = normalizeAppId(appId);
   if (themeCache.has(normalizedId)) {
     return themeCache.get(normalizedId).theme;
   }
-  const { theme, meta } = await loadThemeFromAPI(normalizedId);
+
+  // 1. brand.json + ui.json — always load as the base
+  const brand = await loadThemeFromBrand();
+  let   theme = brand.theme;
+  let   meta  = brand.meta;
+
+  // 2. Platform API overrides (only when the endpoint exists)
+  const overrides = await fetchPlatformOverrides(normalizedId);
+  if (overrides) {
+    theme = deepMerge(theme, overrides.theme);
+    meta  = { ...meta, ...overrides.meta, source: 'brand+api' };
+    console.log(`🎨 [THEME] Platform overrides merged for app: ${normalizedId}`);
+  }
+
   cacheTheme(normalizedId, theme, meta);
   return theme;
 }

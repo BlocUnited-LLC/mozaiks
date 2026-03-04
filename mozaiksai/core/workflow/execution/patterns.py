@@ -5,6 +5,7 @@ Purpose:
 - Factory for creating AG2 Pattern instances (AutoPattern, DefaultPattern, etc.)
 - Handles pattern-specific configuration and constructor signatures
 - Provides fallback logic for compatibility with different AG2 versions
+- Auto-instruments patterns with OpenTelemetry when AG2_OTEL_ENABLED=true
 
 Extracted from orchestration_patterns.py to improve separation of concerns.
 """
@@ -21,6 +22,22 @@ from autogen.agentchat.group.patterns import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _try_instrument_pattern(pattern: Any) -> None:
+    """Attempt to instrument the pattern with OpenTelemetry if enabled.
+
+    This is a best-effort operation that silently fails if OTEL is not
+    configured or dependencies are missing.
+    """
+    try:
+        from mozaiksai.core.observability.otel_tracing import instrument_pattern
+        if instrument_pattern(pattern):
+            logger.debug(f"OTEL: Auto-instrumented pattern {type(pattern).__name__}")
+    except ImportError:
+        pass  # OTEL module not available
+    except Exception as e:
+        logger.debug(f"OTEL auto-instrumentation skipped: {e}")
 
 __all__ = ['create_ag2_pattern']
 
@@ -116,7 +133,7 @@ def create_ag2_pattern(
     try:
         pattern = pattern_class(**pattern_args)
         logger.info(f" {pattern_name} AG2 pattern created successfully")
-        
+
         # Verify context presence on the created pattern/manager
         try:
             gm = getattr(pattern, 'group_manager', None)
@@ -131,7 +148,10 @@ def create_ag2_pattern(
                 logger.debug("Pattern created; group_manager.context_variables not exposed at pattern level (will be set up in prepare_group_chat)")
         except Exception as _post_err:
             logger.debug(f"ContextVariables post-create check skipped: {_post_err}")
-        
+
+        # Auto-instrument with OpenTelemetry if enabled
+        _try_instrument_pattern(pattern)
+
         return pattern
         
     except Exception as e:
@@ -151,6 +171,9 @@ def create_ag2_pattern(
             
         minimal_pattern = pattern_class(**minimal_args)
         logger.info(f" {pattern_name} AG2 pattern created with minimal args")
-        
+
+        # Auto-instrument with OpenTelemetry if enabled
+        _try_instrument_pattern(minimal_pattern)
+
         return minimal_pattern
 

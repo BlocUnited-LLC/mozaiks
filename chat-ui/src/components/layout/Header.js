@@ -53,11 +53,8 @@ const Header = ({
   onNotificationClick = () => {},
   onAction = () => {},
 }) => {
-  const { topNav } = useNavigation();
+  const { pages, headerPages } = useNavigation();
   const handleNavigationItem = useNavigationActions();
-  const topNavItems = Array.isArray(topNav?.items)
-    ? [...topNav.items].sort((a, b) => (a?.order ?? 0) - (b?.order ?? 0))
-    : [];
   // Resolve header config from theme with defaults
   const headerConfig = {
     ...DEFAULT_HEADER_CONFIG,
@@ -83,14 +80,7 @@ const Header = ({
     console.warn('⚠️ [HEADER] notifications.show is true but notifications.icon is not set in ui.json — notification button hidden');
   }
 
-  // Default user if none provided (for standalone mode)
-  const defaultUser = {
-    id: "56132",
-    firstName: "John Doe",
-    userPhoto: null
-  };
-
-  const currentUser = user || defaultUser;
+  const currentUser = user || { id: 'anonymous', firstName: 'Guest', userPhoto: null };
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const [isNotificationDropdownOpen, setIsNotificationDropdownOpen] = useState(false);
   const [notificationCount, setNotificationCount] = useState(3);
@@ -196,9 +186,28 @@ const Header = ({
     );
   };
 
-  // --- Config-driven Action Buttons ---
+  // --- Discover auto-wiring: collect navigable pages from navigation.json ---
+  const discoverItems = React.useMemo(() => {
+    return (pages || [])
+      .filter((p) => p && (p.path || p.href || p.trigger))
+      .map((p, i) => ({
+        id:      p.id || p.path || `page-${i}`,
+        label:   p.label || p.title || p.id || p.path,
+        path:    p.path || null,
+        href:    p.href || null,
+        trigger: p.trigger || null,
+        icon:    p.icon || null,
+        order:   p.order ?? i,
+      }))
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }, [pages]);
+
+  // --- Unified responsive action buttons ---
   const handleActionClick = (action) => {
-    if (action?.items && Array.isArray(action.items) && action.items.length > 0) {
+    const effectiveItems = action.id === 'discover' && discoverItems.length > 0
+      ? discoverItems
+      : action.items;
+    if (Array.isArray(effectiveItems) && effectiveItems.length > 0) {
       setOpenActionMenuId((prev) => (prev === action.id ? null : action.id));
       return;
     }
@@ -207,49 +216,93 @@ const Header = ({
 
   const handleActionItemClick = (action, item) => {
     setOpenActionMenuId(null);
+    if (action.id === 'discover' && item && (item.path || item.trigger)) {
+      handleNavigationItem(item);
+      return;
+    }
     onAction(item?.id || action.id, item || action);
   };
 
   const ActionButtons = () => {
     const actions = headerConfig.actions || DEFAULT_HEADER_CONFIG.actions || [];
-    return actions.filter(a => a.visible !== false).map(action => (
-      <React.Fragment key={action.id}>
-        {/* Desktop action button */}
-        <button
-          onClick={() => handleActionClick(action)}
-          className="hidden md:flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-secondary)] border-2 border-[var(--color-primary-light)] text-white oxanium hover:shadow-[0_0_20px_rgba(51,240,250,0.5)] transition-all duration-300 text-sm font-bold"
-          title={action.label || action.id}
-          style={{ boxShadow: '0 0 10px rgba(51,240,250,0.3)' }}
-        >
-          <ActionIcon icon={action.icon} className="w-5 h-5" />
-          <span className="font-bold tracking-wide">{action.label || action.id}</span>
-        </button>
-        {openActionMenuId === action.id && Array.isArray(action.items) && action.items.length > 0 && (
-          <div className="hidden md:block absolute right-16 top-full mt-2 w-56 rounded-2xl border border-[rgba(var(--color-primary-light-rgb),0.35)] bg-[rgba(5,10,24,0.96)] backdrop-blur-xl shadow-[0_20px_60px_rgba(2,6,23,0.6)] overflow-hidden z-50">
-            <div className="flex flex-col py-2">
-              {action.items.map((item) => (
-                <button
-                  key={item.id || item.label}
-                  type="button"
-                  onClick={() => handleActionItemClick(action, item)}
-                  className="w-full text-left px-4 py-2.5 text-sm text-[rgba(226,232,240,0.9)] hover:bg-white/10 transition"
-                >
-                  {item.label || item.id}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {/* Mobile action button */}
-        <button
-          onClick={() => handleActionClick(action)}
-          className="md:hidden inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-secondary)] border border-[rgba(var(--color-primary-light-rgb),0.5)] text-white hover:shadow-[0_8px_30px_rgba(var(--color-primary-light-rgb),0.4)] transition-all"
-          title={action.label || action.id}
-        >
-          <ActionIcon icon={action.icon} className="w-5 h-5" />
-        </button>
-      </React.Fragment>
-    ));
+    return actions.filter(a => a.visible !== false).map(action => {
+      const effectiveItems = action.id === 'discover' && discoverItems.length > 0
+        ? discoverItems
+        : (action.items || []);
+      const isOpen = openActionMenuId === action.id && effectiveItems.length > 0;
+
+      return (
+        <React.Fragment key={action.id}>
+          {/* Single responsive button — icon-only on small screens, full on md+ */}
+          <button
+            onClick={() => handleActionClick(action)}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-secondary)] border border-[var(--color-primary-light)] text-white oxanium hover:shadow-[0_0_20px_rgba(51,240,250,0.5)] transition-all duration-300 font-bold w-10 h-10 md:w-auto md:h-auto md:px-4 md:py-2 md:rounded-lg md:border-2"
+            title={action.label || action.id}
+            style={{ boxShadow: '0 0 10px rgba(51,240,250,0.3)' }}
+          >
+            <ActionIcon icon={action.icon} className="w-5 h-5" />
+            <span className="hidden md:inline font-bold tracking-wide text-sm">{action.label || action.id}</span>
+          </button>
+          {/* Responsive dropdown: desktop popover / mobile bottom sheet */}
+          {isOpen && (
+            <>
+              {/* Backdrop overlay (mobile only) — closes on tap */}
+              <div
+                className="md:hidden fixed inset-0 bg-black/50 z-[60]"
+                onClick={() => setOpenActionMenuId(null)}
+              />
+              {/* Dropdown panel */}
+              <div className={`
+                fixed md:absolute z-[70]
+                inset-x-0 bottom-0 md:inset-auto md:right-0 md:top-full md:mt-2
+                w-full md:w-56
+                rounded-t-2xl md:rounded-2xl
+                border border-[rgba(var(--color-primary-light-rgb),0.35)]
+                bg-[rgba(5,10,24,0.97)] backdrop-blur-xl
+                shadow-[0_-10px_40px_rgba(2,6,23,0.8)] md:shadow-[0_20px_60px_rgba(2,6,23,0.6)]
+                overflow-hidden
+                max-h-[60vh] md:max-h-[400px] overflow-y-auto
+              `}>
+                {/* Drag handle (mobile) */}
+                <div className="md:hidden flex justify-center pt-3 pb-1">
+                  <div className="w-10 h-1 rounded-full bg-white/20" />
+                </div>
+                {/* Title bar */}
+                <div className="flex items-center justify-between px-4 py-2.5 border-b border-[rgba(var(--color-primary-light-rgb),0.15)]">
+                  <span className="text-xs font-semibold text-[rgba(var(--color-primary-light-rgb),0.7)] uppercase tracking-widest oxanium">
+                    {action.label || action.id}
+                  </span>
+                  <button
+                    onClick={() => setOpenActionMenuId(null)}
+                    className="md:hidden w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 text-[rgba(var(--color-primary-light-rgb),0.6)]"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                {/* Items */}
+                <div className="flex flex-col py-2">
+                  {effectiveItems.map((item) => (
+                    <button
+                      key={item.id || item.label}
+                      type="button"
+                      onClick={() => handleActionItemClick(action, item)}
+                      className="w-full text-left px-4 py-3.5 md:py-2.5 text-sm text-[rgba(226,232,240,0.9)] hover:bg-white/10 active:bg-white/15 transition flex items-center gap-3"
+                    >
+                      {item.icon && <ActionIcon icon={item.icon} className="w-5 h-5 md:w-4 md:h-4 opacity-60" />}
+                      <span className="oxanium">{item.label || item.id}</span>
+                    </button>
+                  ))}
+                </div>
+                {/* Safe area spacer for bottom-sheet on mobile */}
+                <div className="md:hidden h-6" />
+              </div>
+            </>
+          )}
+        </React.Fragment>
+      );
+    });
   };
 
   return (
@@ -263,9 +316,9 @@ const Header = ({
         {/* LEFT: Brand (config-driven) */}
         <div className="flex items-center gap-3 md:gap-4">
           <LogoSection />
-          {topNavItems.length > 0 && (
+          {headerPages.length > 0 && (
             <nav className="hidden md:flex items-center gap-2">
-              {topNavItems.map((item) => (
+              {headerPages.map((item) => (
                 <button
                   key={item.id || item.label}
                   type="button"
@@ -356,9 +409,6 @@ const Header = ({
           <ActionButtons />
         </div>
       </div>
-
-      {/* Mobile spacing placeholder */}
-      <div className="md:hidden px-4 pb-3" />
     </header>
   );
 };

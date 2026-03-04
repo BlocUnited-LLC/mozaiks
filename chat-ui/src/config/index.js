@@ -29,9 +29,8 @@ class ChatUIConfig {
       chat: {
         // Auth system configured via runtime auth endpoints
         defaultAppId: process.env.REACT_APP_DEFAULT_APP_ID || process.env.REACT_APP_DEFAULT_app_id,
-        defaultUserId: process.env.REACT_APP_DEFAULT_USER_ID || '56132',
-        // Do not force a placeholder workflow; fall back to backend discovery
-        defaultWorkflow: process.env.REACT_APP_DEFAULT_WORKFLOW || '',
+        // Workflow resolution handled by resolveWorkflow() utility
+        // (entry_point in orchestrator.yaml → singleton auto-select → null)
       },
     };
 

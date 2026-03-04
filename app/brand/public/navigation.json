@@ -1,16 +1,8 @@
 {
   "version": "1.0.0",
-  "routes": [
-    {
-      "path": "/",
-      "component": "ChatPage",
-      "exact": true,
-      "meta": {
-        "title": "Chat",
-        "requiresAuth": false
-      }
-    }
-  ],
-  "sidebar": { "items": [] },
-  "topNav":  { "items": [] }
+
+  "landing_spot": "/",
+  "startup_mode": "ask",
+
+  "pages": []
 }

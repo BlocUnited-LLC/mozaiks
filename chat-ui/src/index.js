@@ -62,8 +62,9 @@ export { default as componentRegistry } from './registry/componentRegistry';
 // App shell — top-level application wrapper
 export { default as MozaiksApp } from './app/MozaiksApp';
 
-// Development adapter — stubs all API/WS calls without a backend
+// Development adapters — stubs API/WS/Auth calls without a backend
 export { default as mockApiAdapter } from './adapters/mockApiAdapter';
+export { default as mockAuthAdapter, createMockAuthAdapter } from './adapters/mockAuthAdapter';
 
 // Side-effect: registers core pages (ChatPage) in the component registry.
 // Consumers should import this once in their entry point.
@@ -71,6 +72,21 @@ import './registry/coreComponents';
 
 // Pages
 export { default as ChatPage } from './pages/ChatPage';
+export { default as DashboardPage } from './pages/DashboardPage';
+
+// DashboardPage extensibility — register custom dashboard sections
+export {
+  registerDashboardSection,
+  getDashboardSection,
+  getAllDashboardSections,
+  unregisterDashboardSection,
+  useIsAdmin,
+  useHasRole,
+  useAuthConfig,
+  Card as DashboardCard,
+  Stat as DashboardStat,
+  ProgressBar as DashboardProgressBar,
+} from './pages/DashboardPage';
 
 // Navigation
 export { readNavigationCache, writeNavigationCache } from './navigation/navigationCache';

@@ -19,11 +19,12 @@ npm run dev
 
 | File | Role |
 |------|------|
-| `../app.json` | Single config file — `appName`, `appId`, `defaultWorkflow`, `apiUrl` |
+| `app.json` | Single config file — `appName`, `appId`, `apiUrl`, `wsUrl` |
 | `App.jsx` | Root component — reads `app.json`, renders `<MozaiksApp>` |
 | `brand/public/brand.json` | Colors, fonts, shadows, asset filenames |
 | `brand/public/ui.json` | Header, profile menu, notifications, footer |
-| `brand/public/navigation.json` | Route and nav definitions |
+| `brand/public/navigation.json` | Extra routes and nav definitions (core routes are built-in) |
+| `brand/public/auth.json` | Auth provider config (Keycloak), roles, admin emails |
 | `brand/public/assets/` | SVG icons and images |
 | `brand/public/fonts/` | Self-hosted font files |
 | `workflows/` | Your workflow modules — auto-discovered |
@@ -31,9 +32,11 @@ npm run dev
 ## Files you edit
 
 ```
-../app.json                   ← start here: appName, appId, defaultWorkflow, apiUrl
+app.json                      ← start here: appName, appId, apiUrl, wsUrl
 brand/public/brand.json       ← colors, fonts, shadows, asset filenames
 brand/public/ui.json          ← header actions, profile menu, notifications, footer
+brand/public/navigation.json  ← extra pages beyond ChatPage and Admin Portal
+brand/public/auth.json        ← auth provider, roles, admin emails
 brand/public/assets/          ← drop SVG icons and images here
 workflows/hello_world/        ← copy this folder to add a new workflow
 App.jsx                       ← swap mockApiAdapter when backend is ready
@@ -51,7 +54,7 @@ App.jsx                       ← swap mockApiAdapter when backend is ready
 ```jsx
 // App.jsx
 import { MozaiksApp, RestApiAdapter } from '@mozaiks/chat-ui';
-import appConfig from '../app.json';
+import appConfig from './app.json';
 
 const apiAdapter = new RestApiAdapter({ baseUrl: appConfig.apiUrl });
 
@@ -60,7 +63,6 @@ export default function App() {
     <MozaiksApp
       appName={appConfig.appName}
       defaultAppId={appConfig.appId}
-      defaultWorkflow={appConfig.defaultWorkflow}
       apiAdapter={apiAdapter}
     />
   );

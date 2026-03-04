@@ -170,7 +170,7 @@ Example (v2):
 }
 ```
 
-Full contract: `docs/source_of_truth/PACK_GRAPH_SEMANTICS.md`.
+Full contract: [Workflow Architecture](source-of-truth/WORKFLOW_ARCHITECTURE.md).
 
 ---
 

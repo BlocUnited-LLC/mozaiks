@@ -38,27 +38,22 @@
 
 ## 🎨 See It In Action
 
-<div align="center">
-
-### 💬 Embeddable Floating Widget
-
-<video controls muted loop playsinline preload="metadata" width="700">
-    <source src="./docs/assets/widgetAction_compressed.mp4" type="video/mp4">
-    Your browser does not support the video tag.
-</video>
-
-*Drop a floating assistant anywhere in your app - click the button to expand/collapse the chat interface*
-
----
-
 ### 🔀 Dual-Mode Interface
 
 | Workflow Mode | Ask Mode |
 |:---:|:---:|
-| ![Workflow Mode](./docs/assets/ArtifactLayout.png) | ![Ask Mode](./docs/assets/AskMozaiks.png) |
+| ![Workflow Mode](assets/ArtifactLayout.png) | ![Ask Mode](assets/AskMozaiks.png) |
 | *Chat + Artifact split view* | *Full chat with history sidebar* |
 
-</div>
+### 💬 Embeddable Floating Widget
+
+<figure class="widget-center">
+  <video controls muted loop playsinline preload="metadata" width="700">
+    <source src="assets/widgetAction_compressed.mp4" type="video/mp4">
+    Your browser does not support the video tag.
+  </video>
+  <figcaption>Drop a floating assistant anywhere in your app — click the button to expand/collapse the chat interface</figcaption>
+</figure>
 
 ---
 
@@ -88,7 +83,7 @@
 
     Build your own AG2 workflow and wire it to the frontend.
 
-    [:octicons-arrow-right-24: Adding a Workflow](guides/adding-a-workflow.md)
+    [:octicons-arrow-right-24: Adding a Workflow](guides/adding-workflows/01-overview.md)
 
 -   :fontawesome-solid-palette: **Brand Your App**
 
@@ -96,6 +91,6 @@
 
     Colors, fonts, logo, and nav from JSON files — no code changes.
 
-    [:octicons-arrow-right-24: Customize Frontend](guides/customizing-frontend/01-overview.md)
+    [:octicons-arrow-right-24: Customize Frontend](guides/custom-brand-integration/01-overview.md)
 
 </div>

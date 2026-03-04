@@ -1,6 +1,40 @@
 # Getting Started
 
-Everything you need to go from clone → running authenticated app in minutes.
+Everything you need to go from clone → running app in minutes.
+
+---
+
+## What You're Setting Up
+
+Mozaiks is an AI app framework with three main pieces:
+
+| Piece | What it is | Where it runs |
+|-------|-----------|---------------|
+| **Backend** | Python server that runs your AI agents | `python run_server.py` |
+| **Frontend** | React app that users interact with | `npm run dev` |
+| **Services** | MongoDB (database) + Keycloak (login) | Docker containers |
+
+By the end of this guide, you'll have all three running locally.
+
+---
+
+!!! tip "New to Development?"
+
+    **Let AI do the hard parts!** Copy this prompt into Claude Code:
+
+    ```
+    I want to set up Mozaiks from scratch.
+
+    Please read the instruction prompt at:
+    instruction-prompts/getting-started/full-setup-from-clone.md
+
+    My OpenAI API key is: [PASTE YOUR KEY HERE]
+
+    Walk me through the complete setup. Check for any issues along the way
+    and help me fix them.
+    ```
+
+    The AI will handle prerequisites, environment setup, Docker, and verify everything works.
 
 ---
 
@@ -27,7 +61,7 @@ mozaiks/
 │   ├── main.jsx                # Entry point
 │   └── vite.config.js          # Pre-wired — update proxy once backend is live
 │
-├── app.json                    # App name + API URL
+├── app/app.json                # App name, app ID, API URLs
 │
 ├── chat-ui/src/                # UI library — do not modify
 │   └── workflows/              # Workflow frontend component registry
@@ -209,14 +243,12 @@ After login, you're redirected back to the app with a valid JWT session.
 {
   "appName": "My App",
   "appId": "my-app",
-  "defaultWorkflow": "HelloWorld",
-  "defaultUserId": "local-dev-user",
   "apiUrl": "http://localhost:8000",
   "wsUrl": "ws://localhost:8000"
 }
 ```
 
-`appName` appears in the browser tab. Set `apiUrl` and `wsUrl` to your deployed backend URL when going to production.
+`appName` appears in the browser tab. User identity always comes from the auth adapter (Keycloak or mock) — no user ID in this file. The active workflow is resolved automatically from backend config (`entry_point: true` in `orchestrator.yaml`). Set `apiUrl` and `wsUrl` to your deployed backend URL when going to production.
 
 ---
 
@@ -283,7 +315,7 @@ This re-creates all volumes and re-imports the realm from `realm-export.json`.
 
     Create your own backend YAML config + frontend components.
 
-    [:octicons-arrow-right-24: Adding a Workflow](guides/adding-a-workflow.md)
+    [:octicons-arrow-right-24: Adding a Workflow](guides/adding-workflows/01-overview.md)
 
 -   :fontawesome-solid-palette: **Brand your app**
 
@@ -291,7 +323,7 @@ This re-creates all volumes and re-imports the realm from `realm-export.json`.
 
     Set colors, fonts, logo, and nav from JSON files — no code changes.
 
-    [:octicons-arrow-right-24: Customize Frontend](guides/customizing-frontend/01-overview.md)
+    [:octicons-arrow-right-24: Customize Frontend](guides/custom-brand-integration/01-overview.md)
 
 -   :fontawesome-solid-lock: **Configure auth**
 
@@ -299,7 +331,7 @@ This re-creates all volumes and re-imports the realm from `realm-export.json`.
 
     Customize Keycloak login, roles, branding, and social providers.
 
-    [:octicons-arrow-right-24: Auth JSON](guides/customizing-frontend/06-auth-json.md)
+    [:octicons-arrow-right-24: Auth JSON](guides/custom-brand-integration/06-auth-json.md)
 
 -   :fontawesome-solid-server: **Architecture**
 

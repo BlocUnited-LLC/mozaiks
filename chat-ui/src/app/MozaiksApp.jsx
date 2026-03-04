@@ -7,6 +7,7 @@ import NavigationProvider from '../providers/NavigationProvider';
 import BrandingProvider from '../providers/BrandingProvider';
 import RouteRenderer from '../components/RouteRenderer';
 import { initializeWorkflows } from '@chat-workflows/index';
+import ConfigValidationOverlay from '../config/ConfigValidationOverlay';
 
 /**
  * Inner shell — must render inside ChatUIProvider to consume its context.
@@ -29,18 +30,15 @@ function AppShell({ onAuthRequired }) {
  *
  * Props:
  *   appName         {string}   App display name
- *   defaultWorkflow {string}   Workflow name loaded by default (must match backend orchestrator.yaml)
  *   defaultAppId    {string}   App identifier sent to the backend
  *   apiAdapter      {object}   API adapter — use mockApiAdapter for local dev, RestApiAdapter for production
- *   authAdapter     {object}   Optional auth adapter
+ *   authAdapter     {object}   Auth adapter (Keycloak by default, mock for VITE_MOCK_MODE)
  *   uiConfig        {object}   Full uiConfig override (replaces individual props when supplied)
  *   children        {node}     Override the default page renderer
  */
 export default function MozaiksApp({
   appName = 'My App',
-  defaultWorkflow = '',
   defaultAppId = 'demo-app',
-  defaultUserId = 'local-dev-user',
   apiAdapter,
   authAdapter,
   uiConfig: uiConfigProp,
@@ -48,7 +46,7 @@ export default function MozaiksApp({
 }) {
   const uiConfig = uiConfigProp || {
     appName,
-    chat: { defaultAppId, defaultWorkflow, defaultUserId },
+    chat: { defaultAppId },
   };
 
   const renderUiTool = useCallback(
@@ -64,6 +62,9 @@ export default function MozaiksApp({
     []
   );
 
+  // Config validation overlay (dev-mode in-browser error/warning banner)
+  // Replaces console-only logging — founders see issues without opening DevTools
+
   return (
     <BrandingProvider configPath="/brand.json">
       <NavigationProvider>
@@ -75,6 +76,7 @@ export default function MozaiksApp({
           uiConfig={uiConfig}
         >
           <Router>
+            <ConfigValidationOverlay />
             <GlobalChatWidgetWrapper />
             {children || <AppShell />}
           </Router>

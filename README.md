@@ -58,27 +58,6 @@
 </div>
 
 ---
-
-## Installation
-
-```bash
-pip install mozaiks
-```
-
-For local development:
-
-```bash
-pip install -e .[dev]
-```
-
-## Development Checks
-
-```bash
-pytest tests/ -v
-mypy src/mozaiks/
-ruff check src/
-```
-
 ## Contributing
 
 See `CONTRIBUTING.md`.

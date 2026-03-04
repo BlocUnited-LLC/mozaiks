@@ -97,8 +97,8 @@ All running on your own computer, ready to customize and eventually deploy.
 
 Once your app is running:
 
-1. **[Customize your branding](guides/customizing-frontend/01-overview.md)** - Colors, logo, fonts
-2. **[Add AI workflows](guides/adding-a-workflow.md)** - Create new AI capabilities
+1. **[Customize your branding](guides/custom-brand-integration/01-overview.md)** - Colors, logo, fonts
+2. **[Add AI workflows](guides/adding-workflows/01-overview.md)** - Create new AI capabilities
 3. **[Read the architecture docs](architecture/keycloak-auth.md)** - Understand how it all works
 
 ---

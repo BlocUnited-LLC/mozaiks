@@ -406,6 +406,46 @@ class AG2PersistenceManager:
             logger.debug(f"[FETCH_EXTRA_CONTEXT] Failed chat_id={chat_id}: {e}")
             return {}
 
+    async def patch_session_fields(
+        self,
+        *,
+        chat_id: str,
+        app_id: Optional[str] = None,
+        fields: Dict[str, Any],
+    ) -> None:
+        """Write arbitrary extra fields to a chat session document via $set.
+
+        Purpose:
+        - Used by WorkflowPackCoordinator fan-in to write aggregated child results
+          into the parent session before resuming it (e.g., "child_results" key).
+        - Callers are responsible for ensuring field keys do not conflict with
+          canonical session fields (_id, status, messages, etc.).
+
+        Args:
+            chat_id: Target session identifier.
+            app_id:  Tenant scope (defaults to ambient app_id if omitted).
+            fields:  Mapping of field_name → value to $set on the document.
+                     Must be JSON-serialisable.
+        """
+        if not fields:
+            return
+        resolved_app_id = coalesce_app_id(app_id=app_id)
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        try:
+            coll = await self._coll()
+            now = datetime.now(UTC)
+            await coll.update_one(
+                {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
+                {"$set": {**fields, "last_updated_at": now}},
+            )
+            logger.debug(
+                "[PATCH_SESSION] Updated extra fields",
+                extra={"chat_id": chat_id, "app_id": resolved_app_id, "keys": list(fields.keys())},
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.debug("[PATCH_SESSION] Failed chat_id=%s: %s", chat_id, exc)
+
     async def create_general_chat_session(
         self,
         *,

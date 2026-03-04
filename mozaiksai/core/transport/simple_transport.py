@@ -835,6 +835,51 @@ class SimpleTransport:
             # Final safety fallback
             return self._stringify_unknown(obj)
 
+    async def _check_pack_prereqs(
+        self,
+        *,
+        websocket: Any,
+        chat_id: str,
+        app_id: str,
+        user_id: str,
+        workflow_name: str,
+    ) -> bool:
+        """Validate pack prerequisites and notify the client if blocked.
+
+        Returns True if the workflow is ALLOWED to proceed.
+        Returns False if blocked (sends chat.prereq_blocked to the client).
+
+        This is the single validation helper used by all workflow-start paths
+        (launch_workflow, start_workflow, batch_start_workflows) to avoid
+        duplicating the validate → notify → abort pattern.
+        """
+        from mozaiksai.core.workflow.pack.gating import validate_pack_prereqs
+
+        pm = self._get_or_create_persistence_manager()
+        ok, error_msg = await validate_pack_prereqs(
+            app_id=str(app_id),
+            user_id=str(user_id),
+            workflow_name=str(workflow_name),
+            persistence=pm,
+        )
+        if ok:
+            return True
+
+        logger.warning("⚠️ Prerequisite validation failed for %s: %s", workflow_name, error_msg)
+        await websocket.send_json(
+            {
+                "type": "chat.prereq_blocked",
+                "data": {
+                    "workflow_name": str(workflow_name),
+                    "message": error_msg or "Prerequisites not met",
+                    "error_code": "WORKFLOW_PREREQS_NOT_MET",
+                },
+                "chat_id": chat_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        return False
+
     async def _handle_artifact_action(self, event: Dict[str, Any], chat_id: str, websocket) -> None:
         """
         Handle artifact action events from frontend (launch_workflow, update_state, etc.).
@@ -866,29 +911,12 @@ class SimpleTransport:
             
             logger.info(f"🚀 Launching workflow {target_workflow} from chat {chat_id}")
             
-        # Validate pack prerequisites before launching
-            from mozaiksai.core.workflow.pack.gating import validate_pack_prereqs
-
-            pm = self._get_or_create_persistence_manager()
-            is_valid, error_msg = await validate_pack_prereqs(
-                app_id=str(app_id),
-                user_id=str(user_id),
+            # Validate pack prerequisites before launching.
+            if not await self._check_pack_prereqs(
+                websocket=websocket, chat_id=chat_id,
+                app_id=str(app_id), user_id=str(user_id),
                 workflow_name=str(target_workflow),
-                persistence=pm,
-            )
-            
-            if not is_valid:
-                logger.warning(f"⚠️ Prerequisite validation failed for {target_workflow}: {error_msg}")
-                await websocket.send_json({
-                    "type": "chat.prereq_blocked",
-                    "data": {
-                        "workflow_name": target_workflow,
-                        "message": error_msg or "Prerequisites not met",
-                        "error_code": "WORKFLOW_PREREQS_NOT_MET"
-                    },
-                    "chat_id": chat_id,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                })
+            ):
                 return
             
             # Create new session and artifact (old session stays IN_PROGRESS)
@@ -1418,27 +1446,11 @@ class SimpleTransport:
                             raise ValueError("Missing connection metadata")
 
                         # Enforce pack prerequisites before starting/spawning.
-                        from mozaiksai.core.workflow.pack.gating import validate_pack_prereqs
-                        pm = self._get_or_create_persistence_manager()
-                        ok, prereq_error = await validate_pack_prereqs(
-                            app_id=str(ent_id),
-                            user_id=str(usr_id),
+                        if not await self._check_pack_prereqs(
+                            websocket=websocket, chat_id=chat_id,
+                            app_id=str(ent_id), user_id=str(usr_id),
                             workflow_name=str(target_workflow),
-                            persistence=pm,
-                        )
-                        if not ok:
-                            await websocket.send_json(
-                                {
-                                    "type": "chat.prereq_blocked",
-                                    "data": {
-                                        "workflow_name": str(target_workflow),
-                                        "message": prereq_error or "Prerequisites not met",
-                                        "error_code": "WORKFLOW_PREREQS_NOT_MET",
-                                    },
-                                    "chat_id": chat_id,
-                                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                                }
-                            )
+                        ):
                             continue
                         
                         # Create new chat session
@@ -1521,9 +1533,6 @@ class SimpleTransport:
                         if not isinstance(runs, list) or not runs:
                             raise ValueError("runs must be a non-empty list")
 
-                        pm = self._get_or_create_persistence_manager()
-                        from mozaiksai.core.workflow.pack.gating import validate_pack_prereqs
-
                         started: List[Dict[str, Any]] = []
                         blocked: List[Dict[str, Any]] = []
                         for i, run in enumerate(runs):
@@ -1537,29 +1546,17 @@ class SimpleTransport:
                             initial_agent_name_override = run.get("initial_agent") or run.get("initial_agent_name")
                             label = run.get("label")
 
-                            ok, prereq_error = await validate_pack_prereqs(
-                                app_id=str(ent_id),
-                                user_id=str(usr_id),
+                            # Enforce pack prerequisites — helper sends the
+                            # chat.prereq_blocked event to the client on failure.
+                            if not await self._check_pack_prereqs(
+                                websocket=websocket, chat_id=chat_id,
+                                app_id=str(ent_id), user_id=str(usr_id),
                                 workflow_name=str(target_workflow),
-                                persistence=pm,
-                            )
-                            if not ok:
+                            ):
                                 blocked.append(
                                     {
                                         "workflow_name": str(target_workflow),
-                                        "reason": prereq_error or "Prerequisites not met",
-                                    }
-                                )
-                                await websocket.send_json(
-                                    {
-                                        "type": "chat.prereq_blocked",
-                                        "data": {
-                                            "workflow_name": str(target_workflow),
-                                            "message": prereq_error or "Prerequisites not met",
-                                            "error_code": "WORKFLOW_PREREQS_NOT_MET",
-                                        },
-                                        "chat_id": chat_id,
-                                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                                        "reason": "Prerequisites not met",
                                     }
                                 )
                                 continue

@@ -4,6 +4,7 @@ export default {
     './index.html',
     './*.{js,jsx}',
     './workflows/**/*.{js,jsx}',
+    '../chat-ui/src/**/*.{js,jsx,ts,tsx}',
     '../../packages/frontend/chat-ui/src/**/*.{js,jsx,ts,tsx}',
   ],
   theme: {

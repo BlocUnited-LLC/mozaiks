@@ -7,9 +7,12 @@ import FluidChatLayout from '../components/chat/FluidChatLayout';
 import MobileArtifactDrawer from '../components/chat/MobileArtifactDrawer';
 import { applyArtifactUpdate, applyJsonPatch, applyOptimisticUpdate, deriveArtifactId, interpolateParams } from '../core/actions/actionUtils';
 import { useNavigate, useLocation } from "react-router-dom";
+import { useContext } from "react";
 import { useChatUI } from "../context/ChatUIContext";
+import { NavigationContext } from "../providers/NavigationProvider";
 import workflowConfig from '../config/workflowConfig';
-import { getLoadedWorkflows, getWorkflow } from '@chat-workflows/index';
+import { getWorkflow } from '@chat-workflows/index';
+import resolveWorkflow from '../utils/resolveWorkflow';
 import { dynamicUIHandler } from '../core/dynamicUIHandler';
 import LoadingSpinner from '../utils/AgentChatLoadingSpinner';
 import useTheme from "../styles/useTheme";
@@ -256,6 +259,9 @@ const MobileAskHistoryDrawer = ({
 const ChatPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  // Navigation config (null-safe — dev shell may omit NavigationProvider)
+  const navContext = useContext(NavigationContext);
+  const configuredStartupMode = navContext?.startup_mode || null;
   // Core state
   const [messages, setMessages] = useState([]);
   // Ref mirror to access latest messages inside callbacks without stale closure
@@ -303,12 +309,13 @@ const ChatPage = () => {
 
   const appId = pathAppId || queryAppId;
   const urlWorkflowName = pathWorkflowName || queryWorkflowName;
-  const { 
-    user, 
-    api, 
-    config, 
+  const {
+    user,
+    api,
+    config,
+    logout,
     activeChatId,
-    setActiveChatId, 
+    setActiveChatId,
     activeWorkflowName,
     setActiveWorkflowName,
     setChatMinimized,
@@ -385,19 +392,7 @@ const ChatPage = () => {
   const isViewMode = effectiveLayoutMode === 'view';
   const mainPaddingClass = 'pt-16 md:pt-16';
 
-  // Helper function to get default workflow from registry
-  const getDefaultWorkflowFromRegistry = () => {
-    const cfgDefault = typeof workflowConfig?.getDefaultWorkflow === 'function'
-      ? workflowConfig.getDefaultWorkflow()
-      : null;
-    if (cfgDefault) return cfgDefault;
-
-    const workflows = getLoadedWorkflows();
-    if (!Array.isArray(workflows) || workflows.length === 0) return null;
-    return workflows[0].name || null;
-  };
-
-  const defaultWorkflow = (urlWorkflowName || config?.chat?.defaultWorkflow || getDefaultWorkflowFromRegistry() || '');
+  const defaultWorkflow = resolveWorkflow(urlWorkflowName) || '';
   const [currentWorkflowName, setCurrentWorkflowName] = useState(defaultWorkflow);
 
   useEffect(() => {
@@ -523,7 +518,7 @@ const ChatPage = () => {
     implicitDevAppId ||
     null;
   const { theme: chatTheme, loading: themeLoading } = useTheme(currentAppId);
-  const currentUserId = user?.id || config?.chat?.defaultUserId || '56132';
+  const currentUserId = user?.id || user?.user_id || 'anonymous';
   const [generalSessionsLoading, setGeneralSessionsLoading] = useState(false);
   // Workflow completion state
   const [workflowCompleted, setWorkflowCompleted] = useState(false);
@@ -575,7 +570,7 @@ const ChatPage = () => {
       setConversationMode('workflow');
     }
 
-    const nextWorkflow = trigger?.workflow || defaultWorkflow;
+    const nextWorkflow = trigger?.workflow || resolveWorkflow() || currentWorkflowName;
     if (nextWorkflow && nextWorkflow !== currentWorkflowName) {
       setCurrentWorkflowName(nextWorkflow);
     }
@@ -648,7 +643,6 @@ const ChatPage = () => {
   }, [
     pendingNavigationTrigger,
     currentWorkflowName,
-    defaultWorkflow,
     layoutMode,
     conversationMode,
     setLayoutMode,
@@ -888,11 +882,20 @@ const ChatPage = () => {
       return;
     }
     
-    // Default to workflow mode if not explicitly set
-    if (conversationMode !== 'workflow') {
+    // Default to configured startup mode (navigation.json startup_mode) or 'workflow'
+    const startupDefault = configuredStartupMode || 'workflow';
+    if (startupDefault === 'ask') {
+      console.log('🧭 [BOOTSTRAP] startup_mode is "ask" — entering Ask mode');
+      setConversationMode('ask');
+      setTimeout(() => {
+        setIsSidePanelOpen(false);
+        setCurrentArtifactMessages([]);
+        if (setLayoutMode) setLayoutMode('full');
+      }, 50);
+    } else if (conversationMode !== 'workflow') {
       setConversationMode('workflow');
     }
-  }, [conversationMode, setConversationMode, queryMode, queryChatId, queryResume, urlWorkflowName, setLayoutMode, askMessages, setMessagesWithLogging]);
+  }, [conversationMode, setConversationMode, queryMode, queryChatId, queryResume, urlWorkflowName, setLayoutMode, askMessages, setMessagesWithLogging, configuredStartupMode]);
 
   // Separate effect to enforce Ask mode artifact panel state
   // This ensures the panel stays closed even if other effects try to open it
@@ -2278,7 +2281,7 @@ useEffect(() => {
       setConnectionStatus('connecting');
       setTransportType('websocket');
 
-      const workflowName = urlWorkflowName || getDefaultWorkflowFromRegistry();
+      const workflowName = resolveWorkflow(urlWorkflowName);
       if (!workflowName) {
         console.warn('⚠️ No workflow available to connect');
         return () => {};
@@ -2338,9 +2341,8 @@ useEffect(() => {
     // Query the workflow transport type and use WebSocket connection
     const connectWithCorrectTransport = async () => {
       try {
-        // Use URL workflow name first, then the initialized React state (set from
-        // config.chat.defaultWorkflow at mount), then dynamic registry discovery.
-        const workflowName = urlWorkflowName || currentWorkflowName || getDefaultWorkflowFromRegistry();
+        // Unified workflow resolution: URL explicit → backend entry_point → singleton → null
+        const workflowName = resolveWorkflow(urlWorkflowName) || currentWorkflowName;
         if (!workflowName) {
           throw new Error('No workflow available');
         }
@@ -2363,9 +2365,9 @@ useEffect(() => {
       } catch (error) {
         console.error('Error querying workflow transport:', error);
         // Fallback to WebSocket
-        const fallbackWf = getDefaultWorkflowFromRegistry();
+        const fallbackWf = resolveWorkflow();
         if (!fallbackWf) {
-          console.warn('⚠️ No default workflow available for fallback');
+          console.warn('⚠️ No workflow available for fallback');
           return () => {};
         }
         setTransportType('websocket');
@@ -2964,7 +2966,7 @@ useEffect(() => {
       return false;
     }
 
-    const resolvedWorkflow = targetWorkflow || currentWorkflowName || defaultWorkflow;
+    const resolvedWorkflow = targetWorkflow || currentWorkflowName || resolveWorkflow();
     console.log('🔁 [WORKFLOW_RESUME] Attempting resume for chat:', targetChatId, 'workflow:', resolvedWorkflow);
 
     setCurrentChatId(targetChatId);
@@ -2983,7 +2985,7 @@ useEffect(() => {
     }
 
     return false;
-  }, [currentWorkflowName, defaultWorkflow, sendWsMessage, setActiveChatId, setActiveWorkflowName, setConversationMode, setCurrentWorkflowName, setCurrentChatId]);
+  }, [currentWorkflowName, sendWsMessage, setActiveChatId, setActiveWorkflowName, setConversationMode, setCurrentWorkflowName, setCurrentChatId]);
 
   const handleConversationModeChange = useCallback(async (mode) => {
     console.log('🔄 [MODE_CHANGE] handleConversationModeChange called with mode:', mode);
@@ -3052,8 +3054,38 @@ useEffect(() => {
         console.log('✅ [MODE_CHANGE] API response:', JSON.stringify(response, null, 2));
         
         if (!response || !response.found) {
-          console.warn('⚠️ [MODE_CHANGE] No IN_PROGRESS workflows available to resume');
-          console.warn('⚠️ [MODE_CHANGE] Response found flag:', response?.found);
+          console.log('📭 [MODE_CHANGE] No IN_PROGRESS session — attempting to start entry_point workflow');
+          const entryWorkflow = resolveWorkflow();
+          if (!entryWorkflow) {
+            console.warn('⚠️ [MODE_CHANGE] No entry_point workflow available to start');
+            return;
+          }
+
+          try {
+            const result = await api.startChat(currentAppId, entryWorkflow, currentUserId);
+            if (result && (result.chat_id || result.id)) {
+              const newChatId = result.chat_id || result.id;
+              console.log(`🚀 [MODE_CHANGE] Created new session for ${entryWorkflow}: ${newChatId}`);
+              setCurrentChatId(newChatId);
+              setActiveChatId(newChatId);
+              setActiveWorkflowName(entryWorkflow);
+              setCurrentWorkflowName(entryWorkflow);
+              try { localStorage.setItem(LOCAL_STORAGE_KEY, newChatId); } catch {}
+
+              // Reset connection so the WS effect re-fires with the new chatId
+              setConnectionInitialized(false);
+              connectionInProgressRef.current = false;
+
+              setConversationMode('workflow');
+              if (setLayoutMode) setLayoutMode('split');
+              generalMessagesCacheRef.current = messagesRef.current;
+              console.log('✅ [MODE_CHANGE] Entry_point workflow session started, WS will connect on re-render');
+            } else {
+              console.error('❌ [MODE_CHANGE] startChat returned no chat_id:', result);
+            }
+          } catch (startErr) {
+            console.error('❌ [MODE_CHANGE] Failed to start entry_point workflow session:', startErr);
+          }
           return;
         }
         
@@ -3435,6 +3467,35 @@ useEffect(() => {
     if (actionId === 'discover') {
       const page = action?.page || action?.target || action?.payload?.page || null;
       handleDiscoverClick(page);
+      return;
+    }
+
+    // Handle profile menu navigation
+    if (actionId === 'navigate' || action?.action === 'navigate') {
+      const href = action?.href || action?.path;
+      if (href) {
+        if (href.startsWith('/')) {
+          navigate(href);
+        } else {
+          window.location.href = href;
+        }
+      }
+      return;
+    }
+
+    // Handle signout
+    if (actionId === 'signout' || action?.action === 'signout') {
+      logout();
+      return;
+    }
+
+    // Handle other navigation by id (profile-settings, preferences, etc.)
+    if (action?.href) {
+      if (action.href.startsWith('/')) {
+        navigate(action.href);
+      } else {
+        window.location.href = action.href;
+      }
     }
   };
 

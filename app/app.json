@@ -1,8 +1,6 @@
 {
   "appName": "My App",
   "appId": "my-app",
-  "defaultWorkflow": "HelloWorld",
-  "defaultUserId": "local-dev-user",
   "apiUrl": "http://localhost:8000",
   "wsUrl": "ws://localhost:8000"
 }

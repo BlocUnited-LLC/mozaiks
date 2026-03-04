@@ -11,6 +11,7 @@ import { registerComponent } from './componentRegistry';
 
 // Core pages
 import ChatPage from '../pages/ChatPage';
+import DashboardPage from '../pages/DashboardPage';
 
 // Register core components
 registerComponent('ChatPage', ChatPage, {
@@ -18,9 +19,17 @@ registerComponent('ChatPage', ChatPage, {
   description: 'Main chat interface page'
 });
 
-// Export for potential programmatic access
-export const CORE_COMPONENTS = [
-  'ChatPage'
-];
+registerComponent('DashboardPage', DashboardPage, {
+  core: true,
+  description: 'Admin portal and user dashboard'
+});
+
+// Alias: navigation.json can reference either name
+registerComponent('AdminPortal', DashboardPage, {
+  core: true,
+  description: 'Admin portal (alias for DashboardPage)'
+});
+
+export const CORE_COMPONENTS = ['ChatPage', 'DashboardPage', 'AdminPortal'];
 
 console.log('[CoreComponents] Registered core chat-ui components:', CORE_COMPONENTS);

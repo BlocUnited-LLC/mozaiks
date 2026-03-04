@@ -6,7 +6,7 @@ import { createRequire } from 'module';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const appConfig = require('../app.json');
+const appConfig = require('./app.json');
 
 export default defineConfig({
   plugins: [
@@ -47,10 +47,12 @@ export default defineConfig({
   },
   // Shim process.env for src/config/index.js (written for CRA / Node env vars).
   // All reads have || fallback defaults so an empty object is safe.
+  // IMPORTANT: esbuild define values must be valid JSON or JS identifiers.
+  // Runtime expressions like window.location.* are NOT valid define values.
+  // Instead, code that reads process.env.REACT_APP_WS_URL will get "" and
+  // the fallback in config/index.js will compute the WS URL at runtime.
   define: {
     'process.env': JSON.stringify({}),
-    'process.env.REACT_APP_API_BASE_URL': 'window.location.origin',
-    'process.env.REACT_APP_WS_URL': 'window.location.origin.replace("http","ws")',
   },
   server: {
     port: 3000,

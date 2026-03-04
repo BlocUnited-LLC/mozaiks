@@ -141,7 +141,7 @@ class ConfigDrivenDecomposition:
     Or in ``_pack/workflow_graph.json``::
 
         {
-          "nested_chats": [{
+          "journeys": [{
             "trigger_agent": "Planner",
             "children": ["sub_a", "sub_b"],
             "resume_agent": "Merger"
@@ -154,7 +154,7 @@ class ConfigDrivenDecomposition:
         plan = self._from_workflow_config(context)
         if plan:
             return plan
-        # 2. Try pack graph nested_chats
+        # 2. Try pack graph journeys
         plan = self._from_pack_graph(context)
         if plan:
             return plan
@@ -207,11 +207,11 @@ class ConfigDrivenDecomposition:
         pack = ctx.pack_config
         if not isinstance(pack, dict):
             return None
-        nested = pack.get("nested_chats")
+        nested = pack.get("journeys")
         if not isinstance(nested, list) or not nested:
             return None
 
-        # Use the first nested_chats entry that matches (simple heuristic).
+        # Use the first journeys entry that matches (simple heuristic).
         for entry in nested:
             if not isinstance(entry, dict):
                 continue
@@ -234,7 +234,7 @@ class ConfigDrivenDecomposition:
                 return DecompositionPlan(
                     sub_tasks=tuple(sub_tasks),
                     execution_mode=ExecutionMode.PARALLEL,
-                    reason="pack-graph nested_chats",
+                    reason="pack-graph journeys",
                     resume_agent=_str_or_none(entry.get("resume_agent")),
                 )
 

@@ -165,6 +165,16 @@ class ThemeResponse(BaseModel):
 
 
 DEFAULT_THEME: Dict[str, Any] = {
+    # -------------------------------------------------------------------
+    # SCHEMA REFERENCE ONLY — not used at runtime for serving themes.
+    #
+    # The frontend's brand.json is the source of truth for visual identity.
+    # This dict exists so that:
+    #   1. theme_validation.py can merge partial payloads to check schema
+    #   2. ThemeConfig Pydantic model has a known-good example for tests
+    #
+    # If you change brand.json, you do NOT need to sync this dict.
+    # -------------------------------------------------------------------
     "fonts": {
         "body": {
             "family": "Rajdhani",
@@ -264,25 +274,24 @@ class ThemeManager:
             return self._collection
 ################################################################################
 
-    async def get_theme(self, app_id: str) -> ThemeResponse:
+    async def get_theme(self, app_id: str) -> Optional[ThemeResponse]:
+        """Return the custom theme for *app_id*, or ``None`` when no override exists.
+
+        When no document is found in Mongo the caller (API route) should
+        return 404 so the frontend falls through to brand.json — the
+        single source of truth for visual identity.
+        """
         app_id = app_id.strip() or "default"
 
         coll = await self._get_collection()
         doc = await coll.find_one({"_id": app_id})
 
         if not doc:
-            logger.debug("Theme fallback to default", extra={"app_id": app_id})
-            theme = ThemeConfig.parse_obj(DEFAULT_THEME)
-            return ThemeResponse(
-                app_id=app_id,
-                theme=theme,
-                source="default",
-                updatedAt=None,
-                updatedBy=None,
-            )
+            logger.debug("No custom theme in Mongo — frontend will use brand.json",
+                         extra={"app_id": app_id})
+            return None
 
-        merged = _deep_merge(DEFAULT_THEME, doc.get("theme", {}))
-        theme = ThemeConfig.parse_obj(merged)
+        theme = ThemeConfig.parse_obj(doc.get("theme", {}))
         return ThemeResponse(
             app_id=app_id,
             theme=theme,
@@ -296,10 +305,19 @@ class ThemeManager:
 
         coll = await self._get_collection()
         existing_doc = await coll.find_one({"_id": app_id})
-        base_theme = DEFAULT_THEME if not existing_doc else _deep_merge(DEFAULT_THEME, existing_doc.get("theme", {}))
 
         overrides = payload.theme.model_dump(exclude_none=True)
-        merged = _deep_merge(base_theme, overrides)
+
+        if existing_doc:
+            # Merge new overrides on top of what's already in Mongo.
+            base_theme = existing_doc.get("theme", {})
+            merged = _deep_merge(base_theme, overrides)
+        else:
+            # First save — store exactly what was submitted.
+            # The frontend's brand.json is the conceptual base;
+            # Mongo only holds explicit tenant overrides.
+            merged = overrides
+
         theme = ThemeConfig.parse_obj(merged)
 
         now = datetime.now(UTC)

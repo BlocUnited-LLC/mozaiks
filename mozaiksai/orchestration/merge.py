@@ -18,13 +18,26 @@ Built-in strategies:
   combined dict.  Useful when each sub-chat produces a well-defined JSON
   schema and the parent needs a unified view.
 
-Platform can register additional strategies via the PluginRegistry.
+* **DeepMergeMerge** — deep-merges child structured outputs into a single
+  flat dict (last-write-wins for duplicate keys, deterministic child order
+  by task_id).  Useful when children produce disjoint key spaces.
+
+* **FirstSuccessMerge** — returns the output of the first successfully
+  completed child (sorted by task_id for determinism).  Useful for
+  redundant-execution patterns where only one answer is needed.
+
+* **MajorityVoteMerge** — returns the most common structured output across
+  children.  Useful for consensus / evaluation patterns where multiple
+  agents solve the same problem and the mode answer is selected.
+
+Platform can register additional strategies via the MergeStrategyRegistry.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -229,8 +242,321 @@ class StructuredMerge:
 __all__ = [
     "ChildResult",
     "ConcatenateMerge",
+    "DeepMergeMerge",
+    "FirstSuccessMerge",
+    "MajorityVoteMerge",
     "MergeContext",
     "MergeResult",
     "MergeStrategy",
+    "MergeStrategyRegistry",
     "StructuredMerge",
+    "get_merge_strategy_registry",
+    "merge_strategy",
+    "reset_merge_strategy_registry",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Built-in: DeepMergeMerge
+# ---------------------------------------------------------------------------
+
+class DeepMergeMerge:
+    """Deep-merges child structured outputs into a single flat dict.
+
+    Children are processed in deterministic order (sorted by ``task_id``).
+    For duplicate keys across children, last-write-wins.  Nested dicts are
+    recursively merged; non-dict values overwrite.
+
+    Use case: children produce disjoint key spaces (e.g., one child generates
+    "frontend" keys, another generates "backend" keys) and the parent needs
+    a unified object.
+
+    Config: ``merge_mode: "deep_merge"``
+    """
+
+    @staticmethod
+    def _deep_merge(base: dict, overlay: dict) -> dict:
+        """Recursively merge *overlay* into *base* (mutates base)."""
+        for key, value in overlay.items():
+            if (
+                key in base
+                and isinstance(base[key], dict)
+                and isinstance(value, dict)
+            ):
+                DeepMergeMerge._deep_merge(base[key], value)
+            else:
+                base[key] = value
+        return base
+
+    def merge(self, context: MergeContext) -> MergeResult:
+        merged: dict[str, Any] = {}
+        all_ok = True
+
+        # Deterministic order: sort children by task_id.
+        sorted_results = sorted(context.child_results, key=lambda r: r.task_id)
+
+        for result in sorted_results:
+            if result.structured_output and isinstance(result.structured_output, dict):
+                self._deep_merge(merged, result.structured_output)
+            if not result.success:
+                all_ok = False
+
+        total = len(context.child_results)
+        ok_count = sum(1 for r in context.child_results if r.success)
+        summary = (
+            f"Deep-merged {ok_count}/{total} child outputs "
+            f"into {len(merged)} top-level keys."
+        )
+
+        return MergeResult(
+            summary_message=summary,
+            merged_data=merged,
+            child_results=tuple(context.child_results),
+            all_succeeded=all_ok,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Built-in: FirstSuccessMerge
+# ---------------------------------------------------------------------------
+
+class FirstSuccessMerge:
+    """Returns the output of the first successfully completed child.
+
+    Children are sorted by ``task_id`` for deterministic winner selection.
+    If no child succeeded, returns an empty merge with ``all_succeeded=False``.
+
+    Use case: redundant execution — spawn the same task to multiple agents
+    and take whichever finishes successfully first.  The "first" is
+    deterministic by ``task_id`` sort order (actual arrival order is not
+    tracked at the merge layer; the fan-in waits for all children).
+
+    Config: ``merge_mode: "first_success"``
+    """
+
+    def merge(self, context: MergeContext) -> MergeResult:
+        sorted_results = sorted(context.child_results, key=lambda r: r.task_id)
+
+        winner: ChildResult | None = None
+        for result in sorted_results:
+            if result.success:
+                winner = result
+                break
+
+        if winner is None:
+            total = len(context.child_results)
+            return MergeResult(
+                summary_message=f"No child succeeded out of {total}.",
+                merged_data={},
+                child_results=tuple(context.child_results),
+                all_succeeded=False,
+            )
+
+        total = len(context.child_results)
+        summary = (
+            f"Selected first successful child: {winner.workflow_name} "
+            f"({winner.task_id}) out of {total} candidates."
+        )
+
+        return MergeResult(
+            summary_message=summary,
+            merged_data=winner.structured_output or {},
+            child_results=tuple(context.child_results),
+            all_succeeded=all(r.success for r in context.child_results),
+            metadata={"winner_task_id": winner.task_id},
+        )
+
+
+# ---------------------------------------------------------------------------
+# Built-in: MajorityVoteMerge
+# ---------------------------------------------------------------------------
+
+class MajorityVoteMerge:
+    """Returns the most common structured output across children.
+
+    Outputs are compared by their JSON-serialized canonical form (sorted
+    keys, deterministic serialization).  The most frequent output wins.
+    Ties are broken by the earliest ``task_id`` alphabetically.
+
+    Use case: consensus evaluation — multiple agents solve the same problem,
+    and the most-agreed-upon answer is selected.
+
+    Config: ``merge_mode: "majority_vote"``
+    """
+
+    @staticmethod
+    def _canonical(output: dict[str, Any]) -> str:
+        """Produce a deterministic string for comparison."""
+        try:
+            return json.dumps(output, sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            return str(sorted(output.items()))
+
+    def merge(self, context: MergeContext) -> MergeResult:
+        # Build canonical → (count, first_task_id, original_output) map.
+        vote_counts: Counter[str] = Counter()
+        canonical_to_output: dict[str, dict[str, Any]] = {}
+        canonical_to_task: dict[str, str] = {}  # earliest task_id per canonical
+
+        sorted_results = sorted(context.child_results, key=lambda r: r.task_id)
+
+        for result in sorted_results:
+            if not result.success:
+                continue
+            output = result.structured_output or {}
+            canon = self._canonical(output)
+            vote_counts[canon] += 1
+            if canon not in canonical_to_output:
+                canonical_to_output[canon] = output
+                canonical_to_task[canon] = result.task_id
+
+        if not vote_counts:
+            total = len(context.child_results)
+            return MergeResult(
+                summary_message=f"No successful children to vote on (0/{total}).",
+                merged_data={},
+                child_results=tuple(context.child_results),
+                all_succeeded=False,
+            )
+
+        # Find the winner: highest count, tiebreak by earliest task_id.
+        max_count = max(vote_counts.values())
+        candidates = [
+            canon for canon, count in vote_counts.items()
+            if count == max_count
+        ]
+        # Tiebreak: earliest task_id alphabetically.
+        winner_canon = min(candidates, key=lambda c: canonical_to_task[c])
+        winner_output = canonical_to_output[winner_canon]
+        winner_count = vote_counts[winner_canon]
+
+        total = len(context.child_results)
+        ok_count = sum(1 for r in context.child_results if r.success)
+        summary = (
+            f"Majority vote: {winner_count}/{ok_count} successful children "
+            f"agreed (total: {total}).  Winner from task "
+            f"{canonical_to_task[winner_canon]}."
+        )
+
+        return MergeResult(
+            summary_message=summary,
+            merged_data=winner_output,
+            child_results=tuple(context.child_results),
+            all_succeeded=all(r.success for r in context.child_results),
+            metadata={
+                "winner_task_id": canonical_to_task[winner_canon],
+                "vote_count": winner_count,
+                "total_voters": ok_count,
+            },
+        )
+
+
+# ---------------------------------------------------------------------------
+# Merge Strategy Registry
+# ---------------------------------------------------------------------------
+
+class MergeStrategyRegistry:
+    """Registry for merge strategies — both built-in and custom.
+
+    Built-in strategies are registered at import time.  Workflows can
+    register custom strategies via ``merge_strategy()`` decorator or
+    direct ``register()`` call.
+
+    Lookup: ``registry.get("concatenate")`` returns a ``MergeStrategy``
+    **class** (not an instance).  The coordinator instantiates it.
+
+    For custom strategies in workflow configs, use the syntax:
+        ``merge_mode: "custom:my_strategy_name"``
+    The coordinator strips the ``custom:`` prefix and looks up the name.
+    """
+
+    def __init__(self) -> None:
+        self._strategies: dict[str, type] = {}
+
+    def register(self, name: str, strategy_cls: type, *, replace: bool = False) -> type:
+        """Register a merge strategy class under a name.
+
+        Args:
+            name: Lookup key (e.g., "concatenate", "my_custom_merge").
+            strategy_cls: Class implementing `MergeStrategy` protocol.
+            replace: If True, overwrite existing registration.
+
+        Returns:
+            The strategy class (for decorator chaining).
+        """
+        if not name:
+            raise ValueError("Strategy name is required.")
+        if not replace and name in self._strategies:
+            raise ValueError(f"Merge strategy '{name}' already registered.")
+        self._strategies[name] = strategy_cls
+        return strategy_cls
+
+    def get(self, name: str) -> type | None:
+        """Look up a strategy class by name.  Returns None if not found."""
+        return self._strategies.get(name)
+
+    def list(self) -> list[str]:
+        """Return sorted list of registered strategy names."""
+        return sorted(self._strategies.keys())
+
+    def _register_builtins(self) -> None:
+        """Register all built-in strategies.  Called once at singleton init."""
+        builtins = {
+            "concatenate": ConcatenateMerge,
+            "structured": StructuredMerge,
+            "deep_merge": DeepMergeMerge,
+            "first_success": FirstSuccessMerge,
+            "majority_vote": MajorityVoteMerge,
+        }
+        for name, cls in builtins.items():
+            self._strategies[name] = cls
+
+
+import threading
+
+_MERGE_REGISTRY: MergeStrategyRegistry | None = None
+_MERGE_LOCK = threading.Lock()
+
+
+def get_merge_strategy_registry() -> MergeStrategyRegistry:
+    """Return a singleton merge strategy registry with built-ins pre-registered."""
+    global _MERGE_REGISTRY
+    if _MERGE_REGISTRY is None:
+        with _MERGE_LOCK:
+            if _MERGE_REGISTRY is None:
+                reg = MergeStrategyRegistry()
+                reg._register_builtins()
+                _MERGE_REGISTRY = reg
+    return _MERGE_REGISTRY
+
+
+def reset_merge_strategy_registry() -> None:
+    """Reset singleton (for tests).  Re-registers builtins on next access."""
+    global _MERGE_REGISTRY
+    with _MERGE_LOCK:
+        _MERGE_REGISTRY = None
+
+
+def merge_strategy(
+    name: str | None = None,
+) -> Any:
+    """Decorator to register a custom merge strategy class.
+
+    Usage::
+
+        @merge_strategy("my_custom_merge")
+        class MyCustomMerge:
+            def merge(self, context: MergeContext) -> MergeResult:
+                ...
+
+    In workflow config::
+
+        merge_mode: "custom:my_custom_merge"
+    """
+    def decorator(cls: type) -> type:
+        resolved_name = name or cls.__name__
+        registry = get_merge_strategy_registry()
+        registry.register(resolved_name, cls)
+        setattr(cls, "__merge_strategy_name__", resolved_name)
+        return cls
+    return decorator

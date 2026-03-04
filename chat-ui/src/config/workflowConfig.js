@@ -94,6 +94,19 @@ class WorkflowConfig {
   }
 
   /**
+   * Get the workflow marked as entry_point in backend config.
+   * Returns null if no workflow has entry_point: true or configs aren't loaded yet.
+   */
+  getEntryPointWorkflow() {
+    for (const [key, cfg] of this.configs.entries()) {
+      // Skip lowercase aliases (they duplicate the canonical entry)
+      if (key !== cfg?.workflow_name) continue;
+      if (cfg?.entry_point === true) return cfg.workflow_name;
+    }
+    return null;
+  }
+
+  /**
    * Get default workflow type
    */
   getDefaultWorkflow() {

@@ -1,5 +1,6 @@
 // API adapter interface
 import workflowConfig from '../config/workflowConfig';
+import resolveWorkflow from '../utils/resolveWorkflow';
 import config from '../config';
 
 /**
@@ -95,8 +96,7 @@ export class ApiAdapter {
   }
 
   async sendMessageToWorkflow(message, appId, userId, workflowname = null, chatId = null, context = null) {
-    // Use dynamic default workflow type
-    const actualworkflowname = workflowname || workflowConfig.getDefaultWorkflow();
+    const actualworkflowname = resolveWorkflow(workflowname);
     console.log(`Sending message to workflow: ${actualworkflowname}`);
     throw new Error('sendMessageToWorkflow must be implemented');
   }
@@ -186,7 +186,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
   }
 
   async sendMessageToWorkflow(message, appId, userId, workflowname = null, chatId = null, context = null) {
-    const actualworkflowname = workflowname || workflowConfig.getDefaultWorkflow();
+    const actualworkflowname = resolveWorkflow(workflowname);
 
     if (!chatId) {
       console.error('Chat ID is required for sending message to workflow');
@@ -215,8 +215,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
   }
 
   async _sendMessageToWorkflowHttp(message, appId, userId, workflowname = null, chatId = null, context = null) {
-    // Use dynamic default workflow type
-    const actualworkflowname = workflowname || workflowConfig.getDefaultWorkflow();
+    const actualworkflowname = resolveWorkflow(workflowname);
     
     if (!chatId) {
       console.error('Chat ID is required for sending message to workflow');
@@ -252,14 +251,13 @@ export class WebSocketApiAdapter extends ApiAdapter {
   }
 
   createWebSocketConnection(appId, userId, callbacks = {}, workflowname = null, chatId = null) {
-    const actualworkflowname = workflowname || workflowConfig.getDefaultWorkflow();
+    const actualworkflowname = resolveWorkflow(workflowname);
     
     console.log('🛠️ [WS-CONN] WebSocket workflow resolution:', {
       provided: workflowname,
-      fallback: workflowConfig.getDefaultWorkflow(), 
-      actual: actualworkflowname,
+      resolved: actualworkflowname,
+      entryPoint: workflowConfig.getEntryPointWorkflow(),
       availableConfigs: workflowConfig.getAvailableWorkflows(),
-      configs: workflowConfig.configs ? Array.from(workflowConfig.configs.entries()) : 'not available'
     });
     
     if (!chatId) {
@@ -443,15 +441,14 @@ export class WebSocketApiAdapter extends ApiAdapter {
   }
 
   async startChat(appId, workflowname, userId, fetchOpts = {}) {
-    const actualworkflowname = workflowname || workflowConfig.getDefaultWorkflow();
+    const actualworkflowname = resolveWorkflow(workflowname);
     const clientRequestId = crypto?.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random().toString(36).slice(2));
     
     console.log('🛠️ [WS-API] startChat workflow resolution:', {
       provided: workflowname,
-      fallback: workflowConfig.getDefaultWorkflow(), 
-      actual: actualworkflowname,
+      resolved: actualworkflowname,
+      entryPoint: workflowConfig.getEntryPointWorkflow(),
       availableConfigs: workflowConfig.getAvailableWorkflows(),
-      configs: workflowConfig.configs ? Array.from(workflowConfig.configs.entries()) : 'not available'
     });
     
     try {
@@ -526,8 +523,7 @@ export class RestApiAdapter extends ApiAdapter {
   }
 
   async sendMessageToWorkflow(message, appId, userId, workflowname = null, chatId = null, context = null) {
-    // Use dynamic default workflow type
-    const actualworkflowname = workflowname || workflowConfig.getDefaultWorkflow();
+    const actualworkflowname = resolveWorkflow(workflowname);
     
     if (!chatId) {
       console.error('Chat ID is required for sending message to workflow');
@@ -629,7 +625,7 @@ export class RestApiAdapter extends ApiAdapter {
   }
 
   async startChat(appId, workflowname, userId, fetchOpts = {}) {
-    const actualworkflowname = workflowname || workflowConfig.getDefaultWorkflow();
+    const actualworkflowname = resolveWorkflow(workflowname);
     const clientRequestId = crypto?.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random().toString(36).slice(2));
     
     try {

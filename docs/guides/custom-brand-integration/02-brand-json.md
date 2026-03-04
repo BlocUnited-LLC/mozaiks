@@ -1,11 +1,26 @@
 # Step 2 — brand.json
 
-> **Guide:** Customizing Your Frontend · Step 2 of 5  
-> **Live:** https://docs.mozaiks.ai/guides/custom-frontend/brand-json.html
+> **Guide:** Customizing Your Frontend · Step 2 of 5
 
 File location: `brand/public/brand.json` — served at `/brand.json`
 
 Visual identity only. UI structure, menus, and action icons belong in `ui.json`.
+
+---
+
+!!! tip "New to Development?"
+
+    **Let AI configure your brand.json!** Copy this prompt into Claude Code:
+
+    ```
+    I want to configure brand.json for my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/custom-brand-integration/02-brand-json.md
+
+    My brand colors are: [describe your colors]
+    My logo file is: [filename]
+    ```
 
 ---
 

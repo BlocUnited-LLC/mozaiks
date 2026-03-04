@@ -1,6 +1,11 @@
 # ==============================================================================
 # FILE: ag2_runtime_logger.py
-# DESCRIPTION: 
+# DESCRIPTION: AG2 runtime logging controller with OpenTelemetry integration.
+#
+# This module provides:
+# - Session-scoped AG2 runtime logging (file/SQLite backends)
+# - Integration with RealtimeTokenLogger for token tracking
+# - Automatic OpenTelemetry initialization when enabled
 # ==============================================================================
 
 # === MOZAIKS-CORE-HEADER ===
@@ -20,6 +25,30 @@ from logs.logging_config import get_observability_logger, get_ag2_runtime_log_pa
 from mozaiksai.core.observability.realtime_token_logger import get_realtime_token_logger
 
 log = get_observability_logger("ag2.runtime")
+
+# Track if OTEL has been initialized
+_otel_initialized = False
+
+
+def _ensure_otel_initialized() -> None:
+    """Initialize OpenTelemetry tracing if enabled and not already done.
+
+    This is called once on the first runtime logging session start.
+    """
+    global _otel_initialized
+    if _otel_initialized:
+        return
+
+    try:
+        from mozaiksai.core.observability.otel_tracing import initialize_otel_tracing
+        if initialize_otel_tracing():
+            log.info("OpenTelemetry tracing initialized via AG2RuntimeLoggingController")
+        _otel_initialized = True
+    except ImportError:
+        _otel_initialized = True  # Don't retry if module unavailable
+    except Exception as e:
+        log.debug(f"OTEL initialization skipped: {e}")
+        _otel_initialized = True
 
 
 class AG2RuntimeLoggingController:
@@ -61,6 +90,9 @@ class AG2RuntimeLoggingController:
         if not self.should_enable():
             log.debug("AG2 runtime logging disabled via env")
             return False
+
+        # Initialize OTEL on first session (lazy, once per process)
+        _ensure_otel_initialized()
 
         if self._active:
             log.debug("Active AG2 runtime session detected; restarting")

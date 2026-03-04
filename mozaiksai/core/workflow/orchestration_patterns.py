@@ -1795,12 +1795,12 @@ async def run_workflow_orchestration(
             except Exception as _seed_err:
                 wf_logger.debug(f" [{workflow_name_upper}] Failed merging persisted extra context: {_seed_err}")
 
-            # Permanent runtime variable: does this workflow declare nested child chats?
+            # Permanent runtime variable: does this workflow declare fan-out journeys?
             try:
                 if context is not None:
-                    from mozaiksai.core.workflow.pack.graph import workflow_has_nested_chats
+                    from mozaiksai.core.workflow.pack.config import workflow_has_journeys
 
-                    context.set("has_children", bool(workflow_has_nested_chats(workflow_name)))
+                    context.set("has_children", bool(workflow_has_journeys(workflow_name)))
             except Exception:
                 pass
             context_time = (perf_counter() - context_start) * 1000

@@ -175,44 +175,45 @@ Without `OrchestrationPort`, the orchestrator has no formal contract to implemen
 
 ### Checklist
 
-#### 1.1 — Create `mozaiksai/core/contracts/`
+#### 1.1 — Create `mozaiksai/core/contracts/`  ✅
 
-- [ ] `__init__.py` — Aggregate re-exports (~35 symbols)
-- [ ] `events.py` — `DomainEvent`, `EventEnvelope`, `EVENT_SCHEMA_VERSION`, `EVENT_TYPE_PATTERN`
+- [x] `__init__.py` — Aggregate re-exports (35 symbols in `__all__`)
+- [x] `events.py` — `DomainEvent`, `EventEnvelope`, `EVENT_SCHEMA_VERSION`, `EVENT_TYPE_PATTERN`
   - Pydantic v2 models, extra=forbid, UTC normalization, regex-validated event_type
-- [ ] `runner.py` — `RunRequest`, `ResumeRequest`, `AI_RUNNER_PROTOCOL_VERSION`
-  - Legacy field coercion (`input`→`payload`, `from_seq`→`last_seq`)
-- [ ] `replay.py` — `ReplayBoundaryPayload`, `SnapshotEventPayload`, protocol version + event type constants
-- [ ] `artifacts.py` — `ArtifactRef`, `ArtifactCreatedPayload`, `ArtifactUpdatedPayload`, `ArtifactStateReplacedPayload`, `ArtifactStatePatchedPayload`, size threshold constant
-- [ ] `sandbox.py` — `SandboxExecutionResult`
-- [ ] `secrets.py` — `SecretRef`
-- [ ] `taxonomy.py` — `CANONICAL_EVENT_TAXONOMY`, `PROCESS_STARTED/COMPLETED/FAILED_EVENT_TYPE`
-- [ ] `tools.py` — `ToolExecutionRequest`, `ToolExecutionResult`, `TOOL_EXECUTION_SCHEMA_VERSION`
+- [x] `runner.py` — `RunRequest`, `ResumeRequest`, `AI_RUNNER_PROTOCOL_VERSION`
+  - Legacy field coercion (`input`→`payload`, `checkpoint_key`→`checkpoint_id`)
+- [x] `replay.py` — `ReplayBoundaryPayload`, `SnapshotEventPayload`, protocol version + event type constants
+- [x] `artifacts.py` — `ArtifactRef`, `ArtifactCreatedPayload`, `ArtifactUpdatedPayload`, `ArtifactStateReplacedPayload`, `ArtifactStatePatchedPayload`, `LARGE_ARTIFACT_INLINE_THRESHOLD_BYTES` (256KB)
+- [x] `sandbox.py` — `SandboxExecutionResult`
+- [x] `secrets.py` — `SecretRef`
+- [x] `taxonomy.py` — `CANONICAL_EVENT_TAXONOMY`, `PROCESS_STARTED/COMPLETED/FAILED_EVENT_TYPE`
+- [x] `tools.py` — `ToolExecutionRequest`, `ToolExecutionResult`, `TOOL_EXECUTION_SCHEMA_VERSION`
 
-#### 1.2 — Create `mozaiksai/core/ports/`
+#### 1.2 — Create `mozaiksai/core/ports/`  ✅
 
-- [ ] `__init__.py` — Aggregate re-exports (~12 symbols)
-- [ ] `orchestration.py` — `OrchestrationPort` (`run`, `resume`, `cancel`, `capabilities`)
-- [ ] `ai_runner.py` — `AIWorkflowRunnerPort` (extends OrchestrationPort, marker protocol)
-- [ ] `runtime.py` — `LedgerPort`, `ControlPlanePort`, `ArtifactPort`, `ClockPort`, `LoggerPort`
-- [ ] `sandbox.py` — `SandboxPort`
-- [ ] `secrets.py` — `SecretsPort`
-- [ ] `tool_execution.py` — `ToolExecutionPort`
-- [ ] `context.py` — `RuntimeContext` Protocol (properties for run_id, tenant_id, ledger, control_plane, etc.)
-- [ ] `registry.py` — `WorkflowRegistry` Protocol, `PluginRegistry` Protocol, `InMemoryWorkflowRegistry`, `InMemoryPluginRegistry`, `@workflow` decorator, `@plugin` decorator
+- [x] `__init__.py` — Aggregate re-exports (26 symbols in `__all__`)
+- [x] `orchestration.py` — `OrchestrationPort` (`run`, `resume`, `cancel`, `capabilities`)
+- [x] `ai_runner.py` — `AIWorkflowRunnerPort` (extends OrchestrationPort, marker protocol)
+- [x] `runtime.py` — `LedgerPort`, `ControlPlanePort`, `ArtifactPort`, `ClockPort`, `LoggerPort`
+- [x] `sandbox.py` — `SandboxPort`
+- [x] `secrets.py` — `SecretsPort`
+- [x] `tool_execution.py` — `ToolExecutionPort`
+- [x] `context.py` — `RuntimeContext` Protocol (properties for run_id, tenant_id, ledger, control_plane, etc.)
+- [x] `registry.py` — `WorkflowRegistry` Protocol, `PluginRegistry` Protocol, `InMemoryWorkflowRegistry`, `InMemoryPluginRegistry`, `@workflow` decorator, `@plugin` decorator
+- [x] `ag2_adapter.py` — `AG2OrchestrationAdapter` (implements OrchestrationPort, wraps `run_workflow_orchestration`)
 
-#### 1.3 — Update Exports
+#### 1.3 — Update Exports  ✅
 
-- [ ] Add `contracts` and `ports` to `mozaiksai/core/__init__.py` re-exports
-- [ ] Add new packages to `pyproject.toml` packages list
-- [ ] Verify: `from mozaiks.core.contracts import RunRequest, DomainEvent` works
-- [ ] Verify: `from mozaiks.core.ports import OrchestrationPort` works
+- [x] Add `contracts` and `ports` to `mozaiksai/core/__init__.py` re-exports
+- [x] Add new packages to `pyproject.toml` packages list (both `mozaiks.*` and `mozaiksai.*` namespaces)
+- [x] Verify: `from mozaiks.core.contracts import RunRequest, DomainEvent` works
+- [x] Verify: `from mozaiks.core.ports import OrchestrationPort` works
 
-#### 1.4 — Validation
+#### 1.4 — Validation  ✅
 
-- [ ] All existing tests still pass (zero regression)
-- [ ] New import smoke test passes
-- [ ] No existing file was modified (except `__init__.py` exports + `pyproject.toml`)
+- [x] All existing tests still pass (zero regression)
+- [x] New import smoke test passes
+- [x] No existing file was modified (except `__init__.py` exports + `pyproject.toml`)
 
 ---
 

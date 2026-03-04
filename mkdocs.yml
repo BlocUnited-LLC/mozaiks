@@ -79,14 +79,24 @@ nav:
   - Home: index.md
   - AI-Assisted Setup: setup-prompt.md
   - Getting Started: getting-started.md
-  - Adding a Workflow: guides/adding-a-workflow.md
+  - Setting Up Databases:
+      - Overview: guides/databases/01-overview.md
+      - MongoDB: guides/databases/02-mongodb.md
+      - Keycloak: guides/databases/03-keycloak.md
+      - Production: guides/databases/04-production.md
+  - Adding a Workflow:
+      - Overview: guides/adding-workflows/01-overview.md
+      - Backend Basics: guides/adding-workflows/02-backend-basics.md
+      - Tools: guides/adding-workflows/03-tools.md
+      - UI Components: guides/adding-workflows/04-ui-components.md
+      - Testing: guides/adding-workflows/05-testing.md
   - Customizing Frontend:
-      - Overview: guides/customizing-frontend/01-overview.md
-      - Brand JSON: guides/customizing-frontend/02-brand-json.md
-      - UI JSON: guides/customizing-frontend/03-ui-json.md
-      - Assets: guides/customizing-frontend/04-assets.md
-      - Wiring: guides/customizing-frontend/05-wiring.md
-      - Auth JSON: guides/customizing-frontend/06-auth-json.md
+      - Overview: guides/custom-brand-integration/01-overview.md
+      - Brand JSON: guides/custom-brand-integration/02-brand-json.md
+      - UI JSON: guides/custom-brand-integration/03-ui-json.md
+      - Assets: guides/custom-brand-integration/04-assets.md
+      - Wiring: guides/custom-brand-integration/05-wiring.md
+      - Auth JSON: guides/custom-brand-integration/06-auth-json.md
   - Architecture:
       - Keycloak Auth: architecture/keycloak-auth.md
       - Frontend UI:

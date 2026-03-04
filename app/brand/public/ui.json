@@ -32,18 +32,12 @@
     "sublabel":     "Mission Control",
     "menu": [
       {
-        "id":     "profile-settings",
-        "label":  "Profile Settings",
+        "id":     "admin-portal",
+        "label":  "Admin Portal",
         "icon":   "settings.svg",
         "action": "navigate",
-        "href":   "/profile"
-      },
-      {
-        "id":     "preferences",
-        "label":  "Preferences",
-        "icon":   "settings.svg",
-        "action": "navigate",
-        "href":   "/preferences"
+        "href":   "/admin",
+        "requiresRole": "admin"
       },
       {
         "id":   "divider-before-signout",

@@ -78,7 +78,7 @@ chat-ui/src/adapters/                    # Frontend auth modules
 app/                                     # Template app
 ├── App.jsx                              # Initializes Keycloak adapter, passes to MozaiksApp
 ├── brand/public/auth.json               # Per-app Keycloak config
-└── brand/public/silent-check-sso.html   # Silent SSO redirect target
+└── brand/public/_system/silent-check-sso.html  # Silent SSO redirect target
 ```
 
 ### What each module does
@@ -97,7 +97,7 @@ app/                                     # Template app
 | `keycloakAuth.js` | `KeycloakAuthAdapter` — wraps `keycloak-js`, fetches `/auth.json` for config, sets `window.mozaiksAuth.getAccessToken()`. |
 | `auth.js` | `AuthAdapter` base class + `ExternalAuthAdapter` (embedded mode) + `TokenAuthAdapter` (localStorage). |
 | `api.js` | `authFetch()` injects `Authorization: Bearer` headers. WebSocket appends `?access_token=`. |
-| `App.jsx` | Template entry — reads `app.json` auth flag, calls `createKeycloakAuthAdapter()`, passes adapter to `<MozaiksApp>`. |
+| `App.jsx` | Template entry — calls `createKeycloakAuthAdapter()` and passes the adapter to `<MozaiksApp>`. Auth is always on; mock mode via `VITE_MOCK_MODE=true`. |
 
 ---
 

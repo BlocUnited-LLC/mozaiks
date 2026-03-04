@@ -118,7 +118,13 @@ def get_platform_router() -> APIRouter:  # noqa: C901
         if theme_mgr is None:
             raise HTTPException(status_code=503, detail="Theme service unavailable")
         try:
-            return await theme_mgr.get_theme(app_id)
+            result = await theme_mgr.get_theme(app_id)
+            if result is None:
+                # No custom theme in Mongo — frontend falls through to brand.json
+                raise HTTPException(status_code=404, detail="No custom theme")
+            return result
+        except HTTPException:
+            raise
         except Exception as exc:
             logger.exception("THEME_FETCH_FAILED")
             raise HTTPException(status_code=500, detail="Failed to load theme") from exc

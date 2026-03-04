@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:docs.ag2.ai)",
+      "Bash(md \"c:\\\\Users\\\\mbari\\\\OneDrive\\\\Desktop\\\\BlocUnited\\\\BlocUnited Code\\\\mozaiks\\\\docs\\\\guides\\\\adding-workflows\")",
+      "Bash(md \"c:\\\\Users\\\\mbari\\\\OneDrive\\\\Desktop\\\\BlocUnited\\\\BlocUnited Code\\\\mozaiks\\\\docs\\\\instruction-prompts\\\\telemetry\")",
+      "Bash(npm run dev:*)",
+      "Bash(timeout:*)",
+      "Bash(npm install:*)",
+      "Bash(dir:*)"
+    ]
+  }
+}

@@ -1,4 +1,9 @@
 workflow_name: HelloWorld
+# entry_point: true means this workflow activates on app load.
+# Rules: single workflow → always true. Multi-workflow with journey → first step.
+# Multi-workflow peers with no clear primary → omit (frontend shows picker).
+# At most ONE workflow per app should have entry_point: true.
+entry_point: true
 max_turns: 10
 human_in_the_loop: true
 startup_mode: AgentDriven

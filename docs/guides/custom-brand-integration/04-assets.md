@@ -1,9 +1,23 @@
 # Step 4 — Assets & Icons
 
-> **Guide:** Customizing Your Frontend · Step 4 of 5  
-> **Live:** https://docs.mozaiks.ai/guides/custom-frontend/assets.html
+> **Guide:** Customizing Your Frontend · Step 4 of 5
 
 All brand assets live in `brand/public/assets/` — served statically from the app root.
+
+---
+
+!!! tip "New to Development?"
+
+    **Let AI set up your assets!** Copy this prompt into Claude Code:
+
+    ```
+    I want to add brand assets to my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/custom-brand-integration/04-assets.md
+
+    I have these files ready: [list your logo, icons, fonts]
+    ```
 
 ---
 

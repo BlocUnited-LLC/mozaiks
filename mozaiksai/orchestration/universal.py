@@ -3,7 +3,7 @@
 # DESCRIPTION: UniversalOrchestrator — Layer 1.5 orchestration engine.
 #
 # Sits between single-GroupChat execution (AG2OrchestrationAdapter) and
-# cross-workflow pack orchestration (WorkflowPackCoordinator / JourneyOrchestrator).
+# cross-workflow pack orchestration (WorkflowPackCoordinator).
 #
 # It controls GroupChats — pause, decompose, spawn parallel sub-GroupChats,
 # merge results, and resume the parent.

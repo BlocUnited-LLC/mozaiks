@@ -1,11 +1,25 @@
 # Step 6 — auth.json
 
-> **Guide:** Customizing Your Frontend · Step 6  
-> **Live:** https://docs.mozaiks.ai/guides/custom-frontend/auth-json.html
+> **Guide:** Customizing Your Frontend · Step 6
 
 File location: `brand/public/auth.json` — served at `/auth.json`
 
 Authentication configuration for your Mozaiks app. Controls the Keycloak identity provider, login page branding, social login, roles, and session policy.
+
+---
+
+!!! tip "New to Development?"
+
+    **Let AI configure your auth.json!** Copy this prompt into Claude Code:
+
+    ```
+    I want to configure auth.json for my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/custom-brand-integration/06-auth-json.md
+
+    I want to customize: [login page / social login / registration]
+    ```
 
 ---
 
@@ -278,8 +292,6 @@ export default function App() {
     <MozaiksApp
       appName={appConfig.appName}
       defaultAppId={appConfig.appId}
-      defaultWorkflow={appConfig.defaultWorkflow}
-      defaultUserId={appConfig.defaultUserId}
       apiAdapter={apiAdapter}
       authAdapter={authAdapter}
     />
@@ -296,7 +308,7 @@ Set `AUTH_ENABLED=false` in your `.env` file. The backend skips JWT validation a
 
 ### Silent SSO
 
-The template includes `brand/public/silent-check-sso.html` which enables Keycloak's silent login check. If a user has an active Keycloak session in another tab, they'll be logged in automatically without a redirect.
+The template includes `brand/public/_system/silent-check-sso.html` which enables Keycloak's silent login check. If a user has an active Keycloak session in another tab, they'll be logged in automatically without a redirect. This file is in the `_system/` subfolder so it doesn't clutter the user-editable config files.
 
 ### Token flow
 

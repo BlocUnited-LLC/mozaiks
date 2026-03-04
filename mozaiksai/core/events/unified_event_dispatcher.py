@@ -28,7 +28,6 @@ from abc import ABC, abstractmethod
 from mozaiksai.core.events.auto_tool_handler import AutoToolEventHandler
 from mozaiksai.core.events.usage_ingest import get_usage_ingest_client
 from mozaiksai.core.workflow.pack.workflow_pack_coordinator import WorkflowPackCoordinator
-from mozaiksai.core.workflow.pack.journey_orchestrator import JourneyOrchestrator
 from logs.logging_config import get_core_logger, get_workflow_logger
 from mozaiksai.core.events.event_serialization import serialize_event_content
 
@@ -186,16 +185,18 @@ class UnifiedEventDispatcher:
             "created": datetime.now(UTC).isoformat(),
         }
         self._auto_tool_handler = AutoToolEventHandler()
+        # Single coordinator handles BOTH parallel MFJ fan-out/fan-in AND
+        # sequential journey auto-advance. JourneyOrchestrator was merged
+        # into WorkflowPackCoordinator.
         self._pack_coordinator = WorkflowPackCoordinator()
-        self._journey_orchestrator = JourneyOrchestrator()
         # Advisory-only usage ingest (measurement signals only; no billing mutations).
         self._usage_ingest = get_usage_ingest_client()
         self._setup_default_handlers()
         self.register_handler("chat.structured_output_ready", self._auto_tool_handler.handle_structured_output_ready)
         self.register_handler("chat.structured_output_ready", self._pack_coordinator.handle_structured_output_ready)
+        # handle_run_complete now dispatches to fan-in OR journey auto-advance
+        # internally, so a single registration covers both paths.
         self.register_handler("chat.run_complete", self._pack_coordinator.handle_run_complete)
-        # Journey auto-advance (pack v2)
-        self.register_handler("chat.run_complete", self._journey_orchestrator.handle_run_complete)
         # Best-effort control-plane notification; must never block execution.
         self.register_handler("chat.usage_summary", self._usage_ingest.handle_usage_summary)
 

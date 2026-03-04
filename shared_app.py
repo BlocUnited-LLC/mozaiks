@@ -1216,9 +1216,9 @@ async def chat_meta(
     try:
         has_children = False
         try:
-            from mozaiksai.core.workflow.pack.graph import workflow_has_nested_chats
+            from mozaiksai.core.workflow.pack.config import workflow_has_journeys
 
-            has_children = workflow_has_nested_chats(workflow_name)
+            has_children = workflow_has_journeys(workflow_name)
         except Exception:
             has_children = False
 
@@ -1445,9 +1445,9 @@ async def websocket_endpoint(
     try:
         has_children = False
         try:
-            from mozaiksai.core.workflow.pack.graph import workflow_has_nested_chats
+            from mozaiksai.core.workflow.pack.config import workflow_has_journeys
 
-            has_children = workflow_has_nested_chats(workflow_name)
+            has_children = workflow_has_journeys(workflow_name)
         except Exception:
             has_children = False
 

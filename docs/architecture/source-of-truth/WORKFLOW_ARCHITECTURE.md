@@ -136,6 +136,28 @@ Practical rule: comparing billing/limits directly to AG-UI protocol is a categor
 
 Execution modes are invocation flows.
 
+### Entry Point Resolution
+
+Each app may designate at most **one** workflow as the entry point by setting `entry_point: true` in its `orchestrator.yaml`. The frontend uses this to determine which workflow to activate on load. If no workflow has `entry_point: true`, the frontend falls back to ask-mode or a workflow picker.
+
+**Rules for setting `entry_point`:**
+
+| Scenario | Rule |
+|---|---|
+| Single workflow | Always `entry_point: true` |
+| Multi-workflow with journey (`workflow_graph.json`) | First step in the journey gets `entry_point: true` |
+| Multi-workflow with a clear primary | The user-facing starting workflow gets it |
+| Multi-workflow, all equal peers | No workflow gets `entry_point` (frontend shows picker) |
+
+The frontend resolution chain (implemented in `resolveWorkflow.js`) is:
+
+1. **Explicit** — URL path or resume target (always wins)
+2. **Backend entry_point** — the workflow with `entry_point: true` from `/api/workflows`
+3. **Singleton auto-select** — if exactly one workflow exists, use it
+4. **null** — no resolution; frontend enters ask-mode or shows a workflow picker
+
+This field is frontend-facing metadata only. The backend orchestration layer (`UniversalOrchestrator`, `WorkflowPackCoordinator`) ignores it — they execute whatever workflow they're told to run.
+
 ### Mode 1: AI Workflow
 
 - Entry: chat/user prompt
