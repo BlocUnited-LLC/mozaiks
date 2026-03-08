@@ -249,6 +249,22 @@ async function loadThemeFromBrand() {
 const themeCache = new Map();
 const CURRENT_APP_ID_STORAGE_KEY = 'mozaiks.current_app_id';
 
+function getAccessToken() {
+  try {
+    if (typeof window !== 'undefined' && window.mozaiksAuth?.getAccessToken) {
+      return window.mozaiksAuth.getAccessToken();
+    }
+  } catch (_) {}
+
+  try {
+    if (typeof localStorage !== 'undefined') {
+      return localStorage.getItem('chatui_token') || localStorage.getItem('access_token');
+    }
+  } catch (_) {}
+
+  return null;
+}
+
 // The brand used when no app-specific theme exists.
 // Apps can configure this via ChatUIProvider → uiConfig.brandId.
 // Brand is determined by the deployment's publicDir; no runtime brand switching.
@@ -305,9 +321,13 @@ async function fetchPlatformOverrides(appId) {
   const timeout    = globalThis.setTimeout(() => controller.abort(), 4000);
 
   try {
+    const token = getAccessToken();
+    const headers = { Accept: 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+
     const response = await fetch(`/api/themes/${encodeURIComponent(appId)}`, {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers,
       signal: controller.signal,
     });
 

@@ -17,7 +17,7 @@ const MOCK_USER = {
 };
 
 const mockAuthAdapter = {
-  /** Auth config loaded from auth.json (or defaults) */
+  /** Auth config (mirrors app.json auth section) */
   authConfig: {
     roles: {
       claimPath: 'realm_access.roles',

@@ -7,7 +7,7 @@ Covers:
 2. ConfigDrivenDecomposition strategy detection
 3. AgentSignalDecomposition strategy detection
 4. ConcatenateMerge and StructuredMerge strategies
-5. GroupChatPool with mocked adapter (sequential & parallel)
+5. DAGExecutor-backed decomposition (via UniversalOrchestrator)
 6. UniversalOrchestrator happy path + decomposition path
 7. OrchestrationPort protocol conformance
 8. Singleton lifecycle (get / reset)
@@ -25,11 +25,11 @@ import pytest
 # ---------------------------------------------------------------------------
 # Imports under test
 # ---------------------------------------------------------------------------
-from mozaiksai.core.contracts.events import EVENT_SCHEMA_VERSION, DomainEvent
-from mozaiksai.core.contracts.runner import ResumeRequest, RunRequest
-from mozaiksai.core.ports.orchestration import OrchestrationPort
+from mozaiksai.contracts.events import EVENT_SCHEMA_VERSION, DomainEvent
+from mozaiksai.contracts.runner import ResumeRequest, RunRequest
+from mozaiksai.ports.orchestration import OrchestrationPort
 
-from mozaiksai.orchestration.decomposition import (
+from mozaiksai.kernel.decomposition import (
     AgentSignalDecomposition,
     ConfigDrivenDecomposition,
     DecompositionContext,
@@ -38,7 +38,7 @@ from mozaiksai.orchestration.decomposition import (
     ExecutionMode,
     SubTask,
 )
-from mozaiksai.orchestration.merge import (
+from mozaiksai.kernel.merge import (
     ChildResult,
     ConcatenateMerge,
     MergeContext,
@@ -46,8 +46,7 @@ from mozaiksai.orchestration.merge import (
     MergeStrategy,
     StructuredMerge,
 )
-from mozaiksai.orchestration.groupchat_pool import GroupChatPool
-from mozaiksai.orchestration.universal import (
+from mozaiksai.kernel.orchestrator import (
     OrchestratorRun,
     RunState,
     UniversalOrchestrator,
@@ -76,7 +75,7 @@ def _make_domain_event(
         occurred_at=_now(),
         run_id=run_id,
         schema_version=EVENT_SCHEMA_VERSION,
-        payload=payload or {"result": "ok"},
+        data=payload or {"result": "ok"},
     )
 
 
@@ -91,10 +90,33 @@ def _make_run_request(
         app_id="app-1",
         user_id="user-1",
         chat_id="chat-1",
-        payload=extra.pop("payload", {"initial_message": "hello"}),
+        context=extra.pop("context", {"initial_message": "hello"}),
         metadata=extra.pop("metadata", {}),
         **extra,
     )
+
+
+class _MockSupervisor:
+    """Test double for RunSupervisor that delegates to a mock adapter."""
+
+    def __init__(self, adapter):
+        self._adapter = adapter
+
+    async def start_run(self, request):
+        async for event in self._adapter.run(request):
+            yield event
+
+    async def resume_run(self, request):
+        resume = getattr(self._adapter, "resume", None)
+        if resume is not None:
+            async for event in resume(request):
+                yield event
+
+    async def cancel_run(self, run_id: str) -> bool:
+        cancel = getattr(self._adapter, "cancel", None)
+        if cancel is not None:
+            await cancel(run_id)
+        return True
 
 
 def _make_child_result(
@@ -338,11 +360,11 @@ class TestAgentSignalDecomposition:
         assert plan.resume_agent == "SynthAgent"
         assert "agent signal" in plan.reason
 
-    def test_pattern_selection_structured_output(self):
+    def test_decomposition_request_structured_output(self):
         strategy = AgentSignalDecomposition()
         ctx = _make_context(trigger_event={
             "structured_data": {
-                "PatternSelection": {
+                "decomposition_request": {
                     "is_multi_workflow": True,
                     "workflows": [
                         {"name": "wf_1", "initial_message": "msg1"},
@@ -356,14 +378,14 @@ class TestAgentSignalDecomposition:
         plan = strategy.detect(ctx)
         assert plan is not None
         assert plan.task_count == 2
-        assert plan.reason == "PatternSelection structured output"
+        assert plan.reason == "agent structured output"
         assert plan.strategy_metadata["decomposition_reason"] == "complex task"
 
-    def test_pattern_selection_not_multi_returns_none(self):
+    def test_decomposition_request_not_multi_returns_none(self):
         strategy = AgentSignalDecomposition()
         ctx = _make_context(trigger_event={
             "structured_data": {
-                "PatternSelection": {
+                "decomposition_request": {
                     "is_multi_workflow": False,
                     "workflows": [{"name": "single"}],
                 },
@@ -571,17 +593,14 @@ class TestUniversalOrchestratorHappyPath:
 
         orchestrator = UniversalOrchestrator(
             decomposition_strategies=[NoOpStrategy()],
+            run_supervisor=_MockSupervisor(mock_adapter),
         )
 
         request = _make_run_request()
         events: list[DomainEvent] = []
 
-        with patch(
-            "mozaiksai.core.ports.ag2_adapter.get_ag2_orchestration_adapter",
-            return_value=mock_adapter,
-        ):
-            async for event in orchestrator.run(request):
-                events.append(event)
+        async for event in orchestrator.run(request):
+            events.append(event)
 
         # Should have the forwarded adapter event + orchestration.run_completed
         event_types = [e.event_type for e in events]
@@ -608,22 +627,19 @@ class TestUniversalOrchestratorHappyPath:
 
         orchestrator = UniversalOrchestrator(
             decomposition_strategies=[NoOpStrategy()],
+            run_supervisor=_MockSupervisor(mock_adapter),
         )
 
         request = _make_run_request(run_id="run-002")
         events: list[DomainEvent] = []
 
-        with patch(
-            "mozaiksai.core.ports.ag2_adapter.get_ag2_orchestration_adapter",
-            return_value=mock_adapter,
-        ):
-            async for event in orchestrator.run(request):
-                events.append(event)
+        async for event in orchestrator.run(request):
+            events.append(event)
 
         completed = [e for e in events if e.event_type == "orchestration.run_completed"]
         assert len(completed) == 1
-        assert completed[0].payload["decomposed"] is False
-        assert completed[0].payload["child_count"] == 0
+        assert completed[0].data["decomposed"] is False
+        assert completed[0].data["child_count"] == 0
 
 
 # ===========================================================================
@@ -674,18 +690,14 @@ class TestUniversalOrchestratorDecomposition:
         orchestrator = UniversalOrchestrator(
             decomposition_strategies=[AlwaysDecompose()],
             auto_resume_parent=False,  # skip resume for simplicity
+            run_supervisor=_MockSupervisor(mock_adapter),
         )
 
-        # Patch both the adapter in universal.py and groupchat_pool.py
         request = _make_run_request()
         events: list[DomainEvent] = []
 
-        with patch(
-            "mozaiksai.core.ports.ag2_adapter.get_ag2_orchestration_adapter",
-            return_value=mock_adapter,
-        ):
-            async for event in orchestrator.run(request):
-                events.append(event)
+        async for event in orchestrator.run(request):
+            events.append(event)
 
         event_types = [e.event_type for e in events]
 
@@ -724,22 +736,19 @@ class TestUniversalOrchestratorDecomposition:
         orchestrator = UniversalOrchestrator(
             decomposition_strategies=[AlwaysDecompose()],
             auto_resume_parent=False,
+            run_supervisor=_MockSupervisor(mock_adapter),
         )
 
         request = _make_run_request()
         events: list[DomainEvent] = []
 
-        with patch(
-            "mozaiksai.core.ports.ag2_adapter.get_ag2_orchestration_adapter",
-            return_value=mock_adapter,
-        ):
-            async for event in orchestrator.run(request):
-                events.append(event)
+        async for event in orchestrator.run(request):
+            events.append(event)
 
         completed = [e for e in events if e.event_type == "orchestration.run_completed"]
         assert len(completed) == 1
-        assert completed[0].payload["decomposed"] is True
-        assert completed[0].payload["child_count"] >= 1
+        assert completed[0].data["decomposed"] is True
+        assert completed[0].data["child_count"] >= 1
 
 
 # ===========================================================================
@@ -773,22 +782,19 @@ class TestUniversalOrchestratorErrors:
 
         orchestrator = UniversalOrchestrator(
             decomposition_strategies=[NoOpStrategy()],
+            run_supervisor=_MockSupervisor(mock_adapter),
         )
 
         request = _make_run_request()
         events: list[DomainEvent] = []
 
-        with patch(
-            "mozaiksai.core.ports.ag2_adapter.get_ag2_orchestration_adapter",
-            return_value=mock_adapter,
-        ):
-            async for event in orchestrator.run(request):
-                events.append(event)
+        async for event in orchestrator.run(request):
+            events.append(event)
 
         event_types = [e.event_type for e in events]
         assert "orchestration.run_failed" in event_types
         failed = [e for e in events if e.event_type == "orchestration.run_failed"]
-        assert "AG2 exploded" in failed[0].payload["error"]
+        assert "AG2 exploded" in failed[0].data["error"]
 
 
 # ===========================================================================
@@ -835,186 +841,8 @@ class TestSingleton:
 
 
 # ===========================================================================
-# 11. GroupChatPool (isolated)
+# 11. GroupChatPool → DELETED (replaced by DAGExecutor, tested in test_dag_executor.py)
 # ===========================================================================
-class TestGroupChatPool:
-    """Test GroupChatPool with mocked adapter."""
-
-    @pytest.mark.asyncio
-    async def test_sequential_execution(self):
-        """Sequential pool executes sub-tasks one at a time."""
-        plan = DecompositionPlan(
-            sub_tasks=(
-                SubTask(workflow_name="wf_a", task_id="ta"),
-                SubTask(workflow_name="wf_b", task_id="tb"),
-            ),
-            execution_mode=ExecutionMode.SEQUENTIAL,
-        )
-
-        mock_adapter = MagicMock()
-        call_order: list[str] = []
-
-        async def _mock_run(request: RunRequest) -> AsyncIterator[DomainEvent]:
-            call_order.append(request.workflow_name)
-            yield _make_domain_event(
-                event_type="workflow.run_completed",
-                run_id=request.run_id,
-                payload={"result": f"done-{request.workflow_name}"},
-            )
-
-        mock_adapter.run = _mock_run
-
-        pool = GroupChatPool(
-            parent_run_id="parent-1",
-            parent_app_id="app-1",
-            parent_user_id="user-1",
-        )
-
-        events: list[DomainEvent] = []
-        with patch(
-            "mozaiksai.core.ports.ag2_adapter.get_ag2_orchestration_adapter",
-            return_value=mock_adapter,
-        ):
-            async for event in pool.execute(plan):
-                events.append(event)
-
-        # Both sub-tasks should complete
-        assert len(pool.results) == 2
-        assert pool.results[0].workflow_name == "wf_a"
-        assert pool.results[1].workflow_name == "wf_b"
-
-        # Event lifecycle
-        event_types = [e.event_type for e in events]
-        assert event_types[0] == "orchestration.pool_started"
-        assert event_types[-1] == "orchestration.pool_completed"
-
-    @pytest.mark.asyncio
-    async def test_parallel_execution(self):
-        """Parallel pool fires sub-tasks concurrently."""
-        plan = DecompositionPlan(
-            sub_tasks=(
-                SubTask(workflow_name="wf_x", task_id="tx"),
-                SubTask(workflow_name="wf_y", task_id="ty"),
-            ),
-            execution_mode=ExecutionMode.PARALLEL,
-        )
-
-        mock_adapter = MagicMock()
-
-        async def _mock_run(request: RunRequest) -> AsyncIterator[DomainEvent]:
-            # Brief delay to simulate async work
-            await asyncio.sleep(0.01)
-            yield _make_domain_event(
-                event_type="workflow.run_completed",
-                run_id=request.run_id,
-                payload={"result": f"done-{request.workflow_name}"},
-            )
-
-        mock_adapter.run = _mock_run
-
-        pool = GroupChatPool(
-            parent_run_id="parent-2",
-            parent_app_id="app-1",
-            parent_user_id="user-1",
-        )
-
-        events: list[DomainEvent] = []
-        with patch(
-            "mozaiksai.core.ports.ag2_adapter.get_ag2_orchestration_adapter",
-            return_value=mock_adapter,
-        ):
-            async for event in pool.execute(plan):
-                events.append(event)
-
-        assert len(pool.results) == 2
-        event_types = [e.event_type for e in events]
-        assert "orchestration.pool_started" in event_types
-        assert "orchestration.pool_completed" in event_types
-
-    @pytest.mark.asyncio
-    async def test_sub_task_failure_recorded(self):
-        """A failing sub-task records error in ChildResult."""
-        plan = DecompositionPlan(
-            sub_tasks=(SubTask(workflow_name="wf_boom", task_id="t_boom"),),
-            execution_mode=ExecutionMode.SEQUENTIAL,
-        )
-
-        mock_adapter = MagicMock()
-
-        async def _mock_run(request: RunRequest) -> AsyncIterator[DomainEvent]:
-            raise RuntimeError("sub-task crashed")
-            yield  # pragma: no cover
-
-        mock_adapter.run = _mock_run
-
-        pool = GroupChatPool(
-            parent_run_id="parent-3",
-            parent_app_id="app-1",
-            parent_user_id="user-1",
-        )
-
-        events: list[DomainEvent] = []
-        with patch(
-            "mozaiksai.core.ports.ag2_adapter.get_ag2_orchestration_adapter",
-            return_value=mock_adapter,
-        ):
-            async for event in pool.execute(plan):
-                events.append(event)
-
-        assert len(pool.results) == 1
-        assert pool.results[0].success is False
-        assert "sub-task crashed" in pool.results[0].error
-
-        # Should see process.failed event
-        event_types = [e.event_type for e in events]
-        assert "process.failed" in event_types
-
-    @pytest.mark.asyncio
-    async def test_pool_completed_payload(self):
-        """Verify pool_completed event has correct counts."""
-        plan = DecompositionPlan(
-            sub_tasks=(
-                SubTask(workflow_name="wf_ok", task_id="t_ok"),
-                SubTask(workflow_name="wf_fail", task_id="t_fail"),
-            ),
-            execution_mode=ExecutionMode.SEQUENTIAL,
-        )
-
-        mock_adapter = MagicMock()
-        call_idx = 0
-
-        async def _mock_run(request: RunRequest) -> AsyncIterator[DomainEvent]:
-            nonlocal call_idx
-            call_idx += 1
-            if call_idx == 2:
-                raise RuntimeError("second fails")
-            yield _make_domain_event(
-                event_type="workflow.run_completed",
-                run_id=request.run_id,
-            )
-
-        mock_adapter.run = _mock_run
-
-        pool = GroupChatPool(
-            parent_run_id="parent-4",
-            parent_app_id="app-1",
-            parent_user_id="user-1",
-        )
-
-        events: list[DomainEvent] = []
-        with patch(
-            "mozaiksai.core.ports.ag2_adapter.get_ag2_orchestration_adapter",
-            return_value=mock_adapter,
-        ):
-            async for event in pool.execute(plan):
-                events.append(event)
-
-        pool_done = [e for e in events if e.event_type == "orchestration.pool_completed"]
-        assert len(pool_done) == 1
-        assert pool_done[0].payload["total"] == 2
-        assert pool_done[0].payload["succeeded"] == 1
-        assert pool_done[0].payload["failed"] == 1
-        assert pool_done[0].payload["all_succeeded"] is False
 
 
 # ===========================================================================
@@ -1024,7 +852,7 @@ class TestOrchestrationEvents:
     """Test event emission helpers."""
 
     def test_event_kind_constants_are_strings(self):
-        from mozaiksai.orchestration.events import (
+        from mozaiksai.kernel.orchestration_events import (
             EVENT_KIND_DECOMPOSITION_STARTED,
             EVENT_KIND_MERGE_COMPLETED,
             EVENT_KIND_SUBTASK_SPAWNED,
@@ -1034,9 +862,9 @@ class TestOrchestrationEvents:
         assert isinstance(EVENT_KIND_SUBTASK_SPAWNED, str)
 
     def test_emit_decomposition_started(self):
-        from mozaiksai.orchestration.events import emit_decomposition_started
+        from mozaiksai.kernel.orchestration_events import emit_decomposition_started
 
-        with patch("mozaiksai.orchestration.events.emit_handoff_event") as mock_emit:
+        with patch("mozaiksai.kernel.orchestration_events.emit_handoff_event") as mock_emit:
             emit_decomposition_started(
                 run_id="r1",
                 workflow_name="wf",
@@ -1050,9 +878,9 @@ class TestOrchestrationEvents:
             assert args[0][1]["task_count"] == 3
 
     def test_emit_merge_completed(self):
-        from mozaiksai.orchestration.events import emit_merge_completed
+        from mozaiksai.kernel.orchestration_events import emit_merge_completed
 
-        with patch("mozaiksai.orchestration.events.emit_handoff_event") as mock_emit:
+        with patch("mozaiksai.kernel.orchestration_events.emit_handoff_event") as mock_emit:
             emit_merge_completed(
                 run_id="r1",
                 workflow_name="wf",
@@ -1072,7 +900,7 @@ class TestPackageExports:
     """Verify the orchestration package exports all Phase 4 symbols."""
 
     def test_all_phase4_symbols_importable(self):
-        from mozaiksai.orchestration import __all__ as exports
+        from mozaiksai.kernel import __all__ as exports
         expected = {
             "create_ai_workflow_runner",
             "DecompositionStrategy",
@@ -1088,7 +916,6 @@ class TestPackageExports:
             "ChildResult",
             "ConcatenateMerge",
             "StructuredMerge",
-            "GroupChatPool",
             "UniversalOrchestrator",
             "OrchestratorRun",
             "RunState",
@@ -1101,6 +928,6 @@ class TestPackageExports:
 
     def test_all_symbols_actually_resolve(self):
         """Every name in __all__ should be importable from the package."""
-        import mozaiksai.orchestration as pkg
+        import mozaiksai.kernel as pkg
         for name in pkg.__all__:
             assert hasattr(pkg, name), f"'{name}' in __all__ but not importable"

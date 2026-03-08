@@ -30,7 +30,7 @@ const mockAuthAdapter = {
  * Minimal mock API adapter for development.
  */
 const mockApiAdapter = {
-  baseUrl: import.meta.env.VITE_API_URL || 'http://localhost:8080',
+  baseUrl: import.meta.env.VITE_API_URL || 'http://localhost:8000',
   fetch: (path, options = {}) =>
     fetch(`${mockApiAdapter.baseUrl}${path}`, {
       ...options,

@@ -43,7 +43,7 @@ mozaiks/
 | `OPENAI_API_KEY` | Your OpenAI key |
 | `MONGO_URI` | `mongodb://localhost:27017` (local) or your Atlas URI |
 | `ENVIRONMENT` | `development` or `production` |
-| `AUTH_ENABLED` | `false` for local dev, `true` with real OIDC in prod |
+| `AUTH_ENABLED` | `true` by default (production-parity local + prod). Set `false` only as temporary fallback when Keycloak is unavailable |
 | `MOZAIKS_OIDC_AUTHORITY` | Your OIDC provider URL (when `AUTH_ENABLED=true`) |
 | `AUTH_AUDIENCE` | JWT audience claim |
 
@@ -151,7 +151,7 @@ const WORKFLOW_REGISTRY = {
 
 ```powershell
 # 1. Start MongoDB
-docker compose -f infra/compose/docker-compose.yml up mongo -d
+docker compose -f infra/compose/docker-compose.yml up -d mongo keycloak-db keycloak
 
 # 2. Install Python deps (first time only)
 .\.venv\Scripts\pip.exe install -r requirements.txt
@@ -167,6 +167,8 @@ npm run dev
 
 Backend runs on `http://localhost:8000`.  
 Frontend runs on `http://localhost:3000`.
+
+If Keycloak is temporarily unavailable and you must continue local work, set `AUTH_ENABLED=false` in `.env` and restart the backend.
 
 ### Or run everything in Docker
 

@@ -7,6 +7,7 @@ param(
     [switch]$KeepLogs,
     [switch]$KeepDB,
     [switch]$AllowNonLocalMongo,
+    [switch]$AllowStandaloneMongoFallback,
     [switch]$Full
 )
 
@@ -95,9 +96,11 @@ except:
                 }
             }
             
-            # If still not running, try to create a new container
-            if (-not $mongoRunning) {
-                Write-Host "   Creating new MongoDB Docker container..." -ForegroundColor Gray
+            # If still not running, optionally create a standalone container.
+            # Disabled by default to avoid pulling extra images/creating artifacts
+            # during routine cleanses.
+            if (-not $mongoRunning -and $AllowStandaloneMongoFallback) {
+                Write-Host "   Creating standalone MongoDB Docker container (fallback enabled)..." -ForegroundColor Gray
                 $runOut = & docker run -d --name mongodb -p 27017:27017 mongo:latest 2>&1
                 $dockerRunExit = $LASTEXITCODE
                 Start-Sleep -Seconds 5
@@ -105,6 +108,9 @@ except:
                 if (-not $mongoRunning -and $dockerRunExit -ne 0) {
                     Write-Host "   Docker run error: $runOut" -ForegroundColor Gray
                 }
+            } elseif (-not $mongoRunning) {
+                Write-Host "   Skipping standalone 'docker run mongo:latest' fallback (default safe mode)." -ForegroundColor Gray
+                Write-Host "   Use -AllowStandaloneMongoFallback to enable that behavior." -ForegroundColor Gray
             }
         }
         
@@ -196,5 +202,5 @@ Write-Host "`n Cleanse complete!`n" -ForegroundColor Cyan
 if (-not $Full) {
     Write-Host " Tip: Run with -Full flag for deeper cleaning (DB, Docker cache, pip cache)" -ForegroundColor Gray
     Write-Host "   Example: .\scripts\cleanse.ps1 -Full" -ForegroundColor Gray
-    Write-Host "   Flags: -KeepLogs, -KeepDB, -AllowNonLocalMongo, -DatabaseName, -Full`n" -ForegroundColor Gray
+    Write-Host "   Flags: -KeepLogs, -KeepDB, -AllowNonLocalMongo, -AllowStandaloneMongoFallback, -Full`n" -ForegroundColor Gray
 }

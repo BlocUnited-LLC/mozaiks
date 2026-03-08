@@ -12,7 +12,7 @@ This is your first tool.  To build your own:
 import logging
 from typing import Annotated, Any, Dict, Optional
 
-from mozaiksai.core.workflow.outputs.ui_tools import UIToolError, use_ui_tool
+from mozaiksai.engine.outputs.ui_tools import UIToolError, use_ui_tool
 
 _logger = logging.getLogger("tools.greet")
 

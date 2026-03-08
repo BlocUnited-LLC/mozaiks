@@ -22,7 +22,7 @@ A structured agentic run. The user is working through a defined workflow — a m
 - Default layout is `split` (chat 50% + artifact 50%)
 - The artifact panel is visible and receives streaming updates
 - Messages are stored in `workflowMessages` in context
-- Driven by the `ChatSessions` collection and the AG2 workflow runner on the backend
+- Driven by the `ChatSessions` collection and the workflow runtime runner on the backend
 
 ---
 

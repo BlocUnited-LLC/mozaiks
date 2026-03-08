@@ -3,7 +3,7 @@ start-dev.ps1
 
 Helper to start the project in two modes:
  - docker (default): bring up docker compose (app + infra), tail app logs, and optionally start frontend.
- - local: start infra services in docker (mongo, etc.), ensure no app container is occupying port 8000, then run the local app from .venv and optionally start frontend.
+ - local: start infra services in docker (mongo + keycloak), ensure no app container is occupying port 8000, then run the local app from .venv and optionally start frontend.
 
 Usage examples (PowerShell):
   # Docker-managed (recommended)
@@ -11,6 +11,12 @@ Usage examples (PowerShell):
 
   # Local backend with Docker infra
   .\start-dev.ps1 -Mode local -StartFrontend
+
+  # Local backend with temporary auth bypass fallback
+  .\start-dev.ps1 -Mode local -BypassAuth -StartFrontend
+
+  # Skip artifact preflight generation (not recommended)
+  .\start-dev.ps1 -Mode docker -SkipGenerate
 
 This script is intentionally small and conservative: it will not overwrite existing files and will try to avoid port collisions.
 #>
@@ -27,6 +33,8 @@ param(
     [switch]$CleanLogsBefore,
     [switch]$Stop,
     [switch]$AutoCaptureAfter,
+    [switch]$SkipGenerate,
+    [switch]$BypassAuth,
     [int]$AppPort = 8000
 )
 
@@ -39,6 +47,38 @@ function Test-PortInUse {
 function Get-ContainerByName($name) {
     $c = docker ps --filter "name=$name" --format "{{.ID}} {{.Names}}" 2>$null
     return $c
+}
+
+function Get-PythonExe {
+    $venvPython = Join-Path -Path $RepoRoot -ChildPath '.venv\Scripts\python.exe'
+    if (Test-Path $venvPython) {
+        return $venvPython
+    }
+    $python = Get-Command python -ErrorAction SilentlyContinue
+    if ($python) {
+        return $python.Source
+    }
+    return $null
+}
+
+function Run-ArtifactGeneration {
+    if ($SkipGenerate) {
+        Write-Host "SkipGenerate requested: skipping 'python -m mozaiksai.cli generate' preflight." -ForegroundColor Yellow
+        return
+    }
+
+    $pythonExe = Get-PythonExe
+    if (-not $pythonExe) {
+        Write-Host "No Python interpreter found (.venv\\Scripts\\python.exe or python on PATH)." -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "Syncing generated artifacts (realm/theme)..." -ForegroundColor Green
+    & $pythonExe -m mozaiksai.cli generate
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Artifact generation failed. Fix the errors or rerun with -SkipGenerate." -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
 }
 
 # Resolve script and repo paths early so functions can rely on them
@@ -73,7 +113,7 @@ function Start-FrontendProcess {
     param(
         [switch]$Background
     )
-    $cwd = Join-Path -Path $ScriptRoot -ChildPath 'ChatUI'
+    $cwd = Join-Path -Path $ScriptRoot -ChildPath 'app'
     if (Is-Running-In-VSCode) {
         if ($Background) {
             Write-Host "VSCode detected: starting frontend in background using Start-Process -NoNewWindow..." -ForegroundColor Green
@@ -103,7 +143,7 @@ function Start-FrontendProcess {
                 Pop-Location
             }
         } else {
-            Write-Host "No suitable shell found to start frontend. Please run manually: cd ChatUI; npm start" -ForegroundColor Red
+            Write-Host "No suitable shell found to start frontend. Please run manually: cd app; npm start" -ForegroundColor Red
         }
     }
 }
@@ -157,6 +197,8 @@ if ($Mode -eq 'docker') {
         exit 0
     }
 
+    Run-ArtifactGeneration
+
     # Normal start: bring down any existing compose then up
     docker compose -f infra/compose/docker-compose.yml down
     docker compose -f infra/compose/docker-compose.yml up -d --remove-orphans
@@ -165,7 +207,7 @@ if ($Mode -eq 'docker') {
         Write-Host "Tailing mozaiksai-app logs in this terminal (press Ctrl+C to stop)..." -ForegroundColor Yellow
         # If StartFrontend was requested alongside TailInPlace, start frontend in the background
         if ($StartFrontend) {
-            Write-Host "Starting frontend (ChatUI) in the background so logs keep streaming here..." -ForegroundColor Green
+            Write-Host "Starting frontend (app) in the background so logs keep streaming here..." -ForegroundColor Green
             Start-FrontendProcess -Background
         }
         # Run the tail in-place (this will block until stopped)
@@ -192,7 +234,7 @@ if ($Mode -eq 'docker') {
         Write-Host "Tail logs in another terminal with: docker logs -f mozaiksai-app" -ForegroundColor Yellow
     }
     if ($StartFrontend -and -not $TailInPlace) {
-            Write-Host "Starting frontend (ChatUI)..." -ForegroundColor Green
+            Write-Host "Starting frontend (app)..." -ForegroundColor Green
             # Use helper to start frontend; when running inside VS Code this will avoid creating an external window.
             Start-FrontendProcess
         }
@@ -201,9 +243,16 @@ if ($Mode -eq 'docker') {
 
 # Local mode: ensure infra running, stop app container if present, run local app using .venv
 Write-Host "Local-dev mode: starting infra-only and running app locally" -ForegroundColor Green
+Run-ArtifactGeneration
 
-# Start infra only (mongo). This avoids the app container binding port 8000.
-docker compose -f infra/compose/docker-compose.yml up -d mongo
+# Start infra dependencies for local runtime.
+# Default is production-parity auth-on (mongo + keycloak-db + keycloak).
+if ($BypassAuth) {
+    Write-Host "BypassAuth requested: starting mongo only for temporary auth-off fallback." -ForegroundColor Yellow
+    docker compose -f infra/compose/docker-compose.yml up -d mongo
+} else {
+    docker compose -f infra/compose/docker-compose.yml up -d mongo keycloak-db keycloak
+}
 # If an app container is running, stop it to free the port
 $appContainer = Get-ContainerByName mozaiksai-app
 if ($appContainer) {
@@ -230,15 +279,18 @@ if (Test-Path ".venv\Scripts\Activate.ps1") {
     exit 1
 }
 
-if (-not $env:AUTH_ENABLED) {
-    # Local dev default: disable auth so ChatUI can call APIs without tokens.
+if ($BypassAuth) {
     $env:AUTH_ENABLED = "false"
+    Write-Host "BypassAuth enabled for this shell session (AUTH_ENABLED=false)." -ForegroundColor Yellow
+} elseif (-not $env:AUTH_ENABLED) {
+    # Local dev default: keep auth enabled for production parity.
+    $env:AUTH_ENABLED = "true"
 }
 
 Write-Host "Starting local backend on http://localhost:$AppPort (AUTH_ENABLED=$($env:AUTH_ENABLED))" -ForegroundColor Yellow
 python run_server.py
 
 if ($StartFrontend) {
-    Write-Host "Starting frontend (ChatUI) in a new process..." -ForegroundColor Green
+    Write-Host "Starting frontend (app) in a new process..." -ForegroundColor Green
     Start-FrontendProcess -Background
 }

@@ -394,7 +394,7 @@ const AdminOverviewSection = () => {
 
       <Card title="Admin Configuration">
         <p className="text-slate-400 text-sm mb-3">
-          Users with admin access (via auth.json):
+          Users with admin access (via app.json):
         </p>
         <div className="flex flex-wrap gap-2">
           {adminEmails.length > 0 ? (
@@ -408,7 +408,7 @@ const AdminOverviewSection = () => {
           )}
         </div>
         <p className="text-slate-500 text-xs mt-3">
-          Edit <code className="text-cyan-400">app/brand/public/auth.json</code> → roles.adminEmails
+          Edit <code className="text-cyan-400">app/app.json</code> → auth.roles.adminEmails
         </p>
       </Card>
     </div>

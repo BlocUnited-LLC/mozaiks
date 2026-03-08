@@ -49,12 +49,11 @@ def _direct_import(module_name: str, file_path: Path):
 # Pre-register namespace stubs
 for _ns in [
     "mozaiksai",
-    "mozaiksai.core",
-    "mozaiksai.core.contracts",
-    "mozaiksai.core.contracts.events",
-    "mozaiksai.core.workflow",
-    "mozaiksai.core.workflow.pack",
-    "mozaiksai.orchestration",
+    "mozaiksai.contracts",
+    "mozaiksai.contracts.events",
+    "mozaiksai.engine",
+    "mozaiksai.kernel.pack",
+    "mozaiksai.kernel",
 ]:
     if _ns not in sys.modules:
         _m = types.ModuleType(_ns)
@@ -64,20 +63,20 @@ for _ns in [
 
 # 1. contracts.events
 _events_mod = _direct_import(
-    "mozaiksai.core.contracts.events",
-    _ROOT / "mozaiksai" / "core" / "contracts" / "events.py",
+    "mozaiksai.contracts.events",
+    _ROOT / "mozaiksai" / "contracts" / "events.py",
 )
 
 # 2. orchestration.decomposition
 _decomp_mod = _direct_import(
-    "mozaiksai.orchestration.decomposition",
-    _ROOT / "mozaiksai" / "orchestration" / "decomposition.py",
+    "mozaiksai.kernel.decomposition",
+    _ROOT / "mozaiksai" / "kernel" / "decomposition.py",
 )
 
 # 3. orchestration.merge
 _merge_mod = _direct_import(
-    "mozaiksai.orchestration.merge",
-    _ROOT / "mozaiksai" / "orchestration" / "merge.py",
+    "mozaiksai.kernel.merge",
+    _ROOT / "mozaiksai" / "kernel" / "merge.py",
 )
 ChildResult = _merge_mod.ChildResult
 ConcatenateMerge = _merge_mod.ConcatenateMerge
@@ -95,8 +94,8 @@ reset_merge_strategy_registry = _merge_mod.reset_merge_strategy_registry
 
 # 4. The coordinator
 _coord_mod = _direct_import(
-    "mozaiksai.core.workflow.pack.workflow_pack_coordinator",
-    _ROOT / "mozaiksai" / "core" / "workflow" / "pack" / "workflow_pack_coordinator.py",
+    "mozaiksai.kernel.pack.workflow_pack_coordinator",
+    _ROOT / "mozaiksai" / "kernel" / "pack" / "workflow_pack_coordinator.py",
 )
 WorkflowPackCoordinator = _coord_mod.WorkflowPackCoordinator
 

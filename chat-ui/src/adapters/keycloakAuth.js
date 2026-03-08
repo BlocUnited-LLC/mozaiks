@@ -1,35 +1,20 @@
 /**
  * KeycloakAuthAdapter — connects chat-ui's AuthAdapter interface to Keycloak.
  *
- * Reads /auth.json at init to get realm, clientId, and authority.
+ * Config is passed from the host app (via app.json) — no separate auth.json needed.
  * Uses keycloak-js for OIDC Authorization Code + PKCE flow.
+ * Supports dev auto-login via direct access grants (Resource Owner Password).
  *
  * Usage:
  *   import { createKeycloakAuthAdapter } from './auth/KeycloakAuthAdapter';
  *
- *   const authAdapter = await createKeycloakAuthAdapter();
- *   // Pass to MozaiksApp: <MozaiksApp authAdapter={authAdapter} ... />
+ *   const authAdapter = await createKeycloakAuthAdapter({
+ *     auth: { provider: 'keycloak' },
+ *     dev: { autoLogin: true, users: [{ username: 'dev', password: 'dev' }] },
+ *   });
  */
 import Keycloak from 'keycloak-js';
 import { AuthAdapter } from './auth';
-
-/**
- * Load auth.json from the brand public directory.
- * Served by Vite's publicDir at /auth.json.
- */
-async function loadAuthConfig() {
-  try {
-    const resp = await fetch('/auth.json');
-    if (!resp.ok) {
-      console.warn('[keycloak-auth] auth.json not found, using defaults');
-      return {};
-    }
-    return await resp.json();
-  } catch (err) {
-    console.warn('[keycloak-auth] Failed to load auth.json:', err);
-    return {};
-  }
-}
 
 /**
  * Keycloak auth adapter implementing the chat-ui AuthAdapter interface.
@@ -37,12 +22,13 @@ async function loadAuthConfig() {
 export class KeycloakAuthAdapter extends AuthAdapter {
   /**
    * @param {Keycloak} keycloak — initialized keycloak-js instance
-   * @param {object} authConfig — parsed auth.json
+   * @param {object} appConfig — merged app config (auth + dev sections from app.json)
    */
-  constructor(keycloak, authConfig = {}) {
+  constructor(keycloak, appConfig = {}) {
     super();
     this.keycloak = keycloak;
-    this.authConfig = authConfig;
+    this.authConfig = appConfig.auth || {};
+    this.appConfig = appConfig;
     this._authStateCallbacks = [];
     this._currentUser = null;
 
@@ -168,22 +154,24 @@ export class KeycloakAuthAdapter extends AuthAdapter {
 /**
  * Create and initialize a Keycloak auth adapter.
  *
- * Reads /auth.json for configuration, initializes keycloak-js,
- * and returns a ready-to-use adapter.
+ * Reads config from the appConfig object (passed from app.json).
+ * If dev.autoLogin is true and dev.users has entries, authenticates
+ * automatically via Keycloak's direct access grant (Resource Owner Password)
+ * so developers never see the login page during development.
  *
- * @param {object} [overrides] - Override auth.json values
- * @param {string} [overrides.authority] - Keycloak base URL
- * @param {string} [overrides.realm] - Keycloak realm name
- * @param {string} [overrides.clientId] - Keycloak public client ID
+ * @param {object} [appConfig] - App config (auth + dev sections from app.json)
+ * @param {object} [appConfig.auth] - Auth config: { provider, keycloak: { authority, realm, clientId } }
+ * @param {object} [appConfig.dev] - Dev config: { autoLogin, users: [{ username, password }] }
  * @returns {Promise<KeycloakAuthAdapter>}
  */
-export async function createKeycloakAuthAdapter(overrides = {}) {
-  const authConfig = await loadAuthConfig();
-  const kcConfig = authConfig.keycloak || {};
+export async function createKeycloakAuthAdapter(appConfig = {}) {
+  const authSection = appConfig.auth || {};
+  const kcConfig = authSection.keycloak || {};
+  const devConfig = appConfig.dev || {};
 
-  const authority = overrides.authority || kcConfig.authority || 'http://localhost:8080';
-  const realm = overrides.realm || kcConfig.realm || 'mozaiks';
-  const clientId = overrides.clientId || kcConfig.clientId || 'mozaiks-app';
+  const authority = kcConfig.authority || 'http://localhost:8080';
+  const realm = kcConfig.realm || 'mozaiks';
+  const clientId = kcConfig.clientId || 'mozaiks-app';
 
   const keycloak = new Keycloak({
     url: authority,
@@ -191,17 +179,73 @@ export async function createKeycloakAuthAdapter(overrides = {}) {
     clientId,
   });
 
-  // Initialize with check-sso (silent login if session exists, no redirect if not)
-  const features = authConfig.features || {};
+  // ── Dev auto-login via direct access grant ─────────────────────────────
+  // When dev.autoLogin is true and a dev user is declared, we fetch tokens
+  // from the Keycloak token endpoint using the Resource Owner Password grant.
+  // This requires directAccessGrantsEnabled=true on the Keycloak client.
+  // The tokens are passed to keycloak.init() so no redirect is needed.
+  if (devConfig.autoLogin && devConfig.users?.length) {
+    const devUser = devConfig.users[0];
+    const tokenUrl = `${authority}/realms/${realm}/protocol/openid-connect/token`;
+
+    try {
+      console.log(`[keycloak-auth] Dev auto-login as "${devUser.username}"...`);
+      const resp = await fetch(tokenUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'password',
+          client_id: clientId,
+          username: devUser.username,
+          password: devUser.password,
+          scope: 'openid',
+        }),
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        // Init keycloak-js with pre-fetched tokens — no redirect needed
+        await keycloak.init({
+          token: data.access_token,
+          refreshToken: data.refresh_token,
+          idToken: data.id_token,
+          checkLoginIframe: false,
+        });
+
+        console.log(`[keycloak-auth] Dev auto-login successful (${devUser.username})`);
+
+        window.mozaiksAuth = {
+          getAccessToken: () => keycloak.token || null,
+        };
+
+        const adapter = new KeycloakAuthAdapter(keycloak, appConfig);
+        _attachKeycloakListeners(keycloak, adapter);
+        return adapter;
+      }
+
+      // Direct access grant failed — fall through to normal login
+      const errBody = await resp.json().catch(() => ({}));
+      console.warn(
+        `[keycloak-auth] Dev auto-login failed (${errBody.error || resp.status}). ` +
+        'Falling back to redirect login. ' +
+        'Ensure directAccessGrantsEnabled=true on the Keycloak client.'
+      );
+    } catch (err) {
+      console.warn('[keycloak-auth] Dev auto-login error:', err.message, '— falling back to redirect.');
+    }
+  }
+
+  // ── Standard redirect login ────────────────────────────────────────────
+  // 'login-required' redirects to Keycloak's login page if no session exists.
+  // If the user already has a valid Keycloak session cookie, the redirect
+  // resolves instantly without showing the login form.
   const initOptions = {
-    onLoad: 'check-sso',
+    onLoad: 'login-required',
     pkceMethod: kcConfig.pkce !== false ? 'S256' : undefined,
     silentCheckSsoRedirectUri: window.location.origin + '/_system/silent-check-sso.html',
-    checkLoginIframe: false, // disable iframe check (doesn't work well with SPAs)
+    checkLoginIframe: false,
   };
 
-  // Init keycloak-js — this MUST succeed when auth is enabled.
-  // Throws on network failure, bad realm, or invalid clientId.
   await keycloak.init(initOptions);
 
   // Expose token globally for api.js fallback (window.mozaiksAuth)
@@ -209,9 +253,16 @@ export async function createKeycloakAuthAdapter(overrides = {}) {
     getAccessToken: () => keycloak.token || null,
   };
 
-  const adapter = new KeycloakAuthAdapter(keycloak, authConfig);
+  const adapter = new KeycloakAuthAdapter(keycloak, appConfig);
+  _attachKeycloakListeners(keycloak, adapter);
+  return adapter;
+}
 
-  // Listen for Keycloak events
+/**
+ * Attach keycloak-js event listeners to the adapter.
+ * @private
+ */
+function _attachKeycloakListeners(keycloak, adapter) {
   keycloak.onAuthSuccess = async () => {
     const user = await adapter.getCurrentUser();
     adapter._notifyAuthStateChange(user);
@@ -233,8 +284,6 @@ export async function createKeycloakAuthAdapter(overrides = {}) {
       adapter._notifyAuthStateChange(null);
     });
   };
-
-  return adapter;
 }
 
 export default KeycloakAuthAdapter;

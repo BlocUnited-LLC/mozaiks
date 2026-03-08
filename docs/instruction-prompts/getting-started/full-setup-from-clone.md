@@ -140,6 +140,9 @@ MONGO_DB_NAME=MozaiksAI                 # Default database name
 AUTH_ENABLED=true                        # Keycloak authentication enabled
 ```
 
+Keep `AUTH_ENABLED=true` as the default local setup.  
+Use `AUTH_ENABLED=false` only as a temporary fallback when Keycloak is unavailable.
+
 ---
 
 ## Phase 3: Start Docker Services
@@ -351,6 +354,7 @@ Keycloak isn't running or isn't ready yet.
 1. Check Keycloak: `docker ps | grep keycloak`
 2. Wait 30-60 seconds for Keycloak to initialize
 3. Check Keycloak logs: `docker logs $(docker ps -qf "name=keycloak") --tail 50`
+4. Temporary fallback only: set `AUTH_ENABLED=false` in `.env` and restart backend
 
 ### "Cannot connect to MongoDB"
 

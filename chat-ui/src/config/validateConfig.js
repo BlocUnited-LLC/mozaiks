@@ -180,7 +180,7 @@ function validateNavigation(nav) {
 
 function validateAuth(auth) {
   const issues = [];
-  const file = 'auth.json';
+  const file = 'app.json → auth';
 
   if (!auth || typeof auth !== 'object') {
     issues.push({ level: 'warn', file, message: 'File is empty or missing. Auth will use defaults (Keycloak on localhost:8080).' });
@@ -243,6 +243,26 @@ function validateAppConfig(app) {
     issues.push({ level: 'warn', file, message: 'Missing "wsUrl". WebSocket connections will fall back to the apiUrl.' });
   }
 
+  // Validate auth section inline (was previously a separate auth.json)
+  if (app.auth) {
+    issues.push(...validateAuth(app.auth));
+  } else {
+    issues.push({ level: 'info', file, message: 'No "auth" section. Auth will use Keycloak defaults (localhost:8080/mozaiks).' });
+  }
+
+  // Validate dev section
+  if (app.dev) {
+    if (app.dev.autoLogin && (!Array.isArray(app.dev.users) || app.dev.users.length === 0)) {
+      issues.push({ level: 'warn', file, message: 'dev.autoLogin is true but dev.users is empty. Auto-login needs at least one user.' });
+    }
+    if (Array.isArray(app.dev.users)) {
+      app.dev.users.forEach((u, i) => {
+        if (!u.username) issues.push({ level: 'error', file, message: `dev.users[${i}] is missing "username".` });
+        if (!u.password) issues.push({ level: 'error', file, message: `dev.users[${i}] is missing "password".` });
+      });
+    }
+  }
+
   return issues;
 }
 
@@ -278,11 +298,10 @@ export async function validateAllConfigs() {
   };
 
   // Load all configs in parallel
-  const [brand, ui, nav, auth] = await Promise.all([
+  const [brand, ui, nav] = await Promise.all([
     safeLoad('/brand.json', 'brand.json'),
     safeLoad('/ui.json', 'ui.json'),
     safeLoad('/navigation.json', 'navigation.json'),
-    safeLoad('/auth.json', 'auth.json'),
   ]);
 
   if (brand.data) results.push(...validateBrand(brand.data));
@@ -294,8 +313,8 @@ export async function validateAllConfigs() {
   if (nav.data) results.push(...validateNavigation(nav.data));
   else if (nav.missing) results.push({ level: 'info', file: 'navigation.json', message: 'Not found — the core shell (Chat + Admin) will load with no extra pages.' });
 
-  if (auth.data) results.push(...validateAuth(auth.data));
-  else if (auth.missing) results.push({ level: 'info', file: 'auth.json', message: 'Not found — mock auth will be used for development.' });
+  // Auth is now validated as part of app.json (no separate auth.json)
+  // validateAppConfig handles the auth sub-section internally.
 
   return results;
 }

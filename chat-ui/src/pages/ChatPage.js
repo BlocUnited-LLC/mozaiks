@@ -27,6 +27,39 @@ const debugFlag = (k) => {
   try { return ['1','true','on','yes'].includes((localStorage.getItem(k)||'').toLowerCase()); } catch { return false; }
 };
 
+const getAccessToken = () => {
+  if (typeof window !== 'undefined' && window.mozaiksAuth?.getAccessToken) {
+    return window.mozaiksAuth.getAccessToken();
+  }
+  if (typeof localStorage !== 'undefined') {
+    return localStorage.getItem('chatui_token') || localStorage.getItem('access_token');
+  }
+  return null;
+};
+
+const getUserIdFromToken = () => {
+  const token = getAccessToken();
+  if (!token || typeof token !== 'string') {
+    return null;
+  }
+  const parts = token.split('.');
+  if (parts.length < 2) {
+    return null;
+  }
+  try {
+    const normalized = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+    if (typeof window === 'undefined' || typeof window.atob !== 'function') {
+      return null;
+    }
+    const json = window.atob(padded);
+    const payload = JSON.parse(json);
+    return payload?.sub || payload?.user_id || payload?.preferred_username || null;
+  } catch (_err) {
+    return null;
+  }
+};
+
 const formatHistoryTimestamp = (timestamp) => {
   if (!timestamp) return 'Just now';
   try {
@@ -518,7 +551,7 @@ const ChatPage = () => {
     implicitDevAppId ||
     null;
   const { theme: chatTheme, loading: themeLoading } = useTheme(currentAppId);
-  const currentUserId = user?.id || user?.user_id || 'anonymous';
+  const currentUserId = user?.id || user?.user_id || user?.sub || getUserIdFromToken() || 'anonymous';
   const [generalSessionsLoading, setGeneralSessionsLoading] = useState(false);
   // Workflow completion state
   const [workflowCompleted, setWorkflowCompleted] = useState(false);
@@ -1430,6 +1463,74 @@ const ChatPage = () => {
             }
           ]));
         }
+        return;
+      }
+      case 'stream_chunk': {
+        // Real-time token streaming from AG2 IOStream bridge.
+        // Each chunk is a small piece of an agent's LLM response
+        // arriving character-by-character for live display.
+        const agentNameChunk = extractAgentName(data);
+        const chunkContent = data.content || '';
+        if (!chunkContent) return;
+        // Hide init spinner on first streaming token
+        if (showInitSpinner) setShowInitSpinner(false);
+        setMessagesWithLogging(prev => {
+          const updated = [...prev];
+          // Find an existing streaming message from the same agent
+          for (let i = updated.length - 1; i >= 0; i--) {
+            const m = updated[i];
+            if (m.__streaming && m.agentName === agentNameChunk) {
+              m.content += chunkContent;
+              return updated;
+            }
+          }
+          // No existing streaming message — create one
+          updated.push({
+            id: `stream-chunk-${Date.now()}`,
+            sender: 'agent',
+            agentName: agentNameChunk,
+            content: chunkContent,
+            isStreaming: true,
+            __streaming: true,
+            __streamId: data.stream_id || null,
+            isStructuredCapable: false,
+            isVisual: true,
+            isToolAgent: false,
+          });
+          return updated;
+        });
+        return;
+      }
+      case 'stream_end': {
+        // End of a streaming turn — finalize the message.
+        // The backend sends the full accumulated content so we can
+        // replace any partial chunks with the authoritative final text.
+        const agentNameEnd = extractAgentName(data);
+        const finalContent = data.full_content || data.content || '';
+        setMessagesWithLogging(prev => {
+          const updated = [...prev];
+          for (let i = updated.length - 1; i >= 0; i--) {
+            const m = updated[i];
+            if (m.__streaming && m.agentName === agentNameEnd) {
+              m.content = finalContent || m.content;
+              m.isStreaming = false;
+              delete m.__streaming;
+              delete m.__streamId;
+              return updated;
+            }
+          }
+          // If no streaming message found, just append the final text
+          if (finalContent) {
+            updated.push({
+              id: `stream-end-${Date.now()}`,
+              sender: 'agent',
+              agentName: agentNameEnd,
+              content: finalContent,
+              isStreaming: false,
+            });
+          }
+          return updated;
+        });
         return;
       }
       case 'print': {
@@ -3330,11 +3431,22 @@ useEffect(() => {
 
         // Send the UI tool response to the backend
         try {
-          const response = await fetch('http://localhost:8080/api/ui-tool/submit', {
+          const submitPath = '/api/ui-tool/submit';
+          const baseUrl = api && typeof api.getHttpBaseUrl === 'function'
+            ? api.getHttpBaseUrl()
+            : null;
+          const submitUrl = baseUrl ? `${baseUrl}${submitPath}` : submitPath;
+          const headers = {
+            'Content-Type': 'application/json',
+          };
+          const token = getAccessToken();
+          if (token) {
+            headers.Authorization = `Bearer ${token}`;
+          }
+
+          const response = await fetch(submitUrl, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
+            headers,
             body: JSON.stringify(payload)
           });
           if (response.ok) {

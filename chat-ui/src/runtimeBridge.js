@@ -41,7 +41,7 @@ export function buildRuntimeWebSocketUrl({
     // Same-origin: use current host with runtime port
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.hostname;
-    const port = import.meta.env.VITE_AI_RUNTIME_PORT || '8080';
+    const port = import.meta.env.VITE_AI_RUNTIME_PORT || '8000';
     baseWsUrl = `${protocol}//${host}:${port}`;
   }
   
@@ -73,7 +73,7 @@ export function buildRuntimeApiUrl(path, runtimeUrl = null) {
   // Same-origin fallback
   const protocol = window.location.protocol;
   const host = window.location.hostname;
-  const port = import.meta.env.VITE_AI_RUNTIME_PORT || '8080';
+  const port = import.meta.env.VITE_AI_RUNTIME_PORT || '8000';
   
   return `${protocol}//${host}:${port}${path}`;
 }

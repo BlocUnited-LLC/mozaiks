@@ -6,12 +6,17 @@ class ChatUIConfig {
 
   loadConfig() {
     const defaultAuthMode = 'token';
+    const defaultHttpProtocol = typeof window !== 'undefined' ? window.location.protocol : 'http:';
+    const defaultHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+    const defaultWsProtocol = defaultHttpProtocol === 'https:' ? 'wss:' : 'ws:';
+    const defaultApiBaseUrl = `${defaultHttpProtocol}//${defaultHost}:8000`;
+    const defaultWsBaseUrl = `${defaultWsProtocol}//${defaultHost}:8000`;
     
     const defaultConfig = {
       // API Configuration
       api: {
-        baseUrl: process.env.REACT_APP_API_BASE_URL || 'http://localhost:8080',
-        wsUrl: process.env.REACT_APP_WS_URL || 'ws://localhost:8080',
+        baseUrl: process.env.REACT_APP_API_BASE_URL || defaultApiBaseUrl,
+        wsUrl: process.env.REACT_APP_WS_URL || defaultWsBaseUrl,
       },
 
       // Auth Configuration

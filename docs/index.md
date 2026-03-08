@@ -9,7 +9,7 @@
 <a href="https://github.com/BlocUnited-LLC/mozaiks/blob/main/CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.0-blue" alt="Version"></a>
 <a href="https://github.com/BlocUnited-LLC/mozaiks/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11+-blue?logo=python" alt="Python"></a>
-<a href="https://github.com/ag2ai/ag2"><img src="https://img.shields.io/badge/AG2-Autogen-green" alt="AG2"></a>
+<a href="https://github.com/BlocUnited-LLC/mozaiks"><img src="https://img.shields.io/badge/Engine-Pluggable_(AG2_default)-green" alt="Engine"></a>
 
 </div>
 
@@ -22,7 +22,7 @@
 
 ## 🎯 What is MozaiksAI?
 
-**MozaiksAI Runtime** is a production-ready orchestration engine that transforms AG2 (Microsoft Autogen) into an app-grade platform with:
+**MozaiksAI Runtime** is a production-ready orchestration engine that supports pluggable agent frameworks (AG2 currently shipping as the default adapter) with:
 
 - ✅ **Event-Driven Architecture** → Every action flows through unified event pipeline
 - ✅ **Real-Time WebSocket Transport** → Live streaming to React frontends
@@ -32,7 +32,7 @@
 - ✅ **Declarative Workflows** → JSON manifests, no code changes needed
 - ✅ **Comprehensive Observability** → Built-in metrics, logging, and token tracking
 
-**MozaiksAI = AG2 + Production Infrastructure + Event-Driven Core**
+**MozaiksAI = Engine Adapter + Production Infrastructure + Event-Driven Core**
 
 ---
 
@@ -77,11 +77,19 @@
 
     [:octicons-arrow-right-24: Getting Started](getting-started.md)
 
+-   :material-run-fast: **First-Run Ritual**
+
+    ---
+
+    New workspace bootstrap + diagnostics for first-time developers.
+
+    [:octicons-arrow-right-24: First-Run Ritual](first-run-ritual.md)
+
 -   :fontawesome-solid-sitemap: **Add a Workflow**
 
     ---
 
-    Build your own AG2 workflow and wire it to the frontend.
+    Build your own workflow and wire it to the frontend.
 
     [:octicons-arrow-right-24: Adding a Workflow](guides/adding-workflows/01-overview.md)
 

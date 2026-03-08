@@ -72,7 +72,6 @@ mozaiks-platform/                ← LAYER 1: FIRST-PARTY APP (proprietary)
 project-aid-v2/                  ← BEING DEPRECATED → merging into mozaiks-platform
 ```
 
-**Important: `_pack/` is a CORE feature, not a platform feature.** The `_pack/` directories you see inside workflows are part of the UniversalOrchestrator's dependency system — they define which workflows must complete before others can start, nested workflow spawning, and journey step sequencing. This lives in `mozaiks.core/workflow/pack/` (6 files). The platform merely calls these core functions.
 
 The **magic switch** is one environment variable:
 
@@ -669,7 +668,7 @@ The core never imports the platform directly. The platform plugs INTO the core v
 - ❌ A self-host export bundle generator
 - ❌ An onboarding flow for OSS users (validate + import existing workflows)
 - ❌ The `config.py` / `db_manager.py` / `deployment_manager.py` refactor (kill the 6 DB collection dependencies)
-- ❌ An advanced OSS example workflow that demonstrates `_pack/` dependencies (HelloWorld has an empty `nested_chats` array)
+- ❌ An advanced OSS example workflow that demonstrates `_pack/` dependencies (HelloWorld has an empty `journeys` array)
 - ❌ Route extraction from `shared_app.py` into `mozaiksai.core.routes` APIRouter modules (so the `build_runtime()` factory includes core routes — health, chat, websocket, sessions, etc.)
 
 ### HelloWorld Safety

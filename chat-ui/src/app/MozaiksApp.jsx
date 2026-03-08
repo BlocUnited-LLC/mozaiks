@@ -4,7 +4,6 @@ import { ChatUIProvider, useChatUI } from '../context/ChatUIContext';
 import GlobalChatWidgetWrapper from '../widget/GlobalChatWidgetWrapper';
 import ShellUIToolRenderer from '../core/ui/ShellUIToolRenderer';
 import NavigationProvider from '../providers/NavigationProvider';
-import BrandingProvider from '../providers/BrandingProvider';
 import RouteRenderer from '../components/RouteRenderer';
 import { initializeWorkflows } from '@chat-workflows/index';
 import ConfigValidationOverlay from '../config/ConfigValidationOverlay';
@@ -25,7 +24,7 @@ function AppShell({ onAuthRequired }) {
 /**
  * MozaiksApp — complete application shell.
  *
- * Wraps BrandingProvider → NavigationProvider → ChatUIProvider → Router.
+ * Wraps NavigationProvider → ChatUIProvider → Router.
  * Workflows are auto-registered from the @chat-workflows alias (no manual registry needed).
  *
  * Props:
@@ -66,22 +65,20 @@ export default function MozaiksApp({
   // Replaces console-only logging — founders see issues without opening DevTools
 
   return (
-    <BrandingProvider configPath="/brand.json">
-      <NavigationProvider>
-        <ChatUIProvider
-          workflowInitializer={initializeWorkflows}
-          uiToolRenderer={renderUiTool}
-          apiAdapter={apiAdapter}
-          authAdapter={authAdapter}
-          uiConfig={uiConfig}
-        >
-          <Router>
-            <ConfigValidationOverlay />
-            <GlobalChatWidgetWrapper />
-            {children || <AppShell />}
-          </Router>
-        </ChatUIProvider>
-      </NavigationProvider>
-    </BrandingProvider>
+    <NavigationProvider>
+      <ChatUIProvider
+        workflowInitializer={initializeWorkflows}
+        uiToolRenderer={renderUiTool}
+        apiAdapter={apiAdapter}
+        authAdapter={authAdapter}
+        uiConfig={uiConfig}
+      >
+        <Router>
+          <ConfigValidationOverlay />
+          <GlobalChatWidgetWrapper />
+          {children || <AppShell />}
+        </Router>
+      </ChatUIProvider>
+    </NavigationProvider>
   );
 }

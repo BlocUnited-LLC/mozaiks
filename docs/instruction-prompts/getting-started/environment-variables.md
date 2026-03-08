@@ -72,7 +72,7 @@ Read the `.env.example` file to understand what variables exist. Here's what eac
 |----------|---------|--------------|
 | `MONGO_URI` | `mongodb://localhost:27017` | MongoDB connection string. Leave default if using Docker. |
 | `MONGO_DB_NAME` | `MozaiksAI` | Database name. Usually no need to change. |
-| `AUTH_ENABLED` | `true` (Docker) / `false` (local) | Enable Keycloak authentication. |
+| `AUTH_ENABLED` | `true` | Enable Keycloak authentication (recommended default for local + prod parity). |
 | `KC_ADMIN_USER` | `admin` | Keycloak admin console username. |
 | `KC_ADMIN_PASSWORD` | `admin` | Keycloak admin console password. Change in production! |
 
@@ -143,11 +143,11 @@ MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/MozaiksAI?retryWri
 
 ---
 
-## Step 5: Decide on Authentication
+## Step 5: Configure Authentication
 
-Ask the user: **"Do you want to use authentication (login/logout), or skip it for local development?"**
+Use authentication by default for a production-parity local setup.
 
-### Option A: Use Authentication (Default, recommended)
+### Default (recommended): Auth enabled
 
 Leave defaults:
 ```
@@ -160,16 +160,16 @@ Keycloak will start with Docker and provide login functionality.
 
 Default test user: `dev` / `dev`
 
-### Option B: Skip Authentication (Quick local testing)
+### Temporary fallback only: Skip auth when Keycloak is unavailable
 
 Set:
 ```
 AUTH_ENABLED=false
 ```
 
-All routes will allow unauthenticated access. User ID will be "anonymous".
+All routes allow unauthenticated access. User ID will be `anonymous`.
 
-**Warning:** Never deploy without authentication enabled.
+Use this only for temporary debugging or offline workflow work.
 
 ---
 
@@ -190,7 +190,7 @@ The output should show your actual values (not empty).
 - [ ] `.env` file exists in repo root
 - [ ] `OPENAI_API_KEY` is set to a real key (starts with `sk-`)
 - [ ] `MONGO_URI` is either default (localhost) or a valid connection string
-- [ ] `AUTH_ENABLED` is set to your preference
+- [ ] `AUTH_ENABLED=true` unless you're intentionally using temporary fallback mode
 
 ---
 
@@ -241,9 +241,9 @@ python run_server.py
 **Cause:** Keycloak isn't running.
 
 **Fix:**
-1. Start Keycloak: `docker compose up -d keycloak`
+1. Start Keycloak and its DB: `docker compose up -d keycloak-db keycloak`
 2. Wait ~30 seconds for it to initialize
-3. Or disable auth: set `AUTH_ENABLED=false` in `.env`
+3. Temporary fallback only: set `AUTH_ENABLED=false` in `.env`
 
 ### "I changed .env but nothing changed"
 
@@ -279,12 +279,6 @@ When deploying to production, you'll need to:
 
 ## Summary of Common Setups
 
-### Minimal Local Development (Fastest)
-```env
-OPENAI_API_KEY=sk-your-key
-AUTH_ENABLED=false
-```
-
 ### Full Local Development (With Auth)
 ```env
 OPENAI_API_KEY=sk-your-key
@@ -298,5 +292,11 @@ KC_ADMIN_PASSWORD=admin
 ```env
 OPENAI_API_KEY=sk-your-key
 MONGO_URI=mongodb+srv://user:pass@cluster.mongodb.net/MozaiksAI
+AUTH_ENABLED=true
+```
+
+### Emergency Offline Fallback (Short-term only)
+```env
+OPENAI_API_KEY=sk-your-key
 AUTH_ENABLED=false
 ```

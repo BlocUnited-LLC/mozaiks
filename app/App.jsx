@@ -32,7 +32,8 @@ export default function App() {
     }
 
     // Production/dev mode: use real Keycloak
-    createKeycloakAuthAdapter()
+    // Pass auth + dev config from app.json so keycloakAuth has everything it needs.
+    createKeycloakAuthAdapter({ auth: appConfig.auth, dev: appConfig.dev })
       .then((adapter) => {
         setAuthAdapter(adapter);
         setAuthReady(true);
@@ -67,7 +68,7 @@ export default function App() {
           Keycloak Not Available
         </h1>
         <p style={{ color: '#94a3b8', maxWidth: '32rem', lineHeight: 1.6 }}>
-          The app is configured to use Keycloak authentication (via <code style={{ color: '#22d3ee' }}>auth.json</code>),
+          The app is configured to use Keycloak authentication (via <code style={{ color: '#22d3ee' }}>app.json</code>),
           but the Keycloak server isn&apos;t running.
         </p>
         <div style={{

@@ -35,7 +35,10 @@ Follow those instructions to help me:
 2. Check if I have the required tools installed (Docker, Python, Node.js, Git)
 3. Help me install anything that's missing
 4. Clone the Mozaiks repository
-5. Walk me through the full setup
+5. Run `python -m mozaiksai.cli init --llm`
+6. Run `python -m mozaiksai.cli doctor`
+7. Run `python -m mozaiksai.cli up --frontend`
+8. Walk me through the full setup
 
 Be patient with me - explain things simply and wait for my confirmation at each step.
 ```

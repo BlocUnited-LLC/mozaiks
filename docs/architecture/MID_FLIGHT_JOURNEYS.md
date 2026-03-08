@@ -549,7 +549,7 @@ This means:
 > it doesn't belong here.
 
 **Date:** March 2, 2026  
-**Depends on:** [Kernel Integration Roadmap](../../KERNEL_INTEGRATION_ROADMAP.md) (Phases 1-4 complete)
+**Depends on:** Kernel integration roadmap (Phases 1-4 complete)
 
 ---
 
@@ -598,7 +598,6 @@ Mid-Flight Journeys (Production)
 
 - [x] Coordinator syntax verified (`ast.parse` OK)
 - [x] Production path working for AgentGenerator's `journeys` trigger
-- [x] Backward-compatible with `nested_chats` key (falls back automatically)
 
 ---
 

@@ -7,6 +7,7 @@
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
   "sslRequired": "none",
+  "loginTheme": "mozaiks",
   "accessTokenLifespan": 300,
   "ssoSessionIdleTimeout": 1800,
   "ssoSessionMaxLifespan": 36000,
@@ -25,7 +26,9 @@
       }
     ]
   },
-  "defaultRoles": ["user"],
+  "defaultRoles": [
+    "user"
+  ],
   "clients": [
     {
       "clientId": "mozaiks-app",
@@ -33,13 +36,13 @@
       "enabled": true,
       "publicClient": true,
       "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "implicitFlowEnabled": false,
       "serviceAccountsEnabled": false,
       "protocol": "openid-connect",
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "http://localhost:5173/*"
+        "post.logout.redirect.uris": "http://localhost:5173/*##http://localhost:3000/*##http://localhost:8000/*"
       },
       "redirectUris": [
         "http://localhost:5173/*",
@@ -71,6 +74,17 @@
             "jsonType.label": "String",
             "userinfo.token.claim": "true"
           }
+        },
+        {
+          "name": "mozaiks-app-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "mozaiks-app",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
         }
       ]
     }
@@ -90,7 +104,10 @@
           "temporary": false
         }
       ],
-      "realmRoles": ["user", "admin"]
+      "realmRoles": [
+        "user",
+        "admin"
+      ]
     }
   ]
 }

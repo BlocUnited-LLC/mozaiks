@@ -78,6 +78,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - AI-Assisted Setup: setup-prompt.md
+  - First-Run Ritual: first-run-ritual.md
   - Getting Started: getting-started.md
   - Setting Up Databases:
       - Overview: guides/databases/01-overview.md
@@ -96,9 +97,10 @@ nav:
       - UI JSON: guides/custom-brand-integration/03-ui-json.md
       - Assets: guides/custom-brand-integration/04-assets.md
       - Wiring: guides/custom-brand-integration/05-wiring.md
-      - Auth JSON: guides/custom-brand-integration/06-auth-json.md
+      - Auth (app.json): guides/custom-brand-integration/06-auth-json.md
   - Architecture:
       - Keycloak Auth: architecture/keycloak-auth.md
+      - Mobile Client Contract: architecture/mobile-client-contract.md
       - Frontend UI:
           - Overview: architecture/frontend/index.md
           - UI Surface Model: architecture/frontend/ui-surface-model.md

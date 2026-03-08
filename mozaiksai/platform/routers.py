@@ -29,14 +29,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, AliasChoices
 
-from mozaiksai.core.auth import (
+from mozaiksai.runtime.auth import (
     UserPrincipal,
     ServicePrincipal,
     require_user_scope,
     require_internal,
     validate_user_id_against_principal,
 )
-from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id
+from mozaiksai.runtime.multitenant import build_app_scope_filter, coalesce_app_id
 from logs.logging_config import get_workflow_logger
 
 logger = get_workflow_logger("mozaiks_platform.routers")
@@ -156,12 +156,12 @@ def get_platform_router() -> APIRouter:  # noqa: C901
             return JSONResponse(status_code=202, content={"accepted": True, "delivered": False})
 
         conn = transport.connections.get(chat_id)
-        connected = bool(conn and conn.get("websocket"))
+        connected = bool(conn and conn.websocket)
 
         delivered = False
         if connected:
-            conn_app_id = conn.get("app_id")
-            conn_user_id = conn.get("user_id")
+            conn_app_id = conn.app_id
+            conn_user_id = conn.user_id
             if (conn_app_id and str(conn_app_id) != str(payload.app_id)) or (
                 conn_user_id and str(conn_user_id) != str(payload.user_id)
             ):
@@ -390,7 +390,7 @@ def get_platform_router() -> APIRouter:  # noqa: C901
         """Workflows with availability status based on pack prerequisite gates."""
         pm = _get_persistence(request)
         try:
-            from mozaiksai.core.workflow.pack.gating import list_workflow_availability
+            from mozaiksai.kernel.pack.gating import list_workflow_availability
 
             if principal.user_id == "anonymous":
                 resolved_user_id = str(user_id or "").strip()

@@ -51,12 +51,11 @@ def _direct_import(module_name: str, file_path: Path):
 # Pre-register namespace stubs
 for _ns in [
     "mozaiksai",
-    "mozaiksai.core",
-    "mozaiksai.core.contracts",
-    "mozaiksai.core.contracts.events",
-    "mozaiksai.core.workflow",
-    "mozaiksai.core.workflow.pack",
-    "mozaiksai.orchestration",
+    "mozaiksai.contracts",
+    "mozaiksai.contracts.events",
+    "mozaiksai.engine",
+    "mozaiksai.kernel.pack",
+    "mozaiksai.kernel",
 ]:
     if _ns not in sys.modules:
         _m = types.ModuleType(_ns)
@@ -65,43 +64,43 @@ for _ns in [
         sys.modules[_ns] = _m
 
 # Import required modules
-if "mozaiksai.core.contracts.events" not in sys.modules or \
-   not hasattr(sys.modules["mozaiksai.core.contracts.events"], "DomainEvent"):
+if "mozaiksai.contracts.events" not in sys.modules or \
+   not hasattr(sys.modules["mozaiksai.contracts.events"], "DomainEvent"):
     _direct_import(
-        "mozaiksai.core.contracts.events",
-        _ROOT / "mozaiksai" / "core" / "contracts" / "events.py",
+        "mozaiksai.contracts.events",
+        _ROOT / "mozaiksai" / "contracts" / "events.py",
     )
 
-if "mozaiksai.orchestration.decomposition" not in sys.modules or \
-   not hasattr(sys.modules.get("mozaiksai.orchestration.decomposition", None), "SubTask"):
+if "mozaiksai.kernel.decomposition" not in sys.modules or \
+   not hasattr(sys.modules.get("mozaiksai.kernel.decomposition", None), "SubTask"):
     _direct_import(
-        "mozaiksai.orchestration.decomposition",
-        _ROOT / "mozaiksai" / "orchestration" / "decomposition.py",
+        "mozaiksai.kernel.decomposition",
+        _ROOT / "mozaiksai" / "kernel" / "decomposition.py",
     )
 
-if "mozaiksai.orchestration.merge" not in sys.modules or \
-   not hasattr(sys.modules.get("mozaiksai.orchestration.merge", None), "ChildResult"):
+if "mozaiksai.kernel.merge" not in sys.modules or \
+   not hasattr(sys.modules.get("mozaiksai.kernel.merge", None), "ChildResult"):
     _direct_import(
-        "mozaiksai.orchestration.merge",
-        _ROOT / "mozaiksai" / "orchestration" / "merge.py",
+        "mozaiksai.kernel.merge",
+        _ROOT / "mozaiksai" / "kernel" / "merge.py",
     )
 
-if "mozaiksai.core.workflow.pack.schema" not in sys.modules or \
-   not hasattr(sys.modules.get("mozaiksai.core.workflow.pack.schema", None), "MidFlightJourney"):
+if "mozaiksai.kernel.pack.schema" not in sys.modules or \
+   not hasattr(sys.modules.get("mozaiksai.kernel.pack.schema", None), "MidFlightJourney"):
     _direct_import(
-        "mozaiksai.core.workflow.pack.schema",
-        _ROOT / "mozaiksai" / "core" / "workflow" / "pack" / "schema.py",
+        "mozaiksai.kernel.pack.schema",
+        _ROOT / "mozaiksai" / "kernel" / "pack" / "schema.py",
     )
 
-if "mozaiksai.core.workflow.pack.mfj_persistence" not in sys.modules:
+if "mozaiksai.kernel.pack.mfj_persistence" not in sys.modules:
     _direct_import(
-        "mozaiksai.core.workflow.pack.mfj_persistence",
-        _ROOT / "mozaiksai" / "core" / "workflow" / "pack" / "mfj_persistence.py",
+        "mozaiksai.kernel.pack.mfj_persistence",
+        _ROOT / "mozaiksai" / "kernel" / "pack" / "mfj_persistence.py",
     )
 
 _coord_mod = _direct_import(
-    "mozaiksai.core.workflow.pack.workflow_pack_coordinator",
-    _ROOT / "mozaiksai" / "core" / "workflow" / "pack" / "workflow_pack_coordinator.py",
+    "mozaiksai.kernel.pack.workflow_pack_coordinator",
+    _ROOT / "mozaiksai" / "kernel" / "pack" / "workflow_pack_coordinator.py",
 )
 WorkflowPackCoordinator = _coord_mod.WorkflowPackCoordinator
 _ActivePackRun = _coord_mod._ActivePackRun

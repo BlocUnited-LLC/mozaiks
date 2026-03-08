@@ -303,6 +303,8 @@ causation event or a stable reference to it.
 | `chat.text` | Chat text message | `content` |
 | `chat.message_sent` | Message sent | `user_id`, `content` |
 | `chat.usage_delta` | LLM token usage | `total_tokens` |
+| `chat.stream_chunk` | Real-time token streaming chunk from AG2 IOStream bridge | `agent`, `content`, `chunk_seq`, `stream_id` |
+| `chat.stream_end` | End of a token stream; carries authoritative full content | `agent`, `full_content`, `chunk_count`, `stream_id`, `reason` |
 
 ### ui.tool
 
@@ -416,6 +418,7 @@ AG2 native events are normalized on ingest into this taxonomy.
 | `auto_tool.tool_call` | `integration.tool_call_sent` |
 | `auto_tool.tool_response` | `integration.tool_call_succeeded` |
 | `select_speaker` | `action.skill_invoked` |
+| `StreamEvent` (AG2 IOStream) | `chat.stream_chunk` (per token) / `chat.stream_end` (on flush) |
 
 Normalization rules:
 

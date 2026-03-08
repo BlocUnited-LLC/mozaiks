@@ -65,12 +65,11 @@ def _direct_import(module_name: str, file_path: Path):
 # Pre-register namespace stubs
 for _ns in [
     "mozaiksai",
-    "mozaiksai.core",
-    "mozaiksai.core.contracts",
-    "mozaiksai.core.contracts.events",
-    "mozaiksai.core.workflow",
-    "mozaiksai.core.workflow.pack",
-    "mozaiksai.orchestration",
+    "mozaiksai.contracts",
+    "mozaiksai.contracts.events",
+    "mozaiksai.engine",
+    "mozaiksai.kernel.pack",
+    "mozaiksai.kernel",
 ]:
     if _ns not in sys.modules:
         _m = types.ModuleType(_ns)
@@ -80,20 +79,20 @@ for _ns in [
 
 # Import the modules we need
 _events_mod = _direct_import(
-    "mozaiksai.core.contracts.events",
-    _ROOT / "mozaiksai" / "core" / "contracts" / "events.py",
+    "mozaiksai.contracts.events",
+    _ROOT / "mozaiksai" / "contracts" / "events.py",
 )
 _decomp_mod = _direct_import(
-    "mozaiksai.orchestration.decomposition",
-    _ROOT / "mozaiksai" / "orchestration" / "decomposition.py",
+    "mozaiksai.kernel.decomposition",
+    _ROOT / "mozaiksai" / "kernel" / "decomposition.py",
 )
 _merge_mod = _direct_import(
-    "mozaiksai.orchestration.merge",
-    _ROOT / "mozaiksai" / "orchestration" / "merge.py",
+    "mozaiksai.kernel.merge",
+    _ROOT / "mozaiksai" / "kernel" / "merge.py",
 )
 _coord_mod = _direct_import(
-    "mozaiksai.core.workflow.pack.workflow_pack_coordinator",
-    _ROOT / "mozaiksai" / "core" / "workflow" / "pack" / "workflow_pack_coordinator.py",
+    "mozaiksai.kernel.pack.workflow_pack_coordinator",
+    _ROOT / "mozaiksai" / "kernel" / "pack" / "workflow_pack_coordinator.py",
 )
 
 WorkflowPackCoordinator = _coord_mod.WorkflowPackCoordinator
@@ -336,7 +335,7 @@ def _structured_output_event(
     return {
         "agent_name": agent_name,
         "structured_data": {
-            "PatternSelection": {
+            "decomposition_request": {
                 "is_multi_workflow": True,
                 "resume_agent": "presenter",
                 "workflows": workflows,
@@ -369,9 +368,9 @@ def _integration_patches(transport, pack_graph):
 
     patches = [
         patch.dict(sys.modules, {
-            "mozaiksai.core.transport.simple_transport": fake_transport_module,
-            "mozaiksai.core.transport.session_registry": fake_registry_module,
-            "mozaiksai.orchestration.events": fake_events_module,
+            "mozaiksai.transport.websocket.handler": fake_transport_module,
+            "mozaiksai.transport.websocket.registry": fake_registry_module,
+            "mozaiksai.kernel.orchestration_events": fake_events_module,
         }),
         patch.object(
             _coord_mod,
@@ -884,13 +883,13 @@ class TestContractViolation:
         events = EventCollector()
         transport = _build_transport(pm, events)
         pack_graph = _single_mfj_pack_graph(
-            required_context=["InterviewTranscript", "PatternSelection"],
+            required_context=["parent_transcript", "decomposition_request"],
         )
         coord = WorkflowPackCoordinator()
 
-        # Context is missing InterviewTranscript
+        # Context is missing parent_transcript
         event = _structured_output_event(
-            context={"PatternSelection": {"some": "data"}},
+            context={"decomposition_request": {"some": "data"}},
         )
 
         with _integration_patches(transport, pack_graph):
@@ -913,12 +912,12 @@ class TestContractViolation:
         events = EventCollector()
         transport = _build_transport(pm, events)
         pack_graph = _single_mfj_pack_graph(
-            required_context=["InterviewTranscript"],
+            required_context=["parent_transcript"],
         )
         coord = WorkflowPackCoordinator()
 
         event = _structured_output_event(
-            context={"InterviewTranscript": "Some transcript data"},
+            context={"parent_transcript": "Some transcript data"},
         )
 
         with _integration_patches(transport, pack_graph):

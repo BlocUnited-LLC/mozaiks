@@ -1,15 +1,15 @@
 import React from 'react';
-import { useBranding } from '../providers/BrandingProvider';
+import { useTheme } from '../styles/useTheme';
+import { getCurrentAppId } from '../styles/themeProvider';
 
 const LoadingSpinner = () => {
-  // Read logo from brand.json → assets.logo; falls back to mozaik_logo.svg
-  // useBranding() returns the full context value: { branding, loading, ... }
-  const ctx   = useBranding?.();
-  const _logo = ctx?.branding?.assets?.logo;
-  if (!ctx?.loading && !_logo) {
-    console.warn('⚠️ [THEME] branding.assets.logo not set — using fallback: mozaik_logo.svg');
+  const appId = getCurrentAppId();
+  const { theme, loading } = useTheme(appId);
+  const logoSrc = theme?.branding?.logo || '/assets/mozaik_logo.svg';
+
+  if (!loading && !theme?.branding?.logo) {
+    console.warn('⚠️ [THEME] branding.logo not set — using fallback: /assets/mozaik_logo.svg');
   }
-  const logoSrc  = _logo ? `/assets/${_logo}` : '/assets/mozaik_logo.svg';
 
   return (
     <div id="loader" className="flex flex-col items-center justify-center gap-4" role="status" aria-label="Initializing workflow">

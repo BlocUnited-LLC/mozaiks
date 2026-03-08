@@ -51,12 +51,26 @@ Docker is required — it runs **MongoDB** (app database), **PostgreSQL** (Keycl
 
 ---
 
+## Fastest path (recommended)
+
+Use the bootstrap ritual + doctor checks:
+
+```powershell
+python -m mozaiksai.cli init --llm
+python -m mozaiksai.cli doctor
+python -m mozaiksai.cli up --frontend
+```
+
+This is the best path for first-time developers because it configures `app/app.json`, `.env`, and generated Keycloak artifacts before startup.
+
+---
+
 ## Repo layout
 
 ```
 mozaiks/
 ├── app/                        # Frontend app (Vite + React) — brand & customize this
-│   ├── brand/public/           # brand.json, ui.json, navigation.json, auth.json, assets, fonts
+│   ├── brand/public/           # brand.json, ui.json, navigation.json, assets, fonts
 │   ├── App.jsx                 # App shell (Keycloak auth built-in)
 │   ├── main.jsx                # Entry point
 │   └── vite.config.js          # Pre-wired — update proxy once backend is live
@@ -67,7 +81,7 @@ mozaiks/
 │   └── workflows/              # Workflow frontend component registry
 │       └── HelloWorld/         # Example — copy for your own workflows
 │
-├── workflows/                  # Backend AG2 workflow definitions
+├── workflows/                  # Backend workflow definitions (engine-adapter compatible)
 │   └── HelloWorld/             # Example workflow — copy for your own
 │
 ├── mozaiksai/                  # Runtime engine — do not modify
@@ -109,7 +123,7 @@ That's the only required edit. Everything else has working defaults:
 | `OPENAI_API_KEY` | **Yes** | — | Your OpenAI API key |
 | `MONGO_URI` | — | `mongodb://localhost:27017` | MongoDB connection string |
 | `MONGO_DB_NAME` | — | `MozaiksAI` | App database name |
-| `AUTH_ENABLED` | — | `true` (Docker) / `false` (local) | Enable Keycloak JWT validation |
+| `AUTH_ENABLED` | — | `true` | Enable Keycloak JWT validation |
 | `KC_ADMIN_USER` | — | `admin` | Keycloak admin console username |
 | `KC_ADMIN_PASSWORD` | — | `admin` | Keycloak admin console password |
 | `KC_DB_PASSWORD` | — | `keycloak` | Keycloak Postgres password |
@@ -289,16 +303,16 @@ This re-creates all volumes and re-imports the realm from `realm-export.json`.
     Keycloak needs ~30-60 seconds to initialize its database and import the realm. Run `docker compose logs keycloak -f` and wait for `Running the server in development mode`. Then `docker compose up -d` again.
 
 ??? question "Port 8080 already in use"
-    Another service is using port 8080. Either stop it or change Keycloak's port in `docker-compose.yml` and update `authority` in `app/brand/public/auth.json` to match.
+    Another service is using port 8080. Either stop it or change Keycloak's port in `docker-compose.yml` and update `auth.keycloak.authority` in `app/app.json` to match.
 
 ??? question "Port 27017 already in use"
     A local MongoDB is already running. Either stop it (`brew services stop mongodb-community` or stop the Windows service) or change the port mapping in `docker-compose.yml`.
 
 ??? question "Frontend shows 'Authentication Unavailable'"
-    Keycloak isn't running or isn't reachable. Check `docker compose ps` — Keycloak should be `healthy`. If you want to skip auth for local dev, set `AUTH_ENABLED=false` in `.env` and remove `app/brand/public/auth.json`.
+    Keycloak isn't running or isn't reachable. Check `docker compose ps` — Keycloak should be `healthy`. If you want temporary fallback mode, set `AUTH_ENABLED=false` in `.env` and restart backend/frontend.
 
 ??? question "I want to skip auth during development"
-    Set `AUTH_ENABLED=false` in `.env` to disable backend JWT validation. The frontend will still try to reach Keycloak — remove or rename `app/brand/public/auth.json` to skip that too. Remember: auth is the default for a reason.
+    Set `AUTH_ENABLED=false` in `.env` to disable backend JWT validation. This is temporary fallback mode and should not be used for production parity testing.
 
 ??? question "How do I connect to MongoDB Atlas instead of local?"
     Set `MONGO_URI` in `.env` to your Atlas connection string. You can then skip starting the local mongo container: `docker compose up keycloak-db keycloak -d`
@@ -329,9 +343,9 @@ This re-creates all volumes and re-imports the realm from `realm-export.json`.
 
     ---
 
-    Customize Keycloak login, roles, branding, and social providers.
+    Configure Keycloak authority/client/realm from `app/app.json`.
 
-    [:octicons-arrow-right-24: Auth JSON](guides/custom-brand-integration/06-auth-json.md)
+    [:octicons-arrow-right-24: Auth (app.json)](guides/custom-brand-integration/06-auth-json.md)
 
 -   :fontawesome-solid-server: **Architecture**
 

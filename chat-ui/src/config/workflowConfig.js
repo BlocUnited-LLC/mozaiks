@@ -9,6 +9,18 @@
  */
 import config from './index';
 
+function getAccessToken() {
+  if (typeof window !== 'undefined' && window.mozaiksAuth?.getAccessToken) {
+    return window.mozaiksAuth.getAccessToken();
+  }
+
+  if (typeof localStorage !== 'undefined') {
+    return localStorage.getItem('chatui_token') || localStorage.getItem('access_token');
+  }
+
+  return null;
+}
+
 class WorkflowConfig {
   constructor() {
     this.configs = new Map();
@@ -28,20 +40,24 @@ class WorkflowConfig {
     this.fetchInProgress = true;
     const baseUrlRaw = typeof config?.get === 'function' ? config.get('api.baseUrl') : undefined;
     const baseUrl = typeof baseUrlRaw === 'string' && baseUrlRaw.endsWith('/') ? baseUrlRaw.slice(0, -1) : baseUrlRaw;
-    const hosts = [
-      baseUrl,
-      'http://localhost:8080',
-      'http://127.0.0.1:8080'
-    ].filter(Boolean);
     const path = '/api/workflows';
+    const urls = [];
+    if (typeof window !== 'undefined') {
+      urls.push(path);
+    }
+    if (baseUrl) {
+      urls.push(baseUrl + path);
+    }
+    const candidates = Array.from(new Set(urls));
+    const token = getAccessToken();
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
     let lastError = null;
-    for (const host of hosts) {
-      const url = host + path;
+    for (const url of candidates) {
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 5000);
         console.log('� WorkflowRegistry: Fetching workflows from', url);
-        const response = await fetch(url, { signal: controller.signal });
+        const response = await fetch(url, { signal: controller.signal, headers });
         clearTimeout(timeout);
         if (!response.ok) {
           const txt = await response.text().catch(()=> '');

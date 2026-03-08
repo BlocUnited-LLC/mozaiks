@@ -7,6 +7,7 @@
 import { useState, useEffect } from 'react';
 import {
   getTheme,
+  applyTheme,
   DEFAULT_THEME,
   DEFAULT_HEADER_CONFIG,
   DEFAULT_FOOTER_CONFIG,
@@ -16,7 +17,7 @@ import {
 
 // ─── CSS variable name map ────────────────────────────────────────────────────
 // Maps semantic color type + variant → CSS variable name.
-// These vars are always set at runtime by applyTheme() / applyBrand().
+// These vars are set at runtime by applyTheme().
 const COLOR_VAR_MAP = {
   primary:   { main: 'color-primary',       light: 'color-primary-light',   dark: 'color-primary-dark' },
   secondary: { main: 'color-secondary',     light: 'color-secondary-light', dark: 'color-secondary-dark' },
@@ -55,12 +56,14 @@ export function useTheme(appId = null) {
         
         if (!cancelled) {
           setTheme(loadedTheme);
+          applyTheme(loadedTheme);
           setLoading(false);
         }
       } catch (error) {
         console.error('🎨 [useTheme] Failed to load theme:', error);
         if (!cancelled) {
           setTheme(DEFAULT_THEME);
+          applyTheme(DEFAULT_THEME);
           setLoading(false);
         }
       }
@@ -113,7 +116,7 @@ export function getThemeFont(theme, fontKey = 'body') {
 /**
  * DYNAMIC COLOR CLASS GENERATOR
  * Returns a single Tailwind arbitrary-value class backed by a CSS variable.
- * CSS variables are guaranteed to be set by applyTheme() / applyBrand()
+ * CSS variables are guaranteed to be set by applyTheme()
  * before components render, so no competing fallback class is needed.
  *
  * @param {Object} theme - Theme object (not used for class selection, kept for API compat)
@@ -127,7 +130,7 @@ export function getThemeFont(theme, fontKey = 'body') {
  * // → 'bg-[var(--color-primary)]'
  */
 export function getDynamicColorClass(theme, type = 'primary', variant = 'main', property = 'bg') {
-  void theme; // CSS vars are set by applyTheme/applyBrand — no theme object lookup needed
+  void theme; // CSS vars are set by applyTheme() — no theme object lookup needed
 
   const varName = COLOR_VAR_MAP[type]?.[variant] || COLOR_VAR_MAP[type]?.main || 'color-primary';
 

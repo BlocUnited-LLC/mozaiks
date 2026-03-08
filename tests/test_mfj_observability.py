@@ -51,12 +51,11 @@ def _direct_import(module_name: str, file_path: Path):
 # Pre-register namespace stubs
 for _ns in [
     "mozaiksai",
-    "mozaiksai.core",
-    "mozaiksai.core.contracts",
-    "mozaiksai.core.contracts.events",
-    "mozaiksai.core.workflow",
-    "mozaiksai.core.workflow.pack",
-    "mozaiksai.orchestration",
+    "mozaiksai.contracts",
+    "mozaiksai.contracts.events",
+    "mozaiksai.engine",
+    "mozaiksai.kernel.pack",
+    "mozaiksai.kernel",
 ]:
     if _ns not in sys.modules:
         _m = types.ModuleType(_ns)
@@ -66,32 +65,32 @@ for _ns in [
 
 # Import contracts.events (needed by later modules)
 _direct_import(
-    "mozaiksai.core.contracts.events",
-    _ROOT / "mozaiksai" / "core" / "contracts" / "events.py",
+    "mozaiksai.contracts.events",
+    _ROOT / "mozaiksai" / "contracts" / "events.py",
 )
 
 # Import merge (needed by coordinator)
 _direct_import(
-    "mozaiksai.orchestration.merge",
-    _ROOT / "mozaiksai" / "orchestration" / "merge.py",
+    "mozaiksai.kernel.merge",
+    _ROOT / "mozaiksai" / "kernel" / "merge.py",
 )
 
 # Import decomposition (needed by coordinator)
 _direct_import(
-    "mozaiksai.orchestration.decomposition",
-    _ROOT / "mozaiksai" / "orchestration" / "decomposition.py",
+    "mozaiksai.kernel.decomposition",
+    _ROOT / "mozaiksai" / "kernel" / "decomposition.py",
 )
 
 # Import mfj_persistence (needed by coordinator)
 _direct_import(
-    "mozaiksai.core.workflow.pack.mfj_persistence",
-    _ROOT / "mozaiksai" / "core" / "workflow" / "pack" / "mfj_persistence.py",
+    "mozaiksai.kernel.pack.mfj_persistence",
+    _ROOT / "mozaiksai" / "kernel" / "pack" / "mfj_persistence.py",
 )
 
 # Import the observability module under test
 _obs_mod = _direct_import(
-    "mozaiksai.core.workflow.pack.mfj_observability",
-    _ROOT / "mozaiksai" / "core" / "workflow" / "pack" / "mfj_observability.py",
+    "mozaiksai.kernel.pack.mfj_observability",
+    _ROOT / "mozaiksai" / "kernel" / "pack" / "mfj_observability.py",
 )
 MFJObserver = _obs_mod.MFJObserver
 MFJSpanContext = _obs_mod.MFJSpanContext
@@ -100,8 +99,8 @@ reset_mfj_observer = _obs_mod.reset_mfj_observer
 
 # Import coordinator
 _coord_mod = _direct_import(
-    "mozaiksai.core.workflow.pack.workflow_pack_coordinator",
-    _ROOT / "mozaiksai" / "core" / "workflow" / "pack" / "workflow_pack_coordinator.py",
+    "mozaiksai.kernel.pack.workflow_pack_coordinator",
+    _ROOT / "mozaiksai" / "kernel" / "pack" / "workflow_pack_coordinator.py",
 )
 WorkflowPackCoordinator = _coord_mod.WorkflowPackCoordinator
 
@@ -235,7 +234,7 @@ class TestObserverStructuredLogging:
             observer.on_contract_violation(
                 trigger_id="trig_1",
                 parent_chat_id="chat_abc",
-                violation="Missing required_context key: InterviewTranscript",
+                violation="Missing required_context key: parent_transcript",
             )
 
         assert len(caplog.records) >= 1

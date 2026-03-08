@@ -79,6 +79,10 @@ uploads/
 # Docs build
 site/
 
+# Generated artifacts (from brand.json via `python -m mozaiksai.cli generate`)
+infra/keycloak/themes/mozaiks/login/resources/css/login.css
+infra/keycloak/themes/mozaiks/login/resources/img/
+
 # Misc
 nul
 *.log

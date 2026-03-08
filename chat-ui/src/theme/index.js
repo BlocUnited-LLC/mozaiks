@@ -30,7 +30,7 @@ export function BrandProvider({ children }) {
         setError(e);
       })
       .finally(() => setLoading(false));
-  }, [brandId]);
+  }, []);
 
   return (
     <BrandContext.Provider value={{ brand, loading, error }}>

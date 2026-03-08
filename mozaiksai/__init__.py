@@ -1,17 +1,27 @@
 # ==============================================================================
-# MozaiksAI Namespace Package
+# MozaiksAI Runtime — Top-level Namespace
 # ==============================================================================
 """
 MozaiksAI runtime namespace package.
 
-This namespace allows the MozaiksAI runtime to be distributed across multiple
-repositories while maintaining a unified import structure:
+Layered architecture:
 
-    from mozaiksai.core.workflow import workflow_manager
-    from mozaiksai.core.transport import SimpleTransport
-    from mozaiksai.core.auth import require_user_scope
+    Layer 0 — Contracts & Ports (engine-agnostic interfaces)
+        from mozaiksai.contracts import DomainEvent, RunRequest
+        from mozaiksai.ports import OrchestrationPort
 
-The namespace is PEP 420 compliant (implicit namespace packages).
+    Layer 1 — Engine Adapter (AG2-specific execution)
+        from mozaiksai.engine import run_workflow_orchestration
+
+    Layer 1.5 — Kernel / Orchestration (AG2-free coordination)
+        from mozaiksai.kernel import UniversalOrchestrator
+
+    Layer 2 — Runtime Services (persistence, auth, config)
+        from mozaiksai.runtime.auth import require_user_scope
+        from mozaiksai.runtime.data import AG2PersistenceManager
+
+    Layer 3 — Transport (HTTP + WebSocket)
+        from mozaiksai.transport.websocket.handler import SimpleTransport
 """
 
 __version__ = "1.0.0"

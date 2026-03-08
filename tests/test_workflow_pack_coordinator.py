@@ -8,7 +8,6 @@ Covers:
 3. Input/output contract validation
 4. Multi-MFJ sequencing (requires field)
 5. Timeout enforcement + partial failure strategies
-6. Backward compatibility (raw PatternSelection → DecompositionPlan)
 """
 
 from __future__ import annotations
@@ -54,12 +53,11 @@ def _direct_import(module_name: str, file_path: Path):
 # Pre-register namespace stubs so chained __init__.py's don't fire
 for _ns in [
     "mozaiksai",
-    "mozaiksai.core",
-    "mozaiksai.core.contracts",
-    "mozaiksai.core.contracts.events",
-    "mozaiksai.core.workflow",
-    "mozaiksai.core.workflow.pack",
-    "mozaiksai.orchestration",
+    "mozaiksai.contracts",
+    "mozaiksai.contracts.events",
+    "mozaiksai.engine",
+    "mozaiksai.kernel.pack",
+    "mozaiksai.kernel",
 ]:
     if _ns not in sys.modules:
         _m = types.ModuleType(_ns)
@@ -70,14 +68,14 @@ for _ns in [
 # Now import only the specific modules we need (they don't depend on autogen)
 # 1. contracts.events (needed by orchestration modules)
 _events_mod = _direct_import(
-    "mozaiksai.core.contracts.events",
-    _ROOT / "mozaiksai" / "core" / "contracts" / "events.py",
+    "mozaiksai.contracts.events",
+    _ROOT / "mozaiksai" / "contracts" / "events.py",
 )
 
 # 2. orchestration.decomposition
 _decomp_mod = _direct_import(
-    "mozaiksai.orchestration.decomposition",
-    _ROOT / "mozaiksai" / "orchestration" / "decomposition.py",
+    "mozaiksai.kernel.decomposition",
+    _ROOT / "mozaiksai" / "kernel" / "decomposition.py",
 )
 AgentSignalDecomposition = _decomp_mod.AgentSignalDecomposition
 DecompositionContext = _decomp_mod.DecompositionContext
@@ -87,8 +85,8 @@ SubTask = _decomp_mod.SubTask
 
 # 3. orchestration.merge
 _merge_mod = _direct_import(
-    "mozaiksai.orchestration.merge",
-    _ROOT / "mozaiksai" / "orchestration" / "merge.py",
+    "mozaiksai.kernel.merge",
+    _ROOT / "mozaiksai" / "kernel" / "merge.py",
 )
 ChildResult = _merge_mod.ChildResult
 ConcatenateMerge = _merge_mod.ConcatenateMerge
@@ -98,8 +96,8 @@ StructuredMerge = _merge_mod.StructuredMerge
 
 # 4. The coordinator itself
 _coord_mod = _direct_import(
-    "mozaiksai.core.workflow.pack.workflow_pack_coordinator",
-    _ROOT / "mozaiksai" / "core" / "workflow" / "pack" / "workflow_pack_coordinator.py",
+    "mozaiksai.kernel.pack.workflow_pack_coordinator",
+    _ROOT / "mozaiksai" / "kernel" / "pack" / "workflow_pack_coordinator.py",
 )
 FanInContractError = _coord_mod.FanInContractError
 FanOutContractError = _coord_mod.FanOutContractError
@@ -158,21 +156,21 @@ class TestFanOutContractValidation:
 
     def test_all_required_present_passes(self):
         _validate_fan_out_context(
-            {"required_context": ["InterviewTranscript", "PatternSelection"]},
-            {"InterviewTranscript": "...", "PatternSelection": {}, "extra": 1},
+            {"required_context": ["parent_transcript", "decomposition_request"]},
+            {"parent_transcript": "...", "decomposition_request": {}, "extra": 1},
         )
 
     def test_missing_required_raises(self):
-        with pytest.raises(FanOutContractError, match="InterviewTranscript"):
+        with pytest.raises(FanOutContractError, match="parent_transcript"):
             _validate_fan_out_context(
-                {"required_context": ["InterviewTranscript", "PatternSelection"]},
-                {"PatternSelection": {}},
+                {"required_context": ["parent_transcript", "decomposition_request"]},
+                {"decomposition_request": {}},
             )
 
     def test_multiple_missing(self):
-        with pytest.raises(FanOutContractError, match="InterviewTranscript"):
+        with pytest.raises(FanOutContractError, match="parent_transcript"):
             _validate_fan_out_context(
-                {"required_context": ["InterviewTranscript", "foo"]},
+                {"required_context": ["parent_transcript", "foo"]},
                 {},
             )
 
@@ -426,66 +424,7 @@ class TestMergeMode:
 
 
 # ===========================================================================
-# 5. Plan from Raw (backward compat)
-# ===========================================================================
-
-class TestPlanFromRaw:
-    """Test _plan_from_raw converting old PatternSelection dicts."""
-
-    def test_basic_conversion(self):
-        c = WorkflowPackCoordinator()
-        raw = {
-            "is_multi_workflow": True,
-            "workflows": [
-                {"name": "wf_a", "description": "A"},
-                {"name": "wf_b", "initial_message": "Start B"},
-            ],
-            "resume_agent": "Merger",
-        }
-        plan = c._plan_from_raw(raw, {})
-        assert plan is not None
-        assert plan.task_count == 2
-        assert plan.sub_tasks[0].workflow_name == "wf_a"
-        assert plan.sub_tasks[1].initial_message == "Start B"
-        assert plan.resume_agent == "Merger"
-        assert "backward" in plan.reason.lower()
-
-    def test_no_workflows_returns_none(self):
-        c = WorkflowPackCoordinator()
-        assert c._plan_from_raw({"workflows": []}, {}) is None
-
-    def test_bad_workflow_entries_skipped(self):
-        c = WorkflowPackCoordinator()
-        raw = {
-            "workflows": [
-                {"name": ""},
-                {"name": "  "},
-                42,
-                {"name": "valid_wf"},
-            ],
-        }
-        plan = c._plan_from_raw(raw, {})
-        assert plan is not None
-        assert plan.task_count == 1
-        assert plan.sub_tasks[0].workflow_name == "valid_wf"
-
-    def test_metadata_preserved(self):
-        c = WorkflowPackCoordinator()
-        raw = {
-            "workflows": [
-                {"name": "wf_a", "description": "A thing", "custom_field": 42},
-            ],
-            "decomposition_reason": "user requested",
-        }
-        plan = c._plan_from_raw(raw, {})
-        assert plan is not None
-        assert plan.sub_tasks[0].metadata.get("description") == "A thing"
-        assert plan.sub_tasks[0].metadata.get("custom_field") == 42
-        assert plan.strategy_metadata.get("decomposition_reason") == "user requested"
-
-
-# ===========================================================================
-# 6. Coordinator Init & Merge Apply
+# 5. Coordinator Init & Merge Apply
 # ===========================================================================
 
 class TestCoordinatorInit:
@@ -571,46 +510,13 @@ class TestApplyMerge:
 
 
 # ===========================================================================
-# 7. Extract Pack Plan (backward compat)
-# ===========================================================================
-
-class TestExtractPackPlan:
-    """Test _extract_pack_plan raw dict extraction."""
-
-    def test_pattern_selection_key(self):
-        c = WorkflowPackCoordinator()
-        result = c._extract_pack_plan({
-            "PatternSelection": {"is_multi_workflow": True, "workflows": [{"name": "a"}]},
-        })
-        assert result is not None
-        assert result["is_multi_workflow"] is True
-
-    def test_lowercase_key(self):
-        c = WorkflowPackCoordinator()
-        result = c._extract_pack_plan({
-            "pattern_selection": {"is_multi_workflow": True, "workflows": []},
-        })
-        assert result is not None
-
-    def test_not_dict_returns_none(self):
-        c = WorkflowPackCoordinator()
-        assert c._extract_pack_plan("string") is None
-        assert c._extract_pack_plan(None) is None
-        assert c._extract_pack_plan(42) is None
-
-    def test_no_matching_key_returns_none(self):
-        c = WorkflowPackCoordinator()
-        assert c._extract_pack_plan({"other_key": {}}) is None
-
-
-# ===========================================================================
-# 8. DecompositionStrategy detection via coordinator
+# 7. DecompositionStrategy detection via coordinator
 # ===========================================================================
 
 class TestDecompositionIntegration:
     """Test that AgentSignalDecomposition is used correctly."""
 
-    def test_pattern_selection_detected(self):
+    def test_decomposition_request_detected(self):
         strategy = AgentSignalDecomposition()
         ctx = DecompositionContext(
             run_id="run1",
@@ -619,7 +525,7 @@ class TestDecompositionIntegration:
             user_id="user1",
             trigger_event={
                 "structured_data": {
-                    "PatternSelection": {
+                    "decomposition_request": {
                         "is_multi_workflow": True,
                         "workflows": [
                             {"name": "child_a"},
@@ -678,7 +584,7 @@ class TestExports:
     """Verify package exports."""
 
     def test_all_exports(self):
-        from mozaiksai.core.workflow.pack import workflow_pack_coordinator as mod
+        from mozaiksai.kernel.pack import workflow_pack_coordinator as mod
         for name in mod.__all__:
             assert hasattr(mod, name), f"Missing export: {name}"
 
@@ -692,7 +598,11 @@ class TestCollectChildResults:
 
     @pytest.mark.asyncio
     async def test_collects_from_mongodb(self):
-        c = WorkflowPackCoordinator()
+        # Mock transport port: no errors for either child
+        mock_transport = MagicMock()
+        mock_transport.get_task_error = MagicMock(return_value=None)
+
+        c = WorkflowPackCoordinator(transport=mock_transport)
 
         # Mock persistence manager
         pm = AsyncMock()
@@ -714,22 +624,7 @@ class TestCollectChildResults:
             task_to_chat={"task_1": "c1", "task_2": "c2"},
         )
 
-        # Mock transport + background tasks (both done successfully)
-        mock_task = MagicMock()
-        mock_task.done.return_value = True
-        mock_task.result.return_value = None
-
-        mock_transport = AsyncMock()
-        mock_transport._background_tasks = {"c1": mock_task, "c2": mock_task}
-
-        # Patch the lazy import inside _collect_child_results
-        fake_transport_module = MagicMock()
-        fake_transport_module.SimpleTransport.get_instance = AsyncMock(return_value=mock_transport)
-
-        with patch.dict(sys.modules, {
-            "mozaiksai.core.transport.simple_transport": fake_transport_module,
-        }):
-            results = await c._collect_child_results(active, pm)
+        results = await c._collect_child_results(active, pm)
 
         assert len(results) == 2
         assert results[0].task_id == "task_1"
@@ -740,7 +635,11 @@ class TestCollectChildResults:
 
     @pytest.mark.asyncio
     async def test_failed_child_detected(self):
-        c = WorkflowPackCoordinator()
+        # Mock transport port: get_task_error returns error string for c1
+        mock_transport = MagicMock()
+        mock_transport.get_task_error = MagicMock(return_value="agent crashed")
+
+        c = WorkflowPackCoordinator(transport=mock_transport)
 
         pm = AsyncMock()
         pm.fetch_chat_session_extra_context = AsyncMock(return_value={})
@@ -756,21 +655,7 @@ class TestCollectChildResults:
             task_to_chat={"task_1": "c1"},
         )
 
-        # Mock task that raised an exception
-        mock_task = MagicMock()
-        mock_task.done.return_value = True
-        mock_task.result.side_effect = RuntimeError("agent crashed")
-
-        mock_transport = AsyncMock()
-        mock_transport._background_tasks = {"c1": mock_task}
-
-        fake_transport_module = MagicMock()
-        fake_transport_module.SimpleTransport.get_instance = AsyncMock(return_value=mock_transport)
-
-        with patch.dict(sys.modules, {
-            "mozaiksai.core.transport.simple_transport": fake_transport_module,
-        }):
-            results = await c._collect_child_results(active, pm)
+        results = await c._collect_child_results(active, pm)
 
         assert len(results) == 1
         assert results[0].success is False

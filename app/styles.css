@@ -3,9 +3,9 @@
 @tailwind utilities;
 
 /* Base document styling driven entirely by brand.json CSS variables.
-   These values are set at runtime by applyBrand() — nothing is hardcoded here.
+   These values are set at runtime by applyTheme() — nothing is hardcoded here.
    The var() fallbacks match the template brand (brand.json) so the page
-   renders correctly before applyBrand() fires. */
+   renders correctly before applyTheme() fires. */
 
 html, body, #root {
   min-height: 100vh;

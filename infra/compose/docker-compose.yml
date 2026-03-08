@@ -1,3 +1,13 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Declarative config:  After editing app.json or brand.json, regenerate
+# derived artifacts before starting the stack:
+#
+#     python -m mozaiksai.cli generate
+#
+# This regenerates:  realm-export.json (from app.json)
+#                    Keycloak login theme CSS (from brand.json)
+# ═══════════════════════════════════════════════════════════════════════════
+
 services:
   # ---------------------------------------------------------------------------
   # Keycloak Postgres — user/realm/session persistence
@@ -38,6 +48,7 @@ services:
       - "8080:8080"
     volumes:
       - ../keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+      - ../keycloak/themes:/opt/keycloak/themes:ro
     depends_on:
       keycloak-db:
         condition: service_healthy

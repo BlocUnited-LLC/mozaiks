@@ -8,6 +8,18 @@ import React, { useState, useCallback } from 'react';
 import { FiMessageCircle, FiSend, FiX } from 'react-icons/fi';
 import config from '../../config';
 
+function getAccessToken() {
+  if (typeof window !== 'undefined' && window.mozaiksAuth?.getAccessToken) {
+    return window.mozaiksAuth.getAccessToken();
+  }
+
+  if (typeof localStorage !== 'undefined') {
+    return localStorage.getItem('chatui_token') || localStorage.getItem('access_token');
+  }
+
+  return null;
+}
+
 /**
  * 🎯 GENERIC USER INPUT REQUEST COMPONENT
  * 
@@ -56,12 +68,19 @@ const UserInputRequest = ({ payload, onResponse, onCancel, submitInputRequest })
       // Fall back to REST if WebSocket failed or unavailable
       if (!success) {
         const baseUrlRaw = typeof config?.get === 'function' ? config.get('api.baseUrl') : undefined;
-        const baseUrl = typeof baseUrlRaw === 'string' && baseUrlRaw.endsWith('/') ? baseUrlRaw.slice(0, -1) : (baseUrlRaw || 'http://localhost:8080');
-        const response = await fetch(`${baseUrl}/api/user-input/submit`, {
+        const baseUrl = typeof baseUrlRaw === 'string' && baseUrlRaw.endsWith('/') ? baseUrlRaw.slice(0, -1) : baseUrlRaw;
+        const endpoint = baseUrl ? `${baseUrl}/api/user-input/submit` : '/api/user-input/submit';
+        const headers = {
+          'Content-Type': 'application/json',
+        };
+        const token = getAccessToken();
+        if (token) {
+          headers.Authorization = `Bearer ${token}`;
+        }
+
+        const response = await fetch(endpoint, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers,
           body: JSON.stringify({
             input_request_id,
             user_input: userInput || "" // Empty string for enter/skip

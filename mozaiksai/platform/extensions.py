@@ -4,12 +4,17 @@ from __future__ import annotations
 ====================================
 Registered via RUNTIME_PLATFORM_EXTENSIONS=mozaiksai.platform.extensions:get_bundle
 
-Provides four hook callables that plug into the core runtime:
+Provides five hook callables that plug into the core runtime:
 
     on_startup(app)
         Mounts the Mozaiks platform APIRouter (themes, OAuth webhook, build
         export, general chats, available workflows) and initialises
         ThemeManager on app.state.
+
+    register_workers(*, worker_registry, capability_registry)
+        Registers platform capability workers (e.g. ProvisioningWorker) into
+        Core's WorkerRegistry so RunSupervisor can dispatch
+        RunRequest(capability='provision') without modification.
 
     chat_prereqs(*, app_id, user_id, workflow_name, persistence)
         Enforces pack prerequisite gates before a chat session is created.
@@ -42,7 +47,7 @@ async def on_startup(app: Any) -> None:
     # Initialise ThemeManager backed by the runtime persistence layer.
     # persistence_manager is set on app.state by shared_app.py before hooks run.
     try:
-        from mozaiksai.core.data.themes.theme_manager import ThemeManager
+        from mozaiksai.runtime.data.themes.theme_manager import ThemeManager
         pm = getattr(app.state, "persistence_manager", None)
         if pm is not None:
             app.state.platform_theme_manager = ThemeManager(pm.persistence)
@@ -73,6 +78,39 @@ async def on_startup(app: Any) -> None:
 
 
 # ===========================================================================
+# register_workers
+# ===========================================================================
+
+def register_workers(*, worker_registry: Any, capability_registry: Any) -> None:
+    """Register platform capability workers into Core's WorkerRegistry.
+
+    Called by Core's factory.py after AgentWorker is registered.  Platform
+    layers add workers for additional capabilities here so RunSupervisor
+    can dispatch them via the standard run lifecycle.
+    """
+    try:
+        from app.workers.provisioning_worker import ProvisioningWorker
+        from mozaiksai.runtime.execution.capability_registry import CapabilityMetadata
+
+        provisioning_worker = ProvisioningWorker()
+        worker_registry.register(provisioning_worker)
+        capability_registry.register(
+            "provision",
+            metadata=CapabilityMetadata(
+                name="provision",
+                worker_type="provisioning",
+                description="Infrastructure provisioning: DNS, compute, databases, domains, repos",
+                features=["domain", "deploy", "database", "email", "repo"],
+            ),
+        )
+        logger.info(
+            "MOZAIKS_PLATFORM: ProvisioningWorker registered (capability='provision')"
+        )
+    except Exception as exc:
+        logger.warning(f"MOZAIKS_PLATFORM: register_workers failed (non-fatal): {exc}")
+
+
+# ===========================================================================
 # chat_prereqs
 # ===========================================================================
 
@@ -85,7 +123,7 @@ async def chat_prereqs(
 ) -> Tuple[bool, Optional[str]]:
     """Enforce pack prerequisite gates (required upstream workflows completed)."""
     try:
-        from mozaiksai.core.workflow.pack.gating import validate_pack_prereqs
+        from mozaiksai.kernel.pack.gating import validate_pack_prereqs
         return await validate_pack_prereqs(
             app_id=app_id,
             user_id=user_id,
@@ -112,7 +150,7 @@ async def chat_session_fields(
 ) -> Dict[str, Any]:
     """Return journey metadata fields to embed in the ChatSession document."""
     try:
-        from mozaiksai.core.workflow.pack.config import (
+        from mozaiksai.kernel.pack.config import (
             load_pack_config,
             infer_auto_journey_for_start,
         )
@@ -141,7 +179,7 @@ async def chat_session_fields(
 def workflow_ordering(workflow_names: List[str]) -> List[str]:
     """Order workflow list by the first pack journey's step sequence."""
     try:
-        from mozaiksai.core.workflow.pack.config import load_pack_config
+        from mozaiksai.kernel.pack.config import load_pack_config
         pack = load_pack_config()
         journeys = pack.get("journeys") if isinstance(pack, dict) else None
         if not isinstance(journeys, list) or not journeys:
@@ -184,6 +222,7 @@ def get_bundle() -> Dict[str, Any]:
     """
     return {
         "on_startup": on_startup,
+        "register_workers": register_workers,
         "chat_prereqs": chat_prereqs,
         "chat_session_fields": chat_session_fields,
         "workflow_ordering": workflow_ordering,

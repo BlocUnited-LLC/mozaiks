@@ -1,5 +1,5 @@
 ﻿# MozaiksAI Requirements
-ag2[openai,lmm]
+ag2[openai,lmm,tracing]>=0.11.2
 fastapi>=0.100.0
 uvicorn[standard]>=0.20.0
 websockets>=11.0
@@ -25,4 +25,6 @@ tree-sitter-python
 tree-sitter-javascript
 tree-sitter-css
 aiohttp>=3.8.0
+opentelemetry-sdk>=1.27.0
+opentelemetry-exporter-otlp>=1.27.0
 

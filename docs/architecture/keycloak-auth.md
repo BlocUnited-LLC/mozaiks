@@ -248,19 +248,16 @@ After import, you can manage users at [http://localhost:8080/admin](http://local
 
 ## Local Development
 
-For local dev without Keycloak, set in `.env`:
+Use auth-on by default (production-parity):
 
 ```dotenv
-AUTH_ENABLED=false
+AUTH_ENABLED=true
 ```
 
-All routes accept unauthenticated requests and stamp `user_id="anonymous"`.
-
-To develop **with** Keycloak locally (default when using docker compose):
+Start Keycloak + dependencies:
 
 ```bash
-# Start everything including Keycloak
-docker compose up
+docker compose -f infra/compose/docker-compose.yml up -d keycloak-db keycloak mongo
 
 # Keycloak admin console
 open http://localhost:8080/admin    # admin / admin
@@ -268,6 +265,14 @@ open http://localhost:8080/admin    # admin / admin
 # Dev user login
 # username: dev   password: dev
 ```
+
+Temporary fallback only (offline/debug):
+
+```dotenv
+AUTH_ENABLED=false
+```
+
+With auth disabled, protected routes accept unauthenticated requests and stamp `user_id="anonymous"`.
 
 ---
 

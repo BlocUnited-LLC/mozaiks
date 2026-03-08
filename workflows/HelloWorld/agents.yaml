@@ -31,4 +31,4 @@ agents:
       - A clarifying question (string)
   max_consecutive_auto_reply: 20
   auto_tool_mode: false
-  structured_outputs_required: true
+  structured_outputs_required: false

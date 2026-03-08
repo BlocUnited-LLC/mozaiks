@@ -4,13 +4,13 @@ Tests for pack schema models (schema.py) and config integration
 
 Covers:
 1. Pydantic model validation (valid, missing required, invalid types)
-2. Version detection (v1 legacy, v2, v3, unknown)
+2. Version detection (v2, v3, unknown)
 3. v2 → v3 conversion (flat dict → typed MidFlightJourney)
 4. v3 → v2 conversion (typed MidFlightJourney → flat dict round-trip)
 5. PerWorkflowPackGraph trigger normalization (.triggers property)
 6. Global pack config parsing (PackGlobalConfig)
 7. Coordinator _resolve_triggers compatibility
-8. Backward compat: nested_chats, journeys, mid_flight_journeys all work
+8. Backward compat: journeys, mid_flight_journeys both work
 """
 
 from __future__ import annotations
@@ -49,9 +49,9 @@ def _direct_import(module_name: str, file_path: Path):
 # Pre-register namespace stubs
 for _ns in [
     "mozaiksai",
-    "mozaiksai.core",
-    "mozaiksai.core.workflow",
-    "mozaiksai.core.workflow.pack",
+    "mozaiksai.engine",
+    "mozaiksai.kernel.pack",
+    "mozaiksai.kernel",
 ]:
     if _ns not in sys.modules:
         _m = types.ModuleType(_ns)
@@ -60,8 +60,8 @@ for _ns in [
         sys.modules[_ns] = _m
 
 _schema = _direct_import(
-    "mozaiksai.core.workflow.pack.schema",
-    _ROOT / "mozaiksai" / "core" / "workflow" / "pack" / "schema.py",
+    "mozaiksai.kernel.pack.schema",
+    _ROOT / "mozaiksai" / "kernel" / "pack" / "schema.py",
 )
 
 # Pull symbols
@@ -109,17 +109,17 @@ class TestMFJFanOutConfig:
     def test_defaults(self):
         fo = MFJFanOutConfig()
         assert fo.spawn_mode == SpawnMode.WORKFLOW
-        assert fo.generator_workflow is None
+        assert fo.shared_workflow is None
         assert fo.max_children == 0
         assert fo.timeout_seconds is None
 
-    def test_generator_subrun(self):
+    def test_shared_workflow(self):
         fo = MFJFanOutConfig(
-            spawn_mode="generator_subrun",
-            generator_workflow="AgentGenerator",
+            spawn_mode="shared_workflow",
+            shared_workflow="SharedRunner",
         )
-        assert fo.spawn_mode == SpawnMode.GENERATOR_SUBRUN
-        assert fo.generator_workflow == "AgentGenerator"
+        assert fo.spawn_mode == SpawnMode.SHARED_WORKFLOW
+        assert fo.shared_workflow == "SharedRunner"
 
     def test_timeout_must_be_positive(self):
         with pytest.raises(ValidationError):
@@ -161,11 +161,11 @@ class TestMidFlightJourney:
             trigger_on="structured_output_ready",
             requires=["intake_phase"],
             fan_out=MFJFanOutConfig(
-                spawn_mode="generator_subrun",
-                generator_workflow="AgentGenerator",
+                spawn_mode="shared_workflow",
+                shared_workflow="SharedRunner",
                 child_initial_agent="PlannerAgent",
                 timeout_seconds=300,
-                input_contract=MFJContract(required=["InterviewTranscript"]),
+                input_contract=MFJContract(required=["parent_transcript"]),
             ),
             fan_in=MFJFanInConfig(
                 resume_agent="ProjectOverview",
@@ -175,8 +175,8 @@ class TestMidFlightJourney:
                 output_contract=MFJContract(required=["plan_json"]),
             ),
         )
-        assert mfj.fan_out.spawn_mode == SpawnMode.GENERATOR_SUBRUN
-        assert mfj.fan_out.input_contract.required == ["InterviewTranscript"]
+        assert mfj.fan_out.spawn_mode == SpawnMode.SHARED_WORKFLOW
+        assert mfj.fan_out.input_contract.required == ["parent_transcript"]
         assert mfj.fan_in.inject_as == "planning_results"
         assert mfj.fan_in.on_partial_failure == PartialFailureStrategy.PROMPT_USER
 
@@ -207,8 +207,9 @@ class TestVersionDetection:
     def test_v2_journeys(self):
         assert detect_schema_version({"journeys": []}) == 2
 
-    def test_v1_nested_chats(self):
-        assert detect_schema_version({"nested_chats": []}) == 1
+    def test_v1_nested_chats_returns_unknown(self):
+        """nested_chats key is no longer recognized — returns 0."""
+        assert detect_schema_version({"nested_chats": []}) == 0
 
     def test_unknown_empty(self):
         assert detect_schema_version({}) == 0
@@ -239,8 +240,8 @@ class TestV2ToV3Conversion:
             "requires": ["intake"],
             "required_context": ["transcript"],
             "expected_output_keys": ["plan"],
-            "spawn_mode": "generator_subrun",
-            "generator_workflow": "AgentGen",
+            "spawn_mode": "shared_workflow",
+            "shared_workflow": "AgentGen",
             "child_initial_agent": "Planner",
             "resume_agent": "Overview",
             "merge_mode": "structured",
@@ -250,8 +251,8 @@ class TestV2ToV3Conversion:
         mfj = _v2_entry_to_mfj(entry)
         assert mfj.id == "planning"
         assert mfj.requires == ["intake"]
-        assert mfj.fan_out.spawn_mode == SpawnMode.GENERATOR_SUBRUN
-        assert mfj.fan_out.generator_workflow == "AgentGen"
+        assert mfj.fan_out.spawn_mode == SpawnMode.SHARED_WORKFLOW
+        assert mfj.fan_out.shared_workflow == "AgentGen"
         assert mfj.fan_out.child_initial_agent == "Planner"
         assert mfj.fan_out.timeout_seconds == 120
         assert mfj.fan_out.input_contract.required == ["transcript"]
@@ -297,8 +298,8 @@ class TestV3ToV2Roundtrip:
             description="Generate files",
             requires=["plan"],
             fan_out=MFJFanOutConfig(
-                spawn_mode="generator_subrun",
-                generator_workflow="AG",
+                spawn_mode="shared_workflow",
+                shared_workflow="AG",
                 child_initial_agent="Init",
                 timeout_seconds=60,
                 input_contract=MFJContract(required=["ctx_a"]),
@@ -311,8 +312,8 @@ class TestV3ToV2Roundtrip:
             ),
         )
         d = _mfj_to_v2_dict(mfj)
-        assert d["spawn_mode"] == "generator_subrun"
-        assert d["generator_workflow"] == "AG"
+        assert d["spawn_mode"] == "shared_workflow"
+        assert d["shared_workflow"] == "AG"
         assert d["child_initial_agent"] == "Init"
         assert d["timeout_seconds"] == 60
         assert d["required_context"] == ["ctx_a"]
@@ -360,36 +361,10 @@ class TestPerWorkflowPackGraph:
         assert triggers[0].id == "j1"
         assert triggers[0].trigger_agent == "PatternAgent"
 
-    def test_legacy_nested_chats(self):
-        data = {
-            "nested_chats": [
-                {"trigger_agent": "Agent"},
-            ],
-        }
-        pg = parse_pack_graph(data)
-        assert pg.detected_version == 2  # no version, no mid_flight_journeys
-        triggers = pg.triggers
-        assert len(triggers) == 1
-        assert triggers[0].trigger_agent == "Agent"
-
     def test_empty_v3(self):
         data = {"version": 3, "mid_flight_journeys": []}
         pg = parse_pack_graph(data)
         assert pg.triggers == []
-
-    def test_raw_journeys_v3(self):
-        """raw_journeys property converts v3 MFJ objects to v2 flat dicts."""
-        data = {
-            "version": 3,
-            "mid_flight_journeys": [
-                {"id": "t", "trigger_agent": "A", "fan_in": {"merge_mode": "structured"}},
-            ],
-        }
-        pg = parse_pack_graph(data)
-        raw = pg.raw_journeys
-        assert len(raw) == 1
-        assert raw[0]["trigger_agent"] == "A"
-        assert raw[0]["merge_mode"] == "structured"
 
     def test_bad_v2_entries_skipped(self):
         """Entries that can't parse are silently skipped."""
@@ -475,7 +450,7 @@ class TestPackGlobalConfig:
 class TestEnums:
     def test_spawn_mode_values(self):
         assert SpawnMode.WORKFLOW.value == "workflow"
-        assert SpawnMode.GENERATOR_SUBRUN.value == "generator_subrun"
+        assert SpawnMode.SHARED_WORKFLOW.value == "shared_workflow"
 
     def test_merge_mode_values(self):
         assert MergeMode.CONCATENATE.value == "concatenate"
@@ -494,13 +469,6 @@ class TestEnums:
 # ===========================================================================
 
 class TestBackwardCompat:
-    def test_nested_chats_only(self):
-        """Legacy nested_chats-only config should parse and produce triggers."""
-        data = {"nested_chats": [{"trigger_agent": "Legacy"}]}
-        pg = parse_pack_graph(data)
-        assert len(pg.triggers) == 1
-        assert pg.triggers[0].trigger_agent == "Legacy"
-
     def test_journeys_only(self):
         """v2 journeys config should parse."""
         data = {"journeys": [{"trigger_agent": "V2Agent", "id": "v2"}]}
@@ -525,4 +493,3 @@ class TestBackwardCompat:
         data = {}
         pg = parse_pack_graph(data)
         assert pg.triggers == []
-        assert pg.raw_journeys == []

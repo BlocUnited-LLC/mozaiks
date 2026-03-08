@@ -69,10 +69,13 @@ export class ApiAdapter {
 
   getHttpBaseUrl() {
     const fallback = typeof config?.get === 'function' ? config.get('api.baseUrl') : undefined;
+    const defaultHttpProtocol = typeof window !== 'undefined' ? window.location.protocol : 'http:';
+    const defaultHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+    const defaultHttpBase = `${defaultHttpProtocol}//${defaultHost}:8000`;
     const raw = this.config?.baseUrl
       || this.config?.api?.baseUrl
       || fallback
-      || 'http://localhost:8080';
+      || defaultHttpBase;
     if (typeof raw === 'string' && raw.endsWith('/')) {
       return raw.slice(0, -1);
     }
@@ -81,10 +84,14 @@ export class ApiAdapter {
 
   getWsBaseUrl() {
     const fallback = typeof config?.get === 'function' ? config.get('api.wsUrl') : undefined;
+    const defaultHttpProtocol = typeof window !== 'undefined' ? window.location.protocol : 'http:';
+    const defaultWsProtocol = defaultHttpProtocol === 'https:' ? 'wss:' : 'ws:';
+    const defaultHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+    const defaultWsBase = `${defaultWsProtocol}//${defaultHost}:8000`;
     const raw = this.config?.wsUrl
       || this.config?.api?.wsUrl
       || fallback
-      || 'ws://localhost:8080';
+      || defaultWsBase;
     if (typeof raw === 'string' && raw.endsWith('/')) {
       return raw.slice(0, -1);
     }
