@@ -11,8 +11,16 @@ from .config import (
 )
 from .gating import list_workflow_availability, validate_pack_prereqs
 from .graph import load_pack_graph, workflow_has_nested_chats
+from .merge import (
+    ChildResult,
+    MergeResult,
+    MergeStrategy,
+    get_merge_strategy,
+    register_merge_strategy,
+)
 
 __all__ = [
+    # config
     "compute_required_gates",
     "get_journey",
     "get_pack_config_path",
@@ -23,7 +31,14 @@ __all__ = [
     "list_workflow_availability",
     "list_workflow_ids",
     "load_pack_config",
+    # graph
     "load_pack_graph",
     "validate_pack_prereqs",
     "workflow_has_nested_chats",
+    # merge
+    "ChildResult",
+    "MergeResult",
+    "MergeStrategy",
+    "get_merge_strategy",
+    "register_merge_strategy",
 ]

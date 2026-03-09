@@ -115,6 +115,7 @@ packages = [
     # ── internal namespace (maps to same files on disk) ──
     "mozaiksai",
     "mozaiksai.core",
+    "mozaiksai.core.adapters",
     "mozaiksai.core.artifacts",
     "mozaiksai.core.auth",
     "mozaiksai.core.capabilities",
@@ -124,6 +125,7 @@ packages = [
     "mozaiksai.core.events",
     "mozaiksai.core.multitenant",
     "mozaiksai.core.observability",
+    "mozaiksai.core.ports",
     "mozaiksai.core.runtime",
     "mozaiksai.core.tokens",
     "mozaiksai.core.transport",
