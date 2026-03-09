@@ -2,9 +2,9 @@
  * mockAuthAdapter — development stub auth adapter
  *
  * Provides a mock authenticated user for local development without Keycloak.
- * This allows testing the UI (including DashboardPage) without running the auth server.
+ * This allows testing the UI (including AdminPortal) without running the auth server.
  *
- * The mock user is an admin by default so you can test all dashboard features.
+ * The mock user is an admin by default so you can test all admin portal features.
  */
 
 const MOCK_USER = {

@@ -72,10 +72,15 @@ import './registry/coreComponents';
 
 // Pages
 export { default as ChatPage } from './pages/ChatPage';
-export { default as DashboardPage } from './pages/DashboardPage';
+export { default as AdminPortal } from './pages/AdminPortal';
 
-// DashboardPage extensibility — register custom dashboard sections
+// AdminPortal extensibility — register custom admin portal sections
 export {
+  registerAdminSection,
+  getAdminSection,
+  getAllAdminSections,
+  unregisterAdminSection,
+  // Legacy aliases (will be removed in future release)
   registerDashboardSection,
   getDashboardSection,
   getAllDashboardSections,
@@ -83,10 +88,10 @@ export {
   useIsAdmin,
   useHasRole,
   useAuthConfig,
-  Card as DashboardCard,
-  Stat as DashboardStat,
-  ProgressBar as DashboardProgressBar,
-} from './pages/DashboardPage';
+  Card as AdminCard,
+  Stat as AdminStat,
+  ProgressBar as AdminProgressBar,
+} from './pages/AdminPortal';
 
 // Navigation
 export { readNavigationCache, writeNavigationCache } from './navigation/navigationCache';

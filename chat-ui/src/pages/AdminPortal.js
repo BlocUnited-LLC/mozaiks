@@ -1,21 +1,22 @@
 /**
- * DashboardPage — Modular user dashboard and admin portal
+ * AdminPortal — Modular admin portal and user account management
  *
  * ARCHITECTURE:
- * - Config-driven: Sections defined in ui.json → dashboard.sections
- * - Extensible: Register custom sections via registerDashboardSection()
+ * - Config-driven: Sections defined in ui.json → adminPortal.sections
+ * - Extensible: Register custom sections via registerAdminSection()
  * - Role-based: Sections can require specific roles
  * - Themeable: Uses existing theme system
  *
  * USAGE:
  * 1. Default sections are registered automatically (profile, usage, budget, admin)
- * 2. Add custom sections: registerDashboardSection('my-section', MyComponent, { order: 50 })
- * 3. Configure in ui.json: dashboard.sections = ['profile', 'usage', 'my-section']
+ * 2. Add custom sections: registerAdminSection('my-section', MyComponent, { order: 50 })
+ * 3. Configure in ui.json: adminPortal.sections = ['profile', 'usage', 'my-section']
  *
- * This is the foundation for all apps in the agentic future - every app needs
- * a dashboard for users to manage their account, view usage, and access admin features.
+ * This is part of mozaikscore — the application services substrate.
+ * Every app built on mozaiks gets an AdminPortal out of the box.
+ * It renders in layoutMode='view' as a fullscreen artifact with the chat widget floating.
  *
- * @module @mozaiks/chat-ui/pages/DashboardPage
+ * @module @mozaiks/chat-ui/pages/AdminPortal
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -24,13 +25,13 @@ import Header from '../components/layout/Header';
 import Footer from '../components/layout/Footer';
 
 // ---------------------------------------------------------------------------
-// Section Registry — allows app creators to register custom dashboard sections
+// Section Registry — allows app creators to register custom admin portal sections
 // ---------------------------------------------------------------------------
 
 const sectionRegistry = new Map();
 
 /**
- * Register a dashboard section
+ * Register an admin portal section
  * @param {string} id - Unique section identifier
  * @param {React.ComponentType} component - React component to render
  * @param {object} options
@@ -40,7 +41,7 @@ const sectionRegistry = new Map();
  * @param {string} [options.category] - 'user' | 'admin' | 'settings'
  * @param {string} [options.gridSpan] - 'full' | 'half' | 'third'
  */
-export function registerDashboardSection(id, component, options = {}) {
+export function registerAdminSection(id, component, options = {}) {
   sectionRegistry.set(id, {
     id,
     component,
@@ -55,23 +56,29 @@ export function registerDashboardSection(id, component, options = {}) {
 /**
  * Get a registered section
  */
-export function getDashboardSection(id) {
+export function getAdminSection(id) {
   return sectionRegistry.get(id);
 }
 
 /**
  * Get all registered sections (sorted by order)
  */
-export function getAllDashboardSections() {
+export function getAllAdminSections() {
   return Array.from(sectionRegistry.values()).sort((a, b) => a.order - b.order);
 }
 
 /**
  * Unregister a section
  */
-export function unregisterDashboardSection(id) {
+export function unregisterAdminSection(id) {
   sectionRegistry.delete(id);
 }
+
+// Legacy aliases — will be removed in a future release
+export const registerDashboardSection = registerAdminSection;
+export const getDashboardSection = getAdminSection;
+export const getAllDashboardSections = getAllAdminSections;
+export const unregisterDashboardSection = unregisterAdminSection;
 
 // ---------------------------------------------------------------------------
 // Auth Hooks
@@ -420,28 +427,28 @@ const AdminOverviewSection = () => {
 // ---------------------------------------------------------------------------
 
 // User sections
-registerDashboardSection('profile', ProfileSection, {
+registerAdminSection('profile', ProfileSection, {
   title: 'Profile',
   order: 10,
   category: 'user',
   gridSpan: 'two-thirds',
 });
 
-registerDashboardSection('actions', ActionsSection, {
+registerAdminSection('actions', ActionsSection, {
   title: 'Quick Actions',
   order: 15,
   category: 'user',
   gridSpan: 'third',
 });
 
-registerDashboardSection('usage', UsageSection, {
+registerAdminSection('usage', UsageSection, {
   title: 'Usage',
   order: 20,
   category: 'user',
   gridSpan: 'half',
 });
 
-registerDashboardSection('budget', BudgetSection, {
+registerAdminSection('budget', BudgetSection, {
   title: 'Budget',
   order: 25,
   category: 'user',
@@ -449,7 +456,7 @@ registerDashboardSection('budget', BudgetSection, {
 });
 
 // Admin sections
-registerDashboardSection('admin-overview', AdminOverviewSection, {
+registerAdminSection('admin-overview', AdminOverviewSection, {
   title: 'Admin Overview',
   order: 100,
   category: 'admin',
@@ -458,16 +465,16 @@ registerDashboardSection('admin-overview', AdminOverviewSection, {
 });
 
 // ---------------------------------------------------------------------------
-// Main DashboardPage Component
+// Main AdminPortal Component
 // ---------------------------------------------------------------------------
 
-const DashboardPage = () => {
+const AdminPortal = () => {
   const { user, api, logout, loading } = useChatUI();
   const isAdmin = useIsAdmin();
 
   // Get sections to render (could be config-driven from ui.json in future)
   const sections = useMemo(() => {
-    const allSections = getAllDashboardSections();
+    const allSections = getAllAdminSections();
 
     return allSections.filter(section => {
       // Check role requirement
@@ -500,7 +507,7 @@ const DashboardPage = () => {
         <div className="pt-20 px-4 max-w-4xl mx-auto">
           <Card>
             <div className="text-center py-8">
-              <p className="text-slate-400 mb-4">Please sign in to view your dashboard</p>
+              <p className="text-slate-400 mb-4">Please sign in to access the admin portal</p>
               <button
                 onClick={() => handleNavigate('/')}
                 className="px-6 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-lg text-white transition-colors"
@@ -538,7 +545,7 @@ const DashboardPage = () => {
         <div className="max-w-4xl mx-auto space-y-8">
           {/* Page header */}
           <div>
-            <h1 className="text-2xl font-bold text-white">Dashboard</h1>
+            <h1 className="text-2xl font-bold text-white">Admin Portal</h1>
             <p className="text-slate-400 mt-1">Manage your account, view usage, and access admin features</p>
           </div>
 
@@ -574,4 +581,4 @@ const DashboardPage = () => {
   );
 };
 
-export default DashboardPage;
+export default AdminPortal;

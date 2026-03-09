@@ -37,7 +37,7 @@ const CORE_ROUTES = [
   },
   {
     path: '/admin',
-    component: 'DashboardPage',
+    component: 'AdminPortal',
     meta: { title: 'Admin Portal', requiresAuth: true },
   },
 ];
