@@ -1756,7 +1756,8 @@ class SimpleTransport:
             logger.info(f"🚀 [SMART_ROUTING] Starting new workflow for chat {chat_id}")
             starting_new_workflow = True
 
-            from mozaiksai.core.workflow.orchestration_patterns import run_workflow_orchestration
+            from mozaiksai.core.adapters.ag2_orchestration import get_ag2_adapter
+            from mozaiksai.core.ports.orchestration import RunRequest
 
             # Only persist and echo user message when starting NEW workflows
             # For existing sessions, the message goes directly to AG2 via callback
@@ -1785,15 +1786,16 @@ class SimpleTransport:
                 except Exception:
                     pass
 
-            # Launch orchestration (will also seed initial_messages including the persisted one)
-            await run_workflow_orchestration(
+            # Launch orchestration via OrchestrationPort (engine-agnostic)
+            adapter = get_ag2_adapter()
+            await adapter.run(RunRequest(
                 workflow_name=workflow_name,
                 app_id=app_id,
                 chat_id=chat_id,
                 user_id=user_id,
                 initial_message=None,  # already persisted & sent upstream
                 initial_agent_name_override=initial_agent_name_override,
-            )
+            ))
 
             if is_build and _emit_build_completed is not None:
                 try:

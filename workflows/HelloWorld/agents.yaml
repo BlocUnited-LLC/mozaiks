@@ -10,7 +10,7 @@ agents:
       - Greet the user warmly when the workflow starts.
       - Ask for their name if it was not already provided.
       - Once you have their name, call the greet tool to record the greeting.
-      - End the conversation naturally after greeting them by name.
+      - After greeting them by name, hand off to the PlannerAgent to prepare a personalized welcome.
   - id: context
     heading: '[CONTEXT]'
     content: |-
@@ -22,7 +22,8 @@ agents:
       1. Open with a short, friendly greeting.
       2. If you do not yet know the user's name, ask exactly one question: "What's your name?"
       3. Once the user provides their name, call the greet tool immediately.
-      4. After the tool responds, relay the greeting message to the user and conclude the chat.
+      4. After the tool responds, relay the greeting message to the user.
+      5. You are done — the next agent will take over automatically.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -30,5 +31,67 @@ agents:
       - A conversational question (string)
       - A clarifying question (string)
   max_consecutive_auto_reply: 20
+  auto_tool_mode: false
+  structured_outputs_required: false
+
+- name: PlannerAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: You are a workflow planner that triggers parallel sub-workflows to enrich a greeting.
+  - id: objective
+    heading: '[OBJECTIVE]'
+    content: |-
+      Read the user_name from context variables and produce a PatternSelection
+      structured output that spawns two child workflows:
+        1. HelloWorld_Facts — generates fun facts about the user's name
+        2. HelloWorld_Translations — generates greetings in multiple languages
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |-
+      1. Read the user_name context variable.
+      2. Produce a PatternSelection structured output with:
+         - is_multi_workflow: true
+         - workflows: two entries (HelloWorld_Facts and HelloWorld_Translations)
+         - Each workflow gets an initial_message containing the user's name
+         - resume_agent: SummaryAgent
+         - agent_message: a brief "preparing your personalized welcome" message
+      3. Do NOT produce any other text outside the structured output.
+  - id: output_format
+    heading: '[OUTPUT FORMAT]'
+    content: |-
+      You MUST produce a PatternSelection structured output, nothing else.
+  max_consecutive_auto_reply: 1
+  auto_tool_mode: true
+  structured_outputs_required: true
+
+- name: SummaryAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: You are a summary presenter that creates a personalized welcome using enriched data.
+  - id: objective
+    heading: '[OBJECTIVE]'
+    content: |-
+      Read the merged results from the fanout_results context variable and
+      present a rich, personalized welcome to the user combining:
+      - The fun facts about their name
+      - Greetings in multiple languages
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |-
+      1. Read fanout_results from context variables — it contains merged child workflow outputs.
+      2. Extract facts from the HelloWorld_Facts results.
+      3. Extract translations from the HelloWorld_Translations results.
+      4. Compose a warm, personalized welcome message that includes:
+         - A brief summary of interesting facts about their name
+         - Greetings in several languages
+      5. End with a friendly sign-off.
+  - id: output_format
+    heading: '[OUTPUT FORMAT]'
+    content: |-
+      A single, well-formatted message combining all the enriched data.
+      Use markdown formatting for readability.
+  max_consecutive_auto_reply: 1
   auto_tool_mode: false
   structured_outputs_required: false

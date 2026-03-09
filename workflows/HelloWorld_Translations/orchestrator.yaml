@@ -1,0 +1,9 @@
+workflow_name: HelloWorld_Translations
+entry_point: false
+max_turns: 5
+human_in_the_loop: false
+startup_mode: AgentDriven
+orchestration_pattern: DefaultPattern
+initial_message_to_user: null
+initial_message: null
+initial_agent: TranslatorAgent

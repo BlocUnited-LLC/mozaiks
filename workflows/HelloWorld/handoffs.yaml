@@ -1,4 +1,5 @@
 handoff_rules:
+# User → InterviewAgent: start the greeting interview
 - source_agent: user
   target_agent: InterviewAgent
   handoff_type: condition
@@ -7,7 +8,20 @@ handoff_rules:
   condition: ${greeting_complete} == False
   transition_target: AgentTarget
 
+# InterviewAgent → PlannerAgent: after greeting, plan the fan-out
 - source_agent: InterviewAgent
+  target_agent: PlannerAgent
+  handoff_type: after_work
+  condition_type: null
+  condition_scope: null
+  condition: null
+  transition_target: AgentTarget
+
+# PlannerAgent → (structured output triggers fan-out; pack coordinator pauses parent)
+# No explicit handoff needed — the structured output event handles this.
+
+# SummaryAgent → user: present the final personalized welcome
+- source_agent: SummaryAgent
   target_agent: user
   handoff_type: after_work
   condition_type: null

@@ -827,17 +827,19 @@ class UnifiedWorkflowManager:
         key = workflow_name.lower()
         if key in self._handlers:
             return self._handlers[key]
-        # Lazy dynamic handler creation using orchestration engine
+        # Lazy dynamic handler creation via OrchestrationPort (engine-agnostic)
         async def dynamic_handler(app_id: str, chat_id: str, user_id: Optional[str] = None, initial_message: Optional[str] = None, **kwargs):
-            from .orchestration_patterns import run_workflow_orchestration
-            return await run_workflow_orchestration(
+            from mozaiksai.core.adapters.ag2_orchestration import get_ag2_adapter
+            from mozaiksai.core.ports.orchestration import RunRequest
+            adapter = get_ag2_adapter()
+            return await adapter.run(RunRequest(
                 workflow_name=workflow_name,
                 app_id=app_id,
                 chat_id=chat_id,
-                user_id=user_id,
+                user_id=user_id or "",
                 initial_message=initial_message,
-                **kwargs,
-            )
+                extra=kwargs,
+            ))
         # Cache it
         self._handlers[key] = dynamic_handler
         self._handler_metadata.setdefault(key, {"human_loop": self.has_human_in_the_loop(workflow_name), "transport": "websocket"})

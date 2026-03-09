@@ -1,0 +1,7 @@
+definitions:
+- name: user_name
+  type: string
+  description: The user's name to research facts about.
+  source:
+    type: runtime
+    default: null

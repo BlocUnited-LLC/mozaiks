@@ -19,3 +19,12 @@ definitions:
   source:
     type: runtime
     default: false
+
+- name: fanout_results
+  type: dict
+  description: >-
+    Merged output from parallel child workflows (HelloWorld_Facts and
+    HelloWorld_Translations).  Injected by the pack coordinator after fan-in.
+  source:
+    type: runtime
+    default: null

@@ -1,31 +1,39 @@
-# Structured outputs define typed Pydantic-style response schemas that agents
-# can use to produce validated, structured data instead of free-form text.
-#
-# The runtime loads this file and makes the models available to agents that
-# declare `structured_output: <ModelName>` in agents.yaml.
-#
-# To add a structured output, define it under `structured_outputs.models`:
-#
-# structured_outputs:
-#   models:
-#     GreetingResult:
-#       type: model
-#       fields:
-#         name:
-#           type: str
-#           description: The user's name.
-#         message:
-#           type: str
-#           description: The full greeting message.
-#         language:
-#           type: union
-#           variants:
-#             - str
-#             - 'null'
-#           description: Language of the greeting, or null if unknown.
-
 structured_outputs:
-  models: {}
-  
-registry:
-  InterviewAgent: null
+  models:
+    WorkflowSpec:
+      type: model
+      fields:
+        name:
+          type: str
+          description: Name of the child workflow to spawn (must match a directory under workflows/)
+        description:
+          type: str
+          description: Brief description of what this child workflow does
+        initial_message:
+          type: str
+          description: The initial message to send to the child workflow
+        initial_agent:
+          type: optional_str
+          description: Optional agent name to start the child workflow with
+          default: null
+    PatternSelection:
+      type: model
+      fields:
+        is_multi_workflow:
+          type: bool
+          description: Must be true to trigger fan-out
+        workflows:
+          type: list
+          items: WorkflowSpec
+          description: List of child workflows to spawn in parallel
+        resume_agent:
+          type: str
+          description: Agent name in the parent workflow to resume after fan-in
+        agent_message:
+          type: str
+          description: Message to display to the user while child workflows run
+
+  registry:
+    InterviewAgent: null
+    PlannerAgent: PatternSelection
+    SummaryAgent: null

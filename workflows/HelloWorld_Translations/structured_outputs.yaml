@@ -1,0 +1,5 @@
+structured_outputs:
+  models: {}
+
+registry:
+  TranslatorAgent: null
