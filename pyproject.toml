@@ -69,7 +69,8 @@ e2b = [
 ]
 
 [project.scripts]
-mozaiks = "mozaiksai.cli.__main__:main"
+# CLI disabled — cli module not present in core base
+# mozaiks = "mozaiksai.cli.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/BlocUnited-LLC/mozaiks"
@@ -81,92 +82,59 @@ line-length = 100
 target-version = "py311"
 
 # ---------------------------------------------------------------------------
-# Package mapping
-# ---------------------------------------------------------------------------
-# On disk the code lives under mozaiksai/.  The package-dir mapping lets
-# external consumers import via the public "mozaiks" namespace:
-#
-#   from mozaiks.engine import run_workflow_orchestration
-#   from mozaiks.contracts import DomainEvent
-#
-# The "mozaiksai" packages are ALSO listed so that internal imports
-# (from mozaiksai.engine.…) work as-is alongside the public namespace.
+# Package mapping — migrated to mozaiksai.core flat structure
 # ---------------------------------------------------------------------------
 [tool.setuptools.package-dir]
 "mozaiks" = "mozaiksai"
 
 [tool.setuptools]
 packages = [
-    # ── public API namespace (for external consumers) ──
+    # ── public API namespace ──
     "mozaiks",
-    "mozaiks.contracts",
-    "mozaiks.ports",
-    "mozaiks.engine",
-    "mozaiks.engine.agents",
-    "mozaiks.engine.context",
-    "mozaiks.engine.events",
-    "mozaiks.engine.execution",
-    "mozaiks.engine.messages",
-    "mozaiks.engine.observability",
-    "mozaiks.engine.outputs",
-    "mozaiks.engine.validation",
-    "mozaiks.kernel",
-    "mozaiks.kernel.events",
-    "mozaiks.kernel.pack",
-    "mozaiks.runtime",
-    "mozaiks.runtime.artifacts",
-    "mozaiks.runtime.auth",
-    "mozaiks.runtime.capabilities",
-    "mozaiks.runtime.data",
-    "mozaiks.runtime.data.persistence",
-    "mozaiks.runtime.data.themes",
-    "mozaiks.runtime.extensions",
-    "mozaiks.runtime.multitenant",
-    "mozaiks.runtime.observability",
-    "mozaiks.runtime.sessions",
-    "mozaiks.runtime.tokens",
-    "mozaiks.transport",
-    "mozaiks.transport.middleware",
-    "mozaiks.transport.routes",
-    "mozaiks.transport.websocket",
-    "mozaiks.platform",
-    "mozaiks.cli",
-    "mozaiks.cli.generators",
+    "mozaiks.core",
+    "mozaiks.core.artifacts",
+    "mozaiks.core.auth",
+    "mozaiks.core.capabilities",
+    "mozaiks.core.data",
+    "mozaiks.core.data.persistence",
+    "mozaiks.core.data.themes",
+    "mozaiks.core.events",
+    "mozaiks.core.multitenant",
+    "mozaiks.core.observability",
+    "mozaiks.core.runtime",
+    "mozaiks.core.tokens",
+    "mozaiks.core.transport",
+    "mozaiks.core.workflow",
+    "mozaiks.core.workflow.agents",
+    "mozaiks.core.workflow.context",
+    "mozaiks.core.workflow.execution",
+    "mozaiks.core.workflow.messages",
+    "mozaiks.core.workflow.outputs",
+    "mozaiks.core.workflow.pack",
+    "mozaiks.core.workflow.validation",
     # ── internal namespace (maps to same files on disk) ──
     "mozaiksai",
-    "mozaiksai.contracts",
-    "mozaiksai.ports",
-    "mozaiksai.engine",
-    "mozaiksai.engine.agents",
-    "mozaiksai.engine.context",
-    "mozaiksai.engine.events",
-    "mozaiksai.engine.execution",
-    "mozaiksai.engine.messages",
-    "mozaiksai.engine.observability",
-    "mozaiksai.engine.outputs",
-    "mozaiksai.engine.validation",
-    "mozaiksai.kernel",
-    "mozaiksai.kernel.events",
-    "mozaiksai.kernel.pack",
-    "mozaiksai.runtime",
-    "mozaiksai.runtime.artifacts",
-    "mozaiksai.runtime.auth",
-    "mozaiksai.runtime.capabilities",
-    "mozaiksai.runtime.data",
-    "mozaiksai.runtime.data.persistence",
-    "mozaiksai.runtime.data.themes",
-    "mozaiksai.runtime.extensions",
-    "mozaiksai.runtime.multitenant",
-    "mozaiksai.runtime.observability",
-    "mozaiksai.runtime.sessions",
-    "mozaiksai.runtime.tokens",
-    "mozaiksai.transport",
-    "mozaiksai.transport.middleware",
-    "mozaiksai.transport.routes",
-    "mozaiksai.transport.websocket",
-    "mozaiksai.platform",
-    "mozaiksai.cli",
-    "mozaiksai.cli.generators",
+    "mozaiksai.core",
+    "mozaiksai.core.artifacts",
+    "mozaiksai.core.auth",
+    "mozaiksai.core.capabilities",
+    "mozaiksai.core.data",
+    "mozaiksai.core.data.persistence",
+    "mozaiksai.core.data.themes",
+    "mozaiksai.core.events",
+    "mozaiksai.core.multitenant",
+    "mozaiksai.core.observability",
+    "mozaiksai.core.runtime",
+    "mozaiksai.core.tokens",
+    "mozaiksai.core.transport",
+    "mozaiksai.core.workflow",
+    "mozaiksai.core.workflow.agents",
+    "mozaiksai.core.workflow.context",
+    "mozaiksai.core.workflow.execution",
+    "mozaiksai.core.workflow.messages",
+    "mozaiksai.core.workflow.outputs",
+    "mozaiksai.core.workflow.pack",
+    "mozaiksai.core.workflow.validation",
     # ── support packages (repo-root modules used by mozaiksai) ──
     "logs",
 ]
