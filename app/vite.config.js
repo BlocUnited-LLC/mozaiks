@@ -6,7 +6,7 @@ import { createRequire } from 'module';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const appConfig = require('./app.json');
+const appConfig = require('../platform/app.json');
 
 export default defineConfig({
   plugins: [
@@ -32,17 +32,20 @@ export default defineConfig({
       },
     },
   ],
-  publicDir: './brand/public',
+  publicDir: '../platform/brand',
   resolve: {
     // chat-ui/src files live outside this project root and import shared packages.
     // All dependencies are installed in chat-ui/node_modules — resolve from there.
     modules: [path.resolve(__dirname, '../chat-ui/node_modules'), 'node_modules'],
     alias: {
       // Resolves @mozaiks/chat-ui to the local source during development.
-      // In a published app this would be the installed npm package.
-      '@mozaiks/chat-ui': path.resolve(__dirname, '../chat-ui/src/index.js'),
-      // Resolves @chat-workflows to the workflow UI component registry.
-      '@chat-workflows':  path.resolve(__dirname, '../chat-ui/src/workflows'),
+      // Points to the src directory so subpath imports (e.g. @mozaiks/chat-ui/coreBridge)
+      // resolve correctly for platform module UIs.
+      '@mozaiks/chat-ui': path.resolve(__dirname, '../chat-ui/src'),
+      // Resolves @chat-workflows to the auto-discovery registry that scans platform/workflows.
+      '@chat-workflows':  path.resolve(__dirname, '../chat-ui/src/@chat-workflows'),
+      // Resolves @modules to the auto-discovery registry that scans platform/modules.
+      '@modules':         path.resolve(__dirname, '../chat-ui/src/@modules'),
     },
   },
   // Shim process.env for src/config/index.js (written for CRA / Node env vars).

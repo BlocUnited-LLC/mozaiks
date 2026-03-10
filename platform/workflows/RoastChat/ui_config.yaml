@@ -1,0 +1,5 @@
+visual_agents:
+- InterviewAgent
+- DecompositionAgent
+- HostAgent
+- user

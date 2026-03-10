@@ -1,0 +1,80 @@
+structured_outputs:
+  models:
+    RoastTraitPacket:
+      type: model
+      fields:
+        trait:
+          type: str
+          description: Trait selected for roast focus.
+        reason:
+          type: str
+          description: Why this trait is strategically useful for judging.
+        roast_angle:
+          type: str
+          description: One-line angle for roast generation.
+
+    RoastWorkflowSpec:
+      type: model
+      fields:
+        name:
+          type: str
+          description: Child workflow name to run in parallel.
+        description:
+          type: str
+          description: Judge role description.
+        initial_message:
+          type: str
+          description: Seed message containing profile, style, and trait focus.
+        initial_agent:
+          type: optional_str
+          description: Optional override for child start agent.
+          default: null
+
+    RoastDecomposition:
+      type: model
+      fields:
+        workflows:
+          type: list
+          items: RoastWorkflowSpec
+          description: Exactly three RoastChat child runs.
+        traits:
+          type: list
+          items: RoastTraitPacket
+          description: Exactly three trait packets aligned to child runs.
+        agent_message:
+          type: str
+          description: One-line status update while judges run.
+
+    JudgeVerdict:
+      type: model
+      fields:
+        judge_name:
+          type: str
+          description: Canonical judge identity.
+        trait_focus:
+          type: str
+          description: Trait this judge scored.
+        roast_line:
+          type: str
+          description: Signature roast line.
+        verdict:
+          type: str
+          description: accept | reject | conditional.
+        score:
+          type: int
+          description: 0-100 score from this judge.
+        objection:
+          type: str
+          description: Top blocker from this judge.
+        positive_spin:
+          type: str
+          description: Redeeming upside if any.
+
+  registry:
+    InterviewAgent: null
+    DecompositionAgent: RoastDecomposition
+    ResumeRouterAgent: null
+    HostAgent: null
+    ContrarianJudgeAgent: JudgeVerdict
+    RageTesterJudgeAgent: JudgeVerdict
+    MoonshotJudgeAgent: JudgeVerdict

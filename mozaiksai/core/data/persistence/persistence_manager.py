@@ -26,8 +26,15 @@ from logs.logging_config import get_workflow_logger
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id, dual_write_app_scope
 from ..models import WorkflowStatus
-from autogen.events.base_event import BaseEvent
-from autogen.events.agent_events import TextEvent
+try:
+    from autogen.events.base_event import BaseEvent
+    from autogen.events.agent_events import TextEvent
+except ImportError:
+    # autogen < 1.0 — events submodule not available; minimal stubs
+    class BaseEvent:  # type: ignore[no-redef]
+        pass
+    class TextEvent:  # type: ignore[no-redef]
+        pass
 from mozaiksai.core.workflow.outputs.structured import agent_has_structured_output, get_structured_output_model_fields
 
 logger = get_workflow_logger("persistence")

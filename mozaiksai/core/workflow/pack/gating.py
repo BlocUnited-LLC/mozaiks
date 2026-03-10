@@ -5,7 +5,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from mozaiksai.core.data.models import WorkflowStatus
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.multitenant import build_app_scope_filter
-from mozaiksai.core.workflow.pack.config import compute_required_gates, load_pack_config
+from mozaiksai.core.workflow.pack.config import (
+    compute_required_gates,
+    get_workflow_entry,
+    list_workflow_ids,
+    load_global_pack_graph,
+)
 
 
 async def validate_pack_prereqs(
@@ -15,16 +20,7 @@ async def validate_pack_prereqs(
     workflow_name: str,
     persistence: Optional[AG2PersistenceManager] = None,
 ) -> Tuple[bool, Optional[str]]:
-    """Validate workflow prerequisites from the pack config (if present).
-
-    - Required gates block starting/resuming a workflow until upstream workflows have at least one
-      COMPLETED chat session in the applicable scope.
-    - Journey step order is enforced via implicit required gates when a journey has
-      `enforce_step_gating=true`.
-
-    Note: gating checks for existence of *any* completed upstream run (not necessarily the most recent),
-    so refactors/new attempts do not re-lock downstream workflows.
-    """
+    """Validate workflow prerequisites from canonical global pack graph."""
     try:
         wf = str(workflow_name or "").strip()
         if not wf:
@@ -36,8 +32,8 @@ async def validate_pack_prereqs(
         if not uid:
             return False, "user_id is required"
 
-        pack = load_pack_config()
-        if not pack:
+        pack = load_global_pack_graph()
+        if pack is None:
             return True, None
 
         required_gates = compute_required_gates(pack, wf)
@@ -55,13 +51,15 @@ async def validate_pack_prereqs(
             if not parent:
                 continue
             reason = str(gate.get("reason") or "").strip()
+            scope = str(gate.get("scope") or "app").strip().lower()
 
             query: Dict[str, Any] = {
                 "workflow_name": parent,
-                "user_id": uid,
                 "status": int(WorkflowStatus.COMPLETED),
                 **build_app_scope_filter(scope_id),
             }
+            if scope == "user":
+                query["user_id"] = uid
 
             doc = await coll.find_one(
                 query,
@@ -74,7 +72,6 @@ async def validate_pack_prereqs(
         if not missing_msgs:
             return True, None
 
-        # De-dupe while preserving order.
         seen = set()
         uniq: List[str] = []
         for msg in missing_msgs:
@@ -93,44 +90,31 @@ async def list_workflow_availability(
     user_id: str,
     persistence: Optional[AG2PersistenceManager] = None,
 ) -> List[Dict[str, Any]]:
-    """List workflows declared in the pack config and whether they are startable."""
+    """List workflows declared in global pack graph with availability status."""
     scope_id = str(app_id or "").strip()
     uid = str(user_id or "").strip()
     if not scope_id or not uid:
         return []
 
-    pack = load_pack_config()
-    if not pack:
+    pack = load_global_pack_graph()
+    if pack is None:
         return []
-
-    workflows = pack.get("workflows") or []
-    if not isinstance(workflows, list):
-        return []
-
-    pm = persistence or AG2PersistenceManager()
-    coll = await pm._coll()
 
     results: List[Dict[str, Any]] = []
-    for w in workflows:
-        if not isinstance(w, dict):
-            continue
-        wf = str(w.get("id") or "").strip()
-        if not wf:
-            continue
-
+    for wf in list_workflow_ids(pack):
         ok, reason = await validate_pack_prereqs(
             app_id=scope_id,
             user_id=uid,
             workflow_name=wf,
-            persistence=pm,
+            persistence=persistence,
         )
+        entry = get_workflow_entry(pack, wf)
         results.append(
             {
                 "workflow_name": wf,
                 "available": bool(ok),
                 "reason": reason or "All prerequisites met",
-                "type": str(w.get("type") or "").strip() or None,
-                "description": str(w.get("description") or "").strip() or None,
+                "description": entry.description if entry else None,
                 "required_gates": compute_required_gates(pack, wf),
             }
         )
@@ -139,3 +123,4 @@ async def list_workflow_availability(
 
 
 __all__ = ["validate_pack_prereqs", "list_workflow_availability"]
+

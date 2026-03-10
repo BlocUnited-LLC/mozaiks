@@ -37,8 +37,8 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ../keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
-      - ../keycloak/themes:/opt/keycloak/themes:ro
+      - ../../platform/brand/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+      - ../../platform/brand/login-theme:/opt/keycloak/themes/mozaiks/login:ro
     depends_on:
       keycloak-db:
         condition: service_healthy
@@ -90,6 +90,7 @@ services:
       AG2_RUNTIME_LOGGING: "sqlite"
       LOGS_BASE_DIR: /app/logs
       DOCKERIZED: "true"
+      MOZAIKS_WORKFLOWS_PATH: /app/platform/workflows
       # Multi-tenant settings (override in .env for production)
       # DEFAULT_APP_ID: "your-app-id"
     depends_on:
@@ -100,8 +101,8 @@ services:
     volumes:
       # Persist logs outside container
       - ../../logs:/app/logs
-      # Mount workflows for hot-reload (dev only, remove in prod)
-      # - ../../workflows:/app/workflows:ro
+      # Mount platform workflows (read-only in production)
+      - ../../platform/workflows:/app/platform/workflows:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]

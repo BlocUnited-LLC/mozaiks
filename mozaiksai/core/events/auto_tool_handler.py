@@ -13,17 +13,26 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, Optional
 
 from pydantic import ValidationError
 
 from mozaiksai.core.workflow.agents.tools import load_agent_tool_functions
 from mozaiksai.core.workflow.outputs.structured import get_structured_outputs_for_workflow
 from mozaiksai.core.events.event_serialization import serialize_event_content
-from mozaiksai.core.transport.simple_transport import SimpleTransport
 from mozaiksai.core.workflow.context.adapter import create_context_container
 
+if TYPE_CHECKING:
+    from mozaiksai.core.transport.simple_transport import SimpleTransport
+
 logger = logging.getLogger("auto_tool_handler")
+
+
+async def _get_simple_transport() -> Optional["SimpleTransport"]:
+    """Resolve SimpleTransport lazily to avoid transport<->events import cycles."""
+    from mozaiksai.core.transport.simple_transport import SimpleTransport
+
+    return await SimpleTransport.get_instance()
 
 
 @dataclass(frozen=True)
@@ -372,7 +381,7 @@ class AutoToolEventHandler:
         if not chat_id:
             return
         try:
-            transport = await SimpleTransport.get_instance()
+            transport = await _get_simple_transport()
         except Exception as exc:  # pragma: no cover
             logger.debug("[AUTO_TOOL] Transport unavailable for tool_call: %s", exc)
             return
@@ -426,7 +435,7 @@ class AutoToolEventHandler:
         if not chat_id:
             return
         try:
-            transport = await SimpleTransport.get_instance()
+            transport = await _get_simple_transport()
         except Exception as exc:  # pragma: no cover
             logger.debug("[AUTO_TOOL] Transport unavailable for tool_result: %s", exc)
             return

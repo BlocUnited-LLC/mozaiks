@@ -40,6 +40,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "httpx",
     "aiohttp>=3.8.0",
+    "python-dateutil>=2.8.0",
 ]
 
 [project.optional-dependencies]
@@ -71,6 +72,7 @@ e2b = [
 [project.scripts]
 # CLI disabled — cli module not present in core base
 # mozaiks = "mozaiksai.cli.__main__:main"
+mozaikscore = "mozaikscore.core_app:app"
 
 [project.urls]
 Homepage = "https://github.com/BlocUnited-LLC/mozaiks"
@@ -101,6 +103,7 @@ packages = [
     "mozaiks.core.events",
     "mozaiks.core.multitenant",
     "mozaiks.core.observability",
+    "mozaiks.core.orchestration",
     "mozaiks.core.runtime",
     "mozaiks.core.tokens",
     "mozaiks.core.transport",
@@ -125,6 +128,7 @@ packages = [
     "mozaiksai.core.events",
     "mozaiksai.core.multitenant",
     "mozaiksai.core.observability",
+    "mozaiksai.core.orchestration",
     "mozaiksai.core.ports",
     "mozaiksai.core.runtime",
     "mozaiksai.core.tokens",
@@ -139,6 +143,10 @@ packages = [
     "mozaiksai.core.workflow.validation",
     # ── support packages (repo-root modules used by mozaiksai) ──
     "logs",
+    # ── mozaikscore substrate (application services / CRUD) ──
+    "mozaikscore",
+    "mozaikscore.core",
+    "mozaikscore.core.routes",
 ]
 
 [tool.ruff.lint]

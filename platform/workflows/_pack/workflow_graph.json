@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "workflows": [
+    {
+      "id": "RoastChat",
+      "description": "Primary roast interview + decomposition + MFJ jury fan-out/fan-in"
+    },
+    {
+      "id": "AwardsShow",
+      "description": "Optional post-roast award recap"
+    }
+  ],
+  "journeys": [
+    {
+      "id": "roastchat_showcase",
+      "description": "Roast chat followed by optional awards",
+      "steps": [
+        "RoastChat",
+        "AwardsShow"
+      ]
+    }
+  ]
+}

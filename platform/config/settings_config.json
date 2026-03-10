@@ -1,0 +1,114 @@
+{
+  "profile_sections": [
+    {
+      "id": "personal",
+      "title": "Personal Information",
+      "icon": "user",
+      "order": 1,
+      "visible": true,
+      "editable": true,
+      "fields": [
+        {
+          "id": "full_name",
+          "label": "Full Name",
+          "type": "text",
+          "required": true,
+          "editable": true
+        },
+        {
+          "id": "email",
+          "label": "Email Address",
+          "type": "email",
+          "required": true,
+          "editable": false
+        },
+        {
+          "id": "bio",
+          "label": "Bio",
+          "type": "textarea",
+          "required": false,
+          "editable": true
+        },
+        {
+          "id": "profile_picture",
+          "label": "Profile Picture",
+          "type": "image",
+          "required": false,
+          "editable": true
+        }
+      ]
+    },
+    {
+      "id": "security",
+      "title": "Security",
+      "icon": "lock",
+      "order": 2,
+      "visible": true,
+      "editable": true,
+      "fields": [
+        {
+          "id": "password",
+          "label": "Password",
+          "type": "password-change",
+          "required": false,
+          "editable": true
+        },
+        {
+          "id": "two_factor",
+          "label": "Two-Factor Authentication",
+          "type": "toggle",
+          "required": false,
+          "editable": true
+        }
+      ]
+    },
+    {
+      "id": "notifications",
+      "title": "Notifications",
+      "icon": "bell",
+      "order": 3,
+      "visible": true,
+      "editable": true,
+      "fields": [
+        {
+          "id": "email_notifications",
+          "label": "Email Notifications",
+          "type": "toggle",
+          "category": "account",
+          "description": "Receive notifications via email",
+          "required": false,
+          "editable": true
+        },
+        {
+          "id": "subscription_updates",
+          "label": "Subscription Updates",
+          "type": "toggle",
+          "category": "subscription",
+          "description": "Receive updates about your subscription status",
+          "required": false,
+          "editable": true,
+          "channels": ["in_app", "email"],
+          "default_enabled": true
+        }
+      ],
+      "module_notification_fields": []
+    },
+    {
+      "id": "appearance",
+      "title": "Appearance",
+      "icon": "palette",
+      "order": 4,
+      "visible": true,
+      "editable": true,
+      "fields": [
+        {
+          "id": "theme",
+          "label": "Theme",
+          "type": "theme-selector",
+          "required": false,
+          "editable": true
+        }
+      ]
+    }
+  ]
+}

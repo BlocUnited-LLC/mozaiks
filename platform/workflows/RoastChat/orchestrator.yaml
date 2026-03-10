@@ -1,0 +1,9 @@
+workflow_name: RoastChat
+entry_point: true
+max_turns: 30
+human_in_the_loop: true
+startup_mode: AgentDriven
+orchestration_pattern: DefaultPattern
+initial_message_to_user: null
+initial_message: "InterviewAgent, ask one sharp onboarding question for RoastChat."
+initial_agent: InterviewAgent

@@ -12,6 +12,14 @@ from .orchestration import (
     DomainEvent,
 )
 
+from .core_service import (
+    CoreServicePort,
+    ModuleRequest,
+    ModuleResult,
+    NotificationRequest,
+    SubstrateHealth,
+)
+
 __all__ = [
     "OrchestrationPort",
     "RunRequest",
@@ -19,4 +27,9 @@ __all__ = [
     "RunResult",
     "RunStatus",
     "DomainEvent",
+    "CoreServicePort",
+    "ModuleRequest",
+    "ModuleResult",
+    "NotificationRequest",
+    "SubstrateHealth",
 ]

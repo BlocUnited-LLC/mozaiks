@@ -1,0 +1,20 @@
+{
+  "modules": [
+    {
+      "name": "admin_portal",
+      "display_name": "Admin Portal",
+      "description": "Platform administration \u2014 user management, analytics, module oversight.",
+      "version": "1.0.0",
+      "enabled": true,
+      "backend": "modules.admin_portal.handler"
+    },
+    {
+      "name": "awards_board",
+      "display_name": "Awards Board",
+      "description": "Playful showcase of standout roast sessions and winners.",
+      "version": "1.0.0",
+      "enabled": true,
+      "backend": "modules.awards_board.handler"
+    }
+  ]
+}

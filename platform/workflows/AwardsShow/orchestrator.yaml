@@ -1,0 +1,9 @@
+workflow_name: AwardsShow
+entry_point: false
+max_turns: 8
+human_in_the_loop: true
+startup_mode: AgentDriven
+orchestration_pattern: DefaultPattern
+initial_message_to_user: null
+initial_message: "AwardHostAgent, present a short award recap from roast outputs."
+initial_agent: AwardHostAgent

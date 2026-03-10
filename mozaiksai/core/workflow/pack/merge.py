@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -196,6 +197,45 @@ class FirstSuccessMerge(MergeStrategy):
         )
 
 
+class MajorityVoteMerge(MergeStrategy):
+    """Return the most common successful output across children."""
+
+    @property
+    def name(self) -> str:
+        return "majority_vote"
+
+    def merge(self, children: List[ChildResult]) -> MergeResult:
+        voters = [c for c in children if c.success]
+        failed = len(children) - len(voters)
+        if not voters:
+            return MergeResult(
+                merged={},
+                strategy_used=self.name,
+                child_count=len(children),
+                failed_count=failed if failed > 0 else len(children),
+            )
+
+        counts: Dict[str, int] = {}
+        payload_by_key: Dict[str, Dict[str, Any]] = {}
+        first_workflow_by_key: Dict[str, str] = {}
+        for child in sorted(voters, key=lambda c: c.workflow_name):
+            canonical = json.dumps(child.context, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+            counts[canonical] = counts.get(canonical, 0) + 1
+            payload_by_key.setdefault(canonical, dict(child.context))
+            first_workflow_by_key.setdefault(canonical, child.workflow_name)
+
+        winner = max(
+            counts.items(),
+            key=lambda kv: (kv[1], first_workflow_by_key.get(kv[0], ""), kv[0]),
+        )[0]
+        return MergeResult(
+            merged=payload_by_key.get(winner, {}),
+            strategy_used=self.name,
+            child_count=len(children),
+            failed_count=failed,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -206,24 +246,52 @@ _STRATEGIES: Dict[str, MergeStrategy] = {}
 
 def _ensure_registry() -> Dict[str, MergeStrategy]:
     if not _STRATEGIES:
-        for cls in (CollectAllMerge, ConcatenateMerge, MergeBundlesMerge, FirstSuccessMerge):
+        for cls in (
+            CollectAllMerge,
+            ConcatenateMerge,
+            MergeBundlesMerge,
+            FirstSuccessMerge,
+            MajorityVoteMerge,
+        ):
             instance = cls()
             _STRATEGIES[instance.name] = instance
     return _STRATEGIES
 
 
 def get_merge_strategy(name: str) -> MergeStrategy:
-    """Resolve a strategy by name (from workflow_graph.json).
+    """Resolve a strategy by canonical name.
 
-    Falls back to ``collect_all`` if the name is unrecognized.
+    Supports built-ins and `custom:<name>` registry lookups.
     """
     registry = _ensure_registry()
-    return registry.get(name, registry["collect_all"])
+    key = str(name or "").strip()
+    if not key:
+        raise ValueError("aggregation strategy name is required")
+
+    if key.startswith("custom:"):
+        custom_name = key.split(":", 1)[1].strip()
+        if not custom_name:
+            raise ValueError("custom aggregation strategy must be custom:<name>")
+        strategy = registry.get(custom_name)
+        if strategy is None:
+            raise ValueError(f"custom aggregation strategy is not registered: {custom_name}")
+        return strategy
+
+    strategy = registry.get(key)
+    if strategy is None:
+        raise ValueError(f"unknown aggregation strategy: {key}")
+    return strategy
 
 
-def register_merge_strategy(strategy: MergeStrategy) -> None:
+def register_merge_strategy(strategy: MergeStrategy, *, replace: bool = False) -> None:
     """Register a custom merge strategy at runtime."""
-    _ensure_registry()[strategy.name] = strategy
+    registry = _ensure_registry()
+    name = str(strategy.name or "").strip()
+    if not name:
+        raise ValueError("merge strategy name must be non-empty")
+    if name in registry and not replace:
+        raise ValueError(f"merge strategy already registered: {name}")
+    registry[name] = strategy
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +318,7 @@ __all__ = [
     "ConcatenateMerge",
     "MergeBundlesMerge",
     "FirstSuccessMerge",
+    "MajorityVoteMerge",
     "get_merge_strategy",
     "register_merge_strategy",
 ]

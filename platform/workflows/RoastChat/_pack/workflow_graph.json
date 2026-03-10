@@ -1,0 +1,50 @@
+{
+  "version": 3,
+  "mid_flight_journeys": [
+    {
+      "id": "roast_cycle",
+      "description": "Fan out decomposition results to three parallel RoastChat judge runs, then fan in to host",
+      "trigger_agent": "DecompositionAgent",
+      "trigger_on": "structured_output",
+      "requires": [],
+      "fan_out": {
+        "spawn_mode": "workflow",
+        "generator_workflow": null,
+        "child_initial_agent": null,
+        "max_children": 3,
+        "timeout_seconds": 420,
+        "input_contract": {
+          "required": [
+            "profile_line",
+            "roast_style"
+          ],
+          "optional": []
+        },
+        "child_context_seed": {
+          "demo_mode": "roastchat"
+        }
+      },
+      "fan_in": {
+        "resume_agent": "HostAgent",
+        "resume_entry_agent": "ResumeRouterAgent",
+        "aggregation_strategy": "collect_all",
+        "inject_as": "mfj_roast_results",
+        "on_partial_failure": "resume_with_available",
+        "timeout_seconds": 60
+      },
+      "output_contract": {
+        "required": [
+          "judge_name",
+          "trait_focus",
+          "roast_line",
+          "verdict",
+          "score",
+          "objection"
+        ],
+        "optional": [
+          "positive_spin"
+        ]
+      }
+    }
+  ]
+}

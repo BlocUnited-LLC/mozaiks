@@ -16,7 +16,7 @@ DEFAULT_LLM_MODEL      Override fallback model name (default gpt-4o-mini)
 OPENAI_MODEL_FALLBACK  Comma-separated list of fallback model names
 
 Public API
-----------z
+----------
 async get_llm_config(response_format=None, stream=False, extra_config=None, cache=True)
 """
 from __future__ import annotations

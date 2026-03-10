@@ -6,6 +6,7 @@ import ShellUIToolRenderer from '../core/ui/ShellUIToolRenderer';
 import NavigationProvider from '../providers/NavigationProvider';
 import RouteRenderer from '../components/RouteRenderer';
 import { initializeWorkflows } from '@chat-workflows/index';
+import { initializeModules } from '@modules/index';
 import ConfigValidationOverlay from '../config/ConfigValidationOverlay';
 
 /**
@@ -64,10 +65,15 @@ export default function MozaiksApp({
   // Config validation overlay (dev-mode in-browser error/warning banner)
   // Replaces console-only logging — founders see issues without opening DevTools
 
+  const moduleInitializer = (registerComponent) => {
+    initializeWorkflows(registerComponent);
+    initializeModules(registerComponent);
+  };
+
   return (
     <NavigationProvider>
       <ChatUIProvider
-        workflowInitializer={initializeWorkflows}
+        workflowInitializer={moduleInitializer}
         uiToolRenderer={renderUiTool}
         apiAdapter={apiAdapter}
         authAdapter={authAdapter}

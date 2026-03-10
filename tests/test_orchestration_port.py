@@ -21,12 +21,12 @@ from mozaiksai.core.ports.orchestration import (
 class TestRunRequest:
     def test_required_fields(self):
         r = RunRequest(
-            workflow_name="HelloWorld",
+            workflow_name="RoastChat",
             app_id="app-1",
             chat_id="chat-1",
             user_id="user-1",
         )
-        assert r.workflow_name == "HelloWorld"
+        assert r.workflow_name == "RoastChat"
         assert r.app_id == "app-1"
         assert r.chat_id == "chat-1"
         assert r.user_id == "user-1"

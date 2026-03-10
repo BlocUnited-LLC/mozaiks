@@ -1,9 +1,9 @@
 ﻿// ============================================================================
 // FILE: chat-ui/src/styles/themeProvider.js
 // PURPOSE: Dynamic theme system for multi-tenant branding
-// USAGE: Theme is always loaded from a source — either the API (app-specific)
-//        or the brand.json file (brand-level config). There is no hardcoded
-//        default brand. The brand is defined in /brands/{brandId}/brand.json.
+// USAGE: Theme is loaded from the mozaikscore /api/theme-config endpoint
+//        (backed by app/config/theme_config.json). In platform mode,
+//        /api/themes/{appId} overrides are deep-merged on top.
 // ============================================================================
 
 // ---------------------------------------------------------------------------
@@ -98,18 +98,18 @@ function resolveHeaderIconValue(basePath, value) {
 }
 
 /**
- * Convert brand.json + ui.json into the full theme shape.
+ * Convert a unified theme_config.json into the full theme shape.
  *
- * @param {object} brandConfig  — visual identity (colors, fonts, shadows, assets).
- * @param {object} uiConfig     — UI chrome (header, footer, profile menu, notifications, chat).
- * @param {string} basePath     — absolute URL prefix for relative asset filenames, e.g. '/assets'.
+ * @param {object} config    — merged theme config (identity, assets, fonts, colors, shadows, ui).
+ * @param {string} basePath  — absolute URL prefix for relative asset filenames, e.g. '/assets'.
  */
-function brandConfigToTheme(brandConfig, uiConfig, basePath) {
-  const ui = uiConfig;
+function themeConfigToTheme(config, basePath) {
+  const ui = config.ui || {};
   const fallback = BARE_FALLBACK_THEME;
+  const identity = config.identity || {};
 
-  // --- Visual assets (brand.json) ---
-  const rawAssets = brandConfig.assets || {};
+  // --- Visual assets ---
+  const rawAssets = config.assets || {};
   const assets = {
     logo:            resolveBrandAsset(basePath, rawAssets.logo),
     wordmark:        resolveBrandAsset(basePath, rawAssets.wordmark),
@@ -118,7 +118,7 @@ function brandConfigToTheme(brandConfig, uiConfig, basePath) {
     loadingIcon:     resolveBrandAsset(basePath, rawAssets.loadingIcon),
   };
 
-  // --- UI chrome (ui.json) ---
+  // --- UI chrome ---
   const rawProfile       = ui.profile       || {};
   const rawNotifications = ui.notifications || {};
   const rawHeader        = ui.header        || {};
@@ -142,7 +142,7 @@ function brandConfigToTheme(brandConfig, uiConfig, basePath) {
     : fallback.profile.menu;
 
   // --- Fallback warnings ---
-  const _bn = brandConfig.name || 'brand';
+  const _bn = identity.name || 'theme';
   if (!assets.backgroundImage)
     console.warn(`⚠️ [THEME] [${_bn}] assets.backgroundImage not set — using fallback: chat_bg_template.png`);
   if (!assets.logo)
@@ -151,32 +151,32 @@ function brandConfigToTheme(brandConfig, uiConfig, basePath) {
     console.warn(`⚠️ [THEME] [${_bn}] assets.favicon not set — browser tab icon will be missing`);
   if (!assets.wordmark)
     console.warn(`⚠️ [THEME] [${_bn}] assets.wordmark not set — header wordmark will be missing`);
-  if (!brandConfig.fonts)
+  if (!config.fonts)
     console.warn(`⚠️ [THEME] [${_bn}] fonts block not configured — using system-ui fallback`);
-  if (!brandConfig.colors)
+  if (!config.colors)
     console.warn(`⚠️ [THEME] [${_bn}] colors block not configured — using bare fallback palette`);
-  if (!brandConfig.shadows)
+  if (!config.shadows)
     console.warn(`⚠️ [THEME] [${_bn}] shadows block not configured — using bare fallback shadows`);
   if (!profileIcon)
-    console.warn(`⚠️ [THEME] [${_bn}] profile.icon not set — set a filename in ui.json profile.icon or profile button will be hidden`);
+    console.warn(`⚠️ [THEME] [${_bn}] ui.profile.icon not set — profile button will be hidden`);
   if (!notificationsIcon && rawNotifications.show !== false)
-    console.warn(`⚠️ [THEME] [${_bn}] notifications.icon not set — set a filename in ui.json notifications.icon or notification button will be hidden`);
+    console.warn(`⚠️ [THEME] [${_bn}] ui.notifications.icon not set — notification button will be hidden`);
 
   const headerLogo = {
     src:      resolveBrandAsset(basePath, rawLogo.src) || assets.logo,
     wordmark: resolveBrandAsset(basePath, rawLogo.wordmark) || assets.wordmark,
-    alt:      rawLogo.alt  || brandConfig.name || fallback.header.logo.alt,
+    alt:      rawLogo.alt  || identity.name || fallback.header.logo.alt,
     href:     rawLogo.href || fallback.header.logo.href,
   };
 
   return {
-    fonts:   brandConfig.fonts   || fallback.fonts,
-    colors:  brandConfig.colors  || fallback.colors,
-    shadows: brandConfig.shadows || fallback.shadows,
+    fonts:   config.fonts   || fallback.fonts,
+    colors:  config.colors  || fallback.colors,
+    shadows: config.shadows || fallback.shadows,
     branding: {
-      name:            brandConfig.name            || fallback.branding.name,
-      backgroundImage: assets.backgroundImage      || fallback.branding.backgroundImage,
-      loadingIcon:     assets.loadingIcon          || fallback.branding.loadingIcon,
+      name:            identity.name              || fallback.branding.name,
+      backgroundImage: assets.backgroundImage     || fallback.branding.backgroundImage,
+      loadingIcon:     assets.loadingIcon         || fallback.branding.loadingIcon,
       favicon:         assets.favicon,
       logo:            assets.logo,
     },
@@ -198,46 +198,32 @@ function brandConfigToTheme(brandConfig, uiConfig, basePath) {
       actions: headerActions,
     },
     footer: ui.footer || fallback.footer,
-    _brandId:  brandConfig._brandId,
     _basePath: basePath,
-    _source:   'brand',
+    _source:   'config',
   };
 }
 
 /**
- * Load and convert /brand.json into a theme object.
- * brand.json is served at the publicDir root (brands/public/brand.json → /brand.json).
- * Images are served from /assets/, fonts from /fonts/.
+ * Load theme from the declarative theme_config.json via mozaikscore API.
+ * Falls back to BARE_FALLBACK_THEME when the API is unavailable.
+ * Assets are still served from the Vite publicDir (/assets/, /fonts/).
  */
-async function loadThemeFromBrand() {
+async function loadThemeFromConfig() {
   const assetsPath = '/assets';
+  const coreUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_CORE_URL) || '';
+  const baseUrl = coreUrl.replace(/\/+$/, '');
+
   try {
-    // brand.json is required; ui.json is optional and can safely fall back.
-    const brandRes = await fetch('/brand.json');
-    if (!brandRes.ok) throw new Error(`/brand.json not found (${brandRes.status})`);
+    const url = baseUrl ? `${baseUrl}/api/theme-config` : '/api/theme-config';
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`/api/theme-config returned ${res.status}`);
 
-    const brandConfig = await brandRes.json();
-    let uiConfig = {};
-
-    try {
-      const uiRes = await fetch('/ui.json');
-      if (uiRes.ok) {
-        uiConfig = await uiRes.json();
-        console.log('🎛️ [THEME] Loaded brand.json + ui.json');
-      } else if (uiRes.status === 404) {
-        console.warn('⚠️ [THEME] /ui.json not found — using default UI chrome fallback');
-      } else {
-        console.warn(`⚠️ [THEME] /ui.json load failed (${uiRes.status}) — using default UI chrome fallback`);
-      }
-    } catch (uiErr) {
-      console.warn('⚠️ [THEME] Could not parse /ui.json — using default UI chrome fallback:', uiErr?.message || uiErr);
-    }
-
-    const theme = brandConfigToTheme(brandConfig, uiConfig, assetsPath);
-    console.log(`🎨 [THEME] Loaded brand theme: ${brandConfig.name || 'default'}`);
-    return { theme, meta: { source: 'brand', appId: 'default' } };
+    const config = await res.json();
+    const theme = themeConfigToTheme(config, assetsPath);
+    console.log(`🎨 [THEME] Loaded declarative theme config: ${config.identity?.name || 'default'}`);
+    return { theme, meta: { source: 'config', appId: 'default' } };
   } catch (err) {
-    console.warn('⚠️ [THEME] Could not load brand.json:', err.message);
+    console.warn('⚠️ [THEME] Could not load theme config from API:', err.message);
     return { theme: BARE_FALLBACK_THEME, meta: { source: 'fallback', appId: 'default' } };
   }
 }
@@ -364,12 +350,11 @@ async function fetchPlatformOverrides(appId) {
  * Load the theme for a given app.
  *
  * Load order:
- *   1. brand.json + ui.json  — always the base (local, declarative, user-editable).
+ *   1. /api/theme-config     — declarative config (app/config/theme_config.json).
  *   2. /api/themes/{appId}   — platform overrides merged on top (multi-tenant only).
  *
- * This guarantees brand.json is the source of truth in local dev.  In
- * platform mode the API can overlay tenant-specific customisation on top
- * without wiping out the full brand definition.
+ * This guarantees theme_config.json is the source of truth in local dev.
+ * In platform mode the API can overlay tenant-specific customisation.
  */
 export async function getTheme(appId = 'default') {
   const normalizedId = normalizeAppId(appId);
@@ -377,8 +362,8 @@ export async function getTheme(appId = 'default') {
     return themeCache.get(normalizedId).theme;
   }
 
-  // 1. brand.json + ui.json — always load as the base
-  const brand = await loadThemeFromBrand();
+  // 1. Declarative theme_config.json — always load as the base
+  const brand = await loadThemeFromConfig();
   let   theme = brand.theme;
   let   meta  = brand.meta;
 

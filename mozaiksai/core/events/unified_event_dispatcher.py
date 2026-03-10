@@ -27,6 +27,7 @@ from abc import ABC, abstractmethod
 
 from mozaiksai.core.events.auto_tool_handler import AutoToolEventHandler
 from mozaiksai.core.events.usage_ingest import get_usage_ingest_client
+from mozaiksai.core.orchestration import get_universal_orchestrator
 from mozaiksai.core.workflow.pack.workflow_pack_coordinator import WorkflowPackCoordinator
 from mozaiksai.core.workflow.pack.journey_orchestrator import JourneyOrchestrator
 from logs.logging_config import get_core_logger, get_workflow_logger
@@ -160,6 +161,7 @@ class UnifiedEventDispatcher:
         self._auto_tool_handler = AutoToolEventHandler()
         self._pack_coordinator = WorkflowPackCoordinator()
         self._journey_orchestrator = JourneyOrchestrator()
+        self._universal_orchestrator = get_universal_orchestrator()
         # Advisory-only usage ingest (measurement signals only; no billing mutations).
         self._usage_ingest = get_usage_ingest_client()
         self._setup_default_handlers()
@@ -170,6 +172,9 @@ class UnifiedEventDispatcher:
         self.register_handler("chat.run_complete", self._journey_orchestrator.handle_run_complete)
         # Best-effort control-plane notification; must never block execution.
         self.register_handler("chat.usage_summary", self._usage_ingest.handle_usage_summary)
+        # Universal routing entrypoints.
+        self.register_handler("runtime.universal_event", self._handle_universal_structured)
+        self.register_handler("runtime.universal_text", self._handle_universal_text)
 
     def _setup_default_handlers(self):
         self.register_handler(BusinessLogHandler())
@@ -221,6 +226,20 @@ class UnifiedEventDispatcher:
         self.metrics["custom_events_emitted"] += 1
         emitted_by_type = self.metrics.setdefault("custom_events_by_type", {})
         emitted_by_type[event_type] = emitted_by_type.get(event_type, 0) + 1
+
+    async def _handle_universal_structured(self, payload: Dict[str, Any]) -> None:
+        try:
+            result = await self._universal_orchestrator.handle_structured_event(payload)
+            logger.info("[UNIVERSAL_ROUTE] structured status=%s route=%s", result.status, result.route)
+        except Exception as exc:
+            logger.warning("[UNIVERSAL_ROUTE] structured dispatch failed: %s", exc)
+
+    async def _handle_universal_text(self, payload: Dict[str, Any]) -> None:
+        try:
+            result = await self._universal_orchestrator.handle_free_text_event(payload)
+            logger.info("[UNIVERSAL_ROUTE] text status=%s route=%s", result.status, result.route)
+        except Exception as exc:
+            logger.warning("[UNIVERSAL_ROUTE] text dispatch failed: %s", exc)
 
     async def dispatch(self, event: EventType) -> bool:
         start_time = datetime.now(UTC)

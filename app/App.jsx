@@ -6,7 +6,7 @@ import {
   mockApiAdapter,
   createMockAuthAdapter,
 } from '@mozaiks/chat-ui';
-import appConfig from './app.json';
+import appConfig from '../platform/app.json';
 
 // Explicit mock mode: set VITE_MOCK_MODE=true in .env to bypass auth/backend
 const USE_MOCK = import.meta.env.VITE_MOCK_MODE === 'true';

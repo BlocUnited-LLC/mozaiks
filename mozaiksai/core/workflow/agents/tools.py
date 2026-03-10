@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 import json
 
+from ..workflow_manager import workflow_manager
+
 logger = logging.getLogger(__name__)
 
 
@@ -220,7 +222,7 @@ def load_agent_tool_functions(workflow_name: str) -> Dict[str, List[Callable]]:
     - Logs to logs/logs/tools.log (workflow-agnostic)
     """
     mapping: Dict[str, List[Callable]] = {}
-    base_dir = Path('workflows') / workflow_name
+    base_dir = Path(str(workflow_manager.workflows_base_path)) / workflow_name
     tools_yaml_path = base_dir / 'tools.yaml'
     
     if not tools_yaml_path.exists():
@@ -401,4 +403,3 @@ __all__ = [
     'load_agent_tool_functions',
     'clear_tool_cache',
 ]
-

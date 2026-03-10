@@ -1,9 +1,0 @@
-workflow_name: HelloWorld
-entry_point: true
-max_turns: 25
-human_in_the_loop: true
-startup_mode: AgentDriven
-orchestration_pattern: DefaultPattern
-initial_message_to_user: null
-initial_message: "InterviewAgent, greet the user and ask for their name."
-initial_agent: InterviewAgent

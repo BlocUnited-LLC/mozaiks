@@ -67,20 +67,20 @@ export { default as mockApiAdapter } from './adapters/mockApiAdapter';
 export { default as mockAuthAdapter, createMockAuthAdapter } from './adapters/mockAuthAdapter';
 
 // Side-effect: registers core pages (ChatPage) in the component registry.
-// Consumers should import this once in their entry point.
+// Platform modules (AdminPortal etc.) are registered via @modules auto-discovery.
 import './registry/coreComponents';
 
 // Pages
 export { default as ChatPage } from './pages/ChatPage';
-export { default as AdminPortal } from './pages/AdminPortal';
+// AdminPortal is now a platform module — import from platform/modules/admin_portal/ui/
 
-// AdminPortal extensibility — register custom admin portal sections
+// AdminPortal extensibility API — section registry, auth hooks, shared primitives
 export {
   registerAdminSection,
   getAdminSection,
   getAllAdminSections,
   unregisterAdminSection,
-  // Legacy aliases (will be removed in future release)
+  // Legacy aliases
   registerDashboardSection,
   getDashboardSection,
   getAllDashboardSections,
@@ -91,7 +91,15 @@ export {
   Card as AdminCard,
   Stat as AdminStat,
   ProgressBar as AdminProgressBar,
-} from './pages/AdminPortal';
+  // Original names — for platform module UIs that import from '@mozaiks/chat-ui'
+  Card,
+  Stat,
+  ProgressBar,
+} from './adminPortalRegistry';
+
+// Admin bridge functions (used by platform/modules/admin_portal/ui)
+export { adminListUsers, adminGetAnalytics } from './coreBridge';
+
 
 // Navigation
 export { readNavigationCache, writeNavigationCache } from './navigation/navigationCache';

@@ -2,6 +2,9 @@ import React, { useState, useRef, useEffect } from "react";
 import { DEFAULT_HEADER_CONFIG } from "../../styles/themeProvider";
 import { useNavigation } from "../../providers/NavigationProvider";
 import { useNavigationActions } from "../../navigation/useNavigationActions";
+import { useCoreNotifications } from "../../hooks/useCoreNotifications";
+import NotificationsDropdown from "./NotificationsDropdown";
+import SettingsOverlay from "./SettingsOverlay";
 import "./header-styles.css";
 
 const ICON_FILE_RE = /\.(svg|png|jpe?g|gif|webp|ico)$/i;
@@ -17,12 +20,12 @@ const resolveIconSource = (iconValue) => {
  * ActionIcon — renders a brand-owned asset file as a color-inheriting icon.
  * The icon value MUST be a file path (absolute, http, or a filename resolved
  * from /assets/). Named string shortcuts ("bell", "sparkle", etc.) are NOT
- * supported — set the actual filename in brand.json.
+ * supported — set the actual filename in theme_config.json.
  */
 const ActionIcon = ({ icon, className = "w-5 h-5" }) => {
   const src = resolveIconSource(icon);
   if (!src) {
-    console.warn(`⚠️ [HEADER] ActionIcon received icon="${icon}" which is not a resolvable asset path. Set a valid filename (e.g. "sparkle.svg") in brand.json.`);
+    console.warn(`⚠️ [HEADER] ActionIcon received icon="${icon}" which is not a resolvable asset path. Set a valid filename (e.g. "sparkle.svg") in theme_config.json.`);
     return null;
   }
   // mask-image renders the SVG as a shape filled with currentColor,
@@ -63,31 +66,38 @@ const Header = ({
   const logoConfig   = { ...DEFAULT_HEADER_CONFIG.logo, ...headerConfig?.logo };
   const brandConfig  = { ...{ name: 'MozaiksAI' }, ...chatTheme?.branding };
 
-  // Profile and notifications come from their own top-level ui.json sections.
-  // Icons MUST be set as asset filenames in ui.json — no built-in fallbacks.
+  // Profile and notifications come from the ui section within theme_config.json.
+  // Icons MUST be set as asset filenames in theme_config.json — no built-in fallbacks.
   const profileIcon         = chatTheme?.profile?.icon  ? resolveIconSource(chatTheme.profile.icon)  : null;
   const showProfile         = chatTheme?.profile?.show  !== false;
   const profileDefaultLabel = chatTheme?.profile?.defaultLabel || 'User';
   const profileSublabel     = chatTheme?.profile?.sublabel     || null;
   const profileMenu         = chatTheme?.profile?.menu         || [];
   if (!themeLoading && showProfile && !profileIcon) {
-    console.warn('⚠️ [HEADER] profile.show is true but profile.icon is not set in ui.json — profile button hidden');
+    console.warn('⚠️ [HEADER] profile.show is true but profile.icon is not set in theme_config.json — profile button hidden');
   }
 
   const notificationIcon  = chatTheme?.notifications?.icon ? resolveIconSource(chatTheme.notifications.icon) : null;
   const showNotifications = chatTheme?.notifications?.show !== false;
   if (!themeLoading && showNotifications && !notificationIcon) {
-    console.warn('⚠️ [HEADER] notifications.show is true but notifications.icon is not set in ui.json — notification button hidden');
+    console.warn('⚠️ [HEADER] notifications.show is true but notifications.icon is not set in theme_config.json — notification button hidden');
   }
 
   const currentUser = user || { id: 'anonymous', firstName: 'Guest', userPhoto: null };
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const [isNotificationDropdownOpen, setIsNotificationDropdownOpen] = useState(false);
-  const [notificationCount, setNotificationCount] = useState(3);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [notificationCount, setNotificationCount] = useState(0);
   const [isScrolled, setIsScrolled] = useState(false);
   const [openActionMenuId, setOpenActionMenuId] = useState(null);
   const dropdownRef = useRef(null);
   const headerRef = useRef(null);
+
+  // Live notification count from mozaikscore
+  const { count: coreNotificationCount, refresh: refreshNotifications } = useCoreNotifications();
+  useEffect(() => {
+    setNotificationCount(coreNotificationCount);
+  }, [coreNotificationCount]);
 
   // Handle scroll effect for dynamic blur
   useEffect(() => {
@@ -96,15 +106,6 @@ const Header = ({
     };
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
-
-  // Notification count updates
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setNotificationCount(prev => Math.max(0, prev + Math.floor(Math.random() * 3) - 1));
-    }, 30000);
-
-    return () => clearInterval(interval);
   }, []);
 
   // Close dropdowns when clicking outside or pressing Escape
@@ -143,13 +144,10 @@ const Header = ({
 
   const toggleNotificationDropdown = () => {
     setIsNotificationDropdownOpen(!isNotificationDropdownOpen);
-    if (isProfileDropdownOpen) {
-      setIsProfileDropdownOpen(false);
-    }
-    onNotificationClick();
+    if (isProfileDropdownOpen) setIsProfileDropdownOpen(false);
   };
 
-  // Render a single profile menu item from ui.json profile.menu declaration
+  // Render a single profile menu item from theme_config.json ui.profile.menu declaration
   const renderProfileMenuItem = (item) => {
     if (!item) return null;
     if (item.type === 'divider') {
@@ -306,6 +304,8 @@ const Header = ({
   };
 
   return (
+    <React.Fragment>
+    <SettingsOverlay isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     <header ref={headerRef} className={`
       fixed top-0 left-0 right-0 z-50 transition-all duration-300
       ${isScrolled ? 'backdrop-blur-md bg-black/25' : 'backdrop-blur-md bg-black/15'}
@@ -391,25 +391,44 @@ const Header = ({
             </div>
           )}
 
-          {/* Notifications (conditionally rendered — requires notifications.icon in brand.json) */}
+          {/* Notifications (conditionally rendered — requires ui.notifications.icon in theme_config.json) */}
           {showNotifications && notificationIcon && (
-            <button onClick={toggleNotificationDropdown} className="relative p-1.5 rounded-lg hover:bg-white/10 transition-colors flex items-center justify-center" title="Mission Alerts">
-              <ActionIcon icon={notificationIcon} className="w-6 h-6 text-[var(--color-primary-light)]" />
-              {notificationCount > 0 && (
-                <div className="absolute top-0 right-0">
-                  <div className="w-4 h-4 bg-[var(--color-error)] rounded-full flex items-center justify-center border border-slate-900/60">
-                    <span className="text-white text-[10px] font-bold oxanium">{notificationCount}</span>
+            <div className="relative">
+              <button onClick={toggleNotificationDropdown} className="relative p-1.5 rounded-lg hover:bg-white/10 transition-colors flex items-center justify-center" title="Mission Alerts">
+                <ActionIcon icon={notificationIcon} className="w-6 h-6 text-[var(--color-primary-light)]" />
+                {notificationCount > 0 && (
+                  <div className="absolute top-0 right-0">
+                    <div className="w-4 h-4 bg-[var(--color-error)] rounded-full flex items-center justify-center border border-slate-900/60">
+                      <span className="text-white text-[10px] font-bold oxanium">{notificationCount}</span>
+                    </div>
                   </div>
-                </div>
-              )}
-            </button>
+                )}
+              </button>
+              <NotificationsDropdown
+                isOpen={isNotificationDropdownOpen}
+                onClose={() => setIsNotificationDropdownOpen(false)}
+              />
+            </div>
           )}
+
+          {/* Settings gear (runtime control — always visible) */}
+          <button
+            onClick={() => setIsSettingsOpen(true)}
+            className="p-1.5 rounded-lg hover:bg-white/10 transition-colors flex items-center justify-center text-[rgba(var(--color-primary-light-rgb),0.6)] hover:text-[var(--color-primary-light)]"
+            title="Settings"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.43l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
 
           {/* Config-driven action buttons */}
           <ActionButtons />
         </div>
       </div>
     </header>
+    </React.Fragment>
   );
 };
 

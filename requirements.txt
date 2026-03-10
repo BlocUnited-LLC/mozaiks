@@ -1,30 +1,25 @@
 ﻿# MozaiksAI Requirements
+# Core runtime
 ag2[openai,lmm,tracing]>=0.11.2
 fastapi>=0.100.0
 uvicorn[standard]>=0.20.0
 websockets>=11.0
+pydantic>=2.5.0
+python-dotenv>=1.0.0
+pyyaml>=6.0
+httpx
+aiohttp>=3.8.0
+
+# Database
 motor>=3.3.0
 pymongo>=4.5.0
 dnspython>=2.4.0
+
+# Auth
+PyJWT[crypto]>=2.8.0
 python-multipart>=0.0.6
+
+# Azure (optional — used when AZURE_KEYVAULT_URL is set)
 azure-identity>=1.15.0
 azure-keyvault-secrets>=4.7.0
-python-dotenv>=1.0.0
-pydantic>=2.5.0
-PyJWT[crypto]>=2.8.0
-jinja2
-pyyaml>=6.0
-flake8
-httpx
-pytest
-pytest-asyncio
-watchdog
-e2b-code-interpreter>=0.0.10
-tree-sitter>=0.20.0
-tree-sitter-python
-tree-sitter-javascript
-tree-sitter-css
-aiohttp>=3.8.0
-opentelemetry-sdk>=1.27.0
-opentelemetry-exporter-otlp>=1.27.0
 

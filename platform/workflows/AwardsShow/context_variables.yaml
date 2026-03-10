@@ -1,0 +1,7 @@
+definitions:
+- name: roast_summary
+  type: dict
+  description: Optional roast summary payload from prior workflow.
+  source:
+    type: runtime
+    default: null

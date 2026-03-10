@@ -9,21 +9,15 @@
 
 import { registerComponent } from './componentRegistry';
 
-// Core pages
+// Core pages — ChatPage only.
+// AdminPortal is now a platform module registered via @modules auto-discovery.
 import ChatPage from '../pages/ChatPage';
-import AdminPortal from '../pages/AdminPortal';
 
-// Register core components
 registerComponent('ChatPage', ChatPage, {
   core: true,
-  description: 'Main chat interface page'
+  description: 'Main chat interface page',
 });
 
-registerComponent('AdminPortal', AdminPortal, {
-  core: true,
-  description: 'Admin portal — account management, usage, admin features'
-});
-
-export const CORE_COMPONENTS = ['ChatPage', 'AdminPortal'];
+export const CORE_COMPONENTS = ['ChatPage'];
 
 console.log('[CoreComponents] Registered core chat-ui components:', CORE_COMPONENTS);

@@ -5,6 +5,7 @@
 # ==============================================================================
 
 import json
+import os
 import yaml
 import importlib
 from typing import Dict, Any, List, Optional, Tuple, Callable, Awaitable, Set
@@ -47,7 +48,7 @@ class UnifiedWorkflowManager:
 
     _instance = None
 
-    def __new__(cls):
+    def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
@@ -955,8 +956,16 @@ class UnifiedWorkflowManager:
 # GLOBAL INSTANCE & API
 # ========================================================================
 
-# Single global instance
-_unified_workflow_manager = UnifiedWorkflowManager()
+# Single global instance — path driven by MOZAIKS_WORKFLOWS_PATH env or platform/workflows
+def _resolve_workflows_path() -> str:
+    raw = (os.getenv("MOZAIKS_WORKFLOWS_PATH") or "").strip()
+    if raw:
+        return os.path.abspath(raw)
+    return os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "platform", "workflows")
+    )
+
+_unified_workflow_manager = UnifiedWorkflowManager(workflows_base_path=_resolve_workflows_path())
 
 def get_workflow_manager() -> UnifiedWorkflowManager:
     """Get the global workflow manager instance"""

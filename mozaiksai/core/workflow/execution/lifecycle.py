@@ -8,22 +8,18 @@ Lifecycle Tools - Declarative Hook System for Workflows
 
 Purpose:
 - Execute tools at orchestration boundaries (before_chat, after_chat, before_agent, after_agent)
-- Driven by workflows/<workflow>/tools.json "lifecycle_tools" array
+- Driven by platform/workflows/<workflow>/tools.yaml "lifecycle_tools" list
 - Integrates with existing event system for observability
 - AG2-native context injection via ContextVariables
 
-Schema (tools.json):
-{
-  "lifecycle_tools": [
-    {
-      "trigger": "before_chat",       # Required: before_chat | after_chat | before_agent | after_agent
-      "agent": null,                  # Optional: Agent name for before_agent/after_agent, null for chat-level
-      "file": "echo.py",              # Required: Tool file path (supports root or tools/ subdir)
-      "function": "echo",             # Required: Function name to invoke
-      "description": "..."            # Optional: For logging/observability
-    }
-  ]
-}
+Schema (tools.yaml lifecycle section):
+
+lifecycle_tools:
+  - trigger: before_chat       # Required: before_chat | after_chat | before_agent | after_agent
+    agent: null                # Optional: Agent name for before_agent/after_agent, null for chat-level
+    file: echo.py              # Required: Tool file path (supports root or tools/ subdir)
+    function: echo             # Required: Function name to invoke
+    description: "..."         # Optional: For logging/observability
 
 Runtime Contract:
 - Tools receive context via 'context_variables' parameter (AG2 dependency injection)
@@ -35,18 +31,42 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import inspect
-import json
 import logging
+import os
 import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+import yaml
+
 from logs.logging_config import get_workflow_logger
 from logs.tools_logs import get_tool_logger, log_tool_event
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_workflows_root() -> Path:
+    """Return the platform workflows root directory.
+
+    Respects ``MOZAIKS_WORKFLOWS_PATH`` when set, otherwise walks up from this
+    file to find the repo root and returns ``<repo>/platform/workflows``.
+    """
+    override = str(os.getenv("MOZAIKS_WORKFLOWS_PATH") or "").strip()
+    if override:
+        candidate = Path(override)
+        if not candidate.is_absolute():
+            here = Path(__file__).resolve()
+            for parent in [here] + list(here.parents):
+                if (parent / "mozaiksai").is_dir():
+                    return (parent / candidate).resolve()
+        return Path(override).resolve()
+    here = Path(__file__).resolve()
+    for parent in [here] + list(here.parents):
+        if (parent / "mozaiksai").is_dir():
+            return (parent / "platform" / "workflows").resolve()
+    return (Path.cwd() / "platform" / "workflows").resolve()
 
 
 class LifecycleTrigger(Enum):
@@ -83,16 +103,11 @@ class LifecycleToolManager:
         self._loaded = False
 
     def load_lifecycle_tools(self) -> None:
-        """Load lifecycle tools from workflows/<workflow>/tools.yaml + platform defaults."""
+        """Load lifecycle tools from platform/workflows/<workflow>/tools.yaml."""
         if self._loaded:
             return
 
-        # Load platform-default lifecycle tools (always enabled for all workflows)
-        self._load_platform_defaults()
-
-        # Then load workflow-specific lifecycle tools
-
-        base_dir = Path('workflows') / self.workflow_name
+        base_dir = _resolve_workflows_root() / self.workflow_name
         tools_yaml_path = base_dir / 'tools.yaml'
 
         if not tools_yaml_path.exists():
@@ -101,8 +116,9 @@ class LifecycleToolManager:
             return
 
         try:
-            import yaml
-            data = yaml.safe_load(tools_yaml_path.read_text(encoding='utf-8')) or {}
+            data = yaml.safe_load(tools_yaml_path.read_text(encoding='utf-8'))
+            if not isinstance(data, dict):
+                raise ValueError("tools.yaml must contain a mapping at root")
         except Exception as err:
             logger.warning(f"[LIFECYCLE] Failed to parse tools.yaml for '{self.workflow_name}': {err}")
             self._loaded = True
@@ -123,8 +139,8 @@ class LifecycleToolManager:
 
             # Validate required fields
             trigger_str = entry.get('trigger')
-            file_name = entry.get('file')
-            func_name = entry.get('function')
+            file_name = entry.get('file') or entry.get('function_file')
+            func_name = entry.get('function') or entry.get('function_name')
 
             if not all([trigger_str, file_name, func_name]):
                 logger.warning(
@@ -324,12 +340,9 @@ class LifecycleToolManager:
             f"{f' (agent={agent_name})' if agent_name else ''}"
         )
 
-        # Execute all tools for this trigger (in parallel, non-blocking)
-        tasks = [
-            self._execute_single_tool(tool, context_variables, wf_logger)
-            for tool in tools
-        ]
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # Deterministic contract: execute in declaration order.
+        for tool in tools:
+            await self._execute_single_tool(tool, context_variables, wf_logger)
 
     async def _execute_single_tool(
         self,

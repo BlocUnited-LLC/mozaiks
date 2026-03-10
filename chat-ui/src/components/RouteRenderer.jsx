@@ -1,7 +1,9 @@
 /**
  * Route Renderer
  *
- * Core routes (ChatPage, AdminPortal) are always mounted — they are the shell.
+ * ChatPage is the only hardcoded core route — it is the agentic shell.
+ * Platform modules (AdminPortal etc.) are loaded via @modules auto-discovery
+ * and routed through navigation_config.json modules[].
  * navigation.json defines EXTRA routes beyond the core shell.
  * `landing_spot` (from navigation config) controls the default redirect.
  * All routes require auth unless explicitly opted out via meta.requiresAuth: false.
@@ -16,7 +18,9 @@ import { getComponent, hasComponent } from '../registry/componentRegistry';
 
 /**
  * Core routes that are ALWAYS mounted — not driven by navigation.json.
- * These are the agentic shell pages every app gets out of the box.
+ * Only ChatPage is a true core route. All platform modules (including
+ * AdminPortal) are registered via @modules auto-discovery and routed
+ * through the navigation config modules[] section.
  */
 const CORE_ROUTES = [
   {
@@ -34,11 +38,6 @@ const CORE_ROUTES = [
     path: '/app/*',
     component: 'ChatPage',
     meta: { title: 'Chat', requiresAuth: true },
-  },
-  {
-    path: '/admin',
-    component: 'AdminPortal',
-    meta: { title: 'Admin Portal', requiresAuth: true },
   },
 ];
 
@@ -116,7 +115,8 @@ const RouteWrapper = ({
 /**
  * RouteRenderer Component
  *
- * Always mounts core shell routes (ChatPage, AdminPortal).
+ * Always mounts core shell routes (ChatPage).
+ * Module routes (AdminPortal etc.) come from navigation_config.json modules[].
  * Extra routes from navigation.json are appended after.
  * All routes require auth by default; opt out with meta.requiresAuth: false.
  * Supports landing_spot from navigation config for default redirect.

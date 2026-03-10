@@ -1,0 +1,54 @@
+{
+  "settings": {
+    "default_email_frequency": "immediate",
+    "default_enabled": true
+  },
+  "categories": [
+    {
+      "id": "account",
+      "name": "Account",
+      "description": "Notifications related to your account activity",
+      "icon": "user"
+    },
+    {
+      "id": "subscription",
+      "name": "Subscription",
+      "description": "Updates about your subscription and billing",
+      "icon": "credit-card"
+    },
+    {
+      "id": "system",
+      "name": "System",
+      "description": "System alerts and important information",
+      "icon": "bell"
+    },
+    {
+      "id": "modules",
+      "name": "Modules",
+      "description": "Notifications from installed modules",
+      "icon": "puzzle"
+    }
+  ],
+  "core": {
+    "display_name": "Core System",
+    "notifications": [
+      {
+        "id": "subscription_updates",
+        "label": "Subscription Updates",
+        "description": "Receive updates about your subscription status",
+        "category": "subscription",
+        "channels": ["in_app", "email"],
+        "default_enabled": true
+      },
+      {
+        "id": "security_alerts",
+        "label": "Security Alerts",
+        "description": "Important security-related notifications",
+        "category": "account",
+        "channels": ["in_app", "email"],
+        "default_enabled": true
+      }
+    ]
+  },
+  "modules": {}
+}

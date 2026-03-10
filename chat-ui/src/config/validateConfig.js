@@ -1,9 +1,9 @@
 /**
  * Config Validator
  *
- * Validates all declarative JSON config files at startup and surfaces
- * human-readable errors. Designed for non-technical founders — messages
- * explain WHAT is wrong and HOW to fix it.
+ * Validates the declarative config files (theme_config.json, navigation_config.json)
+ * fetched from the mozaikscore API at startup and surfaces human-readable errors.
+ * Designed for non-technical founders — messages explain WHAT is wrong and HOW to fix it.
  *
  * Runs once during app init. Returns an array of { level, file, message }
  * objects. Levels: 'error' (will break), 'warn' (degraded), 'info'.
@@ -16,44 +16,45 @@ const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const URL_RE = /^(https?:\/\/|\/)/;
 
 // ---------------------------------------------------------------------------
-// Individual file validators
+// Individual section validators
 // ---------------------------------------------------------------------------
 
-function validateBrand(brand) {
+function validateThemeConfig(config) {
   const issues = [];
-  const file = 'brand.json';
+  const file = 'theme_config.json';
 
-  if (!brand || typeof brand !== 'object') {
-    issues.push({ level: 'error', file, message: 'File is empty or not valid JSON.' });
+  if (!config || typeof config !== 'object') {
+    issues.push({ level: 'error', file, message: 'Config is empty or not valid JSON.' });
     return issues;
   }
 
-  // Name
-  if (!brand.name) {
-    issues.push({ level: 'warn', file, message: 'Missing "name". Your app will show as "App" in the browser tab.' });
+  // Identity
+  const identity = config.identity;
+  if (!identity || !identity.name) {
+    issues.push({ level: 'warn', file, message: 'Missing "identity.name". Your app will show as "App" in the browser tab.' });
   }
 
   // Assets
-  if (!brand.assets) {
+  if (!config.assets) {
     issues.push({ level: 'error', file, message: 'Missing "assets" block. Add at least: { "assets": { "logo": "your-logo.svg" } }' });
   } else {
-    if (!brand.assets.logo) {
+    if (!config.assets.logo) {
       issues.push({ level: 'warn', file, message: 'Missing "assets.logo". The header will have no logo image.' });
-    } else if (!ICON_FILE_RE.test(brand.assets.logo) && !URL_RE.test(brand.assets.logo)) {
-      issues.push({ level: 'error', file, message: `assets.logo="${brand.assets.logo}" doesn't look like a file. Use a filename like "logo.svg" (placed in brand/public/assets/).` });
+    } else if (!ICON_FILE_RE.test(config.assets.logo) && !URL_RE.test(config.assets.logo)) {
+      issues.push({ level: 'error', file, message: `assets.logo="${config.assets.logo}" doesn't look like a file. Use a filename like "logo.svg" (placed in brand/public/assets/).` });
     }
-    if (!brand.assets.backgroundImage) {
+    if (!config.assets.backgroundImage) {
       issues.push({ level: 'info', file, message: 'No "assets.backgroundImage" set. The chat background will be a solid color.' });
     }
   }
 
   // Colors
-  if (!brand.colors) {
+  if (!config.colors) {
     issues.push({ level: 'warn', file, message: 'Missing "colors" block. The default blue/indigo palette will be used.' });
   } else {
     const requiredColors = ['primary', 'secondary'];
     for (const name of requiredColors) {
-      const c = brand.colors[name];
+      const c = config.colors[name];
       if (!c) {
         issues.push({ level: 'warn', file, message: `Missing "colors.${name}". A fallback color will be used.` });
       } else if (typeof c === 'object') {
@@ -67,70 +68,62 @@ function validateBrand(brand) {
   }
 
   // Fonts
-  if (!brand.fonts) {
+  if (!config.fonts) {
     issues.push({ level: 'info', file, message: 'No "fonts" block. System fonts will be used.' });
   }
 
-  return issues;
-}
+  // UI chrome
+  const ui = config.ui;
+  if (ui) {
+    // Header
+    if (ui.header) {
+      const logo = ui.header.logo;
+      if (logo) {
+        if (logo.src && !ICON_FILE_RE.test(logo.src) && !URL_RE.test(logo.src)) {
+          issues.push({ level: 'error', file, message: `ui.header.logo.src="${logo.src}" is not a valid asset filename. Use a filename like "logo.svg" or a full URL.` });
+        }
+      }
 
-function validateUI(ui) {
-  const issues = [];
-  const file = 'ui.json';
-
-  if (!ui || typeof ui !== 'object') {
-    issues.push({ level: 'warn', file, message: 'File is empty or missing. Default header/profile/footer will be used.' });
-    return issues;
-  }
-
-  // Header
-  if (ui.header) {
-    const logo = ui.header.logo;
-    if (logo) {
-      if (logo.src && !ICON_FILE_RE.test(logo.src) && !URL_RE.test(logo.src)) {
-        issues.push({ level: 'error', file, message: `header.logo.src="${logo.src}" is not a valid asset filename. Use a filename like "logo.svg" or a full URL.` });
+      if (Array.isArray(ui.header.actions)) {
+        ui.header.actions.forEach((action, i) => {
+          if (action.icon && !ICON_FILE_RE.test(action.icon) && !URL_RE.test(action.icon)) {
+            issues.push({ level: 'error', file, message: `ui.header.actions[${i}].icon="${action.icon}" is not a valid asset filename. Use "sparkle.svg" not "sparkle".` });
+          }
+        });
       }
     }
 
-    if (Array.isArray(ui.header.actions)) {
-      ui.header.actions.forEach((action, i) => {
-        if (action.icon && !ICON_FILE_RE.test(action.icon) && !URL_RE.test(action.icon)) {
-          issues.push({ level: 'error', file, message: `header.actions[${i}].icon="${action.icon}" is not a valid asset filename. Use "sparkle.svg" not "sparkle".` });
+    // Profile
+    if (ui.profile) {
+      if (ui.profile.show !== false && ui.profile.icon) {
+        if (!ICON_FILE_RE.test(ui.profile.icon) && !URL_RE.test(ui.profile.icon)) {
+          issues.push({ level: 'error', file, message: `ui.profile.icon="${ui.profile.icon}" is not a valid asset filename. Use "profile.svg" (placed in brand/public/assets/).` });
         }
-      });
-    }
-  }
-
-  // Profile
-  if (ui.profile) {
-    if (ui.profile.show !== false && ui.profile.icon) {
-      if (!ICON_FILE_RE.test(ui.profile.icon) && !URL_RE.test(ui.profile.icon)) {
-        issues.push({ level: 'error', file, message: `profile.icon="${ui.profile.icon}" is not a valid asset filename. Use "profile.svg" (placed in brand/public/assets/).` });
+      }
+      if (Array.isArray(ui.profile.menu)) {
+        ui.profile.menu.forEach((item, i) => {
+          if (item.type === 'divider') return;
+          if (!item.id) {
+            issues.push({ level: 'warn', file, message: `ui.profile.menu[${i}] is missing an "id" field. Each menu item needs a unique id.` });
+          }
+          if (!item.label) {
+            issues.push({ level: 'warn', file, message: `ui.profile.menu[${i}] is missing a "label". The menu item won't have visible text.` });
+          }
+          if (item.icon && !ICON_FILE_RE.test(item.icon) && !URL_RE.test(item.icon)) {
+            issues.push({ level: 'error', file, message: `ui.profile.menu[${i}].icon="${item.icon}" is not a valid filename. Use "settings.svg" not "settings".` });
+          }
+          if (item.action === 'navigate' && !item.href && !item.path) {
+            issues.push({ level: 'error', file, message: `ui.profile.menu[${i}] has action="navigate" but no "href". Where should it navigate to?` });
+          }
+        });
       }
     }
-    if (Array.isArray(ui.profile.menu)) {
-      ui.profile.menu.forEach((item, i) => {
-        if (item.type === 'divider') return;
-        if (!item.id) {
-          issues.push({ level: 'warn', file, message: `profile.menu[${i}] is missing an "id" field. Each menu item needs a unique id.` });
-        }
-        if (!item.label) {
-          issues.push({ level: 'warn', file, message: `profile.menu[${i}] is missing a "label". The menu item won't have visible text.` });
-        }
-        if (item.icon && !ICON_FILE_RE.test(item.icon) && !URL_RE.test(item.icon)) {
-          issues.push({ level: 'error', file, message: `profile.menu[${i}].icon="${item.icon}" is not a valid filename. Use "settings.svg" not "settings".` });
-        }
-        if (item.action === 'navigate' && !item.href && !item.path) {
-          issues.push({ level: 'error', file, message: `profile.menu[${i}] has action="navigate" but no "href". Where should it navigate to?` });
-        }
-      });
-    }
-  }
 
-  // Notifications
-  if (ui.notifications?.show !== false && ui.notifications?.icon) {
-    if (!ICON_FILE_RE.test(ui.notifications.icon) && !URL_RE.test(ui.notifications.icon)) {
-      issues.push({ level: 'error', file, message: `notifications.icon="${ui.notifications.icon}" is not a valid asset filename. Use "notifications.svg".` });
+    // Notifications
+    if (ui.notifications?.show !== false && ui.notifications?.icon) {
+      if (!ICON_FILE_RE.test(ui.notifications.icon) && !URL_RE.test(ui.notifications.icon)) {
+        issues.push({ level: 'error', file, message: `ui.notifications.icon="${ui.notifications.icon}" is not a valid asset filename. Use "notifications.svg".` });
+      }
     }
   }
 
@@ -139,10 +132,10 @@ function validateUI(ui) {
 
 function validateNavigation(nav) {
   const issues = [];
-  const file = 'navigation.json';
+  const file = 'navigation_config.json';
 
   if (!nav || typeof nav !== 'object') {
-    issues.push({ level: 'warn', file, message: 'File is empty or missing. Default navigation will be used.' });
+    issues.push({ level: 'warn', file, message: 'Config is empty or missing. Default navigation will be used.' });
     return issues;
   }
 
@@ -297,21 +290,21 @@ export async function validateAllConfigs() {
     }
   };
 
-  // Load all configs in parallel
-  const [brand, ui, nav] = await Promise.all([
-    safeLoad('/brand.json', 'brand.json'),
-    safeLoad('/ui.json', 'ui.json'),
-    safeLoad('/navigation.json', 'navigation.json'),
+  // Resolve mozaikscore base URL
+  const coreUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_CORE_URL) || '';
+  const baseUrl = coreUrl.replace(/\/+$/, '');
+
+  // Load configs from mozaikscore API
+  const [themeResult, navResult] = await Promise.all([
+    safeLoad(baseUrl ? `${baseUrl}/api/theme-config` : '/api/theme-config', 'theme_config.json'),
+    safeLoad(baseUrl ? `${baseUrl}/api/navigation-config` : '/api/navigation-config', 'navigation_config.json'),
   ]);
 
-  if (brand.data) results.push(...validateBrand(brand.data));
-  else if (brand.missing) results.push({ level: 'error', file: 'brand.json', message: 'File not found. This is the core visual identity file — your app needs it. Create brand/public/brand.json.' });
+  if (themeResult.data) results.push(...validateThemeConfig(themeResult.data));
+  else if (themeResult.missing) results.push({ level: 'error', file: 'theme_config.json', message: 'Not found. This is the core visual identity config — your app needs it. Create app/config/theme_config.json.' });
 
-  if (ui.data) results.push(...validateUI(ui.data));
-  else if (ui.missing) results.push({ level: 'info', file: 'ui.json', message: 'Not found — default header, profile, and footer will be used.' });
-
-  if (nav.data) results.push(...validateNavigation(nav.data));
-  else if (nav.missing) results.push({ level: 'info', file: 'navigation.json', message: 'Not found — the core shell (Chat + Admin) will load with no extra pages.' });
+  if (navResult.data) results.push(...validateNavigation(navResult.data));
+  else if (navResult.missing) results.push({ level: 'info', file: 'navigation_config.json', message: 'Not found — the core shell (Chat + Admin) will load with no extra pages.' });
 
   // Auth is now validated as part of app.json (no separate auth.json)
   // validateAppConfig handles the auth sub-section internally.

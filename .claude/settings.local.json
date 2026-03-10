@@ -8,7 +8,10 @@
       "Bash(timeout:*)",
       "Bash(npm install:*)",
       "Bash(dir:*)",
-      "Bash(python -m pytest:*)"
+      "Bash(python -m pytest:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(python -m py_compile:*)"
     ]
   }
 }

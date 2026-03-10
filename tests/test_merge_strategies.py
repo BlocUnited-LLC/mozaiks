@@ -3,17 +3,20 @@
 # ==============================================================================
 
 import pytest
-from mozaiksai.core.workflow.pack.merge import (
-    ChildResult,
-    MergeResult,
-    MergeStrategy,
-    CollectAllMerge,
-    ConcatenateMerge,
-    MergeBundlesMerge,
-    FirstSuccessMerge,
-    get_merge_strategy,
-    register_merge_strategy,
-)
+
+from tests.import_utils import import_module_directly
+
+_merge = import_module_directly("mozaiksai.core.workflow.pack.merge")
+ChildResult = _merge.ChildResult
+MergeResult = _merge.MergeResult
+MergeStrategy = _merge.MergeStrategy
+CollectAllMerge = _merge.CollectAllMerge
+ConcatenateMerge = _merge.ConcatenateMerge
+MergeBundlesMerge = _merge.MergeBundlesMerge
+FirstSuccessMerge = _merge.FirstSuccessMerge
+MajorityVoteMerge = _merge.MajorityVoteMerge
+get_merge_strategy = _merge.get_merge_strategy
+register_merge_strategy = _merge.register_merge_strategy
 
 
 # ---------------------------------------------------------------------------
@@ -62,13 +65,13 @@ def all_success():
 
 class TestRegistry:
     def test_builtin_strategies(self):
-        for name in ("collect_all", "concatenate", "merge_bundles", "first_success"):
+        for name in ("collect_all", "concatenate", "merge_bundles", "first_success", "majority_vote"):
             s = get_merge_strategy(name)
             assert isinstance(s, MergeStrategy)
 
     def test_unknown_fallback(self):
-        s = get_merge_strategy("nonexistent_xyz")
-        assert isinstance(s, CollectAllMerge)
+        with pytest.raises(ValueError):
+            get_merge_strategy("nonexistent_xyz")
 
     def test_register_custom(self):
         class CustomMerge(MergeStrategy):
@@ -79,13 +82,13 @@ class TestRegistry:
             def merge(self, children):
                 return MergeResult(
                     merged={"custom": True},
-                    strategy_used="custom_test",
-                    child_count=len(children),
-                    failed_count=0,
+                        strategy_used="custom_test",
+                        child_count=len(children),
+                        failed_count=0,
                 )
 
-        register_merge_strategy(CustomMerge())
-        s = get_merge_strategy("custom_test")
+        register_merge_strategy(CustomMerge(), replace=True)
+        s = get_merge_strategy("custom:custom_test")
         assert isinstance(s, CustomMerge)
         r = s.merge([])
         assert r.merged == {"custom": True}
@@ -199,6 +202,17 @@ class TestFirstSuccessMerge:
         assert r.merged == {}
         assert r.failed_count == 2
 
+
+class TestMajorityVoteMerge:
+    def test_majority(self):
+        children = [
+            ChildResult(child_chat_id="a", workflow_name="A", context={"x": 1}, success=True),
+            ChildResult(child_chat_id="b", workflow_name="B", context={"x": 1}, success=True),
+            ChildResult(child_chat_id="c", workflow_name="C", context={"x": 2}, success=True),
+        ]
+        r = MajorityVoteMerge().merge(children)
+        assert r.strategy_used == "majority_vote"
+        assert r.merged == {"x": 1}
 
 # ---------------------------------------------------------------------------
 # MergeResult / ChildResult data classes

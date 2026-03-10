@@ -1,5 +1,0 @@
-structured_outputs:
-  models: {}
-
-registry:
-  FactAgent: null
