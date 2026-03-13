@@ -13,7 +13,8 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
-Write-Host "[frontend] Starting Vite on $BindHost`:$Port..." -ForegroundColor Cyan
-Write-Host "[frontend] Command: npm --prefix app run dev -- --host $BindHost --port $Port" -ForegroundColor DarkGray
+Write-Host "[frontend] Starting Vite on $BindHost`:$Port (strict port)..." -ForegroundColor Cyan
+Write-Host "[frontend] Command: npm --prefix app run dev -- --host $BindHost --port $Port --strictPort" -ForegroundColor DarkGray
+Write-Host "[frontend] Open: http://localhost:$Port" -ForegroundColor Yellow
 
-npm --prefix app run dev -- --host $BindHost --port $Port
+npm --prefix app run dev -- --host $BindHost --port $Port --strictPort

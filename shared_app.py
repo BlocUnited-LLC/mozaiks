@@ -218,17 +218,54 @@ async def chrome_devtools_probe():
 # Expose shared state on app for platform extension routers.
 app.state.persistence_manager = persistence_manager
 
-# Allow CORS for all origins (e.g., test_client.html local file)
-_react_dev_origin = os.getenv("REACT_DEV_ORIGIN")
-if _react_dev_origin and _react_dev_origin.strip():
+def _parse_csv_origins(raw: Optional[str]) -> List[str]:
+    if not raw:
+        return []
+    return [origin.strip() for origin in raw.split(",") if origin and origin.strip()]
+
+
+def _build_cors_origins() -> List[str]:
+    origins: List[str] = []
+
+    origins.extend(_parse_csv_origins(os.getenv("FRONTEND_URL")))
+    origins.extend(_parse_csv_origins(os.getenv("REACT_DEV_ORIGIN")))
+    origins.extend(_parse_csv_origins(os.getenv("ADDITIONAL_CORS_ORIGINS")))
+
+    # In local/dev flows we commonly run Vite on 3000 or 5173 and occasionally 3001.
+    if env != "production":
+        origins.extend(
+            [
+                "http://localhost:3000",
+                "http://127.0.0.1:3000",
+                "http://localhost:3001",
+                "http://127.0.0.1:3001",
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+            ]
+        )
+
+    # De-dupe while preserving order.
+    deduped: List[str] = []
+    seen = set()
+    for origin in origins:
+        if origin not in seen:
+            seen.add(origin)
+            deduped.append(origin)
+    return deduped
+
+
+_cors_origins = _build_cors_origins()
+if _cors_origins:
+    wf_logger.info("CORS allow_origins configured: %s", _cors_origins)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[_react_dev_origin.strip()],
+        allow_origins=_cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 else:
+    wf_logger.warning("No explicit CORS origins configured; falling back to allow_origin_regex=.*")
     app.add_middleware(
         CORSMiddleware,
         # Allow all origins, including file:// (null); using regex for full coverage

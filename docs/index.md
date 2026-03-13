@@ -1,6 +1,6 @@
 # Mozaiks
 
-<div align="center">
+<div align="center" markdown>
 
 <img src="assets/mozaik_logo.svg" alt="Mozaiks Logo" width="180"/>
 
@@ -35,7 +35,7 @@
 
 ## 🎨 See It In Action
 
-<div align="center">
+<div align="center" markdown>
 
 ### 💬 Embeddable Floating Widget
 
@@ -111,48 +111,3 @@ Choose the path that matches what you need to do.
     [:octicons-arrow-right-24: Reference](reference/index.md)
 
 </div>
-
-## What You Can Build
-
-Mozaiks is designed for more than chat bots. A single app bundle can mix:
-
-- workflow-driven AI experiences
-- persistent modules and pages
-- inline UI tools inside chat
-- artifact views beside chat
-- standard app surfaces such as dashboards, forms, tables, and detail pages
-
-The runtime already supports:
-
-- AG2-powered workflow execution
-- workflow-level fan-out and fan-in
-- global workflow journeys
-- WebSocket streaming and UI round-trips
-- multi-tenant persistence
-- event-driven orchestration
-
-## How To Read The Docs
-
-Use this order if you are learning the system:
-
-1. [Getting Started](getting-started.md)
-2. [Architecture Overview](architecture/index.md)
-3. [Workflow Guide](guides/adding-workflows/01-overview.md)
-4. [App Bundle Declaratives](architecture/foundations/app-bundle-declaratives.md)
-5. [Prompt Packs](instruction-prompts/prompt-packs.md)
-
-If you are already working with an AI coding agent, open:
-
-- [Agent Bootstrap Prompt](agent-bootstrap-prompt.md)
-- [Prompt Packs](instruction-prompts/prompt-packs.md)
-
-## Current Platform Example
-
-The live showcase in `platform/` is **Backstage**, a comedy-club operating system that demonstrates:
-
-- workflow intake in `GreenRoom`
-- workflow-level fan-out and fan-in in `WritersRoom`
-- final presentation in `MainStage`
-- inline UI tools, artifact UI tools, and persistent modules
-
-This is the example to study instead of the older legacy demo flow.

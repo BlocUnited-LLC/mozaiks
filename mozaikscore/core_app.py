@@ -40,10 +40,32 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 # CORS
 # ---------------------------------------------------------------------------
-frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-cors_origins = [frontend_url]
-if os.getenv("ADDITIONAL_CORS_ORIGINS"):
-    cors_origins.extend([o.strip() for o in os.getenv("ADDITIONAL_CORS_ORIGINS", "").split(",")])
+def _parse_csv_origins(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    return [o.strip() for o in raw.split(",") if o and o.strip()]
+
+
+cors_origins: list[str] = []
+cors_origins.extend(_parse_csv_origins(os.getenv("FRONTEND_URL")))
+cors_origins.extend(_parse_csv_origins(os.getenv("REACT_DEV_ORIGIN")))
+cors_origins.extend(_parse_csv_origins(os.getenv("ADDITIONAL_CORS_ORIGINS")))
+
+if ENV != "production":
+    cors_origins.extend(
+        [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:3001",
+            "http://127.0.0.1:3001",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ]
+    )
+
+# De-dupe while preserving order
+_seen = set()
+cors_origins = [o for o in cors_origins if not (o in _seen or _seen.add(o))]
 
 app.add_middleware(
     CORSMiddleware,

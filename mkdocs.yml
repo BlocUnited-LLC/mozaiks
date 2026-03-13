@@ -1,14 +1,13 @@
 site_name: Mozaiks
 site_description: Unified agentic stack — contracts, core runtime, and orchestration
 site_url: https://docs.mozaiks.ai
+repo_url: https://github.com/BlocUnited-LLC/mozaiks
+repo_name: BlocUnited-LLC/mozaiks
 edit_uri: ""
 
 docs_dir: docs
 
 extra:
-  social:
-    - icon: fontawesome/brands/github
-      link: https://github.com/BlocUnited-LLC/mozaiks
   generator: false
 
 theme:
@@ -115,7 +114,7 @@ nav:
   - Architecture:
       - Overview: architecture/index.md
       - Foundations:
-          - Overview: architecture/foundations/prompt-packs.md
+          - Overview: architecture/foundations/overview.md
           - Canonical App Structure: architecture/foundations/canonical-app-structure.md
           - App Bundle Declaratives: architecture/foundations/app-bundle-declaratives.md
           - App Creation Guide: architecture/foundations/app-creation-guide.md
@@ -145,7 +144,7 @@ nav:
           - Persistent Widget: architecture/frontend/persistent-widget.md
           - Event-Driven State: architecture/frontend/event-driven-state.md
       - Events:
-          - Overview: architecture/events/prompt-packs.md
+          - Overview: architecture/events/overview.md
           - Event System Inventory: architecture/events/event-system-inventory.md
           - Declarative Runtime System: architecture/events/declarative-runtime-system.md
   - Reference:

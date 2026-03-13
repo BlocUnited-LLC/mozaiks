@@ -77,6 +77,7 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    strictPort: true,
     proxy: {
       '/api': { target: appConfig.apiUrl, changeOrigin: true },
       '/ws':  { target: appConfig.apiUrl.replace('http', 'ws'), ws: true },
