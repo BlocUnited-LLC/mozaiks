@@ -1,5 +1,22 @@
 # Instruction Prompt: Create a New Workflow
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to create a new Mozaiks workflow from scratch.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/workflows/create-new-workflow.md
+
+    My workflow should:
+    - Be called: [YourWorkflowName]
+    - Do this: [Describe what it should do in plain English]
+    ```
+
+---
+
 **Task:** Help the user create a new workflow from scratch
 
 **Complexity:** Medium-High (workflow YAML + Python tools + workflow UI)

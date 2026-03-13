@@ -1,5 +1,21 @@
 # Instruction Prompt: Workflow Backend Configuration
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to configure the backend YAML files for a Mozaiks workflow.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/adding-workflows/02-backend-basics.md
+
+    My workflow is called: [YourWorkflowName]
+    I need these agents: [List your agents]
+    ```
+
+---
+
 **Task:** Configure the declarative files that define a workflow
 
 **Complexity:** Low-Medium

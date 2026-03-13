@@ -39,10 +39,7 @@
 
 ### 💬 Embeddable Floating Widget
 
-<video controls muted loop playsinline preload="metadata" width="700">
-	<source src="./docs/assets/widgetAction_compressed.mp4" type="video/mp4">
-	Your browser does not support the video tag.
-</video>
+![Widget Demo](./docs/assets/widgetAction.gif)
 
 *Drop a floating assistant anywhere in your app - click the button to expand/collapse the chat interface*
 

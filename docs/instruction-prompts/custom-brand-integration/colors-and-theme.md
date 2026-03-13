@@ -1,5 +1,20 @@
 # Prompt Pack: Quick Theme Update
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to do a quick visual refresh for my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/custom-brand-integration/colors-and-theme.md
+
+    Changes I want: [Describe — e.g. new color palette, font, accent color]
+    ```
+
+---
+
 ## Task
 
 Make a fast visual refresh for a Mozaiks app.

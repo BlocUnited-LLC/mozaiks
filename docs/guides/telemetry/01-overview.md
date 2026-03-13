@@ -1,5 +1,17 @@
 # Telemetry Overview
 
+!!! tip "New to Development?"
+
+    **Let AI configure telemetry!** Copy this prompt into Claude Code:
+
+    ```
+    Configure telemetry for my Mozaiks app.
+
+    Please read: docs/instruction-prompts/telemetry/01-overview.md
+    ```
+
+---
+
 MozaiksCore includes built-in telemetry for tracking, costing, and managing your AI workflows.
 
 ---
@@ -11,18 +23,6 @@ MozaiksCore includes built-in telemetry for tracking, costing, and managing your
 | **Agent Tracing** | OpenTelemetry spans for every conversation, agent turn, and LLM call |
 | **Cost Tracking** | Automatic token-to-cost calculation with configurable pricing |
 | **Budget Management** | Patterns for implementing spending limits and subscription tiers |
-
----
-
-!!! tip "New to Development?"
-
-    **Let AI configure telemetry!** Copy this prompt into Claude Code:
-
-    ```
-    Configure telemetry for my Mozaiks app.
-
-    Please read: docs/instruction-prompts/telemetry/01-overview.md
-    ```
 
 ---
 

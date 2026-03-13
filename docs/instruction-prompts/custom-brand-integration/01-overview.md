@@ -1,5 +1,18 @@
 # Prompt Pack: App Shell And Branding Overview
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to customize the app shell and branding for my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/custom-brand-integration/01-overview.md
+    ```
+
+---
+
 ## Task
 
 Help a user customize the Mozaiks app shell using the current declarative config model.

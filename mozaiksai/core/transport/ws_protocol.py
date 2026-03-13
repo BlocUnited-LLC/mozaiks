@@ -255,9 +255,10 @@ class WebSocketProtocolMixin:
                     })
                 elif kind == "resume_boundary":
                     # Convert boundary to transport format
+                    boundary = {k: v for k, v in event_dict.items() if k != "kind"}
                     await self._queue_message_with_backpressure(chat_id, {
                         "type": "chat.resume_boundary",
-                        "data": event_dict.get("data", {})
+                        "data": boundary
                     })
 
             # Call the resumer with startup_mode filtering

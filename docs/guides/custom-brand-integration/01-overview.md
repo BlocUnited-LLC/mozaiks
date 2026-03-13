@@ -1,9 +1,5 @@
 # App Shell And Branding
 
-> **Guide:** Configure the Mozaiks shell without changing core runtime code
-
-Mozaiks apps ship with a shared shell. You customize that shell through declarative files in `platform/`, not by editing the runtime.
-
 !!! tip "Using an AI coding agent?"
 
     Start with the prompt packs in:
@@ -11,6 +7,12 @@ Mozaiks apps ship with a shared shell. You customize that shell through declarat
     `docs/instruction-prompts/custom-brand-integration/`
 
     Use the guide first to understand the file model, then hand the matching prompt pack to Claude Code, Cursor, or Copilot.
+
+---
+
+> **Guide:** Configure the Mozaiks shell without changing core runtime code
+
+Mozaiks apps ship with a shared shell. You customize that shell through declarative files in `platform/`, not by editing the runtime.
 
 ## What You Customize
 

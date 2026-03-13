@@ -13,6 +13,39 @@ param(
 
 # SAFETY: Only ever touch MozaiksAI database - hardcoded to prevent accidents
 $DatabaseName = "MozaiksAI"
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+
+function Stop-MozaiksDevProcesses {
+    param(
+        [string]$RepoPath
+    )
+
+    # Stop only python/node processes that are running from this repo context.
+    # This is used by full cleanse to free locked log files.
+    $candidates = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.ProcessId -ne $PID -and
+            ($_.Name -match '^(python|python3|node)\.exe$') -and
+            $_.CommandLine -and
+            $_.CommandLine -like "*$RepoPath*"
+        }
+
+    if (-not $candidates) {
+        return 0
+    }
+
+    $stopped = 0
+    foreach ($proc in $candidates) {
+        try {
+            Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
+            $stopped++
+        } catch {
+            # best effort
+        }
+    }
+
+    return $stopped
+}
 
 Write-Host " Starting MozaiksAI deep cleanse..." -ForegroundColor Cyan
 
@@ -35,8 +68,53 @@ if (Test-Path "ChatUI") {
 if (-not $KeepLogs) {
     Write-Host "`n Cleaning logs..." -ForegroundColor Yellow
     if (Test-Path "logs/logs") {
-        Get-ChildItem -Path "logs/logs" -Filter "*.log" -ErrorAction SilentlyContinue | Remove-Item -Force
-        Write-Host "    Removed logs/logs/*.log" -ForegroundColor Green
+        $logFiles = Get-ChildItem -Path "logs/logs" -Filter "*.log" -ErrorAction SilentlyContinue
+        if (-not $logFiles) {
+            Write-Host "    No log files found in logs/logs/" -ForegroundColor Gray
+        } else {
+            $lockedFiles = @()
+            $deletedCount = 0
+
+            foreach ($logFile in $logFiles) {
+                try {
+                    Remove-Item -Path $logFile.FullName -Force -ErrorAction Stop
+                    $deletedCount++
+                } catch {
+                    $lockedFiles += $logFile
+                }
+            }
+
+            # For full cleanses, stop repo-scoped dev processes and retry locked logs.
+            if ($Full -and $lockedFiles.Count -gt 0) {
+                Write-Host "    Some logs are locked, stopping repo dev processes and retrying..." -ForegroundColor Yellow
+                $stopped = Stop-MozaiksDevProcesses -RepoPath $RepoRoot
+                if ($stopped -gt 0) {
+                    Write-Host "    Stopped $stopped process(es) holding log handles" -ForegroundColor Green
+                    Start-Sleep -Seconds 1
+                } else {
+                    Write-Host "    No repo python/node processes found to stop" -ForegroundColor Gray
+                }
+
+                $remainingLocked = @()
+                foreach ($locked in $lockedFiles) {
+                    try {
+                        Remove-Item -Path $locked.FullName -Force -ErrorAction Stop
+                        $deletedCount++
+                    } catch {
+                        $remainingLocked += $locked
+                    }
+                }
+                $lockedFiles = $remainingLocked
+            }
+
+            if ($lockedFiles.Count -gt 0) {
+                $names = ($lockedFiles | ForEach-Object { $_.Name }) -join ", "
+                Write-Host "    ⚠️  Could not delete locked logs: $names" -ForegroundColor Yellow
+                Write-Host "       Close remaining log writers and rerun cleanse to remove them." -ForegroundColor Gray
+            } else {
+                Write-Host "    Removed logs/logs/*.log ($deletedCount file(s))" -ForegroundColor Green
+            }
+        }
     }
 } else {
     Write-Host "`n Keeping logs (-KeepLogs flag set)" -ForegroundColor Gray

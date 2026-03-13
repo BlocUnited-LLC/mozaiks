@@ -1,5 +1,20 @@
 # Prompt Pack: navigation_config.json
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to configure the navigation for my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/custom-brand-integration/03-ui-json.md
+
+    Changes I want: [Describe your navigation changes — landing page, routes, menu items, etc.]
+    ```
+
+---
+
 ## Task
 
 Help a user edit `platform/config/navigation_config.json`.

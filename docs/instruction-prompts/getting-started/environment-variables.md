@@ -1,5 +1,20 @@
 # Instruction Prompt: Environment Variables Setup
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I need help setting up my .env file for Mozaiks.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/getting-started/environment-variables.md
+
+    My OpenAI API key is: [PASTE YOUR KEY HERE]
+    ```
+
+---
+
 **Task:** Help the user set up their `.env` file for MozaiksAI
 
 **Complexity:** Medium (involves understanding what each variable does and where to get values)

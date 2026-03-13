@@ -1,5 +1,21 @@
 # UI Components
 
+!!! tip "New to Development?"
+
+    **Let AI create your components!** Copy this prompt into Claude Code:
+
+    ```
+    I want to create UI components for my Mozaiks workflow.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/adding-workflows/04-ui-components.md
+
+    My workflow is: [WorkflowName]
+    I need these UI components: [List components like "date picker", "form", "confirmation"]
+    ```
+
+---
+
 UI components are React elements that appear in the chat when UI tools are triggered. They collect user input and send responses back to your Python tools.
 
 ---
@@ -18,22 +34,6 @@ Python Tool                  React Component              Python Tool
 ```
 
 The runtime handles all WebSocket communication — you just define what to show and what to return.
-
----
-
-!!! tip "New to Development?"
-
-    **Let AI create your components!** Copy this prompt into Claude Code:
-
-    ```
-    I want to create UI components for my Mozaiks workflow.
-
-    Please read the instruction prompt at:
-    docs/instruction-prompts/adding-workflows/04-ui-components.md
-
-    My workflow is: [WorkflowName]
-    I need these UI components: [List components like "date picker", "form", "confirmation"]
-    ```
 
 ---
 

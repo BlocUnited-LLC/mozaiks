@@ -1,23 +1,5 @@
 # Getting Started
 
-Everything you need to go from clone → running app in minutes.
-
----
-
-## What You're Setting Up
-
-Mozaiks is an AI app framework with three main pieces:
-
-| Piece | What it is | Where it runs |
-|-------|-----------|---------------|
-| **Backend** | Python server that runs your AI agents | `python run_server.py` |
-| **Frontend** | React app that users interact with | `npm run dev` |
-| **Services** | MongoDB (database) + Keycloak (login) | Docker containers |
-
-By the end of this guide, you'll have all three running locally.
-
----
-
 !!! tip "New to Development?"
 
     **Let AI do the hard parts!** Copy this prompt into Claude Code:
@@ -35,6 +17,24 @@ By the end of this guide, you'll have all three running locally.
     ```
 
     The AI will handle prerequisites, environment setup, Docker, and verify everything works.
+
+---
+
+Everything you need to go from clone → running app in minutes.
+
+---
+
+## What You're Setting Up
+
+Mozaiks is an AI app framework with three main pieces:
+
+| Piece | What it is | Where it runs |
+|-------|-----------|---------------|
+| **Backend** | Python server that runs your AI agents | `python run_server.py` |
+| **Frontend** | React app that users interact with | `npm run dev` |
+| **Services** | MongoDB (database) + Keycloak (login) | Docker containers |
+
+By the end of this guide, you'll have all three running locally.
 
 ---
 

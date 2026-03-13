@@ -1,5 +1,18 @@
 # Step 4 — Assets And Fonts
 
+!!! tip "Using an AI coding agent?"
+
+    Hand this prompt pack to Claude Code, Cursor, or Copilot:
+
+    ```
+    Help me add or replace shell assets and fonts for my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/custom-brand-integration/04-assets.md
+    ```
+
+---
+
 > **Guide:** App Shell And Branding · Step 4 of 5
 
 Mozaiks serves shell assets from `platform/brand/`.

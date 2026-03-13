@@ -49,41 +49,45 @@ It should help users check order status and escalate billing issues.
 
 ### Getting Started
 
-- environment setup
-- full local setup from clone
+- [Full Setup From Clone](getting-started/full-setup-from-clone.md)
+- [Environment Variables](getting-started/environment-variables.md)
 
 ### Adding Workflows
 
-- planning workflows
-- backend workflow files
-- tools
-- UI components
-- testing
+- [01 — Overview & Planning](adding-workflows/01-overview.md)
+- [02 — Backend Basics](adding-workflows/02-backend-basics.md)
+- [03 — Tools](adding-workflows/03-tools.md)
+- [04 — UI Components](adding-workflows/04-ui-components.md)
+- [05 — Testing](adding-workflows/05-testing.md)
+
+### Workflows
+
+- [Create New Workflow](workflows/create-new-workflow.md)
 
 ### App Planning
 
-- decompose user intent into typed app concerns
-- classify capabilities into modules, workflows, actions, and CRUD surfaces
+- [Decompose App Intent](app-planning/decompose-app-intent.md)
 
 ### App Shell And Branding
 
-- branding files
-- shell configuration
-- assets
-- wiring
-- auth
+- [01 — Overview](custom-brand-integration/01-overview.md)
+- [02 — theme\_config.json](custom-brand-integration/02-brand-json.md)
+- [03 — navigation\_config.json](custom-brand-integration/03-ui-json.md)
+- [04 — Assets And Fonts](custom-brand-integration/04-assets.md)
+- [05 — Wiring](custom-brand-integration/05-wiring.md)
+- [06 — Auth in app.json](custom-brand-integration/06-auth-json.md)
+- [Colors And Theme](custom-brand-integration/colors-and-theme.md)
 
 ### Databases
 
-- MongoDB
-- Keycloak
-- production setup
+- [Setup](databases/setup.md)
 
 ### Telemetry
 
-- tracing
-- cost tracking
-- budget management
+- [01 — Overview](telemetry/01-overview.md)
+- [02 — Agent Tracing](telemetry/02-agent-tracing.md)
+- [03 — Cost Tracking](telemetry/03-cost-tracking.md)
+- [04 — Budget Management](telemetry/04-budget-management.md)
 
 ## Relationship To The Main Docs
 

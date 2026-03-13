@@ -1,5 +1,18 @@
 # Instruction Prompt: Build Subscription System
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to set up budget management and subscription tiers for my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/telemetry/04-budget-management.md
+    ```
+
+---
+
 **Task:** Set up budget management with subscription tiers
 
 **Complexity:** Medium (code implementation + event handling)

@@ -690,21 +690,37 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
 
     def _stringify_unknown(self, obj: Any) -> str:
         """Safely convert any object to a string for logging/transport."""
-        try:
-            if obj is None:
-                return ""
-            if isinstance(obj, (str, int, float, bool)):
-                return str(obj)
-            # Try JSON first with default=str to preserve structure
-            return json.dumps(obj, default=str)
-        except Exception:
+        if obj is None:
+            return ""
+        if isinstance(obj, (str, int, float, bool)):
+            return str(obj)
+        if isinstance(obj, (bytes, bytearray)):
             try:
-                return str(obj)
+                return obj.decode("utf-8", errors="replace")
             except Exception:
-                return "<unserializable>"
+                pass
+        try:
+            # Keep container payload readable while avoiding recursive __str__/__repr__ calls.
+            if isinstance(obj, dict):
+                return json.dumps(obj, default=lambda o: f"<{type(o).__name__}@{hex(id(o))}>")
+            if isinstance(obj, (list, tuple, set)):
+                return json.dumps(list(obj), default=lambda o: f"<{type(o).__name__}@{hex(id(o))}>")
+        except Exception:
+            pass
+        try:
+            type_name = type(obj).__name__
+        except Exception:
+            type_name = "object"
+        try:
+            object_id = hex(id(obj))
+        except Exception:
+            object_id = "unknown"
+        return f"<unserializable {type_name} {object_id}>"
 
-    def _serialize_ag2_events(self, obj: Any) -> Any:
+    def _serialize_ag2_events(self, obj: Any, _seen: Optional[set[int]] = None, _depth: int = 0) -> Any:
         """Convert AG2 event objects to JSON-serializable format."""
+        if _seen is None:
+            _seen = set()
         try:
             # Lazy import so absence of autogen doesn't break app start.
             try:
@@ -730,11 +746,27 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             if obj is None or isinstance(obj, (str, int, float, bool)):
                 return obj
 
+            # Guard against deep recursive/cyclic objects from external runtimes.
+            if _depth > 12:
+                return self._stringify_unknown(obj)
+
+            obj_id = id(obj)
+            if obj_id in _seen:
+                return f"<circular_ref {type(obj).__name__}>"
+
             # Dict / list recursive handling
             if isinstance(obj, dict):
-                return {k: self._serialize_ag2_events(v) for k, v in obj.items()}
+                _seen.add(obj_id)
+                try:
+                    return {k: self._serialize_ag2_events(v, _seen, _depth + 1) for k, v in obj.items()}
+                finally:
+                    _seen.discard(obj_id)
             if isinstance(obj, (list, tuple, set)):
-                return [self._serialize_ag2_events(v) for v in list(obj)]
+                _seen.add(obj_id)
+                try:
+                    return [self._serialize_ag2_events(v, _seen, _depth + 1) for v in list(obj)]
+                finally:
+                    _seen.discard(obj_id)
 
             # Specific AG2 event shapes
             def _extract_sender(o):
@@ -792,30 +824,34 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 }
 
             # Generic event-like objects with a small public attribute surface.
-            public_attrs = {}
-            # Avoid exploding on very large objects; cap attributes
-            attr_count = 0
-            for name in dir(obj):
-                if name.startswith("_"):
-                    continue
-                if attr_count > 25:
-                    break
-                try:
-                    value = getattr(obj, name)
-                except Exception:
-                    continue
-                # Skip callables
-                if callable(value):
-                    continue
-                attr_count += 1
-                public_attrs[name] = self._serialize_ag2_events(value)
+            _seen.add(obj_id)
+            try:
+                public_attrs = {}
+                # Avoid exploding on very large objects; cap attributes
+                attr_count = 0
+                for name in dir(obj):
+                    if name.startswith("_"):
+                        continue
+                    if attr_count > 25:
+                        break
+                    try:
+                        value = getattr(obj, name)
+                    except Exception:
+                        continue
+                    # Skip callables
+                    if callable(value):
+                        continue
+                    attr_count += 1
+                    public_attrs[name] = self._serialize_ag2_events(value, _seen, _depth + 1)
 
-            if public_attrs:
-                public_attrs["_ag2_event_type"] = cls_name
-                return public_attrs
+                if public_attrs:
+                    public_attrs["_ag2_event_type"] = cls_name
+                    return public_attrs
 
-            # Fallback textual representation
-            return self._stringify_unknown(obj)
+                # Fallback textual representation
+                return self._stringify_unknown(obj)
+            finally:
+                _seen.discard(obj_id)
         except Exception:
             # Final safety fallback
             return self._stringify_unknown(obj)

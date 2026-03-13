@@ -1,5 +1,21 @@
 # Instruction Prompt: Creating Workflow UI Components
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to create UI components for my Mozaiks workflow.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/adding-workflows/04-ui-components.md
+
+    My workflow is: [WorkflowName]
+    I need these UI components: [List components like "date picker", "form", "confirmation"]
+    ```
+
+---
+
 **Task:** Create React components for workflow UI tools
 
 **Complexity:** Medium

@@ -1,5 +1,20 @@
 # Prompt Pack: Decompose App Intent
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I have an app idea I want to build on Mozaiks.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/app-planning/decompose-app-intent.md
+
+    My app idea: [Describe your app in plain English]
+    ```
+
+---
+
 Use this prompt pack when an AI coding agent needs to turn a user idea into a
 structured Mozaiks app plan before any file generation starts.
 

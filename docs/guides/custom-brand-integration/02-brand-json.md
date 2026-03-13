@@ -1,5 +1,18 @@
 # Step 2 — theme_config.json
 
+!!! tip "Using an AI coding agent?"
+
+    Hand this prompt pack to Claude Code, Cursor, or Copilot:
+
+    ```
+    Help me configure theme_config.json for my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/custom-brand-integration/02-brand-json.md
+    ```
+
+---
+
 > **Guide:** App Shell And Branding · Step 2 of 5
 
 File location: `platform/config/theme_config.json`

@@ -1,5 +1,22 @@
 # Instruction Prompt: Workflow Planning & Overview
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to plan a new Mozaiks workflow.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/adding-workflows/01-overview.md
+
+    My workflow should:
+    - Be called: [YourWorkflowName]
+    - Do this: [Describe what it should do in plain English]
+    ```
+
+---
+
 **Task:** Help the user understand what workflow they need and plan the shape
 
 **Complexity:** Low

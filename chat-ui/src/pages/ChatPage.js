@@ -718,6 +718,8 @@ const ChatPage = () => {
   const askModeSyncedChatRef = useRef(null);
   const workflowArtifactSnapshotRef = useRef({ isOpen: false, messages: [], layoutMode: 'split' });
   const queryResumeHandledRef = useRef(null);
+  const validatedChatIdRef = useRef(null);
+  const validatingChatIdRef = useRef(false);
   
   useEffect(() => {
     if (conversationMode === 'workflow') {
@@ -1304,6 +1306,7 @@ const ChatPage = () => {
     if (dispatchSurfaceEvent) {
       dispatchSurfaceEvent(data);
     }
+    const showSystemMessages = debugFlag('mozaiks.show_system_messages') || debugFlag('mozaiks.debug_pipeline');
     // Robust spinner hide: only once
     try {
       if (initSpinnerShownRef.current && !initSpinnerHiddenOnceRef.current) {
@@ -1646,7 +1649,7 @@ const ChatPage = () => {
         } else if (nextMode === 'workflow') {
           setConversationMode('workflow');
         }
-        if (payload.message) {
+        if (payload.message && showSystemMessages) {
           setMessagesWithLogging((prev) => ([
             ...prev,
             {
@@ -1694,7 +1697,7 @@ const ChatPage = () => {
           setActiveWorkflowName(payload.workflow_name);
         }
         setConversationMode('workflow');
-        if (payload.message) {
+        if (payload.message && showSystemMessages) {
           setMessagesWithLogging((prev) => ([
             ...prev,
             {
@@ -2073,7 +2076,9 @@ const ChatPage = () => {
             }
           } catch (e) {}
         } else {
-          setMessagesWithLogging(prev => [...prev, { id: data.tool_call_id || `tool-call-${Date.now()}`, sender:'system', agentName:'System', content:`🔧 Tool Call: ${data.tool_name}`, isStreaming:false }]);
+          if (showSystemMessages) {
+            setMessagesWithLogging(prev => [...prev, { id: data.tool_call_id || `tool-call-${Date.now()}`, sender:'system', agentName:'System', content:`🔧 Tool Call: ${data.tool_name}`, isStreaming:false }]);
+          }
         }
         return;
       }
@@ -2204,12 +2209,16 @@ const ChatPage = () => {
           console.log(`⏭️ Skipping auto-tool success response (${data.tool_name}) - handled by UI renderer`);
           return;
         }
-        const responseContent = data.success ? `✅ Tool Response: ${data.content || 'Success'}` : `❌ Tool Failed: ${data.content || 'Error'}`;
-        setMessagesWithLogging(prev => [...prev, { id: data.tool_call_id || `tool-response-${Date.now()}`, sender:'system', agentName:'System', content: responseContent, isStreaming:false }]);
+        if (showSystemMessages) {
+          const responseContent = data.success ? `✅ Tool Response: ${data.content || 'Success'}` : `❌ Tool Failed: ${data.content || 'Error'}`;
+          setMessagesWithLogging(prev => [...prev, { id: data.tool_call_id || `tool-response-${Date.now()}`, sender:'system', agentName:'System', content: responseContent, isStreaming:false }]);
+        }
         return;
       }
       case 'usage_summary': {
-        setMessagesWithLogging(prev => [...prev, { id:`usage-${Date.now()}`, sender:'system', agentName:'System', content:`📊 Usage: tokens=${data.total_tokens} prompt=${data.prompt_tokens} completion=${data.completion_tokens}${data.cost?` cost=$${data.cost}`:''}`, isStreaming:false }]);
+        if (showSystemMessages) {
+          setMessagesWithLogging(prev => [...prev, { id:`usage-${Date.now()}`, sender:'system', agentName:'System', content:`📊 Usage: tokens=${data.total_tokens} prompt=${data.prompt_tokens} completion=${data.completion_tokens}${data.cost?` cost=$${data.cost}`:''}`, isStreaming:false }]);
+        }
         return;
       }
       case 'select_speaker': {
@@ -2260,6 +2269,9 @@ const ChatPage = () => {
         // Update or append progress for a long-running tool
         const progress = data.progress_percent;
         const tool = data.tool_name || 'tool';
+        if (!showSystemMessages) {
+          return;
+        }
         setMessagesWithLogging(prev => {
           const updated = [...prev];
           for (let i = updated.length - 1; i >=0; i--) {
@@ -2278,20 +2290,25 @@ const ChatPage = () => {
       case 'deployment_started': {
         const payload = data.data || {};
         const message = payload.message || 'Starting deployment to GitHub...';
-        setMessagesWithLogging(prev => [...prev, {
-          id: `deploy-start-${Date.now()}`,
-          sender: 'system',
-          agentName: 'System',
-          content: `🚀 ${message}`,
-          isStreaming: false,
-          metadata: { event_type: 'deployment', status: 'started', job_id: payload.job_id || payload.jobId || null }
-        }]);
+        if (showSystemMessages) {
+          setMessagesWithLogging(prev => [...prev, {
+            id: `deploy-start-${Date.now()}`,
+            sender: 'system',
+            agentName: 'System',
+            content: `🚀 ${message}`,
+            isStreaming: false,
+            metadata: { event_type: 'deployment', status: 'started', job_id: payload.job_id || payload.jobId || null }
+          }]);
+        }
         return;
       }
       case 'deployment_progress': {
         const payload = data.data || {};
         const jobId = payload.job_id || payload.jobId || null;
         const statusText = payload.status || payload.message || 'Deployment in progress...';
+        if (!showSystemMessages) {
+          return;
+        }
         setMessagesWithLogging(prev => {
           const updated = [...prev];
           if (jobId) {
@@ -2320,27 +2337,31 @@ const ChatPage = () => {
         const payload = data.data || {};
         const repoUrl = payload.repo_url || payload.repoUrl;
         const message = payload.message || 'Deployment completed.';
-        setMessagesWithLogging(prev => [...prev, {
-          id: `deploy-done-${Date.now()}`,
-          sender: 'system',
-          agentName: 'System',
-          content: repoUrl ? `✅ ${message} Repo: ${repoUrl}` : `✅ ${message}`,
-          isStreaming: false,
-          metadata: { event_type: 'deployment', status: 'completed', job_id: payload.job_id || payload.jobId || null, repo_url: repoUrl || null }
-        }]);
+        if (showSystemMessages) {
+          setMessagesWithLogging(prev => [...prev, {
+            id: `deploy-done-${Date.now()}`,
+            sender: 'system',
+            agentName: 'System',
+            content: repoUrl ? `✅ ${message} Repo: ${repoUrl}` : `✅ ${message}`,
+            isStreaming: false,
+            metadata: { event_type: 'deployment', status: 'completed', job_id: payload.job_id || payload.jobId || null, repo_url: repoUrl || null }
+          }]);
+        }
         return;
       }
       case 'deployment_failed': {
         const payload = data.data || {};
         const message = payload.message || payload.error || 'Deployment failed.';
-        setMessagesWithLogging(prev => [...prev, {
-          id: `deploy-fail-${Date.now()}`,
-          sender: 'system',
-          agentName: 'System',
-          content: `❌ ${message}`,
-          isStreaming: false,
-          metadata: { event_type: 'deployment', status: 'failed', job_id: payload.job_id || payload.jobId || null }
-        }]);
+        if (showSystemMessages) {
+          setMessagesWithLogging(prev => [...prev, {
+            id: `deploy-fail-${Date.now()}`,
+            sender: 'system',
+            agentName: 'System',
+            content: `❌ ${message}`,
+            isStreaming: false,
+            metadata: { event_type: 'deployment', status: 'failed', job_id: payload.job_id || payload.jobId || null }
+          }]);
+        }
         return;
       }
       case 'input_timeout': {
@@ -2396,8 +2417,10 @@ const ChatPage = () => {
         // Acknowledgment: no UI mutation needed
         return;
       case 'resume_boundary':
-  // Replay boundary marker: insert a divider system note
-  setMessagesWithLogging(prev => [...prev, { id:`resume-${Date.now()}`, sender:'system', agentName:'System', content:`🔄 Session replay complete. Live events resumed.`, isStreaming:false }]);
+        if (showSystemMessages) {
+          // Replay boundary marker for debug visibility
+          setMessagesWithLogging(prev => [...prev, { id:`resume-${Date.now()}`, sender:'system', agentName:'System', content:`🔄 Session replay complete. Live events resumed.`, isStreaming:false }]);
+        }
         return;
       default:
         return;
@@ -2545,6 +2568,73 @@ useEffect(() => {
   })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [api, workflowConfigLoaded, currentChatId, currentWorkflowName, currentAppId, currentUserId, resolveKnownWorkflowName]);
+
+  // Guard against stale chat IDs restored from local storage (e.g. after cleanse).
+  // If the chat does not exist anymore, clear it so preflight can create a new one.
+  useEffect(() => {
+    if (!api) return;
+    if (!workflowConfigLoaded) return;
+    if (!currentAppId) return;
+    if (!currentChatId) return;
+    if (validatingChatIdRef.current) return;
+    if (validatedChatIdRef.current === currentChatId) return;
+
+    validatingChatIdRef.current = true;
+    (async () => {
+      try {
+        const workflowForCheck =
+          resolveKnownWorkflowName(currentWorkflowName)
+          || resolveKnownWorkflowName(urlWorkflowName)
+          || workflowConfig.getDefaultWorkflow()
+          || 'GreenRoom';
+
+        const resp = await fetch(
+          `${api.getHttpBaseUrl()}/api/chats/exists/${currentAppId}/${workflowForCheck}/${currentChatId}`
+        );
+        if (!resp.ok) {
+          validatedChatIdRef.current = currentChatId;
+          return;
+        }
+
+        const result = await resp.json();
+        if (result?.exists === false) {
+          console.warn('🧹 [CHAT_GUARD] Stale chat id detected; resetting:', currentChatId);
+          try {
+            const activeWs = wsRef.current;
+            if (activeWs && typeof activeWs.close === 'function') {
+              activeWs.close();
+            }
+          } catch {}
+
+          clearStoredArtifactState(currentChatId);
+          clearStoredChatCacheSeed(currentChatId);
+          setStoredActiveChatId(null);
+          validatedChatIdRef.current = null;
+          setActiveChatId(null);
+          setMessagesWithLogging([]);
+          setCurrentChatId(null);
+          return;
+        }
+
+        validatedChatIdRef.current = currentChatId;
+      } catch (err) {
+        console.warn('⚠️ [CHAT_GUARD] Chat existence validation failed, keeping current chat id:', err);
+        validatedChatIdRef.current = currentChatId;
+      } finally {
+        validatingChatIdRef.current = false;
+      }
+    })();
+  }, [
+    api,
+    workflowConfigLoaded,
+    currentAppId,
+    currentChatId,
+    currentWorkflowName,
+    urlWorkflowName,
+    resolveKnownWorkflowName,
+    setActiveChatId,
+    setMessagesWithLogging,
+  ]);
 
   // Expose a helper to force-reset the current chat client-side (can be wired to a debug button later)
   const forceResetChat = useCallback(() => {
@@ -3407,7 +3497,15 @@ useEffect(() => {
     setActiveWorkflowName(resolvedWorkflow);
     setCurrentWorkflowName(resolvedWorkflow);
 
-    const sent = sendWsMessage({ type: 'chat.switch_workflow', chat_id: targetChatId });
+    // Reset visible transcript before workflow replay arrives to avoid
+    // mixing Ask-mode messages with workflow history.
+    setMessagesWithLogging([]);
+
+    const sent = sendWsMessage({
+      type: 'chat.switch_workflow',
+      chat_id: targetChatId,
+      replay_on_switch: true,
+    });
     console.log('🔁 [WORKFLOW_RESUME] chat.switch_workflow sent:', sent);
 
     if (sent) {
@@ -3418,7 +3516,7 @@ useEffect(() => {
     }
 
     return false;
-  }, [currentWorkflowName, sendWsMessage, setActiveChatId, setActiveWorkflowName, setConversationMode, setCurrentWorkflowName, setCurrentChatId]);
+  }, [currentWorkflowName, sendWsMessage, setActiveChatId, setActiveWorkflowName, setConversationMode, setCurrentWorkflowName, setCurrentChatId, setMessagesWithLogging]);
 
   const handleSelectWorkflowSession = useCallback((chatId, workflowName = null) => {
     if (!chatId) {

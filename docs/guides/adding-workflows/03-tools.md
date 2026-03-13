@@ -1,19 +1,5 @@
 # Tools
 
-Tools give your agents the ability to take actions — look up data, send emails, show UI components, and more.
-
----
-
-## Tool Types
-
-| Type | Purpose | Example |
-|------|---------|---------|
-| **Data Tools** | Fetch or update information | `get_order_status`, `update_ticket` |
-| **Action Tools** | Perform operations | `send_email`, `create_ticket` |
-| **UI Tools** | Show interactive components | `show_calendar`, `show_form` |
-
----
-
 !!! tip "New to Development?"
 
     **Let AI create your tools!** Copy this prompt into Claude Code:
@@ -27,6 +13,20 @@ Tools give your agents the ability to take actions — look up data, send emails
     My workflow is: [WorkflowName]
     I need tools for: [Describe what actions your agents need]
     ```
+
+---
+
+Tools give your agents the ability to take actions — look up data, send emails, show UI components, and more.
+
+---
+
+## Tool Types
+
+| Type | Purpose | Example |
+|------|---------|---------|
+| **Data Tools** | Fetch or update information | `get_order_status`, `update_ticket` |
+| **Action Tools** | Perform operations | `send_email`, `create_ticket` |
+| **UI Tools** | Show interactive components | `show_calendar`, `show_form` |
 
 ---
 

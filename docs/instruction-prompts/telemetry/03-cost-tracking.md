@@ -1,5 +1,18 @@
 # Instruction Prompt: View Cost Data
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to view and understand cost tracking data in my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/telemetry/03-cost-tracking.md
+    ```
+
+---
+
 **Task:** Show user how to view and query cost data
 
 **Complexity:** Low (cost tracking is already enabled)

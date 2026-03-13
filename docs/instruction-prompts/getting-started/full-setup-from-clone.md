@@ -1,5 +1,23 @@
 # Instruction Prompt: Full Setup from Clone
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to set up Mozaiks from scratch.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/getting-started/full-setup-from-clone.md
+
+    My OpenAI API key is: [PASTE YOUR KEY HERE]
+
+    Walk me through the complete setup. Check for any issues along the way
+    and help me fix them.
+    ```
+
+---
+
 **Task:** Help the user go from `git clone` to a fully running MozaiksAI app
 
 **Complexity:** High (multiple steps, dependencies, services)

@@ -1,5 +1,18 @@
 # Instruction Prompt: Database Setup
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to set up the databases for my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/databases/setup.md
+    ```
+
+---
+
 **Task:** Set up MongoDB and PostgreSQL/Keycloak databases
 
 **Complexity:** Low (Docker commands and configuration)

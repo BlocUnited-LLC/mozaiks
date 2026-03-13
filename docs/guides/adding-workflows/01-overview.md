@@ -1,5 +1,25 @@
 # Adding Workflows
 
+!!! tip "New to Development?"
+
+    **Let AI create your workflow!** Copy this prompt into Claude Code:
+
+    ```
+    I want to create a new Mozaiks workflow.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/adding-workflows/01-overview.md
+
+    My workflow should:
+    - Be called: [YourWorkflowName]
+    - Do this: [Describe what it should do in plain English]
+
+    Start by helping me understand what agents and tools I need,
+    then create everything for me.
+    ```
+
+---
+
 > **Guide:** Adding Workflows · Overview
 
 ---
@@ -48,26 +68,6 @@ The current platform example is the `Backstage` showcase under `platform/workflo
 | [**Tools**](03-tools.md) | Give your agents abilities (call APIs, fetch data, etc.) |
 | [**UI Components**](04-ui-components.md) | Show interactive cards in the chat |
 | [**Testing**](05-testing.md) | Verify your workflow works |
-
----
-
-!!! tip "New to Development?"
-
-    **Let AI create your workflow!** Copy this prompt into Claude Code:
-
-    ```
-    I want to create a new Mozaiks workflow.
-
-    Please read the instruction prompt at:
-    docs/instruction-prompts/adding-workflows/01-overview.md
-
-    My workflow should:
-    - Be called: [YourWorkflowName]
-    - Do this: [Describe what it should do in plain English]
-
-    Start by helping me understand what agents and tools I need,
-    then create everything for me.
-    ```
 
 ---
 

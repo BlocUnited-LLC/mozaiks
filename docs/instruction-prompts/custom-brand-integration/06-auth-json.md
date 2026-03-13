@@ -1,5 +1,18 @@
 # Prompt Pack: Auth In app.json
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to configure auth in my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/custom-brand-integration/06-auth-json.md
+    ```
+
+---
+
 ## Task
 
 Help a user configure auth in `platform/app.json`.

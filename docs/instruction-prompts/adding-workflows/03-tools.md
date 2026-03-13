@@ -1,5 +1,21 @@
 # Instruction Prompt: Adding Tools to a Workflow
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to add tools to my Mozaiks workflow.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/adding-workflows/03-tools.md
+
+    My workflow is: [WorkflowName]
+    I need tools for: [Describe what actions your agents need]
+    ```
+
+---
+
 **Task:** Create Python tool implementations and configure `tools.yaml`
 
 **Complexity:** Medium

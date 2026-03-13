@@ -1,5 +1,20 @@
 # Instruction Prompt: Testing a Workflow
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to test my Mozaiks workflow.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/adding-workflows/05-testing.md
+
+    My workflow is: [WorkflowName]
+    ```
+
+---
+
 **Task:** Verify a workflow is configured correctly and works end to end
 
 **Complexity:** Low

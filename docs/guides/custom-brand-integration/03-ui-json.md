@@ -1,5 +1,18 @@
 # Step 3 — navigation_config.json
 
+!!! tip "Using an AI coding agent?"
+
+    Hand this prompt pack to Claude Code, Cursor, or Copilot:
+
+    ```
+    Help me configure navigation_config.json for my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/custom-brand-integration/03-ui-json.md
+    ```
+
+---
+
 > **Guide:** App Shell And Branding · Step 3 of 5
 
 File location: `platform/config/navigation_config.json`

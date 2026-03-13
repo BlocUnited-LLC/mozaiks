@@ -27,6 +27,7 @@ async def handle_switch_workflow(
     """Handle chat.switch_workflow message type."""
     target_chat_id = data.get("chat_id")
     frontend_context = data.get("frontend_context")
+    replay_on_switch = bool(data.get("replay_on_switch", True))
 
     if not target_chat_id:
         raise ValueError("chat_id required for workflow switch")
@@ -88,6 +89,59 @@ async def handle_switch_workflow(
         },
         "timestamp": utc_timestamp()
     })
+
+    # Replay persisted transcript when switching back into workflow mode so the
+    # UI can reliably reconstruct workflow messages after Ask-mode transitions.
+    if replay_on_switch:
+        try:
+            from mozaiksai.core.transport.resume_groupchat import GroupChatResumer
+
+            resumer = GroupChatResumer()
+
+            async def send_event_wrapper(event_dict: Dict[str, Any], _target_chat_id: str | None) -> None:
+                if not isinstance(event_dict, dict):
+                    return
+
+                kind = event_dict.get("kind")
+                if kind == "text":
+                    await websocket.send_json({
+                        "type": "chat.text",
+                        "data": {
+                            "index": event_dict.get("index", 0),
+                            "content": event_dict.get("content", ""),
+                            "role": event_dict.get("role", "user"),
+                            "agent": event_dict.get("agent", "user"),
+                            "sender": event_dict.get("agent", "user"),
+                            "replay": event_dict.get("replay", True),
+                            "timestamp": event_dict.get("timestamp"),
+                            "metadata": event_dict.get("metadata"),
+                            "uiToolEvent": event_dict.get("uiToolEvent"),
+                            "ui_tool_completed": event_dict.get("ui_tool_completed"),
+                            "ui_tool_status": event_dict.get("ui_tool_status"),
+                        },
+                        "timestamp": utc_timestamp(),
+                    })
+                elif kind == "resume_boundary":
+                    boundary = {k: v for k, v in event_dict.items() if k != "kind"}
+                    await websocket.send_json({
+                        "type": "chat.resume_boundary",
+                        "data": boundary,
+                        "timestamp": utc_timestamp(),
+                    })
+
+            await resumer.handle_resume_request(
+                chat_id=str(target_chat_id),
+                app_id=str(active_context.app_id),
+                last_client_index=-1,
+                send_event=send_event_wrapper,
+            )
+        except Exception as replay_err:
+            logger.warning(
+                "Workflow switch replay failed for chat %s (ws_id=%s): %s",
+                target_chat_id,
+                ws_id,
+                replay_err,
+            )
 
     # UserDriven UX: when switching from Ask -> Workflow, emit pre-run bootstrap
     # if this workflow chat has no transcript yet. We bypass only the persisted

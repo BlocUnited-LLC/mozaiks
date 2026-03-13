@@ -1,5 +1,18 @@
 # Instruction Prompt: Configure Telemetry
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to configure telemetry for my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/telemetry/01-overview.md
+    ```
+
+---
+
 **Task:** Configure telemetry settings for a Mozaiks app
 
 **Complexity:** Low (environment variables)

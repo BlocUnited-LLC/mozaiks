@@ -1,5 +1,18 @@
 # Prompt Pack: Shell Wiring
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to understand or update how my Mozaiks shell is wired together.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/custom-brand-integration/05-wiring.md
+    ```
+
+---
+
 ## Task
 
 Explain or update how the Mozaiks shell is wired together.

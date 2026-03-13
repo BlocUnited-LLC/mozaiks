@@ -1,5 +1,18 @@
 # Instruction Prompt: Configure Trace Export
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to configure trace export for my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/telemetry/02-agent-tracing.md
+    ```
+
+---
+
 **Task:** Configure where OpenTelemetry traces are exported
 
 **Complexity:** Low (environment variables + optional Docker)

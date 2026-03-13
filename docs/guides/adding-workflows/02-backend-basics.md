@@ -1,5 +1,21 @@
 # Backend Basics
 
+!!! tip "New to Development?"
+
+    **Let AI configure your backend!** Copy this prompt into Claude Code:
+
+    ```
+    I want to configure the backend for my Mozaiks workflow.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/adding-workflows/02-backend-basics.md
+
+    My workflow is called: [YourWorkflowName]
+    I need these agents: [List your agents]
+    ```
+
+---
+
 This guide covers the core YAML configuration files that define your workflow's behavior.
 
 ---
@@ -14,22 +30,6 @@ Every workflow lives in `platform/workflows/<YourWorkflow>/` and contains:
 | `agents.yaml` | Agent definitions and prompts |
 | `handoffs.yaml` | Agent-to-agent routing rules |
 | `context_variables.yaml` | Shared state across agents |
-
----
-
-!!! tip "New to Development?"
-
-    **Let AI configure your backend!** Copy this prompt into Claude Code:
-
-    ```
-    I want to configure the backend for my Mozaiks workflow.
-
-    Please read the instruction prompt at:
-    docs/instruction-prompts/adding-workflows/02-backend-basics.md
-
-    My workflow is called: [YourWorkflowName]
-    I need these agents: [List your agents]
-    ```
 
 ---
 

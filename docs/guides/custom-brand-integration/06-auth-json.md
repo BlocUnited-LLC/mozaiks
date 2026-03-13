@@ -1,5 +1,18 @@
 # Step 6 - Auth in app.json
 
+!!! tip "Using an AI coding agent?"
+
+    Hand this prompt pack to Claude Code, Cursor, or Copilot:
+
+    ```
+    Help me configure auth in platform/app.json for my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/custom-brand-integration/06-auth-json.md
+    ```
+
+---
+
 > Guide: Customizing Your Frontend · Step 6
 
 Mozaiks no longer uses a separate `brand/public/auth.json`.

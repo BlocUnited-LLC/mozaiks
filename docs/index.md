@@ -1,14 +1,60 @@
 # Mozaiks
 
-Mozaiks is the easiest framework for non-technical developers to build AI-native applications.
+<div align="center">
 
-It gives you a modular runtime, a shared chat and artifact UI, declarative workflows, persistent modules, and a platform bundle under `platform/` that the runtime can consume directly.
+<img src="assets/mozaik_logo.svg" alt="Mozaiks Logo" width="180"/>
 
-If you are new here, think in three layers:
+[![Version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/CHANGELOG.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://www.python.org/)
+[![AG2](https://img.shields.io/badge/AG2-Autogen-green)](https://github.com/ag2ai/ag2)
 
-- `platform/` is the app bundle you customize
-- `mozaiksai/` is the AI runtime and orchestration layer
-- `chat-ui/` and `clients/mobile/` are the shared user interfaces
+</div>
+
+> **Note**: This is the unified Mozaiks stack. BlocUnited offers a managed platform with app generation tools at [mozaiks.ai](https://mozaiks.ai), but you're welcome to self-host and build everything yourself.
+
+> **Zero-Code Setup**: New to development? No problem! Copy the [AI Setup Prompt](setup-prompt.md) into your AI coding agent (Claude Code, Cursor, Copilot, etc.) and let AI guide you through the entire setup.
+
+---
+
+## 🎯 What is MozaiksAI?
+
+**MozaiksAI Runtime** is a production-ready orchestration engine that transforms AG2 (Microsoft Autogen) into an app-grade platform with:
+
+- ✅ **Event-Driven Architecture** -> Every action flows through unified event pipeline
+- ✅ **Real-Time WebSocket Transport** -> Live streaming to React frontends
+- ✅ **Persistent State Management** -> Resume conversations exactly where they left off
+- ✅ **Multi-Tenant Isolation** -> app-scoped data and execution contexts
+- ✅ **Dynamic UI Integration** -> Agents can invoke React components during workflows
+- ✅ **Declarative Workflows** -> JSON manifests, no code changes needed
+- ✅ **Comprehensive Observability** -> Built-in metrics, logging, and token tracking
+
+**MozaiksAI = AG2 + Production Infrastructure + Event-Driven Core**
+
+---
+
+## 🎨 See It In Action
+
+<div align="center">
+
+### 💬 Embeddable Floating Widget
+
+![Widget Demo](assets/widgetAction.gif)
+
+*Drop a floating assistant anywhere in your app - click the button to expand/collapse the chat interface*
+
+---
+
+### 🔀 Dual-Mode Interface
+
+| Workflow Mode | Ask Mode |
+|:---:|:---:|
+| ![Workflow Mode](assets/ArtifactLayout.png) | ![Ask Mode](assets/AskMozaiks.png) |
+| *Chat + Artifact split view* | *Full chat with history sidebar* |
+
+</div>
+
+---
 
 ## Start Here
 

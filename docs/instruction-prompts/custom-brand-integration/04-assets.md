@@ -1,5 +1,20 @@
 # Prompt Pack: Assets And Fonts
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to add or replace assets and fonts for my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/custom-brand-integration/04-assets.md
+
+    Changes I want: [Describe — e.g. new logo, custom font, background image]
+    ```
+
+---
+
 ## Task
 
 Help a user add or replace shell assets and fonts for Mozaiks.

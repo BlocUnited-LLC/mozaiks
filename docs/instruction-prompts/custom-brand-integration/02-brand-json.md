@@ -1,5 +1,20 @@
 # Prompt Pack: theme_config.json
 
+!!! tip "New to Development?"
+
+    Copy this into Claude Code, Cursor, or Copilot:
+
+    ```
+    I want to update the theme/branding for my Mozaiks app.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/custom-brand-integration/02-brand-json.md
+
+    Changes I want: [Describe your branding changes — logo, colors, app name, etc.]
+    ```
+
+---
+
 ## Task
 
 Help a user edit `platform/config/theme_config.json`.

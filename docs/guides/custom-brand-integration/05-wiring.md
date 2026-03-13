@@ -1,5 +1,18 @@
 # Step 5 — Wiring
 
+!!! tip "Using an AI coding agent?"
+
+    Hand this prompt pack to Claude Code, Cursor, or Copilot:
+
+    ```
+    Help me understand or update how the Mozaiks shell is wired together.
+
+    Please read the instruction prompt at:
+    docs/instruction-prompts/custom-brand-integration/05-wiring.md
+    ```
+
+---
+
 > **Guide:** App Shell And Branding · Step 5 of 5
 
 This page explains how the app shell reads and applies the declarative config.
