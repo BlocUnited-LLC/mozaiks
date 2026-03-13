@@ -1,0 +1,63 @@
+definitions:
+- name: set_title
+  type: string
+  description: Short title for the set.
+  source:
+    type: state
+    default: null
+
+- name: set_brief
+  type: string
+  description: Compact description of the set premise.
+  source:
+    type: state
+    default: null
+
+- name: audience
+  type: string
+  description: Target audience for the set.
+  source:
+    type: state
+    default: null
+
+- name: tone
+  type: string
+  description: Roast, warm, chaotic, or clean.
+  source:
+    type: state
+    default: warm
+
+- name: set_brief_packet
+  type: dict
+  description: Canonical set brief from GreenRoom.
+  source:
+    type: state
+    default: null
+
+- name: writers_summary
+  type: dict
+  description: Final writers room summary used to build the stage packet.
+  source:
+    type: state
+    default: null
+
+- name: stage_ready
+  type: boolean
+  description: True when MainStage has enough context to present the final set.
+  source:
+    type: state
+    default: false
+
+- name: show_packet
+  type: dict
+  description: Final stage-ready set packet for modules and UI tools.
+  source:
+    type: state
+    default: null
+
+- name: final_direction
+  type: string
+  description: Chosen comedic direction for the final set.
+  source:
+    type: state
+    default: null

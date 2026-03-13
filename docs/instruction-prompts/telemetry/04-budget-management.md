@@ -502,3 +502,4 @@ async def chat_prereqs(app_id: str, user_id: str) -> dict:
 3. **Platform:** Subscribe mozaiks-platform to events (no core changes)
 
 The runtime remains identical — only the **listeners** change.
+

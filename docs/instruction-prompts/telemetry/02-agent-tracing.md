@@ -118,3 +118,4 @@ initialize_otel_tracing()
 ### Verified
 - [ ] Traces appear in [destination]
 ```
+

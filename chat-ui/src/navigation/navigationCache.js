@@ -35,15 +35,17 @@ export const buildNavigationCacheKey = (workflow, input) => {
   return `artifact:${safeWorkflow}:${inputHash}`;
 };
 
+import platform from '../platform/index.js';
+
 export const readNavigationCache = (workflow, input) => {
   if (!workflow) return null;
   const key = `${NAV_CACHE_PREFIX}${buildNavigationCacheKey(workflow, input)}`;
   try {
-    const raw = localStorage.getItem(key);
+    const raw = platform.storage.getItem(key);
     if (!raw) return null;
     const payload = JSON.parse(raw);
     if (payload?.expires_at && Date.now() > payload.expires_at) {
-      localStorage.removeItem(key);
+      platform.storage.removeItem(key);
       return null;
     }
     return { key, ...payload };
@@ -68,7 +70,7 @@ export const writeNavigationCache = (workflow, input, artifact, ttlSeconds) => {
     expires_at: now + ttlMs,
   };
   try {
-    localStorage.setItem(key, JSON.stringify(payload));
+    platform.storage.setItem(key, JSON.stringify(payload));
     return { key, ...payload };
   } catch (err) {
     console.warn('[navigationCache] Failed to write cache', err);

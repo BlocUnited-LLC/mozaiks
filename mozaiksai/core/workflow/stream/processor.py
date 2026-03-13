@@ -120,7 +120,9 @@ class EventStreamProcessor:
         _stream_events() function.
 
         Args:
-            response: AG2 response object with .events async iterator
+            response: AG2 response object. Supports either:
+                - response.events async iterator
+                - direct async iterator (AsyncRunIterResponse)
             ctx: Immutable stream context with services and configuration
             initial_state: Optional pre-initialized state
 
@@ -157,7 +159,15 @@ class EventStreamProcessor:
 
         try:
             # Main event loop - AG2 modern pattern
-            async for event in response.events:
+            event_stream = getattr(response, "events", None)
+            if event_stream is None and hasattr(response, "__aiter__"):
+                event_stream = response
+            if event_stream is None:
+                raise TypeError(
+                    f"Unsupported AG2 response type for stream processing: {type(response).__name__}"
+                )
+
+            async for event in event_stream:
                 # Increment sequence
                 state.sequence_counter += 1
 

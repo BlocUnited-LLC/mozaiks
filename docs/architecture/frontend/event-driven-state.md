@@ -141,3 +141,4 @@ function MyComponent() {
 ```
 
 Components should read from context and dispatch actions — they should never manage layout or surface state locally.
+

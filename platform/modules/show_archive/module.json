@@ -1,0 +1,16 @@
+{
+  "name": "show_archive",
+  "display_name": "Show Archive",
+  "description": "Archive of finished Backstage sets, closers, and stage-ready packets.",
+  "version": "1.0.0",
+  "author": "MozaiksAI",
+  "category": "platform",
+  "icon": "library",
+  "navigation": {
+    "label": "Show Archive",
+    "path": "/archive",
+    "icon": "library",
+    "component": "ShowArchive",
+    "ui": "platform/modules/show_archive/ui/index.js"
+  }
+}

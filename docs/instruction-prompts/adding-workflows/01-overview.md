@@ -1,8 +1,8 @@
 # Instruction Prompt: Workflow Planning & Overview
 
-**Task:** Help the user understand what workflow they need and plan the structure
+**Task:** Help the user understand what workflow they need and plan the shape
 
-**Complexity:** Low (conversation and planning)
+**Complexity:** Low
 
 **Time:** 5-10 minutes
 
@@ -10,123 +10,89 @@
 
 ## Context for AI Agent
 
-You are helping a user plan a new workflow for MozaiksAI. Before writing any code, you need to understand:
+You are helping a user plan a new workflow for MozaiksAI before writing any
+files.
 
-1. What the workflow should accomplish
-2. What agents are needed
-3. What tools those agents need
-4. How agents should hand off to each other
+Current repo targets:
 
-This is a **planning conversation**, not implementation yet.
+- workflow files live under `platform/workflows/[WorkflowName]/`
+- workflow UI components live under `platform/workflows/[WorkflowName]/ui/`
+- workflow boot defaults at the app level live in `platform/config/ai.json`
+- workflow-local execution startup lives in `orchestrator.yaml`
+
+This is a planning conversation, not implementation yet.
 
 ---
 
 ## Step 1: Understand the Goal
 
-Ask the user: **"What should this workflow do? Describe it like you're explaining to a colleague."**
+Ask the user:
+
+"What should this workflow do? Describe it like you're explaining it to a teammate."
 
 Listen for:
-- The main purpose (customer support, document analysis, booking, etc.)
-- Who the "users" are (customers, employees, admins)
-- What actions need to happen (look up data, send emails, show forms)
+
+- the main outcome
+- who uses it
+- what data it needs
+- whether it is mostly conversational, mostly deterministic, or mixed
 
 ---
 
 ## Step 2: Identify Agents
 
-Based on their description, suggest agents. Use this pattern:
+Suggest a shape based on complexity:
 
-**Single Agent Workflows** (simple):
-- One agent that does everything
-- Good for: Q&A bots, simple assistants
+**Single-agent workflows**
+- good for straightforward Q&A, intake, or guided support
 
-**Multi-Agent Workflows** (complex):
-- **Coordinator/Router** — Understands intent, routes to specialists
-- **Specialists** — Handle specific domains (billing, technical, orders)
-- **Escalation** — Handles edge cases or human handoff
+**Multi-agent workflows**
+- coordinator/router for intent routing
+- specialists for domain work
+- optional escalation or review agent
 
-Ask: **"Does this sound right? Do you need more or fewer agents?"**
-
-### Example Agent Suggestions
-
-**Customer Support:**
-```
-- GreetingAgent: Welcomes users, understands their issue
-- OrderAgent: Handles order-related questions
-- TechnicalAgent: Handles technical/product questions
-- EscalationAgent: Handles complaints or complex issues
-```
-
-**Document Analysis:**
-```
-- AnalyzerAgent: Reads and understands documents
-- SummarizerAgent: Creates summaries
-- QAAgent: Answers questions about the document
-```
-
-**Booking System:**
-```
-- AssistantAgent: Guides through booking process
-(Single agent is often enough for linear flows)
-```
+Ask the user whether that split feels right.
 
 ---
 
-## Step 3: Identify Tools
+## Step 3: Identify Tools and UI
 
-For each agent, ask: **"What actions does [AgentName] need to perform?"**
+Ask:
 
-Categorize tools:
+- What actions should the agents be able to take?
+- What data lookups or mutations are required?
+- Does the workflow need inline or artifact UI?
 
-**Data Tools** (fetch/update information):
-- `get_customer_info` — Look up customer data
-- `check_order_status` — Query order database
-- `update_ticket` — Modify a support ticket
+Classify likely tools as:
 
-**Action Tools** (do something):
-- `send_email` — Send an email
-- `create_ticket` — Create a support ticket
-- `schedule_appointment` — Book a time slot
-
-**UI Tools** (show interactive components):
-- `show_calendar` — Display a date picker
-- `show_form` — Display a form for user input
-- `show_confirmation` — Display a confirmation card
+- standard tools for lookups or actions
+- UI tools for forms, selection cards, confirmations, or artifact renderers
 
 ---
 
 ## Step 4: Plan Handoffs
 
-If multiple agents, ask: **"When should one agent hand off to another?"**
+If the workflow uses multiple agents, define when one agent should hand off to
+another and when control should return.
 
-Create a handoff map:
+Capture:
 
-```
-GreetingAgent:
-  → OrderAgent: when user asks about orders, shipping, returns
-  → TechnicalAgent: when user asks about product features, bugs
-  → EscalationAgent: when user is frustrated or requests manager
-
-OrderAgent:
-  → GreetingAgent: when order issue is resolved
-  → EscalationAgent: when refund > $100 requested
-
-TechnicalAgent:
-  → GreetingAgent: when technical question answered
-  → EscalationAgent: when bug requires engineering escalation
-```
+- who routes first
+- who handles specialist work
+- what conditions trigger escalation
+- what conditions end the flow
 
 ---
 
 ## Step 5: Confirm the Plan
 
-Summarize what you've learned:
+Summarize the workflow as:
 
-```
+```markdown
 ## Workflow: [Name]
 
 ### Purpose
-[One sentence description]
+[One sentence]
 
 ### Agents
 1. [AgentName] — [Role]
@@ -134,76 +100,32 @@ Summarize what you've learned:
 
 ### Tools
 - [tool_name] — [What it does] — Used by: [Agent]
-- [tool_name] — [What it does] — Used by: [Agent]
 
 ### Handoffs
-- [From] → [To]: [Condition]
+- [From] -> [To]: [Condition]
 
-### UI Components Needed
-- [ComponentName] — [What it shows]
+### Workflow UI
+- [ComponentName] — [What it shows or collects]
 ```
 
-Ask: **"Does this plan look right? Should we adjust anything before I create the files?"**
+Ask whether anything should change before implementation starts.
 
 ---
 
 ## Step 6: Recommend Next Steps
 
-Once the plan is confirmed, tell the user:
+Once the user approves the plan, tell them the implementation will typically
+create:
 
-```
-Great! Here's what we'll create:
+1. `platform/workflows/[Name]/orchestrator.yaml`
+2. `platform/workflows/[Name]/agents.yaml`
+3. `platform/workflows/[Name]/handoffs.yaml`
+4. `platform/workflows/[Name]/tools.yaml`
+5. `platform/workflows/[Name]/context_variables.yaml`
+6. `platform/workflows/[Name]/structured_outputs.yaml` when needed
+7. `platform/workflows/[Name]/tools/*.py`
+8. `platform/workflows/[Name]/ui/*.js` when the workflow uses UI tools
 
-1. workflows/[Name]/orchestrator.yaml — Workflow configuration
-2. workflows/[Name]/agents.yaml — Agent definitions
-3. workflows/[Name]/tools.yaml — Tool registry
-4. workflows/[Name]/handoffs.yaml — Handoff rules
-5. workflows/[Name]/tools/*.py — Tool implementations
+Mention separately that if the app should launch into this workflow by default,
+the entry workflow is configured in `platform/config/ai.json`.
 
-For UI components:
-6. chat-ui/src/workflows/[Name]/components/*.js
-
-Ready to start building? Say "create the workflow" and I'll generate all the files.
-```
-
----
-
-## Common Workflow Patterns
-
-### Pattern 1: Simple Q&A Bot
-```
-Agents: 1 (AssistantAgent)
-Tools: None or data lookup only
-Handoffs: None
-```
-
-### Pattern 2: Customer Support
-```
-Agents: 3-4 (Coordinator, Specialists, Escalation)
-Tools: Customer lookup, ticket creation, order status
-Handoffs: Based on intent classification
-```
-
-### Pattern 3: Data Entry / Forms
-```
-Agents: 1 (FormAssistant)
-Tools: UI tools for forms, validation, submission
-Handoffs: None
-```
-
-### Pattern 4: Document Processing
-```
-Agents: 2-3 (Analyzer, Summarizer, QA)
-Tools: Document parsing, search, extraction
-Handoffs: Sequential (analyze → summarize → answer questions)
-```
-
----
-
-## Questions to Ask If User Is Stuck
-
-- "What problem are you trying to solve?"
-- "Who will use this workflow?"
-- "What's the most common scenario?"
-- "What data does the workflow need access to?"
-- "Does the user need to fill out any forms or make choices?"

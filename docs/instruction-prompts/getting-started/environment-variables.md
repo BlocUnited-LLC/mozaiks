@@ -300,3 +300,4 @@ AUTH_ENABLED=true
 OPENAI_API_KEY=sk-your-key
 AUTH_ENABLED=false
 ```
+

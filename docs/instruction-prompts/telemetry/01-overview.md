@@ -91,3 +91,4 @@ print(f"Cost: ${result.total_cost_usd:.4f}")  # Should print ~$0.0125
 - [ ] Traces appear (if enabled)
 - [ ] calculate_cost() returns expected values
 ```
+

@@ -3,7 +3,7 @@
  *
  * ChatPage is the only hardcoded core route — it is the agentic shell.
  * Platform modules (AdminPortal etc.) are loaded via @modules auto-discovery
- * and routed through navigation_config.json modules[].
+ * and routed through backend navigation entries derived from module metadata.
  * navigation.json defines EXTRA routes beyond the core shell.
  * `landing_spot` (from navigation config) controls the default redirect.
  * All routes require auth unless explicitly opted out via meta.requiresAuth: false.
@@ -116,7 +116,7 @@ const RouteWrapper = ({
  * RouteRenderer Component
  *
  * Always mounts core shell routes (ChatPage).
- * Module routes (AdminPortal etc.) come from navigation_config.json modules[].
+ * Module routes (AdminPortal etc.) come from backend navigation.
  * Extra routes from navigation.json are appended after.
  * All routes require auth by default; opt out with meta.requiresAuth: false.
  * Supports landing_spot from navigation config for default redirect.

@@ -8,7 +8,6 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Dict, Optional
 
-from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
 from logs.logging_config import get_workflow_logger
 
 logger = get_workflow_logger("token_manager")
@@ -95,6 +94,8 @@ class TokenManager:
         }
 
         try:
+            from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
+
             dispatcher = get_event_dispatcher()
             await dispatcher.emit(USAGE_DELTA_EVENT_TYPE, payload)
         except Exception as exc:  # pragma: no cover - best effort
@@ -133,6 +134,8 @@ class TokenManager:
         }
 
         try:
+            from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
+
             dispatcher = get_event_dispatcher()
             await dispatcher.emit(USAGE_SUMMARY_EVENT_TYPE, payload)
         except Exception as exc:  # pragma: no cover - best effort

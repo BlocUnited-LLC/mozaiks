@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Dict, Any, List, Optional
+import re
 from autogen.agentchat.group import (
     AgentTarget,
     RevertToUserTarget,
@@ -128,6 +129,7 @@ class HandoffManager:
                             use_llm = True
                     if use_expression:
                         expr_text = cond_text if isinstance(cond_text, str) else str(cond_text)
+                        expr_text = self._normalize_expression_literals(expr_text)
                         scope_raw = rule.get("condition_scope") or rule.get("scope")
                         scope = str(scope_raw).strip().lower() if scope_raw is not None else ""
                         try:
@@ -235,6 +237,14 @@ class HandoffManager:
             if any([out["details"][name]["llm"], out["details"][name]["ctx"], out["details"][name]["after_work"]]):
                 out["configured"] += 1
         return out
+
+    @staticmethod
+    def _normalize_expression_literals(expr_text: str) -> str:
+        """Normalize YAML-style literals to Python literals for expression eval."""
+        normalized = re.sub(r"\btrue\b", "True", expr_text, flags=re.IGNORECASE)
+        normalized = re.sub(r"\bfalse\b", "False", normalized, flags=re.IGNORECASE)
+        normalized = re.sub(r"\bnull\b", "None", normalized, flags=re.IGNORECASE)
+        return normalized
 
     def _wrap_expression_condition_logging(self, condition_obj: ExpressionContextCondition, source: str, target: Any, expr_text: str) -> ExpressionContextCondition:
         """Wrap ExpressionContextCondition.evaluate to log runtime evaluation results."""
@@ -351,6 +361,5 @@ def wire_handoffs_with_debugging(workflow_name: str, agents: Dict[str, Any]) -> 
 
 
 __all__ = ["wire_handoffs", "wire_handoffs_with_debugging", "handoff_manager", "HandoffManager"]
-
 
 

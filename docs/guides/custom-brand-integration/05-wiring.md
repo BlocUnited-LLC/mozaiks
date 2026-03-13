@@ -1,265 +1,93 @@
-# Step 5 — Wiring & Backend
+# Step 5 — Wiring
 
-> **Guide:** Customizing Your Frontend · Step 5 of 5
+> **Guide:** App Shell And Branding · Step 5 of 5
 
----
+This page explains how the app shell reads and applies the declarative config.
 
-!!! tip "New to Development?"
+## The Runtime Flow
 
-    **Let AI help you understand wiring!** Copy this prompt into Claude Code:
+```text
+platform/app.json
+    -> app/App.jsx boot config
 
-    ```
-    I want to understand how brand configuration is wired in my Mozaiks app.
+platform/config/ai.json
+    -> startup mode + workflow entry point
 
-    Please read the instruction prompt at:
-    docs/instruction-prompts/custom-brand-integration/05-wiring.md
-    ```
+platform/config/theme_config.json
+    -> theme, assets, header, profile, notifications, footer
 
----
+platform/config/navigation_config.json
+    -> landing route + shell pages + module nav
 
-## App config — `app.json`
+platform/config/module_registry.json
+    -> canonical module catalog
 
-All identity and connection config lives in one shared file at `app/app.json`:
-
-```json
-{
-  "appName":         "My App",
-  "appId":           "my-app",
-  "apiUrl":          "http://localhost:8000",
-  "wsUrl":           "ws://localhost:8000"
-}
+platform/brand/
+    -> public assets, fonts, login theme files
 ```
 
-`App.jsx` imports this file directly — no hard-coded values anywhere else. The active workflow is resolved automatically from backend config (`entry_point: true` in `orchestrator.yaml`):
+## File Responsibilities
 
-```jsx
-import { MozaiksApp, mockApiAdapter } from '@mozaiks/chat-ui';
-import appConfig from '../app.json';
+| File | What it controls |
+|---|---|
+| `platform/app.json` | App identity, API/WS URLs, auth |
+| `platform/config/ai.json` | Engine, startup mode, workflow entry point |
+| `platform/config/theme_config.json` | Theme tokens and shell chrome |
+| `platform/config/navigation_config.json` | Landing route and shell navigation |
+| `platform/config/module_registry.json` | Registered modules |
 
-export default function App() {
-  return (
-    <MozaiksApp
-      appName={appConfig.appName}
-      defaultAppId={appConfig.appId}
-      apiAdapter={mockApiAdapter}
-    />
-  );
-}
-```
+## Web Shell Boot Path
 
----
+### 1. `app/App.jsx`
 
-## Navigation config — `navigation.json`
+The app shell reads `platform/app.json` for core boot configuration.
 
-File location: `app/brand/public/navigation.json` — served at `/navigation.json`
+### 2. `app/vite.config.js`
 
-This file controls three things: **where** your app goes on load, **what mode** it starts in, and any **extra pages** beyond the core shell.
+The web app exposes `platform/brand/` as the public directory, which is why `/assets/...` and `/fonts/...` resolve from that folder.
 
-### Example setup
+### 3. `mozaikscore` config routes
 
-In our HelloWorld example, we ship with:
+The backend serves the declarative config files through API endpoints such as:
 
-```json
-{
-  "version": "1.0.0",
-  "landing_spot": "/",
-  "startup_mode": "ask",
-  "pages": []
-}
-```
+- `/api/theme-config`
+- `/api/navigation-config`
 
-This means:
+### 4. `chat-ui` providers
 
-- The app opens on the **chat page** — the main conversation screen
-- The user starts in **Ask mode** — a full-screen general chat, no workflow running yet
-- When the user clicks the workflow toggle (if a workflow is available), the app starts a new workflow session. In our example, HelloWorld has `entry_point: true` in its `orchestrator.yaml`, so it's the workflow that fires up
+The shared UI layer loads those configs and applies them to:
 
-### What each field does
+- theme variables
+- shell actions
+- header and profile controls
+- landing behavior
 
-These three settings work together but each controls something different:
+### 5. `ai.json`
 
-| Setting | Where it lives | What it controls |
-|---------|---------------|-----------------|
-| `landing_spot` | `navigation.json` | **Which page** opens when the app loads. `"/"` is the chat page. If you add custom pages you could point this elsewhere |
-| `startup_mode` | `navigation.json` | **Which chat mode** the chat page starts in. `"ask"` = general Q&A first. `"workflow"` = jump straight into the entry_point workflow |
-| `entry_point` | `orchestrator.yaml` | **Which workflow** runs when entering workflow mode. This is set per-workflow in the backend config — not in this file |
+When the landing route is chat, `ai.json` decides:
 
-Think of it as a chain: **landing_spot** picks the page → **startup_mode** picks the mode → **entry_point** picks the workflow.
+- whether chat starts in `ask` or `workflow`
+- which workflow starts first in workflow mode
 
-### Switching to workflow-first
+## Current Practical Rule
 
-If you'd rather skip ask mode and have the app jump straight into a workflow when it loads:
+If you want to change how the app looks or how the shell behaves, start by changing declarative config before touching React code.
 
-```json
-{
-  "version": "1.0.0",
-  "landing_spot": "/",
-  "startup_mode": "workflow",
-  "pages": []
-}
-```
+Edit code only when:
 
-Or just remove `startup_mode` entirely — `"workflow"` is the default when it's not set.
+- the shell needs a new UI capability
+- the current config model cannot express the behavior
+- you are building a new module or workflow UI component
 
-With this setup, the app loads and immediately connects to whichever workflow has `entry_point: true`, showing the split layout with the artifact panel. In our example, that's HelloWorld.
+## Verification Checklist
 
-### `pages` — adding custom routes
+- `platform/app.json` points at the correct backend URLs
+- `platform/config/ai.json` has the intended startup mode and workflow entry point
+- `platform/config/theme_config.json` returns from `/api/theme-config`
+- `platform/config/navigation_config.json` returns from `/api/navigation-config`
+- referenced assets exist under `platform/brand/assets/` or `platform/brand/fonts/`
+- registered modules exist in `platform/config/module_registry.json`
 
-The core shell always mounts the chat page (`/`) and the admin dashboard (`/admin`). Use `pages` to add extra routes:
+## Next
 
-```json
-{
-  "pages": [
-    {
-      "path": "/analytics",
-      "component": "AnalyticsPage",
-      "showInHeader": true,
-      "order": 1,
-      "meta": { "title": "Analytics", "requiresAuth": true }
-    }
-  ]
-}
-```
-
-The `component` name must be registered in the component registry. Core routes (ChatPage, Admin) are not affected by `pages` — they always mount regardless.
-
----
-
-## Swapping in a real API adapter
-
-Swap `mockApiAdapter` for a real one once your backend is running:
-
-```jsx
-import { MozaiksApp, RestApiAdapter } from '@mozaiks/chat-ui';
-import appConfig from '../app.json';
-
-const apiAdapter = new RestApiAdapter({
-  baseUrl:      appConfig.apiUrl,
-  getAuthToken: async () => await auth.currentUser.getIdToken(),
-});
-
-export default function App() {
-  return (
-    <MozaiksApp
-      appName={appConfig.appName}
-      defaultAppId={appConfig.appId}
-      apiAdapter={apiAdapter}
-    />
-  );
-}
-```
-
-| `MozaiksApp` prop | Type | Description |
-|-------------------|------|-------------|
-| `appName` | string | Display name shown in the header |
-| `defaultAppId` | string | App identifier sent to the backend |
-| `apiAdapter` | object | Implement `listGeneralChats`, `sendMessage`, etc. |
-| `authAdapter` | object optional | Plugs into your auth provider |
-| `uiConfig` | object optional | Full config override (replaces individual props) |
-
----
-
-## The `onAction` contract
-
-Header and profile dropdown actions dispatch through `onAction(action, item)` inside `ChatPage`.  
-Handle them in the `handleHeaderAction` function:
-
-```javascript
-function handleHeaderAction(action, item) {
-  switch (action) {
-    case 'navigate':
-      navigate(item.href);
-      break;
-    case 'signout':
-      authAdapter.signOut();
-      break;
-    case 'discover':
-      navigate('/discover');
-      break;
-    default:
-      console.warn('[onAction] Unhandled action:', action, item);
-  }
-}
-```
-
-The `action` string comes directly from the `"action"` field of the item in `ui.json`.
-
----
-
-## User context
-
-Pass a user object to `MozaiksApp` via `authAdapter` or directly when authenticated:
-
-```javascript
-const user = {
-  id:          'user_abc123',
-  firstName:   'Maya',
-  userPhoto:   'https://…/photo.jpg',  // null if no photo
-  email:       'maya@yourapp.com',
-};
-```
-
-### Avatar render priority
-
-1. `user.userPhoto` — when present and loads successfully
-2. Generated initials — derived from `user.firstName` on photo failure
-3. Fallback icon — the `profile.icon` SVG from `ui.json`
-
----
-
-## Auth provider integration
-
-Map your provider's user object to `{ id, firstName, userPhoto }`:
-
-```javascript
-import { useAuthState } from 'react-firebase-hooks/auth';
-import { auth } from './firebase';
-import { MozaiksApp, RestApiAdapter } from '@mozaiks/chat-ui';
-import appConfig from '../app.json';
-
-const apiAdapter = new RestApiAdapter({ baseUrl: appConfig.apiUrl });
-
-export function App() {
-  const [firebaseUser] = useAuthState(auth);
-
-  const user = firebaseUser
-    ? {
-        id:        firebaseUser.uid,
-        firstName: firebaseUser.displayName,
-        userPhoto: firebaseUser.photoURL,
-        email:     firebaseUser.email,
-      }
-    : null;
-
-  return (
-    <MozaiksApp
-      appName={appConfig.appName}
-      defaultAppId={appConfig.appId}
-      apiAdapter={apiAdapter}
-    />
-  );
-}
-```
-
-Works with any provider: Supabase, Clerk, Auth0, custom JWT.
-
----
-
-## Custom action names
-
-Any string in `"action"` fields is forwarded to your handler as-is:
-
-```json
-{ "id": "open-feedback", "label": "Send Feedback", "icon": "feedback.svg", "action": "open-feedback" }
-```
-
-```javascript
-case 'open-feedback':
-  setFeedbackDrawerOpen(true);
-  break;
-```
-
----
-
-**Prev:** [Step 4 — Assets & Icons](04-assets.md)  
-**Back to index:** [Customizing Your Frontend](01-overview.md)
+[Step 6 — Auth In app.json](06-auth-json.md)

@@ -75,32 +75,68 @@ markdown_extensions:
   - toc:
       permalink: true
 
+validation:
+  omitted_files: ignore
+
 nav:
   - Home: index.md
-  - AI-Assisted Setup: setup-prompt.md
-  - First-Run Ritual: first-run-ritual.md
-  - Getting Started: getting-started.md
-  - Setting Up Databases:
-      - Overview: guides/databases/01-overview.md
-      - MongoDB: guides/databases/02-mongodb.md
-      - Keycloak: guides/databases/03-keycloak.md
-      - Production: guides/databases/04-production.md
-  - Adding a Workflow:
-      - Overview: guides/adding-workflows/01-overview.md
-      - Backend Basics: guides/adding-workflows/02-backend-basics.md
-      - Tools: guides/adding-workflows/03-tools.md
-      - UI Components: guides/adding-workflows/04-ui-components.md
-      - Testing: guides/adding-workflows/05-testing.md
-  - Customizing Frontend:
-      - Overview: guides/custom-brand-integration/01-overview.md
-      - Brand JSON: guides/custom-brand-integration/02-brand-json.md
-      - UI JSON: guides/custom-brand-integration/03-ui-json.md
-      - Assets: guides/custom-brand-integration/04-assets.md
-      - Wiring: guides/custom-brand-integration/05-wiring.md
-      - Auth (app.json): guides/custom-brand-integration/06-auth-json.md
+  - Start Here:
+      - Getting Started: getting-started.md
+      - AI-Assisted Setup: setup-prompt.md
+      - First-Run Ritual: first-run-ritual.md
+      - Prompt Packs: instruction-prompts/prompt-packs.md
+  - Build Apps:
+      - Workflow Guide:
+          - Overview: guides/adding-workflows/01-overview.md
+          - Backend Basics: guides/adding-workflows/02-backend-basics.md
+          - Tools: guides/adding-workflows/03-tools.md
+          - UI Components: guides/adding-workflows/04-ui-components.md
+          - Testing: guides/adding-workflows/05-testing.md
+      - App Shell & Branding:
+          - Overview: guides/custom-brand-integration/01-overview.md
+          - Theme Config: guides/custom-brand-integration/02-brand-json.md
+          - Navigation Config: guides/custom-brand-integration/03-ui-json.md
+          - Assets And Fonts: guides/custom-brand-integration/04-assets.md
+          - Wiring: guides/custom-brand-integration/05-wiring.md
+          - Auth (app.json): guides/custom-brand-integration/06-auth-json.md
+      - Databases:
+          - Overview: guides/databases/01-overview.md
+          - MongoDB: guides/databases/02-mongodb.md
+          - Keycloak: guides/databases/03-keycloak.md
+          - Production: guides/databases/04-production.md
+      - Mobile:
+          - Overview: guides/mobile/01-overview.md
+          - React Native Core Integration: guides/mobile/05-react-native-core.md
+      - Telemetry:
+          - Overview: guides/telemetry/01-overview.md
+          - Agent Tracing: guides/telemetry/02-agent-tracing.md
+          - Cost Tracking: guides/telemetry/03-cost-tracking.md
+          - Budget Management: guides/telemetry/04-budget-management.md
   - Architecture:
+      - Overview: architecture/index.md
+      - Foundations:
+          - Overview: architecture/foundations/prompt-packs.md
+          - Canonical App Structure: architecture/foundations/canonical-app-structure.md
+          - App Bundle Declaratives: architecture/foundations/app-bundle-declaratives.md
+          - App Creation Guide: architecture/foundations/app-creation-guide.md
+          - App Planning Contracts: architecture/foundations/app-planning-contracts.md
+          - Workflow Architecture: architecture/foundations/workflow-architecture.md
+          - Workflow Authoring Contracts: architecture/foundations/workflow-authoring-contracts.md
+          - UI Surface and Layout: architecture/foundations/ui-surface-and-layout-architecture.md
+          - Core vs Product vs App Bundle: architecture/foundations/core-product-app-bundle-boundary.md
+          - Runtime State and Control Events: architecture/foundations/runtime-state-and-control-events.md
+          - App Builder State and Routing: architecture/foundations/app-builder-state-and-routing.md
+          - Builder Execution Model: architecture/foundations/builder-execution-model.md
+          - App Builder Architecture: architecture/foundations/app-builder-architecture.md
+          - Builder And Orchestration Taxonomy: architecture/foundations/builder-orchestration-taxonomy.md
+          - Graph Injection Contract: architecture/foundations/graph-injection-contract.md
+          - Learning Loop Architecture: architecture/foundations/learning-loop-architecture.md
+          - Event Taxonomy: architecture/foundations/event-taxonomy.md
+          - Event System Architecture: architecture/foundations/event-system-architecture.md
+          - Process and Event Map: architecture/foundations/process-and-event-map.md
       - Keycloak Auth: architecture/keycloak-auth.md
       - Mobile Client Contract: architecture/mobile-client-contract.md
+      - Orchestration and Decomposition: architecture/orchestration-and-decomposition.md
       - Frontend UI:
           - Overview: architecture/frontend/index.md
           - UI Surface Model: architecture/frontend/ui-surface-model.md
@@ -108,3 +144,66 @@ nav:
           - Layout Modes: architecture/frontend/layout-modes.md
           - Persistent Widget: architecture/frontend/persistent-widget.md
           - Event-Driven State: architecture/frontend/event-driven-state.md
+      - Events:
+          - Overview: architecture/events/prompt-packs.md
+          - Event System Inventory: architecture/events/event-system-inventory.md
+          - Declarative Runtime System: architecture/events/declarative-runtime-system.md
+  - Reference:
+      - Overview: reference/index.md
+      - Deep Dives:
+          - Overview: reference/deep-dives/index.md
+          - Workflow and Orchestration:
+              - Universal Orchestrator: reference/deep-dives/universal-orchestrator.md
+              - Mid-Flight Journeys: reference/deep-dives/mid-flight-journeys.md
+              - Pack Graph Semantics: reference/deep-dives/pack-graph-semantics.md
+              - MFJ Strict Resume Contract: reference/deep-dives/mfj-strict-resume-contract.md
+              - Parallel Fan-Out Fan-In: reference/deep-dives/parallel-fan-out-fan-in.md
+              - AG2 Touchpoints and Extensions: reference/deep-dives/ag2-touchpoints-and-extensions.md
+              - Handoff Condition Scope: reference/deep-dives/handoff-condition-scope.md
+          - UI and Interaction:
+              - UI Interaction Patterns: reference/deep-dives/ui-interaction-patterns.md
+              - Lifecycle Tools: reference/deep-dives/lifecycle-tools.md
+          - Runtime and Transport:
+              - Transport and Streaming: reference/deep-dives/transport-and-streaming.md
+              - Event Pipeline: reference/deep-dives/event-pipeline.md
+              - Hook System Deep Dive: reference/deep-dives/hook-system-deep-dive.md
+              - API Reference Notes: reference/deep-dives/api-reference.md
+          - Agent and Contracts:
+              - Agent Dependency Matrix: reference/deep-dives/agent-dependency-matrix.md
+              - Context Variables Complete: reference/deep-dives/context-variables-complete.md
+              - Auto Tool Execution: reference/deep-dives/auto-tool-execution.md
+          - Tokens and Cost Control:
+              - Token Management: reference/deep-dives/token-management.md
+              - Token Manager Plan: reference/deep-dives/token-manager-plan.md
+          - Platform Notes:
+              - Dual Runtime Architecture: reference/deep-dives/mozaiks-platform-dual-substrate.md
+  - AI Coding Agents:
+      - Prompt Packs: instruction-prompts/prompt-packs.md
+      - Getting Started:
+          - Environment Variables: instruction-prompts/getting-started/environment-variables.md
+          - Full Setup From Clone: instruction-prompts/getting-started/full-setup-from-clone.md
+      - App Planning:
+          - Decompose App Intent: instruction-prompts/app-planning/decompose-app-intent.md
+      - Adding Workflows:
+          - Overview: instruction-prompts/adding-workflows/01-overview.md
+          - Backend Basics: instruction-prompts/adding-workflows/02-backend-basics.md
+          - Tools: instruction-prompts/adding-workflows/03-tools.md
+          - UI Components: instruction-prompts/adding-workflows/04-ui-components.md
+          - Testing: instruction-prompts/adding-workflows/05-testing.md
+          - Create A New Workflow: instruction-prompts/workflows/create-new-workflow.md
+      - App Shell And Branding:
+          - Overview: instruction-prompts/custom-brand-integration/01-overview.md
+          - Theme Config: instruction-prompts/custom-brand-integration/02-brand-json.md
+          - Navigation Config: instruction-prompts/custom-brand-integration/03-ui-json.md
+          - Assets And Fonts: instruction-prompts/custom-brand-integration/04-assets.md
+          - Wiring: instruction-prompts/custom-brand-integration/05-wiring.md
+          - Auth (app.json): instruction-prompts/custom-brand-integration/06-auth-json.md
+          - Color System: instruction-prompts/custom-brand-integration/colors-and-theme.md
+      - Databases:
+          - Setup: instruction-prompts/databases/setup.md
+      - Telemetry:
+          - Overview: instruction-prompts/telemetry/01-overview.md
+          - Agent Tracing: instruction-prompts/telemetry/02-agent-tracing.md
+          - Cost Tracking: instruction-prompts/telemetry/03-cost-tracking.md
+          - Budget Management: instruction-prompts/telemetry/04-budget-management.md
+      - Agent Bootstrap Prompt: agent-bootstrap-prompt.md

@@ -13,7 +13,7 @@ Responsibilities:
 - Handle derived context updates
 - Emit synthetic speaker selection when needed
 - Filter seed messages to avoid duplication
-- Process auto-tool structured outputs
+- Process structured outputs and auto-tool follow-ups
 - Build text payload for UI
 """
 
@@ -64,7 +64,7 @@ class TextEventHandler(BaseEventHandler):
     - Derived context handling
     - Synthetic speaker emission
     - Seed message deduplication
-    - Auto-tool structured output processing
+    - Structured output processing
     """
 
     def event_types(self) -> Set[Type]:
@@ -134,8 +134,8 @@ class TextEventHandler(BaseEventHandler):
             f"content='{message_content[:100]}...' content_len={len(message_content)}"
         )
 
-        # Process auto-tool structured outputs
-        actual_message, is_structured = await self._process_auto_tool(
+        # Process structured outputs and auto-tool follow-ups
+        actual_message, is_structured = await self._process_structured_output(
             sender_name, message_content, ctx, state
         )
 
@@ -204,7 +204,7 @@ class TextEventHandler(BaseEventHandler):
                 f"Failed to emit synthetic select_speaker event: {synth_err}"
             )
 
-    async def _process_auto_tool(
+    async def _process_structured_output(
         self,
         sender_name: str,
         content: str,
@@ -217,11 +217,13 @@ class TextEventHandler(BaseEventHandler):
         Returns:
             Tuple of (display_message, is_structured)
         """
-        if sender_name not in ctx.auto_tool_agents:
+        if sender_name not in ctx.structured_agents:
             return content, False
 
+        auto_mode = sender_name in ctx.auto_tool_agents
+        mode_label = "auto-tool" if auto_mode else "structured-output"
         ctx.wf_logger.info(
-            f" [{ctx.workflow_name_upper}] Auto-tool intercept for {sender_name} "
+            f" [{ctx.workflow_name_upper}] {mode_label} intercept for {sender_name} "
             f"(content_len={len(content)})"
         )
 
@@ -263,7 +265,7 @@ class TextEventHandler(BaseEventHandler):
 
         ctx.wf_logger.info(
             f" [{ctx.workflow_name_upper}] Structured output ready for {sender_name}; "
-            "emitting auto-tool event."
+            f"emitting dispatcher event (auto_tool_mode={auto_mode})."
         )
 
         # Extract display message
@@ -275,7 +277,7 @@ class TextEventHandler(BaseEventHandler):
 
         # Emit structured output ready event
         await self._emit_structured_output_event(
-            sender_name, normalized_structured, ctx, state
+            sender_name, normalized_structured, ctx, state, auto_mode=auto_mode
         )
 
         return display_message, True
@@ -367,6 +369,8 @@ class TextEventHandler(BaseEventHandler):
         normalized_structured: Dict[str, Any],
         ctx: "StreamContext",
         state: "StreamState",
+        *,
+        auto_mode: bool,
     ) -> None:
         """Emit structured_output_ready event through dispatcher."""
         # Build turn key for idempotency
@@ -401,7 +405,7 @@ class TextEventHandler(BaseEventHandler):
             agent=sender_name,
             model_name=model_name,
             structured_data=normalized_structured,
-            auto_tool_mode=True,
+            auto_tool_mode=auto_mode,
             context=context_payload,
         )
         structured_event["turn_idempotency_key"] = turn_key

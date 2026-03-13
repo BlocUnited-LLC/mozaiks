@@ -122,3 +122,4 @@ Connection: `mongodb://localhost:27017/MozaiksAI`
     1. Check MongoDB is running: `docker ps` or service status
     2. Check firewall isn't blocking port 27017
     3. Verify MONGO_URI in .env
+

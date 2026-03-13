@@ -6,7 +6,7 @@
 """
 Transition Event Handler
 
-Handles AG2 swarm transition events, particularly detecting when the workflow
+Handles AG2 group transition events, particularly detecting when the workflow
 hands off to the user via RevertToUserTarget.
 
 When handoff_to_user is detected:
@@ -24,8 +24,8 @@ if TYPE_CHECKING:
 
 # Import AG2 transition types conditionally (version compatibility)
 try:
+    from autogen.agentchat.group import RevertToUserTarget
     from autogen.agentchat.group.events import AfterWorksTransitionEvent
-    from autogen.agentchat.group._swarm_group_chat import RevertToUserTarget
     HAS_HANDOFF_EVENTS = True
 except ImportError:
     HAS_HANDOFF_EVENTS = False
@@ -41,7 +41,7 @@ class TransitionHandler(BaseEventHandler):
     input_request events to the UI. Terminates the event stream when
     handoff is detected.
 
-    This handler is critical for swarm patterns where agents can hand off
+    This handler is critical for group-chat patterns where agents can hand off
     control back to the user mid-conversation.
     """
 

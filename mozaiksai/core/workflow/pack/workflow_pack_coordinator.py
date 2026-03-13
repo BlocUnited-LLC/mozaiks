@@ -603,7 +603,7 @@ class WorkflowPackCoordinator:
             return False
         root = Path(__file__).resolve()
         for parent in [root] + list(root.parents):
-            candidate = parent / "workflows" / wf
+            candidate = parent / "platform" / "workflows" / wf
             if candidate.exists() and candidate.is_dir():
                 return True
         return False

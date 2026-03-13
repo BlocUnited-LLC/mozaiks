@@ -6,14 +6,41 @@ import {
   mockApiAdapter,
   createMockAuthAdapter,
 } from '@mozaiks/chat-ui';
+import {
+  registerComponent,
+  hasComponent,
+} from '@mozaiks/chat-ui/registry/componentRegistry';
 import appConfig from '../platform/app.json';
+import AdminPortal from '../platform/modules/admin_portal/ui/AdminPortal';
+import LineupBoard from '../platform/modules/lineup_board/ui/LineupBoard';
+import ShowArchive from '../platform/modules/show_archive/ui/ShowArchive';
 
 // Explicit mock mode: set VITE_MOCK_MODE=true in .env to bypass auth/backend
 const USE_MOCK = import.meta.env.VITE_MOCK_MODE === 'true';
+const DEV_AUTH_MODE = appConfig?.dev?.authMode;
+const USE_CONFIGURED_MOCK = DEV_AUTH_MODE === 'mock';
+const FALLBACK_TO_MOCK = appConfig?.dev?.fallbackToMockAuth === true;
+const SHOULD_USE_MOCK = USE_MOCK || USE_CONFIGURED_MOCK || appConfig?.auth?.provider === 'mock';
 
 const apiAdapter = USE_MOCK
   ? mockApiAdapter
   : new WebSocketApiAdapter({ baseUrl: appConfig.apiUrl, wsUrl: appConfig.wsUrl });
+
+// Fallback registration: if module auto-discovery misses these components in dev,
+// we still keep routes renderable.
+const FALLBACK_PLATFORM_COMPONENTS = {
+  AdminPortal,
+  LineupBoard,
+  ShowArchive,
+};
+
+for (const [componentName, component] of Object.entries(FALLBACK_PLATFORM_COMPONENTS)) {
+  if (!hasComponent(componentName)) {
+    registerComponent(componentName, component, {
+      description: 'Platform module component (app fallback registration)',
+    });
+  }
+}
 
 export default function App() {
   const [authAdapter, setAuthAdapter] = useState(null);
@@ -22,9 +49,9 @@ export default function App() {
 
   useEffect(() => {
     // Mock mode: skip Keycloak entirely
-    if (USE_MOCK) {
-      console.log('[App] Mock mode enabled');
-      createMockAuthAdapter().then((adapter) => {
+    if (SHOULD_USE_MOCK) {
+      console.log('[App] Mock auth mode enabled');
+      createMockAuthAdapter({ auth: appConfig.auth, dev: appConfig.dev }).then((adapter) => {
         setAuthAdapter(adapter);
         setAuthReady(true);
       });
@@ -40,6 +67,16 @@ export default function App() {
       })
       .catch((err) => {
         console.error('[App] Keycloak init failed:', err);
+        if (FALLBACK_TO_MOCK) {
+          console.warn('[App] Falling back to mock auth adapter (dev.fallbackToMockAuth=true)');
+          createMockAuthAdapter({ auth: appConfig.auth, dev: appConfig.dev })
+            .then((adapter) => {
+              setAuthAdapter(adapter);
+              setAuthReady(true);
+            })
+            .catch((mockErr) => setAuthError(mockErr));
+          return;
+        }
         setAuthError(err);
       });
 
@@ -86,7 +123,8 @@ export default function App() {
           </p>
           <p style={{ margin: 0, color: '#94a3b8' }}>
             <strong style={{ color: '#22d3ee' }}>2. Use Mock Mode</strong> (UI testing only):<br />
-            Add <code style={{ fontSize: '0.875rem' }}>VITE_MOCK_MODE=true</code> to <code>.env</code>
+            Set <code style={{ fontSize: '0.875rem' }}>dev.authMode="mock"</code> in <code>platform/app.json</code><br />
+            or add <code style={{ fontSize: '0.875rem' }}>VITE_MOCK_MODE=true</code> to <code>.env</code>
           </p>
         </div>
         <button

@@ -7,16 +7,29 @@ import { createRequire } from 'module';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const appConfig = require('../platform/app.json');
+const themeConfig = require('../platform/config/theme_config.json');
+
+function resolveBrandPublicAsset(value) {
+  if (!value || typeof value !== 'string') {
+    return '/favicon.ico';
+  }
+  if (value.startsWith('/') || value.startsWith('http')) {
+    return value;
+  }
+  return `/assets/${value}`;
+}
 
 export default defineConfig({
   plugins: [
-    // Pre-process .js files from chat-ui/src that contain JSX.
+    // Pre-process .js files that contain JSX.
     // Runs before Vite's own module analysis so JSX syntax doesn't trip the parser.
     {
       name: 'jsx-in-chat-ui-js',
       enforce: 'pre',
       async transform(code, id) {
-        if (/[\\/]chat-ui[\\/]src[\\/].*\.js$/.test(id)) {
+        const isChatUiJsxInJs = /[\\/]chat-ui[\\/]src[\\/].*\.js$/.test(id);
+        const isPlatformUiJsxInJs = /[\\/]platform[\\/](workflows|modules)[\\/].*[\\/]ui[\\/].*\.js$/.test(id);
+        if (isChatUiJsxInJs || isPlatformUiJsxInJs) {
           return transformWithEsbuild(code, id, { loader: 'jsx', jsx: 'automatic', jsxImportSource: 'react' });
         }
       },
@@ -24,11 +37,13 @@ export default defineConfig({
     // Include .js files — chat-ui/src uses .js with JSX syntax
     react({ include: /\.(jsx|js)$/ }),
     // ── HTML token injection ─────────────────────────────────────────────────
-    // Replaces %APP_NAME% in index.html with the value from app.json.
+    // Replaces HTML tokens in index.html with app/theme values.
     {
       name: 'html-inject-app-config',
       transformIndexHtml(html) {
-        return html.replace(/%APP_NAME%/g, appConfig.appName);
+        return html
+          .replace(/__APP_NAME__/g, appConfig.appName)
+          .replace(/__FAVICON_HREF__/g, resolveBrandPublicAsset(themeConfig?.assets?.favicon));
       },
     },
   ],
@@ -46,6 +61,9 @@ export default defineConfig({
       '@chat-workflows':  path.resolve(__dirname, '../chat-ui/src/@chat-workflows'),
       // Resolves @modules to the auto-discovery registry that scans platform/modules.
       '@modules':         path.resolve(__dirname, '../chat-ui/src/@modules'),
+      // React Native Web: translate react-native imports to browser-compatible equivalents.
+      // This allows chat-ui/src/ui/ components (built with RN primitives) to run in the browser.
+      'react-native':     'react-native-web',
     },
   },
   // Shim process.env for src/config/index.js (written for CRA / Node env vars).

@@ -59,7 +59,15 @@ def get_module_registry() -> dict:
 
 
 def get_navigation_config() -> dict:
-    return _load_json("navigation_config.json") or {}
+    nav = _load_json("navigation_config.json") or {}
+    ai = get_ai_config()
+    startup_mode = ((ai.get("chat") or {}).get("startup_mode"))
+    if startup_mode is not None:
+        nav = {**nav, "startup_mode": startup_mode}
+    resume_policy = ((ai.get("workflows") or {}).get("resume_policy"))
+    if resume_policy is not None:
+        nav = {**nav, "workflow_resume_policy": resume_policy}
+    return nav
 
 
 def get_theme_config() -> dict:
@@ -76,3 +84,7 @@ def get_notifications_config() -> dict:
 
 def get_subscription_config() -> dict:
     return _load_json("subscription_config.json") or {}
+
+
+def get_ai_config() -> dict:
+    return _load_json("ai.json") or {}

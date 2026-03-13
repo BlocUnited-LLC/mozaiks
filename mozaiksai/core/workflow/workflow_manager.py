@@ -58,6 +58,7 @@ class UnifiedWorkflowManager:
             return
         # Core caches / registries
         self.workflows_base_path = Path(workflows_base_path)
+        self._ai_config: Dict[str, Any] = {}
         self._workflows: Dict[str, WorkflowInfo] = {}
         self._config_cache: Dict[str, Dict[str, Any]] = {}
         self._ui_registry: Dict[str, Dict[str, Any]] = {}
@@ -307,6 +308,7 @@ class UnifiedWorkflowManager:
     def _load_all_workflows(self) -> None:
         """Load all workflow configs and initialize them"""
         try:
+            self._ai_config = self._load_ai_config()
             workflow_names = self.discover_workflows()
             
             if not workflow_names:
@@ -757,6 +759,29 @@ class UnifiedWorkflowManager:
             logger.error(f"Failed reading YAML {yaml_path}: {e}")
             return {}
 
+    def _resolve_ai_config_path(self) -> Path:
+        raw = (os.getenv("MOZAIKS_AI_CONFIG_PATH") or "").strip()
+        if raw:
+            return Path(raw).resolve()
+        return self.workflows_base_path.resolve().parent / "config" / "ai.json"
+
+    def _load_ai_config(self) -> Dict[str, Any]:
+        path = self._resolve_ai_config_path()
+        if not path.exists():
+            logger.info(f"AI config not found, skipping workflow AI metadata: {path}")
+            return {}
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                logger.warning(f"AI config must be a JSON object: {path}")
+                return {}
+            return data
+        except Exception as e:
+            logger.error(f"Failed reading AI config {path}: {e}")
+            return {}
+
     def _load_modular_workflow_config(self, workflow_path: Path) -> Dict[str, Any]:
         """Load modular workflow configuration from YAML files.
 
@@ -800,6 +825,14 @@ class UnifiedWorkflowManager:
         if ui_data:
             # Merge UI config keys at root (e.g., visual_agents)
             config.update(ui_data)
+
+        configured_entry_point = (
+            ((self._ai_config or {}).get("workflows") or {}).get("entry_point")
+        )
+        if isinstance(configured_entry_point, str) and configured_entry_point.strip():
+            config["entry_point"] = workflow_path.name.lower() == configured_entry_point.strip().lower()
+        else:
+            config.pop("entry_point", None)
         
         return config
 
@@ -977,6 +1010,7 @@ def initialize_workflows(base_path: str = "workflows") -> Dict[str, Dict[str, An
     # Create new instance with custom path
     new_manager = object.__new__(UnifiedWorkflowManager)
     new_manager.workflows_base_path = Path(base_path)
+    new_manager._ai_config = {}
     new_manager._workflows = {}
     new_manager._config_cache = {}
     new_manager._initialized = False

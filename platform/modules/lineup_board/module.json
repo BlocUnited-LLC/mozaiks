@@ -1,0 +1,16 @@
+{
+  "name": "lineup_board",
+  "display_name": "Lineup Board",
+  "description": "Live club lineup showing which Backstage sets are ready to hit the room.",
+  "version": "1.0.0",
+  "author": "MozaiksAI",
+  "category": "platform",
+  "icon": "mic-2",
+  "navigation": {
+    "label": "Lineup Board",
+    "path": "/lineup",
+    "icon": "mic-2",
+    "component": "LineupBoard",
+    "ui": "platform/modules/lineup_board/ui/index.js"
+  }
+}

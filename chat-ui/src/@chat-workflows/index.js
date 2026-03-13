@@ -6,9 +6,9 @@
 // ==============================================================================
 
 // Vite glob import — scans platform/workflows/*/ui/index.js at build time.
-// Path is relative to this file: ../../../../platform/workflows/*/ui/index.js
+// Path is relative to this file: ../../../platform/workflows/*/ui/index.js
 const uiModules = import.meta.glob(
-  '../../../../platform/workflows/*/ui/index.{js,jsx}',
+  '../../../platform/workflows/*/ui/index.{js,jsx}',
   { eager: true }
 );
 

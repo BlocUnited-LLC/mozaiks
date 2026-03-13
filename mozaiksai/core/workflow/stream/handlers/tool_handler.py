@@ -131,7 +131,7 @@ class ToolCallHandler(BaseEventHandler):
     ) -> None:
         """Handle UI tool interaction if applicable."""
         try:
-            from mozaiksai.core.workflow.outputs.ui_tools import (
+            from mozaiksai.core.workflow.ui_tools import (
                 handle_tool_call_for_ui_interaction,
             )
             ui_response = await handle_tool_call_for_ui_interaction(event, ctx.chat_id)

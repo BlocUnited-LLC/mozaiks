@@ -8,6 +8,8 @@
  * - Route WebSocket connections correctly
  */
 
+import platform from './platform/index.js';
+
 /**
  * Build WebSocket URL for AI runtime chat
  * 
@@ -38,11 +40,9 @@ export function buildRuntimeWebSocketUrl({
     const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     baseWsUrl = `${protocol}//${url.host}`;
   } else {
-    // Same-origin: use current host with runtime port
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.hostname;
-    const port = import.meta.env.VITE_AI_RUNTIME_PORT || '8000';
-    baseWsUrl = `${protocol}//${host}:${port}`;
+    baseWsUrl = platform.resolveWsUrl({
+      port: import.meta.env.VITE_AI_RUNTIME_PORT || '8000',
+    });
   }
   
   // Build the runtime WebSocket path
@@ -69,13 +69,10 @@ export function buildRuntimeApiUrl(path, runtimeUrl = null) {
   if (runtimeUrl) {
     return `${runtimeUrl}${path}`;
   }
-  
-  // Same-origin fallback
-  const protocol = window.location.protocol;
-  const host = window.location.hostname;
-  const port = import.meta.env.VITE_AI_RUNTIME_PORT || '8000';
-  
-  return `${protocol}//${host}:${port}${path}`;
+
+  return `${platform.resolveHttpUrl({
+    port: import.meta.env.VITE_AI_RUNTIME_PORT || '8000',
+  })}${path}`;
 }
 
 /**

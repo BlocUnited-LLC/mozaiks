@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from logs.logging_config import get_core_logger
-from mozaiksai.core.orchestration.change_classifier import ChangeType, get_change_classifier
+from mozaiksai.core.orchestration.change_classifier import ChangeIntent, ChangeType, get_change_classifier
 
 logger = get_core_logger("universal_orchestrator")
 
@@ -61,6 +61,19 @@ class UniversalOrchestrator:
         self._handlers[str(route)] = handler
 
     async def handle_structured_event(self, payload: Dict[str, Any]) -> RouteResult:
+        intent = self._extract_change_intent(payload)
+        if intent is not None:
+            route = self._resolve_change_intent_route(intent)
+            if not route:
+                return RouteResult(
+                    status="ignored",
+                    route="",
+                    detail={"reason": f"no route configured for change_type {intent.change_type.value}"},
+                )
+            enriched = dict(payload)
+            enriched["change_intent"] = intent.model_dump(mode="json")
+            return await self._dispatch(route=route, payload=enriched)
+
         event_type = str(payload.get("event_type") or payload.get("type") or "").strip()
         if not event_type:
             return RouteResult(status="ignored", route="", detail={"reason": "missing event_type"})
@@ -76,26 +89,19 @@ class UniversalOrchestrator:
             return RouteResult(status="ignored", route="", detail={"reason": "missing text"})
 
         classifier = get_change_classifier()
-        classification = await classifier.classify(
+        intent = await classifier.classify(
             text=text,
             context=payload.get("context") if isinstance(payload.get("context"), dict) else None,
         )
-        route = self._change_type_routes.get(
-            classification.change_type,
-            self._change_type_routes.get(ChangeType.UNKNOWN),
-        )
+        route = self._resolve_change_intent_route(intent)
         if not route:
             return RouteResult(
                 status="ignored",
                 route="",
-                detail={"reason": f"no route configured for change_type {classification.change_type.value}"},
+                detail={"reason": f"no route configured for change_type {intent.change_type.value}"},
             )
         enriched = dict(payload)
-        enriched["classification"] = {
-            "change_type": classification.change_type.value,
-            "rationale": classification.rationale,
-            "confidence": classification.confidence,
-        }
+        enriched["change_intent"] = intent.model_dump(mode="json")
         return await self._dispatch(route=route, payload=enriched)
 
     async def handle_event(self, payload: Dict[str, Any]) -> RouteResult:
@@ -128,6 +134,40 @@ class UniversalOrchestrator:
             )
 
         return RouteResult(status="ignored", route=route, detail={"reason": "unhandled route"})
+
+    @staticmethod
+    def _extract_change_intent(payload: Dict[str, Any]) -> Optional[ChangeIntent]:
+        candidate = payload.get("change_intent")
+        if isinstance(candidate, dict):
+            try:
+                return ChangeIntent.model_validate(candidate)
+            except Exception:
+                return None
+
+        direct_keys = {
+            "change_type",
+            "change_scope",
+            "requires_appspec_revision",
+            "requires_replan",
+            "requires_new_iteration",
+            "target_workflow",
+            "rationale",
+            "confidence",
+        }
+        if direct_keys.intersection(payload.keys()):
+            try:
+                return ChangeIntent.model_validate(payload)
+            except Exception:
+                return None
+        return None
+
+    def _resolve_change_intent_route(self, intent: ChangeIntent) -> Optional[str]:
+        if intent.target_workflow:
+            return f"workflow.run:{intent.target_workflow}"
+        return self._change_type_routes.get(
+            intent.change_type,
+            self._change_type_routes.get(ChangeType.UNKNOWN),
+        )
 
     async def _dispatch_workflow_run(self, *, workflow_name: str, payload: Dict[str, Any]) -> RouteResult:
         app_id = str(payload.get("app_id") or "").strip()

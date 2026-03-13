@@ -1,5 +1,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { createInitialSurfaceState, mapSurfaceEventToAction, uiSurfaceReducer } from '../state/uiSurfaceReducer';
+import platform from '../platform/index.js';
+import {
+  getStoredActiveChatId,
+  getStoredActiveWorkflowName,
+  getStoredConversationMode,
+  setStoredActiveChatId,
+  setStoredActiveWorkflowName,
+  setStoredConversationMode,
+} from '../session/chatSessionStorage';
 
 const ChatUIContext = createContext(null);
 
@@ -35,8 +44,8 @@ export const ChatUIProvider = ({
   onReadyRef.current = onReady;
 
   // Persistent chat state (survives navigation)
-  const [activeChatId, setActiveChatId] = useState(null);
-  const [activeWorkflowName, setActiveWorkflowName] = useState(null);
+  const [activeChatId, setActiveChatId] = useState(() => getStoredActiveChatId());
+  const [activeWorkflowName, setActiveWorkflowName] = useState(() => getStoredActiveWorkflowName());
   const [chatMinimized, setChatMinimized] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   
@@ -47,7 +56,7 @@ export const ChatUIProvider = ({
     () => {
       let initialMode = 'workflow';
       try {
-        const stored = localStorage.getItem('mozaiks.conversation_mode');
+        const stored = getStoredConversationMode() || platform.storage.getItem('mozaiks.conversation_mode');
         if (stored === 'ask' || stored === 'workflow') {
           initialMode = stored;
         }
@@ -149,9 +158,7 @@ export const ChatUIProvider = ({
 
   useEffect(() => {
     try {
-      if (activeChatId) {
-        localStorage.setItem('mozaiks.current_chat_id', activeChatId);
-      }
+      setStoredActiveChatId(activeChatId);
     } catch (_) {
       /* ignore storage errors */
     }
@@ -159,9 +166,7 @@ export const ChatUIProvider = ({
 
   useEffect(() => {
     try {
-      if (activeWorkflowName) {
-        localStorage.setItem('mozaiks.current_workflow_name', activeWorkflowName);
-      }
+      setStoredActiveWorkflowName(activeWorkflowName);
     } catch (_) {
       /* ignore storage errors */
     }
@@ -169,7 +174,7 @@ export const ChatUIProvider = ({
 
   useEffect(() => {
     try {
-      localStorage.setItem('mozaiks.conversation_mode', conversationMode);
+      setStoredConversationMode(conversationMode);
     } catch (_) {
       /* ignore storage errors */
     }

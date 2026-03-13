@@ -236,3 +236,4 @@ OTEL tracing adds minimal overhead (~1-5ms per span). For high-throughput scenar
 
 - [Cost Tracking](03-cost-tracking.md) — Track how much workflows cost
 - [Budget Management](04-budget-management.md) — Set spending limits
+

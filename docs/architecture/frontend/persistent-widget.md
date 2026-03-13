@@ -116,3 +116,4 @@ The widget increments this count automatically: it tracks the length of `workflo
 - `/app/:id/:workflow` and all sub-paths
 
 On all other routes it renders `PersistentChatWidget` with `activeChatId`, `activeWorkflowName`, and `conversationMode` passed as props from context.
+

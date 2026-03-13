@@ -62,3 +62,4 @@ All services should show `healthy`. Keycloak takes ~30-60 seconds on first boot.
 | [MongoDB Setup](02-mongodb.md) | Local, Docker, or Atlas configuration |
 | [Keycloak & PostgreSQL](03-keycloak.md) | Identity provider setup |
 | [Production & Backup](04-production.md) | Production checklist, backup/restore |
+

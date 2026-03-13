@@ -11,7 +11,15 @@
       "Bash(python -m pytest:*)",
       "Bash(find:*)",
       "Bash(grep:*)",
-      "Bash(python -m py_compile:*)"
+      "Bash(python -m py_compile:*)",
+      "Bash(for f in mozaiksai/core/transport/simple_transport.py mozaiksai/core/transport/ws_protocol.py mozaiksai/core/transport/workflow_bridge.py mozaiksai/core/transport/ui_tools.py mozaiksai/core/transport/general_mode.py)",
+      "Bash(powershell -Command:*)",
+      "Bash(npm run lint:*)",
+      "Bash(npm run:*)",
+      "Bash(docker compose:*)",
+      "Bash(curl:*)",
+      "Bash(cmd /c \"taskkill /F /PID 152796\")",
+      "Bash(python run_server.py:*)"
     ]
   }
 }

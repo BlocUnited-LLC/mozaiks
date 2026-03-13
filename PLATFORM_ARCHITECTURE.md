@@ -291,7 +291,7 @@ workflows/{AppName}/          # The full workflow directory
 docker-compose.yaml           # Templated for the mozaiks core
 .env.example                  # All required env vars
 schema.json + seed.json       # For DB initialization
-README.md                     # Setup instructions
+prompt-packs.md                     # Setup instructions
 ```
 
 ---
@@ -527,7 +527,7 @@ When a user chooses to self-host, project-aid generates:
   init-db/
     schema.json                    ← MongoDB collection schemas
     seed.json                      ← Initial data
-  README.md                        ← Setup + run instructions
+  prompt-packs.md                        ← Setup + run instructions
 ```
 
 **docker-compose.yaml** (conceptual):

@@ -123,11 +123,33 @@ class ModuleManager:
                         try:
                             with open(meta_path, "r", encoding="utf-8") as f:
                                 extra = json.load(f)
-                            metadata.update({
-                                k: v
-                                for k, v in extra.items()
-                                if k in ("display_name", "description", "version", "required_tier", "enabled")
-                            })
+                            metadata.update(
+                                {
+                                    k: v
+                                    for k, v in extra.items()
+                                    if k in ("display_name", "description", "version", "required_tier", "enabled", "icon")
+                                }
+                            )
+
+                            # Canonical module navigation metadata lives in module.json.
+                            # We project it into module_registry.json to avoid duplicating
+                            # the same route/component data in navigation_config.json.
+                            nav = extra.get("navigation") if isinstance(extra, dict) else None
+                            if isinstance(nav, dict):
+                                path = nav.get("path")
+                                component = nav.get("component")
+                                if isinstance(path, str) and path.strip():
+                                    metadata["path"] = path.strip()
+                                if isinstance(component, str) and component.strip():
+                                    metadata["component"] = component.strip()
+                                metadata["label"] = nav.get("label") or metadata.get("display_name")
+                                metadata["icon"] = nav.get("icon") or metadata.get("icon")
+                                if "showInHeader" in nav:
+                                    metadata["showInHeader"] = bool(nav.get("showInHeader"))
+                                if "order" in nav:
+                                    metadata["order"] = nav.get("order")
+                                if isinstance(nav.get("meta"), dict):
+                                    metadata["meta"] = nav.get("meta")
                         except Exception as exc:
                             logger.warning("Could not read %s: %s", meta_path, exc)
                         break

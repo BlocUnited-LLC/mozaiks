@@ -2,12 +2,10 @@
  * mockAuthAdapter — development stub auth adapter
  *
  * Provides a mock authenticated user for local development without Keycloak.
- * This allows testing the UI (including AdminPortal) without running the auth server.
- *
- * The mock user is an admin by default so you can test all admin portal features.
+ * This allows testing UI and workflow flows while auth infrastructure is off.
  */
 
-const MOCK_USER = {
+const DEFAULT_USER = {
   id: 'dev-user-001',
   user_id: 'dev-user-001',
   name: 'Dev User',
@@ -16,64 +14,108 @@ const MOCK_USER = {
   authenticated: true,
 };
 
-const mockAuthAdapter = {
-  /** Auth config (mirrors app.json auth section) */
-  authConfig: {
-    roles: {
-      claimPath: 'realm_access.roles',
-      default: 'user',
-      admin: 'admin',
-      adminEmails: ['dev@mozaiks.local'],
+function resolveMockUser(appConfig = {}) {
+  const devUsers = Array.isArray(appConfig?.dev?.users) ? appConfig.dev.users : [];
+  const devUser = devUsers[0] || {};
+  const username = devUser.username || 'dev';
+  const userId = devUser.user_id || devUser.id || username || DEFAULT_USER.user_id;
+  const firstName = devUser.firstName || devUser.first_name || '';
+  const lastName = devUser.lastName || devUser.last_name || '';
+  const displayName = `${firstName} ${lastName}`.trim() || username || DEFAULT_USER.name;
+  const roles = Array.isArray(devUser.roles) && devUser.roles.length > 0
+    ? devUser.roles
+    : DEFAULT_USER.roles;
+
+  return {
+    id: userId,
+    user_id: userId,
+    name: displayName,
+    email: devUser.email || DEFAULT_USER.email,
+    roles,
+    authenticated: true,
+  };
+}
+
+function resolveRolesConfig(appConfig = {}, user) {
+  const authRoles = appConfig?.auth?.roles || {};
+  const adminEmails = Array.isArray(authRoles.adminEmails) && authRoles.adminEmails.length > 0
+    ? authRoles.adminEmails
+    : (user.email ? [user.email] : ['dev@mozaiks.local']);
+
+  return {
+    claimPath: authRoles.claimPath || 'realm_access.roles',
+    default: authRoles.default || 'user',
+    admin: authRoles.admin || 'admin',
+    adminEmails,
+  };
+}
+
+function buildMockAdapter(appConfig = {}) {
+  const user = resolveMockUser(appConfig);
+  const token = appConfig?.dev?.mockAccessToken || 'mock-dev-token';
+  const rolesConfig = resolveRolesConfig(appConfig, user);
+
+  if (typeof window !== 'undefined') {
+    window.mozaiksAuth = {
+      token,
+      getAccessToken: () => token,
+    };
+  }
+
+  return {
+    authConfig: { roles: rolesConfig },
+
+    getUser() {
+      return user;
     },
-  },
 
-  /** Returns the mock user (sync) */
-  getUser() {
-    return MOCK_USER;
-  },
+    async getCurrentUser() {
+      return user;
+    },
 
-  /** Returns the mock user (async - used by ChatUIContext) */
-  async getCurrentUser() {
-    return MOCK_USER;
-  },
+    isAuthenticated() {
+      return true;
+    },
 
-  /** Always authenticated in mock mode */
-  isAuthenticated() {
-    return true;
-  },
+    async login() {
+      console.log('[mockAuth] login() called - already authenticated');
+      return true;
+    },
 
-  /** No-op login - already "logged in" */
-  async login() {
-    console.log('[mockAuth] login() called - already authenticated');
-    return true;
-  },
+    async logout() {
+      console.log('[mockAuth] logout() called');
+      if (typeof window !== 'undefined') {
+        window.location.href = '/';
+      }
+    },
 
-  /** Logout just logs a message */
-  async logout() {
-    console.log('[mockAuth] logout() called');
-    window.location.href = '/';
-  },
+    async getToken() {
+      return token;
+    },
 
-  /** Returns a fake token for API calls */
-  async getToken() {
-    return 'mock-dev-token';
-  },
+    getAccessToken() {
+      return token;
+    },
 
-  /** No-op destroy */
-  destroy() {
-    console.log('[mockAuth] destroy() called');
-  },
+    destroy() {
+      console.log('[mockAuth] destroy() called');
+    },
 
-  /** Identify as mock adapter */
-  isMock: true,
-};
+    isMock: true,
+  };
+}
+
+const mockAuthAdapter = buildMockAdapter();
 
 export default mockAuthAdapter;
 
 /**
- * Factory function matching createKeycloakAuthAdapter signature
+ * Factory function matching createKeycloakAuthAdapter signature.
  */
-export function createMockAuthAdapter() {
-  console.log('[mockAuth] Using mock auth adapter (no Keycloak)');
-  return Promise.resolve(mockAuthAdapter);
+export function createMockAuthAdapter(appConfig = {}) {
+  const adapter = buildMockAdapter(appConfig);
+  const user = adapter.getUser();
+  console.log(`[mockAuth] Using mock auth adapter as "${user.name}" (${user.email})`);
+  return Promise.resolve(adapter);
 }
+

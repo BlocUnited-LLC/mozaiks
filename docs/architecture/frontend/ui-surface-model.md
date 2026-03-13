@@ -67,3 +67,4 @@ The Mozaiks UI provides **two rendered surfaces**, not three:
 | Floating widget | All other routes + `view` mode | `PersistentChatWidget.jsx` |
 
 There is no third surface. The `view` mode within ChatPage is a layout state, not a separate surface — the artifact is fullscreen but the session is unchanged and the widget provides the same entry point the floating button provides on non-chat routes.
+

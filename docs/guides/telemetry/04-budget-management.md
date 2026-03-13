@@ -500,3 +500,4 @@ The **runtime code stays the same** — only the event listeners and storage cha
 - Add [custom model pricing](#custom-model-pricing) for your LLMs
 - Set up [personal monitoring](#personal-budget-monitoring) for cost awareness
 - [Integrate with a billing platform](#platform-integration) for monetization
+

@@ -61,7 +61,7 @@ python -m mozaiksai.cli doctor
 python -m mozaiksai.cli up --frontend
 ```
 
-This is the best path for first-time developers because it configures `app/app.json`, `.env`, and generated Keycloak artifacts before startup.
+This is the best path for first-time developers because it configures `platform/app.json`, `.env`, and generated Keycloak artifacts before startup.
 
 ---
 
@@ -69,22 +69,25 @@ This is the best path for first-time developers because it configures `app/app.j
 
 ```
 mozaiks/
-├── app/                        # Frontend app (Vite + React) — brand & customize this
-│   ├── brand/public/           # brand.json, ui.json, navigation.json, assets, fonts
-│   ├── App.jsx                 # App shell (Keycloak auth built-in)
-│   ├── main.jsx                # Entry point
-│   └── vite.config.js          # Pre-wired — update proxy once backend is live
+├── platform/                   # Declarative app bundle consumed by the runtime
+│   ├── app.json                # App identity and deployment config
+│   ├── config/                 # AI, modules, navigation, subscriptions
+│   ├── workflows/              # Workflow definitions and UI tools
+│   └── modules/                # Persistent modules/pages
 │
-├── app/app.json                # App name, app ID, API URLs
+├── app/                        # Web shell entrypoint and Vite config
+│   ├── App.jsx
+│   ├── main.jsx
+│   └── vite.config.js
 │
-├── chat-ui/src/                # UI library — do not modify
-│   └── workflows/              # Workflow frontend component registry
-│       └── HelloWorld/         # Example — copy for your own workflows
+├── platform/brand/             # Public shell assets, fonts, and login-theme files
+
+├── clients/
+│   └── mobile/                 # Native client implementation
 │
-├── workflows/                  # Backend workflow definitions (engine-adapter compatible)
-│   └── HelloWorld/             # Example workflow — copy for your own
-│
-├── mozaiksai/                  # Runtime engine — do not modify
+├── chat-ui/                    # Shared web UI shell
+├── mozaiksai/                  # AI runtime, orchestration, transport
+├── mozaikscore/                # Shared platform services
 ├── shared_app.py               # FastAPI server entry
 ├── run_server.py               # Start the server
 ├── requirements.txt            # Python dependencies
@@ -237,7 +240,7 @@ From here you can manage users, roles, and login settings. The `mozaiks` realm i
 |---|---|---|
 | Frontend | [http://localhost:5173](http://localhost:5173) | Keycloak login page (redirects automatically) |
 | Backend health | [http://localhost:8000/api/health](http://localhost:8000/api/health) | `{"status": "ok"}` |
-| Loaded workflows | [http://localhost:8000/api/workflows](http://localhost:8000/api/workflows) | Shows `HelloWorld` |
+| Loaded workflows | [http://localhost:8000/api/workflows](http://localhost:8000/api/workflows) | Shows `GreenRoom`, `WritersRoom`, and `MainStage` |
 | Keycloak admin | [http://localhost:8080/admin](http://localhost:8080/admin) | Admin console (admin/admin) |
 
 ### First login
@@ -251,7 +254,7 @@ After login, you're redirected back to the app with a valid JWT session.
 
 ---
 
-## Step 5 — Configure `app.json`
+## Step 5 — Configure `platform/app.json`
 
 ```json
 {
@@ -262,7 +265,9 @@ After login, you're redirected back to the app with a valid JWT session.
 }
 ```
 
-`appName` appears in the browser tab. User identity always comes from the auth adapter (Keycloak or mock) — no user ID in this file. The active workflow is resolved automatically from backend config (`entry_point: true` in `orchestrator.yaml`). Set `apiUrl` and `wsUrl` to your deployed backend URL when going to production.
+`appName` appears in the browser tab and is also used by the mobile shell. User identity always comes from the auth adapter (Keycloak, token, external, or mock) — no user ID in this file. The active workflow is resolved automatically from backend config, with the canonical entry-point workflow declared in `platform/config/ai.json`. Set `apiUrl` and `wsUrl` to your deployed backend URL when going to production.
+
+For most users, this is the only config file they should touch. The `clients/mobile` directory is the repo-owned native implementation layer.
 
 ---
 
@@ -303,7 +308,7 @@ This re-creates all volumes and re-imports the realm from `realm-export.json`.
     Keycloak needs ~30-60 seconds to initialize its database and import the realm. Run `docker compose logs keycloak -f` and wait for `Running the server in development mode`. Then `docker compose up -d` again.
 
 ??? question "Port 8080 already in use"
-    Another service is using port 8080. Either stop it or change Keycloak's port in `docker-compose.yml` and update `auth.keycloak.authority` in `app/app.json` to match.
+    Another service is using port 8080. Either stop it or change Keycloak's port in `docker-compose.yml` and update `auth.keycloak.authority` in `platform/app.json` to match.
 
 ??? question "Port 27017 already in use"
     A local MongoDB is already running. Either stop it (`brew services stop mongodb-community` or stop the Windows service) or change the port mapping in `docker-compose.yml`.
@@ -327,23 +332,31 @@ This re-creates all volumes and re-imports the realm from `realm-export.json`.
 
     ---
 
-    Create your own backend YAML config + frontend components.
+    Create your own workflow under `platform/workflows/` with agents, tools, handoffs, and UI tools.
 
     [:octicons-arrow-right-24: Adding a Workflow](guides/adding-workflows/01-overview.md)
 
--   :fontawesome-solid-palette: **Brand your app**
+-   :fontawesome-solid-palette: **Configure your app shell**
 
     ---
 
-    Set colors, fonts, logo, and nav from JSON files — no code changes.
+    Configure branding, shell behavior, and auth without modifying the runtime.
 
     [:octicons-arrow-right-24: Customize Frontend](guides/custom-brand-integration/01-overview.md)
+
+-   :material-robot-outline: **Use prompt packs**
+
+    ---
+
+    Hand setup or implementation work to an AI coding agent with task-specific prompt packs.
+
+    [:octicons-arrow-right-24: Prompt Packs](instruction-prompts/prompt-packs.md)
 
 -   :fontawesome-solid-lock: **Configure auth**
 
     ---
 
-    Configure Keycloak authority/client/realm from `app/app.json`.
+    Configure Keycloak authority/client/realm from `platform/app.json`.
 
     [:octicons-arrow-right-24: Auth (app.json)](guides/custom-brand-integration/06-auth-json.md)
 
@@ -356,3 +369,4 @@ This re-creates all volumes and re-imports the realm from `realm-export.json`.
     [:octicons-arrow-right-24: Keycloak Auth Architecture](architecture/keycloak-auth.md)
 
 </div>
+

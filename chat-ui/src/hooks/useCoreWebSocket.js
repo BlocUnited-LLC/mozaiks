@@ -1,7 +1,7 @@
 /**
  * useCoreWebSocket — Persistent WebSocket connection to mozaikscore.
  *
- * Connects to ws://host:8001/ws/{userId}, auto-reconnects on drop,
+ * Connects to ws://host:8000/ws/{userId}, auto-reconnects on drop,
  * dispatches incoming events to registered listeners, and exposes
  * connection state to the UI.
  *
@@ -16,18 +16,29 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import platform from '../platform/index.js';
 
 const RECONNECT_BASE_DELAY = 1000;
 const RECONNECT_MAX_DELAY = 30000;
 const PING_INTERVAL = 25000;
 
 function getCoreWsUrl(userId) {
-  const coreUrl = import.meta.env.VITE_CORE_URL
-    || `${window.location.protocol}//${window.location.hostname}:${import.meta.env.VITE_CORE_PORT || '8001'}`;
+  // Explicit VITE_CORE_URL override (browser/Vite builds)
+  const explicitUrl =
+    typeof import.meta !== 'undefined' ? (import.meta.env?.VITE_CORE_URL ?? '') : '';
+  if (explicitUrl) {
+    const base = explicitUrl.replace(/^http/, 'ws').replace(/\/+$/, '');
+    return `${base}/ws/${encodeURIComponent(userId)}`;
+  }
 
-  // Convert http(s) to ws(s)
-  const wsUrl = coreUrl.replace(/^http/, 'ws').replace(/\/+$/, '');
-  return `${wsUrl}/ws/${encodeURIComponent(userId)}`;
+  // Derive from platform bridge — portable to React Native.
+  // RN apps: configure getBaseUrls() to return the correct backend URL including port.
+  const { wsUrl } = platform.getBaseUrls();
+  const corePort =
+    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_CORE_PORT) || '8000';
+  // Replace existing port (or append) with the core WebSocket port.
+  const base = wsUrl.replace(/\/+$/, '').replace(/(:\d+)?$/, `:${corePort}`);
+  return `${base}/ws/${encodeURIComponent(userId)}`;
 }
 
 export function useCoreWebSocket(userId, { enabled = true } = {}) {

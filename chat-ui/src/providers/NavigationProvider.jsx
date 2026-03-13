@@ -17,7 +17,8 @@
  * When `coreApiUrl` is provided (or VITE_CORE_URL is set), the provider
  * also fetches `/api/navigation` from mozaikscore and merges those pages
  * into the navigation context (static pages take precedence on path
- * collision).
+ * collision). Module routes are sourced from module_registry-derived
+ * backend navigation, not duplicated in navigation_config.json.
  *
  * @module @mozaiks/chat-ui/providers/NavigationProvider
  */
@@ -102,30 +103,6 @@ export const NavigationProvider = ({
       } catch (err) {
         console.error('[NavigationProvider] Error loading navigation config:', err);
         onErrorRef.current(err);
-      }
-
-      // 1b. Convert modules[] from static config into pages[] entries.
-      // Each module entry needs path + component to be routable.
-      const configModules = staticNav.modules || [];
-      if (configModules.length > 0) {
-        const existingPaths = new Set((staticNav.pages || []).map((p) => p.path));
-        const modulePages = configModules
-          .filter((m) => m.path && m.component && !existingPaths.has(m.path))
-          .map((m) => ({
-            path: m.path,
-            component: m.component,
-            label: m.label || m.module_name,
-            icon: m.icon || 'puzzle',
-            order: m.order ?? 50,
-            showInHeader: m.showInHeader || false,
-            meta: m.meta || { title: m.label || m.module_name, requiresAuth: true },
-          }));
-        if (modulePages.length > 0) {
-          staticNav = {
-            ...staticNav,
-            pages: [...(staticNav.pages || []), ...modulePages],
-          };
-        }
       }
 
       // 2. Optionally fetch filtered navigation entries from mozaikscore
@@ -234,6 +211,8 @@ export const NavigationProvider = ({
     version: navigation.version,
     landing_spot: navigation.landing_spot || '/',
     startup_mode: navigation.startup_mode || null,
+    entry_point: navigation.entry_point || null,
+    resume_policy: navigation.resume_policy || null,
     pages,
     headerPages,
     findPage,

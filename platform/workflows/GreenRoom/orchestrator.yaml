@@ -1,0 +1,8 @@
+workflow_name: GreenRoom
+max_turns: 12
+human_in_the_loop: true
+startup_mode: UserDriven
+orchestration_pattern: DefaultPattern
+initial_message_to_user: "Welcome to GreenRoom. Before we open the writers room, tell me one true story, awkward trait, or weird premise and your tone: roast, warm, chaotic, or clean."
+initial_message: null
+initial_agent: ClubHostAgent

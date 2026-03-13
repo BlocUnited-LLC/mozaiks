@@ -1,0 +1,30 @@
+tools:
+- agent: WritersHostAgent
+  file: writers_seed.py
+  function: capture_room_seed
+  description: Normalize a fallback premise directly inside WritersRoom when no green room brief exists.
+  tool_type: Agent_Tool
+  auto_invoke: false
+
+- agent: HostAgent
+  file: set_board.py
+  function: present_set_board
+  description: Emit inline and artifact SetBoardCard views from the fan-in writers room summary.
+  tool_type: UI_Tool
+  auto_invoke: false
+  ui:
+    component: SetBoardCard
+    mode: artifact
+
+lifecycle_tools:
+- trigger: before_chat
+  agent: null
+  file: load_set_context.py
+  function: load_set_context
+  description: Load the persisted GreenRoom set brief into WritersRoom before the first turn.
+
+- trigger: after_chat
+  agent: null
+  file: persist_writers_summary.py
+  function: persist_writers_summary
+  description: Persist the final writers room summary for module pages and MainStage.

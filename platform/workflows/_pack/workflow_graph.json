@@ -2,21 +2,26 @@
   "version": 2,
   "workflows": [
     {
-      "id": "RoastChat",
-      "description": "Primary roast interview + decomposition + MFJ jury fan-out/fan-in"
+      "id": "GreenRoom",
+      "description": "Interview the performer, lock the set brief, and capture boundaries."
     },
     {
-      "id": "AwardsShow",
-      "description": "Optional post-roast award recap"
+      "id": "WritersRoom",
+      "description": "Decompose the premise into parallel comedy lanes and synthesize the strongest set."
+    },
+    {
+      "id": "MainStage",
+      "description": "Package the selected material into a final stage-ready set."
     }
   ],
   "journeys": [
     {
-      "id": "roastchat_showcase",
-      "description": "Roast chat followed by optional awards",
+      "id": "backstage_showcase",
+      "description": "Intake in the green room, parallel writing in the writers room, then final polish on main stage.",
       "steps": [
-        "RoastChat",
-        "AwardsShow"
+        "GreenRoom",
+        "WritersRoom",
+        "MainStage"
       ]
     }
   ]

@@ -25,6 +25,7 @@ from enum import Enum
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 
+from mozaiksai.core.ports.orchestration import DomainEvent
 from mozaiksai.core.events.auto_tool_handler import AutoToolEventHandler
 from mozaiksai.core.events.usage_ingest import get_usage_ingest_client
 from mozaiksai.core.orchestration import get_universal_orchestrator
@@ -106,7 +107,7 @@ class SessionPausedEvent:
     category: str = field(default="runtime")
 
 
-EventType = Union[BusinessLogEvent, UIToolEvent, SessionPausedEvent]
+EventType = Union[BusinessLogEvent, UIToolEvent, SessionPausedEvent, DomainEvent]
 
 class EventHandler(ABC):
     @abstractmethod
@@ -136,6 +137,24 @@ class UIToolHandler(EventHandler):
         if not isinstance(event, UIToolEvent):
             return False
         logger.debug(f"[UI_TOOL] id={event.ui_tool_id} workflow={event.workflow_name} display={event.display}")
+        return True
+
+
+class DomainEventHandler(EventHandler):
+    """Handle canonical runtime DomainEvents without importing engine-specific types."""
+
+    def can_handle(self, event: EventType) -> bool:
+        return isinstance(event, DomainEvent)
+
+    async def handle(self, event: EventType) -> bool:
+        if not isinstance(event, DomainEvent):
+            return False
+        logger.info(
+            "[DOMAIN_EVENT] kind=%s chat_id=%s source=%s",
+            event.kind,
+            event.chat_id,
+            event.source,
+        )
         return True
 
 class UnifiedEventDispatcher:
@@ -179,6 +198,7 @@ class UnifiedEventDispatcher:
     def _setup_default_handlers(self):
         self.register_handler(BusinessLogHandler())
         self.register_handler(UIToolHandler())
+        self.register_handler(DomainEventHandler())
 
     def register_handler(
         self,
@@ -290,6 +310,37 @@ class UnifiedEventDispatcher:
         event = UIToolEvent(ui_tool_id=ui_tool_id, payload=payload, workflow_name=workflow_name, display=display, chat_id=chat_id)
         return await self.dispatch(event)
 
+    async def emit_domain_event(self, event: DomainEvent) -> bool:
+        """Dispatch a typed control-plane DomainEvent and fan it out to listeners."""
+        success = await self.dispatch(event)
+        await self.emit(
+            event.kind,
+            {
+                "kind": event.kind,
+                "payload": event.payload,
+                "chat_id": event.chat_id,
+                "timestamp": event.timestamp,
+                "source": event.source,
+            },
+        )
+        return success
+
+    @staticmethod
+    def domain_event_to_envelope(event: DomainEvent) -> Dict[str, Any]:
+        """Convert a typed DomainEvent into a websocket-style envelope."""
+        return {
+            "type": event.kind,
+            "data": {
+                "kind": event.kind,
+                "payload": event.payload,
+                "chat_id": event.chat_id,
+                "timestamp": event.timestamp,
+                "source": event.source,
+            },
+            "chat_id": event.chat_id,
+            "timestamp": event.timestamp,
+        }
+
     def build_outbound_event_envelope(
         self,
         *,
@@ -307,6 +358,8 @@ class UnifiedEventDispatcher:
         
         The 'kind' -> 'type' namespace mapping ensures frontend receives consistent event names.
         """
+        if isinstance(raw_event, DomainEvent):
+            return self.domain_event_to_envelope(raw_event)
         if not (isinstance(raw_event, dict) and 'kind' in raw_event):
             return None
         timestamp = datetime.now(UTC).isoformat()

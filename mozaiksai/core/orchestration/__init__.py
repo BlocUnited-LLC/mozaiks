@@ -1,10 +1,27 @@
 from .change_classifier import (
-    ChangeClassification,
     ChangeClassifierAdapter,
+    ChangeIntent,
     ChangeType,
     HeuristicChangeClassifier,
     get_change_classifier,
     set_change_classifier,
+)
+from .planning_contracts import (
+    ActionSpec,
+    ActionType,
+    AppSpec,
+    BundlePlan,
+    Capability,
+    CapabilityExecutionMode,
+    DecompositionPackage,
+    EntityFieldSpec,
+    EntitySpec,
+    ModuleSpec,
+    PolicySpec,
+    ViewSpec,
+    ViewType,
+    WorkflowSpec,
+    build_decomposition_package,
 )
 from .universal_orchestrator import (
     CHANGE_TYPE_ROUTE_MAP,
@@ -15,16 +32,30 @@ from .universal_orchestrator import (
 )
 
 __all__ = [
-    "ChangeClassification",
     "ChangeClassifierAdapter",
+    "ChangeIntent",
     "ChangeType",
     "HeuristicChangeClassifier",
     "get_change_classifier",
     "set_change_classifier",
+    "ActionSpec",
+    "ActionType",
+    "AppSpec",
+    "BundlePlan",
+    "Capability",
+    "CapabilityExecutionMode",
+    "DecompositionPackage",
+    "EntityFieldSpec",
+    "EntitySpec",
+    "ModuleSpec",
+    "PolicySpec",
+    "ViewSpec",
+    "ViewType",
+    "WorkflowSpec",
+    "build_decomposition_package",
     "CHANGE_TYPE_ROUTE_MAP",
     "EVENT_ROUTE_MAP",
     "RouteResult",
     "UniversalOrchestrator",
     "get_universal_orchestrator",
 ]
-

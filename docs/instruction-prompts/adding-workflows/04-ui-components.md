@@ -1,109 +1,83 @@
-# Instruction Prompt: Creating UI Components
+# Instruction Prompt: Creating Workflow UI Components
 
-**Task:** Create React components for interactive UI tools
+**Task:** Create React components for workflow UI tools
 
-**Complexity:** Medium (React/JavaScript code)
+**Complexity:** Medium
 
 ---
 
 ## Context for AI Agent
 
-You are helping a user create React components for their MozaiksAI workflow. These components render in the chat when UI tools are triggered, collect user input, and send responses back to the Python tool.
+You are helping a user create UI components for a workflow.
+
+Current repo target:
+
+- workflow UI lives under `platform/workflows/[WorkflowName]/ui/`
+- `platform/workflows/[WorkflowName]/ui/index.js` is auto-discovered by the shared shell
+- do not create workflow component registries under `chat-ui/src/workflows/`
 
 ---
 
-## Step 1: Understand Requirements
+## Step 1: Understand the Component Requirements
 
 Ask the user:
 
-1. **"What UI components do you need?"**
-   Examples: date picker, form, confirmation card, product selector
-
-2. **"What data will each component receive?"**
-   This becomes the `payload` prop
-
-3. **"What data should each component return?"**
-   This is what `onResponse()` sends back
+1. What component is needed?
+2. What data will it receive in `payload`?
+3. What data should it return through `onResponse()`?
+4. Should it render inline in chat or as an artifact surface?
 
 ---
 
-## Step 2: Set Up Folder Structure
-
-Ensure the structure exists:
+## Step 2: Set Up the Folder Structure
 
 ```powershell
-# Create workflow components folder
-New-Item -ItemType Directory -Force -Path "chat-ui/src/workflows/[WorkflowName]/components"
+New-Item -ItemType Directory -Force -Path "platform/workflows/[WorkflowName]/ui"
 ```
 
 Expected structure:
-```
-chat-ui/src/workflows/
-├── index.js                         # Workflow registry
-└── [WorkflowName]/
-    └── components/
-        ├── index.js                 # Component exports
-        ├── [Component1].js
-        └── [Component2].js
+
+```text
+platform/workflows/[WorkflowName]/
+└── ui/
+    ├── index.js
+    ├── [Component1].js
+    └── [Component2].js
 ```
 
 ---
 
-## Step 3: Create Component Template
-
-For each component:
+## Step 3: Create a Component Template
 
 ```jsx
-// chat-ui/src/workflows/[WorkflowName]/components/[ComponentName].js
 import React from 'react';
 
-export default function [ComponentName]({ payload, onResponse, onCancel, eventId, ui_tool_id }) {
-  // State for user input
+export default function ExampleCard({ payload, onResponse, onCancel, eventId, ui_tool_id }) {
   const [value, setValue] = React.useState(payload?.initialValue ?? '');
 
-  // Handle successful submission
   async function handleSubmit() {
     await onResponse({
       status: 'success',
-      data: {
-        // Return the collected data
-        value: value,
-      },
-      eventId,      // Required - pass through
-      ui_tool_id,   // Required - pass through
+      data: { value },
+      eventId,
+      ui_tool_id,
     });
-  }
-
-  // Handle cancellation
-  async function handleCancel() {
-    await onCancel();  // or call onResponse with status: 'cancelled'
   }
 
   return (
     <div className="p-4 border rounded-xl bg-white shadow-sm">
-      {/* Component UI */}
-      <p className="mb-4">{payload?.message ?? 'Default message'}</p>
-
-      {/* Input elements */}
+      <p className="mb-4">{payload?.message ?? 'Provide input'}</p>
       <input
         type="text"
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(event) => setValue(event.target.value)}
         className="w-full border rounded p-2 mb-4"
       />
-
-      {/* Action buttons */}
       <div className="flex gap-2">
-        <button
-          onClick={handleSubmit}
-          className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded"
-        >
+        <button onClick={handleSubmit} className="px-4 py-2 rounded bg-cyan-600 text-white">
           Submit
         </button>
-        <button
-          onClick={handleCancel}
-          className="border hover:bg-gray-100 px-4 py-2 rounded"
-        >
+        <button onClick={onCancel} className="px-4 py-2 rounded border">
           Cancel
         </button>
       </div>
@@ -111,213 +85,35 @@ export default function [ComponentName]({ payload, onResponse, onCancel, eventId
   );
 }
 ```
+
+Always pass `eventId` and `ui_tool_id` back through `onResponse()`.
 
 ---
 
-## Step 4: Component Examples
+## Step 4: Export Components for Auto-Discovery
 
-### Date Picker Component
+`platform/workflows/[WorkflowName]/ui/index.js` should export an object of
+component names to components.
 
-```jsx
-// chat-ui/src/workflows/[WorkflowName]/components/DatePicker.js
-import React from 'react';
+```js
+import ExampleCard from './ExampleCard';
 
-export default function DatePicker({ payload, onResponse, onCancel, eventId, ui_tool_id }) {
-  const [selectedDate, setSelectedDate] = React.useState('');
-
-  // Filter to only allowed dates if provided
-  const availableDates = payload?.available_dates ?? [];
-  const minDate = payload?.min_date ?? '';
-  const maxDate = payload?.max_date ?? '';
-
-  async function handleSelect() {
-    if (!selectedDate) return;
-
-    await onResponse({
-      status: 'success',
-      data: { selected_date: selectedDate },
-      eventId,
-      ui_tool_id,
-    });
-  }
-
-  return (
-    <div className="p-4 border rounded-xl bg-white">
-      <h3 className="font-semibold mb-2">{payload?.title ?? 'Select a Date'}</h3>
-      <p className="text-gray-600 mb-4">{payload?.message ?? 'Choose your preferred date'}</p>
-
-      <input
-        type="date"
-        value={selectedDate}
-        onChange={(e) => setSelectedDate(e.target.value)}
-        min={minDate}
-        max={maxDate}
-        className="w-full border rounded p-2 mb-4"
-      />
-
-      {availableDates.length > 0 && (
-        <p className="text-sm text-gray-500 mb-4">
-          Available: {availableDates.join(', ')}
-        </p>
-      )}
-
-      <div className="flex gap-2">
-        <button
-          onClick={handleSelect}
-          disabled={!selectedDate}
-          className="bg-blue-500 disabled:bg-gray-300 text-white px-4 py-2 rounded"
-        >
-          Confirm Date
-        </button>
-        <button onClick={onCancel} className="border px-4 py-2 rounded">
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
+export default {
+  ExampleCard,
+};
 ```
 
-### Confirmation Card Component
+The export key must match the `ui.component` value from `tools.yaml`.
 
-```jsx
-// chat-ui/src/workflows/[WorkflowName]/components/ConfirmationCard.js
-import React from 'react';
+---
 
-export default function ConfirmationCard({ payload, onResponse, onCancel, eventId, ui_tool_id }) {
-  const [isLoading, setIsLoading] = React.useState(false);
+## Step 5: Validation Checklist
 
-  async function handleConfirm() {
-    setIsLoading(true);
-    await onResponse({
-      status: 'success',
-      data: { confirmed: true },
-      eventId,
-      ui_tool_id,
-    });
-  }
-
-  async function handleDecline() {
-    await onResponse({
-      status: 'success',
-      data: { confirmed: false },
-      eventId,
-      ui_tool_id,
-    });
-  }
-
-  return (
-    <div className="p-4 border rounded-xl bg-white">
-      <h3 className="font-bold text-lg mb-2">
-        {payload?.title ?? 'Please Confirm'}
-      </h3>
-
-      <p className="text-gray-700 mb-4">
-        {payload?.message ?? 'Are you sure you want to proceed?'}
-      </p>
-
-      {/* Optional details list */}
-      {payload?.details && (
-        <div className="bg-gray-50 p-3 rounded mb-4">
-          <ul className="text-sm space-y-1">
-            {payload.details.map((item, index) => (
-              <li key={index} className="flex items-center">
-                <span className="mr-2">•</span>
-                {item}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Warning message if present */}
-      {payload?.warning && (
-        <div className="bg-yellow-50 border border-yellow-200 p-3 rounded mb-4 text-sm">
-          ⚠️ {payload.warning}
-        </div>
-      )}
-
-      <div className="flex gap-3">
-        <button
-          onClick={handleConfirm}
-          disabled={isLoading}
-          className="bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white px-6 py-2 rounded font-medium"
-        >
-          {isLoading ? 'Processing...' : (payload?.confirmText ?? 'Yes, Confirm')}
-        </button>
-        <button
-          onClick={handleDecline}
-          disabled={isLoading}
-          className="bg-red-500 hover:bg-red-600 text-white px-6 py-2 rounded font-medium"
-        >
-          {payload?.declineText ?? 'No, Cancel'}
-        </button>
-      </div>
-    </div>
-  );
-}
-```
-
-### Multi-Field Form Component
-
-```jsx
-// chat-ui/src/workflows/[WorkflowName]/components/ContactForm.js
-import React from 'react';
-
-export default function ContactForm({ payload, onResponse, onCancel, eventId, ui_tool_id }) {
-  const [formData, setFormData] = React.useState({
-    name: payload?.defaults?.name ?? '',
-    email: payload?.defaults?.email ?? '',
-    phone: payload?.defaults?.phone ?? '',
-    message: '',
-  });
-  const [errors, setErrors] = React.useState({});
-
-  function updateField(field, value) {
-    setFormData(prev => ({ ...prev, [field]: value }));
-    // Clear error when user types
-    if (errors[field]) {
-      setErrors(prev => ({ ...prev, [field]: null }));
-    }
-  }
-
-  function validate() {
-    const newErrors = {};
-    if (!formData.name.trim()) newErrors.name = 'Name is required';
-    if (!formData.email.trim()) newErrors.email = 'Email is required';
-    if (formData.email && !formData.email.includes('@')) {
-      newErrors.email = 'Invalid email format';
-    }
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  }
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (!validate()) return;
-
-    await onResponse({
-      status: 'success',
-      data: formData,
-      eventId,
-      ui_tool_id,
-    });
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="p-4 border rounded-xl bg-white">
-      <h3 className="font-bold text-lg mb-4">
-        {payload?.title ?? 'Contact Information'}
-      </h3>
-
-      <div className="space-y-4">
-        {/* Name field */}
-        <div>
-          <label className="block text-sm font-medium mb-1">Name *</label>
-          <input
-            type="text"
-            value={formData.name}
-            onChange={(e) => updateField('name', e.target.value)}
+- components live under `platform/workflows/[WorkflowName]/ui/`
+- `ui/index.js` exports every component used by `tools.yaml`
+- `onResponse()` includes `eventId` and `ui_tool_id`
+- the component handles cancel or unsupported input cleanly
+- the component renders correctly in the browser shell
             className={`w-full border rounded p-2 ${errors.name ? 'border-red-500' : ''}`}
           />
           {errors.name && <p className="text-red-500 text-sm mt-1">{errors.name}</p>}
@@ -482,11 +278,11 @@ Update the main registry:
 
 ```js
 // chat-ui/src/workflows/index.js
-import HelloWorldComponents from './HelloWorld/components';
+import GreenRoomComponents from './GreenRoom/components';
 import [WorkflowName]Components from './[WorkflowName]/components';  // Add import
 
 const WORKFLOW_REGISTRY = {
-  HelloWorld: { components: HelloWorldComponents },
+  GreenRoom: { components: GreenRoomComponents },
   [WorkflowName]: { components: [WorkflowName]Components },         // Add entry
 };
 
@@ -570,3 +366,4 @@ Every component must:
 1. Tailwind classes should work by default
 2. Check if parent container has conflicting styles
 3. Add explicit width/height if needed
+

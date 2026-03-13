@@ -1,0 +1,12 @@
+{
+  "engine": {
+    "framework": "ag2"
+  },
+  "chat": {
+    "startup_mode": "ask"
+  },
+  "workflows": {
+    "entry_point": "GreenRoom",
+    "resume_policy": "last_active_then_oldest_then_entry_point"
+  }
+}

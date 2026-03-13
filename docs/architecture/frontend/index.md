@@ -48,3 +48,4 @@ The architecture builds from five layered concepts. Read them in order — each 
 | `chat-ui/src/widget/GlobalChatWidgetWrapper.jsx` | Mounts the widget on non-chat routes; suppresses it on chat routes |
 | `chat-ui/src/components/chat/PersistentChatWidget.jsx` | The floating widget component |
 | `chat-ui/src/components/chat/FluidChatLayout.jsx` | Animates between layout modes (full / split / minimized / view) |
+

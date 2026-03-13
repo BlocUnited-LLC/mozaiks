@@ -6,6 +6,7 @@
 
 import React from 'react';
 import { getComponent } from '../registry/componentRegistry';
+import platform from '../platform/index.js';
 
 /**
  * 🎯 WORKFLOW UI ROUTER - TRULY MODULAR
@@ -66,10 +67,10 @@ const WorkflowUIRouter = ({
       }
       // Derive chat-specific cache key (include cache_seed AND eventId to prevent collision on revisions)
       let chatId = null;
-      try { chatId = localStorage.getItem('mozaiks.current_chat_id'); } catch {}
+      try { chatId = platform.storage.getItem('mozaiks.current_chat_id'); } catch {}
       let cacheSeed = null;
       if (chatId) {
-        try { const storedSeed = localStorage.getItem(`mozaiks.current_chat_id.cache_seed.${chatId}`); if (storedSeed) cacheSeed = storedSeed; } catch {}
+        try { const storedSeed = platform.storage.getItem(`mozaiks.current_chat_id.cache_seed.${chatId}`); if (storedSeed) cacheSeed = storedSeed; } catch {}
       }
       // CRITICAL: Include eventId in cache key to prevent collision when revisions arrive with new eventId
       const cacheKey = `${chatId || 'nochat'}:${cacheSeed || 'noseed'}:${workflow}:${component}:${eventId || 'no-event'}`;

@@ -1,0 +1,84 @@
+structured_outputs:
+  models:
+    WritersLanePacket:
+      type: model
+      fields:
+        lane_name:
+          type: str
+          description: Human-readable label for the evaluation lane.
+        focus_prompt:
+          type: str
+          description: What this lane is trying to deliver.
+        success_signal:
+          type: str
+          description: What success looks like in this lane.
+
+    WritersWorkflowSpec:
+      type: model
+      fields:
+        name:
+          type: str
+          description: Child workflow name to run in parallel.
+        description:
+          type: str
+          description: Short description of the lane.
+        initial_message:
+          type: str
+          description: Seed message containing canon, lane focus, and evaluation instructions.
+        initial_agent:
+          type: optional_str
+          description: Optional override for the child start agent.
+          default: null
+
+    WritersDecomposition:
+      type: model
+      fields:
+        workflows:
+          type: list
+          items: WritersWorkflowSpec
+          description: Exactly four WritersRoom child runs.
+        lanes:
+          type: list
+          items: WritersLanePacket
+          description: Exactly four lane packets aligned to the child runs.
+        agent_message:
+          type: str
+          description: Short status update while the lanes execute.
+
+    WritersLaneVerdict:
+      type: model
+      fields:
+        lane_name:
+          type: str
+          description: Canonical lane identity.
+        bit_headline:
+          type: str
+          description: Short name for the strongest angle.
+        strongest_bit:
+          type: str
+          description: The strongest line or observation from this lane.
+        supporting_tag:
+          type: str
+          description: A fast extra topper for the bit.
+        score:
+          type: int
+          description: 0-100 score from this lane.
+        crowd_hook:
+          type: str
+          description: Quick audience hook or reaction line.
+        risk_note:
+          type: str
+          description: What could miss or go too far.
+        closer_idea:
+          type: str
+          description: How this lane would try to close the set.
+
+  registry:
+    WritersHostAgent: null
+    DecompositionAgent: WritersDecomposition
+    ResumeRouterAgent: null
+    HostAgent: null
+    RoastLaneAgent: WritersLaneVerdict
+    ObservationalLaneAgent: WritersLaneVerdict
+    AbsurdistLaneAgent: WritersLaneVerdict
+    CrowdWorkLaneAgent: WritersLaneVerdict

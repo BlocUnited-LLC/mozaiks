@@ -9,7 +9,7 @@
 # Consumers (transport, pack coordinator, journey orchestrator) interact
 # exclusively through the OrchestrationPort protocol and never import AG2.
 # ==============================================================================
-"""AG2OrchestrationAdapter — wraps AG2 a_run_group_chat behind OrchestrationPort.
+"""AG2OrchestrationAdapter — wraps AG2 group-chat execution behind OrchestrationPort.
 
 Responsibilities:
     - run()    → delegates to orchestration_patterns.run_workflow_orchestration()
@@ -154,8 +154,8 @@ class AG2OrchestrationAdapter:
     async def resume(self, request: ResumeRequest) -> RunResult:
         """Resume a paused workflow.
 
-        Under the hood this is the same AG2 call — ``run_workflow_orchestration``
-        with ``initial_agent_name_override`` set to ``resume_agent``.
+        Under the hood this is the same orchestration entrypoint, with
+        ``initial_agent_name_override`` set to ``resume_agent``.
 
         AG2's persistence layer replays prior messages and continues from where
         the conversation left off.  If ``injected_context`` is provided, it will

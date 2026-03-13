@@ -8,17 +8,10 @@
  * Fetches workflow configurations from backend
  */
 import config from './index';
+import platform from '../platform/index.js';
 
 function getAccessToken() {
-  if (typeof window !== 'undefined' && window.mozaiksAuth?.getAccessToken) {
-    return window.mozaiksAuth.getAccessToken();
-  }
-
-  if (typeof localStorage !== 'undefined') {
-    return localStorage.getItem('chatui_token') || localStorage.getItem('access_token');
-  }
-
-  return null;
+  return platform.getAccessToken();
 }
 
 class WorkflowConfig {
@@ -26,6 +19,7 @@ class WorkflowConfig {
     this.configs = new Map();
     this.defaultWorkflow = null; // Dynamic discovery from backend
     this.fetchInProgress = false;
+    this.fetchPromise = null;
     this.warnedNoWorkflow = false;
     this.autoFetchAttempted = false;
   }
@@ -35,71 +29,78 @@ class WorkflowConfig {
    */
   async fetchWorkflowConfigs() {
     if (this.fetchInProgress) {
-      return; // prevent concurrent duplicate fetches (StrictMode double invoke)
+      return this.fetchPromise; // wait for the real in-flight fetch to finish
     }
     this.fetchInProgress = true;
-    const baseUrlRaw = typeof config?.get === 'function' ? config.get('api.baseUrl') : undefined;
-    const baseUrl = typeof baseUrlRaw === 'string' && baseUrlRaw.endsWith('/') ? baseUrlRaw.slice(0, -1) : baseUrlRaw;
-    const path = '/api/workflows';
-    const urls = [];
-    if (typeof window !== 'undefined') {
-      urls.push(path);
-    }
-    if (baseUrl) {
-      urls.push(baseUrl + path);
-    }
-    const candidates = Array.from(new Set(urls));
-    const token = getAccessToken();
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    let lastError = null;
-    for (const url of candidates) {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5000);
-        console.log('� WorkflowRegistry: Fetching workflows from', url);
-        const response = await fetch(url, { signal: controller.signal, headers });
-        clearTimeout(timeout);
-        if (!response.ok) {
-          const txt = await response.text().catch(()=> '');
-          console.warn('⚠️ Workflow fetch non-OK', response.status, txt.slice(0,200));
-          lastError = new Error('status_'+response.status);
-          continue;
-        }
-        const data = await response.json();
-        console.log('🔍 Raw workflow data from backend:', data);
-        const workflows = [];
-        for (const [workflowName, wfCfg] of Object.entries(data)) {
-          workflows.push({ workflow_name: workflowName, ...wfCfg });
-        }
-        for (const workflow of workflows) {
-          this.configs.set(workflow.workflow_name, workflow);
-          const lowerKey = workflow.workflow_name.toLowerCase();
-          if (!this.configs.has(lowerKey)) this.configs.set(lowerKey, workflow);
-        }
-        console.log('✅ Loaded workflow configs:', workflows.map(w => w.workflow_name));
-        if (workflows.length > 0) {
-          if (!this.defaultWorkflow) {
-            this.defaultWorkflow = workflows[0].workflow_name;
-            console.log('🎯 Default workflow set to:', this.defaultWorkflow);
-          }
-        }
-        this.fetchInProgress = false;
-        this.warnedNoWorkflow = false;
-        return; // success
-      } catch (error) {
-        lastError = error;
-        if (error.name === 'AbortError') {
-          console.warn('⚠️ Workflow fetch timeout for', url);
-        } else {
-          console.warn('⚠️ Workflow fetch failed for', url, error.message);
-        }
-        // try next host
+    this.fetchPromise = (async () => {
+      const baseUrlRaw = typeof config?.get === 'function' ? config.get('api.baseUrl') : undefined;
+      const baseUrl = typeof baseUrlRaw === 'string' && baseUrlRaw.endsWith('/') ? baseUrlRaw.slice(0, -1) : baseUrlRaw;
+      const path = '/api/workflows';
+      const urls = [];
+      if (typeof window !== 'undefined') {
+        urls.push(path);
       }
-    }
-    if (lastError) {
-      console.warn('⚠️ All workflow fetch attempts failed. Operating with no configs. Last error:', lastError.message);
-    }
-    this.fetchInProgress = false;
+      if (baseUrl) {
+        urls.push(baseUrl + path);
+      }
+      const candidates = Array.from(new Set(urls));
+      const token = getAccessToken();
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      let lastError = null;
+      for (const url of candidates) {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 5000);
+          console.log('� WorkflowRegistry: Fetching workflows from', url);
+          const response = await fetch(url, { signal: controller.signal, headers });
+          clearTimeout(timeout);
+          if (!response.ok) {
+            const txt = await response.text().catch(()=> '');
+            console.warn('⚠️ Workflow fetch non-OK', response.status, txt.slice(0,200));
+            lastError = new Error('status_'+response.status);
+            continue;
+          }
+          const data = await response.json();
+          console.log('🔍 Raw workflow data from backend:', data);
+          const workflows = [];
+          for (const [workflowName, wfCfg] of Object.entries(data)) {
+            workflows.push({ workflow_name: workflowName, ...wfCfg });
+          }
+          this.configs.clear();
+          for (const workflow of workflows) {
+            this.configs.set(workflow.workflow_name, workflow);
+            const lowerKey = workflow.workflow_name.toLowerCase();
+            if (!this.configs.has(lowerKey)) this.configs.set(lowerKey, workflow);
+          }
+          console.log('✅ Loaded workflow configs:', workflows.map(w => w.workflow_name));
+          if (workflows.length > 0) {
+            const entryPointWorkflow = workflows.find((workflow) => workflow?.entry_point === true)?.workflow_name;
+            this.defaultWorkflow = entryPointWorkflow || workflows[0].workflow_name;
+            console.log('🎯 Default workflow set to:', this.defaultWorkflow);
+          } else {
+            this.defaultWorkflow = null;
+          }
+          this.warnedNoWorkflow = false;
+          return; // success
+        } catch (error) {
+          lastError = error;
+          if (error.name === 'AbortError') {
+            console.warn('⚠️ Workflow fetch timeout for', url);
+          } else {
+            console.warn('⚠️ Workflow fetch failed for', url, error.message);
+          }
+          // try next host
+        }
+      }
+      if (lastError) {
+        console.warn('⚠️ All workflow fetch attempts failed. Operating with no configs. Last error:', lastError.message);
+      }
+    })().finally(() => {
+      this.fetchInProgress = false;
+      this.fetchPromise = null;
+    });
+
+    return this.fetchPromise;
   }
 
   /**
@@ -111,6 +112,8 @@ class WorkflowConfig {
 
   /**
    * Get the workflow marked as entry_point in backend config.
+   * Canonical source is platform/config/ai.json; backend projects it onto
+   * the workflow configs returned by /api/workflows.
    * Returns null if no workflow has entry_point: true or configs aren't loaded yet.
    */
   getEntryPointWorkflow() {
@@ -173,6 +176,12 @@ class WorkflowConfig {
       if (k.toLowerCase() === target) return v;
     }
     return null;
+  }
+
+  resolveKnownWorkflowName(workflowname) {
+    if (!workflowname) return null;
+    const resolved = this.getWorkflowConfig(workflowname);
+    return resolved?.workflow_name || null;
   }
 
   /**

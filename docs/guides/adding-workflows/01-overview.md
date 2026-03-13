@@ -26,7 +26,7 @@ In Mozaiks, each of these would be an "agent" in your workflow.
 Every workflow is a folder with configuration files:
 
 ```
-workflows/
+platform/workflows/
 └── CustomerSupport/           # Your workflow folder
     ├── orchestrator.yaml      # How the conversation runs
     ├── agents.yaml            # Your AI agents
@@ -36,7 +36,7 @@ workflows/
         └── check_order.py
 ```
 
-The **HelloWorld** workflow in the repo is a complete example — we'll copy it as our starting point.
+The current platform example is the `Backstage` showcase under `platform/workflows/GreenRoom`, `platform/workflows/WritersRoom`, and `platform/workflows/MainStage`. Use those as live references instead of the retired legacy demo.
 
 ---
 
@@ -104,3 +104,4 @@ You should have:
 ---
 
 **Next:** [Backend Basics](02-backend-basics.md)
+

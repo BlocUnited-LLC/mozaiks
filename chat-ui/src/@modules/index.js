@@ -14,9 +14,9 @@
 // ==============================================================================
 
 // Vite glob import — scans platform/modules/*/ui/index.{js,jsx} at build time.
-// Path is relative to this file: ../../../../platform/modules/*/ui/index.js
+// Path is relative to this file: ../../../platform/modules/*/ui/index.js
 const moduleUIs = import.meta.glob(
-  '../../../../platform/modules/*/ui/index.{js,jsx}',
+  '../../../platform/modules/*/ui/index.{js,jsx}',
   { eager: true }
 );
 

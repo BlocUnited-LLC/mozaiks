@@ -7,17 +7,10 @@
 import React, { useState, useCallback } from 'react';
 import { FiMessageCircle, FiSend, FiX } from 'react-icons/fi';
 import config from '../../config';
+import platform from '../../platform/index.js';
 
 function getAccessToken() {
-  if (typeof window !== 'undefined' && window.mozaiksAuth?.getAccessToken) {
-    return window.mozaiksAuth.getAccessToken();
-  }
-
-  if (typeof localStorage !== 'undefined') {
-    return localStorage.getItem('chatui_token') || localStorage.getItem('access_token');
-  }
-
-  return null;
+  return platform.getAccessToken();
 }
 
 /**

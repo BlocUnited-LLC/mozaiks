@@ -1,0 +1,5 @@
+visual_agents:
+- WritersHostAgent
+- DecompositionAgent
+- HostAgent
+- user

@@ -369,7 +369,7 @@ class AG2PersistenceManager:
 
         Purpose:
         - Allows runtime to seed AG2 ContextVariables from persisted session metadata
-          (e.g., parent_chat_id, PatternSelection seeds for generator subruns).
+          (e.g., parent_chat_id, seeds for generator subruns).
 
         Notes:
         - Excludes messages for performance.

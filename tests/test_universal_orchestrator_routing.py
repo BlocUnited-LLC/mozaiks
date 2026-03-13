@@ -43,10 +43,8 @@ async def test_structured_event_routes_directly() -> None:
 async def test_free_text_event_uses_change_classifier() -> None:
     collector = _Collector()
     orchestrator = UniversalOrchestrator()
-    orchestrator.configure_routes(
-        change_type_routes={_uo.ChangeType.FOUNDATIONAL: "workflow.run:ValueEngineGroupChat"}
-    )
-    orchestrator.register_handler("workflow.run:ValueEngineGroupChat", collector.handler)
+    orchestrator.configure_routes(change_type_routes={_uo.ChangeType.FOUNDATIONAL: "workflow.run:ValueEngineGroupChat"})
+    orchestrator.register_handler("workflow.run:ValueEngine", collector.handler)
 
     result = await orchestrator.handle_free_text_event(
         {
@@ -59,7 +57,38 @@ async def test_free_text_event_uses_change_classifier() -> None:
 
     assert result.status == "accepted"
     assert collector.calls
-    assert collector.calls[0]["classification"]["change_type"] == "FOUNDATIONAL"
+    assert collector.calls[0]["change_intent"]["change_type"] == "FOUNDATIONAL"
+    assert collector.calls[0]["change_intent"]["target_workflow"] == "ValueEngine"
+    assert result.route == "custom"
+
+
+@pytest.mark.asyncio
+async def test_structured_change_intent_routes_directly() -> None:
+    collector = _Collector()
+    orchestrator = UniversalOrchestrator()
+    orchestrator.register_handler("workflow.run:ValueEngine", collector.handler)
+
+    result = await orchestrator.handle_structured_event(
+        {
+            "app_id": "app-1",
+            "user_id": "user-1",
+            "chat_id": "chat-3",
+            "change_intent": {
+                "change_type": "FOUNDATIONAL",
+                "change_scope": "foundational",
+                "requires_appspec_revision": True,
+                "requires_replan": True,
+                "requires_new_iteration": True,
+                "target_workflow": "ValueEngine",
+                "rationale": "major product pivot",
+                "confidence": 0.9,
+            },
+        }
+    )
+
+    assert result.status == "accepted"
+    assert collector.calls
+    assert collector.calls[0]["change_intent"]["target_workflow"] == "ValueEngine"
 
 
 @pytest.mark.asyncio

@@ -1,3 +1,5 @@
+import platform from '../platform/index.js';
+
 // Authentication adapter interface
 export class AuthAdapter {
   async getCurrentUser() {
@@ -109,7 +111,7 @@ export class TokenAuthAdapter extends AuthAdapter {
 
       if (response.ok) {
         const data = await response.json();
-        localStorage.setItem(this.tokenKey, data.token);
+        platform.storage.setItem(this.tokenKey, data.token);
         this.currentUser = data.user;
         this.notifyAuthStateChange(this.currentUser);
         return { success: true, user: this.currentUser };
@@ -122,7 +124,7 @@ export class TokenAuthAdapter extends AuthAdapter {
   }
 
   async logout() {
-    localStorage.removeItem(this.tokenKey);
+    platform.storage.removeItem(this.tokenKey);
     this.currentUser = null;
     this.notifyAuthStateChange(null);
     return { success: true };
@@ -134,8 +136,8 @@ export class TokenAuthAdapter extends AuthAdapter {
   }
   
   getAccessToken() {
-    // Get token from localStorage
-    return localStorage.getItem(this.tokenKey);
+    // Get token from the active platform storage.
+    return platform.storage.getItem(this.tokenKey);
   }
 
   onAuthStateChange(callback) {

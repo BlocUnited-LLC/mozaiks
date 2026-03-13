@@ -31,9 +31,15 @@ async def handle_switch_workflow(
     if not target_chat_id:
         raise ValueError("chat_id required for workflow switch")
 
-    ws_id = transport._get_conn_meta(chat_id).get("ws_id")
+    conn = transport._get_conn_meta(chat_id)
+    ws_id = conn.get("ws_id")
     if not ws_id:
-        raise ValueError("WebSocket ID not found in connection metadata")
+        # Recover gracefully when metadata was partially initialized.
+        ws_id = id(websocket)
+        if chat_id not in transport.connections:
+            transport.connections[chat_id] = {"websocket": websocket}
+        transport.connections[chat_id]["ws_id"] = ws_id
+        logger.warning(f"Recovered missing ws_id for chat {chat_id} using websocket identity")
 
     # Store frontend context in connection metadata
     if frontend_context and isinstance(frontend_context, dict):
@@ -44,6 +50,28 @@ async def handle_switch_workflow(
 
     # Switch workflow context
     active_context = session_registry.switch_workflow(ws_id, target_chat_id)
+    if not active_context:
+        # Attempt on-demand session hydration from persistence when registry drifted.
+        try:
+            pm = transport._get_or_create_persistence_manager()
+            coll = await pm._coll()
+            doc = await coll.find_one(
+                {"_id": target_chat_id},
+                {"workflow_name": 1, "app_id": 1, "user_id": 1, "artifact_instance_id": 1},
+            )
+            if doc and doc.get("workflow_name") and doc.get("app_id") and doc.get("user_id"):
+                active_context = session_registry.add_workflow(
+                    ws_id=ws_id,
+                    chat_id=target_chat_id,
+                    workflow_name=str(doc.get("workflow_name")),
+                    app_id=str(doc.get("app_id")),
+                    user_id=str(doc.get("user_id")),
+                    artifact_id=str(doc.get("artifact_instance_id")) if doc.get("artifact_instance_id") else None,
+                    auto_activate=True,
+                )
+        except Exception as hydrate_err:
+            logger.warning(f"Failed to hydrate workflow context for {target_chat_id}: {hydrate_err}")
+
     if not active_context:
         raise ValueError(f"Workflow {target_chat_id} not found or already completed")
 
@@ -60,6 +88,19 @@ async def handle_switch_workflow(
         },
         "timestamp": utc_timestamp()
     })
+
+    # UserDriven UX: when switching from Ask -> Workflow, emit pre-run bootstrap
+    # if this workflow chat has no transcript yet. We bypass only the persisted
+    # "sent" guard here and use per-session dedupe to avoid duplicate emits on
+    # repeated toggles within the same websocket session.
+    await transport._emit_userdriven_bootstrap_if_needed(
+        chat_id=target_chat_id,
+        user_id=active_context.user_id,
+        workflow_name=active_context.workflow_name,
+        app_id=active_context.app_id,
+        ignore_sent_guard=True,
+        session_dedupe_token=f"{ws_id}:{target_chat_id}",
+    )
 
 
 async def handle_start_workflow(

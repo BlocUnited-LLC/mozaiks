@@ -51,10 +51,11 @@ except ImportError:
         pass
     class RunCompletionEvent:  # type: ignore[no-redef]
         pass
-# Handoff-to-user detection: AG2 swarm emits this when transitioning to RevertToUserTarget
+# Handoff-to-user detection: unified AG2 group chats emit this when transitioning
+# to RevertToUserTarget.
 try:
+    from autogen.agentchat.group import RevertToUserTarget
     from autogen.agentchat.group.events import AfterWorksTransitionEvent
-    from autogen.agentchat.group._swarm_group_chat import RevertToUserTarget
     _HAS_HANDOFF_EVENTS = True
 except ImportError:
     _HAS_HANDOFF_EVENTS = False
@@ -73,7 +74,6 @@ from .context import DerivedContextManager
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.observability.ag2_runtime_logger import ag2_logging_session
 from mozaiksai.core.observability.performance_manager import get_performance_manager
-from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
 
 from .validation import SENTINEL_STATUS
 
@@ -85,6 +85,15 @@ from .messages import (
     safe_context_snapshot as _safe_context_snapshot,
 )
 from .execution import create_ag2_pattern
+from .orchestration_utils import (
+    get_run_registry_summary,
+    _cancel_ag2_task,
+    _normalize_human_in_the_loop,
+    _load_workflow_config,
+    _safe_float_value,
+    _reconcile_final_usage,
+    log_conversation_to_agent_chat_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -112,86 +121,12 @@ logging.getLogger("autogen.io").setLevel(logging.INFO)
 logging.getLogger("autogen.agentchat.group").setLevel(logging.INFO)
 
 # ===================================================================
-# HEALTH ENDPOINT SUPPORT
-# ===================================================================
-def get_run_registry_summary() -> Dict[str, Any]:
-    """Simple health endpoint response - no actual registry tracking"""
-    return {
-        'active_count': 0,
-        'total_runs': 0,
-        'runs': [],
-        'note': 'Registry tracking disabled for simplicity'
-    }
-
-
-def _cancel_ag2_task(response: Any, *, logger: Any = None, label: str = "") -> None:
-    """Cancel the internal AG2 task that may block on IOStream.input().
-
-    When a swarm hands off to the user (RevertToUserTarget), the AG2
-    group-chat task is frozen waiting for input that will never come.
-    Cancelling it prevents resource leaks.
-    """
-    _log = logger or logging.getLogger(__name__)
-    task = getattr(response, "_task", None)
-    if task is None:
-        # Some AG2 versions store it differently
-        task = getattr(response, "task", None)
-    if task is not None and hasattr(task, "cancel"):
-        task.cancel()
-        _log.info(f" [{label}] Cancelled zombie AG2 task after handoff_to_user")
-    else:
-        _log.debug(f" [{label}] No AG2 task to cancel (response type: {type(response).__name__})")
-
-# ===================================================================
 # NOTE: Helper functions have been extracted to separate modules:
+# - orchestration_utils.py: Config loading, usage reconciliation, task management
 # - message_utils.py: Message normalization, text extraction, agent name resolution
 # - event_payload_builder.py: UI event payload construction
 # - pattern_factory.py: AG2 pattern creation
-# This refactoring reduces orchestration_patterns.py from 2800+ to ~2000 lines
-# and improves maintainability through separation of concerns.
 # ===================================================================
-
-# ===================================================================
-# ORCHESTRATION HELPERS
-# ===================================================================
-
-def _normalize_human_in_the_loop(value) -> bool:
-    """Normalize human_in_the_loop config values to a strict boolean.
-
-    Accepts booleans directly, and common string/int representations:
-    - True-y: "true", "yes", "1", "on", "always"
-    - False-y: "false", "no", "0", "of", "never"
-    Any other value defaults to False.
-    """
-    if isinstance(value, bool):
-        return value
-    # Handle integers passed through env parsing, etc.
-    try:
-        if isinstance(value, (int, float)):
-            return bool(int(value))
-    except Exception:
-        pass
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in {"true", "yes", "1", "on", "always"}:
-            return True
-        if v in {"false", "no", "0", "of", "never"}:
-            return False
-    return False
-
-"""Internal helper: load workflow config block."""
-def _load_workflow_config(workflow_name: str):
-    from .workflow_manager import workflow_manager
-    config = workflow_manager.get_config(workflow_name)
-    return {
-        "config": config,
-        "max_turns": config.get("max_turns", 50),
-        "orchestration_pattern": config.get("orchestration_pattern", "AutoPattern"),
-        "startup_mode": config.get("startup_mode", "AgentDriven"),
-        "human_in_loop": _normalize_human_in_the_loop(config.get("human_in_the_loop", False)),
-        "initial_agent_name": config.get("initial_agent", None),
-    }
-
 
 async def _resume_or_initialize_chat(
     persistence_manager: AG2PersistenceManager,
@@ -305,11 +240,10 @@ async def _resume_or_initialize_chat(
                 wf_logger.debug(f" Failed to persist initial messages for {chat_id}: {init_persist_err}")
 
     if not initial_messages:
-        seed = config.get("initial_message") or config.get("initial_message_to_user")
+        seed = config.get("initial_message")
         if seed:
-            seed_kind = "initial_message" if config.get("initial_message") else "initial_message_to_user"
             initial_messages = [
-                {"role": "user", "name": "user", "content": seed, "_mozaiks_seed_kind": seed_kind}
+                {"role": "user", "name": "user", "content": seed, "_mozaiks_seed_kind": "initial_message"}
             ]
 
             if os.getenv("ENABLE_MANUAL_INITIAL_PERSIST") == "1":
@@ -610,7 +544,19 @@ async def _stream_events(
     from .stream import EventStreamProcessor, StreamContext, StreamState
     from .outputs import get_structured_outputs_for_workflow
     from collections import Counter
-    from autogen.agentchat import a_run_group_chat
+    from autogen.agentchat import a_run_group_chat_iter
+    import inspect as _inspect
+
+    async def _resolve_run_iter_response(value: Any) -> Any:
+        """
+        Normalize AG2 run/resume return types across versions.
+
+        Some versions return an awaitable, others return AsyncRunIterResponse
+        directly. This helper supports both.
+        """
+        if _inspect.isawaitable(value):
+            return await value
+        return value
 
     # Get structured outputs registry
     try:
@@ -619,13 +565,17 @@ async def _stream_events(
         structured_registry = {}
         wf_logger.debug(f"[{workflow_name_upper}] Structured outputs unavailable: {so_err}")
 
-    # Identify auto-tool agents
+    # Identify agents with structured outputs and agents that additionally
+    # require auto-tool execution.
+    structured_agents = set(structured_registry.keys())
     auto_tool_agents = {
         name for name, agent in agents.items()
         if getattr(agent, '_mozaiks_auto_tool_mode', False)
     }
 
     # Get event dispatcher
+    from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
+
     dispatcher = get_event_dispatcher()
 
     # Determine resume mode
@@ -634,7 +584,6 @@ async def _stream_events(
     # Initialize AG2 response
     if resumed_mode:
         wf_logger.info(f" [AG2_RESUME] Resuming chat {chat_id}")
-        import inspect as _inspect
         _pgc = getattr(pattern, "prepare_group_chat", None)
         if callable(_pgc):
             _sig = _inspect.signature(_pgc)
@@ -650,12 +599,32 @@ async def _stream_events(
             group_manager = prep_res[1]
         else:
             group_manager = getattr(pattern, "group_manager", None)
-        if not group_manager or not hasattr(group_manager, "a_resume"):
-            raise RuntimeError("Pattern missing required a_resume capability")
-        response = await group_manager.a_resume(messages=initial_messages, max_rounds=max_turns)
+        if group_manager and hasattr(group_manager, "a_resume"):
+            response = await _resolve_run_iter_response(
+                group_manager.a_resume(messages=initial_messages, max_rounds=max_turns)
+            )
+        else:
+            # AG2 >=0.11 may expose iterator execution without group_manager.a_resume.
+            # Fall back to native run_iter resume semantics using persisted messages.
+            wf_logger.warning(
+                " [AG2_RESUME] Pattern lacks a_resume; falling back to a_run_group_chat_iter for resume"
+            )
+            response = await _resolve_run_iter_response(
+                a_run_group_chat_iter(
+                    pattern=pattern,
+                    messages=initial_messages,
+                    max_rounds=max_turns,
+                )
+            )
     else:
         wf_logger.info(f" [AG2_RUN] Starting NEW chat {chat_id}")
-        response = await a_run_group_chat(pattern=pattern, messages=initial_messages, max_rounds=max_turns)
+        response = await _resolve_run_iter_response(
+            a_run_group_chat_iter(
+                pattern=pattern,
+                messages=initial_messages,
+                max_rounds=max_turns,
+            )
+        )
 
     # Build StreamContext
     ctx = StreamContext(
@@ -672,6 +641,7 @@ async def _stream_events(
         dispatcher=dispatcher,
         agents=agents,
         structured_registry=structured_registry,
+        structured_agents=structured_agents,
         auto_tool_agents=auto_tool_agents,
         max_turns=max_turns,
         wf_logger=wf_logger,
@@ -826,6 +796,35 @@ async def run_workflow_orchestration(
 
             # Track resume mode early so downstream logging can reference it safely
             resumed_mode = bool(resumed_messages)
+
+            # Emit optional user-facing bootstrap text for NEW workflow runs.
+            # This is presentation-only and intentionally separate from
+            # `initial_message`, which seeds agent execution.
+            ui_bootstrap_message = config.get("initial_message_to_user")
+            if (
+                not resumed_mode
+                and isinstance(ui_bootstrap_message, str)
+                and ui_bootstrap_message.strip()
+                and startup_mode != "UserDriven"
+            ):
+                try:
+                    await transport.send_event_to_ui(
+                        {
+                            "kind": "text",
+                            "event_type": "TextEvent",
+                            "agent": "Assistant",
+                            "content": ui_bootstrap_message.strip(),
+                            "source": "orchestrator.initial_message_to_user",
+                        },
+                        chat_id,
+                    )
+                except Exception as ui_seed_err:
+                    wf_logger.warning(
+                        " [%s] Failed to emit initial_message_to_user for chat %s: %s",
+                        workflow_name_upper,
+                        chat_id,
+                        ui_seed_err,
+                    )
 
             # -----------------------------------------------------------------
             # 3) LLM config (per-chat cache seed)
@@ -1250,107 +1249,16 @@ async def run_workflow_orchestration(
                 # keep the workflow IN_PROGRESS instead of COMPLETED.
                 return result_payload
 
-            # Final usage reconciliation using AG2's native gather_usage_summary
-            try:
-                from autogen import gather_usage_summary
-
-                # Get authoritative usage data from AG2
-                agent_list = list(agents.values())
-                if agent_list:
-                    final_summary = gather_usage_summary(agent_list)
-
-                    # Extract AG2 final totals
-                    def _safe_float_local(value: Any) -> float:
-                        """Convert mixed autogen values to float safely."""
-                        try:
-                            if isinstance(value, dict):
-                                if "total_cost" in value:
-                                    return float(value.get("total_cost", 0.0))
-                                values = list(value.values())
-                                if values:
-                                    return float(values[0])
-                                return 0.0
-                            return float(value)
-                        except (TypeError, ValueError):
-                            return 0.0
-
-                    ag2_total_cost = _safe_float_local(final_summary.get("total_cost", 0.0))
-                    ag2_usage_including_cached = final_summary.get("usage_including_cached", {})
-                    ag2_usage_excluding_cached = final_summary.get("usage_excluding_cached", {})
-
-                    # Log comprehensive AG2 final summary
-                    wf_logger.info(
-                        "[AG2_FINAL_SUMMARY] Authoritative usage data | "
-                        f"total_cost=${ag2_total_cost:.4f} | "
-                        f"with_cache={ag2_usage_including_cached} | "
-                        f"without_cache={ag2_usage_excluding_cached}"
-                    )
-
-                    # Compare AG2 totals vs persisted ChatSessions counters (avoid double counting).
-                    persisted_prompt = 0
-                    persisted_completion = 0
-                    persisted_cost = 0.0
-                    try:
-                        coll = await persistence_manager._coll()
-                        persisted = await coll.find_one(
-                            {"_id": chat_id, "app_id": app_id},
-                            {
-                                "usage_prompt_tokens_final": 1,
-                                "usage_completion_tokens_final": 1,
-                                "usage_total_cost_final": 1,
-                            },
-                        )
-                        if isinstance(persisted, dict):
-                            persisted_prompt = int(persisted.get("usage_prompt_tokens_final") or 0)
-                            persisted_completion = int(persisted.get("usage_completion_tokens_final") or 0)
-                            persisted_cost = float(persisted.get("usage_total_cost_final") or 0.0)
-                    except Exception as read_err:
-                        wf_logger.debug(f"[FINAL_RECONCILIATION] Failed to read persisted usage: {read_err}")
-
-                    ag2_prompt_total = int(ag2_usage_excluding_cached.get("prompt_tokens", 0) or 0)
-                    ag2_completion_total = int(ag2_usage_excluding_cached.get("completion_tokens", 0) or 0)
-
-                    final_cost_delta = max(0.0, ag2_total_cost - persisted_cost)
-                    final_prompt_delta = max(0, ag2_prompt_total - persisted_prompt)
-                    final_completion_delta = max(0, ag2_completion_total - persisted_completion)
-
-                    if final_cost_delta > 0.01 or final_prompt_delta or final_completion_delta:
-                        wf_logger.warning(
-                            "[FINAL_RECONCILIATION] Delta detected | "
-                            f"ag2_total=${ag2_total_cost:.4f} persisted_total=${persisted_cost:.4f} | "
-                            f"delta=${final_cost_delta:.4f} prompt_delta={final_prompt_delta} completion_delta={final_completion_delta}"
-                        )
-                        await persistence_manager.update_session_metrics(
-                            chat_id=chat_id,
-                            app_id=app_id,
-                            user_id=user_id or "unknown",
-                            workflow_name=workflow_name,
-                            prompt_tokens=final_prompt_delta,
-                            completion_tokens=final_completion_delta,
-                            cost_usd=final_cost_delta,
-                            agent_name="ag2_final_reconciliation",
-                            event_ts=datetime.now(UTC)
-                        )
-                    else:
-                        wf_logger.info(
-                            "o. [FINAL_RECONCILIATION] Usage tracking accurate | "
-                            f"ag2=${ag2_total_cost:.4f} persisted=${persisted_cost:.4f} | "
-                            f"delta=${final_cost_delta:.4f}"
-                        )
-
-                    # Log per-agent usage summaries for visibility
-                    for agent_name, agent in agents.items():
-                        try:
-                            if hasattr(agent, 'print_usage_summary'):
-                                wf_logger.debug(f" [AGENT_USAGE] {agent_name} summary logged to stdout")
-                                # Note: print_usage_summary() outputs to stdout, captured by AG2 runtime logging
-                        except Exception as agent_summary_err:
-                            wf_logger.debug(f"Failed to log usage summary for {agent_name}: {agent_summary_err}")
-
-            except ImportError:
-                wf_logger.warning(" [FINAL_RECONCILIATION] autogen.gather_usage_summary not available")
-            except Exception as reconcile_err:
-                wf_logger.error(f" [FINAL_RECONCILIATION] Failed: {reconcile_err}")
+            # Final usage reconciliation
+            await _reconcile_final_usage(
+                agents=agents,
+                persistence_manager=persistence_manager,
+                chat_id=chat_id,
+                app_id=app_id,
+                user_id=user_id,
+                workflow_name=workflow_name,
+                wf_logger=wf_logger,
+            )
 
             max_turns_reached = getattr(response, 'max_turns_reached', False)
 
@@ -1473,89 +1381,3 @@ async def run_workflow_orchestration(
             pass
 
     return result_payload
-
-
-# ==============================================================================
-# NOTE: create_ag2_pattern function has been extracted to pattern_factory.py
-# This refactoring improves modularity and maintainability.
-# Import: from .pattern_factory import create_ag2_pattern
-async def log_conversation_to_agent_chat_file(conversation_history, chat_id: str, app_id: str, workflow_name: str):
-    """
-    Log the complete AG2 conversation to the agent chat log file.
-    """
-    try:
-        agent_chat_logger = get_workflow_logger(
-            "agent_messages",
-            base_logger=logging.getLogger("mozaiks.workflow.agent_messages"),
-        )
-
-        if not conversation_history:
-            agent_chat_logger.info(f" [{workflow_name}] No conversation history to log for chat {chat_id}")
-            return
-
-        msg_count = len(conversation_history) if hasattr(conversation_history, '__len__') else 0
-        agent_chat_logger.info(f" [{workflow_name}] Logging {msg_count} messages to agent chat file for chat {chat_id}")
-
-        for i, message in enumerate(conversation_history):
-            try:
-                sender_name = "Unknown"
-                content = ""
-
-                if isinstance(message, dict):
-                    if 'name' in message and message['name']:
-                        sender_name = message['name']
-                    elif 'sender' in message and message['sender']:
-                        sender_name = message['sender']
-                    elif 'from' in message and message['from']:
-                        sender_name = message['from']
-
-                    if 'content' in message and message['content'] is not None:
-                        content = message['content']
-                    elif 'message' in message and message['message'] is not None:
-                        content = message['message']
-                    elif 'text' in message and message['text'] is not None:
-                        content = message['text']
-                elif isinstance(message, str):
-                    content = message
-                elif hasattr(message, 'name') and hasattr(message, 'content'):
-                    sender_name = getattr(message, 'name', 'Unknown')
-                    content = getattr(message, 'content', '')
-                elif hasattr(message, 'sender') and hasattr(message, 'message'):
-                    sender_name = getattr(message, 'sender', 'Unknown')
-                    content = getattr(message, 'message', '')
-                else:
-                    content = str(message)
-
-                clean_content = content if isinstance(content, str) else str(content)
-                clean_content = clean_content.strip() if clean_content else ""
-
-                if clean_content:
-                    agent_chat_logger.info(
-                        f"AGENT_MESSAGE | Chat: {chat_id} | App: {app_id} | Agent: {sender_name} | Message #{i+1}: {clean_content}"
-                    )
-                    # Skip user proxy messages to prevent echo back to UI
-                    message_role = message.get('role') if isinstance(message, dict) else None
-                    if not (sender_name.lower() in ("user", "userproxy", "userproxyagent") or message_role == 'user'):
-                        try:
-                            from mozaiksai.core.transport.simple_transport import SimpleTransport
-                            transport = await SimpleTransport.get_instance()
-                            if transport:
-                                await transport.send_chat_message(
-                                    message=clean_content,
-                                    agent_name=sender_name,
-                                    chat_id=chat_id,
-                                    metadata={"source": "ag2_conversation", "message_index": i+1}
-                                )
-                        except Exception as ui_error:
-                            logger.debug(f"UI forwarding failed for message {i+1}: {ui_error}")
-                else:
-                    agent_chat_logger.debug(f"EMPTY_MESSAGE | Chat: {chat_id} | Agent: {sender_name} | Message #{i+1}: (empty)")
-
-            except Exception as msg_error:
-                agent_chat_logger.error(f" Failed to log message {i+1} in chat {chat_id}: {msg_error}")
-
-        agent_chat_logger.info(f" [{workflow_name}] Successfully logged {msg_count} messages for chat {chat_id}")
-
-    except Exception as e:
-        logger.error(f" Failed to log conversation to agent chat file for {chat_id}: {e}")
-        # Do not raise

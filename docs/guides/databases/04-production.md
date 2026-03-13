@@ -108,3 +108,4 @@ Wipes all chat history, users (except `dev` test user), and workflow state.
 
 ??? question "Can I use SQLite instead of Postgres?"
     For development only. Keycloak's `start-dev` mode can use embedded H2 (remove `KC_DB*` vars). **Not for production** — H2 doesn't support clustering.
+

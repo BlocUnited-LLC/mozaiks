@@ -1,7 +1,7 @@
 /**
  * Core Bridge — HTTP client for mozaikscore application services
  *
- * Provides frontend access to mozaikscore (port 8001) endpoints:
+ * Provides frontend access to mozaikscore endpoints (default port 8000):
  *   - Navigation config
  *   - Settings CRUD
  *   - Notifications
@@ -15,33 +15,31 @@
  * @module @mozaiks/chat-ui/coreBridge
  */
 
+import platform from './platform/index.js';
+
 // ---------------------------------------------------------------------------
 // Base URL resolution
 // ---------------------------------------------------------------------------
 
 function getCoreBaseUrl() {
-  // Explicit env var takes priority
-  if (import.meta.env.VITE_CORE_URL) {
-    return import.meta.env.VITE_CORE_URL.replace(/\/+$/, '');
-  }
-  // Same-origin fallback with core port
-  const protocol = window.location.protocol;
-  const host = window.location.hostname;
-  const port = import.meta.env.VITE_CORE_PORT || '8001';
-  return `${protocol}//${host}:${port}`;
+  return platform.resolveHttpUrl({
+    explicitUrl: import.meta.env.VITE_CORE_URL,
+    // Default to 8000 because this repo commonly runs a unified backend on 8000.
+    // Set VITE_CORE_URL or VITE_CORE_PORT to override for split deployments.
+    port: import.meta.env.VITE_CORE_PORT || '8000',
+  });
 }
+
+// Optional service capability flags. When an endpoint family is missing in the
+// current backend, degrade once and avoid repeated failing requests.
+let notificationsApiUnavailable = false;
 
 // ---------------------------------------------------------------------------
 // Auth header helpers
 // ---------------------------------------------------------------------------
 
 function getAccessToken() {
-  // Prefer window-level auth (set by Keycloak adapter)
-  if (window.mozaiksAuth?.token) {
-    return window.mozaiksAuth.token;
-  }
-  // Fallback: localStorage
-  return localStorage.getItem('access_token') || null;
+  return platform.getAccessToken();
 }
 
 function buildAuthHeaders(token) {
@@ -122,24 +120,45 @@ export async function resetSettings(pluginName) {
 // ---------------------------------------------------------------------------
 
 export async function fetchNotifications(limit = 20, skip = 0) {
-  return coreFetch(`/api/notifications?limit=${limit}&skip=${skip}`);
+  if (notificationsApiUnavailable) return { notifications: [], count: 0 };
+  try {
+    return await coreFetch(`/api/notifications?limit=${limit}&skip=${skip}`);
+  } catch (err) {
+    if (err?.status === 404) {
+      notificationsApiUnavailable = true;
+      return { notifications: [], count: 0 };
+    }
+    throw err;
+  }
 }
 
 export async function fetchNotificationCount() {
-  return coreFetch('/api/notifications/count');
+  if (notificationsApiUnavailable) return { count: 0 };
+  try {
+    return await coreFetch('/api/notifications/count');
+  } catch (err) {
+    if (err?.status === 404) {
+      notificationsApiUnavailable = true;
+      return { count: 0 };
+    }
+    throw err;
+  }
 }
 
 export async function markNotificationRead(notificationId) {
+  if (notificationsApiUnavailable) return { success: false };
   return coreFetch(`/api/notifications/${encodeURIComponent(notificationId)}/read`, {
     method: 'PUT',
   });
 }
 
 export async function markAllNotificationsRead() {
+  if (notificationsApiUnavailable) return { success: false };
   return coreFetch('/api/notifications/read-all', { method: 'PUT' });
 }
 
 export async function deleteNotification(notificationId) {
+  if (notificationsApiUnavailable) return { success: false };
   return coreFetch(`/api/notifications/${encodeURIComponent(notificationId)}`, {
     method: 'DELETE',
   });

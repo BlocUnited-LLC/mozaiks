@@ -6,7 +6,7 @@ This guide covers the core YAML configuration files that define your workflow's 
 
 ## File Structure
 
-Every workflow lives in `workflows/<YourWorkflow>/` and contains:
+Every workflow lives in `platform/workflows/<YourWorkflow>/` and contains:
 
 | File | Purpose |
 |------|---------|
@@ -33,10 +33,10 @@ Every workflow lives in `workflows/<YourWorkflow>/` and contains:
 
 ---
 
-## Quick Start: Copy HelloWorld
+## Quick Start: Copy an Existing Workflow
 
 ```powershell
-Copy-Item -Recurse workflows/HelloWorld workflows/MyWorkflow
+Copy-Item -Recurse platform/workflows/GreenRoom platform/workflows/MyWorkflow
 ```
 
 Rename the folder to **PascalCase** (e.g., `SupportBot`, `OnboardingFlow`).
@@ -54,6 +54,7 @@ human_in_the_loop: true            # user participates in conversation
 startup_mode: AgentDriven          # AgentDriven | UserDriven | BackendOnly
 initial_agent: MyFirstAgent        # which agent speaks first
 initial_message: "MyFirstAgent: start the workflow."
+initial_message_to_user: null      # optional UI-only greeting/instruction
 ```
 
 ### Key Fields Explained
@@ -64,6 +65,14 @@ initial_message: "MyFirstAgent: start the workflow."
 | `max_turns` | Prevents runaway conversations | 10-50 typical |
 | `startup_mode` | Who initiates? | `AgentDriven`, `UserDriven`, `BackendOnly` |
 | `initial_agent` | First agent to speak | Agent name from agents.yaml |
+
+### Startup mode semantics (runtime behavior)
+
+- `AgentDriven`: runtime can auto-start AG2 for a **fresh** chat session. `initial_message` is used as the seed that kicks off orchestration.
+- `UserDriven`: runtime does **not** auto-start on connect. Show `initial_message_to_user`, then orchestration starts on the first real user input.
+- `BackendOnly`: no UI-driven kickoff; orchestration is expected to be triggered by backend/API flows.
+
+`initial_agent` is the first AG2 agent once a run starts. It should generally be an agent from `agents.yaml`, not `"user"`.
 
 ---
 
@@ -206,3 +215,4 @@ If missing, check:
 
 - [Tools](03-tools.md) — Add capabilities to your agents
 - [UI Components](04-ui-components.md) — Create interactive elements
+

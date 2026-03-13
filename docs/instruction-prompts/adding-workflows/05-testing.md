@@ -1,315 +1,123 @@
 # Instruction Prompt: Testing a Workflow
 
-**Task:** Verify a workflow is configured correctly and works end-to-end
+**Task:** Verify a workflow is configured correctly and works end to end
 
-**Complexity:** Low (verification and debugging)
+**Complexity:** Low
 
 ---
 
 ## Context for AI Agent
 
-You are helping a user test their MozaiksAI workflow. This involves checking configuration, verifying the workflow loads, and testing all components work together.
+You are helping a user test a workflow that lives under
+`platform/workflows/[WorkflowName]/`.
+
+Workflow UI components, if any, live under
+`platform/workflows/[WorkflowName]/ui/` and are auto-discovered by the shared
+shell.
 
 ---
 
-## Step 1: Gather Information
+## Step 1: Validate File Structure
 
-Ask the user:
+```powershell
+Get-ChildItem -Path "platform/workflows/[WorkflowName]" -Recurse
+```
 
-1. **"What is your workflow name?"**
-2. **"Does it have UI tools?"** (Components that render in chat)
-3. **"Is it single-agent or multi-agent?"**
+Expected core files:
+
+- `orchestrator.yaml`
+- `agents.yaml`
+- `handoffs.yaml`
+- `context_variables.yaml`
+- `structured_outputs.yaml`
+- `tools.yaml`
+- `ui_config.yaml`
+- `hooks.yaml`
+- `tools/*.py`
 
 ---
 
-## Step 2: Validate Configuration Files
+## Step 2: Validate Workflow Config
 
-Run these checks in order:
+Check:
 
-### Check 1: File Structure
 ```powershell
-# List workflow files
-Get-ChildItem -Path "workflows/[WorkflowName]" -Recurse
-
-# Expected structure:
-# workflows/[WorkflowName]/
-# ├── orchestrator.yaml
-# ├── agents.yaml
-# ├── handoffs.yaml
-# ├── tools.yaml
-# ├── context_variables.yaml
-# └── tools/
-#     └── *.py files
+Get-Content "platform/workflows/[WorkflowName]/orchestrator.yaml"
+Get-Content "platform/workflows/[WorkflowName]/agents.yaml"
+Get-Content "platform/workflows/[WorkflowName]/handoffs.yaml"
+Get-Content "platform/workflows/[WorkflowName]/tools.yaml"
 ```
 
-### Check 2: orchestrator.yaml
+Verify:
+
+- `workflow_name` matches the folder name exactly
+- `initial_agent` exists in `agents.yaml`
+- handoff agent names exist
+- tool declarations point to real Python files and functions
+
+Optional syntax check:
+
 ```powershell
-# Read and validate
-Get-Content "workflows/[WorkflowName]/orchestrator.yaml"
-
-# Verify:
-# - workflow_name matches folder name exactly (case-sensitive)
-# - initial_agent exists in agents.yaml
-# - startup_mode is valid (AgentDriven, UserDriven, BackendOnly)
-```
-
-### Check 3: agents.yaml
-```powershell
-Get-Content "workflows/[WorkflowName]/agents.yaml"
-
-# Verify:
-# - At least one agent defined
-# - Each agent has name and prompt_sections
-# - Agent names are unique
-```
-
-### Check 4: handoffs.yaml (if multi-agent)
-```powershell
-Get-Content "workflows/[WorkflowName]/handoffs.yaml"
-
-# Verify:
-# - from_agent and to_agent match agent names exactly
-# - No circular handoffs without exit conditions
-```
-
-### Check 5: tools.yaml
-```powershell
-Get-Content "workflows/[WorkflowName]/tools.yaml"
-
-# For each tool, verify:
-# - agent matches an agent name
-# - file exists in tools/ folder
-# - function matches Python function name
-```
-
-### Check 6: Tool Python Files
-```powershell
-# List tool files
-Get-ChildItem "workflows/[WorkflowName]/tools/*.py"
-
-# For each file, verify:
-# - Function is async
-# - Function returns Dict[str, Any]
-# - No syntax errors
-python -c "from workflows.[WorkflowName].tools.[tool_name] import [function_name]; print('OK')"
+python -m py_compile "platform/workflows/[WorkflowName]/tools/[tool_name].py"
 ```
 
 ---
 
-## Step 3: Check Frontend (UI Tools Only)
+## Step 3: Validate Workflow UI
 
-If the workflow has UI tools:
+If the workflow uses UI tools:
 
-### Check 7: Components Exist
 ```powershell
-Get-ChildItem "chat-ui/src/workflows/[WorkflowName]/components/"
-
-# Should see:
-# - index.js
-# - [ComponentName].js for each UI tool
+Get-ChildItem "platform/workflows/[WorkflowName]/ui/"
+Get-Content "platform/workflows/[WorkflowName]/ui/index.js"
+Get-Content "chat-ui/src/@chat-workflows/index.js"
 ```
 
-### Check 8: Components Exported
-```powershell
-Get-Content "chat-ui/src/workflows/[WorkflowName]/components/index.js"
+Verify:
 
-# Verify:
-# - Each component imported
-# - Each component exported with key matching tools.yaml ui.component
-```
-
-### Check 9: Workflow Registered
-```powershell
-Get-Content "chat-ui/src/workflows/index.js"
-
-# Verify:
-# - Import statement for [WorkflowName]Components
-# - Entry in WORKFLOW_REGISTRY
-```
+- `ui/index.js` exists
+- every UI tool component is exported
+- the shared workflow registry is using auto-discovery, not manual registration
 
 ---
 
 ## Step 4: Test Workflow Loading
 
 ```powershell
-# Start server if not running
-python -m mozaiksai.main
-
-# Check workflows endpoint
 Invoke-RestMethod -Uri "http://localhost:8000/api/workflows"
 ```
 
-Expected: Your workflow appears in the list
+Expected result: the workflow appears in the list.
 
-If missing, check server logs:
-```powershell
-# Look for loading errors
-# Common issues:
-# - YAML syntax errors
-# - workflow_name mismatch
-# - Missing required files
-```
+If the app should default into it, verify `platform/config/ai.json` contains the
+correct `workflows.entry_point` value.
 
 ---
 
 ## Step 5: Test Conversation Flow
 
-### Create Test Chat
-```powershell
-$body = @{
-    workflow_name = "[WorkflowName]"
-    app_id = "test-app"
-    user_id = "test-user"
-} | ConvertTo-Json
+1. Start or restart the backend.
+2. Open the frontend.
+3. Select the workflow or boot through the configured entry workflow.
+4. Send a message that exercises the main path.
+5. Verify agent replies, handoffs, and tool execution.
 
-$response = Invoke-RestMethod -Uri "http://localhost:8000/api/chat" -Method POST -ContentType "application/json" -Body $body
-$chatId = $response.chat_id
-Write-Host "Chat ID: $chatId"
-```
+For UI tools:
 
-### Test Messages
-```powershell
-# Send test message
-$message = @{ content = "Hello, I need help" } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://localhost:8000/api/chat/$chatId/message" -Method POST -ContentType "application/json" -Body $message
-```
-
-### Verify Agent Response
-Check that:
-- Agent responds appropriately to the message
-- Response matches agent's personality/role
-- No error messages in response
+1. Trigger the tool.
+2. Verify the component from `platform/workflows/[WorkflowName]/ui/` renders.
+3. Submit or cancel it.
+4. Verify the workflow receives the response.
 
 ---
 
-## Step 6: Test Tools
+## Step 6: Report Results
 
-### Standard Tools
-1. Identify a message that should trigger the tool
-2. Send the message
-3. Verify tool is called (check server logs)
-4. Verify agent uses tool response
+Summarize:
 
-### UI Tools
-1. Identify trigger message
-2. Send message
-3. Open chat UI in browser
-4. Verify component renders
-5. Submit the component
-6. Verify agent receives response
+- whether the workflow loaded
+- whether agents responded correctly
+- whether tools executed correctly
+- whether workflow UI rendered correctly
+- any file-level issues that still need fixing
 
----
-
-## Step 7: Test Handoffs (Multi-Agent)
-
-For each handoff rule:
-
-1. Start fresh conversation
-2. Send message matching handoff condition
-3. Verify different agent responds
-4. Check handoff logged correctly
-
-Example test sequence:
-```
-User: "I have a question about my order"
-→ Should handoff to OrderAgent
-
-User: "Actually, I need technical help"
-→ Should handoff to TechnicalAgent
-
-User: "Never mind, it's resolved"
-→ Should handoff back to GreetingAgent
-```
-
----
-
-## Step 8: Generate Test Report
-
-After testing, provide this summary:
-
-```markdown
-## Workflow Test Report: [WorkflowName]
-
-### Configuration Validation
-| Check | Status | Notes |
-|-------|--------|-------|
-| orchestrator.yaml | ✅/❌ | [details] |
-| agents.yaml | ✅/❌ | [details] |
-| handoffs.yaml | ✅/❌ | [details] |
-| tools.yaml | ✅/❌ | [details] |
-| Tool implementations | ✅/❌ | [details] |
-| UI components | ✅/❌ | [details] |
-| Workflow registry | ✅/❌ | [details] |
-
-### Functional Tests
-| Test | Status | Notes |
-|------|--------|-------|
-| Workflow loads | ✅/❌ | |
-| Initial agent responds | ✅/❌ | |
-| Standard tools work | ✅/❌ | |
-| UI tools render | ✅/❌ | |
-| UI tools submit | ✅/❌ | |
-| Handoffs trigger | ✅/❌ | |
-
-### Issues Found
-1. [Issue description]
-   - **File:** [file path]
-   - **Fix:** [what to change]
-
-### Recommendations
-- [Any improvements suggested]
-```
-
----
-
-## Common Issues & Fixes
-
-### "Workflow not found in /api/workflows"
-
-**Cause:** workflow_name doesn't match folder
-**Fix:** Update orchestrator.yaml:
-```yaml
-workflow_name: [ExactFolderName]  # Case-sensitive
-```
-
-### "Agent 'X' not found"
-
-**Cause:** Typo or case mismatch
-**Fix:** Ensure exact match in:
-- orchestrator.yaml → initial_agent
-- handoffs.yaml → from_agent, to_agent
-- tools.yaml → agent
-
-### "Tool function not found"
-
-**Cause:** Function name mismatch
-**Fix:** Ensure tools.yaml `function` matches Python function name exactly
-
-### "UI component not rendering"
-
-**Cause:** Component not exported or registered
-**Fix:**
-1. Export from components/index.js with correct key
-2. Register workflow in chat-ui/src/workflows/index.js
-
-### "onResponse timeout"
-
-**Cause:** Missing eventId or ui_tool_id
-**Fix:** Include both in onResponse call:
-```js
-await onResponse({
-  status: 'success',
-  data: { ... },
-  eventId,      // Must include
-  ui_tool_id,   // Must include
-});
-```
-
-### "YAML parse error"
-
-**Cause:** Invalid YAML syntax
-**Fix:**
-- Use spaces, not tabs
-- Check indentation consistency
-- Quote strings with special characters
-- Validate with: `python -c "import yaml; yaml.safe_load(open('file.yaml'))"`

@@ -83,6 +83,44 @@ template/workflows/
 - `src/context/ChatUIContext.jsx` — provider + hook
 - `src/pages/ChatPage.js` — full chat page composition
 
+## Import Surfaces
+
+Use the package entrypoint that matches the host you are building.
+
+- `@mozaiks/chat-ui` — full web entrypoint; exports browser UI, pages, routing helpers, browser auth adapters, and app shell components.
+- `@mozaiks/chat-ui/core` — portable shared-core entrypoint; exports transport, state, adapters, providers, and hooks intended for non-browser hosts such as React Native.
+- `@mozaiks/chat-ui/platform` — platform bridge; lets a non-browser host inject synchronous storage, auth token lookup, runtime config overrides, and base URLs.
+
+These paths are declared explicitly in `package.json` via the package `exports` map. The portable surface is now formalized there rather than relying on extra top-level re-export files.
+
+### React Native / non-browser hosts
+
+Import the portable core surface and configure the platform bridge before mounting the provider.
+
+```js
+import { configurePlatform } from '@mozaiks/chat-ui/platform';
+import { ChatUIProvider, useChatUI, useConversation } from '@mozaiks/chat-ui/core';
+
+configurePlatform({
+  storage: {
+    getItem: (key) => mmkv.getString(key) ?? null,
+    setItem: (key, value) => mmkv.set(key, value),
+    removeItem: (key) => mmkv.delete(key),
+  },
+  auth: {
+    getAccessToken: () => tokenStore.currentToken ?? null,
+  },
+  getBaseUrls: () => ({
+    httpUrl: 'https://api.example.com',
+    wsUrl: 'wss://api.example.com',
+  }),
+});
+```
+
+Use a synchronous store for `storage`. `AsyncStorage` is not suitable for the current shared core because some reads happen synchronously during initialization.
+
+Web-only adapters such as `keycloakAuth` and `mockAuthAdapter` should not be imported from a native host.
+
 ## Dev Demo
 
 ```bash

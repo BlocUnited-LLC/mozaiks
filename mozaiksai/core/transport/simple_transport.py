@@ -202,7 +202,15 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
 
     def _get_conn_meta(self, chat_id: str) -> Dict[str, Any]:
         """Get connection metadata for a chat_id with safe defaults."""
-        return self.connections.get(chat_id, {})
+        conn = self.connections.get(chat_id, {})
+        if conn and not conn.get("ws_id"):
+            ws = conn.get("websocket")
+            if ws is not None:
+                try:
+                    conn["ws_id"] = id(ws)
+                except Exception:
+                    pass
+        return conn
 
     async def _send_ws_error(
         self,
@@ -1107,6 +1115,15 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
 
         # H5: Auto-resume for IN_PROGRESS chats (check status and restore chat history)
         await self._auto_resume_if_needed(chat_id, websocket, app_id)
+
+        # UserDriven UX bootstrap: emit prompt in chat before first run starts.
+        # This is transport-level only and does not start AG2 execution.
+        await self._emit_userdriven_bootstrap_if_needed(
+            chat_id=chat_id,
+            user_id=user_id,
+            workflow_name=workflow_name,
+            app_id=app_id,
+        )
         
         try:
             # Inbound loop: receive JSON control messages from client

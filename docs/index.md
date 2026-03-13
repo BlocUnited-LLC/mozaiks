@@ -1,104 +1,112 @@
 # Mozaiks
 
-<div align="center">
+Mozaiks is the easiest framework for non-technical developers to build AI-native applications.
 
-<img src="assets/mozaik_logo.svg" alt="Mozaiks Logo" width="180"/>
+It gives you a modular runtime, a shared chat and artifact UI, declarative workflows, persistent modules, and a platform bundle under `platform/` that the runtime can consume directly.
 
-<br>
+If you are new here, think in three layers:
 
-<a href="https://github.com/BlocUnited-LLC/mozaiks/blob/main/CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.0-blue" alt="Version"></a>
-<a href="https://github.com/BlocUnited-LLC/mozaiks/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-<a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11+-blue?logo=python" alt="Python"></a>
-<a href="https://github.com/BlocUnited-LLC/mozaiks"><img src="https://img.shields.io/badge/Engine-Pluggable_(AG2_default)-green" alt="Engine"></a>
+- `platform/` is the app bundle you customize
+- `mozaiksai/` is the AI runtime and orchestration layer
+- `chat-ui/` and `clients/mobile/` are the shared user interfaces
 
-</div>
+## Start Here
 
-> **Note**: This is the unified Mozaiks stack. BlocUnited offers a managed platform with app generation tools at [mozaiks.ai](https://mozaiks.ai), but you're welcome to self-host and build everything yourself.
-
-!!! tip "New to Development?"
-    **Zero coding experience required!** Copy our [AI Setup Prompt](setup-prompt.md) into any AI coding agent (like [Claude Code](https://claude.ai/download), Cursor, or Copilot) and let AI guide you through the entire setup — from installing prerequisites to running your first app.
-
----
-
-## 🎯 What is MozaiksAI?
-
-**MozaiksAI Runtime** is a production-ready orchestration engine that supports pluggable agent frameworks (AG2 currently shipping as the default adapter) with:
-
-- ✅ **Event-Driven Architecture** → Every action flows through unified event pipeline
-- ✅ **Real-Time WebSocket Transport** → Live streaming to React frontends
-- ✅ **Persistent State Management** → Resume conversations exactly where they left off
-- ✅ **Multi-Tenant Isolation** → app-scoped data and execution contexts
-- ✅ **Dynamic UI Integration** → Agents can invoke React components during workflows
-- ✅ **Declarative Workflows** → JSON manifests, no code changes needed
-- ✅ **Comprehensive Observability** → Built-in metrics, logging, and token tracking
-
-**MozaiksAI = Engine Adapter + Production Infrastructure + Event-Driven Core**
-
----
-
-## 🎨 See It In Action
-
-### 🔀 Dual-Mode Interface
-
-| Workflow Mode | Ask Mode |
-|:---:|:---:|
-| ![Workflow Mode](assets/ArtifactLayout.png) | ![Ask Mode](assets/AskMozaiks.png) |
-| *Chat + Artifact split view* | *Full chat with history sidebar* |
-
-### 💬 Embeddable Floating Widget
-
-<figure class="widget-center">
-  <video controls muted loop playsinline preload="metadata" width="700">
-    <source src="assets/widgetAction_compressed.mp4" type="video/mp4">
-    Your browser does not support the video tag.
-  </video>
-  <figcaption>Drop a floating assistant anywhere in your app — click the button to expand/collapse the chat interface</figcaption>
-</figure>
-
----
-
-## Next Steps
+Choose the path that matches what you need to do.
 
 <div class="grid cards" markdown>
 
--   :material-robot: **AI-Assisted Setup**
+-   :material-rocket-launch: **Run Mozaiks Locally**
 
     ---
 
-    New to coding? Let AI set everything up for you.
-
-    [:octicons-arrow-right-24: AI Setup Prompt](setup-prompt.md)
-
--   :fontawesome-solid-rocket: **Manual Setup**
-
-    ---
-
-    Clone, configure, and run the full stack yourself.
+    Clone the repo, configure the environment, and boot the stack.
 
     [:octicons-arrow-right-24: Getting Started](getting-started.md)
 
--   :material-run-fast: **First-Run Ritual**
+-   :material-robot-outline: **Use an AI Coding Agent**
 
     ---
 
-    New workspace bootstrap + diagnostics for first-time developers.
+    Hand setup or feature work to Claude Code, Cursor, or Copilot with the provided prompt packs.
 
-    [:octicons-arrow-right-24: First-Run Ritual](first-run-ritual.md)
+    [:octicons-arrow-right-24: Prompt Packs](instruction-prompts/prompt-packs.md)
 
--   :fontawesome-solid-sitemap: **Add a Workflow**
-
-    ---
-
-    Build your own workflow and wire it to the frontend.
-
-    [:octicons-arrow-right-24: Adding a Workflow](guides/adding-workflows/01-overview.md)
-
--   :fontawesome-solid-palette: **Brand Your App**
+-   :material-sitemap: **Build a Workflow**
 
     ---
 
-    Colors, fonts, logo, and nav from JSON files — no code changes.
+    Add agents, tools, handoffs, UI tools, and testing to a new workflow under `platform/workflows/`.
 
-    [:octicons-arrow-right-24: Customize Frontend](guides/custom-brand-integration/01-overview.md)
+    [:octicons-arrow-right-24: Workflow Guide](guides/adding-workflows/01-overview.md)
+
+-   :material-view-dashboard-outline: **Configure the App Shell**
+
+    ---
+
+    Customize branding, layout chrome, auth, and shell behavior without editing core runtime code.
+
+    [:octicons-arrow-right-24: App Shell & Branding](guides/custom-brand-integration/01-overview.md)
+
+-   :material-book-open-page-variant: **Understand the Architecture**
+
+    ---
+
+    Learn how the runtime, event bus, workflows, modules, and app bundle fit together.
+
+    [:octicons-arrow-right-24: Architecture Overview](architecture/index.md)
+
+-   :material-file-document-multiple-outline: **Open Advanced References**
+
+    ---
+
+    Read deep dives, runtime notes, and lower-level implementation guidance.
+
+    [:octicons-arrow-right-24: Reference](reference/index.md)
 
 </div>
+
+## What You Can Build
+
+Mozaiks is designed for more than chat bots. A single app bundle can mix:
+
+- workflow-driven AI experiences
+- persistent modules and pages
+- inline UI tools inside chat
+- artifact views beside chat
+- standard app surfaces such as dashboards, forms, tables, and detail pages
+
+The runtime already supports:
+
+- AG2-powered workflow execution
+- workflow-level fan-out and fan-in
+- global workflow journeys
+- WebSocket streaming and UI round-trips
+- multi-tenant persistence
+- event-driven orchestration
+
+## How To Read The Docs
+
+Use this order if you are learning the system:
+
+1. [Getting Started](getting-started.md)
+2. [Architecture Overview](architecture/index.md)
+3. [Workflow Guide](guides/adding-workflows/01-overview.md)
+4. [App Bundle Declaratives](architecture/foundations/app-bundle-declaratives.md)
+5. [Prompt Packs](instruction-prompts/prompt-packs.md)
+
+If you are already working with an AI coding agent, open:
+
+- [Agent Bootstrap Prompt](agent-bootstrap-prompt.md)
+- [Prompt Packs](instruction-prompts/prompt-packs.md)
+
+## Current Platform Example
+
+The live showcase in `platform/` is **Backstage**, a comedy-club operating system that demonstrates:
+
+- workflow intake in `GreenRoom`
+- workflow-level fan-out and fan-in in `WritersRoom`
+- final presentation in `MainStage`
+- inline UI tools, artifact UI tools, and persistent modules
+
+This is the example to study instead of the older legacy demo flow.

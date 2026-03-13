@@ -6,6 +6,7 @@ Scope:
 - Runtime transport and auth contract.
 - Workflow/chat lifecycle contract.
 - Event streaming and resume contract.
+- Shared-core frontend integration contract for non-browser hosts.
 
 Out of scope:
 - Platform-only services (hosted builds, billing, marketing, proprietary control plane).
@@ -37,7 +38,7 @@ Auth-disabled local mode (`AUTH_ENABLED=false`) is supported for local developme
 ## Workflow discovery
 - `GET /api/workflows`
   - Returns workflow config map keyed by `workflow_name`.
-  - Use `entry_point: true` when present for default launch selection.
+  - Use `entry_point: true` when present for default launch selection. Canonical source is `platform/config/ai.json`.
 
 ## Start chat
 - `POST /api/chats/{app_id}/{workflow_name}/start`
@@ -210,6 +211,51 @@ Recommended reliability policy:
 - Local pending action queue for transient network failures.
 - Strict tenant-safe keying (`app_id + user_id + chat_id`).
 
+## Shared Chat Core For React Native
+
+The `chat-ui` package now exposes a portable shared-core surface for non-browser hosts.
+
+Use:
+
+- `@mozaiks/chat-ui/core` for shared transport/state/hooks/providers.
+- `@mozaiks/chat-ui/platform` to inject host-specific behavior.
+
+Required host responsibilities:
+
+- Provide synchronous key-value storage.
+- Provide access token lookup.
+- Provide canonical HTTP and WebSocket base URLs.
+- Render native equivalents for any workflow UI tools used by the app.
+
+Important constraint:
+
+- Do not import browser-only adapters such as Keycloak or mock browser auth into a React Native host.
+- The shared core is portable; the default web renderer is not.
+
+Minimal startup shape:
+
+```js
+import { configurePlatform } from '@mozaiks/chat-ui/platform';
+import { ChatUIProvider } from '@mozaiks/chat-ui/core';
+
+configurePlatform({
+  storage: {
+    getItem: (key) => mmkv.getString(key) ?? null,
+    setItem: (key, value) => mmkv.set(key, value),
+    removeItem: (key) => mmkv.delete(key),
+  },
+  auth: {
+    getAccessToken: () => tokenStore.currentToken ?? null,
+  },
+  getBaseUrls: () => ({
+    httpUrl: 'https://api.example.com',
+    wsUrl: 'wss://api.example.com',
+  }),
+});
+```
+
+The React Native host then mounts its own native UI around the shared provider/hook layer.
+
 ## 8) Important Caveat: UI Tool Renderers
 
 Workflows and runtime orchestration do not need to change for mobile.
@@ -236,3 +282,4 @@ Mobile code does not need a separate backend repo. You have two common options:
 Recommended default for Mozaiks right now:
 - Keep runtime + web + mobile in one repo first.
 - Split only when release or ownership boundaries force it.
+

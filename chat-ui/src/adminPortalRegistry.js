@@ -19,7 +19,14 @@ import { useChatUI } from './context/ChatUIContext';
 // Section Registry
 // ---------------------------------------------------------------------------
 
-const sectionRegistry = new Map();
+function getSectionRegistry() {
+  const registryKey = '__mozaiks_admin_section_registry__';
+  const scope = typeof globalThis !== 'undefined' ? globalThis : window;
+  if (!scope[registryKey]) {
+    scope[registryKey] = new Map();
+  }
+  return scope[registryKey];
+}
 
 /**
  * Register an admin portal section.
@@ -33,7 +40,7 @@ const sectionRegistry = new Map();
  * @param {string} [options.gridSpan]   - 'full' | 'half' | 'third' | 'two-thirds'
  */
 export function registerAdminSection(id, component, options = {}) {
-  sectionRegistry.set(id, {
+  getSectionRegistry().set(id, {
     id,
     component,
     title: options.title || id,
@@ -46,17 +53,17 @@ export function registerAdminSection(id, component, options = {}) {
 
 /** Get a registered section by id. */
 export function getAdminSection(id) {
-  return sectionRegistry.get(id);
+  return getSectionRegistry().get(id);
 }
 
 /** Get all registered sections sorted by order. */
 export function getAllAdminSections() {
-  return Array.from(sectionRegistry.values()).sort((a, b) => a.order - b.order);
+  return Array.from(getSectionRegistry().values()).sort((a, b) => a.order - b.order);
 }
 
 /** Unregister a section. */
 export function unregisterAdminSection(id) {
-  sectionRegistry.delete(id);
+  getSectionRegistry().delete(id);
 }
 
 // Legacy aliases

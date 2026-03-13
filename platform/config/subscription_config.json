@@ -29,7 +29,9 @@
         "Email support"
       ],
       "modules_unlocked": [
-        "admin_portal"
+        "admin_portal",
+        "lineup_board",
+        "show_archive"
       ]
     },
     {

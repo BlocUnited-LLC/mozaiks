@@ -245,7 +245,7 @@ curl http://localhost:8000/api/health
 curl http://localhost:8000/api/workflows
 ```
 
-**Expected:** JSON showing `HelloWorld` workflow
+**Expected:** JSON showing the live showcase workflows, including `GreenRoom`
 
 ---
 
@@ -297,9 +297,9 @@ Open http://localhost:5173 in your browser.
 
 **Expected:** After login, you're redirected to the app with a chat interface.
 
-### Step 6.3: Test the HelloWorld workflow
+### Step 6.3: Test the showcase workflow
 
-1. You should see "HelloWorld" as the active workflow
+1. You should see `GreenRoom` available as the entry workflow
 2. Type a message like "Hello!"
 3. The agent should respond
 
@@ -391,7 +391,8 @@ Common issues:
 
 ## Next Steps After Setup
 
-1. **Try the HelloWorld workflow** - Send messages, see how it responds
-2. **Customize branding** - Edit `app/brand/public/brand.json`
-3. **Create your own workflow** - Copy `workflows/HelloWorld` as a template
+1. **Try the Backstage showcase workflows** - Send messages and see how the app moves from `GreenRoom` into `WritersRoom`
+2. **Customize branding** - Edit `platform/config/theme_config.json`
+3. **Create your own workflow** - Copy `platform/workflows/GreenRoom` as a template
 4. **Read the docs** - See the full documentation for more features
+

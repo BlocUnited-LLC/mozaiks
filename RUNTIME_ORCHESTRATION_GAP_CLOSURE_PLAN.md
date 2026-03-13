@@ -163,7 +163,7 @@ If needed, migration is done via one-time converter script and config updates, n
         "max_children": 10,
         "timeout_seconds": 600,
         "input_contract": {
-          "required": ["PatternSelection"],
+          "required": ["PatternSelection"], #what is PatternSelection
           "optional": ["InterviewTranscript"]
         },
         "child_context_seed": {

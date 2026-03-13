@@ -273,6 +273,128 @@ class WebSocketProtocolMixin:
         except Exception as e:
             logger.warning(f"[AUTO_RESUME] Failed to auto-resume chat {chat_id}: {e}")
 
+    async def _emit_userdriven_bootstrap_if_needed(
+        self,
+        chat_id: str,
+        user_id: str,
+        workflow_name: Optional[str],
+        app_id: Optional[str],
+        *,
+        ignore_sent_guard: bool = False,
+        session_dedupe_token: Optional[str] = None,
+    ) -> None:
+        """Emit one pre-run prompt message for UserDriven workflows.
+
+        This keeps AG2 execution untouched: no workflow run is started here.
+        The first user input later triggers orchestration via existing transport flow.
+        """
+        if not workflow_name:
+            return
+
+        try:
+            if session_dedupe_token:
+                seen_tokens = getattr(self, "_userdriven_bootstrap_session_seen", None)
+                if seen_tokens is None:
+                    seen_tokens = set()
+                    self._userdriven_bootstrap_session_seen = seen_tokens
+                if session_dedupe_token in seen_tokens:
+                    return
+
+            from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+            cfg = workflow_manager.get_config(str(workflow_name)) or {}
+            startup_mode = str(cfg.get("startup_mode", "AgentDriven")).strip().lower()
+            if startup_mode != "userdriven":
+                return
+
+            prompt = str(cfg.get("initial_message_to_user") or "").strip()
+            if not prompt:
+                return
+
+            bootstrap_agent = str(cfg.get("initial_agent") or "Assistant").strip() or "Assistant"
+
+            pm_factory = getattr(self, "_get_or_create_persistence_manager", None)
+            if not callable(pm_factory):
+                return
+
+            pm = pm_factory()
+            coll = await pm._coll()
+
+            # One-time send per chat, only before any transcript exists.
+            query: Dict[str, Any] = {
+                "_id": chat_id,
+                "user_id": user_id,
+                "$or": [
+                    {"last_sequence": {"$exists": False}},
+                    {"last_sequence": 0},
+                ],
+                "messages.0": {"$exists": False},
+            }
+            if not ignore_sent_guard:
+                query["userdriven_bootstrap_sent"] = {"$ne": True}
+            if app_id:
+                query["app_id"] = app_id
+
+            from pymongo import ReturnDocument
+
+            claimed = await coll.find_one_and_update(
+                query,
+                {
+                    "$set": {
+                        "userdriven_bootstrap_sent": True,
+                        "userdriven_bootstrap_sent_at": datetime.now(timezone.utc),
+                        "last_updated_at": datetime.now(timezone.utc),
+                    }
+                },
+                return_document=ReturnDocument.AFTER,
+                projection={"_id": 1},
+            )
+
+            if not claimed:
+                return
+
+            # Persist the bootstrap prompt so reconnect/resume can replay it.
+            # This keeps startup behavior deterministic across refreshes.
+            try:
+                if app_id:
+                    await pm.persist_initial_messages(
+                        chat_id=chat_id,
+                        app_id=str(app_id),
+                        messages=[{
+                            "role": "assistant",
+                            "name": bootstrap_agent,
+                            "content": prompt,
+                        }],
+                    )
+            except Exception as persist_err:
+                logger.warning("[USERDRIVEN] Failed to persist bootstrap prompt for %s: %s", chat_id, persist_err)
+
+            await self._queue_message_with_backpressure(
+                chat_id,
+                {
+                    "type": "chat.text",
+                    "data": {
+                        "content": prompt,
+                        "agent": bootstrap_agent,
+                        "sender": bootstrap_agent,
+                        "role": "assistant",
+                        "source": "orchestrator.initial_message_to_user",
+                        "ui_visibility": "default",
+                        "metadata": {
+                            "source": "orchestrator.initial_message_to_user",
+                            "startup_mode": "UserDriven",
+                            "pre_workflow": True,
+                        },
+                    },
+                },
+            )
+            await self._flush_message_queue(chat_id)
+            if session_dedupe_token:
+                self._userdriven_bootstrap_session_seen.add(session_dedupe_token)
+            logger.info("[USERDRIVEN] Emitted bootstrap prompt for chat %s (%s)", chat_id, workflow_name)
+        except Exception as e:
+            logger.warning("[USERDRIVEN] Failed bootstrap emit for chat %s: %s", chat_id, e)
+
     # ==================================================================================
     # CONNECTION CLEANUP
     # ==================================================================================

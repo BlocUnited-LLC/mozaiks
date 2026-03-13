@@ -1,9 +1,19 @@
 {
   "version": "1.1.0",
   "landing_spot": "/",
-  "startup_mode": "ask",
 
-  "pages": [],
+  "pages": [
+    {
+      "id": "platform-overview",
+      "label": "Platform",
+      "path": "/platform",
+      "component": "AdminPortal",
+      "icon": "settings.svg",
+      "order": 8,
+      "showInHeader": true,
+      "meta": { "title": "Platform Overview", "requiresAuth": true }
+    }
+  ],
 
   "default": [
     {
@@ -20,25 +30,6 @@
       "label": "Subscription",
       "path": "/subscriptions",
       "icon": "credit-card"
-    }
-  ],
-
-  "modules": [
-    {
-      "module_name": "admin_portal",
-      "label": "Admin Portal",
-      "path": "/admin",
-      "icon": "settings",
-      "component": "AdminPortal",
-      "meta": { "title": "Admin Portal", "requiresAuth": true }
-    },
-    {
-      "module_name": "awards_board",
-      "label": "Awards Board",
-      "path": "/awards",
-      "icon": "trophy",
-      "component": "AwardsBoard",
-      "meta": { "title": "Awards Board", "requiresAuth": true }
     }
   ]
 }

@@ -11,7 +11,6 @@ from dataclasses import dataclass
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
-from mozaiksai.core.events import get_event_dispatcher
 # Avoid circular import: only import for typing
 if TYPE_CHECKING:
     from mozaiksai.core.transport.simple_transport import SimpleTransport
@@ -89,6 +88,8 @@ class AG2TerminationHandler:
 
         # Emit business event via unified dispatcher
         try:
+            from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
+
             dispatcher = get_event_dispatcher()
             await dispatcher.emit_business_event(
                 log_event_type="CONVERSATION_STARTED",
@@ -162,6 +163,8 @@ class AG2TerminationHandler:
 
                     # Emit business event via unified dispatcher
                     try:
+                        from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
+
                         dispatcher = get_event_dispatcher()
                         await dispatcher.emit_business_event(
                             log_event_type="CONVERSATION_TERMINATED",

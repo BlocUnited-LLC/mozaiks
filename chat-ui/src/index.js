@@ -1,3 +1,6 @@
+// Full web entrypoint for chat-ui.
+// React Native or other non-browser hosts should import chat-ui/core.js instead.
+
 // Chat UI Components
 export { default as ArtifactPanel } from './components/chat/ArtifactPanel';
 export { default as ChatBubble } from './components/chat/ChatBubble';
@@ -15,6 +18,9 @@ export { default as Header } from './components/layout/Header';
 export { default as Footer } from './components/layout/Footer';
 export { default as RouteRenderer } from './components/RouteRenderer';
 
+// Error Handling
+export { default as ErrorBoundary, ChatMessageErrorFallback, ChatInterfaceErrorFallback, ArtifactErrorFallback } from './components/ErrorBoundary';
+
 // Widget
 export { default as GlobalChatWidgetWrapper } from './widget/GlobalChatWidgetWrapper';
 
@@ -23,6 +29,9 @@ export * from './context/ChatUIContext';
 
 // Hooks
 export * from './hooks/useWidgetMode';
+
+// ChatPage extracted hooks
+export { useConversation, useArtifacts, useChatWebSocket } from './pages/hooks';
 
 // Core utilities
 export {

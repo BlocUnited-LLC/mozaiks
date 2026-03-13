@@ -1,0 +1,21 @@
+tools:
+- agent: ClubHostAgent
+  file: green_room_seed.py
+  function: capture_set_seed
+  description: Normalize the performer's raw premise into compact green room fields.
+  tool_type: Agent_Tool
+  auto_invoke: false
+
+- agent: PremiseCanonAgent
+  file: green_room_seed.py
+  function: capture_set_brief
+  description: Write the canonical set brief into workflow context.
+  tool_type: Agent_Tool
+  auto_invoke: false
+
+lifecycle_tools:
+- trigger: after_chat
+  agent: null
+  file: persist_set_brief.py
+  function: persist_set_brief
+  description: Persist the canonical set brief for WritersRoom.

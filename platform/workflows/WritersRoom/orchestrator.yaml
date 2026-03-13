@@ -1,0 +1,8 @@
+workflow_name: WritersRoom
+max_turns: 30
+human_in_the_loop: true
+startup_mode: AgentDriven
+orchestration_pattern: DefaultPattern
+initial_message_to_user: null
+initial_message: "WritersHostAgent, if a set brief is already loaded, open the writers room immediately. Otherwise ask for one concise comedy premise."
+initial_agent: WritersHostAgent

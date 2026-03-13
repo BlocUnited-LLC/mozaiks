@@ -1,138 +1,123 @@
-# Step 2 — brand.json
+# Step 2 — theme_config.json
 
-> **Guide:** Customizing Your Frontend · Step 2 of 5
+> **Guide:** App Shell And Branding · Step 2 of 5
 
-File location: `brand/public/brand.json` — served at `/brand.json`
+File location: `platform/config/theme_config.json`
 
-Visual identity only. UI structure, menus, and action icons belong in `ui.json`.
+This file controls the visible identity of the web shell:
 
----
+- app name and tagline
+- logos and background image
+- fonts
+- colors and shadows
+- header, profile, notifications, and footer UI
 
-!!! tip "New to Development?"
+## What Belongs Here
 
-    **Let AI configure your brand.json!** Copy this prompt into Claude Code:
+`theme_config.json` combines what older versions split across multiple files.
 
-    ```
-    I want to configure brand.json for my Mozaiks app.
+Use it for:
 
-    Please read the instruction prompt at:
-    docs/instruction-prompts/custom-brand-integration/02-brand-json.md
+- brand identity
+- visual theme tokens
+- shell chrome
+- chat mode labels/tints
 
-    My brand colors are: [describe your colors]
-    My logo file is: [filename]
-    ```
+Do not use it for:
 
----
+- API URLs
+- auth provider selection
+- workflow entry points
+- module registration
 
-## Full example
+Those belong in `platform/app.json`, `platform/config/ai.json`, and `platform/config/module_registry.json`.
+
+## Top-Level Shape
 
 ```json
 {
-  "name": "YourApp",
-  "tagline": "AI-Powered Everything",
-
+  "identity": {
+    "name": "MozaiksAI",
+    "tagline": "AI-Powered Workflows",
+    "app_name": "Mozaiks"
+  },
   "assets": {
-    "logo":            "logo.svg",
-    "wordmark":        "wordmark.png",
-    "favicon":         "favicon.png",
-    "backgroundImage": "chat_bg.png"
+    "logo": "mozaik_logo.svg",
+    "wordmark": "mozaik.png",
+    "favicon": "mozaik.png",
+    "backgroundImage": "chat_bg_template.png"
   },
-
-  "fonts": {
-    "body": {
-      "family":        "Rajdhani",
-      "fallbacks":     "ui-sans-serif, system-ui, sans-serif",
-      "googleFont":    "https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600&display=swap",
-      "tailwindClass": "font-sans"
-    },
-    "heading": {
-      "family":        "Orbitron",
-      "fallbacks":     "Rajdhani, sans-serif",
-      "googleFont":    "https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap",
-      "tailwindClass": "font-heading"
-    },
-    "logo": {
-      "family":        "Fagrak Inline",
-      "localFont":     true,
-      "src":           "/fonts/Fagrak Inline.otf",
-      "tailwindClass": "font-logo"
-    }
-  },
-
-  "colors": {
-    "primary":    { "main": "#06b6d4", "light": "#67e8f9", "dark": "#0e7490",  "name": "cyan"    },
-    "secondary":  { "main": "#8b5cf6", "light": "#a78bfa", "dark": "#6d28d9",  "name": "violet"  },
-    "accent":     { "main": "#f59e0b", "light": "#fbbf24", "dark": "#d97706",  "name": "amber"   },
-    "success":    { "main": "#10b981", "light": "#34d399", "dark": "#059669",  "name": "emerald" },
-    "warning":    { "main": "#f59e0b", "light": "#fbbf24", "dark": "#d97706",  "name": "amber"   },
-    "error":      { "main": "#ef4444", "light": "#f87171", "dark": "#dc2626",  "name": "red"     },
-    "background": { "base": "#0b1220", "surface": "#0f1724", "elevated": "#131d33", "overlay": "rgba(13,23,42,0.72)" },
-    "border":     { "subtle": "#1e293b", "strong": "#334155", "accent": "#06b6d4" },
-    "text":       { "primary": "#e6eef8", "secondary": "#94a3b8", "muted": "#64748b", "onAccent": "#f8fafc" }
-  },
-
-  "shadows": {
-    "primary":   "0 20px 45px rgba(6,182,212,0.24)",
-    "secondary": "0 20px 45px rgba(139,92,246,0.24)",
-    "elevated":  "0 24px 60px rgba(11,18,32,0.55)",
-    "focus":     "0 0 0 3px rgba(8,145,178,0.55)"
+  "fonts": {},
+  "colors": {},
+  "shadows": {},
+  "ui": {
+    "chat": {},
+    "header": {},
+    "profile": {},
+    "notifications": {},
+    "footer": {}
   }
 }
 ```
 
----
+## Key Sections
 
-## Field reference
+### `identity`
 
-### name & tagline
+Use this for app-facing names and taglines that the shell should surface.
 
-| Field | Type | Notes |
-|-------|------|-------|
-| `name` | string required | App display name — used in titles and aria labels |
-| `tagline` | string optional | Short tagline for splash/login contexts |
+### `assets`
 
-### assets
+All asset values are filenames resolved under `/assets/`.
 
-All values are filenames resolved from `/assets/`.
+The actual files live in:
 
-| Field | Type | Notes |
-|-------|------|-------|
-| `assets.logo` | string required | Primary logomark SVG or PNG |
-| `assets.wordmark` | string optional | Full logotype image |
-| `assets.favicon` | string optional | Injected as `<link rel="icon">` |
-| `assets.backgroundImage` | string optional | Chat area bg — falls back to `chat_bg_template.png` |
+- `platform/brand/assets/`
 
-### fonts
+### `fonts`
 
-Three slots: `body`, `heading`, `logo`. Set `localFont: true` + `src` for self-hosted fonts  
-(place files in `brands/public/fonts/` → served at `/fonts/<file>`).
+Self-hosted font files live in:
 
-| Field | Notes |
-|-------|-------|
-| `*.family` | CSS font-family name |
-| `*.fallbacks` | Comma-separated CSS fallbacks |
-| `*.googleFont` | Full Google Fonts URL — injected as `<link>` |
-| `*.localFont` | Set `true` for self-hosted |
-| `*.src` | Self-hosted path, e.g. `"/fonts/MyFont.otf"` |
-| `*.tailwindClass` | e.g. `"font-heading"` |
+- `platform/brand/fonts/`
 
-### colors
-
-Each semantic token (`primary`, `secondary`, `accent`, `success`, `warning`, `error`) uses:
+Local fonts use paths such as:
 
 ```json
-{ "main": "#hex", "light": "#hex", "dark": "#hex", "name": "label" }
+{
+  "localFont": true,
+  "src": "/fonts/Fagrak Inline.otf"
+}
 ```
 
-Applied as CSS custom properties: `--color-primary`, `--color-primary-light`, etc.
+### `colors` and `shadows`
 
-Structural tokens: `background` (`base`, `surface`, `elevated`, `overlay`) · `border` (`subtle`, `strong`, `accent`) · `text` (`primary`, `secondary`, `muted`, `onAccent`)
+These become the shell’s visual tokens and are consumed by the shared UI layer.
 
-### shadows
+### `ui`
 
-Named `box-shadow` strings → CSS custom properties (`--shadow-primary`, etc.).
+This is where the shell chrome lives now:
 
----
+- `ui.chat`
+- `ui.header`
+- `ui.profile`
+- `ui.notifications`
+- `ui.footer`
 
-**Prev:** [Step 1 — Overview](01-overview.md)  
-**Next:** [Step 3 — ui.json](03-ui-json.md)
+## Editing Rules
+
+- Use asset filenames such as `"sparkle.svg"` or `"logo.png"`, not React component names.
+- Keep icon values as actual filenames with extensions.
+- Keep colors as explicit hex values or CSS-safe strings.
+- Prefer changing this file over patching UI source.
+
+## Verification
+
+After editing:
+
+1. reload the web app
+2. open the browser console if something fails to render
+3. verify `/api/theme-config` returns the updated file
+
+## Next
+
+[Step 3 — navigation_config.json](03-ui-json.md)

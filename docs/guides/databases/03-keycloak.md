@@ -100,3 +100,4 @@ docker compose -f infra/compose/docker-compose.yml up -d
 
 ??? question "Can I use MySQL/MariaDB instead?"
     Yes. Change `KC_DB`, `KC_DB_URL`, `KC_DB_USERNAME`, `KC_DB_PASSWORD` in docker-compose.yml. See [Keycloak docs](https://www.keycloak.org/server/db).
+

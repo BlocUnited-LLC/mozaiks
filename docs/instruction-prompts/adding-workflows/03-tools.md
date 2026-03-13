@@ -1,14 +1,27 @@
 # Instruction Prompt: Adding Tools to a Workflow
 
-**Task:** Create Python tool implementations and configure tools.yaml
+**Task:** Create Python tool implementations and configure `tools.yaml`
 
-**Complexity:** Medium (Python code + YAML configuration)
+**Complexity:** Medium
 
 ---
 
 ## Context for AI Agent
 
-You are helping a user add tools to their MozaiksAI workflow. Tools are Python functions that agents can call to take actions like fetching data, calling APIs, or showing interactive UI components.
+You are helping a user add tools to a workflow under
+`platform/workflows/[WorkflowName]/`.
+
+Tool declarations belong in:
+
+- `platform/workflows/[WorkflowName]/tools.yaml`
+
+Tool implementations belong in:
+
+- `platform/workflows/[WorkflowName]/tools/*.py`
+
+Workflow UI components referenced by UI tools belong in:
+
+- `platform/workflows/[WorkflowName]/ui/`
 
 ---
 
@@ -16,49 +29,37 @@ You are helping a user add tools to their MozaiksAI workflow. Tools are Python f
 
 Ask the user:
 
-1. **"What actions should your agents be able to perform?"**
-   Examples: look up orders, send emails, show forms, query databases
-
-2. **"For each action, what information is needed?"**
-   Examples: order_id, customer_email, date range
-
-3. **"Should any actions show interactive UI?"**
-   If yes, those need to be UI_Tool type
+1. What actions should the workflow agents take?
+2. What inputs does each action need?
+3. Which actions require inline or artifact UI?
 
 ---
 
-## Step 2: Categorize Tools
+## Step 2: Categorize the Tools
 
-Help the user categorize their tools:
+Use two categories:
 
-### Standard Tools (no UI)
-- Data lookups: `get_order_status`, `get_customer_info`
-- Actions: `send_email`, `create_ticket`, `update_record`
-- Calculations: `calculate_shipping`, `check_availability`
-
-### UI Tools (show interactive components)
-- Input collection: `show_form`, `show_calendar`
-- Confirmations: `show_confirmation_card`
-- Selection: `show_options`, `show_product_picker`
+- `Standard` for lookups, mutations, integrations, or calculations
+- `UI_Tool` for tools that surface a workflow UI component to the user
 
 ---
 
-## Step 3: Create tools.yaml Entries
+## Step 3: Create `tools.yaml` Entries
 
-For each tool, add an entry:
+### Standard tool template
 
-### Standard Tool Template
 ```yaml
 tools:
   - agent: [AgentName]
     file: [tool_name].py
     function: [tool_name]
-    description: "[What the tool does - be specific, this helps the LLM decide when to use it]"
+    description: "[What the tool does]"
     tool_type: Standard
     auto_invoke: false
 ```
 
-### UI Tool Template
+### UI tool template
+
 ```yaml
 tools:
   - agent: [AgentName]
@@ -68,256 +69,65 @@ tools:
     tool_type: UI_Tool
     auto_invoke: true
     ui:
-      component: [ReactComponentName]  # Must match export in components/index.js
-      mode: inline                      # inline or artifact
-```
-
-### Example: Customer Support Tools
-```yaml
-tools:
-  # Standard tools
-  - agent: OrderAgent
-    file: get_order_status.py
-    function: get_order_status
-    description: "Look up the current status of an order by order ID. Returns shipping status, tracking number, and estimated delivery."
-    tool_type: Standard
-    auto_invoke: false
-
-  - agent: OrderAgent
-    file: initiate_return.py
-    function: initiate_return
-    description: "Start a return process for an order. Requires order ID and reason."
-    tool_type: Standard
-    auto_invoke: false
-
-  # UI tool
-  - agent: OrderAgent
-    file: show_return_form.py
-    function: show_return_form
-    description: "Display a form for the customer to fill out return details."
-    tool_type: UI_Tool
-    auto_invoke: true
-    ui:
-      component: ReturnForm
+      component: [ComponentName]
       mode: inline
 ```
 
+The `ui.component` value must match the exported key from
+`platform/workflows/[WorkflowName]/ui/index.js`.
+
 ---
 
-## Step 4: Create Python Implementations
-
-### Standard Tool Template
+## Step 4: Implement Standard Tools
 
 ```python
-# workflows/[WorkflowName]/tools/[tool_name].py
 from typing import Any, Dict
 
 async def [tool_name](
     [required_param]: [type],
     [optional_param]: [type] = [default],
 ) -> Dict[str, Any]:
-    """[Description of what the tool does].
-
-    Args:
-        [required_param]: [Description]
-        [optional_param]: [Description]
-    """
+    """[Description]."""
     try:
-        # Your implementation here
         result = await your_logic([required_param], [optional_param])
-
         return {
             "status": "success",
             "data": result,
         }
-    except Exception as e:
+    except Exception as exc:
         return {
             "status": "error",
-            "error": str(e),
+            "error": str(exc),
         }
 ```
 
-### UI Tool Template
-
-```python
-# workflows/[WorkflowName]/tools/[tool_name].py
-from typing import Any, Dict, Optional
-from mozaiksai.core.workflow.outputs.ui_tools import use_ui_tool
-
-async def [tool_name](
-    *,
-    [param]: [type] = [default],
-    chat_id: Optional[str] = None,
-    workflow_name: str = "[WorkflowName]",
-) -> Dict[str, Any]:
-    """[Description].
-
-    Args:
-        [param]: [Description]
-    """
-    # Call use_ui_tool to display component and wait for response
-    response = await use_ui_tool(
-        tool_id="[ReactComponentName]",      # Must match component export
-        payload={
-            # Data to pass to the React component
-            "[key]": [param],
-            "message": "[Instructions for user]",
-        },
-        chat_id=chat_id,
-        workflow_name=workflow_name,
-    )
-
-    # Process the user's response
-    user_data = response.get("data", {})
-
-    return {
-        "status": "success",
-        "data": user_data,
-    }
-```
+Use JSON-serializable return payloads.
 
 ---
 
-## Step 5: Implementation Examples
+## Step 5: Implement UI Tools Carefully
 
-### Example 1: Order Lookup Tool
+UI tool implementations need to match the current runtime contract used by the
+repo.
 
-```python
-# workflows/SupportBot/tools/get_order_status.py
-from typing import Any, Dict
+Because that contract can evolve, do not invent a helper import path from old
+docs. Instead:
 
-async def get_order_status(
-    order_id: str,
-) -> Dict[str, Any]:
-    """Look up the status of a customer order.
+1. Mirror the current live workflow examples already in the repo.
+2. Keep `tools.yaml -> ui.component` aligned with the workflow's `ui/index.js`.
+3. Return or emit only the payload shape the current runtime expects.
 
-    Args:
-        order_id: The order ID to look up (e.g., "ORD-12345")
-    """
-    # In production, query your database
-    # This is a mock implementation
-    mock_orders = {
-        "ORD-12345": {
-            "status": "shipped",
-            "tracking": "1Z999AA10123456784",
-            "carrier": "UPS",
-            "estimated_delivery": "2024-03-15",
-        },
-        "ORD-67890": {
-            "status": "processing",
-            "tracking": None,
-            "carrier": None,
-            "estimated_delivery": "2024-03-18",
-        },
-    }
-
-    if order_id in mock_orders:
-        return {
-            "status": "success",
-            "data": mock_orders[order_id],
-        }
-    else:
-        return {
-            "status": "error",
-            "error": f"Order {order_id} not found",
-        }
-```
-
-### Example 2: Date Picker UI Tool
-
-```python
-# workflows/BookingBot/tools/show_date_picker.py
-from typing import Any, Dict, List, Optional
-from mozaiksai.core.workflow.outputs.ui_tools import use_ui_tool
-
-async def show_date_picker(
-    *,
-    available_dates: List[str] = None,
-    message: str = "Please select a date:",
-    chat_id: Optional[str] = None,
-    workflow_name: str = "BookingBot",
-) -> Dict[str, Any]:
-    """Display a date picker for the user to select an appointment date.
-
-    Args:
-        available_dates: List of available date strings (YYYY-MM-DD)
-        message: Instructions to show the user
-    """
-    response = await use_ui_tool(
-        tool_id="DatePicker",
-        payload={
-            "available_dates": available_dates or [],
-            "message": message,
-            "allow_past_dates": False,
-        },
-        chat_id=chat_id,
-        workflow_name=workflow_name,
-    )
-
-    selected_date = response.get("data", {}).get("selected_date")
-
-    if selected_date:
-        return {
-            "status": "success",
-            "selected_date": selected_date,
-        }
-    else:
-        return {
-            "status": "cancelled",
-            "message": "User cancelled date selection",
-        }
-```
-
-### Example 3: Form UI Tool
-
-```python
-# workflows/SupportBot/tools/show_return_form.py
-from typing import Any, Dict, Optional
-from mozaiksai.core.workflow.outputs.ui_tools import use_ui_tool
-
-async def show_return_form(
-    *,
-    order_id: str,
-    items: list = None,
-    chat_id: Optional[str] = None,
-    workflow_name: str = "SupportBot",
-) -> Dict[str, Any]:
-    """Display a return request form.
-
-    Args:
-        order_id: The order being returned
-        items: List of items eligible for return
-    """
-    response = await use_ui_tool(
-        tool_id="ReturnForm",
-        payload={
-            "order_id": order_id,
-            "items": items or [],
-            "return_reasons": [
-                "Damaged in shipping",
-                "Wrong item received",
-                "Changed my mind",
-                "Item not as described",
-                "Other",
-            ],
-        },
-        chat_id=chat_id,
-        workflow_name=workflow_name,
-    )
-
-    return {
-        "status": "success",
-        "return_request": response.get("data"),
-    }
-```
+If unsure, inspect an existing workflow before generating a new UI tool.
 
 ---
 
-## Step 6: Accessing Context Variables
+## Step 6: Validation Checklist
 
-When tools need shared state:
-
-```python
+- tool file names match `tools.yaml`
+- function names match `tools.yaml`
+- tool payloads are JSON-serializable
+- UI tools reference components exported from `platform/workflows/[WorkflowName]/ui/index.js`
+- the workflow still loads in `/api/workflows`
 async def my_tool(
     *,
     context_variables: dict = None,
@@ -419,3 +229,4 @@ See: docs/instruction-prompts/adding-workflows/04-ui-components.md
 1. Check for blocking I/O (use async/await)
 2. Add timeout handling for external API calls
 3. Check database connection pool
+

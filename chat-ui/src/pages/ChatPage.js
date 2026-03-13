@@ -14,9 +14,30 @@ import workflowConfig from '../config/workflowConfig';
 import { getWorkflow } from '@chat-workflows/index';
 import resolveWorkflow from '../utils/resolveWorkflow';
 import { dynamicUIHandler } from '../core/dynamicUIHandler';
+import platform from '../platform/index.js';
 import LoadingSpinner from '../utils/AgentChatLoadingSpinner';
 import useTheme from "../styles/useTheme";
 import { readNavigationCache, writeNavigationCache } from '../navigation/navigationCache';
+import ErrorBoundary, { ArtifactErrorFallback, ChatInterfaceErrorFallback } from '../components/ErrorBoundary';
+import {
+  clearStoredArtifactState,
+  clearStoredChatCacheSeed,
+  getStoredActiveChatId,
+  getStoredActiveWorkflowName,
+  getStoredArtifactPanelOpen,
+  getStoredChatCacheSeed,
+  readStoredCurrentArtifact,
+  readStoredLastArtifact,
+  setStoredActiveChatId,
+  setStoredArtifactPanelOpen,
+  setStoredChatCacheSeed,
+  writeStoredLastArtifact,
+  writeStoredCurrentArtifact,
+} from '../session/chatSessionStorage';
+
+// Extracted hooks for gradual migration
+// Usage: const { messages, addMessage, ... } = useConversation({ chatId, conversationMode, ... });
+// import { useConversation, useArtifacts, useChatWebSocket } from './hooks';
 
 // Debug utilities
 const DEBUG_LOG_ALL_AGENT_OUTPUT = true;
@@ -123,6 +144,7 @@ const AskHistorySidebar = ({
   onSelectChat,
   onStartNewChat,
   onRefresh,
+  onClear,
 }) => {
   const hasSessions = Array.isArray(sessions) && sessions.length > 0;
   return (
@@ -132,14 +154,24 @@ const AskHistorySidebar = ({
           <p className="text-[11px] tracking-[0.2em] uppercase text-[rgba(148,163,184,0.9)]">Ask</p>
           <h2 className="text-lg font-semibold">Recent Conversations</h2>
         </div>
-        <button
-          type="button"
-          className="px-2 py-1 rounded-lg border border-[rgba(var(--color-primary-light-rgb),0.4)] text-[11px] tracking-wide text-[rgba(148,163,184,0.9)] hover:text-white hover:border-[rgba(var(--color-primary-light-rgb),0.8)] transition"
-          onClick={onRefresh}
-          disabled={loading}
-        >
-          {loading ? '…' : 'Refresh'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="px-2 py-1 rounded-lg border border-[rgba(248,113,113,0.45)] text-[11px] tracking-wide text-[rgba(254,202,202,0.92)] hover:text-white hover:border-[rgba(248,113,113,0.8)] transition disabled:opacity-60"
+            onClick={onClear}
+            disabled={loading}
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            className="px-2 py-1 rounded-lg border border-[rgba(var(--color-primary-light-rgb),0.4)] text-[11px] tracking-wide text-[rgba(148,163,184,0.9)] hover:text-white hover:border-[rgba(var(--color-primary-light-rgb),0.8)] transition"
+            onClick={onRefresh}
+            disabled={loading}
+          >
+            {loading ? '…' : 'Refresh'}
+          </button>
+        </div>
       </div>
       <div className="mt-3 flex flex-col gap-2">
         <button
@@ -196,6 +228,7 @@ const MobileAskHistoryDrawer = ({
   onSelectChat,
   onStartNewChat,
   onRefresh,
+  onClear,
   onClose,
 }) => {
   if (!open) {
@@ -219,6 +252,14 @@ const MobileAskHistoryDrawer = ({
             <h2 className="text-base font-semibold text-white">Conversations</h2>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClear}
+              disabled={loading}
+              className="px-2 py-1 rounded-lg border border-[rgba(248,113,113,0.45)] text-[11px] text-[rgba(254,202,202,0.95)] hover:border-[rgba(248,113,113,0.8)] hover:text-white transition disabled:opacity-60"
+            >
+              Clear
+            </button>
             <button
               type="button"
               onClick={onRefresh}
@@ -289,12 +330,100 @@ const MobileAskHistoryDrawer = ({
   );
 };
 
+const WorkflowHistorySidebar = ({
+  sessions = [],
+  activeChatId,
+  loading,
+  onSelectSession,
+  onRefresh,
+  onClear,
+  onStartEntryWorkflow,
+}) => {
+  const hasSessions = Array.isArray(sessions) && sessions.length > 0;
+  return (
+    <aside className="hidden lg:flex flex-col w-64 xl:w-72 2xl:w-80 shrink-0 self-stretch min-h-0 h-full rounded-2xl border border-[rgba(var(--color-primary-light-rgb),0.25)] bg-[rgba(2,6,23,0.72)] backdrop-blur-xl shadow-[0_20px_60px_rgba(2,6,23,0.6)] px-4 py-4 text-sm text-slate-100">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="text-[11px] tracking-[0.2em] uppercase text-[rgba(148,163,184,0.9)]">Workflow</p>
+          <h2 className="text-lg font-semibold">Recent Workflows</h2>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="px-2 py-1 rounded-lg border border-[rgba(248,113,113,0.45)] text-[11px] tracking-wide text-[rgba(254,202,202,0.92)] hover:text-white hover:border-[rgba(248,113,113,0.8)] transition disabled:opacity-60"
+            onClick={onClear}
+            disabled={loading}
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            className="px-2 py-1 rounded-lg border border-[rgba(var(--color-primary-light-rgb),0.4)] text-[11px] tracking-wide text-[rgba(148,163,184,0.9)] hover:text-white hover:border-[rgba(var(--color-primary-light-rgb),0.8)] transition"
+            onClick={onRefresh}
+            disabled={loading}
+          >
+            {loading ? '…' : 'Refresh'}
+          </button>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-col gap-2">
+        <button
+          type="button"
+          onClick={onStartEntryWorkflow}
+          className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-[rgba(var(--color-secondary-rgb),0.35)] bg-[rgba(var(--color-secondary-rgb),0.12)] py-2 text-sm font-semibold text-white hover:border-[rgba(var(--color-secondary-rgb),0.55)] hover:bg-[rgba(var(--color-secondary-rgb),0.18)] transition"
+        >
+          <span className="text-base" aria-hidden="true">▶</span>
+          Open Workflow
+        </button>
+        <p className="text-[12px] text-[rgba(148,163,184,0.9)]">{hasSessions ? `${sessions.length} active run${sessions.length === 1 ? '' : 's'}` : 'No active workflows yet.'}</p>
+      </div>
+      <div className="mt-3 flex-1 overflow-y-auto my-scroll1 pr-1 space-y-2">
+        {hasSessions ? (
+          sessions.map((session) => {
+            const chatId = session?.chat_id;
+            if (!chatId) return null;
+            const workflowName = session?.workflow_name || 'Workflow';
+            const isActive = chatId === activeChatId;
+            const summary = session?.last_artifact?.component_name
+              ? `Last artifact: ${session.last_artifact.component_name}`
+              : 'Tap to resume workflow run.';
+            const timestamp = formatHistoryTimestamp(session?.last_updated_at || session?.updated_at || session?.created_at);
+            return (
+              <button
+                key={chatId}
+                type="button"
+                onClick={() => onSelectSession(chatId, workflowName)}
+                className={`w-full text-left rounded-2xl border px-3 py-2 transition focus:outline-none focus:ring-2 focus:ring-[rgba(var(--color-primary-light-rgb),0.6)] ${isActive
+                  ? 'border-[rgba(var(--color-primary-light-rgb),0.7)] bg-[rgba(var(--color-primary-rgb),0.15)] shadow-[0_10px_35px_rgba(6,182,212,0.15)]'
+                  : 'border-[rgba(148,163,184,0.2)] bg-[rgba(15,23,42,0.65)] hover:border-[rgba(148,163,184,0.4)] hover:bg-[rgba(15,23,42,0.8)]'}`}
+              >
+                <div className="flex items-center justify-between text-[11px] text-[rgba(148,163,184,0.95)]">
+                  <span className="font-semibold text-[rgba(226,232,240,0.9)] text-sm">{workflowName}</span>
+                  <span>{timestamp}</span>
+                </div>
+                <p className="mt-1 text-[13px] leading-relaxed text-[rgba(226,232,240,0.8)] max-h-[3.6rem] overflow-hidden">{summary}</p>
+              </button>
+            );
+          })
+        ) : (
+          <div className="rounded-2xl border border-dashed border-[rgba(148,163,184,0.4)] px-3 py-6 text-center text-[13px] text-[rgba(148,163,184,0.9)]">
+            Start a workflow run to see it appear here.
+          </div>
+        )}
+      </div>
+    </aside>
+  );
+};
+
 const ChatPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   // Navigation config (null-safe — dev shell may omit NavigationProvider)
   const navContext = useContext(NavigationContext);
   const configuredStartupMode = navContext?.startup_mode || null;
+  const configuredEntryWorkflow = navContext?.entry_point || null;
+  const configuredResumePolicy = navContext?.resume_policy || 'last_active_then_oldest_then_entry_point';
+  const navigationLoading = navContext?.loading ?? false;
   // Core state
   const [messages, setMessages] = useState([]);
   // Ref mirror to access latest messages inside callbacks without stale closure
@@ -310,7 +439,7 @@ const ChatPage = () => {
   const [currentChatId, setCurrentChatId] = useState(null); // set via start/resume flow below
   useEffect(() => { messagesSnapshotAppliedRef.current = false; }, [currentChatId]);
   const LOCAL_STORAGE_KEY = 'mozaiks.current_chat_id';
-  const [connectionInitialized, setConnectionInitialized] = useState(false);
+  const [, setConnectionInitialized] = useState(false);
   const [workflowConfigLoaded, setWorkflowConfigLoaded] = useState(false); // becomes true once workflow config resolved
   const [cacheSeed, setCacheSeed] = useState(null); // per-chat cache seed for unified backend/frontend caching
   const [chatExists, setChatExists] = useState(null); // tri-state: null=unknown, true=exists, false=new
@@ -372,6 +501,8 @@ const ChatPage = () => {
     setGeneralChatSummary,
     generalChatSessions,
     setGeneralChatSessions,
+    workflowSessions,
+    setWorkflowSessions,
     askMessages,
     setAskMessages,
     workflowMessages,
@@ -428,6 +559,64 @@ const ChatPage = () => {
   const defaultWorkflow = resolveWorkflow(urlWorkflowName) || '';
   const [currentWorkflowName, setCurrentWorkflowName] = useState(defaultWorkflow);
 
+  const resolveKnownWorkflowName = useCallback((preferredWorkflow = null) => {
+    const explicitKnownWorkflow = workflowConfig.resolveKnownWorkflowName(preferredWorkflow);
+    if (explicitKnownWorkflow) {
+      return explicitKnownWorkflow;
+    }
+    return resolveWorkflow() || workflowConfig.getDefaultWorkflow() || null;
+  }, []);
+
+  const restoreStoredArtifactForChat = useCallback((chatId, fallbackWorkflowName = null) => {
+    if (!chatId) {
+      return false;
+    }
+
+    try {
+      const cachedCurrent = readStoredCurrentArtifact(chatId);
+      const cachedLast = readStoredLastArtifact(chatId);
+      const cached = cachedCurrent || cachedLast;
+      if (!cached?.ui_tool_id) {
+        return false;
+      }
+
+      const shouldOpen = getStoredArtifactPanelOpen(chatId);
+      const restoredMsg = {
+        id: `ui-restored-${Date.now()}`,
+        sender: 'agent',
+        agentName: cached.payload?.agentName || cached.payload?.agent_name || cached.agentName || cached.agent_name || 'Agent',
+        content: cached.payload?.structured_output || cached.payload || {},
+        isStreaming: false,
+        uiToolEvent: {
+          ui_tool_id: cached.ui_tool_id,
+          payload: cached.payload || {},
+          eventId: cached.eventId || null,
+          workflow_name: cached.workflow_name || fallbackWorkflowName || currentWorkflowName,
+          onResponse: undefined,
+          display: cached.display || 'artifact',
+          restored: true,
+        },
+      };
+
+      setCurrentArtifactMessages([restoredMsg]);
+      lastArtifactEventRef.current = cached.eventId || restoredMsg.id;
+      artifactCacheValidRef.current = true;
+      artifactRestoredOnceRef.current = true;
+
+      if (shouldOpen !== false) {
+        setIsSidePanelOpen(true);
+        if (setLayoutMode) {
+          setLayoutMode('split');
+        }
+      }
+
+      return true;
+    } catch (e) {
+      console.warn('[RESTORE] Failed to restore artifact from stored session:', e);
+      return false;
+    }
+  }, [currentWorkflowName, setIsSidePanelOpen, setLayoutMode]);
+
   useEffect(() => {
     if (typeof setCurrentArtifactContext !== 'function') {
       return;
@@ -453,6 +642,13 @@ const ChatPage = () => {
   }, [currentArtifactMessages, currentChatId, currentWorkflowName, setCurrentArtifactContext]);
 
   useEffect(() => {
+    if (!currentChatId || conversationMode !== 'workflow') {
+      return;
+    }
+    setStoredArtifactPanelOpen(currentChatId, isSidePanelOpen);
+  }, [currentChatId, conversationMode, isSidePanelOpen]);
+
+  useEffect(() => {
     if (!currentChatId) return;
     if (!Array.isArray(currentArtifactMessages) || currentArtifactMessages.length === 0) return;
     const artifactMsg = currentArtifactMessages.find(m => m?.uiToolEvent?.payload) || currentArtifactMessages[0];
@@ -469,7 +665,6 @@ const ChatPage = () => {
     };
 
     try {
-      const cacheKey = `mozaiks.current_artifact.${currentChatId}`;
       const serializableArtifact = {
         ...artifactMsg,
         uiToolEvent: {
@@ -478,17 +673,16 @@ const ChatPage = () => {
           onResponse: null,
         },
       };
-      localStorage.setItem(cacheKey, JSON.stringify(serializableArtifact));
+      writeStoredCurrentArtifact(currentChatId, serializableArtifact);
 
-      const lastKey = `mozaiks.last_artifact.${currentChatId}`;
-      localStorage.setItem(lastKey, JSON.stringify({
+      writeStoredLastArtifact(currentChatId, {
         ui_tool_id: uiToolEvent.ui_tool_id || 'core.state',
         eventId: uiToolEvent.eventId || null,
         workflow_name: uiToolEvent.workflow_name || currentWorkflowName,
         payload: artifactPayload,
         display: displayMode || 'artifact',
         ts: Date.now(),
-      }));
+      });
       artifactCacheValidRef.current = true;
     } catch (e) {
       console.warn('Failed to persist artifact cache', e);
@@ -521,6 +715,7 @@ const ChatPage = () => {
     }
   }, [currentArtifactMessages, currentChatId, currentWorkflowName]);
   const generalHydrationPendingRef = useRef(false);
+  const askModeSyncedChatRef = useRef(null);
   const workflowArtifactSnapshotRef = useRef({ isOpen: false, messages: [], layoutMode: 'split' });
   const queryResumeHandledRef = useRef(null);
   
@@ -553,6 +748,7 @@ const ChatPage = () => {
   const { theme: chatTheme, loading: themeLoading } = useTheme(currentAppId);
   const currentUserId = user?.id || user?.user_id || user?.sub || getUserIdFromToken() || 'anonymous';
   const [generalSessionsLoading, setGeneralSessionsLoading] = useState(false);
+  const [workflowSessionsLoading, setWorkflowSessionsLoading] = useState(false);
   // Workflow completion state
   const [workflowCompleted, setWorkflowCompleted] = useState(false);
   const [completionData, setCompletionData] = useState(null);
@@ -583,6 +779,34 @@ const ChatPage = () => {
       setCurrentWorkflowName(urlWorkflowName);
     }
   }, [urlWorkflowName, currentWorkflowName]);
+
+  useEffect(() => {
+    if (!workflowConfigLoaded) {
+      return;
+    }
+
+    const nextWorkflowName =
+      workflowConfig.resolveKnownWorkflowName(urlWorkflowName)
+      || workflowConfig.resolveKnownWorkflowName(currentWorkflowName)
+      || workflowConfig.resolveKnownWorkflowName(activeWorkflowName)
+      || workflowConfig.resolveKnownWorkflowName(getStoredActiveWorkflowName())
+      || resolveWorkflow()
+      || workflowConfig.getDefaultWorkflow()
+      || null;
+
+    if (!nextWorkflowName) {
+      return;
+    }
+
+    if (nextWorkflowName !== currentWorkflowName) {
+      console.log('🧭 [WORKFLOW_SYNC] Normalizing current workflow to loaded config:', nextWorkflowName);
+      setCurrentWorkflowName(nextWorkflowName);
+    }
+    if (nextWorkflowName !== activeWorkflowName) {
+      console.log('🧭 [WORKFLOW_SYNC] Normalizing active workflow to loaded config:', nextWorkflowName);
+      setActiveWorkflowName(nextWorkflowName);
+    }
+  }, [workflowConfigLoaded, urlWorkflowName, currentWorkflowName, activeWorkflowName, setActiveWorkflowName]);
 
   useEffect(() => {
     if (!pendingNavigationTrigger) return;
@@ -755,6 +979,25 @@ const ChatPage = () => {
     }
   }, [api, currentAppId, currentUserId, setGeneralChatSessions]);
 
+  const refreshWorkflowSessions = useCallback(async () => {
+    if (!api || typeof api.get !== 'function' || !currentAppId || !currentUserId) {
+      return [];
+    }
+    setWorkflowSessionsLoading(true);
+    try {
+      const result = await api.get(`/api/sessions/list/${currentAppId}/${currentUserId}`);
+      const sessions = Array.isArray(result?.sessions) ? result.sessions : [];
+      setWorkflowSessions(sessions);
+      return sessions;
+    } catch (err) {
+      console.error('Failed to list workflow sessions:', err);
+      setWorkflowSessions([]);
+      return [];
+    } finally {
+      setWorkflowSessionsLoading(false);
+    }
+  }, [api, currentAppId, currentUserId, setWorkflowSessions]);
+
   const mapGeneralMessage = useCallback((message) => {
     if (!message) {
       return null;
@@ -832,10 +1075,26 @@ const ChatPage = () => {
   }, [api, currentAppId, currentUserId, refreshGeneralSessions]);
 
   useEffect(() => {
+    if (!api || !currentAppId || !currentUserId) {
+      return;
+    }
+    if (conversationMode !== 'workflow') {
+      return;
+    }
+    refreshWorkflowSessions();
+  }, [api, currentAppId, currentUserId, conversationMode, refreshWorkflowSessions]);
+
+  useEffect(() => {
     if (conversationBootstrapRef.current) {
       return;
     }
+    // Wait for navigation config so ai.chat.startup_mode can be honored.
+    // Explicit URL mode (?mode=ask|workflow) still takes precedence immediately.
+    if (!queryMode && navigationLoading) {
+      return;
+    }
     conversationBootstrapRef.current = true;
+    console.log('🧭 [BOOTSTRAP] startup_mode resolved to:', configuredStartupMode || 'workflow');
     
     // Respect explicit mode from URL query param (e.g., ?mode=ask from widget navigation)
     if (queryMode === 'ask') {
@@ -867,7 +1126,7 @@ const ChatPage = () => {
         resumeOldestFromWidgetRef.current = true;
       }
       
-      // Try to restore artifact state from snapshot or localStorage (works offline)
+      // Try to restore artifact state from snapshot or platform storage (works offline)
       const snapshot = workflowArtifactSnapshotRef.current;
       if (snapshot?.isOpen && snapshot?.messages?.length > 0) {
         console.log('🎨 [BOOTSTRAP] Restoring artifact panel from in-memory snapshot');
@@ -878,44 +1137,19 @@ const ChatPage = () => {
             setLayoutMode(snapshot.layoutMode);
           }
         }, 100);
-      } else if (queryChatId) {
-        // Try localStorage restore for offline support
-        try {
-          const key = `mozaiks.last_artifact.${queryChatId}`;
-          const raw = localStorage.getItem(key);
-          if (raw) {
-            const cached = JSON.parse(raw);
-            if (cached?.ui_tool_id) {
-              console.log('🎨 [BOOTSTRAP] Restoring artifact from localStorage (offline)', cached.ui_tool_id);
-              setTimeout(() => {
-                setIsSidePanelOpen(true);
-                const restoredMsg = {
-                  id: `ui-restored-${Date.now()}`,
-                  sender: 'agent',
-                  agentName: cached.payload?.agentName || 'Agent',
-                  content: cached.payload?.structured_output || cached.payload || {},
-                  isStreaming: false,
-                  uiToolEvent: {
-                    ui_tool_id: cached.ui_tool_id,
-                    payload: cached.payload || {},
-                    eventId: cached.eventId || null,
-                    workflow_name: cached.workflow_name || urlWorkflowName,
-                    display: cached.display || 'artifact',
-                    restored: true,
-                  },
-                };
-                setCurrentArtifactMessages([restoredMsg]);
-              }, 100);
-            }
+      } else {
+        const restoreChatId = queryChatId || currentChatId || activeChatId || getStoredActiveChatId();
+        if (restoreChatId) {
+          const restored = restoreStoredArtifactForChat(restoreChatId, urlWorkflowName);
+          if (restored) {
+            console.log('🎨 [BOOTSTRAP] Restored artifact from stored session', restoreChatId);
           }
-        } catch (e) {
-          console.warn('[BOOTSTRAP] Failed to restore artifact from localStorage:', e);
         }
       }
       return;
     }
     
-    // Default to configured startup mode (navigation.json startup_mode) or 'workflow'
+    // Default to configured startup mode (projected from platform/config/ai.json) or 'workflow'
     const startupDefault = configuredStartupMode || 'workflow';
     if (startupDefault === 'ask') {
       console.log('🧭 [BOOTSTRAP] startup_mode is "ask" — entering Ask mode');
@@ -928,7 +1162,25 @@ const ChatPage = () => {
     } else if (conversationMode !== 'workflow') {
       setConversationMode('workflow');
     }
-  }, [conversationMode, setConversationMode, queryMode, queryChatId, queryResume, urlWorkflowName, setLayoutMode, askMessages, setMessagesWithLogging, configuredStartupMode]);
+  }, [conversationMode, setConversationMode, queryMode, queryChatId, queryResume, urlWorkflowName, setLayoutMode, askMessages, setMessagesWithLogging, configuredStartupMode, navigationLoading]);
+
+  // Keep backend/session mode aligned when startup lands directly in Ask mode.
+  // Without this, the UI can show Ask while backend remains in workflow context.
+  useEffect(() => {
+    if (conversationMode !== 'ask') return;
+    if (connectionStatus !== 'connected') return;
+    if (!currentChatId) return;
+    if (askModeSyncedChatRef.current === currentChatId) return;
+
+    const activeWs = wsRef.current;
+    if (!activeWs || typeof activeWs.send !== 'function') return;
+
+    const sent = activeWs.send({ type: 'chat.enter_general_mode', chat_id: currentChatId });
+    if (sent) {
+      askModeSyncedChatRef.current = currentChatId;
+      console.log('🧭 [ASK_SYNC] chat.enter_general_mode sent for chat:', currentChatId);
+    }
+  }, [conversationMode, connectionStatus, currentChatId]);
 
   // Separate effect to enforce Ask mode artifact panel state
   // This ensures the panel stays closed even if other effects try to open it
@@ -1040,6 +1292,7 @@ const ChatPage = () => {
     if (!update) return;
     updateArtifactPayload(artifactId, (payload) => applyArtifactUpdate(payload, update));
   }, [updateArtifactPayload]);
+  const handleIncomingRef = useRef(null);
 
   // Simplified incoming handler (namespaced chat.* only)
   const handleIncoming = useCallback((data) => {
@@ -1057,11 +1310,12 @@ const ChatPage = () => {
         const outerType = data.type || '';
         const isText = outerType === 'chat.text';
         const isInputRequest = outerType === 'chat.input_request';
+        const isMeta = outerType === 'chat_meta' || outerType === 'chat.chat_meta';
         const serializedText = !isText && !isInputRequest && typeof data.content === 'string' && 
           (data.content.includes('"type":"chat.text"') || data.content.includes('"type":"chat.input_request"'));
-        if (isText || isInputRequest || serializedText) {
+        if (isText || isInputRequest || isMeta || serializedText) {
           initSpinnerHiddenOnceRef.current = true;
-          if (showInitSpinner) console.log('🧹 [SPINNER] Hiding spinner (interactive event). text?', isText, 'input?', isInputRequest, 'serialized?', serializedText);
+          if (showInitSpinner) console.log('🧹 [SPINNER] Hiding spinner (ready event). text?', isText, 'input?', isInputRequest, 'meta?', isMeta, 'serialized?', serializedText);
           setShowInitSpinner(false);
         }
       }
@@ -1168,7 +1422,7 @@ const ChatPage = () => {
       if (data.cache_seed !== undefined && data.cache_seed !== null) {
         setCacheSeed(data.cache_seed);
         if (currentChatId) {
-          try { localStorage.setItem(`${LOCAL_STORAGE_KEY}.cache_seed.${currentChatId}`, String(data.cache_seed)); } catch {}
+          setStoredChatCacheSeed(currentChatId, data.cache_seed);
         }
         console.log('🧬 [META] Received cache_seed', data.cache_seed, 'for chat', currentChatId);
       }
@@ -1176,12 +1430,8 @@ const ChatPage = () => {
         // Backend indicates this chat_id had no persisted session (fresh after client-side reuse)
         setChatExists(false);
         console.log('🧬 [META] Backend reports chat did NOT previously exist. Suppressing artifact restore. chat_id=', currentChatId);
-        try {
-          // Purge any stale local artifacts for this chat to avoid ghost UI
-          localStorage.removeItem(`mozaiks.last_artifact.${currentChatId}`);
-          localStorage.removeItem(`mozaiks.current_artifact.${currentChatId}`);
-          console.log('🧼 [META] Purged stale artifacts for non-existent chat');
-        } catch {}
+        clearStoredArtifactState(currentChatId);
+        console.log('🧼 [META] Purged stale artifacts for non-existent chat');
         // Reset any prior artifact state
         setCurrentArtifactMessages([]);
         lastArtifactEventRef.current = null;
@@ -1191,10 +1441,7 @@ const ChatPage = () => {
         setChatExists(true);
         console.log('🧬 [META] Backend confirms chat exists. Artifact restore allowed.');
         if (!data.last_artifact || !data.last_artifact.ui_tool_id) {
-          try {
-            localStorage.removeItem(`mozaiks.last_artifact.${currentChatId}`);
-            localStorage.removeItem(`mozaiks.current_artifact.${currentChatId}`);
-          } catch {}
+          clearStoredArtifactState(currentChatId);
           setCurrentArtifactMessages([]);
           lastArtifactEventRef.current = null;
           artifactRestoredOnceRef.current = false;
@@ -1204,15 +1451,14 @@ const ChatPage = () => {
         // If backend already sent last_artifact and we have not restored yet, cache it for restore effect
         if (!artifactRestoredOnceRef.current && data.last_artifact && data.last_artifact.ui_tool_id) {
           try {
-            const key = `mozaiks.last_artifact.${currentChatId}`;
-            localStorage.setItem(key, JSON.stringify({
+            writeStoredLastArtifact(currentChatId, {
               ui_tool_id: data.last_artifact.ui_tool_id,
               eventId: data.last_artifact.event_id || null,
               workflow_name: data.last_artifact.workflow_name || currentWorkflowName,
               payload: data.last_artifact.payload || {},
               display: data.last_artifact.display || 'artifact',
               ts: Date.now(),
-            }));
+            });
             console.log('🧬 [META] Cached last_artifact from server meta event');
             artifactCacheValidRef.current = true;
           } catch (e) { console.warn('Failed to cache server last_artifact', e); }
@@ -1238,18 +1484,15 @@ const ChatPage = () => {
             if (metaData.cache_seed !== undefined && metaData.cache_seed !== null) {
               setCacheSeed(metaData.cache_seed);
               if (currentChatId) {
-                try { localStorage.setItem(`${LOCAL_STORAGE_KEY}.cache_seed.${currentChatId}`, String(metaData.cache_seed)); } catch {}
+                setStoredChatCacheSeed(currentChatId, metaData.cache_seed);
               }
               console.log('🧬 [META] Received cache_seed', metaData.cache_seed, 'for chat', currentChatId);
             }
             if (metaData.chat_exists === false) {
               setChatExists(false);
               console.log('🧬 [META] Backend reports chat did NOT previously exist. Suppressing artifact restore. chat_id=', currentChatId);
-              try {
-                localStorage.removeItem(`mozaiks.last_artifact.${currentChatId}`);
-                localStorage.removeItem(`mozaiks.current_artifact.${currentChatId}`);
-                console.log('🧼 [META] Purged stale artifacts for non-existent chat');
-              } catch {}
+              clearStoredArtifactState(currentChatId);
+              console.log('🧼 [META] Purged stale artifacts for non-existent chat');
               setCurrentArtifactMessages([]);
               lastArtifactEventRef.current = null;
               artifactRestoredOnceRef.current = true;
@@ -1258,10 +1501,7 @@ const ChatPage = () => {
               setChatExists(true);
               console.log('🧬 [META] Backend confirms chat exists. Artifact restore allowed.');
               if (!metaData.last_artifact || !metaData.last_artifact.ui_tool_id) {
-                try {
-                  localStorage.removeItem(`mozaiks.last_artifact.${currentChatId}`);
-                  localStorage.removeItem(`mozaiks.current_artifact.${currentChatId}`);
-                } catch {}
+                clearStoredArtifactState(currentChatId);
                 setCurrentArtifactMessages([]);
                 lastArtifactEventRef.current = null;
                 artifactRestoredOnceRef.current = false;
@@ -1269,15 +1509,14 @@ const ChatPage = () => {
               }
               if (!artifactRestoredOnceRef.current && metaData.last_artifact && metaData.last_artifact.ui_tool_id) {
                 try {
-                  const key = `mozaiks.last_artifact.${currentChatId}`;
-                  localStorage.setItem(key, JSON.stringify({
+                  writeStoredLastArtifact(currentChatId, {
                     ui_tool_id: metaData.last_artifact.ui_tool_id,
                     eventId: metaData.last_artifact.event_id || null,
                     workflow_name: metaData.last_artifact.workflow_name || currentWorkflowName,
                     payload: metaData.last_artifact.payload || {},
                     display: metaData.last_artifact.display || 'artifact',
                     ts: Date.now(),
-                  }));
+                  });
                   console.log('🧬 [META] Cached last_artifact from server meta event');
                   artifactCacheValidRef.current = true;
                 } catch (e) { console.warn('Failed to cache server last_artifact', e); }
@@ -1296,6 +1535,10 @@ const ChatPage = () => {
           data.is_structured_capable = !!innerData.is_structured_capable;
           if (innerData.is_visual !== undefined) data.is_visual = innerData.is_visual;
           if (innerData.is_tool_agent !== undefined) data.is_tool_agent = innerData.is_tool_agent;
+          if (innerData.ui_visibility !== undefined) data.ui_visibility = innerData.ui_visibility;
+          if (innerData.trace_reason !== undefined) data.trace_reason = innerData.trace_reason;
+          if (innerData.trace_agent !== undefined) data.trace_agent = innerData.trace_agent;
+          if (innerData.sequence !== undefined) data.sequence = innerData.sequence;
           // Preserve structured output payloads if present
           if (innerData.structured_output !== undefined) data.structured_output = innerData.structured_output;
           if (innerData.structured_schema !== undefined) data.structured_schema = innerData.structured_schema;
@@ -1343,7 +1586,7 @@ const ChatPage = () => {
         if (inner.structured_output !== undefined && data.structured_output === undefined) data.structured_output = inner.structured_output;
         if (inner.structured_schema !== undefined && data.structured_schema === undefined) data.structured_schema = inner.structured_schema;
         // UI tool / component hints (input_request etc.) + error messages
-        ['component_type','ui_tool_id','tool_name','tool_call_id','request_id','progress_percent','prompt','success','interaction_type','status','corr','call_id','payload','message','error_code'].forEach(f => {
+        ['component_type','ui_tool_id','tool_name','tool_call_id','request_id','progress_percent','prompt','success','interaction_type','status','corr','call_id','payload','message','error_code','ui_visibility','trace_reason','trace_agent','sequence'].forEach(f => {
           if (inner[f] !== undefined && data[f] === undefined) data[f] = inner[f];
         });
       }
@@ -1534,6 +1777,11 @@ const ChatPage = () => {
         return;
       }
       case 'print': {
+        const printVisibility = data.ui_visibility || data.data?.ui_visibility || null;
+        const showTraceMessages = debugFlag('mozaiks.show_trace_messages') || debugFlag('mozaiks.debug_pipeline');
+        if (printVisibility === 'trace' && !showTraceMessages) {
+          return;
+        }
         // Suppress very first auto-generated instruction style message if workflow has no explicit initial_message_to_user
         try {
           if (!firstAgentMessageSuppressedRef.current) {
@@ -1586,6 +1834,11 @@ const ChatPage = () => {
         return;
       }
       case 'text': {
+        const textVisibility = data.ui_visibility || data.data?.ui_visibility || data.metadata?.ui_visibility || null;
+        const showTraceMessages = debugFlag('mozaiks.show_trace_messages') || debugFlag('mozaiks.debug_pipeline');
+        if (textVisibility === 'trace' && !showTraceMessages) {
+          return;
+        }
         // Suppress very first auto-generated instruction style message if workflow has no explicit initial_message_to_user
         try {
           if (!firstAgentMessageSuppressedRef.current) {
@@ -1875,10 +2128,7 @@ const ChatPage = () => {
           artifactCacheValidRef.current = false;
           setCurrentArtifactMessages([]);
           if (currentChatId) {
-            try {
-              localStorage.removeItem(`mozaiks.current_artifact.${currentChatId}`);
-              localStorage.removeItem(`mozaiks.last_artifact.${currentChatId}`);
-            } catch {}
+            clearStoredArtifactState(currentChatId);
           }
         }
         return;
@@ -2000,12 +2250,9 @@ const ChatPage = () => {
           lastArtifactEventRef.current = null;
           setCurrentArtifactMessages([]);
           // Clear artifact cache on new conversation turn
-          try {
-            if (currentChatId) {
-              localStorage.removeItem(`mozaiks.current_artifact.${currentChatId}`);
-              localStorage.removeItem(`mozaiks.last_artifact.${currentChatId}`);
-            }
-          } catch {}
+          if (currentChatId) {
+            clearStoredArtifactState(currentChatId);
+          }
         }
         return;
       }
@@ -2156,10 +2403,28 @@ const ChatPage = () => {
         return;
     }
   }, [currentChatId, currentWorkflowName, setMessagesWithLogging, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, applyArtifactUpdateForAction, updateArtifactPayload]);
+  useEffect(() => {
+    handleIncomingRef.current = handleIncoming;
+  }, [handleIncoming]);
 
   // Debug: Log spinner state changes
   useEffect(() => {
     console.log('🧹 [SPINNER] State changed to:', showInitSpinner);
+  }, [showInitSpinner]);
+
+  // Failsafe: never leave the one-time init spinner on indefinitely.
+  useEffect(() => {
+    if (!showInitSpinner || initSpinnerHiddenOnceRef.current) return undefined;
+
+    const timer = setTimeout(() => {
+      if (!initSpinnerHiddenOnceRef.current) {
+        console.log('🧹 [SPINNER] Auto-hiding spinner (failsafe timeout)');
+        initSpinnerHiddenOnceRef.current = true;
+        setShowInitSpinner(false);
+      }
+    }, 4000);
+
+    return () => clearTimeout(timer);
   }, [showInitSpinner]);
 
   // Workflow configuration & resume bootstrap (no direct startChat here; handled by preflight existence effect)
@@ -2184,17 +2449,14 @@ const ChatPage = () => {
       setWorkflowConfigLoaded(true);
     });
     if (!currentChatId) {
-      let stored = null;
-      try { stored = localStorage.getItem(LOCAL_STORAGE_KEY); } catch {}
+      const stored = getStoredActiveChatId();
       if (stored) {
         setCurrentChatId(stored);
-        try {
-          const seedStored = localStorage.getItem(`${LOCAL_STORAGE_KEY}.cache_seed.${stored}`);
-          if (seedStored) {
-            setCacheSeed(Number(seedStored));
-            console.log('🧬 [RESUME] Loaded cached cache_seed for resumed chat', stored, seedStored);
-          }
-        } catch {}
+        const seedStored = getStoredChatCacheSeed(stored);
+        if (seedStored !== null) {
+          setCacheSeed(seedStored);
+          console.log('🧬 [RESUME] Loaded cached cache_seed for resumed chat', stored, seedStored);
+        }
       }
     }
   }, [api, currentChatId, currentAppId]);
@@ -2216,7 +2478,7 @@ useEffect(() => {
       if (reuseChatId) {
         console.log('[EXISTS] Checking existence of chat', reuseChatId);
         try {
-          const wfName = currentWorkflowName;
+          const wfName = resolveKnownWorkflowName(currentWorkflowName);
           const resp = await fetch(`${api.getHttpBaseUrl()}/api/chats/exists/${currentAppId}/${wfName}/${reuseChatId}`);
           if (resp.ok) {
             const data = await resp.json();
@@ -2234,10 +2496,7 @@ useEffect(() => {
               return;
             }
             console.log('[EXISTS] Chat does NOT exist; clearing any cached artifacts for that id');
-            try {
-              localStorage.removeItem(`mozaiks.last_artifact.${reuseChatId}`);
-              localStorage.removeItem(`mozaiks.current_artifact.${reuseChatId}`);
-            } catch {}
+            clearStoredArtifactState(reuseChatId);
           } else {
             console.warn('[EXISTS] Backend returned non-OK; falling back to reuse chat_id');
             setCurrentChatId(reuseChatId);
@@ -2272,12 +2531,9 @@ useEffect(() => {
         setActiveChatId(newId);
         setActiveWorkflowName(currentWorkflowName);
         setChatMinimized(false);
-        try { localStorage.setItem(LOCAL_STORAGE_KEY, newId); } catch {}
+        setStoredActiveChatId(newId);
         if (!reused) {
-          try {
-            localStorage.removeItem(`mozaiks.last_artifact.${newId}`);
-            localStorage.removeItem(`mozaiks.current_artifact.${newId}`);
-          } catch {}
+          clearStoredArtifactState(newId);
         }
         console.log('[INIT] startChat complete', { newId, reused });
       }
@@ -2288,21 +2544,16 @@ useEffect(() => {
     }
   })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [api, workflowConfigLoaded, currentChatId, currentWorkflowName, currentAppId, currentUserId]);
+}, [api, workflowConfigLoaded, currentChatId, currentWorkflowName, currentAppId, currentUserId, resolveKnownWorkflowName]);
 
   // Expose a helper to force-reset the current chat client-side (can be wired to a debug button later)
   const forceResetChat = useCallback(() => {
-    try {
-      const current = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (current) {
-        [
-          `mozaiks.last_artifact.${current}`,
-          `mozaiks.current_artifact.${current}`,
-          `${LOCAL_STORAGE_KEY}.cache_seed.${current}`,
-        ].forEach(k => { try { localStorage.removeItem(k); } catch {} });
-      }
-      console.log('🧼 [CACHE] Manual force reset invoked; clearing in-memory state');
-    } catch {}
+    const current = getStoredActiveChatId();
+    if (current) {
+      clearStoredArtifactState(current);
+      clearStoredChatCacheSeed(current);
+    }
+    console.log('🧼 [CACHE] Manual force reset invoked; clearing in-memory state');
     setCurrentArtifactMessages([]);
     lastArtifactEventRef.current = null;
     artifactRestoredOnceRef.current = false;
@@ -2324,17 +2575,15 @@ useEffect(() => {
     try {
       window.__mozaiksInspectArtifacts = () => {
         const keys = [];
-        const chatId = currentChatId || localStorage.getItem(LOCAL_STORAGE_KEY);
-        console.log('🔍 [DEBUG] Inspecting artifact localStorage for chat:', chatId);
-        
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (!key) continue;
-          
-          if (key.includes('artifact') || key.includes('cache_seed') || key.includes('current_chat_id')) {
-            const value = localStorage.getItem(key);
-            keys.push({ key, value: value?.slice(0, 200) + (value?.length > 200 ? '...' : '') });
-          }
+        const chatId = currentChatId || getStoredActiveChatId();
+        console.log('🔍 [DEBUG] Inspecting artifact session cache for chat:', chatId);
+        if (chatId) {
+          const currentArtifact = readStoredCurrentArtifact(chatId);
+          const lastArtifact = readStoredLastArtifact(chatId);
+          const cacheSeedValue = getStoredChatCacheSeed(chatId);
+          keys.push({ key: `mozaiks.current_artifact.${chatId}`, value: currentArtifact ? JSON.stringify(currentArtifact).slice(0, 200) : null });
+          keys.push({ key: `mozaiks.last_artifact.${chatId}`, value: lastArtifact ? JSON.stringify(lastArtifact).slice(0, 200) : null });
+          keys.push({ key: `${LOCAL_STORAGE_KEY}.cache_seed.${chatId}`, value: cacheSeedValue });
         }
         
         console.table(keys);
@@ -2360,8 +2609,11 @@ useEffect(() => {
     }
     
     // Prevent duplicate connections
-    if (connectionInitialized || connectionInProgressRef.current) {
-  // console.debug('Connection already initialized or in progress, skipping...');
+    if (connectionInProgressRef.current) {
+      // console.debug('Connection already initialized or in progress, skipping...');
+      return;
+    }
+    if (wsRef.current && wsRef.current.chatId === currentChatId) {
       return;
     }
     
@@ -2387,12 +2639,25 @@ useEffect(() => {
         console.warn('⚠️ No workflow available to connect');
         return () => {};
       }
-      
-  const connection = api.createWebSocketConnection(
+
+      // If a stale connection is still around from a prior chat/session, close it first.
+      if (wsRef.current && wsRef.current.chatId && wsRef.current.chatId !== currentChatId) {
+        try {
+          wsRef.current.close();
+        } catch {}
+        wsRef.current = null;
+        setWs(null);
+      }
+
+      let connection = null;
+      connection = api.createWebSocketConnection(
         currentAppId,
         currentUserId,
         {
           onOpen: () => {
+            if (!connection || wsRef.current !== connection) {
+              return;
+            }
             // console.debug('WebSocket connection established');
             setConnectionStatus('connected');
             setLoading(false);
@@ -2408,15 +2673,29 @@ useEffect(() => {
                 initSpinnerShownRef.current = true; // lock state
               }
             }
-    try { localStorage.setItem(LOCAL_STORAGE_KEY, currentChatId); } catch {}
+            setStoredActiveChatId(currentChatId);
           },
-          onMessage: handleIncoming,
+          onMessage: (data) => {
+            // Ignore callbacks from stale sockets that are no longer active.
+            if (!connection || wsRef.current !== connection) {
+              return;
+            }
+            if (handleIncomingRef.current) {
+              handleIncomingRef.current(data);
+            }
+          },
           onError: (error) => {
+            if (!connection || wsRef.current !== connection) {
+              return;
+            }
             console.error("WebSocket error:", error);
             setConnectionStatus('error');
             setLoading(false);
           },
           onClose: () => {
+            if (!connection || wsRef.current !== connection) {
+              return;
+            }
             // console.debug('WebSocket connection closed');
             setConnectionStatus('disconnected');
             wsRef.current = null;
@@ -2427,6 +2706,12 @@ useEffect(() => {
         currentChatId // Pass the existing chat ID
       );
 
+      if (!connection) {
+        setConnectionStatus('error');
+        setLoading(false);
+        return () => {};
+      }
+      connection.chatId = currentChatId;
       setWs(connection);
       wsRef.current = connection;
   // console.debug('WebSocket connection established:', !!ws);
@@ -2435,7 +2720,10 @@ useEffect(() => {
           connection.close();
           // console.debug('WebSocket connection closed');
         }
-        wsRef.current = null;
+        if (wsRef.current === connection) {
+          wsRef.current = null;
+          setWs(null);
+        }
       };
     };
 
@@ -2443,7 +2731,7 @@ useEffect(() => {
     const connectWithCorrectTransport = async () => {
       try {
         // Unified workflow resolution: URL explicit → backend entry_point → singleton → null
-        const workflowName = resolveWorkflow(urlWorkflowName) || currentWorkflowName;
+        const workflowName = resolveKnownWorkflowName(urlWorkflowName) || resolveKnownWorkflowName(currentWorkflowName);
         if (!workflowName) {
           throw new Error('No workflow available');
         }
@@ -2466,7 +2754,7 @@ useEffect(() => {
       } catch (error) {
         console.error('Error querying workflow transport:', error);
         // Fallback to WebSocket
-        const fallbackWf = resolveWorkflow();
+        const fallbackWf = resolveKnownWorkflowName(currentWorkflowName) || resolveWorkflow();
         if (!fallbackWf) {
           console.warn('⚠️ No workflow available for fallback');
           return () => {};
@@ -2478,9 +2766,15 @@ useEffect(() => {
     };
     
     // Execute the async function and handle cleanup
-    let cleanup;
+    let effectDisposed = false;
+    let cleanup = () => {};
     connectWithCorrectTransport().then(cleanupFn => {
-      cleanup = cleanupFn;
+      const normalizedCleanup = typeof cleanupFn === 'function' ? cleanupFn : () => {};
+      if (effectDisposed) {
+        try { normalizedCleanup(); } catch {}
+        return;
+      }
+      cleanup = normalizedCleanup;
     }).catch(error => {
       console.error('Failed to connect with transport:', error);
       // Reset connection flags on error so user can retry
@@ -2489,11 +2783,12 @@ useEffect(() => {
     });
     
     return () => {
+      effectDisposed = true;
       if (cleanup) cleanup();
       // Reset the in-progress flag when component unmounts
       connectionInProgressRef.current = false;
     };
-  }, [api, currentAppId, currentUserId, handleIncoming, workflowConfigLoaded, currentChatId, connectionInitialized, urlWorkflowName, ws]);
+  }, [api, currentAppId, currentUserId, workflowConfigLoaded, currentChatId, urlWorkflowName, resolveKnownWorkflowName]);
 
   // Retry connection function
   const retryConnection = useCallback(() => {
@@ -2585,10 +2880,9 @@ useEffect(() => {
               setCurrentArtifactMessages([artifactMsg]);
               artifactCacheValidRef.current = true;
               
-              // Also cache to localStorage for persistence across panel open/close
+              // Also cache to platform storage for persistence across panel open/close
               try {
                 if (currentChatId) {
-                  const cacheKey = `mozaiks.current_artifact.${currentChatId}`;
                   // Create a serializable version without the function
                   const serializableArtifact = {
                     ...artifactMsg,
@@ -2597,8 +2891,8 @@ useEffect(() => {
                       onResponse: null // Functions can't be serialized, will be reconstructed on restore
                     }
                   };
-                  localStorage.setItem(cacheKey, JSON.stringify(serializableArtifact));
-                  console.log('🖼️ [UI] Cached artifact to localStorage');
+                  writeStoredCurrentArtifact(currentChatId, serializableArtifact);
+                  console.log('🖼️ [UI] Cached artifact to platform storage');
                 }
               } catch (e) { console.warn('Failed to cache artifact', e); }
             } catch (e) { console.warn('Failed to set artifact message', e); }
@@ -2607,7 +2901,6 @@ useEffect(() => {
             // Persist minimal artifact session state for graceful refresh restore
             try {
               if (currentChatId) {
-                const key = `mozaiks.last_artifact.${currentChatId}`;
                 const cache = {
                   ui_tool_id,
                   eventId: eventId || null,
@@ -2616,7 +2909,7 @@ useEffect(() => {
                   display: displayMode || 'artifact',
                   ts: Date.now(),
                 };
-                localStorage.setItem(key, JSON.stringify(cache));
+                writeStoredLastArtifact(currentChatId, cache);
               }
             } catch {}
             // Persist nav trigger cache if configured
@@ -2962,6 +3255,45 @@ useEffect(() => {
     refreshGeneralSessions();
   }, [refreshGeneralSessions]);
 
+  const handleClearGeneralSessions = useCallback(async () => {
+    if (!api || typeof api.clearGeneralChats !== 'function' || !currentAppId || !currentUserId) {
+      return;
+    }
+
+    const confirmed = typeof window === 'undefined'
+      ? true
+      : window.confirm('Clear all Ask conversations for this app and user?');
+    if (!confirmed) {
+      return;
+    }
+
+    setGeneralSessionsLoading(true);
+    try {
+      await api.clearGeneralChats(currentAppId, currentUserId, { status: 'all' });
+      setGeneralChatSessions([]);
+      setActiveGeneralChatId(null);
+      setGeneralChatSummary(null);
+      generalMessagesCacheRef.current = [];
+      if (conversationMode === 'ask') {
+        setMessagesWithLogging([]);
+      }
+      console.log('🧹 [ASK] Cleared general chat sessions');
+    } catch (err) {
+      console.error('Failed to clear general chat sessions:', err);
+    } finally {
+      setGeneralSessionsLoading(false);
+    }
+  }, [
+    api,
+    currentAppId,
+    currentUserId,
+    conversationMode,
+    setActiveGeneralChatId,
+    setGeneralChatSummary,
+    setGeneralChatSessions,
+    setMessagesWithLogging,
+  ]);
+
   const ensureWorkflowMode = useCallback(() => {
     if (conversationMode === 'workflow') {
       return true;
@@ -3088,6 +3420,208 @@ useEffect(() => {
     return false;
   }, [currentWorkflowName, sendWsMessage, setActiveChatId, setActiveWorkflowName, setConversationMode, setCurrentWorkflowName, setCurrentChatId]);
 
+  const handleSelectWorkflowSession = useCallback((chatId, workflowName = null) => {
+    if (!chatId) {
+      return;
+    }
+    const targetWorkflow =
+      resolveKnownWorkflowName(workflowName)
+      || resolveKnownWorkflowName(activeWorkflowName)
+      || resolveKnownWorkflowName(currentWorkflowName)
+      || resolveKnownWorkflowName(configuredEntryWorkflow)
+      || resolveWorkflow();
+
+    const resumed = resumeWorkflowSession(chatId, targetWorkflow);
+    if (resumed) {
+      if (setLayoutMode) setLayoutMode('split');
+      refreshWorkflowSessions();
+    }
+  }, [
+    activeWorkflowName,
+    currentWorkflowName,
+    configuredEntryWorkflow,
+    resolveKnownWorkflowName,
+    resumeWorkflowSession,
+    setLayoutMode,
+    refreshWorkflowSessions,
+  ]);
+
+  const handleRefreshWorkflowSessions = useCallback(() => {
+    refreshWorkflowSessions();
+  }, [refreshWorkflowSessions]);
+
+  const handleClearWorkflowSessions = useCallback(async () => {
+    if (!api || typeof api.clearWorkflowSessions !== 'function' || !currentAppId || !currentUserId) {
+      return;
+    }
+
+    const confirmed = typeof window === 'undefined'
+      ? true
+      : window.confirm('Clear all workflow runs for this app and user?');
+    if (!confirmed) {
+      return;
+    }
+
+    setWorkflowSessionsLoading(true);
+    try {
+      const existing = Array.isArray(workflowSessions) ? workflowSessions : [];
+      await api.clearWorkflowSessions(currentAppId, currentUserId, { status: 'all' });
+      for (const session of existing) {
+        const chatId = session?.chat_id;
+        if (!chatId) continue;
+        clearStoredArtifactState(chatId);
+        clearStoredChatCacheSeed(chatId);
+      }
+      setWorkflowSessions([]);
+      setStoredActiveChatId(null);
+      if (conversationMode === 'workflow') {
+        setMessagesWithLogging([]);
+        setCurrentArtifactMessages([]);
+      }
+      console.log('🧹 [WORKFLOW] Cleared workflow sessions');
+    } catch (err) {
+      console.error('Failed to clear workflow sessions:', err);
+    } finally {
+      setWorkflowSessionsLoading(false);
+    }
+  }, [
+    api,
+    currentAppId,
+    currentUserId,
+    workflowSessions,
+    conversationMode,
+    setMessagesWithLogging,
+    setWorkflowSessions,
+  ]);
+
+  const resolveResumePolicyOrder = useCallback(() => {
+    const policy = String(configuredResumePolicy || 'last_active_then_oldest_then_entry_point').toLowerCase().trim();
+    const policyMap = {
+      last_active_then_oldest_then_entry_point: ['last_active', 'oldest', 'entry_point'],
+      last_active_then_recent_then_entry_point: ['last_active', 'recent', 'entry_point'],
+      recent_then_entry_point: ['recent', 'entry_point'],
+      oldest_then_entry_point: ['oldest', 'entry_point'],
+      entry_point_only: ['entry_point'],
+    };
+    return policyMap[policy] || ['last_active', 'oldest', 'entry_point'];
+  }, [configuredResumePolicy]);
+
+  const resolveWorkflowSessionByStrategy = useCallback(async (strategy) => {
+    const normalized = String(strategy || '').toLowerCase();
+    const fallbackWorkflowName =
+      resolveKnownWorkflowName(activeWorkflowName)
+      || resolveKnownWorkflowName(currentWorkflowName)
+      || resolveKnownWorkflowName(getStoredActiveWorkflowName())
+      || resolveKnownWorkflowName(configuredEntryWorkflow);
+
+    if (normalized === 'last_active') {
+      const lastActiveChatId = activeChatId || currentChatId || getStoredActiveChatId();
+      if (!lastActiveChatId) {
+        return null;
+      }
+      // last_active should only resume chats that are still IN_PROGRESS.
+      // If the chat is completed, fall through to next resume strategy.
+      if (Array.isArray(workflowSessions) && workflowSessions.length > 0) {
+        const isActiveSession = workflowSessions.some((s) => s?.chat_id === lastActiveChatId);
+        if (!isActiveSession) {
+          return null;
+        }
+      } else if (api && typeof api.get === 'function' && currentAppId && currentUserId) {
+        try {
+          const listed = await api.get(`/api/sessions/list/${currentAppId}/${currentUserId}`);
+          const sessions = Array.isArray(listed?.sessions) ? listed.sessions : [];
+          const isActiveSession = sessions.some((s) => s?.chat_id === lastActiveChatId);
+          if (!isActiveSession) {
+            return null;
+          }
+        } catch (err) {
+          console.warn('Failed to validate last_active workflow session:', err);
+          return null;
+        }
+      }
+      return {
+        strategy: 'last_active',
+        chat_id: lastActiveChatId,
+        workflow_name: fallbackWorkflowName || resolveWorkflow() || null,
+      };
+    }
+
+    if (!api || typeof api.get !== 'function' || !currentAppId || !currentUserId) {
+      return null;
+    }
+
+    if (normalized === 'recent') {
+      try {
+        const recent = await api.get(`/api/sessions/recent/${currentAppId}/${currentUserId}`);
+        if (recent?.found && recent?.chat_id) {
+          return {
+            strategy: 'recent',
+            chat_id: recent.chat_id,
+            workflow_name: recent.workflow_name || fallbackWorkflowName || null,
+          };
+        }
+      } catch (err) {
+        console.warn('Failed to resolve recent workflow session:', err);
+      }
+      return null;
+    }
+
+    if (normalized === 'oldest') {
+      try {
+        const oldest = await api.get(`/api/sessions/oldest/${currentAppId}/${currentUserId}`);
+        if (oldest?.found && oldest?.chat_id) {
+          return {
+            strategy: 'oldest',
+            chat_id: oldest.chat_id,
+            workflow_name: oldest.workflow_name || fallbackWorkflowName || null,
+          };
+        }
+      } catch (err) {
+        if (err?.status !== 404) {
+          console.warn('Failed to resolve oldest workflow session:', err);
+          return null;
+        }
+        // Backward fallback for runtimes without /sessions/oldest.
+        try {
+          const listed = await api.get(`/api/sessions/list/${currentAppId}/${currentUserId}`);
+          const sessions = Array.isArray(listed?.sessions) ? [...listed.sessions] : [];
+          if (sessions.length === 0) {
+            return null;
+          }
+          sessions.sort((a, b) => {
+            const aTs = Date.parse(a?.created_at || '') || Number.MAX_SAFE_INTEGER;
+            const bTs = Date.parse(b?.created_at || '') || Number.MAX_SAFE_INTEGER;
+            return aTs - bTs;
+          });
+          const first = sessions[0];
+          if (first?.chat_id) {
+            return {
+              strategy: 'oldest',
+              chat_id: first.chat_id,
+              workflow_name: first.workflow_name || fallbackWorkflowName || null,
+            };
+          }
+        } catch (fallbackErr) {
+          console.warn('Failed to resolve oldest session from list fallback:', fallbackErr);
+        }
+      }
+      return null;
+    }
+
+    return null;
+  }, [
+    activeChatId,
+    currentChatId,
+    activeWorkflowName,
+    currentWorkflowName,
+    resolveKnownWorkflowName,
+    configuredEntryWorkflow,
+    api,
+    currentAppId,
+    currentUserId,
+    workflowSessions,
+  ]);
+
   const handleConversationModeChange = useCallback(async (mode) => {
     console.log('🔄 [MODE_CHANGE] handleConversationModeChange called with mode:', mode);
     console.log('🔄 [MODE_CHANGE] Current conversationMode:', conversationMode);
@@ -3104,12 +3638,34 @@ useEffect(() => {
       // Reset mobile drawer to peek state (no artifacts in Ask mode)
       if (isMobileView) setMobileDrawerState('peek');
     } else {
-      // Switching to workflow mode from Ask - ALWAYS fetch oldest IN_PROGRESS workflow
-      console.log('🤖 [MODE_CHANGE] Switching to workflow mode, fetching oldest IN_PROGRESS workflow');
+      // Switching from Ask -> Workflow follows ai.workflows.resume_policy.
+      console.log('🤖 [MODE_CHANGE] Switching to workflow mode, resolving session with resume policy');
       console.log('🤖 [MODE_CHANGE] isInWidgetMode:', isInWidgetMode);
       console.log('🤖 [MODE_CHANGE] API available?', !!api);
       console.log('🤖 [MODE_CHANGE] App ID:', currentAppId);
       console.log('🤖 [MODE_CHANGE] User ID:', currentUserId);
+      if (!workflowConfigLoaded) {
+        console.log('🤖 [MODE_CHANGE] Workflow registry not ready yet, waiting for fetch');
+        await workflowConfig.fetchWorkflowConfigs();
+        setWorkflowConfigLoaded(true);
+      }
+
+      const canonicalWorkflowName =
+        resolveKnownWorkflowName(urlWorkflowName)
+        || resolveKnownWorkflowName(configuredEntryWorkflow)
+        || resolveKnownWorkflowName(currentWorkflowName)
+        || resolveKnownWorkflowName(activeWorkflowName)
+        || resolveKnownWorkflowName(getStoredActiveWorkflowName())
+        || resolveWorkflow()
+        || workflowConfig.getDefaultWorkflow();
+
+      if (canonicalWorkflowName && canonicalWorkflowName !== currentWorkflowName) {
+        setCurrentWorkflowName(canonicalWorkflowName);
+      }
+      if (canonicalWorkflowName && canonicalWorkflowName !== activeWorkflowName) {
+        setActiveWorkflowName(canonicalWorkflowName);
+      }
+
       if (layoutMode === 'view') {
         console.log('🧭 [MODE_CHANGE] Leaving view mode -> restoring workflow surface');
         const restored = restoreViewSnapshot();
@@ -3120,11 +3676,8 @@ useEffect(() => {
 
       // If API/app/user is unavailable, fall back to persisted workflow state without crashing.
       if (!api || typeof api.get !== 'function' || !currentAppId || !currentUserId) {
-        const safeGet = (key) => {
-          try { return localStorage.getItem(key); } catch { return null; }
-        };
-        const storedChatId = activeChatId || currentChatId || safeGet('mozaiks.current_chat_id');
-        const storedWorkflowName = activeWorkflowName || currentWorkflowName || safeGet('mozaiks.current_workflow_name');
+        const storedChatId = activeChatId || currentChatId || getStoredActiveChatId();
+        const storedWorkflowName = canonicalWorkflowName || resolveKnownWorkflowName(getStoredActiveWorkflowName());
 
         if (storedChatId) {
           setCurrentChatId(storedChatId);
@@ -3148,79 +3701,85 @@ useEffect(() => {
         setIsInWidgetMode(false);
       }
       
-      try {
-        const endpoint = `/api/sessions/oldest/${currentAppId}/${currentUserId}`;
-        console.log('🌐 [MODE_CHANGE] Calling endpoint:', endpoint);
-        const response = await api.get(endpoint);
-        console.log('✅ [MODE_CHANGE] API response:', JSON.stringify(response, null, 2));
-        
-        if (!response || !response.found) {
-          console.log('📭 [MODE_CHANGE] No IN_PROGRESS session — attempting to start entry_point workflow');
-          const entryWorkflow = resolveWorkflow();
-          if (!entryWorkflow) {
-            console.warn('⚠️ [MODE_CHANGE] No entry_point workflow available to start');
-            return;
-          }
-
-          try {
-            const result = await api.startChat(currentAppId, entryWorkflow, currentUserId);
-            if (result && (result.chat_id || result.id)) {
-              const newChatId = result.chat_id || result.id;
-              console.log(`🚀 [MODE_CHANGE] Created new session for ${entryWorkflow}: ${newChatId}`);
-              setCurrentChatId(newChatId);
-              setActiveChatId(newChatId);
-              setActiveWorkflowName(entryWorkflow);
-              setCurrentWorkflowName(entryWorkflow);
-              try { localStorage.setItem(LOCAL_STORAGE_KEY, newChatId); } catch {}
-
-              // Reset connection so the WS effect re-fires with the new chatId
-              setConnectionInitialized(false);
-              connectionInProgressRef.current = false;
-
-              setConversationMode('workflow');
-              if (setLayoutMode) setLayoutMode('split');
-              generalMessagesCacheRef.current = messagesRef.current;
-              console.log('✅ [MODE_CHANGE] Entry_point workflow session started, WS will connect on re-render');
-            } else {
-              console.error('❌ [MODE_CHANGE] startChat returned no chat_id:', result);
-            }
-          } catch (startErr) {
-            console.error('❌ [MODE_CHANGE] Failed to start entry_point workflow session:', startErr);
-          }
-          return;
+      const startEntryWorkflowSession = async () => {
+        console.log('📭 [MODE_CHANGE] No resumable workflow session — starting entry_point workflow');
+        const entryWorkflow =
+          canonicalWorkflowName
+          || resolveKnownWorkflowName(configuredEntryWorkflow)
+          || resolveWorkflow()
+          || workflowConfig.getDefaultWorkflow();
+        if (!entryWorkflow) {
+          console.warn('⚠️ [MODE_CHANGE] No entry_point workflow available to start');
+          return false;
         }
-        
-        const targetChatId = response.chat_id;
-        const targetWorkflowName = response.workflow_name;
-        
-        console.log(`🎯 [MODE_CHANGE] Resuming oldest workflow: ${targetWorkflowName} (${targetChatId})`);
-        console.log('🎯 [MODE_CHANGE] Setting chat context...');
-        
-        // Update current chat context before sending switch command
-        setCurrentChatId(targetChatId);
-        console.log('✅ [MODE_CHANGE] setCurrentChatId called with:', targetChatId);
-        setActiveChatId(targetChatId);
-        console.log('✅ [MODE_CHANGE] setActiveChatId called with:', targetChatId);
-        setActiveWorkflowName(targetWorkflowName);
-        console.log('✅ [MODE_CHANGE] setActiveWorkflowName called with:', targetWorkflowName);
-        
-        console.log('📤 [MODE_CHANGE] Sending chat.switch_workflow message...');
-        const sent = sendWsMessage({ type: 'chat.switch_workflow', chat_id: targetChatId });
-        console.log('📤 [MODE_CHANGE] WebSocket send result:', sent);
-        
-        if (sent) {
-          console.log('✅ [MODE_CHANGE] Setting conversation mode to workflow');
-          setConversationMode('workflow');
-          if (setLayoutMode) setLayoutMode('split');
-          // Cache general messages - workflow messages will be restored via auto-resume
-          generalMessagesCacheRef.current = messagesRef.current;
-          console.log('✅ [MODE_CHANGE] Cached general messages, count:', messagesRef.current.length);
-        } else {
-          console.error('❌ [MODE_CHANGE] Failed to send WebSocket message');
+
+        try {
+          const result = await api.startChat(currentAppId, entryWorkflow, currentUserId);
+          if (result && (result.chat_id || result.id)) {
+            const newChatId = result.chat_id || result.id;
+            console.log(`🚀 [MODE_CHANGE] Created new session for ${entryWorkflow}: ${newChatId}`);
+            setCurrentChatId(newChatId);
+            setActiveChatId(newChatId);
+            setActiveWorkflowName(entryWorkflow);
+            setCurrentWorkflowName(entryWorkflow);
+            setStoredActiveChatId(newChatId);
+
+            // Reset connection so the WS effect re-fires with the new chatId
+            setConnectionInitialized(false);
+            connectionInProgressRef.current = false;
+
+            setConversationMode('workflow');
+            if (setLayoutMode) setLayoutMode('split');
+            generalMessagesCacheRef.current = messagesRef.current;
+            refreshWorkflowSessions();
+            console.log('✅ [MODE_CHANGE] Entry_point workflow session started, WS will connect on re-render');
+            return true;
+          }
+
+          console.error('❌ [MODE_CHANGE] startChat returned no chat_id:', result);
+          return false;
+        } catch (startErr) {
+          console.error('❌ [MODE_CHANGE] Failed to start entry_point workflow session:', startErr);
+          return false;
+        }
+      };
+
+      try {
+        const policyOrder = resolveResumePolicyOrder();
+        console.log('🧭 [MODE_CHANGE] Resume policy order:', policyOrder.join(' -> '));
+
+        let resumed = false;
+        for (const strategy of policyOrder) {
+          if (strategy === 'entry_point') {
+            continue;
+          }
+          const target = await resolveWorkflowSessionByStrategy(strategy);
+          if (!target?.chat_id) {
+            continue;
+          }
+          const targetWorkflowName = resolveKnownWorkflowName(target.workflow_name)
+            || canonicalWorkflowName
+            || resolveWorkflow();
+          console.log(`🎯 [MODE_CHANGE] Resuming workflow via ${strategy}: ${targetWorkflowName} (${target.chat_id})`);
+          resumed = resumeWorkflowSession(target.chat_id, targetWorkflowName);
+          if (resumed) {
+            if (setLayoutMode) setLayoutMode('split');
+            generalMessagesCacheRef.current = messagesRef.current;
+            refreshWorkflowSessions();
+            break;
+          }
+          console.warn(`⚠️ [MODE_CHANGE] Resume send failed for strategy ${strategy}; trying next option`);
+        }
+
+        if (!resumed) {
+          const started = await startEntryWorkflowSession();
+          if (!started) {
+            ensureWorkflowMode();
+            if (setLayoutMode) setLayoutMode('split');
+          }
         }
       } catch (err) {
-        console.error('❌ [MODE_CHANGE] Error fetching oldest workflow:', err);
-        console.error('❌ [MODE_CHANGE] Error stack:', err.stack);
+        console.error('❌ [MODE_CHANGE] Error resolving workflow session:', err);
         console.log('🔄 [MODE_CHANGE] Falling back to ensureWorkflowMode (backend unavailable)');
         // Fallback: switch to workflow mode locally even if backend is down
         ensureWorkflowMode();
@@ -3252,6 +3811,14 @@ useEffect(() => {
     isMobileView,
     setMobileDrawerState,
     layoutMode,
+    workflowConfigLoaded,
+    resolveKnownWorkflowName,
+    configuredEntryWorkflow,
+    configuredResumePolicy,
+    refreshWorkflowSessions,
+    resolveResumePolicyOrder,
+    resolveWorkflowSessionByStrategy,
+    resumeWorkflowSession,
   ]);
 
   useEffect(() => {
@@ -3416,7 +3983,9 @@ useEffect(() => {
           console.log('🖼️ [UI] Clearing currentArtifactMessages due to response');
           setCurrentArtifactMessages([]);
           // Clear persisted artifact cache for this chat
-          try { if (currentChatId) localStorage.removeItem(`mozaiks.last_artifact.${currentChatId}`); } catch {}
+          if (currentChatId) {
+            clearStoredArtifactState(currentChatId);
+          }
         }
         // If we lack a real eventId (e.g., restored artifact), don't submit to backend; just close locally
         if (!action.eventId) {
@@ -3649,19 +4218,15 @@ useEffect(() => {
       if (next && currentArtifactMessages.length === 0 && artifactCacheValidRef.current) {
         // Panel opening and no current artifact - try to restore from cache
         try {
-          const cacheKey = `mozaiks.current_artifact.${currentChatId}`;
-          const cached = localStorage.getItem(cacheKey);
-          if (cached) {
-            const artifactMsg = JSON.parse(cached);
-            
-            // Reconstruct the onResponse function since it can't be serialized
+          const artifactMsg = readStoredCurrentArtifact(currentChatId);
+          if (artifactMsg) {
             if (artifactMsg.uiToolEvent && !artifactMsg.uiToolEvent.onResponse) {
               artifactMsg.uiToolEvent.onResponse = (response) => {
                 console.log('🔌 [UI] Cached artifact response (no longer functional):', response);
                 console.warn('⚠️ This is a restored artifact - responses may not work until next interaction');
               };
             }
-            
+
             console.log('🖼️ [UI] Restored artifact from cache on panel open');
             setCurrentArtifactMessages([artifactMsg]);
             lastArtifactEventRef.current = artifactMsg.uiToolEvent?.eventId || 'cached';
@@ -3696,36 +4261,15 @@ useEffect(() => {
     if (conversationMode === 'ask') return; // Don't restore artifacts in Ask mode
 
     try {
-      const key = `mozaiks.last_artifact.${currentChatId}`;
-      const raw = localStorage.getItem(key);
-      if (!raw) return;
-      const cached = JSON.parse(raw);
+      const cached = readStoredLastArtifact(currentChatId);
       if (!cached || !cached.ui_tool_id) return;
 
       console.log('[RESTORE] Restoring cached artifact for chat', currentChatId, cached.ui_tool_id);
-      setIsSidePanelOpen(true);
-      const restoredMsg = {
-        id: `ui-restored-${Date.now()}`,
-        sender: 'agent',
-        agentName: cached.payload?.agentName || cached.payload?.agent_name || cached.agentName || cached.agent_name || 'Agent',
-        content: cached.payload?.structured_output || cached.payload || {},
-        isStreaming: false,
-        uiToolEvent: {
-          ui_tool_id: cached.ui_tool_id,
-          payload: cached.payload || {},
-          eventId: cached.eventId || null,
-          workflow_name: cached.workflow_name || currentWorkflowName,
-          onResponse: undefined,
-          display: cached.display || 'artifact',
-          restored: true,
-        },
-      };
-      setCurrentArtifactMessages([restoredMsg]);
-      artifactRestoredOnceRef.current = true;
+      restoreStoredArtifactForChat(currentChatId, currentWorkflowName);
     } catch (e) {
       console.warn('[RESTORE] Failed to restore artifact:', e);
     }
-  }, [connectionStatus, currentChatId, chatExists, currentWorkflowName, conversationMode]);
+  }, [connectionStatus, currentChatId, chatExists, currentWorkflowName, conversationMode, restoreStoredArtifactForChat]);
 
   // Mobile detection and layout adaptation
   useEffect(() => {
@@ -3930,7 +4474,11 @@ useEffect(() => {
               workflowName={currentWorkflowName}
               structuredOutputs={getWorkflow(currentWorkflowName)?.structuredOutputs || {}}
               startupMode={workflowConfig?.getWorkflowConfig(currentWorkflowName)?.startup_mode}
-              initialMessageToUser={workflowConfig?.getWorkflowConfig(currentWorkflowName)?.initial_message_to_user}
+              initialMessageToUser={
+                workflowConfig?.getWorkflowConfig(currentWorkflowName)?.startup_mode === 'UserDriven'
+                  ? null
+                  : workflowConfig?.getWorkflowConfig(currentWorkflowName)?.initial_message_to_user
+              }
               onRetry={retryConnection}
               submitInputRequest={submitInputRequest}
               conversationMode={conversationMode}
@@ -3960,8 +4508,8 @@ useEffect(() => {
   const mobileChatTopMarginClass = shouldReserveArtifactSpace ? 'mt-[1.25rem]' : 'mt-[1.25rem]';
 
   const isChatPageSurface = isPrimaryChatRoute && !isInWidgetMode && !isViewMode;
-  // Show sidebar on desktop in both Ask and Workflow modes for consistent tighter layout
-  const showAskHistorySidebar = isChatPageSurface && !isMobileView;
+  const showAskHistorySidebar = isChatPageSurface && !isMobileView && conversationMode === 'ask';
+  const showWorkflowHistorySidebar = isChatPageSurface && !isMobileView && conversationMode === 'workflow';
   const showMobileAskHistoryMenu = isChatPageSurface && isMobileView && conversationMode === 'ask';
 
   useEffect(() => {
@@ -3981,35 +4529,44 @@ useEffect(() => {
     };
   }, [isAskHistoryDrawerOpen]);
 
+  const currentWorkflowConfig = workflowConfig?.getWorkflowConfig(currentWorkflowName) || {};
+  const uiStartupMode = currentWorkflowConfig?.startup_mode;
+  const headerInitialMessageToUser =
+    uiStartupMode === 'UserDriven'
+      ? null
+      : currentWorkflowConfig?.initial_message_to_user;
+
   const chatInterface = (
-    <ChatInterface 
-      messages={messages} 
-      onSendMessage={sendMessage} 
-      loading={loading}
-      onAgentAction={handleAgentAction}
-      onArtifactToggle={artifactToggleHandler}
-      artifactToggleLabel={artifactToggleLabel}
-      connectionStatus={connectionStatus}
-      transportType={transportType}
-      workflowName={currentWorkflowName}
-      structuredOutputs={getWorkflow(currentWorkflowName)?.structuredOutputs || {}}
-      startupMode={workflowConfig?.getWorkflowConfig(currentWorkflowName)?.startup_mode}
-      initialMessageToUser={workflowConfig?.getWorkflowConfig(currentWorkflowName)?.initial_message_to_user}
-      onRetry={retryConnection}
-      submitInputRequest={submitInputRequest}
-      onBrandClick={undefined}
-      conversationMode={conversationMode}
-      onConversationModeChange={handleConversationModeChange}
-      onStartGeneralChat={handleStartGeneralChat}
-      generalChatSummary={generalChatSummary}
-      isOnChatPage={isChatPageSurface}
-      generalSessionsLoading={generalSessionsLoading}
-      showAskHistoryMenu={showMobileAskHistoryMenu}
-      onAskHistoryToggle={() => setIsAskHistoryDrawerOpen((prev) => !prev)}
-      artifactContext={currentArtifactContext}
-      onArtifactAction={sendArtifactAction}
-      actionStatusMap={actionStatusMap}
-    />
+    <ErrorBoundary fallback={<ChatInterfaceErrorFallback onRetry={() => window.location.reload()} />}>
+      <ChatInterface
+        messages={messages}
+        onSendMessage={sendMessage}
+        loading={loading}
+        onAgentAction={handleAgentAction}
+        onArtifactToggle={artifactToggleHandler}
+        artifactToggleLabel={artifactToggleLabel}
+        connectionStatus={connectionStatus}
+        transportType={transportType}
+        workflowName={currentWorkflowName}
+        structuredOutputs={getWorkflow(currentWorkflowName)?.structuredOutputs || {}}
+        startupMode={uiStartupMode}
+        initialMessageToUser={headerInitialMessageToUser}
+        onRetry={retryConnection}
+        submitInputRequest={submitInputRequest}
+        onBrandClick={undefined}
+        conversationMode={conversationMode}
+        onConversationModeChange={handleConversationModeChange}
+        onStartGeneralChat={handleStartGeneralChat}
+        generalChatSummary={generalChatSummary}
+        isOnChatPage={isChatPageSurface}
+        generalSessionsLoading={generalSessionsLoading}
+        showAskHistoryMenu={showMobileAskHistoryMenu}
+        onAskHistoryToggle={() => setIsAskHistoryDrawerOpen((prev) => !prev)}
+        artifactContext={currentArtifactContext}
+        onArtifactAction={sendArtifactAction}
+        actionStatusMap={actionStatusMap}
+      />
+    </ErrorBoundary>
   );
 
   console.log('📱 [RENDER] ChatPage render:', { isInWidgetMode, isMobileView, workflowCompleted, mobileDrawerState });
@@ -4131,22 +4688,24 @@ useEffect(() => {
                 viewMode={isViewMode}
                 onExitView={exitViewMode}
                 artifactContent={
-                  <ArtifactPanel
-                    onClose={() => {
-                      setMobileDrawerState('peek');
-                      setIsSidePanelOpen(false);
-                    }}
-                    isMobile
-                    isEmbedded
-                    viewMode={isViewMode}
-                    onExitView={exitViewMode}
-                    messages={currentArtifactMessages}
-                    chatId={currentChatId}
-                    workflowName={currentWorkflowName}
-                    onArtifactAction={sendArtifactAction}
-                    actionStatusMap={actionStatusMap}
-                    floatingWidget={viewWidget}
-                  />
+                  <ErrorBoundary fallback={<ArtifactErrorFallback onRetry={() => setMobileDrawerState('peek')} />}>
+                    <ArtifactPanel
+                      onClose={() => {
+                        setMobileDrawerState('peek');
+                        setIsSidePanelOpen(false);
+                      }}
+                      isMobile
+                      isEmbedded
+                      viewMode={isViewMode}
+                      onExitView={exitViewMode}
+                      messages={currentArtifactMessages}
+                      chatId={currentChatId}
+                      workflowName={currentWorkflowName}
+                      onArtifactAction={sendArtifactAction}
+                      actionStatusMap={actionStatusMap}
+                      floatingWidget={viewWidget}
+                    />
+                  </ErrorBoundary>
                 }
                 hasUnseenChat={hasUnseenChat}
                 hasUnseenArtifact={hasUnseenArtifact}
@@ -4162,6 +4721,7 @@ useEffect(() => {
                 onSelectChat={handleSelectGeneralChat}
                 onStartNewChat={handleStartGeneralChat}
                 onRefresh={handleRefreshGeneralSessions}
+                onClear={handleClearGeneralSessions}
                 onClose={() => setIsAskHistoryDrawerOpen(false)}
               />
             )}
@@ -4176,6 +4736,18 @@ useEffect(() => {
                 onSelectChat={handleSelectGeneralChat}
                 onStartNewChat={handleStartGeneralChat}
                 onRefresh={handleRefreshGeneralSessions}
+                onClear={handleClearGeneralSessions}
+              />
+            )}
+            {showWorkflowHistorySidebar && (
+              <WorkflowHistorySidebar
+                sessions={workflowSessions}
+                activeChatId={activeChatId || currentChatId}
+                loading={workflowSessionsLoading}
+                onSelectSession={handleSelectWorkflowSession}
+                onRefresh={handleRefreshWorkflowSessions}
+                onClear={handleClearWorkflowSessions}
+                onStartEntryWorkflow={() => handleConversationModeChange('workflow')}
               />
             )}
             <div className="flex-1 min-h-0 h-full">
@@ -4200,17 +4772,19 @@ useEffect(() => {
                 }}
                 chatContent={chatInterface}
                 artifactContent={
-                  <ArtifactPanel 
-                    onClose={toggleSidePanel} 
-                    viewMode={isViewMode}
-                    onExitView={exitViewMode}
-                    messages={currentArtifactMessages} 
-                    chatId={currentChatId}
-                    workflowName={currentWorkflowName}
-                    onArtifactAction={sendArtifactAction}
-                    actionStatusMap={actionStatusMap}
-                    floatingWidget={viewWidget}
-                  />
+                  <ErrorBoundary fallback={<ArtifactErrorFallback onRetry={() => setLayoutMode('full')} />}>
+                    <ArtifactPanel
+                      onClose={toggleSidePanel}
+                      viewMode={isViewMode}
+                      onExitView={exitViewMode}
+                      messages={currentArtifactMessages}
+                      chatId={currentChatId}
+                      workflowName={currentWorkflowName}
+                      onArtifactAction={sendArtifactAction}
+                      actionStatusMap={actionStatusMap}
+                      floatingWidget={viewWidget}
+                    />
+                  </ErrorBoundary>
                 }
               />
             </div>

@@ -50,6 +50,7 @@ class StreamContext:
     # Workflow configuration
     agents: Dict[str, "ConversableAgent"]
     structured_registry: Dict[str, Any]
+    structured_agents: Set[str]
     auto_tool_agents: Set[str]
     max_turns: int
 

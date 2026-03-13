@@ -1,0 +1,330 @@
+/**
+ * Mobile-First Viewport & Responsiveness Fixes
+ *
+ * Uses modern CSS features for better mobile experience:
+ * - dvh (dynamic viewport height) for iOS Safari address bar
+ * - svh (small viewport height) as fallback
+ * - Touch-friendly sizing
+ * - Safe area insets for notched devices
+ */
+
+/* ==========================================================================
+   VIEWPORT HEIGHT FIXES
+   ========================================================================== */
+
+/* Use dynamic viewport height for mobile browsers */
+:root {
+  --app-height: 100vh;
+  --app-height-dynamic: 100dvh;
+  --app-height-small: 100svh;
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+}
+
+/* Main app container - use dvh with vh fallback */
+.app-container,
+.chat-page-container,
+.chat-container {
+  height: 100vh; /* Fallback for older browsers */
+  height: 100dvh; /* Dynamic viewport height - handles iOS Safari address bar */
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Chat interface container */
+.chat-interface {
+  height: calc(100vh - var(--header-height, 64px));
+  height: calc(100dvh - var(--header-height, 64px));
+  overflow: hidden;
+}
+
+/* Message area should fill available space */
+.messages-container {
+  flex: 1;
+  min-height: 0; /* Critical for flex shrinking */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+  overscroll-behavior: contain; /* Prevent pull-to-refresh interference */
+}
+
+/* ==========================================================================
+   SAFE AREA INSETS (Notched Devices)
+   ========================================================================== */
+
+/* Header respects safe area */
+.app-header,
+.header {
+  padding-top: var(--safe-area-top);
+}
+
+/* Bottom input respects safe area */
+.chat-input-container,
+.input-area {
+  padding-bottom: calc(var(--safe-area-bottom) + 8px);
+}
+
+/* Full-screen modals/overlays */
+.modal-overlay,
+.drawer-overlay {
+  padding: var(--safe-area-top) var(--safe-area-right) var(--safe-area-bottom) var(--safe-area-left);
+}
+
+/* ==========================================================================
+   TOUCH TARGETS
+   ========================================================================== */
+
+/* Ensure minimum 44px touch targets (Apple HIG recommendation) */
+@media (max-width: 768px) {
+  button,
+  [role="button"],
+  a,
+  input[type="submit"],
+  input[type="button"],
+  .clickable,
+  .touchable {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Icon buttons should be easily tappable */
+  .icon-button,
+  .btn-icon {
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Form inputs */
+  input,
+  textarea,
+  select {
+    min-height: 44px;
+    font-size: 16px; /* Prevents iOS zoom on focus */
+  }
+}
+
+/* ==========================================================================
+   FLUID TYPOGRAPHY
+   ========================================================================== */
+
+/* Clamp-based fluid typography for better readability */
+:root {
+  --font-size-xs: clamp(0.7rem, 0.65rem + 0.25vw, 0.75rem);
+  --font-size-sm: clamp(0.8rem, 0.75rem + 0.25vw, 0.875rem);
+  --font-size-base: clamp(0.9rem, 0.85rem + 0.25vw, 1rem);
+  --font-size-lg: clamp(1rem, 0.95rem + 0.25vw, 1.125rem);
+  --font-size-xl: clamp(1.1rem, 1rem + 0.5vw, 1.25rem);
+  --font-size-2xl: clamp(1.25rem, 1.1rem + 0.75vw, 1.5rem);
+}
+
+/* Apply fluid typography to chat */
+.chat-message {
+  font-size: var(--font-size-base);
+  line-height: 1.6;
+}
+
+.chat-message.user-message,
+.chat-message.agent-message {
+  font-size: var(--font-size-base);
+}
+
+/* ==========================================================================
+   MOBILE LAYOUT ADJUSTMENTS
+   ========================================================================== */
+
+@media (max-width: 640px) {
+  /* Reduce padding on mobile */
+  .chat-message {
+    padding: 10px 14px;
+    max-width: 88%;
+  }
+
+  /* Header adjustments */
+  .header {
+    padding: 8px 12px;
+  }
+
+  .header-title {
+    font-size: var(--font-size-lg);
+  }
+
+  /* Input area */
+  .chat-input-container {
+    padding: 8px 12px;
+  }
+
+  .chat-input {
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+
+  /* Hide non-essential UI on small screens */
+  .desktop-only {
+    display: none !important;
+  }
+
+  /* Stack layouts vertically */
+  .split-layout {
+    flex-direction: column;
+  }
+
+  /* Full width panels on mobile */
+  .artifact-panel,
+  .side-panel {
+    width: 100%;
+    max-width: 100%;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+  }
+}
+
+/* Tablet adjustments */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .chat-message {
+    max-width: 75%;
+  }
+
+  .artifact-panel {
+    width: 45%;
+  }
+}
+
+/* Desktop */
+@media (min-width: 1025px) {
+  .mobile-only {
+    display: none !important;
+  }
+
+  .chat-message {
+    max-width: min(720px, 65%);
+  }
+}
+
+/* ==========================================================================
+   MOBILE DRAWER (Bottom Sheet)
+   ========================================================================== */
+
+.mobile-drawer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--color-surface, rgba(15, 23, 42, 0.98));
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.4);
+  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  z-index: 40;
+  max-height: calc(100dvh - 60px);
+  overflow: hidden;
+}
+
+.mobile-drawer.hidden {
+  transform: translateY(100%);
+}
+
+.mobile-drawer.peek {
+  transform: translateY(calc(100% - 80px));
+}
+
+.mobile-drawer.expanded {
+  transform: translateY(0);
+}
+
+.mobile-drawer-handle {
+  width: 40px;
+  height: 4px;
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 2px;
+  margin: 12px auto 8px;
+}
+
+/* ==========================================================================
+   SCROLL BEHAVIOR
+   ========================================================================== */
+
+/* Smooth scrolling with momentum on iOS */
+.scrollable {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar for webkit (thin on mobile) */
+@media (max-width: 768px) {
+  .scrollable::-webkit-scrollbar {
+    width: 4px;
+  }
+}
+
+/* ==========================================================================
+   KEYBOARD HANDLING
+   ========================================================================== */
+
+/* When virtual keyboard is open, adjust layout */
+@media (max-height: 500px) and (max-width: 768px) {
+  .chat-container {
+    /* Compact mode when keyboard is visible */
+    --header-height: 48px;
+  }
+
+  .header {
+    padding: 4px 12px;
+    min-height: 48px;
+  }
+
+  .chat-input-container {
+    padding: 4px 8px;
+  }
+}
+
+/* ==========================================================================
+   ORIENTATION HANDLING
+   ========================================================================== */
+
+@media (orientation: landscape) and (max-height: 500px) {
+  /* Landscape mobile - very limited vertical space */
+  .header {
+    padding: 4px 16px;
+    min-height: 44px;
+  }
+
+  .messages-container {
+    padding: 8px;
+  }
+
+  .chat-message {
+    padding: 8px 12px;
+    margin-bottom: 4px;
+  }
+}
+
+/* ==========================================================================
+   PERFORMANCE OPTIMIZATIONS
+   ========================================================================== */
+
+/* Reduce motion for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* GPU-accelerated transforms for smooth animations */
+.mobile-drawer,
+.artifact-panel,
+.side-panel,
+.modal {
+  will-change: transform;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}

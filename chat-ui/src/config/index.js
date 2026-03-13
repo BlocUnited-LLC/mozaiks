@@ -1,3 +1,5 @@
+import platform from '../platform/index.js';
+
 // Simple configuration for agentic chat platform
 class ChatUIConfig {
   constructor() {
@@ -6,11 +8,8 @@ class ChatUIConfig {
 
   loadConfig() {
     const defaultAuthMode = 'token';
-    const defaultHttpProtocol = typeof window !== 'undefined' ? window.location.protocol : 'http:';
-    const defaultHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-    const defaultWsProtocol = defaultHttpProtocol === 'https:' ? 'wss:' : 'ws:';
-    const defaultApiBaseUrl = `${defaultHttpProtocol}//${defaultHost}:8000`;
-    const defaultWsBaseUrl = `${defaultWsProtocol}//${defaultHost}:8000`;
+    const defaultApiBaseUrl = platform.resolveHttpUrl({ port: '8000' });
+    const defaultWsBaseUrl = platform.resolveWsUrl({ port: '8000' });
     
     const defaultConfig = {
       // API Configuration
@@ -35,13 +34,13 @@ class ChatUIConfig {
         // Auth system configured via runtime auth endpoints
         defaultAppId: process.env.REACT_APP_DEFAULT_APP_ID || process.env.REACT_APP_DEFAULT_app_id,
         // Workflow resolution handled by resolveWorkflow() utility
-        // (entry_point in orchestrator.yaml → singleton auto-select → null)
+        // (backend entry_point derived from platform/config/ai.json → singleton auto-select → null)
       },
     };
 
-    // Override with window.ChatUIConfig if available
-    if (typeof window !== 'undefined' && window.ChatUIConfig) {
-      return { ...defaultConfig, ...window.ChatUIConfig };
+    const overrides = platform.getConfigOverrides();
+    if (overrides) {
+      return { ...defaultConfig, ...overrides };
     }
 
     return defaultConfig;

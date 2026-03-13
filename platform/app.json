@@ -3,9 +3,33 @@
   "appId": "my-app",
   "apiUrl": "http://localhost:8000",
   "wsUrl": "ws://localhost:8000",
-  "engine": {
-    "framework": "ag2",
-    "pattern": "group_chat"
+  "platforms": {
+    "web": {
+      "enabled": true
+    },
+    "mobile": {
+      "enabled": true,
+      "displayName": "My App",
+      "version": {
+        "name": "1.0.0",
+        "code": 1
+      },
+      "ios": {},
+      "android": {},
+      "auth": {
+        "provider": "token",
+        "redirectScheme": "myapp",
+        "redirectPath": "oauthredirect",
+        "scopes": [
+          "openid",
+          "profile",
+          "email"
+        ]
+      }
+    },
+    "desktop": {
+      "enabled": false
+    }
   },
   "auth": {
     "provider": "keycloak",
@@ -17,6 +41,9 @@
     }
   },
   "dev": {
+    "mode": "development",
+    "authMode": "mock",
+    "fallbackToMockAuth": true,
     "autoLogin": true,
     "users": [
       {

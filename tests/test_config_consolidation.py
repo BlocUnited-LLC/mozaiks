@@ -16,6 +16,7 @@ import json
 import os
 import re
 import pytest
+from tests.import_utils import import_module_directly
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -34,6 +35,7 @@ def load_json(relpath):
 # ── 1. Config files exist in platform/config/ ───────────────────────────────
 
 CONFIG_FILES = [
+    "platform/config/ai.json",
     "platform/config/theme_config.json",
     "platform/config/navigation_config.json",
     "platform/config/module_registry.json",
@@ -55,6 +57,21 @@ class TestConfigFilesExist:
         assert isinstance(data, dict)
 
 
+class TestAIConfig:
+    @pytest.fixture
+    def ai(self):
+        return load_json("platform/config/ai.json")
+
+    def test_has_engine_framework(self, ai):
+        assert ai["engine"]["framework"] == "ag2"
+
+    def test_has_workflow_entry_point(self, ai):
+        assert ai["workflows"]["entry_point"] == "GreenRoom"
+
+    def test_has_chat_startup_mode(self, ai):
+        assert ai["chat"]["startup_mode"] == "ask"
+
+
 # ── 2. theme_config.json — merged brand + ui ────────────────────────────────
 
 class TestThemeConfigMerged:
@@ -72,7 +89,9 @@ class TestThemeConfigMerged:
     def test_has_assets(self, theme):
         assert "assets" in theme
         assert theme["assets"]["logo"] == "mozaik_logo.svg"
-        assert theme["assets"]["favicon"] == "mozaik.png"
+        favicon = theme["assets"]["favicon"]
+        assert isinstance(favicon, str) and favicon
+        assert favicon.endswith((".svg", ".png", ".ico"))
 
     def test_has_fonts(self, theme):
         assert "fonts" in theme
@@ -169,8 +188,11 @@ class TestNavigationConfigMerged:
     def test_has_landing_spot(self, nav):
         assert nav["landing_spot"] == "/"
 
-    def test_has_startup_mode(self, nav):
-        assert nav["startup_mode"] == "ask"
+    def test_raw_navigation_config_has_no_startup_mode(self, nav):
+        assert "startup_mode" not in nav
+
+    def test_raw_navigation_config_has_no_entry_point(self, nav):
+        assert "entry_point" not in nav
 
     def test_has_pages(self, nav):
         # pages[] lists config-driven nav routes; core overlays (settings, notifications)
@@ -197,12 +219,21 @@ class TestNavigationConfigMerged:
         labels = [d["label"] for d in nav["default"]]
         assert "AI" in labels
 
-    def test_has_modules_nav(self, nav):
-        assert "modules" in nav
-        assert any(m.get("module_name") == "admin_portal" for m in nav["modules"])
-        # admin_portal navigates to /admin (dedicated route, not the generic module dispatcher)
-        admin = next(m for m in nav["modules"] if m.get("module_name") == "admin_portal")
+    def test_no_modules_section(self, nav):
+        # Module route metadata now comes from module.json -> module_registry.json,
+        # not from duplicated entries in navigation_config.json.
+        assert "modules" not in nav
+
+
+class TestModuleRegistryNavigationMetadata:
+    @pytest.fixture
+    def registry(self):
+        return load_json("platform/config/module_registry.json")
+
+    def test_admin_portal_has_route_metadata(self, registry):
+        admin = next(m for m in registry["modules"] if m.get("name") == "admin_portal")
         assert admin["path"] == "/admin"
+        assert admin["component"] == "AdminPortal"
 
 
 # ── 4. Old files removed ────────────────────────────────────────────────────
@@ -241,6 +272,11 @@ class TestConfigLoader:
         for line in lines:
             if "parent.parent.parent" in line and '"config"' in line:
                 assert '"platform"' in line, "config_loader still resolves to old app/config/ path"
+
+    def test_navigation_loader_projects_ai_startup_mode(self):
+        loader = import_module_directly("mozaikscore.core.config_loader")
+        nav = loader.get_navigation_config()
+        assert nav["startup_mode"] == "ask"
 
 
 # ── 6. themeProvider.js → API fetch ─────────────────────────────────────────

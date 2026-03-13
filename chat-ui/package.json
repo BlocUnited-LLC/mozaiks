@@ -4,18 +4,42 @@
   "version": "1.0.0",
   "description": "Mozaiks Chat UI library. This package.json exists so that dependencies used by src/ are resolvable via standard Node module resolution when developing from template/.",
   "type": "module",
+  "main": "./src/index.js",
+  "module": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./core": "./src/core/index.js",
+    "./platform": "./src/platform/index.js",
+    "./ui": "./src/ui/index.js",
+    "./coreBridge": "./src/coreBridge.js",
+    "./adminPortalRegistry": "./src/adminPortalRegistry.js"
+  },
   "peerDependencies": {
     "react": ">=18",
     "react-dom": ">=18",
+    "react-native": "*",
     "react-router-dom": ">=6"
+  },
+  "peerDependenciesMeta": {
+    "react-dom": {
+      "optional": true
+    },
+    "react-native": {
+      "optional": true
+    },
+    "react-router-dom": {
+      "optional": true
+    }
   },
   "dependencies": {
     "dompurify": "^3.1.6",
     "keycloak-js": "^26.2.3",
     "marked": "^13.0.3",
-    "react-icons": "^5.3.0"
+    "react-icons": "^5.3.0",
+    "react-native-web": "^0.19.13"
   },
   "devDependencies": {
+    "@types/react": "^18.2.0",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.47",

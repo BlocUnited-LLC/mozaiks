@@ -70,8 +70,7 @@ e2b = [
 ]
 
 [project.scripts]
-# CLI disabled — cli module not present in core base
-# mozaiks = "mozaiksai.cli.__main__:main"
+mozaiks = "mozaiksai.cli.main:cli"
 mozaikscore = "mozaikscore.core_app:app"
 
 [project.urls]

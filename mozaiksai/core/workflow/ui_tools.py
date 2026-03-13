@@ -151,8 +151,18 @@ async def use_ui_tool(
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id)
     start = _dt.datetime.now(_dt.timezone.utc)
     
-    # Extract agent_name from payload for proper attribution
-    agent_name = payload.get("agent_name") if isinstance(payload, dict) else None
+    # Resolve the actual tool owner from registry first; payload is only a fallback.
+    agent_name = None
+    try:
+        tool_record = workflow_manager.get_ui_tool_record(tool_id)
+        if tool_record:
+            agent_name = tool_record.get("agent")
+            wf_logger.debug(f"🔍 Tool '{tool_id}' owned by agent: {agent_name}")
+    except Exception as e:
+        wf_logger.warning(f"⚠️ Failed to resolve tool owner for '{tool_id}': {e}")
+
+    if not agent_name and isinstance(payload, dict):
+        agent_name = payload.get("agent_name")
     
     # Auto-resolve display mode from workflow_manager if not explicitly provided
     resolved_display = display
@@ -177,6 +187,43 @@ async def use_ui_tool(
         workflow_name=workflow_name,
         agent_name=agent_name,
     )
+
+    # Persist UI tool metadata to enable restoration after reconnect/resume.
+    if chat_id:
+        try:
+            pm = None
+            app_id = None
+            try:
+                from mozaiksai.core.transport.simple_transport import SimpleTransport
+
+                transport = await SimpleTransport.get_instance()
+                if transport is not None and hasattr(transport, "_get_or_create_persistence_manager"):
+                    pm = transport._get_or_create_persistence_manager()  # type: ignore[attr-defined]
+                    if hasattr(transport, "connections"):
+                        conn = transport.connections.get(chat_id) or {}  # type: ignore[attr-defined]
+                        app_id = conn.get("app_id")
+            except Exception:
+                pm = None
+                app_id = None
+
+            if pm and app_id:
+                await pm.attach_ui_tool_metadata(
+                    chat_id=chat_id,
+                    app_id=str(app_id),
+                    event_id=event_id,
+                    metadata={
+                        "ui_tool_id": tool_id,
+                        "event_id": event_id,
+                        "display": resolved_display,
+                        "ui_tool_completed": False,
+                        "payload": payload,
+                        "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                    },
+                )
+                wf_logger.debug(f"📌 Attached UI tool metadata for {tool_id} (event={event_id})")
+        except Exception as meta_err:
+            wf_logger.warning(f"⚠️ Failed to attach UI tool metadata: {meta_err}")
+
     try:
         # Try to log via tools logger (optional import)
         from logs.tools_logs import get_tool_logger as _get_tool_logger, log_tool_event as _log_tool_event  # type: ignore
@@ -202,6 +249,52 @@ async def use_ui_tool(
             _log_tool_event(_tlog, action="ui_response", status=str(resp.get('status', 'unknown')), event_id=event_id)
         except Exception:
             pass
+
+        # Inline components should collapse cleanly after completion.
+        if resolved_display == "inline" and chat_id:
+            try:
+                from mozaiksai.core.transport.simple_transport import SimpleTransport
+
+                transport = await SimpleTransport.get_instance()
+                completion_event = {
+                    "type": "chat.ui_tool_complete",
+                    "data": {
+                        "eventId": event_id,
+                        "ui_tool_id": tool_id,
+                        "display": "inline",
+                        "status": resp.get("status", "completed"),
+                        "summary": f"{tool_id} completed",
+                    },
+                    "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                }
+                await transport.send_event_to_ui(completion_event, chat_id=chat_id)
+                wf_logger.debug(f"🧹 Sent completion event for inline tool: {event_id}")
+            except Exception as vanish_err:
+                wf_logger.warning(f"⚠️ Failed to send completion event for {event_id}: {vanish_err}")
+
+            try:
+                from mozaiksai.core.transport.simple_transport import SimpleTransport
+
+                transport = await SimpleTransport.get_instance()
+                pm = None
+                app_id = None
+                if transport is not None and hasattr(transport, "_get_or_create_persistence_manager"):
+                    pm = transport._get_or_create_persistence_manager()  # type: ignore[attr-defined]
+                    if hasattr(transport, "connections"):
+                        conn = transport.connections.get(chat_id) or {}  # type: ignore[attr-defined]
+                        app_id = conn.get("app_id")
+                if pm and app_id:
+                    await pm.update_ui_tool_completion(
+                        chat_id=chat_id,
+                        app_id=str(app_id),
+                        event_id=event_id,
+                        completed=True,
+                        status=resp.get("status", "completed"),
+                    )
+                    wf_logger.debug(f"✅ Updated UI tool completion status for {tool_id} (event={event_id})")
+            except Exception as persist_err:
+                wf_logger.warning(f"⚠️ Failed to persist UI tool completion: {persist_err}")
+
         return resp
     except Exception as e:
         duration_ms = (_dt.datetime.now(_dt.timezone.utc) - start).total_seconds() * 1000.0

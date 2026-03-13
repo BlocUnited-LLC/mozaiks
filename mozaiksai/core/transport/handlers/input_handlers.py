@@ -76,19 +76,61 @@ async def handle_user_input_submit(
     # Free-form user message (no pending request)
     try:
         target_chat_id = chat_id
+        target_workflow_name = conn.get("workflow_name")
+        target_app_id = conn.get("app_id")
+        target_user_id = conn.get("user_id")
         try:
             if ws_id:
                 active_ctx = session_registry.get_active_workflow(ws_id)
                 if active_ctx and getattr(active_ctx, "chat_id", None):
                     target_chat_id = str(active_ctx.chat_id)
+                    target_workflow_name = getattr(active_ctx, "workflow_name", None) or target_workflow_name
+                    target_app_id = getattr(active_ctx, "app_id", None) or target_app_id
+                    target_user_id = getattr(active_ctx, "user_id", None) or target_user_id
         except Exception:
             target_chat_id = chat_id
-        await transport.process_incoming_user_message(
-            chat_id=target_chat_id,
-            user_id=transport._get_conn_meta(target_chat_id).get('user_id') or conn.get('user_id'),
-            content=text,
-            source='ws'
-        )
+
+        target_conn = transport._get_conn_meta(target_chat_id)
+        target_workflow_name = target_conn.get("workflow_name") or target_workflow_name
+        target_app_id = target_conn.get("app_id") or target_app_id
+        target_user_id = target_conn.get("user_id") or target_user_id
+
+        startup_mode = "AgentDriven"
+        if isinstance(target_workflow_name, str) and target_workflow_name.strip():
+            try:
+                from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+                cfg = workflow_manager.get_config(str(target_workflow_name))
+                startup_mode = str((cfg or {}).get("startup_mode", "AgentDriven"))
+            except Exception:
+                startup_mode = "AgentDriven"
+
+        # For UserDriven workflows, the first free-form user message should
+        # start (or continue) orchestration through the same smart router used
+        # by HTTP input. For other modes, keep legacy "persist-only" behavior.
+        if startup_mode == "UserDriven":
+            if not target_app_id or not target_workflow_name:
+                await transport._send_ws_error(
+                    websocket,
+                    "Missing workflow context for UserDriven message",
+                    "USER_DRIVEN_CONTEXT_MISSING",
+                )
+                return
+            await transport.handle_user_input_from_api(
+                chat_id=target_chat_id,
+                user_id=str(target_user_id or conn.get("user_id") or ""),
+                workflow_name=str(target_workflow_name),
+                message=text,
+                app_id=str(target_app_id),
+            )
+        else:
+            await transport.process_incoming_user_message(
+                chat_id=target_chat_id,
+                user_id=target_user_id or conn.get('user_id'),
+                content=text,
+                source='ws'
+            )
+
         await websocket.send_json({
             "type": "chat.input_ack",
             "data": {"chat_id": target_chat_id, "status": "accepted"},

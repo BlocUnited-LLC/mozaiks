@@ -1,0 +1,4 @@
+structured_outputs:
+  models: {}
+  registry:
+    StageHostAgent: null

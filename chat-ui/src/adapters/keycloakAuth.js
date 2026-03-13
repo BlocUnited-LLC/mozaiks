@@ -1,11 +1,18 @@
 /**
  * KeycloakAuthAdapter — connects chat-ui's AuthAdapter interface to Keycloak.
  *
+ * Web-only adapter: depends on keycloak-js and browser globals.
+ * React Native hosts should inject their own auth adapter via ChatUIProvider
+ * or configurePlatform(), not import this module.
+ *
  * Config is passed from the host app (via app.json) — no separate auth.json needed.
  * Uses keycloak-js for OIDC Authorization Code + PKCE flow.
  * Supports dev auto-login via direct access grants (Resource Owner Password).
  *
  * Usage:
+ *
+ * Web-only adapter: redirects via window.location and is intended for browser
+ * development flows. Native hosts should provide their own auth adapter.
  *   import { createKeycloakAuthAdapter } from './auth/KeycloakAuthAdapter';
  *
  *   const authAdapter = await createKeycloakAuthAdapter({

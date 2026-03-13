@@ -1,0 +1,17 @@
+{
+  "extends": "./node_modules/@react-native/typescript-config/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "baseUrl": ".",
+    "allowJs": true,
+    "paths": {
+      "@mozaiks/chat-ui":                    ["../../chat-ui/src/index.js"],
+      "@mozaiks/chat-ui/core":               ["../../chat-ui/src/core/index.js"],
+      "@mozaiks/chat-ui/platform":           ["../../chat-ui/src/platform/index.js"],
+      "@mozaiks/chat-ui/ui":                 ["../../chat-ui/src/ui/index.js"],
+      "@mozaiks/chat-ui/coreBridge":         ["../../chat-ui/src/coreBridge.js"],
+      "@mozaiks/chat-ui/adminPortalRegistry":["../../chat-ui/src/adminPortalRegistry.js"]
+    }
+  },
+  "include": ["src", "App.tsx", "index.js", "../../chat-ui/src/types/**/*.d.ts"]
+}

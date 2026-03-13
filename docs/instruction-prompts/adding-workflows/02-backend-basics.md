@@ -1,14 +1,18 @@
 # Instruction Prompt: Workflow Backend Configuration
 
-**Task:** Configure the YAML files that define a workflow's behavior
+**Task:** Configure the declarative files that define a workflow
 
-**Complexity:** Low-Medium (file creation and configuration)
+**Complexity:** Low-Medium
 
 ---
 
 ## Context for AI Agent
 
-You are helping a user configure the backend YAML files for a MozaiksAI workflow. The user has already planned their workflow (agents, tools, handoffs) and now needs the actual configuration files created.
+You are helping a user configure a workflow bundle under
+`platform/workflows/[WorkflowName]/`.
+
+If they have not planned the workflow yet, redirect them to
+`docs/instruction-prompts/adding-workflows/01-overview.md` first.
 
 ---
 
@@ -16,298 +20,129 @@ You are helping a user configure the backend YAML files for a MozaiksAI workflow
 
 Ask the user:
 
-1. **"What is your workflow called?"** (Should be PascalCase like `SupportBot`)
-2. **"What agents did you plan?"** (List from planning phase)
-3. **"What should each agent's personality be?"** (Helpful, formal, casual, etc.)
-
-If they haven't planned yet, redirect them:
-```
-Let's plan your workflow first. Please read:
-docs/instruction-prompts/adding-workflows/01-overview.md
-```
+1. What is the workflow called?
+2. Which agents should exist?
+3. Which agent starts?
+4. What is the workflow-local startup behavior?
 
 ---
 
 ## Step 2: Create the Folder Structure
 
 ```powershell
-# Create from HelloWorld template
-Copy-Item -Recurse workflows/HelloWorld workflows/[WorkflowName]
+Copy-Item -Recurse platform/workflows/GreenRoom platform/workflows/[WorkflowName]
 ```
 
-Verify the folder structure:
-```
-workflows/[WorkflowName]/
+Expected structure:
+
+```text
+platform/workflows/[WorkflowName]/
 ├── orchestrator.yaml
 ├── agents.yaml
 ├── handoffs.yaml
 ├── context_variables.yaml
-├── tools.yaml
 ├── structured_outputs.yaml
+├── tools.yaml
+├── ui_config.yaml
 ├── hooks.yaml
 └── tools/
-    └── (Python files go here)
 ```
 
 ---
 
-## Step 3: Configure orchestrator.yaml
-
-Replace the contents with:
+## Step 3: Configure `orchestrator.yaml`
 
 ```yaml
-workflow_name: [WorkflowName]          # MUST match folder name exactly
+workflow_name: [WorkflowName]
 max_turns: 20
 human_in_the_loop: true
-startup_mode: AgentDriven              # or UserDriven if user speaks first
+startup_mode: AgentDriven
+orchestration_pattern: DefaultPattern
 initial_agent: [FirstAgentName]
-initial_message: "[FirstAgentName]: [Opening message the agent should say]"
+initial_message: "[FirstAgentName]: [Opening message]"
 ```
 
-### Startup Mode Options
+Notes:
 
-| Mode | When to Use |
-|------|-------------|
-| `AgentDriven` | Agent greets user first (most common) |
-| `UserDriven` | User initiates conversation |
-| `BackendOnly` | No user interaction, background processing |
+- `workflow_name` must match the folder name exactly.
+- `startup_mode` here is workflow-local and should not be confused with
+  `platform/config/ai.json -> chat.startup_mode`.
+- App-level workflow defaulting belongs in `platform/config/ai.json -> workflows.entry_point`.
 
 ---
 
-## Step 4: Configure agents.yaml
+## Step 4: Configure `agents.yaml`
 
-Create an entry for each agent:
+Create one entry per agent with:
 
-```yaml
-agents:
-  - name: [AgentName]
-    prompt_sections:
-      - id: role
-        heading: "[ROLE]"
-        content: |
-          You are [describe the agent's role].
-          [Add personality traits: helpful, professional, casual, etc.]
+- `name`
+- `prompt_sections`
+- any routing or constraint sections needed for the workflow
 
-      - id: objective
-        heading: "[OBJECTIVE]"
-        content: |
-          Your goal is to [main purpose].
-          [Add specific behaviors or constraints]
-
-      - id: constraints
-        heading: "[CONSTRAINTS]"
-        content: |
-          - [Rule 1: e.g., Always ask for order number before looking up orders]
-          - [Rule 2: e.g., Never share customer data with other customers]
-          - [Rule 3: e.g., Escalate if customer is frustrated]
-
-    max_consecutive_auto_reply: 10
-    auto_tool_mode: false
-    structured_outputs_required: false
-```
-
-### Agent Configuration Tips
-
-**For Routing/Coordinator Agents:**
-```yaml
-- id: routing
-  heading: "[ROUTING]"
-  content: |
-    Route users to the appropriate specialist:
-    - [AgentA] for [topic A]
-    - [AgentB] for [topic B]
-    When in doubt, ask clarifying questions.
-```
-
-**For Specialist Agents:**
-```yaml
-- id: capabilities
-  heading: "[CAPABILITIES]"
-  content: |
-    You can:
-    - [Action 1]
-    - [Action 2]
-    You cannot:
-    - [Limitation 1]
-```
-
-**For Escalation Agents:**
-```yaml
-- id: escalation
-  heading: "[ESCALATION PROTOCOL]"
-  content: |
-    You handle situations that other agents cannot resolve.
-    Collect: [required information]
-    Then: [what to do, e.g., create a ticket]
-```
+Keep prompts focused on role, objective, constraints, and handoff expectations.
 
 ---
 
-## Step 5: Configure handoffs.yaml
+## Step 5: Configure `handoffs.yaml`
 
-Create routing rules between agents:
+For multi-agent workflows, define clear handoff conditions between agents.
 
-```yaml
-handoffs:
-  # From coordinator to specialists
-  - from_agent: [CoordinatorAgent]
-    to_agent: [SpecialistA]
-    condition: "[natural language condition, e.g., 'user asks about orders']"
+Best practices:
 
-  - from_agent: [CoordinatorAgent]
-    to_agent: [SpecialistB]
-    condition: "[condition]"
-
-  # Return to coordinator
-  - from_agent: [SpecialistA]
-    to_agent: [CoordinatorAgent]
-    condition: "[condition, e.g., 'issue is resolved']"
-
-  # Escalation paths
-  - from_agent: [SpecialistA]
-    to_agent: [EscalationAgent]
-    condition: "[condition, e.g., 'customer requests manager']"
-```
-
-### Handoff Best Practices
-
-1. **Be specific** — Vague conditions cause routing errors
-2. **Always have return paths** — Specialists should route back when done
-3. **Define escalation triggers** — Frustration, high value, complexity
+1. Keep conditions specific.
+2. Add return paths where needed.
+3. Define escalation routes explicitly.
 
 ---
 
-## Step 6: Configure context_variables.yaml
+## Step 6: Configure Shared Runtime Files
 
-Define shared state:
+Use:
 
-```yaml
-context_variables:
-  # User identification
-  - name: user_name
-    type: string
-    default: null
-    description: "Customer name once identified"
-
-  # Conversation context
-  - name: current_topic
-    type: string
-    default: null
-    description: "What the user is asking about"
-
-  # Business data
-  - name: order_id
-    type: string
-    default: null
-    description: "Order being discussed"
-
-  # Flags
-  - name: is_escalated
-    type: boolean
-    default: false
-    description: "Whether conversation has been escalated"
-```
-
-### Common Context Variables
-
-| Use Case | Variables |
-|----------|-----------|
-| Customer Support | `user_name`, `order_id`, `ticket_id`, `escalation_reason` |
-| Booking | `selected_date`, `selected_time`, `service_type` |
-| Document Analysis | `document_id`, `current_page`, `extracted_data` |
+- `context_variables.yaml` for typed shared state
+- `structured_outputs.yaml` for schemas or MFJ-triggered outputs
+- `tools.yaml` for tool declarations
+- `ui_config.yaml` for workflow frontend exposure metadata
+- `hooks.yaml` for lifecycle behavior only when needed
 
 ---
 
 ## Step 7: Verify Configuration
 
-Run these checks:
+Run checks such as:
 
-### 1. YAML Syntax Check
 ```powershell
-# Use a YAML linter or just try to load
-python -c "import yaml; yaml.safe_load(open('workflows/[WorkflowName]/orchestrator.yaml'))"
+python -c "import yaml; yaml.safe_load(open('platform/workflows/[WorkflowName]/orchestrator.yaml'))"
+python -c "import yaml; yaml.safe_load(open('platform/workflows/[WorkflowName]/agents.yaml'))"
 ```
 
-### 2. Name Consistency Check
-Verify:
-- `orchestrator.yaml` → `workflow_name` matches folder name
-- `orchestrator.yaml` → `initial_agent` exists in `agents.yaml`
-- `handoffs.yaml` → All agent names exist in `agents.yaml`
+Then verify:
 
-### 3. Server Load Check
-```powershell
-# Start server and check
-# Visit: http://localhost:8000/api/workflows
-# Your workflow should appear in the list
-```
+- `workflow_name` matches the folder name
+- `initial_agent` exists in `agents.yaml`
+- handoff agent names exist
+- the workflow appears at `http://localhost:8000/api/workflows`
 
 ---
 
-## Step 8: Summary Template
-
-After configuration, provide this summary:
+## Summary Template
 
 ```markdown
-## Backend Configuration Complete
+## Workflow Backend Configuration Complete
 
-### Files Created
-- ✅ `workflows/[WorkflowName]/orchestrator.yaml`
-- ✅ `workflows/[WorkflowName]/agents.yaml`
-- ✅ `workflows/[WorkflowName]/handoffs.yaml`
-- ✅ `workflows/[WorkflowName]/context_variables.yaml`
+### Files Created or Updated
+- `platform/workflows/[WorkflowName]/orchestrator.yaml`
+- `platform/workflows/[WorkflowName]/agents.yaml`
+- `platform/workflows/[WorkflowName]/handoffs.yaml`
+- `platform/workflows/[WorkflowName]/context_variables.yaml`
 
-### Agents Configured
-1. **[AgentName]** — [Role description]
-2. **[AgentName]** — [Role description]
-
-### Handoff Routes
-- [From] → [To]: [Condition]
+### Agents
+1. [AgentName] — [Role]
+2. [AgentName] — [Role]
 
 ### Next Steps
-Your backend is configured! Now you need:
-1. **Tools** — Give agents capabilities (see 03-tools.md)
-2. **UI Components** — Add interactive elements (see 04-ui-components.md)
-
-Ready to add tools? Say "configure tools" and I'll help you set them up.
+1. Add tools in `tools.yaml` and `tools/*.py`
+2. Add workflow UI under `ui/` if the workflow uses UI tools
+3. Set `platform/config/ai.json -> workflows.entry_point` if the app should default into this workflow
 ```
 
----
-
-## Troubleshooting
-
-### "Workflow not appearing in /api/workflows"
-
-1. Check `workflow_name` matches folder name exactly (case-sensitive)
-2. Verify all YAML files have valid syntax
-3. Check server logs for loading errors
-4. Restart the server
-
-### "Agent not found" errors
-
-1. Verify agent names match exactly across all YAML files
-2. Check for typos in `initial_agent` and `handoffs.yaml`
-
-### "Handoff not triggering"
-
-1. Make conditions more specific
-2. Check agent prompts include handoff instructions
-3. Verify the target agent exists
-
----
-
-## Quick Reference
-
-### Required Files
-```
-orchestrator.yaml  — workflow_name, initial_agent, startup_mode
-agents.yaml        — agent definitions with prompts
-handoffs.yaml      — routing rules (optional for single-agent)
-```
-
-### Optional Files
-```
-context_variables.yaml   — shared state
-structured_outputs.yaml  — output schemas
-hooks.yaml               — lifecycle hooks
-tools.yaml               — tool definitions (covered in next guide)
-```

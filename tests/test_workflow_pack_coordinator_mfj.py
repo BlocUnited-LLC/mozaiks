@@ -124,6 +124,11 @@ class TestExtractChildSpecs:
         assert specs[1]["initial_message"] == "Hi"
 
 
+class TestWorkflowExists:
+    def test_writers_room_exists_under_platform_workflows(self):
+        assert WorkflowPackCoordinator._workflow_exists("WritersRoom") is True
+
+
 # ---------------------------------------------------------------------------
 # _validate_input_contract — static method
 # ---------------------------------------------------------------------------

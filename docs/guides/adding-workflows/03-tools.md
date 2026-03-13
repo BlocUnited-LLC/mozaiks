@@ -274,3 +274,4 @@ async def my_tool(order_id: str) -> Dict[str, Any]:
 
 - [UI Components](04-ui-components.md) — Create the React components for UI tools
 - [Testing](05-testing.md) — Verify everything works
+

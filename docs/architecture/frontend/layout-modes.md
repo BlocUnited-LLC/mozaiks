@@ -77,3 +77,4 @@ When entering `view` mode, the reducer saves the current mode to `previousLayout
 ## Layout on mobile
 
 On small screens, `FluidChatLayout` and `MobileArtifactDrawer` handle the layout differently — the split/minimized paradigm does not apply because the screen is too narrow for side-by-side panels. Instead, the artifact is presented as a bottom sheet drawer that overlays the chat. The `layoutMode` state is still set the same way; the visual implementation of `split` and `minimized` differs between desktop and mobile.
+

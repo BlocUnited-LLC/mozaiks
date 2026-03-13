@@ -178,7 +178,19 @@ async def get_app_config():
 @router.get("/api/navigation-config")
 async def get_navigation_config_full():
     """Serve the full navigation_config.json (pages, landing_spot, etc.)."""
-    return load_config("navigation_config.json")
+    nav = load_config("navigation_config.json")
+    ai = load_config("ai.json")
+    startup_mode = ((ai.get("chat") or {}).get("startup_mode"))
+    if startup_mode is not None:
+        nav = {**nav, "startup_mode": startup_mode}
+    workflows = ai.get("workflows") or {}
+    entry_point = workflows.get("entry_point")
+    resume_policy = workflows.get("resume_policy")
+    if entry_point is not None:
+        nav = {**nav, "entry_point": entry_point}
+    if resume_policy is not None:
+        nav = {**nav, "resume_policy": resume_policy}
+    return nav
 
 
 @router.get("/api/navigation")
@@ -200,14 +212,29 @@ async def get_navigation(user: dict = Depends(get_current_user)):
                 continue
             final_nav.append(item)
 
-        for mod_item in nav_config.get("modules", nav_config.get("plugins", [])):
-            mod_name = mod_item.get("module_name") or mod_item.get("plugin_name")
+        for mod_item in installed:
+            mod_name = mod_item.get("name")
             if not mod_name or mod_name == "subscription_manager":
                 continue
-            enabled = any(m.get("name") == mod_name and m.get("enabled", True) for m in installed)
-            if enabled:
-                if not MONETIZATION or await subscription_manager.is_module_accessible(user["user_id"], mod_name):
-                    final_nav.append(mod_item)
+            if not mod_item.get("enabled", True):
+                continue
+            if MONETIZATION and not await subscription_manager.is_module_accessible(user["user_id"], mod_name):
+                continue
+
+            module_label = mod_item.get("label") or mod_item.get("display_name") or mod_name
+            final_nav.append(
+                {
+                    "module_name": mod_name,
+                    "label": module_label,
+                    "path": mod_item.get("path") or f"/modules/{mod_name}",
+                    "icon": mod_item.get("icon") or "puzzle",
+                    "component": mod_item.get("component") or "ModulePage",
+                    "showInHeader": bool(mod_item.get("showInHeader", False)),
+                    "order": mod_item.get("order", 50),
+                    "meta": mod_item.get("meta")
+                    or {"title": module_label, "requiresAuth": True},
+                }
+            )
 
         ttl = 60 if ENV == "development" else 300
         state_manager.set(cache_key, final_nav, expire_in=ttl)

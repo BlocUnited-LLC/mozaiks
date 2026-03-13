@@ -2,6 +2,7 @@
 import workflowConfig from '../config/workflowConfig';
 import resolveWorkflow from '../utils/resolveWorkflow';
 import config from '../config';
+import platform from '../platform/index.js';
 
 /**
  * Get the current access token from storage.
@@ -9,17 +10,7 @@ import config from '../config';
  * Falls back to localStorage for development/standalone mode.
  */
 function getAccessToken() {
-  // Try window.mozaiksAuth first (set by embedding app)
-  if (typeof window !== 'undefined' && window.mozaiksAuth?.getAccessToken) {
-    return window.mozaiksAuth.getAccessToken();
-  }
-  
-  // Fallback to localStorage (development/standalone)
-  if (typeof localStorage !== 'undefined') {
-    return localStorage.getItem('chatui_token') || localStorage.getItem('access_token');
-  }
-  
-  return null;
+  return platform.getAccessToken();
 }
 
 /**
@@ -65,37 +56,62 @@ async function authFetch(url, options = {}) {
 export class ApiAdapter {
   constructor(adapterConfig = null) {
     this.config = adapterConfig || {};
+    this._generalChatsApiUnavailable = false;
+    this._generalChatsTranscriptUnavailable = false;
+  }
+
+  async get(path, options = {}) {
+    const baseUrl = this.getHttpBaseUrl();
+    const normalizedPath = typeof path === 'string' && path.startsWith('http')
+      ? path
+      : `${baseUrl}${String(path || '').startsWith('/') ? '' : '/'}${path || ''}`;
+
+    const response = await authFetch(normalizedPath, {
+      method: 'GET',
+      ...(options || {}),
+    });
+
+    if (!response.ok) {
+      const err = new Error(`HTTP ${response.status}`);
+      err.status = response.status;
+      try {
+        err.body = await response.text();
+      } catch (_) {
+        err.body = null;
+      }
+      throw err;
+    }
+
+    if (response.status === 204) return null;
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      return await response.json();
+    }
+
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      return { raw: text };
+    }
   }
 
   getHttpBaseUrl() {
     const fallback = typeof config?.get === 'function' ? config.get('api.baseUrl') : undefined;
-    const defaultHttpProtocol = typeof window !== 'undefined' ? window.location.protocol : 'http:';
-    const defaultHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-    const defaultHttpBase = `${defaultHttpProtocol}//${defaultHost}:8000`;
     const raw = this.config?.baseUrl
       || this.config?.api?.baseUrl
       || fallback
-      || defaultHttpBase;
-    if (typeof raw === 'string' && raw.endsWith('/')) {
-      return raw.slice(0, -1);
-    }
-    return raw;
+      || platform.resolveHttpUrl({ port: '8000' });
+    return typeof raw === 'string' && raw.endsWith('/') ? raw.slice(0, -1) : raw;
   }
 
   getWsBaseUrl() {
     const fallback = typeof config?.get === 'function' ? config.get('api.wsUrl') : undefined;
-    const defaultHttpProtocol = typeof window !== 'undefined' ? window.location.protocol : 'http:';
-    const defaultWsProtocol = defaultHttpProtocol === 'https:' ? 'wss:' : 'ws:';
-    const defaultHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-    const defaultWsBase = `${defaultWsProtocol}//${defaultHost}:8000`;
     const raw = this.config?.wsUrl
       || this.config?.api?.wsUrl
       || fallback
-      || defaultWsBase;
-    if (typeof raw === 'string' && raw.endsWith('/')) {
-      return raw.slice(0, -1);
-    }
-    return raw;
+      || platform.resolveWsUrl({ port: '8000' });
+    return typeof raw === 'string' && raw.endsWith('/') ? raw.slice(0, -1) : raw;
   }
 
   async sendMessage(_message, _appId, _userId) {
@@ -129,6 +145,9 @@ export class ApiAdapter {
   }
 
   async listGeneralChats(appId, userId, limit = 50) {
+    if (this._generalChatsApiUnavailable) {
+      return { sessions: [] };
+    }
     const baseUrl = this.getHttpBaseUrl();
     const searchParams = new URLSearchParams();
     if (limit !== undefined && limit !== null) {
@@ -139,17 +158,70 @@ export class ApiAdapter {
 
     try {
       const response = await authFetch(url);
+      if (response.status === 404) {
+        // Optional feature: treat missing endpoint as "no conversations yet".
+        this._generalChatsApiUnavailable = true;
+        return { sessions: [] };
+      }
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
-      return await response.json();
+      const payload = await response.json();
+      const sessions = Array.isArray(payload?.sessions)
+        ? payload.sessions
+        : Array.isArray(payload?.chats)
+          ? payload.chats
+          : [];
+      return { ...payload, sessions };
     } catch (error) {
-      console.error('Failed to list general chats:', error);
-      throw error;
+      console.warn('General chats endpoint unavailable, continuing without list.', error?.message || error);
+      if (error?.status === 404 || String(error?.message || '').includes('HTTP 404')) {
+        this._generalChatsApiUnavailable = true;
+      }
+      return { sessions: [] };
+    }
+  }
+
+  async delete(path, options = {}) {
+    const baseUrl = this.getHttpBaseUrl();
+    const normalizedPath = typeof path === 'string' && path.startsWith('http')
+      ? path
+      : `${baseUrl}${String(path || '').startsWith('/') ? '' : '/'}${path || ''}`;
+
+    const response = await authFetch(normalizedPath, {
+      method: 'DELETE',
+      ...(options || {}),
+    });
+
+    if (!response.ok) {
+      const err = new Error(`HTTP ${response.status}`);
+      err.status = response.status;
+      try {
+        err.body = await response.text();
+      } catch (_) {
+        err.body = null;
+      }
+      throw err;
+    }
+
+    if (response.status === 204) return null;
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      return await response.json();
+    }
+
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      return { raw: text };
     }
   }
 
   async fetchGeneralChatTranscript(appId, generalChatId, options = {}) {
+    if (this._generalChatsTranscriptUnavailable) {
+      return null;
+    }
     const { afterSequence = -1, limit = 200 } = options;
     const baseUrl = this.getHttpBaseUrl();
     const searchParams = new URLSearchParams();
@@ -165,6 +237,7 @@ export class ApiAdapter {
     try {
       const response = await authFetch(url);
       if (response.status === 404) {
+        this._generalChatsTranscriptUnavailable = true;
         return null;
       }
       if (!response.ok) {
@@ -172,9 +245,30 @@ export class ApiAdapter {
       }
       return await response.json();
     } catch (error) {
-      console.error('Failed to fetch general chat transcript:', error);
-      throw error;
+      console.warn('General chat transcript endpoint unavailable.', error?.message || error);
+      if (error?.status === 404 || String(error?.message || '').includes('HTTP 404')) {
+        this._generalChatsTranscriptUnavailable = true;
+      }
+      return null;
     }
+  }
+
+  async clearWorkflowSessions(appId, userId, options = {}) {
+    const status = options?.status || 'all';
+    const workflowName = options?.workflow_name || options?.workflowName || null;
+    const params = new URLSearchParams();
+    if (status) params.set('status', String(status));
+    if (workflowName) params.set('workflow_name', String(workflowName));
+    const path = `/api/sessions/${encodeURIComponent(appId)}/${encodeURIComponent(userId)}?${params.toString()}`;
+    return this.delete(path);
+  }
+
+  async clearGeneralChats(appId, userId, options = {}) {
+    const status = options?.status || 'all';
+    const params = new URLSearchParams();
+    if (status) params.set('status', String(status));
+    const path = `/api/general_chats/${encodeURIComponent(appId)}/${encodeURIComponent(userId)}?${params.toString()}`;
+    return this.delete(path);
   }
 }
 
@@ -287,7 +381,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
     const socket = new WebSocket(wsUrl);
     
     // F7/F8: Sequence tracking and resume capability (strict canonical key)
-    let lastSequence = parseInt(localStorage.getItem(`ws_idx_${chatId}`) || '0');
+    let lastSequence = parseInt(platform.storage.getItem(`ws_idx_${chatId}`) || '0');
     let resumePending = false;
     
     // Helper to send client.resume
@@ -322,7 +416,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
         if (data.seq && typeof data.seq === 'number') {
           if (data.seq > lastSequence) {
             lastSequence = data.seq;
-            try { localStorage.setItem(`ws_idx_${chatId}`, lastSequence.toString()); } catch (_) {}
+            try { platform.storage.setItem(`ws_idx_${chatId}`, lastSequence.toString()); } catch (_) {}
           } else if (data.seq < lastSequence - 1 && !resumePending) {
             // Sequence gap detected - request resume
             console.warn(`⚠️ Sequence gap detected: received ${data.seq}, expected > ${lastSequence}`);
@@ -357,6 +451,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
     };
 
     const connection = {
+      chatId,
       socket,
       send: (message) => {
         if (socket.readyState === WebSocket.OPEN) {

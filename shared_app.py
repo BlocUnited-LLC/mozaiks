@@ -14,7 +14,7 @@ import json
 import asyncio
 import importlib
 from fastapi import FastAPI, HTTPException, Request, WebSocket, UploadFile, File, Form, Depends
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse, Response
 from starlette.middleware.cors import CORSMiddleware
 from bson.objectid import ObjectId
 from uuid import uuid4
@@ -180,6 +180,40 @@ app = FastAPI(
     description="Production-ready AG2 runtime with workflow-specific tools",
     version="5.0.0",
 )
+
+
+@app.get("/", include_in_schema=False)
+async def read_root():
+    """Simple root endpoint so localhost:8000/ is never a 404."""
+    return {
+        "service": "mozaiks-runtime",
+        "status": "ok",
+        "docs": "/docs",
+        "health": "/api/health",
+    }
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """Serve a favicon for backend-origin requests (e.g., Swagger/docs probes)."""
+    assets_dir = Path(__file__).parent / "platform" / "brand" / "assets"
+    ico_path = assets_dir / "favicon.ico"
+    svg_path = assets_dir / "mozaik_logo.svg"
+    png_path = assets_dir / "mozaik.png"
+
+    if ico_path.exists():
+        return FileResponse(str(ico_path), media_type="image/x-icon")
+    if svg_path.exists():
+        return FileResponse(str(svg_path), media_type="image/svg+xml")
+    if png_path.exists():
+        return FileResponse(str(png_path), media_type="image/png")
+    return Response(status_code=204)
+
+
+@app.get("/.well-known/appspecific/com.chrome.devtools.json", include_in_schema=False)
+async def chrome_devtools_probe():
+    """Silence Chrome devtools probe noise on localhost."""
+    return Response(status_code=204)
 
 # Expose shared state on app for platform extension routers.
 app.state.persistence_manager = persistence_manager
@@ -1174,8 +1208,262 @@ async def get_most_recent_workflow_session(
         raise HTTPException(status_code=500, detail=f"Failed to fetch most recent session: {e}")
 
 
+@app.get("/api/sessions/oldest/{app_id}/{user_id}")
+async def get_oldest_workflow_session(
+    app_id: str,
+    user_id: str,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """
+    Return the oldest IN_PROGRESS workflow session for a user.
+
+    Useful when UX policy wants "finish oldest run first" semantics.
+    """
+    user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
+
+    try:
+        from mozaiksai.core.data.models import WorkflowStatus
+
+        coll = await _chat_coll()
+        sessions = (
+            await coll.find(
+                {
+                    "user_id": user_id,
+                    "status": int(WorkflowStatus.IN_PROGRESS),
+                    **build_app_scope_filter(app_id),
+                }
+            )
+            .sort("created_at", 1)
+            .to_list(length=100)
+        )
+
+        if not sessions:
+            wf_logger.debug(f"[OLDEST_SESSION] No IN_PROGRESS workflows for user {user_id}")
+            return {
+                "found": False,
+                "chat_id": None,
+                "workflow_name": None,
+            }
+
+        oldest = sessions[0]
+        wf_logger.debug(
+            f"[OLDEST_SESSION] Returning oldest workflow {oldest.get('workflow_name')} "
+            f"chat_id={oldest['_id']} for user {user_id}"
+        )
+
+        return {
+            "found": True,
+            "chat_id": oldest["_id"],
+            "workflow_name": oldest.get("workflow_name"),
+            "created_at": oldest.get("created_at").isoformat() if oldest.get("created_at") else None,
+            "last_updated_at": oldest.get("last_updated_at").isoformat() if oldest.get("last_updated_at") else None,
+            "last_artifact": oldest.get("last_artifact"),
+        }
+    except Exception as e:
+        wf_logger.error(f"[OLDEST_SESSION] Failed to fetch oldest session: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch oldest session: {e}")
+
+
+@app.delete("/api/sessions/{app_id}/{user_id}")
+async def delete_user_sessions(
+    app_id: str,
+    user_id: str,
+    status: str = "in_progress",
+    workflow_name: Optional[str] = None,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """
+    Delete workflow sessions for a user/app scope.
+
+    Query params:
+      - status: in_progress | completed | all (default: in_progress)
+      - workflow_name: optional workflow filter
+    """
+    user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
+
+    try:
+        from mozaiksai.core.data.models import WorkflowStatus
+
+        normalized_status = str(status or "in_progress").strip().lower()
+        query: Dict[str, Any] = {
+            "user_id": user_id,
+            **build_app_scope_filter(app_id),
+        }
+
+        if workflow_name:
+            query["workflow_name"] = str(workflow_name).strip()
+
+        if normalized_status in {"in_progress", "active", "open"}:
+            query["status"] = int(WorkflowStatus.IN_PROGRESS)
+        elif normalized_status in {"completed", "done", "closed"}:
+            query["status"] = int(WorkflowStatus.COMPLETED)
+        elif normalized_status in {"all", "any", "*"}:
+            pass
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="status must be one of: in_progress, completed, all",
+            )
+
+        coll = await _chat_coll()
+        result = await coll.delete_many(query)
+        deleted_count = int(result.deleted_count or 0)
+
+        wf_logger.info(
+            "[DELETE_SESSIONS] Deleted workflow sessions",
+            extra={
+                "app_id": app_id,
+                "user_id": user_id,
+                "status": normalized_status,
+                "workflow_name": workflow_name,
+                "deleted_count": deleted_count,
+            },
+        )
+
+        return {
+            "success": True,
+            "app_id": app_id,
+            "user_id": user_id,
+            "status": normalized_status,
+            "workflow_name": workflow_name,
+            "deleted_count": deleted_count,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        wf_logger.error(f"[DELETE_SESSIONS] Failed to delete sessions: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete sessions: {e}")
+
+
+@app.delete("/api/general_chats/{app_id}/{user_id}")
+async def delete_general_chats(
+    app_id: str,
+    user_id: str,
+    status: str = "all",
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """
+    Delete Ask-mode general chats for a user/app scope.
+
+    Query params:
+      - status: in_progress | completed | all (default: all)
+    """
+    user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
+
+    try:
+        from mozaiksai.core.data.models import WorkflowStatus
+
+        normalized_status = str(status or "all").strip().lower()
+        query: Dict[str, Any] = {
+            "user_id": user_id,
+            **build_app_scope_filter(app_id),
+        }
+
+        if normalized_status in {"in_progress", "active", "open"}:
+            query["status"] = int(WorkflowStatus.IN_PROGRESS)
+        elif normalized_status in {"completed", "done", "closed"}:
+            query["status"] = int(WorkflowStatus.COMPLETED)
+        elif normalized_status in {"all", "any", "*"}:
+            pass
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="status must be one of: in_progress, completed, all",
+            )
+
+        general_coll = await persistence_manager._general_coll()
+        result = await general_coll.delete_many(query)
+        deleted_count = int(result.deleted_count or 0)
+
+        # If we cleared all general chats for this scope, reset the sequence counter too.
+        if normalized_status in {"all", "any", "*"}:
+            try:
+                counter_coll = await persistence_manager._general_counter_coll()
+                await counter_coll.delete_many({
+                    "user_id": user_id,
+                    **build_app_scope_filter(app_id),
+                })
+            except Exception as counter_err:  # pragma: no cover - non-fatal
+                wf_logger.debug(f"[DELETE_GENERAL_CHATS] Counter reset skipped: {counter_err}")
+
+        wf_logger.info(
+            "[DELETE_GENERAL_CHATS] Deleted general chats",
+            extra={
+                "app_id": app_id,
+                "user_id": user_id,
+                "status": normalized_status,
+                "deleted_count": deleted_count,
+            },
+        )
+
+        return {
+            "success": True,
+            "app_id": app_id,
+            "user_id": user_id,
+            "status": normalized_status,
+            "deleted_count": deleted_count,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        wf_logger.error(f"[DELETE_GENERAL_CHATS] Failed to delete general chats: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete general chats: {e}")
+
+
 # NOTE: /api/general_chats/* routes are mounted by mozaiksai.platform
 # (Ask Mode / dual-mode UX) when RUNTIME_PLATFORM_EXTENSIONS is set.
+#
+# Fallback behavior below keeps frontend polling noise-free when those optional
+# extension routes are not mounted in the current runtime profile.
+
+
+@app.get("/api/notifications/count")
+async def notifications_count_fallback(
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """Fallback unread-count endpoint when notification service is absent."""
+    return {"count": 0, "unread_count": 0}
+
+
+@app.get("/api/general_chats/list/{app_id}/{user_id}")
+async def list_general_chats_fallback(
+    app_id: str,
+    user_id: str,
+    limit: int = 50,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """Fallback Ask-mode chat list endpoint when general chat service is absent."""
+    user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
+    return {
+        "app_id": app_id,
+        "user_id": user_id,
+        "limit": max(1, int(limit or 50)),
+        "sessions": [],
+        "count": 0,
+        "source": "fallback",
+    }
+
+
+@app.get("/api/general_chats/transcript/{app_id}/{general_chat_id}")
+async def general_chat_transcript_fallback(
+    app_id: str,
+    general_chat_id: str,
+    after_sequence: int = -1,
+    limit: int = 200,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """Fallback Ask-mode transcript endpoint when general chat service is absent."""
+    _ = principal  # principal check enforced by dependency
+    return {
+        "app_id": app_id,
+        "chat_id": general_chat_id,
+        "label": general_chat_id,
+        "messages": [],
+        "last_sequence": max(-1, int(after_sequence or -1)),
+        "limit": max(1, int(limit or 200)),
+        "found": False,
+        "source": "fallback",
+    }
 
 
 @app.get("/api/chats/meta/{app_id}/{workflow_name}/{chat_id}")
@@ -1393,29 +1681,84 @@ async def websocket_endpoint(
     async def _auto_start_if_needed():
         try:
             from mozaiksai.core.workflow.workflow_manager import workflow_manager
-            cfg = workflow_manager.get_config(workflow_name)
-            if cfg.get("startup_mode", "AgentDriven") == "AgentDriven":
-                local_transport = simple_transport
-                if not local_transport:
-                    return
-                # wait until the connection is registered
-                for _ in range(20):  # poll for registration using active_chat_id
-                    conn = local_transport.connections.get(active_chat_id)
-                    if conn and conn.get("websocket") is not None:
-                        # idempotency guard so auto-start runs at most once per socket
-                        if conn.get("autostarted"):
-                            return
-                        conn["autostarted"] = True
-                        break
-                    await asyncio.sleep(0.1)
+            # In development, pick up YAML edits (startup_mode, initial_message, etc.)
+            # without requiring a Python process restart.
+            try:
+                if os.getenv("ENVIRONMENT", "development").lower() != "production":
+                    workflow_manager.reload_workflow(workflow_name)
+            except Exception as reload_err:
+                wf_logger.debug(f"Workflow hot-reload skipped for {workflow_name}: {reload_err}")
 
-                await local_transport.handle_user_input_from_api(
-                    chat_id=active_chat_id,
-                    user_id=user_id,
-                    workflow_name=workflow_name,
-                    message=None,
-                    app_id=app_id,
+            cfg = workflow_manager.get_config(workflow_name) or {}
+            startup_mode = str(cfg.get("startup_mode", "AgentDriven"))
+            if startup_mode != "AgentDriven":
+                wf_logger.debug(
+                    "WS_AUTO_START_SKIPPED",
+                    extra={
+                        "workflow_name": workflow_name,
+                        "chat_id": active_chat_id,
+                        "reason": f"startup_mode={startup_mode}",
+                    },
                 )
+                return
+
+            # Never auto-start from completed or non-fresh sessions.
+            # AgentDriven auto-start is only for brand-new chats.
+            coll = await _chat_coll()
+            chat_doc = await coll.find_one(
+                {"_id": active_chat_id, "user_id": user_id, **build_app_scope_filter(app_id)},
+                {"status": 1, "last_sequence": 1, "messages": {"$slice": 1}},
+            )
+            if not chat_doc:
+                return
+
+            status = int(chat_doc.get("status", -1))
+            if status != 0:
+                wf_logger.debug(
+                    "WS_AUTO_START_SKIPPED",
+                    extra={
+                        "workflow_name": workflow_name,
+                        "chat_id": active_chat_id,
+                        "reason": f"status={status}",
+                    },
+                )
+                return
+
+            last_sequence = int(chat_doc.get("last_sequence", 0) or 0)
+            has_messages = bool(chat_doc.get("messages"))
+            if last_sequence > 0 or has_messages:
+                wf_logger.debug(
+                    "WS_AUTO_START_SKIPPED",
+                    extra={
+                        "workflow_name": workflow_name,
+                        "chat_id": active_chat_id,
+                        "reason": f"not_fresh last_sequence={last_sequence} has_messages={has_messages}",
+                    },
+                )
+                return
+
+            local_transport = simple_transport
+            if not local_transport:
+                return
+
+            # wait until the connection is registered
+            for _ in range(20):  # poll for registration using active_chat_id
+                conn = local_transport.connections.get(active_chat_id)
+                if conn and conn.get("websocket") is not None:
+                    # idempotency guard so auto-start runs at most once per socket
+                    if conn.get("autostarted"):
+                        return
+                    conn["autostarted"] = True
+                    break
+                await asyncio.sleep(0.1)
+
+            await local_transport.handle_user_input_from_api(
+                chat_id=active_chat_id,
+                user_id=user_id,
+                workflow_name=workflow_name,
+                message=None,
+                app_id=app_id,
+            )
         except Exception as e:
             logger.error(f"Auto-start failed for {workflow_name}/{active_chat_id}: {e}")
 
@@ -1709,6 +2052,61 @@ async def get_workflow_ui_tools_manifest(
 # ==============================================================================
 # TOKEN API ENDPOINTS
 # ==============================================================================
+
+
+# ==============================================================================
+# PLATFORM CONFIG ENDPOINTS
+# ==============================================================================
+
+@app.get("/api/navigation-config")
+async def get_navigation_config():
+    """Return navigation config for frontend (no auth required for config)."""
+    config_dir = Path(__file__).parent / "platform" / "config"
+    nav_path = config_dir / "navigation_config.json"
+    ai_path = config_dir / "ai.json"
+
+    if not nav_path.exists():
+        raise HTTPException(status_code=404, detail="Navigation config not found")
+    try:
+        nav = json.loads(nav_path.read_text(encoding="utf-8"))
+        if ai_path.exists():
+            ai = json.loads(ai_path.read_text(encoding="utf-8"))
+            startup_mode = ((ai.get("chat") or {}).get("startup_mode"))
+            if startup_mode is not None:
+                nav = {**nav, "startup_mode": startup_mode}
+            workflows = ai.get("workflows") or {}
+            entry_point = workflows.get("entry_point")
+            resume_policy = workflows.get("resume_policy")
+            if entry_point is not None:
+                nav = {**nav, "entry_point": entry_point}
+            if resume_policy is not None:
+                nav = {**nav, "resume_policy": resume_policy}
+        return nav
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read navigation config: {e}")
+
+@app.get("/api/theme-config")
+async def get_theme_config():
+    """Return theme config for frontend (no auth required for config)."""
+    config_path = Path(__file__).parent / "platform" / "config" / "theme_config.json"
+    if not config_path.exists():
+        raise HTTPException(status_code=404, detail="Theme config not found")
+    try:
+        return json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read theme config: {e}")
+
+@app.get("/api/themes/{app_id}")
+async def get_app_theme(app_id: str):
+    """Return theme config for a specific app (falls back to default theme)."""
+    # For now, all apps use the same theme config
+    config_path = Path(__file__).parent / "platform" / "config" / "theme_config.json"
+    if not config_path.exists():
+        raise HTTPException(status_code=404, detail="Theme config not found")
+    try:
+        return json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read theme config: {e}")
 
 
 @app.get("/api/workflows")
