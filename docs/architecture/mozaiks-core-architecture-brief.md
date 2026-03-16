@@ -148,12 +148,28 @@ causation_id, correlation_id
 
 ### 3.2 Integration Glue (mozaikscore)
 
+mozaikscore routes are organised into a **director** (core config/navigation) and **15 dedicated route modules** under `mozaikscore/core/routes/`.  Request bodies are validated by Pydantic models in `mozaikscore/core/schemas.py`.
+
 | Component | File(s) | Responsibility |
 |---|---|---|
-| **core_app** | `mozaikscore/core_app.py` | FastAPI app (port 8001).  CORS, WebSocket, mounts all routes. |
-| **EventBus** | `mozaikscore/core/event_bus.py` | Thread-safe in-process pub/sub for substrate-side events. |
+| **core_app** | `mozaikscore/core_app.py` | FastAPI app (port 8001).  CORS, WebSocket (authenticated), lifecycle events, mounts director + all route modules. |
+| **Director** | `mozaikscore/core/director.py` | Core read-only config endpoints: `/` (health), `/api/app-config`, `/api/navigation-config`, `/api/navigation` (dynamic — merges static pages + module registry with dedup + subscription gating), `/api/admin-config`, `/api/automation-config`, `/api/debug/module-status`. |
+| **Theme routes** | `mozaikscore/core/routes/theme.py` | `/api/theme-config`, `/api/change-theme`, `/api/current-theme`. |
+| **Settings routes** | `mozaikscore/core/routes/settings.py` | `/api/settings-config`, `/api/settings` (GET/PUT), `/api/settings/{plugin}` (DELETE), `/api/module-settings/{module}` (GET/POST). |
+| **Profile routes** | `mozaikscore/core/routes/profile.py` | `/api/profile`, `/api/update-profile`, `/api/user-profile`. |
+| **Modules routes** | `mozaikscore/core/routes/modules.py` | `/api/available-modules`, `/api/execute/{module}`, `/api/check-module-access/{module}`. |
+| **Subscriptions routes** | `mozaikscore/core/routes/subscriptions.py` | `/api/subscription`, `/api/subscription-plans`, `/api/upgrade-subscription`, `/api/cancel-subscription` (gated by `MONETIZATION` env). |
+| **Admin users** | `mozaikscore/core/routes/admin_users.py` | `/__mozaiks/admin/users` (list, detail, action). |
+| **Admin observability** | `mozaikscore/core/routes/admin_observability.py` | `/__mozaiks/admin/observability/overview`, `/__mozaiks/admin/observability/chats`, `/__mozaiks/admin/subscriptions/overview`. |
+| **Analytics** | `mozaikscore/core/routes/analytics.py` | `/__mozaiks/admin/analytics`, `/__mozaiks/admin/analytics/kpis`. |
+| **App metadata** | `mozaikscore/core/routes/app_metadata.py` | `/__mozaiks/admin/app/metadata`, `/__mozaiks/admin/app`. |
+| **Notifications** | `mozaikscore/core/routes/notifications.py` | `/api/notifications` (list/count/read/read-all/delete). |
+| **Events / Push / Status** | `mozaikscore/core/routes/events.py`, `push_subscriptions.py`, `status.py` | Event relay, push subscription registration, status endpoints. |
+| **Subscription sync** | `mozaikscore/core/routes/subscription_sync.py` | `/api/internal/subscription/sync` (Control Plane inbound). |
+| **Pydantic schemas** | `mozaikscore/core/schemas.py` | `ChangeThemeRequest`, `UpdateProfileRequest`, `UpdateSubscriptionRequest`, `NotificationPreferencesRequest`, `ModuleExecuteRequest`. |
+| **EventBus** | `mozaikscore/core/event_bus.py` | Thread-safe in-process pub/sub with retry for async callbacks.  Lifecycle hooks are no-ops (async dispatch is inline via `create_task`). |
 | **CrossSubstrateBridge** | `mozaikscore/core/cross_substrate_bridge.py` | Bidirectional event relay (mozaikscore ↔ mozaiksai). |
-| **ModuleManager** | `mozaikscore/core/module_manager.py` | Dynamic module discovery, loading, execution dispatch. |
+| **ModuleManager** | `mozaikscore/core/module_manager.py` | Dynamic module discovery from `platform/modules/`, in-memory registry (no runtime disk writes), `execute(data)` dispatch.  Reads `module.json` for metadata, navigation, and notification registration. |
 | **NotificationsManager** | `mozaikscore/core/notifications_manager.py` | Multi-channel notification delivery (in-app, email, WebSocket). |
 | **SubscriptionManager** | `mozaikscore/core/subscription_manager.py` | Plan-based access control, trial logic, Control Plane sync. |
 
@@ -164,6 +180,7 @@ causation_id, correlation_id
 | **Workflow YAML** | `platform/workflows/{name}/` | Declarative app definition: agents, orchestrator pattern, handoffs, context_variables, structured_outputs, hooks, tools, ui_config, _pack |
 | **Automation config** | `platform/automations/` | `event_catalog.json` (known event types) + `routes.json` (event → workflow bindings) |
 | **Platform config** | `platform/config/` | `ai.json`, `navigation_config.json`, `theme_config.json`, `module_registry.json`, etc. |
+| **Platform modules** | `platform/modules/{name}/` | Business-logic modules.  Each module has: `handler.py` (exports `execute(data)`), `module.json` (metadata + navigation contract), `ui/` (frontend component).  The `module.json` contract includes: `name`, `display_name`, `description`, `version`, `author`, `category`, `icon`, `enabled`, `required_tier`, and a `navigation` block (`path`, `component`, `ui`, `label`, `icon`, `showInHeader`, `order`, `meta`). |
 | **PlatformHookRegistry** | `mozaiksai/core/runtime/platform_hooks.py` | Entrypoint-based hook injection (`on_startup`, `chat_prereqs`, `chat_session_fields`, `workflow_ordering`) so platform layers can extend the runtime without modifying `shared_app.py`. |
 | **RuntimeExtensions** | `mozaiksai/core/runtime/extensions.py` | Mount workflow-declared `api_router` and `startup_service` entrypoints. |
 
@@ -204,6 +221,7 @@ There is no single director process.  The director concept is a **pattern spread
 3. **No dead-letter / observability pipeline for failed events.** Failed event deliveries are logged but not collected or alerted on.  There is no dead-letter queue for NATS messages either.
 4. **AG2 events flow directly via `transport.send_event_to_ui()`**, bypassing the dispatcher for the hot path (text, tool calls, speaker selection).  This means the dispatcher's metrics undercount total event volume and handlers registered on the dispatcher cannot intercept UI-bound AG2 events.
 5. **Tight coupling between orchestration_patterns and SimpleTransport.** The orchestration loop directly calls `transport.send_event_to_ui()` to push events to WebSocket, rather than emitting through the dispatcher and letting the transport subscribe.  This makes it hard to add alternative transports (SSE, gRPC) without modifying the execution loop.
+6. **Endpoint routing gap between substrates.**  The frontend (`chat-ui/src/coreBridge.js`) sends **all** requests to port 8000 (`shared_app.py`).  Docker exposes only port 8000.  However, most mozaikscore endpoints (`/api/navigation`, `/api/settings*`, `/api/profile`, `/api/subscription*`, `/api/notifications` CRUD, `/api/execute/{module}`, `/api/change-theme`, `/api/current-theme`, `/__mozaiks/admin/*`) only exist on port 8001 (`mozaikscore/core_app.py`).  Port 8000 has a small subset of passthrough config routes (`/api/navigation-config`, `/api/theme-config`, `/api/admin-config`, `/api/available-modules`, `/api/notifications/count`).  In dual-port mode (`start-dual.ps1`), the mozaikscore-only endpoints are unreachable from the frontend.  **Resolution**: either proxy mozaikscore routes through `shared_app.py`, or mount the mozaikscore app as a sub-application on port 8000.
 
 ---
 
@@ -260,17 +278,18 @@ AG2 a_run_group_chat_iter()
 
 | Surface | Mechanism | Key endpoints / files |
 |---|---|---|
-| **WebSocket API** | `/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}` | Real-time bidirectional agent communication |
-| **REST API** (mozaiksai) | FastAPI routes in `shared_app.py` | `/api/chats/...` (CRUD), `/api/workflows/...` (config), `/api/substrate-events` (automation ingest), `/health/active-runs`, `/metrics/perf/...` |
-| **REST API** (mozaikscore) | FastAPI routes in `mozaikscore/core/routes/` | `/api/notifications`, `/api/events`, `/api/push`, `/__mozaiks/admin/...` |
+| **WebSocket API** (mozaiksai) | `/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}` | Real-time bidirectional agent communication |
+| **WebSocket API** (mozaikscore) | `/ws/{user_id}` | Authenticated push channel for notifications, events |
+| **REST API** (mozaiksai) | FastAPI routes in `shared_app.py` | `/api/chats/...` (CRUD), `/api/workflows/...` (config), `/api/substrate-events` (automation ingest), `/health/active-runs`, `/metrics/perf/...`, plus passthrough config routes (`/api/navigation-config`, `/api/theme-config`, `/api/admin-config`, `/api/available-modules`, `/api/notifications/count`) |
+| **REST API** (mozaikscore) | Director (`mozaikscore/core/director.py`) + 15 route modules (`mozaikscore/core/routes/`) | `/api/navigation`, `/api/app-config`, `/api/theme-config`, `/api/change-theme`, `/api/current-theme`, `/api/settings*`, `/api/profile`, `/api/update-profile`, `/api/subscription*`, `/api/notifications*`, `/api/available-modules`, `/api/execute/{module}`, `/api/check-module-access/{module}`, `/api/module-settings/{module}`, `/__mozaiks/admin/*`, `/api/automation-config` |
 | **CLI** | `mozaiks build`, `mozaiks dev` | Web app build and Vite dev server |
 | **YAML config** | `platform/workflows/{name}/` | Declarative agent, tool, handoff, context, output definitions |
-| **JSON config** | `platform/config/`, `platform/automations/` | App config, automation event catalog and routes |
+| **JSON config** | `platform/config/`, `platform/automations/`, `platform/modules/{name}/module.json` | App config, automation event catalog and routes, module metadata and navigation contracts |
 | **Environment variables** | `.env` / shell | Transport mode, NATS URL, auth, API keys, cache TTL, etc. |
 
 ### 6.2 What External Systems Talk To
 
-- **UI clients** → WebSocket + REST (mozaiksai port 8000)
+- **UI clients** → WebSocket + REST (mozaiksai port 8000).  The frontend `coreBridge.js` sends **all** requests to port 8000 — both runtime (mozaiksai) and application (mozaikscore) endpoints.  In Docker mode only port 8000 is exposed.
 - **mozaikscore** → REST + NATS (cross-substrate bridge) → mozaiksai
 - **Future NL generator / Mozaiks Platform** → would emit YAML workflow definitions into `platform/workflows/` and JSON config into `platform/config/` and `platform/automations/`
 - **Control Plane** → `POST /api/internal/subscription/sync` on mozaikscore
@@ -382,9 +401,15 @@ AG2 a_run_group_chat_iter()
 ┌────────────────────────────────────────────────────────────────────────────┐
 │                MOZAIKSCORE (app substrate — port 8001)                      │
 │  ┌──────────┐ ┌──────────────┐ ┌─────────────┐ ┌──────────────────────┐  │
-│  │ Director  │ │Notifications │ │Subscriptions│ │ EventBus + Bridge    │  │
-│  │ (CRUD)   │ │ Manager      │ │ Manager     │ │ (→ NATS / HTTP)      │  │
+│  │ Director  │ │15 Route      │ │ Module      │ │ EventBus + Bridge    │  │
+│  │ (config + │ │ Modules      │ │ Manager     │ │ (→ NATS / HTTP)      │  │
+│  │ nav merge)│ │ (theme,      │ │ (in-memory  │ │ (inline dispatch,    │  │
+│  │           │ │  settings,   │ │  registry,  │ │  cross-substrate     │  │
+│  │           │ │  profile,    │ │  module.json │ │  relay)              │  │
+│  │           │ │  modules,    │ │  contract)  │ │                      │  │
+│  │           │ │  admin, ...)  │ │             │ │                      │  │
 │  └──────────┘ └──────────────┘ └─────────────┘ └──────────────────────┘  │
+│  Pydantic schemas (schemas.py) · WebSocket /ws/{user_id} (authenticated) │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
