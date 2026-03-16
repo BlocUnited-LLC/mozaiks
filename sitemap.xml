@@ -2,418 +2,438 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://docs.mozaiks.ai/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/agent-bootstrap-prompt/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/first-run-ritual/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/getting-started/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/setup-prompt/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/docs-cleanup-backlog/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/keycloak-auth/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/mobile-client-contract/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
+    </url>
+    <url>
+         <loc>https://docs.mozaiks.ai/architecture/mozaiks-core-architecture-brief/</loc>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/orchestration-and-decomposition/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/pipeline-refactor-plan/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/ui-component-discovery/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
+    </url>
+    <url>
+         <loc>https://docs.mozaiks.ai/architecture/development/overview/</loc>
+         <lastmod>2026-03-16</lastmod>
+    </url>
+    <url>
+         <loc>https://docs.mozaiks.ai/architecture/development/substrate-ui-dependency-matrix/</loc>
+         <lastmod>2026-03-16</lastmod>
+    </url>
+    <url>
+         <loc>https://docs.mozaiks.ai/architecture/development/substrate-ui-planning-spec/</loc>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/events/declarative-runtime-system/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/events/event-system-inventory/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/events/overview/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/app-builder-architecture/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/app-builder-state-and-routing/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/app-bundle-declaratives/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/app-creation-guide/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/app-planning-contracts/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/builder-execution-model/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/builder-orchestration-taxonomy/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/canonical-app-structure/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/core-product-app-bundle-boundary/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
+    </url>
+    <url>
+         <loc>https://docs.mozaiks.ai/architecture/foundations/declarative-ag2-mapping/</loc>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/event-system-architecture/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/event-taxonomy/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/graph-injection-contract/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/learning-loop-architecture/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/overview/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/process-and-event-map/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/runtime-state-and-control-events/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/ui-surface-and-layout-architecture/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/workflow-architecture/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/foundations/workflow-authoring-contracts/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/frontend/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/frontend/conversation-modes/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/frontend/event-driven-state/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/frontend/layout-modes/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/frontend/persistent-widget/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/architecture/frontend/ui-surface-model/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/adding-workflows/01-overview/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/adding-workflows/02-backend-basics/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/adding-workflows/03-tools/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/adding-workflows/04-ui-components/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/adding-workflows/05-testing/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/custom-brand-integration/01-overview/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/custom-brand-integration/02-brand-json/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/custom-brand-integration/03-ui-json/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/custom-brand-integration/04-assets/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/custom-brand-integration/05-wiring/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/custom-brand-integration/06-auth-json/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/databases/01-overview/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/databases/02-mongodb/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/databases/03-keycloak/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/databases/04-production/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/mobile/01-overview/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/mobile/05-react-native-core/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/telemetry/01-overview/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/telemetry/02-agent-tracing/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/telemetry/03-cost-tracking/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/guides/telemetry/04-budget-management/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/prompt-packs/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/adding-workflows/01-overview/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/adding-workflows/02-backend-basics/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/adding-workflows/03-tools/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/adding-workflows/04-ui-components/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/adding-workflows/05-testing/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/app-planning/decompose-app-intent/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/custom-brand-integration/01-overview/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/custom-brand-integration/02-brand-json/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/custom-brand-integration/03-ui-json/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/custom-brand-integration/04-assets/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/custom-brand-integration/05-wiring/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/custom-brand-integration/06-auth-json/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/custom-brand-integration/colors-and-theme/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/databases/setup/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/getting-started/environment-variables/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/getting-started/full-setup-from-clone/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/telemetry/01-overview/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/telemetry/02-agent-tracing/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/telemetry/03-cost-tracking/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/telemetry/04-budget-management/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/instruction-prompts/workflows/create-new-workflow/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/ag2-touchpoints-and-extensions/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/agent-dependency-matrix/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/api-reference/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/auto-tool-execution/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/context-variables-complete/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/event-pipeline/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/handoff-condition-scope/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/hook-system-deep-dive/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/lifecycle-tools/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/mfj-strict-resume-contract/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/mid-flight-journeys/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/mozaiks-platform-dual-substrate/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/pack-graph-semantics/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/parallel-fan-out-fan-in/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/token-management/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/token-manager-plan/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/transport-and-streaming/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/ui-interaction-patterns/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
     <url>
          <loc>https://docs.mozaiks.ai/reference/deep-dives/universal-orchestrator/</loc>
-         <lastmod>2026-03-13</lastmod>
+         <lastmod>2026-03-16</lastmod>
     </url>
 </urlset>
