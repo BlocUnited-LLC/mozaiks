@@ -10,11 +10,7 @@
       "icon": "settings",
       "path": "/admin",
       "component": "AdminPortal",
-      "label": "Admin Portal",
-      "meta": {
-        "title": "Admin Portal",
-        "requiresAuth": true
-      }
+      "label": "Admin Portal"
     },
     {
       "name": "lineup_board",
@@ -26,27 +22,19 @@
       "icon": "mic-2",
       "path": "/lineup",
       "component": "LineupBoard",
-      "label": "Lineup Board",
-      "meta": {
-        "title": "Lineup Board",
-        "requiresAuth": true
-      }
+      "label": "Lineup Board"
     },
     {
       "name": "show_archive",
       "display_name": "Show Archive",
-      "description": "Archive of finished Backstage sets, closers, and strongest crowd hooks.",
+      "description": "Archive of finished Backstage sets, closers, and stage-ready packets.",
       "version": "1.0.0",
       "enabled": true,
       "backend": "modules.show_archive.handler",
       "icon": "library",
       "path": "/archive",
       "component": "ShowArchive",
-      "label": "Show Archive",
-      "meta": {
-        "title": "Show Archive",
-        "requiresAuth": true
-      }
+      "label": "Show Archive"
     }
   ]
 }

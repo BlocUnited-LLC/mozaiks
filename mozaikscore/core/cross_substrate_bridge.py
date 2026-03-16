@@ -11,11 +11,19 @@
 # ==============================================================================
 import os
 import logging
+import uuid
+from datetime import datetime, timezone
 from typing import Dict, Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 
+from mozaikscore.core.automation_nats import (
+    get_substrate_event_nats_publisher,
+    use_http_transport,
+    use_nats_transport,
+)
+from mozaikscore.core.config_loader import get_automation_event_catalog
 from mozaikscore.core.event_bus import event_bus
 
 logger = logging.getLogger("mozaikscore.cross_substrate_bridge")
@@ -25,44 +33,116 @@ logger = logging.getLogger("mozaikscore.cross_substrate_bridge")
 # ---------------------------------------------------------------------------
 MOZAIKSAI_URL = os.getenv("MOZAIKSAI_URL", "http://localhost:8000").rstrip("/")
 INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "")
+APP_ID = os.getenv("MOZAIKS_APP_ID", "dev_app").strip()
 
-# Events to relay FROM mozaikscore TO mozaiksai
-_OUTBOUND_EVENTS = [
-    "user_action",                  # user clicked something that needs agent processing
-    "report_requested",             # module fired a report generation request
-    "module_executed",              # inform AI side that module work completed
-    "subscription_updated",         # plan change may affect agent capabilities
-]
+
+def _load_event_catalog() -> Dict[str, Dict[str, Any]]:
+    catalog = get_automation_event_catalog()
+    mapping: Dict[str, Dict[str, Any]] = {}
+    for record in catalog.get("events", []):
+        if not isinstance(record, dict):
+            continue
+        source_event = str(record.get("source_event") or "").strip()
+        event_type = str(record.get("event_type") or "").strip()
+        if source_event and event_type:
+            mapping[source_event] = record
+    return mapping
+
+
+_OUTBOUND_EVENT_MAP = _load_event_catalog()
+_OUTBOUND_EVENTS = sorted(_OUTBOUND_EVENT_MAP.keys())
+
+
+def _sanitize_payload(data: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: value
+        for key, value in data.items()
+        if not str(key).startswith("_")
+    }
+
+
+def _build_envelope(source_event: str, event_type: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    clean = _sanitize_payload(data)
+    user_id = str(clean.get("user_id") or clean.get("user") or "").strip() or None
+    actor_type = "user" if user_id else "system"
+    actor_id = user_id or "mozaikscore"
+    correlation_id = (
+        str(clean.get("correlation_id") or clean.get("chat_id") or clean.get("run_id") or "").strip()
+        or None
+    )
+
+    return {
+        "event_id": str(uuid.uuid4()),
+        "event_type": event_type,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "tenant": {
+            "app_id": str(clean.get("app_id") or APP_ID or "").strip(),
+            "user_id": user_id,
+            "chat_id": str(clean.get("chat_id") or "").strip() or None,
+            "run_id": str(clean.get("run_id") or "").strip() or None,
+        },
+        "actor": {
+            "id": actor_id,
+            "type": actor_type,
+        },
+        "source": {
+            "layer": "substrate",
+            "component": "cross_substrate_bridge",
+            "transport": "http",
+            "internal_event": source_event,
+        },
+        "payload": clean,
+        "causation_id": str(clean.get("causation_id") or "").strip() or None,
+        "correlation_id": correlation_id,
+    }
 
 # ---------------------------------------------------------------------------
 # Outbound relay: mozaikscore → mozaiksai
 # ---------------------------------------------------------------------------
 
 async def _relay_to_mozaiksai(event_name: str, data: Dict[str, Any]):
-    """POST the event to mozaiksai's /api/substrate-events endpoint."""
+    """Relay a substrate event to mozaiksai via the configured automation transport."""
+    record = _OUTBOUND_EVENT_MAP.get(event_name)
+    if not record:
+        logger.debug("No automation catalog entry found for outbound event '%s'", event_name)
+        return
+
+    envelope = _build_envelope(
+        source_event=event_name,
+        event_type=str(record["event_type"]),
+        data=data,
+    )
+
+    if use_nats_transport():
+        try:
+            publisher = get_substrate_event_nats_publisher()
+            await publisher.publish(envelope)
+        except Exception as exc:
+            logger.warning("NATS relay to mozaiksai failed for '%s': %s", event_name, exc)
+            if not use_http_transport():
+                return
+
+    if not use_http_transport():
+        return
+
     url = f"{MOZAIKSAI_URL}/api/substrate-events"
-    payload = {
-        "source": "mozaikscore",
-        "event": event_name,
-        "data": data,
-    }
     headers = {"Content-Type": "application/json"}
     if INTERNAL_API_KEY:
         headers["X-Internal-API-Key"] = INTERNAL_API_KEY
 
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
-            resp = await client.post(url, json=payload, headers=headers)
+            resp = await client.post(url, json=envelope, headers=headers)
         if resp.status_code != 200:
             logger.warning(
-                "Relay to mozaiksai failed: %s %d %s",
+                "HTTP relay to mozaiksai failed: %s %d %s",
                 event_name, resp.status_code, resp.text[:200],
             )
         else:
-            logger.debug("Relayed '%s' to mozaiksai", event_name)
+            logger.debug("Relayed '%s' to mozaiksai over HTTP", event_name)
     except httpx.HTTPError as exc:
         # Non-fatal: mozaiksai may not be running
-        logger.debug("Could not relay '%s' to mozaiksai: %s", event_name, exc)
+        logger.debug("Could not relay '%s' to mozaiksai over HTTP: %s", event_name, exc)
 
 
 def _make_outbound_handler(event_name: str):

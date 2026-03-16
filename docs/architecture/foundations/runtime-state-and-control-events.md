@@ -1,65 +1,41 @@
-# Runtime State And Control Events
+# Runtime State and Control Events
 
-This document defines the generic runtime state and typed control-event contracts that belong in `mozaiks core`.
+This document defines the generic runtime state and control-event layer that
+belongs in Mozaiks core.
 
-It answers these questions:
+It is separate from:
 
-- Which session and routing concepts are generic enough for core?
-- Which typed control events belong in core instead of in a first-party product?
-- How should products such as the Mozaiks app builder specialize these contracts?
-
-When event and state discussions drift into product-specific language, this document is the reference for the core layer.
-
----
+- substrate domain events
+- workflow stream events
+- first-party builder vocabulary
 
 ## Core Rule
 
-Core owns generic capabilities.
+Use control events for low-frequency, durable session-routing facts.
 
-Core does not own first-party product vocabulary.
+Do not use them for:
 
-That means `core` may define:
+- raw CRUD mutations
+- chat token streams
+- product-specific nouns when a generic state exists
 
-- session and routing state
-- control-event kinds
-- transfer contracts
-- feedback/impact contracts
-- generic plan/execution/prerequisite artifacts
+## Why This Layer Exists
 
-But `core` should not define:
+Mozaiks needs a stable control plane for cases where one user-visible session
+may:
 
-- `AppSpec`
-- `ActionPlan`
-- `BuildIteration`
-- builder-specific event kinds like `builder.wave_started`
-- first-party builder workflow names
+- plan
+- wait for prerequisites
+- execute
+- reroute
+- review
+- continue
 
-Those belong to the first-party product layer.
-
----
-
-## Runtime Contract Module
-
-The concrete runtime contracts live in:
-
-- [contracts.py](C:/Users/mbari/OneDrive/Desktop/BlocUnited/BlocUnited%20Code/mozaiks/mozaiksai/core/control_plane/contracts.py)
-
-This module defines:
-
-- `ControlPlaneState`
-- `ControlPlaneEventKind`
-- typed payload models
-- `build_control_plane_event(...)`
-- `parse_control_plane_event(...)`
-- `infer_control_plane_state(...)`
-
-These are the canonical runtime state and control-event contracts for `mozaiks core`.
-
----
+That is broader than any single product, including the builder.
 
 ## Generic State Taxonomy
 
-The generic visible-or-hidden session states are:
+Recommended core states:
 
 - `intake`
 - `planning`
@@ -71,21 +47,9 @@ The generic visible-or-hidden session states are:
 - `completed`
 - `failed`
 
-These are generic enough to support:
+These states describe session posture, not business domain facts.
 
-- app building
-- onboarding/configuration flows
-- research/synthesis systems
-- commerce/configuration journeys
-- incident-response systems
-
-They are intentionally broader than any one product UX.
-
----
-
-## Generic Control-Event Taxonomy
-
-The generic core control-event kinds are:
+## Generic Control Event Families
 
 ### Canonical state
 
@@ -120,122 +84,50 @@ The generic core control-event kinds are:
 - `control.transfer_requested`
 - `control.iteration_started`
 
-These are low-frequency, durable control facts.
+## Relation to Domain Events
 
-They are the correct use of `DomainEvent` in core.
+Domain events answer:
 
----
+- what happened in the app or business world
 
-## Generic Payload Taxonomy
+Control events answer:
 
-The generic payload families are:
+- what the runtime or product session is doing next
 
-- `CanonicalStateCreatedPayload`
-- `CanonicalStateRevisedPayload`
-- `PlanCreatedPayload`
-- `PlanApprovedPayload`
-- `PlanRejectedPayload`
-- `PrerequisitesRequiredPayload`
-- `PrerequisitesSatisfiedPayload`
-- `PrerequisitesBlockedPayload`
-- `ExecutionBatchStartedPayload`
-- `ExecutionBatchCompletedPayload`
-- `ExecutionBatchFailedPayload`
-- `ExecutionCompletedPayload`
-- `ExecutionFailedPayload`
-- `ArtifactReadyPayload`
-- `FeedbackReceivedPayload`
-- `ImpactComputedPayload`
-- `TransferRequestedPayload`
-- `IterationStartedPayload`
+That distinction is essential.
 
-These are generic runtime nouns.
+Example:
 
-Products may map them to richer domain-specific artifacts.
+- `booking.request.approved` is a domain event
+- `control.transfer_requested` is a control-plane fact
 
----
+## Relation to Workflow Runtime Events
 
-## What Products Specialize
+Workflow runtime events answer:
 
-The first-party app builder specializes the generic contracts like this:
+- what is happening inside a run right now
 
-| Core Contract | Builder Specialization |
-|---|---|
-| `canonical_state` | `AppSpec` |
-| `plan` | `ActionPlan` + `TaskGraph` |
-| `prerequisites` | API keys, provider config, deploy choices |
-| `execution_batch` | MFJ wave |
-| `artifact_ready` | preview ready / plan artifact ready |
-| `feedback_received` | user change request after preview |
-| `impact_computed` | scoped rebuild impact |
-| `transfer_requested` | route `BuildApp -> ValueEngine` |
-| `iteration_started` | new build iteration |
+Examples:
 
-This is the correct relationship:
+- `process.started`
+- `task.completed`
+- `ui.tool.requested`
 
-- core defines the generic shape
-- product defines the business meaning
+Those are too fine-grained to replace the control plane.
 
----
+## Product Specialization
 
-## Why This Belongs In Core
+Products may specialize generic control events into richer meanings.
 
-These contracts are valuable beyond the builder.
+Example:
 
-Any Mozaiks app that needs:
+- a builder may interpret `control.plan_created` as an architecture review being
+  ready
 
-- one coherent session
-- hidden workflow switching
-- typed approvals/prerequisites
-- parallel execution with later review
-- scoped rerouting
+The generic contract should stay reusable even if the product meaning changes.
 
-can use these contracts.
+## Cross References
 
-This makes them platform capabilities, not just builder features.
-
----
-
-## How Core Should Use These Contracts
-
-Core should use these contracts for:
-
-- state transitions
-- durable control events
-- UI surface coordination
-- replay/recovery of user-visible session state
-
-Core should not use them for:
-
-- raw AG2 text/tool stream events
-- first-party builder-only nouns
-- product-specific workflow names
-
-That is the boundary that preserves modularity.
-
----
-
-## Relationship To Builder Docs
-
-Read the docs in this order:
-
-1. `RUNTIME_STATE_AND_CONTROL_EVENTS`
-2. `APP_BUILDER_STATE_AND_ROUTING`
-3. `BUILDER_EXECUTION_MODEL`
-4. `APP_BUILDER_ARCHITECTURE`
-
-That order keeps the core runtime contracts separate from the first-party builder specialization.
-
----
-
-## Bottom Line
-
-The modular `mozaiks core` should expose:
-
-- generic runtime states
-- generic control-event kinds
-- generic control-event payloads
-- generic transfer/feedback/impact contracts
-
-The builder should specialize those contracts, not redefine the core around builder vocabulary.
-
+- [event-taxonomy.md](event-taxonomy.md)
+- [app-builder-state-and-routing.md](app-builder-state-and-routing.md)
+- [builder-execution-model.md](builder-execution-model.md)

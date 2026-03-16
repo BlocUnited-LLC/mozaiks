@@ -23,6 +23,10 @@ from mozaikscore.core.settings_manager import settings_manager
 from mozaikscore.core.notifications_manager import notifications_manager
 from mozaikscore.core.database import get_users_collection, get_cached_document, db_cache
 from mozaikscore.core.config_loader import (
+    get_ai_config,
+    get_admin_config,
+    get_automation_event_catalog,
+    get_automation_routes,
     get_config_path,
     get_module_registry,
     get_navigation_config,
@@ -118,6 +122,10 @@ async def _async_refresh_modules():
 # Config loader helper
 # ===========================================================================
 _CONFIG_LOADERS = {
+    "ai.json": get_ai_config,
+    "admin.json": get_admin_config,
+    "automation_event_catalog.json": get_automation_event_catalog,
+    "automation_routes.json": get_automation_routes,
     "module_registry.json": get_module_registry,
     "navigation_config.json": get_navigation_config,
     "subscription_config.json": get_subscription_config,
@@ -193,6 +201,20 @@ async def get_navigation_config_full():
     return nav
 
 
+@router.get("/api/admin-config")
+async def get_admin_config_full():
+    """Serve the full admin.json for Admin Portal layout and navigation zones."""
+    return load_config("admin.json")
+
+
+@router.get("/api/automation-config")
+async def get_automation_config():
+    return {
+        "events": load_config("automation_event_catalog.json").get("events", []),
+        "routes": load_config("automation_routes.json").get("routes", []),
+    }
+
+
 @router.get("/api/navigation")
 async def get_navigation(user: dict = Depends(get_current_user)):
     cache_key = f"navigation:{user['user_id']}"
@@ -207,8 +229,9 @@ async def get_navigation(user: dict = Depends(get_current_user)):
         installed = registry.get("modules", registry.get("plugins", []))
 
         final_nav: list = []
-        for item in nav_config.get("default", []):
-            if item.get("path") == "/subscriptions" and not MONETIZATION:
+        for item in nav_config.get("pages", []):
+            page_path = item.get("path") or item.get("href")
+            if page_path == "/subscriptions" and not MONETIZATION:
                 continue
             final_nav.append(item)
 
@@ -384,7 +407,16 @@ async def execute_module(module_name: str, request: Request, user: dict = Depend
         logger.info("Module %s executed in %.2fs for app=%s user=%s", module_name, elapsed, APP_ID, user["user_id"])
         if isinstance(result, dict) and "error" in result:
             raise HTTPException(status_code=500, detail=result["error"])
-        event_bus.publish("module_executed", {"app_id": APP_ID, "module": module_name, "user": user["user_id"], "execution_time": elapsed})
+        event_bus.publish(
+            "module_executed",
+            {
+                "app_id": APP_ID,
+                "module": module_name,
+                "action": data.get("action"),
+                "user": user["user_id"],
+                "execution_time": elapsed,
+            },
+        )
         return result
     except HTTPException:
         raise

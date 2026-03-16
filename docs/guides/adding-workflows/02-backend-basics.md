@@ -30,6 +30,7 @@ Every workflow lives in `platform/workflows/<YourWorkflow>/` and contains:
 | `agents.yaml` | Agent definitions and prompts |
 | `handoffs.yaml` | Agent-to-agent routing rules |
 | `context_variables.yaml` | Shared state across agents |
+| `a2a.yaml` *(optional)* | Remote A2A agent bindings |
 
 ---
 
@@ -68,11 +69,14 @@ initial_message_to_user: null      # optional UI-only greeting/instruction
 
 ### Startup mode semantics (runtime behavior)
 
-- `AgentDriven`: runtime can auto-start AG2 for a **fresh** chat session. `initial_message` is used as the seed that kicks off orchestration.
-- `UserDriven`: runtime does **not** auto-start on connect. Show `initial_message_to_user`, then orchestration starts on the first real user input.
+- `AgentDriven`: runtime auto-starts AG2 for a **fresh** chat session. `initial_message` is used as the seed that kicks off orchestration.
+- `UserDriven`: runtime auto-starts AG2, but the `initial_agent` uses `register_reply` to emit `initial_message_to_user` as a **static greeting with zero LLM cost**. AG2 then waits for the user's reply before continuing. Because the greeting is a native AG2 `TextEvent`, resume and replay work automatically when toggling between modes.
 - `BackendOnly`: no UI-driven kickoff; orchestration is expected to be triggered by backend/API flows.
 
 `initial_agent` is the first AG2 agent once a run starts. It should generally be an agent from `agents.yaml`, not `"user"`.
+
+!!! tip "UserDriven avoids unnecessary LLM calls"
+    When `startup_mode: UserDriven` with `initial_message_to_user`, the runtime registers a one-shot reply function on the initial agent via AG2's native `ConversableAgent.register_reply()`. The first call returns the static greeting (no LLM). All subsequent calls fall through to normal LLM behavior. This is the pattern recommended by the AG2 team for deterministic opening messages.
 
 ---
 
@@ -193,6 +197,32 @@ context_variables:
 ```
 
 Context variables persist across the conversation and can be read/written by tools.
+
+---
+
+## a2a.yaml (Optional)
+
+Use this file when an agent declared in `agents.yaml` should run as a remote A2A agent instead of a local LLM-backed agent.
+
+```yaml
+agents:
+  - name: RemotePlanner
+    url: https://my-a2a-host.example.com/planner
+    max_reconnects: 3
+    polling_interval: 0.5
+    client:
+      streaming: true
+      polling: false
+      use_client_preference: false
+      accepted_output_modes: ["text/plain"]
+      extensions: []
+```
+
+### Notes
+
+- `name` must match an agent in `agents.yaml`.
+- `url` is the A2A server/card base URL for that remote agent.
+- Keep this file out if you only use local agents.
 
 ---
 

@@ -23,6 +23,19 @@ But it still proves the real architecture:
 - event-driven state changes
 - human checkpoints
 
+## Foundations Conformance Targets
+
+This flagship is also the runtime conformance fixture for the foundations docs.
+
+It should always demonstrate:
+
+- app manifest and shell declarations consumed by runtime
+- durable module surfaces (`admin_portal`, `lineup_board`, `show_archive`)
+- workflow contract files for `GreenRoom`, `WritersRoom`, `MainStage`
+- global journey graph and workflow-level MFJ graph
+- automation event catalog and route policy coverage
+- starter automation routes with only `workflow.run` and `workflow.resume` effects
+
 ## Why This Is The Right Showcase
 
 The current example proves mechanics but not imagination.

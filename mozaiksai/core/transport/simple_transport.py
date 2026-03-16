@@ -266,6 +266,13 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                         pass
                 break
         if handled:
+            # Clear pending input request from persistence
+            if ack_chat_id:
+                try:
+                    pm = self._get_or_create_persistence_manager()
+                    await pm.clear_pending_input_request(chat_id=ack_chat_id)
+                except Exception as e:
+                    logger.debug(f"Failed to clear pending input request: {e}")
             # Emit chat.input_ack for B9/B10 protocol compliance
             if ack_chat_id:
                 try:
@@ -510,6 +517,21 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 await self._broadcast_to_websockets(event, chat_id)
                 return
 
+            # Suppress IOStream-originated stream/print events.
+            # WebSocketIOStream calls send_event_to_ui with kind='stream_chunk',
+            # 'stream_end', or 'print' for its print()-capture output.  The
+            # chat.text post-hoc chunking path (further below) already delivers
+            # the same content as stream_chunk + stream_end, so letting the
+            # IOStream events through would create duplicate / split bubbles.
+            if isinstance(event, dict):
+                _iostream_kind = event.get('kind', '')
+                if _iostream_kind in ('stream_chunk', 'stream_end', 'print'):
+                    logger.debug(
+                        "[TRANSPORT] Suppressing IOStream event kind=%s chat=%s",
+                        _iostream_kind, chat_id,
+                    )
+                    return
+
             from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher  # local import to avoid cycle
             dispatcher = get_event_dispatcher()
             workflow_name = None
@@ -594,9 +616,19 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             if not agent_name:
                 data_payload = envelope.get('data') if isinstance(envelope, dict) else None
                 if isinstance(data_payload, dict):
-                    agent_name = data_payload.get('agent') or data_payload.get('agent_name')
+                    raw_payload = data_payload.get('raw_content') if isinstance(data_payload.get('raw_content'), dict) else None
+                    raw_sender = None
+                    if isinstance(raw_payload, dict):
+                        raw_sender = raw_payload.get('sender') or raw_payload.get('agent') or raw_payload.get('agent_name') or raw_payload.get('name')
+
+                    payload_agent = data_payload.get('agent') or data_payload.get('agent_name')
+                    if isinstance(payload_agent, str) and payload_agent.strip().lower() in {'assistant', 'agent'} and raw_sender:
+                        agent_name = raw_sender
+                    else:
+                        agent_name = raw_sender or payload_agent
+
                     if not agent_name and isinstance(event, dict):
-                        agent_name = event.get('agent') or event.get('agent_name')
+                        agent_name = event.get('sender') or event.get('agent') or event.get('agent_name')
                 if not skip_visibility_filter and agent_name and not self.should_show_to_user(agent_name, chat_id):
                     if _downgrade_to_trace(agent=str(agent_name)):
                         logger.info(f"[TRANSPORT] Downgraded non-visual message from '{agent_name}' to trace for chat {chat_id}")
@@ -625,6 +657,62 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 if isinstance(data_payload, dict) and data_payload.get('_mozaiks_hide'):
                     logger.info(f"🚫 [TRANSPORT] Suppressing hidden message (derived context trigger) for chat {chat_id}: {data_payload.get('content', 'no content')[:100]}")
                     return
+
+            # ----------------------------------------------------------------
+            # Token chunking: stream visible agent text as word-level chunks
+            # so the frontend renders a typewriter effect via stream_chunk /
+            # stream_end instead of a single chat.text burst.
+            # ----------------------------------------------------------------
+            if envelope_type == 'chat.text' and isinstance(envelope.get('data'), dict):
+                _d = envelope['data']
+                _content = _d.get('content', '')
+                _role = str(_d.get('role', '') or '').lower()
+                _sender = str(
+                    _d.get('agent') or _d.get('agent_name') or _d.get('sender') or ''
+                ).lower()
+                _vis = _d.get('ui_visibility')
+                # Only stream visible assistant messages; pass user echoes and
+                # trace events through as plain chat.text (no chunking).
+                if _content and _role not in ('user',) and _sender not in ('user',) and _vis != 'trace':
+                    _agent = (
+                        _d.get('agent') or _d.get('agent_name') or _d.get('sender') or 'Agent'
+                    )
+                    _stream_id = f"{chat_id or 'x'}:{_agent}:{uuid.uuid4().hex[:8]}"
+                    # Metadata keys forwarded to stream_end so the frontend can
+                    # apply capability flags when it finalises the message.
+                    _meta_keys = (
+                        'is_structured_capable', 'is_visual', 'is_tool_agent',
+                        'structured_output', 'structured_schema', 'metadata', 'sequence',
+                    )
+                    _stream_meta = {k: _d[k] for k in _meta_keys if k in _d}
+                    logger.info(
+                        "🌊 [STREAM] Chunking chat.text → stream_chunk + stream_end "
+                        "agent=%s chat_id=%s len=%d",
+                        _agent, chat_id, len(_content),
+                    )
+                    await self._emit_text_as_chunks(
+                        _content, str(_agent), chat_id or '', _stream_id
+                    )
+                    await self._broadcast_to_websockets(
+                        {
+                            "type": "chat.stream_end",
+                            "data": {
+                                "agent": _agent,
+                                "stream_id": _stream_id,
+                                # Use 'content' (not 'full_content') so the frontend's
+                                # data.data promotion makes it available as data.content,
+                                # which the stream_end handler reads via
+                                # `data.full_content || data.content`.
+                                "content": _content,
+                                **_stream_meta,
+                            },
+                        },
+                        chat_id,
+                    )
+                    # stream_end replaces chat.text for this message; skip
+                    # the plain broadcast below.
+                    return  # noqa: RET504
+            # ----------------------------------------------------------------
 
             logger.info(f"📤 [TRANSPORT] Sending envelope: type={envelope.get('type')}, chat_id={chat_id}")
             await self._broadcast_to_websockets(envelope, chat_id)
@@ -657,6 +745,46 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
     def _extract_clean_content(self, message: Union[str, Dict[str, Any], Any]) -> str:
         """Instance wrapper around the module-level cleaner."""
         return _extract_clean_content(message)
+
+    async def _emit_text_as_chunks(
+        self,
+        content: str,
+        agent_name: str,
+        chat_id: str,
+        stream_id: str,
+    ) -> None:
+        """Split *content* into word-level tokens and emit each as chat.stream_chunk.
+
+        Emitting one token per WebSocket message lets the browser render each
+        piece as it arrives, producing the typewriter effect. A minimal async
+        yield between chunks ensures React 18's automatic batching doesn't
+        collapse all updates into a single render.  The caller is responsible
+        for sending chat.stream_end afterwards.
+        """
+        import re as _re
+        # Word + trailing whitespace so spaces are preserved between tokens
+        tokens = _re.findall(r'\S+\s*', content)
+        if not tokens:
+            tokens = [content]
+        for seq, token in enumerate(tokens):
+            await self._broadcast_to_websockets(
+                {
+                    "type": "chat.stream_chunk",
+                    "data": {
+                        "agent": agent_name,
+                        "content": token,
+                        "stream_id": stream_id,
+                        "chunk_seq": seq,
+                    },
+                },
+                chat_id or None,
+            )
+            # Minimal delay to allow browser render cycles between chunks.
+            # Without this, React 18's automatic batching may collapse all
+            # state updates into a single render, defeating the typewriter effect.
+            if seq < len(tokens) - 1:  # No delay after the last chunk
+                await asyncio.sleep(0.015)  # 15ms between chunks
+
     async def _broadcast_to_websockets(self, event_data: Dict[str, Any], target_chat_id: Optional[str] = None) -> None:
         """Broadcast event data to relevant WebSocket connections."""
         active_connections = list(self.connections.items())
@@ -746,6 +874,10 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             if obj is None or isinstance(obj, (str, int, float, bool)):
                 return obj
 
+            # Datetime fast-path (common from Mongo persistence payloads)
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+
             # Guard against deep recursive/cyclic objects from external runtimes.
             if _depth > 12:
                 return self._stringify_unknown(obj)
@@ -758,7 +890,16 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             if isinstance(obj, dict):
                 _seen.add(obj_id)
                 try:
-                    return {k: self._serialize_ag2_events(v, _seen, _depth + 1) for k, v in obj.items()}
+                    safe_obj = {}
+                    for k, v in obj.items():
+                        if isinstance(k, str):
+                            safe_key = k
+                        elif isinstance(k, datetime):
+                            safe_key = k.isoformat()
+                        else:
+                            safe_key = str(k)
+                        safe_obj[safe_key] = self._serialize_ag2_events(v, _seen, _depth + 1)
+                    return safe_obj
                 finally:
                     _seen.discard(obj_id)
             if isinstance(obj, (list, tuple, set)):
@@ -1001,8 +1142,19 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         try:
             conn_meta = self.connections.get(chat_id) or {}
             app_id = conn_meta.get('app_id')
+            startup_mode = None
             if not app_id:
                 raise RuntimeError("Missing app_id for resume")
+
+            workflow_name = conn_meta.get('workflow_name')
+            if workflow_name:
+                try:
+                    from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+                    cfg = workflow_manager.get_config(str(workflow_name)) or {}
+                    startup_mode = cfg.get('startup_mode')
+                except Exception:
+                    startup_mode = None
 
             # Use the AG2-aligned resumer so visibility filtering and UI tool replay
             # semantics stay consistent with live events (no leaking hidden agents).
@@ -1014,6 +1166,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 app_id=str(app_id),
                 last_client_index=int(last_client_index),
                 send_event=self.send_event_to_ui,
+                startup_mode=startup_mode,
             )
 
             # Real-time sequence continuity: do not reduce existing counter.
@@ -1151,15 +1304,6 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
 
         # H5: Auto-resume for IN_PROGRESS chats (check status and restore chat history)
         await self._auto_resume_if_needed(chat_id, websocket, app_id)
-
-        # UserDriven UX bootstrap: emit prompt in chat before first run starts.
-        # This is transport-level only and does not start AG2 execution.
-        await self._emit_userdriven_bootstrap_if_needed(
-            chat_id=chat_id,
-            user_id=user_id,
-            workflow_name=workflow_name,
-            app_id=app_id,
-        )
         
         try:
             # Inbound loop: receive JSON control messages from client

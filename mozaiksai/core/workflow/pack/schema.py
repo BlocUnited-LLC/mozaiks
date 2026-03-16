@@ -136,8 +136,8 @@ class MFJFanOutConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    spawn_mode: Literal["workflow", "generator_subrun"]
-    generator_workflow: Optional[str] = None
+    spawn_mode: Literal["workflow", "workflow_authoring_subrun"]
+    authoring_workflow: Optional[str] = None
     child_initial_agent: Optional[str] = None
     max_children: int = 10
     timeout_seconds: int = 600
@@ -146,10 +146,13 @@ class MFJFanOutConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_spawn_mode(self) -> "MFJFanOutConfig":
-        if self.spawn_mode == "generator_subrun":
-            if not isinstance(self.generator_workflow, str) or not self.generator_workflow.strip():
-                raise ValueError("fan_out.generator_workflow is required for spawn_mode=generator_subrun")
-            self.generator_workflow = self.generator_workflow.strip()
+        if self.spawn_mode == "workflow_authoring_subrun":
+            if not isinstance(self.authoring_workflow, str) or not self.authoring_workflow.strip():
+                raise ValueError(
+                    "fan_out.authoring_workflow is required for "
+                    "spawn_mode=workflow_authoring_subrun"
+                )
+            self.authoring_workflow = self.authoring_workflow.strip()
         if self.max_children <= 0:
             raise ValueError("fan_out.max_children must be > 0")
         if self.timeout_seconds < 0:

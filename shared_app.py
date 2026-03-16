@@ -5,6 +5,7 @@
 import logging
 import os
 import sys
+import hmac
 from typing import Optional, Any, List, Dict, Tuple
 from datetime import datetime, timedelta, UTC
 from pathlib import Path
@@ -19,7 +20,16 @@ from starlette.middleware.cors import CORSMiddleware
 from bson.objectid import ObjectId
 from uuid import uuid4
 import autogen
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
+from mozaiksai.core.automation import (
+    SubstrateEventEnvelope,
+    get_automation_router,
+    reload_automation_router,
+)
+from mozaiksai.core.automation.nats_consumer import (
+    get_automation_nats_consumer,
+    use_nats_transport as use_nats_automation_transport,
+)
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.transport.simple_transport import SimpleTransport
 from mozaiksai.core.workflow.workflow_manager import workflow_status_summary, get_workflow_transport, get_workflow_tools
@@ -188,7 +198,7 @@ async def read_root():
     return {
         "service": "mozaiks-runtime",
         "status": "ok",
-        "docs": "/docs",
+        "docs": "https://docs.mozaiks.ai",
         "health": "/api/health",
     }
 
@@ -348,6 +358,15 @@ except Exception as _ext_err:  # pragma: no cover
 
 mongo_client = None  # delay until startup so logging is definitely initialized
 simple_transport: Optional[SimpleTransport] = None
+
+
+def _validate_internal_api_key(request: Request) -> None:
+    expected = os.getenv("INTERNAL_API_KEY", "").strip()
+    if not expected:
+        return
+    provided = request.headers.get("X-Internal-API-Key", "")
+    if not hmac.compare_digest(provided.encode(), expected.encode()):
+        raise HTTPException(status_code=403, detail="Invalid internal API key")
 
 
 @app.get("/health/active-runs")
@@ -668,6 +687,15 @@ async def startup():
         # Log workflow and tool summary
         status = workflow_status_summary()
 
+        automation_router = reload_automation_router()
+        wf_logger.info(
+            "AUTOMATION_ROUTER_READY: loaded %d event type(s) from platform/automations",
+            len(automation_router.known_event_types()),
+        )
+        if use_nats_automation_transport():
+            await get_automation_nats_consumer().start()
+            wf_logger.info("AUTOMATION_NATS_CONSUMER_READY: substrate event consumer connected")
+
         # Start declared startup services (workflow plugins)
         global _runtime_services
         try:
@@ -733,6 +761,9 @@ async def shutdown():
             except Exception:
                 pass
         _runtime_services = []
+
+        if use_nats_automation_transport():
+            await get_automation_nats_consumer().stop()
 
         if simple_transport:
             # No explicit disconnect needed for websockets with this transport design
@@ -821,6 +852,46 @@ async def get_event_metrics(
     except Exception as e:
         logger.error(f"❌ Failed to get event metrics: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve event metrics")
+
+
+@app.post("/api/substrate-events")
+async def ingest_substrate_event(request: Request):
+    """Ingress for post-commit substrate domain events."""
+    _validate_internal_api_key(request)
+
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    try:
+        event = SubstrateEventEnvelope.model_validate(body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.errors())
+
+    automation_router = get_automation_router()
+    decision, route_result = await automation_router.dispatch(event)
+
+    if decision.status.value == "invalid":
+        raise HTTPException(status_code=400, detail=decision.detail or {"reason": "invalid automation event"})
+
+    if route_result is not None and route_result.status in {"failed", "invalid"}:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "route": route_result.route,
+                "dispatch_status": route_result.status,
+                "detail": route_result.detail or {},
+            },
+        )
+
+    return {
+        "status": decision.status.value,
+        "route_id": decision.route_id,
+        "route": decision.route,
+        "dispatch": route_result.detail if route_result else None,
+        "dispatch_status": route_result.status if route_result else None,
+    }
 
 @app.get("/api/health")
 async def health_check(
@@ -2144,6 +2215,32 @@ async def get_app_theme(app_id: str):
         return json.loads(config_path.read_text(encoding="utf-8"))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read theme config: {e}")
+
+
+@app.get("/api/admin-config")
+async def get_admin_config():
+    """Return admin portal config for frontend."""
+    config_path = Path(__file__).parent / "platform" / "config" / "admin.json"
+    if not config_path.exists():
+        raise HTTPException(status_code=404, detail="Admin config not found")
+    try:
+        return json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read admin config: {e}")
+
+
+@app.get("/api/available-modules")
+async def get_available_modules():
+    """Return available platform modules for frontend discovery."""
+    config_path = Path(__file__).parent / "platform" / "config" / "module_registry.json"
+    if not config_path.exists():
+        return {"modules": []}
+    try:
+        registry = json.loads(config_path.read_text(encoding="utf-8"))
+        modules = registry.get("modules", [])
+        return {"modules": [m for m in modules if m.get("enabled", True)]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read module registry: {e}")
 
 
 @app.get("/api/workflows")

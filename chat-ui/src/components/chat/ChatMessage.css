@@ -220,6 +220,17 @@
     border-radius: var(--chat-bubble-radius);
     box-shadow: 0 0 8px rgba(77,166,255,0.10);
   }
+
+  .chat-feed-shell {
+    padding-top: 1.25rem;
+    padding-bottom: 1.5rem;
+  }
+}
+
+/* Top breathing room so the first message doesn't hug the chat window edge */
+.chat-feed-shell {
+  padding-top: 1rem;
+  padding-bottom: 1rem;
 }
 
 /* Desktop chat-feed-shell-ask overrides */

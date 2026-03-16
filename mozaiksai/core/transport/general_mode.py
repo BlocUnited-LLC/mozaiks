@@ -13,7 +13,7 @@ logger = logging.getLogger("simple_transport.general_mode")
 
 def _load_general_agent_service():
     """Load the pluggable general-mode capability executor."""
-    module_path = os.getenv("MOZAIKS_GENERAL_AGENT_MODULE", "core.capabilities.simple_llm")
+    module_path = os.getenv("MOZAIKS_GENERAL_AGENT_MODULE", "mozaiksai.core.capabilities.simple_llm")
     factory_name = os.getenv("MOZAIKS_GENERAL_AGENT_FACTORY", "get_general_capability_service")
     try:
         module = importlib.import_module(module_path)

@@ -208,7 +208,7 @@ const PersistentChatWidget = ({
   // ─── Minimized state ────────────────────────────────────────────────────────
   if (!isExpanded) {
     return (
-      <div className="fixed right-4 z-50 widget-safe-bottom">
+      <div className="fixed right-4 bottom-4 z-50 widget-safe-bottom">
         <button
           type="button"
           onClick={() => { setIsExpanded(true); setUnreadChatCount(0); }}
@@ -237,7 +237,7 @@ const PersistentChatWidget = ({
   const leftTitle = showingWorkflowContext ? 'Switch to ask mode' : 'Open Chat Station';
 
   return (
-    <div className="fixed right-4 z-50 flex flex-col items-end gap-0 pointer-events-none widget-safe-bottom">
+    <div className="fixed right-4 bottom-4 z-50 flex flex-col items-end gap-0 pointer-events-none widget-safe-bottom">
       {/* Collapse tab */}
       <button
         type="button"

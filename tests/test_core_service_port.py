@@ -467,7 +467,7 @@ class TestConfigLoader:
         from mozaikscore.core.config_loader import get_navigation_config
         config = get_navigation_config()
         assert config is not None
-        assert "default" in config or "modules" in config
+        assert "pages" in config or "modules" in config or "header_controls" in config
 
     def test_theme_config(self):
         from mozaikscore.core.config_loader import get_theme_config

@@ -92,6 +92,14 @@ class SelectSpeakerHandler(BaseEventHandler):
         # Update realtime token logger context
         await self._update_realtime_context(new_agent_name, ctx)
 
+        # Update streaming context for token attribution
+        if new_agent_name:
+            try:
+                from mozaiksai.core.workflow.streaming import update_streaming_agent
+                update_streaming_agent(new_agent_name)
+            except Exception:
+                pass  # Streaming may not be installed
+
         # Log handoff trace (debug)
         candidates = getattr(event, "agents", None)
         ctx.wf_logger.debug(

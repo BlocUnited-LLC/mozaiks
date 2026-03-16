@@ -1,11 +1,12 @@
 <#
 .SYNOPSIS
-  Start Mozaiks backend (uvicorn), optionally ensuring Mongo is running first.
+  Start Mozaiks backend (uvicorn), optionally ensuring Mongo and NATS are running first.
 #>
 
 param(
   [int]$Port = 8000,
   [switch]$SkipMongo,
+  [switch]$SkipNats,
   [switch]$ForceStop
 )
 
@@ -13,6 +14,67 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
+
+function Get-RepoEnvValue {
+  param([string]$Name)
+
+  $envFile = Join-Path $RepoRoot ".env"
+  if (-not (Test-Path $envFile)) {
+    return $null
+  }
+
+  foreach ($line in Get-Content $envFile) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed -or $trimmed.StartsWith("#")) {
+      continue
+    }
+
+    if ($trimmed -notmatch '^([^=]+)=(.*)$') {
+      continue
+    }
+
+    $key = $matches[1].Trim()
+    if ($key -ne $Name) {
+      continue
+    }
+
+    $value = $matches[2].Trim()
+    if ($value.Length -ge 2) {
+      $first = $value[0]
+      $last = $value[$value.Length - 1]
+      if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+        $value = $value.Substring(1, $value.Length - 2)
+      }
+    }
+    return $value
+  }
+
+  return $null
+}
+
+function Get-ConfigValue {
+  param(
+    [string]$Name,
+    [string]$Default = ""
+  )
+
+  $envValue = [Environment]::GetEnvironmentVariable($Name)
+  if (-not [string]::IsNullOrWhiteSpace($envValue)) {
+    return $envValue
+  }
+
+  $repoValue = Get-RepoEnvValue -Name $Name
+  if (-not [string]::IsNullOrWhiteSpace($repoValue)) {
+    return $repoValue
+  }
+
+  return $Default
+}
+
+function Use-NatsAutomationTransport {
+  $transportMode = (Get-ConfigValue -Name "MOZAIKS_AUTOMATION_TRANSPORT" -Default "http").Trim().ToLowerInvariant()
+  return $transportMode -in @("nats", "dual")
+}
 
 function Get-ListeningProcessInfo {
   param([int]$LocalPort)
@@ -83,6 +145,11 @@ function Ensure-PortAvailable {
 if (-not $SkipMongo) {
   Write-Host "[backend] Ensuring Mongo is running..." -ForegroundColor Cyan
   & "$PSScriptRoot/run-mongo.ps1"
+}
+
+if (-not $SkipNats -and (Use-NatsAutomationTransport)) {
+  Write-Host "[backend] Ensuring NATS is running..." -ForegroundColor Cyan
+  & "$PSScriptRoot/run-nats.ps1"
 }
 
 Ensure-PortAvailable -LocalPort $Port -KillExisting:$ForceStop

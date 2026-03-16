@@ -10,9 +10,8 @@
  * but ALL pages always appear in the Discover dropdown regardless of
  * screen size.
  *
- * Core routes (ChatPage, AdminPortal, SettingsPage, NotificationsPage)
- * are hardcoded in RouteRenderer — the config only defines
- * EXTRA pages beyond the core shell.
+ * Core routes are mounted by RouteRenderer. navigation_config.json adds
+ * app-defined pages (including module-backed routes and discovery surfaces).
  *
  * When `coreApiUrl` is provided (or VITE_CORE_URL is set), the provider
  * also fetches `/api/navigation` from mozaikscore and merges those pages
@@ -33,6 +32,7 @@ const DEFAULT_NAVIGATION = {
   version: '1.0.0',
   landing_spot: '/',
   pages: [],
+  header_controls: [],
 };
 
 /**
@@ -114,7 +114,7 @@ export const NavigationProvider = ({
           const coreRes = await fetch(`${mergeBaseUrl}/api/navigation`);
           if (coreRes.ok) {
             const coreNav = await coreRes.json();
-            const corePages = coreNav?.navigation || coreNav?.pages || coreNav?.default || [];
+            const corePages = coreNav?.navigation || coreNav?.pages || [];
             if (corePages.length > 0) {
               const existingPaths = new Set((staticNav.pages || []).map((p) => p.path));
               const newPages = corePages
@@ -197,6 +197,12 @@ export const NavigationProvider = ({
     return pages.filter((p) => p.showInHeader === true);
   }, [pages]);
 
+  // Header controls (top-right utility buttons) configured in navigation_config.json
+  const headerControls = useMemo(() => {
+    const controls = Array.isArray(navigation.header_controls) ? navigation.header_controls : [];
+    return [...controls].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }, [navigation.header_controls]);
+
   const findPage = (path) => pages.find((p) => p.path === path) || null;
 
   const pageRequiresAuth = (path) => {
@@ -215,6 +221,7 @@ export const NavigationProvider = ({
     resume_policy: navigation.resume_policy || null,
     pages,
     headerPages,
+    headerControls,
     findPage,
     pageRequiresAuth,
   };

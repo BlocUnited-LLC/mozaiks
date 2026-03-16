@@ -11,8 +11,10 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   useChatUI,
+  useTheme,
   Header,
   Footer,
   registerAdminSection,
@@ -23,7 +25,7 @@ import {
   Stat,
   ProgressBar,
 } from '@mozaiks/chat-ui';
-import { adminListUsers, adminGetAnalytics } from '@mozaiks/chat-ui/coreBridge';
+import { adminListUsers, adminGetAnalytics, fetchAdminConfig, fetchAvailableModules } from '@mozaiks/chat-ui/coreBridge';
 
 // ---------------------------------------------------------------------------
 // Built-in Sections
@@ -325,13 +327,36 @@ registerAdminSection('admin-overview', AdminOverviewSection, {
   gridSpan: 'full',
 });
 
+const DEFAULT_ADMIN_CONFIG = {
+  version: '2.0.0',
+  layout: 'sidebar',
+  pages: [],
+  defaults: {},
+  // v1 compat
+  navigation: { topbar: [], sidebar: [] },
+};
+
+const normalizeRoleToken = (value) => (typeof value === 'string' ? value.trim().toLowerCase() : '');
+
+const normalizeNavEntryKind = (entry) => {
+  const token = normalizeRoleToken(entry?.kind || entry?.type);
+  if (token === 'module') return 'module';
+  if (token === 'page' || token === 'path' || token === 'link') return 'path';
+  return 'section';
+};
+
 // ---------------------------------------------------------------------------
 // Main AdminPortal Component
 // ---------------------------------------------------------------------------
 
 const AdminPortal = () => {
+  const navigate = useNavigate();
   const { user, api, logout, loading } = useChatUI();
+  const { theme: chatTheme, loading: themeLoading } = useTheme();
   const isAdmin = useIsAdmin();
+  const [adminConfig, setAdminConfig] = useState(DEFAULT_ADMIN_CONFIG);
+  const [availableModules, setAvailableModules] = useState([]);
+  const [activeSectionId, setActiveSectionId] = useState(null);
 
   const sections = useMemo(() => {
     return getAllAdminSections().filter(section => {
@@ -342,10 +367,170 @@ const AdminPortal = () => {
 
   const userSections = sections.filter(s => s.category === 'user');
   const adminSections = sections.filter(s => s.category === 'admin');
+  const sectionsById = useMemo(() => new Map(sections.map((section) => [section.id, section])), [sections]);
+  const userRoles = useMemo(() => new Set((user?.roles || []).map(normalizeRoleToken)), [user?.roles]);
+  const availableModulesByName = useMemo(
+    () => new Map(availableModules.map((item) => [item.name, item])),
+    [availableModules]
+  );
 
-  const handleNavigate = (path) => {
-    window.location.href = path;
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAdminSurface = async () => {
+      const [adminResult, modulesResult] = await Promise.allSettled([
+        fetchAdminConfig(),
+        fetchAvailableModules(),
+      ]);
+
+      if (cancelled) return;
+
+      if (adminResult.status === 'fulfilled' && adminResult.value && typeof adminResult.value === 'object') {
+        const raw = adminResult.value;
+        // Detect v1 format (has navigation.topbar/sidebar but no pages[])
+        let pages = raw.pages;
+        let layout = raw.layout || 'sidebar';
+        if (!Array.isArray(pages) && raw.navigation) {
+          const tb = Array.isArray(raw.navigation.topbar) ? raw.navigation.topbar : [];
+          const sb = Array.isArray(raw.navigation.sidebar) ? raw.navigation.sidebar : [];
+          pages = [...tb, ...sb];
+          if (!raw.layout) layout = sb.length > 0 ? 'sidebar' : 'topbar';
+        }
+        setAdminConfig({
+          ...DEFAULT_ADMIN_CONFIG,
+          ...raw,
+          layout,
+          pages: Array.isArray(pages) ? pages : [],
+          defaults: raw.defaults || {},
+        });
+      } else {
+        setAdminConfig(DEFAULT_ADMIN_CONFIG);
+      }
+
+      if (modulesResult.status === 'fulfilled') {
+        const modules = Array.isArray(modulesResult.value?.modules) ? modulesResult.value.modules : [];
+        setAvailableModules(modules.filter((item) => item && item.enabled !== false));
+      } else {
+        setAvailableModules([]);
+      }
+    };
+
+    loadAdminSurface();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const normalizedPages = useMemo(() => {
+    const isRoleAllowed = (requiredRoleRaw) => {
+      const requiredRole = normalizeRoleToken(requiredRoleRaw);
+      if (!requiredRole) return true;
+      if (requiredRole === 'admin') return isAdmin;
+      return userRoles.has(requiredRole);
+    };
+
+    const entries = Array.isArray(adminConfig?.pages) ? adminConfig.pages : [];
+    return entries
+      .map((raw) => {
+        if (!raw || typeof raw !== 'object') return null;
+        if (!isRoleAllowed(raw.requires_role || raw.requiresRole)) return null;
+
+        const kind = normalizeNavEntryKind(raw);
+        if (kind === 'section') {
+          const sectionId = raw.section_id || raw.sectionId || raw.id;
+          const section = sectionsById.get(sectionId);
+          if (!section) return null;
+          return {
+            id: raw.id || `section:${sectionId}`,
+            label: raw.label || section.title || sectionId,
+            icon: raw.icon || null,
+            kind: 'section',
+            sectionId,
+          };
+        }
+
+        if (kind === 'module') {
+          const moduleName = raw.module_name || raw.moduleName || raw.name;
+          const moduleItem = availableModulesByName.get(moduleName);
+          if (!moduleItem) return null;
+          return {
+            id: raw.id || `module:${moduleName}`,
+            label: raw.label || moduleItem.display_name || moduleItem.label || moduleName,
+            icon: raw.icon || null,
+            kind: 'path',
+            path: raw.path || moduleItem.path || `/modules/${moduleName}`,
+          };
+        }
+
+        const path = raw.path || null;
+        const href = raw.href || null;
+        if (!path && !href) return null;
+        return {
+          id: raw.id || path || href,
+          label: raw.label || raw.title || path || href,
+          icon: raw.icon || null,
+          kind: 'path',
+          path,
+          href,
+          external: raw.external === true,
+        };
+      })
+      .filter(Boolean);
+  }, [adminConfig, availableModulesByName, isAdmin, sectionsById, userRoles]);
+
+  useEffect(() => {
+    const sectionIds = sections.map((section) => section.id);
+    if (sectionIds.length === 0) {
+      setActiveSectionId(null);
+      return;
+    }
+
+    if (activeSectionId && sectionIds.includes(activeSectionId)) {
+      return;
+    }
+
+    const declaredIds = normalizedPages
+      .filter((entry) => entry.kind === 'section')
+      .map((entry) => entry.sectionId);
+
+    const preferred = [
+      adminConfig?.defaults?.page_id || adminConfig?.defaults?.section_id,
+      ...declaredIds,
+      ...sectionIds,
+    ].find((candidate) => candidate && sectionIds.includes(candidate));
+
+    setActiveSectionId(preferred || null);
+  }, [activeSectionId, adminConfig, normalizedPages, sections]);
+
+  const handleNavigate = (pathOrHref) => {
+    if (!pathOrHref) return;
+    if (/^https?:\/\//i.test(pathOrHref)) {
+      window.location.href = pathOrHref;
+      return;
+    }
+    navigate(pathOrHref);
   };
+
+  const handleHeaderAction = (actionId, action = null) => {
+    if (actionId === 'discover') {
+      navigate('/discover');
+      return;
+    }
+    if (actionId === 'signout' || action?.action === 'signout') {
+      logout();
+      return;
+    }
+    if (actionId === 'navigate' || action?.action === 'navigate') {
+      handleNavigate(action?.path || action?.href);
+      return;
+    }
+    if (action?.path || action?.href) {
+      handleNavigate(action.path || action.href);
+    }
+  };
+
+  const hasDeclarativeNav = normalizedPages.length > 0;
+  const layoutMode = adminConfig?.layout || 'sidebar';
 
   if (loading) {
     return (
@@ -357,9 +542,9 @@ const AdminPortal = () => {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-        <Header />
-        <div className="pt-20 px-4 max-w-4xl mx-auto">
+      <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+        <Header user={user} chatTheme={chatTheme} themeLoading={themeLoading} onAction={handleHeaderAction} />
+        <div className="flex-1 pt-20 px-4 max-w-4xl mx-auto w-full">
           <Card>
             <div className="text-center py-8">
               <p className="text-slate-400 mb-4">Please sign in to access the admin portal</p>
@@ -372,7 +557,7 @@ const AdminPortal = () => {
             </div>
           </Card>
         </div>
-        <Footer />
+        <Footer chatTheme={chatTheme} />
       </div>
     );
   }
@@ -391,43 +576,131 @@ const AdminPortal = () => {
     );
   };
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      <Header user={user} />
+  const activeSection = activeSectionId ? sectionsById.get(activeSectionId) : null;
 
-      <main className="pt-20 pb-12 px-4">
-        <div className="max-w-4xl mx-auto space-y-8">
+  const renderLegacySectionGrid = () => (
+    <>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {userSections.map(section => {
+          const spanClass = {
+            'full': 'md:col-span-3',
+            'two-thirds': 'md:col-span-2',
+            'half': 'md:col-span-3 lg:col-span-1',
+            'third': 'md:col-span-1',
+          }[section.gridSpan] || '';
+
+          return (
+            <div key={section.id} className={spanClass}>
+              {renderSection(section)}
+            </div>
+          );
+        })}
+      </div>
+
+      {adminSections.length > 0 && (
+        <div className="pt-6 border-t border-slate-700/50">
+          {adminSections.map(renderSection)}
+        </div>
+      )}
+    </>
+  );
+
+  const renderNavItem = (entry, variant) => {
+    const isActive = entry.kind === 'section' && entry.sectionId === activeSectionId;
+    const handleClick = () => {
+      if (entry.kind === 'section') {
+        setActiveSectionId(entry.sectionId);
+        return;
+      }
+      handleNavigate(entry.path || entry.href);
+    };
+
+    if (variant === 'tab') {
+      return (
+        <button
+          key={entry.id}
+          type="button"
+          className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors border-b-2 ${
+            isActive
+              ? 'border-cyan-400 text-cyan-300'
+              : 'border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-600'
+          }`}
+          onClick={handleClick}
+        >
+          {entry.label}
+        </button>
+      );
+    }
+
+    // sidebar variant
+    return (
+      <button
+        key={entry.id}
+        type="button"
+        className={`w-full text-left px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+          isActive
+            ? 'bg-cyan-500/15 text-cyan-300'
+            : 'text-slate-300 hover:bg-slate-700/50 hover:text-white'
+        }`}
+        onClick={handleClick}
+      >
+        {entry.label}
+      </button>
+    );
+  };
+
+  const renderNavContent = () => {
+    if (activeSection) return renderSection(activeSection);
+    return renderLegacySectionGrid();
+  };
+
+  const renderSidebarLayout = () => (
+    <div className="flex gap-8">
+      <aside className="w-48 shrink-0 space-y-1 border-r border-slate-700/50 pr-6">
+        {normalizedPages.map((entry) => renderNavItem(entry, 'sidebar'))}
+      </aside>
+      <section className="flex-1 min-w-0 pl-4">
+        {renderNavContent()}
+      </section>
+    </div>
+  );
+
+  const renderTopbarLayout = () => (
+    <div className="space-y-6">
+      <div className="flex gap-1 border-b border-slate-700/50 overflow-x-auto">
+        {normalizedPages.map((entry) => renderNavItem(entry, 'tab'))}
+      </div>
+      <section>
+        {renderNavContent()}
+      </section>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      <Header
+        user={user}
+        chatTheme={chatTheme}
+        themeLoading={themeLoading}
+        onAction={handleHeaderAction}
+      />
+
+      <main className="flex-1 pt-20 pb-12 px-4">
+        <div className="max-w-6xl mx-auto space-y-8">
           <div>
             <h1 className="text-2xl font-bold text-white">Admin Portal</h1>
-            <p className="text-slate-400 mt-1">Manage your account, view usage, and access admin features</p>
+            <p className="text-slate-400 mt-1">Manage your account, view usage, and route into module surfaces.</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {userSections.map(section => {
-              const spanClass = {
-                'full': 'md:col-span-3',
-                'two-thirds': 'md:col-span-2',
-                'half': 'md:col-span-3 lg:col-span-1',
-                'third': 'md:col-span-1',
-              }[section.gridSpan] || '';
-
-              return (
-                <div key={section.id} className={spanClass}>
-                  {renderSection(section)}
-                </div>
-              );
-            })}
-          </div>
-
-          {adminSections.length > 0 && (
-            <div className="pt-6 border-t border-slate-700/50">
-              {adminSections.map(renderSection)}
-            </div>
+          {hasDeclarativeNav ? (
+            layoutMode === 'topbar' ? renderTopbarLayout() : renderSidebarLayout()
+          ) : (
+            renderLegacySectionGrid()
           )}
         </div>
       </main>
 
-      <Footer />
+      <Footer chatTheme={chatTheme} />
     </div>
   );
 };

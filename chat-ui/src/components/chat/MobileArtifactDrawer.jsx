@@ -13,7 +13,7 @@ const MobileArtifactDrawer = ({
   const isExpanded = viewMode || state === 'expanded';
   const isHidden = state === 'hidden';
   const isPeek = !isExpanded && !isHidden;
-  const heightClass = viewMode ? 'h-screen' : (isExpanded ? 'h-[calc(100vh-5rem)]' : isHidden ? 'h-0' : 'h-20');
+  const heightClass = viewMode ? 'h-full' : (isExpanded ? 'h-[calc(100vh-5rem)]' : isHidden ? 'h-0' : 'h-20');
 
   const baseContainerClasses = 'relative w-full bg-[rgba(3,6,15,0.96)] backdrop-blur-2xl border border-[rgba(var(--color-primary-light-rgb),0.45)] shadow-[0_-12px_40px_rgba(2,6,23,0.65)] overflow-hidden transition-all duration-300 pointer-events-auto flex flex-col';
   const expandedShapeClasses = 'w-full rounded-none rounded-t-3xl';
@@ -22,6 +22,14 @@ const MobileArtifactDrawer = ({
 
   const handleToggle = () => {
     if (viewMode) {
+      if (typeof onExitView === 'function') {
+        onExitView();
+      } else {
+        onStateChange('peek');
+      }
+      if (typeof onClose === 'function') {
+        onClose();
+      }
       return;
     }
     if (isExpanded) {
@@ -34,14 +42,17 @@ const MobileArtifactDrawer = ({
     }
   };
 
-  const contentVisibilityClasses = state === 'expanded'
+  const contentVisibilityClasses = (viewMode || state === 'expanded')
     ? 'opacity-100 pointer-events-auto'
     : 'opacity-0 pointer-events-none';
 
   return (
-    <div className="absolute inset-x-0 bottom-0 z-40 pointer-events-none">
+    <div
+      className="absolute inset-x-0 bottom-0 z-40 pointer-events-none"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+    >
       <div className={`${containerClasses}`}>
-        {!viewMode && (
+        {!isHidden && (
           <button
             type="button"
             onClick={handleToggle}
@@ -62,7 +73,7 @@ const MobileArtifactDrawer = ({
               <div className="min-w-0 flex-1">
                 <p className="text-xs sm:text-sm font-semibold text-white tracking-wide truncate">Artifact Workspace</p>
                 <p className="text-[10px] sm:text-[11px] uppercase tracking-[0.15em] sm:tracking-[0.2em] text-[rgba(255,255,255,0.55)] truncate">
-                  {isExpanded ? 'Swipe down' : 'Tap to expand'}
+                  {viewMode ? 'Tap to close' : (isExpanded ? 'Swipe down' : 'Tap to expand')}
                 </p>
               </div>
             </div>

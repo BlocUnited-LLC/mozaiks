@@ -16,34 +16,50 @@ _CONFIG_CACHE: dict[str, tuple[Any, float]] = {}
 _CACHE_TTL = 300  # 5 minutes
 
 
+def get_platform_path() -> Path:
+    """Resolve the platform directory from env or default to repository platform/."""
+    raw = os.getenv("MOZAIKS_PLATFORM_PATH", "").strip()
+    if raw:
+        return Path(raw).resolve()
+    return Path(__file__).resolve().parent.parent.parent / "platform"
+
+
 def get_config_path() -> Path:
     """Resolve the config directory from env or default to platform/config."""
     raw = os.getenv("MOZAIKS_CONFIGS_PATH", "").strip()
     if raw:
         return Path(raw).resolve()
-    return Path(__file__).resolve().parent.parent.parent / "platform" / "config"
+    return get_platform_path() / "config"
 
 
-def _load_json(name: str) -> Optional[dict]:
+def get_automations_path() -> Path:
+    """Resolve the automation config directory from env or default to platform/automations."""
+    return get_platform_path() / "automations"
+
+
+def _load_json_from_path(cache_key: str, path: Path) -> Optional[dict]:
     """Load a JSON config file with TTL caching."""
     now = time.time()
-    if name in _CONFIG_CACHE:
-        data, ts = _CONFIG_CACHE[name]
+    if cache_key in _CONFIG_CACHE:
+        data, ts = _CONFIG_CACHE[cache_key]
         if now - ts < _CACHE_TTL:
             return data
 
-    path = get_config_path() / name
     if not path.exists():
         logger.warning("Config file not found: %s", path)
         return None
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        _CONFIG_CACHE[name] = (data, now)
+        _CONFIG_CACHE[cache_key] = (data, now)
         return data
     except (json.JSONDecodeError, OSError) as exc:
-        logger.error("Error loading config %s: %s", name, exc)
+        logger.error("Error loading config %s: %s", path, exc)
         return None
+
+
+def _load_json(name: str) -> Optional[dict]:
+    return _load_json_from_path(f"config:{name}", get_config_path() / name)
 
 
 def reload_configs():
@@ -82,9 +98,27 @@ def get_notifications_config() -> dict:
     return _load_json("notifications_config.json") or {}
 
 
+def get_admin_config() -> dict:
+    return _load_json("admin.json") or {"navigation": {"topbar": [], "sidebar": []}, "defaults": {}}
+
+
 def get_subscription_config() -> dict:
     return _load_json("subscription_config.json") or {}
 
 
 def get_ai_config() -> dict:
     return _load_json("ai.json") or {}
+
+
+def get_automation_event_catalog() -> dict:
+    return _load_json_from_path(
+        "automations:event_catalog.json",
+        get_automations_path() / "event_catalog.json",
+    ) or {"events": []}
+
+
+def get_automation_routes() -> dict:
+    return _load_json_from_path(
+        "automations:routes.json",
+        get_automations_path() / "routes.json",
+    ) or {"routes": []}

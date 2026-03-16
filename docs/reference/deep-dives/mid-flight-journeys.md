@@ -560,7 +560,7 @@ Mid-Flight Journeys (Production)
 - [x] `AgentSignalDecomposition.detect()` produces `DecompositionPlan` from structured outputs
 - [x] `_plan_from_raw()` backward-compat fallback converts raw `PatternSelection` dict → `DecompositionPlan`
 - [x] Trigger entry `id` field used as `trigger_id` (falls back to `trigger_{agent_name}`)
-- [x] `spawn_mode` and `generator_workflow` read from trigger config
+- [x] `spawn_mode` and `authoring_workflow` read from trigger config
 
 #### 2.2 — Configurable Merge Strategies  ✅
 
@@ -624,7 +624,7 @@ Mid-Flight Journeys (Production)
 #### 3.1 — Pydantic Config Models  ✅
 
 - [x] `MFJContract` model — `required: list[str]`, `optional: list[str]`
-- [x] `MFJFanOutConfig` model — `spawn_mode`, `generator_workflow`, `child_initial_agent`, `max_children`, `timeout_seconds`, `input_contract: MFJContract`, `child_context_seed: dict`
+- [x] `MFJFanOutConfig` model — `spawn_mode`, `authoring_workflow`, `child_initial_agent`, `max_children`, `timeout_seconds`, `input_contract: MFJContract`, `child_context_seed: dict`
 - [x] `MFJFanInConfig` model — `resume_agent`, `merge_mode`, `inject_as`, `on_partial_failure`, `output_contract: MFJContract`
 - [x] `MidFlightJourney` model — `id`, `description`, `trigger_agent`, `trigger_on`, `requires`, `fan_out: MFJFanOutConfig`, `fan_in: MFJFanInConfig`
 - [x] `PerWorkflowPackGraph` model — unified v1/v2/v3 with `detected_version` property, `triggers` property (normalized to MidFlightJourney list), `raw_journeys` property (flat dicts for backward compat)

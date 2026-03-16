@@ -387,7 +387,43 @@ class UnifiedEventDispatcher:
                     "chat_id": chat_id,
                     "timestamp": timestamp
                 }
-            
+
+            # Check 0.3: UserDriven static greeting (already sent by ws_protocol.py)
+            # This marker indicates the greeting was already sent before workflow started
+            if isinstance(content, str) and content.startswith('[_MOZAIKS_SUPPRESS_UI]'):
+                # Strip the marker from content for persistence but hide from UI
+                actual_content = content.replace('[_MOZAIKS_SUPPRESS_UI]', '', 1)
+                event_dict['content'] = actual_content
+                event_dict['_mozaiks_hide'] = True
+                logger.info(f"🚫 [USERDRIVEN_GREETING] Suppressing duplicate static greeting from {agent_name}")
+                return {
+                    "type": f"chat.{base_kind}",
+                    "data": event_dict,
+                    "chat_id": chat_id,
+                    "timestamp": timestamp
+                }
+
+            # Check 0.5: UserDriven synthetic trigger (the "." message used to start groupchat)
+            # This should never be shown to users - it's an internal AG2 mechanism
+            if isinstance(content, str) and content.strip() == ".":
+                # Check if this is a userdriven workflow
+                try:
+                    wf_config = workflow_manager.get_config(workflow_name)  # type: ignore
+                    startup_mode = str(wf_config.get("startup_mode", "")).strip().lower() if wf_config else ""
+                    sender_lower = str(agent_name or "").lower()
+                    # Suppress if userdriven mode AND sender looks like a user proxy
+                    if startup_mode == "userdriven" and sender_lower in {"user", "userproxy", "chat_manager", "manager"}:
+                        event_dict['_mozaiks_hide'] = True
+                        logger.info(f"🚫 [USERDRIVEN_TRIGGER] Suppressing synthetic '.' trigger from {agent_name} (startup_mode={startup_mode})")
+                        return {
+                            "type": f"chat.{base_kind}",
+                            "data": event_dict,
+                            "chat_id": chat_id,
+                            "timestamp": timestamp
+                        }
+                except Exception as e:
+                    logger.debug(f"[USERDRIVEN_TRIGGER] Could not check startup_mode: {e}")
+
             if agent_name and isinstance(content, str):
                 # Check 1: UI_HIDDEN triggers (exact match suppression)
                 try:

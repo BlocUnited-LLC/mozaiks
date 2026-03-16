@@ -1,131 +1,95 @@
 # Graph Injection Contract
 
-**Status:** Current architecture reference  
-**Last updated:** 2026-02-26
+This document defines how graph-shaped declaratives should be treated in
+Mozaiks.
 
-## Purpose
+The important rule is that graphs are compiled runtime inputs, not freeform
+places to hide business logic.
 
-This document defines the runtime contract for graph-based context injection and graph mutation rules used by workflows.
+## Graph Families
 
-## Scope
+### 1. Global workflow journey graph
 
-Graph injection provides two hook types:
+Path:
 
-1. **Before-turn injection**: query graph context and inject it into agent/runtime context.
-2. **After-event mutation**: run graph writes when matching events occur.
+- `platform/workflows/_pack/workflow_graph.json`
 
-Graph injection is optional and must degrade safely when unavailable.
+Purpose:
 
-## File Location
+- cross-workflow ordering
+- journey-level sequencing
 
-Per workflow:
+### 2. Workflow-local execution graph
 
-```text
-workflows/{workflow_name}/backend/graph_injection.yaml
-```
+Path:
 
-## Contract Shape
+- `platform/workflows/{workflow_name}/_pack/workflow_graph.json`
 
-```yaml
-version: "1.0"
-extends: "../_shared/graph_injection_base.yaml"  # optional
+Purpose:
 
-injection_rules:
-  - name: inject_recent_patterns
-    agents: ["PlannerAgent"]
-    condition: "$context.phase == 'planning'"  # optional
-    queries:
-      - id: recent_patterns
-        cypher: |
-          MATCH (p:Pattern)
-          RETURN p.name, p.score
-          ORDER BY p.score DESC
-          LIMIT 5
-        params:
-          tenant_id: "$context.tenant_id"
-        inject_as: "recent_patterns"
-        format: "list"          # list | single | json | markdown
-        max_results: 5            # optional
+- MFJ
+- child workflow fan-out and fan-in
+- explicit resume locations
 
-mutation_rules:
-  - name: record_workflow_success
-    events: ["telemetry.run.summary"]
-    condition: "$event.outcome == 'completed'"  # optional
-    mutations:
-      - id: upsert_workflow_score
-        cypher: |
-          MERGE (w:Workflow {name: $workflow_name})
-          SET w.last_score = $score,
-              w.updated_at = datetime()
-        params:
-          workflow_name: "$workflow.name"
-          score: "$event.score"
-```
+### 3. Builder build graph
 
-## Parameter Resolution
+Purpose:
 
-| Token | Resolves from |
-|---|---|
-| `$context.*` | runtime context values |
-| `$event.*` | triggering event payload |
-| `$workflow.*` | workflow metadata |
-| literals | unchanged |
+- compile-time task scheduling for the first-party builder
 
-Missing required parameters should skip the rule with structured logging.
+This graph belongs to the product layer and should not be shipped as core app
+runtime behavior unless explicitly compiled into bundle assets.
 
-## Execution Semantics
+## Injection Rules
 
-### Injection rules
+### Graphs are explicit
 
-- evaluated before eligible agent turns
-- filtered by `agents` and optional `condition`
-- query results formatted and attached under `inject_as`
+A graph should define:
 
-### Mutation rules
+- nodes
+- edges
+- types
+- resume or completion behavior
 
-- evaluated when event type matches `events`
-- optional `condition` gate
-- each mutation executes independently
+It should not rely on long prose fields called `logic`.
 
-## Inheritance (`extends`)
+### Graphs are compiled
 
-When `extends` is present:
+Graphs should be generated from structured planning or workflow declaratives.
+They are not the first place where meaning is invented.
 
-- parent rules load first
-- child rule with same `name` replaces parent rule
-- unique names are merged
+### Graphs are scoped
 
-## Multi-Tenancy
+Workflow graphs own workflow execution structure.
 
-Graph operations must be tenant/app scoped.
+They do not own:
 
-Recommended namespacing pattern:
+- navigation
+- domain event policy
+- shell layout
+- module registration
 
-```text
-graph_name = "mozaiks_{app_or_tenant_id}"
-```
+### Automation routes are not graph nodes
 
-## Failure Behavior
+A domain event to workflow mapping belongs in automation declaratives, not in
+`workflow_graph.json`.
 
-Graph injection must be non-fatal by default.
+The route may select a workflow entry or resume point, but it should not mutate
+the graph contract itself.
 
-| Failure | Expected behavior |
-|---|---|
-| YAML parse/validation error | fail workflow load with clear error |
-| graph query timeout | skip rule, continue workflow |
-| missing parameter | skip rule, log warning |
-| graph backend unavailable | continue workflow without injection/mutation |
+## Why This Matters
 
-## Separation of Concerns
+When graph files absorb business policy, the system becomes unreadable:
 
-Do not conflate:
+- app policy hides in graph nodes
+- workflow structure hides in prose
+- generators stop knowing which layer they are editing
 
-- `graph_injection.yaml`: memory/context query/mutation rules
-- `_pack/workflow_graph.json`: workflow-to-workflow orchestration dependencies
+The graph contract should stay narrow enough that a compiler, runtime, and
+human can all reason about it.
 
 ## Cross References
 
 - [workflow-architecture.md](workflow-architecture.md)
-- [app-creation-guide.md](app-creation-guide.md)
-- [learning-loop-architecture.md](learning-loop-architecture.md)
-
+- [builder-execution-model.md](builder-execution-model.md)
+- [app-planning-contracts.md](app-planning-contracts.md)

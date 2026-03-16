@@ -35,10 +35,12 @@ class GroupChatResumer:
             self.logger.debug("[AUTO_RESUME] Missing app_id for %s; skipping", chat_id)
             return None
 
-        doc = await self._fetch_chat_doc(chat_id, app_id, projection={"status": 1, "messages": 1})
+        doc = await self._fetch_chat_doc(chat_id, app_id, projection={"status": 1, "messages": 1, "workflow_name": 1})
         if not doc:
             self.logger.debug("[AUTO_RESUME] No persisted chat found for %s", chat_id)
             return None
+
+        startup_mode = self._resolve_startup_mode(startup_mode, doc.get("workflow_name"))
 
         try:
             from mozaiksai.core.data.models import WorkflowStatus
@@ -58,7 +60,7 @@ class GroupChatResumer:
             self.logger.debug("[AUTO_RESUME] No messages to replay for %s", chat_id)
             return None
 
-        last_index = await self._replay_messages(
+        replay_result = await self._replay_messages(
             chat_id=chat_id,
             messages=messages,
             send_event=send_event,
@@ -68,7 +70,7 @@ class GroupChatResumer:
             context={"reason": "on_connect"},
             startup_mode=startup_mode,
         )
-        return last_index
+        return replay_result.get("last_index")
 
     async def handle_resume_request(
         self,
@@ -77,14 +79,16 @@ class GroupChatResumer:
         app_id: Optional[str],
         last_client_index: int,
         send_event: SendEventFunc,
+        startup_mode: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Process an explicit client.resume handshake request."""
         if not app_id:
             raise RuntimeError("Missing app_id for resume flow")
 
-        doc = await self._fetch_chat_doc(chat_id, app_id, projection={"status": 1, "messages": 1})
+        doc = await self._fetch_chat_doc(chat_id, app_id, projection={"status": 1, "messages": 1, "workflow_name": 1})
         messages: List[Dict[str, Any]] = doc.get("messages", []) or []
         status = doc.get("status", "unknown")
+        startup_mode = self._resolve_startup_mode(startup_mode, doc.get("workflow_name"))
 
         if last_client_index < -1:
             last_client_index = -1
@@ -112,7 +116,7 @@ class GroupChatResumer:
             )
             return summary
 
-        last_index = await self._replay_messages(
+        replay_result = await self._replay_messages(
             chat_id=chat_id,
             messages=messages,
             send_event=send_event,
@@ -120,11 +124,11 @@ class GroupChatResumer:
             chat_status=status,
             start_index=start_index,
             context={"reason": "client_resume", "last_client_index": last_client_index},
-            startup_mode=None,  # Client resume doesn't need filtering (they already saw it)
+            startup_mode=startup_mode,
         )
         return {
-            "replayed_messages": len(messages[start_index:]) if last_index is not None else 0,
-            "last_message_index": last_index if last_index is not None else last_client_index,
+            "replayed_messages": replay_result.get("replayed_messages", 0),
+            "last_message_index": replay_result.get("last_index", last_client_index),
             "total_messages": len(messages),
         }
 
@@ -142,7 +146,7 @@ class GroupChatResumer:
         start_index: int,
         context: Optional[Dict[str, Any]],
         startup_mode: Optional[str] = None,
-    ) -> Optional[int]:
+    ) -> Dict[str, int]:
         slice_messages = messages[start_index:]
         if not slice_messages:
             await send_event(
@@ -159,29 +163,42 @@ class GroupChatResumer:
                 ),
                 chat_id,
             )
-            return None
+            return {"last_index": start_index - 1, "replayed_messages": 0}
 
+        normalized_startup_mode = str(startup_mode or "").strip().lower()
+        replayed_messages: List[Dict[str, Any]] = []
         last_index = start_index - 1
         for offset, message in enumerate(slice_messages):
             absolute_index = start_index + offset
             
-            # Filter out initial_message from UserProxy in AgentDriven mode during reconnect
-            # This prevents the hidden kickstart message from appearing in the UI on resume
             should_skip = False
-            if startup_mode == "AgentDriven":
-                # Check if this is the initial_message seed (hidden user proxy kickstart)
-                seed_kind = message.get("_mozaiks_seed_kind")
-                metadata = message.get("metadata", {})
-                metadata_seed_kind = metadata.get("_mozaiks_seed_kind") if isinstance(metadata, dict) else None
-                
+            seed_kind = message.get("_mozaiks_seed_kind")
+            metadata = message.get("metadata", {})
+            metadata_seed_kind = metadata.get("_mozaiks_seed_kind") if isinstance(metadata, dict) else None
+            role = str(message.get("role") or "").strip().lower()
+            content = str(message.get("content") or "")
+
+            if normalized_startup_mode == "agentdriven":
                 if seed_kind == "initial_message" or metadata_seed_kind == "initial_message":
                     self.logger.debug(
                         "[AUTO_RESUME] Skipping initial_message for AgentDriven workflow (index=%d, chat_id=%s)",
                         absolute_index, chat_id
                     )
                     should_skip = True
+            elif normalized_startup_mode == "userdriven":
+                is_marked_userdriven_trigger = (
+                    seed_kind == "userdriven_trigger" or metadata_seed_kind == "userdriven_trigger"
+                )
+                is_legacy_userdriven_trigger = absolute_index == 0 and role == "user" and content.strip() == "."
+                if is_marked_userdriven_trigger or is_legacy_userdriven_trigger:
+                    self.logger.debug(
+                        "[AUTO_RESUME] Skipping synthetic UserDriven trigger (index=%d, chat_id=%s)",
+                        absolute_index, chat_id
+                    )
+                    should_skip = True
             
             if not should_skip:
+                replayed_messages.append(message)
                 await send_event(
                     self._build_text_event(message=message, index=absolute_index, chat_id=chat_id),
                     chat_id,
@@ -192,19 +209,63 @@ class GroupChatResumer:
             self._build_boundary_event(
                 chat_id=chat_id,
                 total_messages=len(messages),
-                replayed=len(slice_messages),
+                replayed=len(replayed_messages),
                 last_index=last_index,
                 mode=mode,
                 chat_status=chat_status,
                 start_index=start_index,
-                events_slice=slice_messages,
+                events_slice=replayed_messages,
                 context=context,
             ),
             chat_id,
         )
-        return last_index
+
+        # Re-emit pending input request if one exists
+        # This ensures the UI knows input is still needed after resume
+        try:
+            pm = self._get_persistence_manager()
+            if pm:
+                pending = await pm.get_pending_input_request(chat_id=chat_id)
+                if pending:
+                    self.logger.info(
+                        "[AUTO_RESUME] Re-emitting pending input request: %s (chat=%s)",
+                        pending.get("request_id"),
+                        chat_id,
+                    )
+                    await send_event(
+                        self._build_input_request_event(
+                            request_id=pending.get("request_id", ""),
+                            agent=pending.get("agent", "Agent"),
+                            prompt=pending.get("prompt", ""),
+                            chat_id=chat_id,
+                        ),
+                        chat_id,
+                    )
+        except Exception as e:
+            self.logger.debug("[AUTO_RESUME] Failed to check pending input request: %s", e)
+
+        return {"last_index": last_index, "replayed_messages": len(replayed_messages)}
+
+    def _resolve_startup_mode(self, startup_mode: Optional[str], workflow_name: Optional[str]) -> Optional[str]:
+        normalized = str(startup_mode or "").strip().lower()
+        if normalized:
+            return normalized
+        if not workflow_name:
+            return None
+        try:
+            from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+            cfg = workflow_manager.get_config(str(workflow_name)) or {}
+            resolved = str(cfg.get("startup_mode") or "").strip().lower()
+            return resolved or None
+        except Exception:
+            return None
 
     def _build_text_event(self, *, message: Dict[str, Any], index: int, chat_id: str) -> Dict[str, Any]:
+        timestamp = message.get("timestamp")
+        if isinstance(timestamp, datetime):
+            timestamp = timestamp.isoformat()
+
         role = message.get("role")
         if role == "assistant":
             agent_name = message.get("agent_name") or message.get("name") or "assistant"
@@ -218,11 +279,11 @@ class GroupChatResumer:
             "index": index,
             "chat_id": chat_id,
             "replay": True,
-            "timestamp": message.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+            "timestamp": timestamp or datetime.now(timezone.utc).isoformat(),
         }
         metadata = message.get("metadata")
         if metadata:
-            normalized["metadata"] = metadata
+            normalized["metadata"] = self._json_safe(metadata)
             
             # Restore UI tool state if message has ui_tool metadata
             ui_tool_meta = metadata.get("ui_tool")
@@ -291,8 +352,29 @@ class GroupChatResumer:
             "role": message.get("role"),
             "name": message.get("name"),
             "content": message.get("content"),
-            "metadata": message.get("metadata"),
+            "metadata": self._json_safe(message.get("metadata")),
         }
+
+    def _json_safe(self, value: Any) -> Any:
+        """Best-effort conversion of persistence payloads to JSON-safe values."""
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, dict):
+            out: Dict[str, Any] = {}
+            for k, v in value.items():
+                if isinstance(k, str):
+                    key = k
+                elif isinstance(k, datetime):
+                    key = k.isoformat()
+                else:
+                    key = str(k)
+                out[key] = self._json_safe(v)
+            return out
+        if isinstance(value, (list, tuple, set)):
+            return [self._json_safe(v) for v in value]
+        return str(value)
 
     async def _fetch_chat_doc(
         self,
@@ -314,6 +396,35 @@ class GroupChatResumer:
 
             self._persistence_manager = AG2PersistenceManager()
         return self._persistence_manager
+
+    def _get_persistence_manager(self):
+        """Get the cached persistence manager if available (sync access)."""
+        if self._persistence_manager is None:
+            from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+            self._persistence_manager = AG2PersistenceManager()
+        return self._persistence_manager
+
+    def _build_input_request_event(
+        self,
+        *,
+        request_id: str,
+        agent: str,
+        prompt: str,
+        chat_id: str,
+    ) -> Dict[str, Any]:
+        """Build an input_request event payload for UI."""
+        return {
+            "kind": "input_request",
+            "request_id": request_id,
+            "agent": agent,
+            "prompt": prompt,
+            "chat_id": chat_id,
+            "replay": True,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "metadata": {
+                "source": "resume_pending_input",
+            },
+        }
 
 
 __all__ = ["GroupChatResumer"]

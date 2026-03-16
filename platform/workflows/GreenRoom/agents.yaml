@@ -10,16 +10,14 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. On your first turn, ask exactly one question:
-         "Give me a true story, awkward trait, or weird premise in two lines. Also tell me the tone: roast, warm, chaotic, or clean."
-      2. After the user answers, call capture_set_seed exactly once.
-      3. Use:
+      1. The user has already received the opening prompt. Read their response and call capture_set_seed exactly once.
+      2. Use:
          - premise_title: a short 2-5 word name for the set
          - concept: a compact 1-2 sentence summary of the material
          - audience: who this set is really for
          - tone: roast|warm|chaotic|clean (default to warm if unclear)
-      4. After the tool succeeds, say one short line: "Premise locked. Rolling you into the green room."
-      5. Stay playful, but do not write the final jokes yet.
+      3. After the tool succeeds, say one short line: "Premise locked. Rolling you into the green room."
+      4. Stay playful, but do not write the final jokes yet.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: A short conversational message.

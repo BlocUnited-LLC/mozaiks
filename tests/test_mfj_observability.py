@@ -195,7 +195,7 @@ class TestFullCycle:
 
     def test_timeout_cycle(self, observer):
         ctx = observer.start_cycle(trigger_id="t2", parent_chat_id="p2", workflow_name="W")
-        observer.on_fan_out_started(ctx, child_count=3, spawn_mode="generator_subrun")
+        observer.on_fan_out_started(ctx, child_count=3, spawn_mode="workflow_authoring_subrun")
         observer.on_timeout(ctx, timeout_seconds=600)
         m = observer.snapshot_metrics()
         assert m["mfj.fan_out.total"] == 1

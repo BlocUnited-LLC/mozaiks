@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { useChatUI, Header, Footer } from '@mozaiks/chat-ui';
+import { useNavigate } from 'react-router-dom';
+import { useChatUI, useTheme, Header, Footer } from '@mozaiks/chat-ui';
 import { executeModule } from '@mozaiks/chat-ui/coreBridge';
 
 const FALLBACK_LINEUP = [
@@ -33,9 +34,29 @@ const statusTone = {
 };
 
 export default function LineupBoard() {
-  const { user, loading } = useChatUI();
+  const navigate = useNavigate();
+  const { user, loading, logout } = useChatUI();
+  const { theme: chatTheme, loading: themeLoading } = useTheme();
   const [lineup, setLineup] = useState(FALLBACK_LINEUP);
   const [source, setSource] = useState('mock');
+
+  const handleHeaderAction = (actionId, action = null) => {
+    if (actionId === 'discover') {
+      navigate('/discover');
+      return;
+    }
+    if (actionId === 'signout' || action?.action === 'signout') {
+      logout();
+      return;
+    }
+    const target = action?.path || action?.href;
+    if (!target) return;
+    if (/^https?:\/\//i.test(target)) {
+      window.location.href = target;
+      return;
+    }
+    navigate(target);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -62,9 +83,9 @@ export default function LineupBoard() {
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.18),_transparent_28%),linear-gradient(180deg,_#09111f,_#100d1a)]">
-      <Header user={user} />
-      <main className="pt-20 pb-12 px-4">
+    <div className="min-h-screen flex flex-col bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.18),_transparent_28%),linear-gradient(180deg,_#09111f,_#100d1a)]">
+      <Header user={user} chatTheme={chatTheme} themeLoading={themeLoading} onAction={handleHeaderAction} />
+      <main className="flex-1 pt-20 pb-12 px-4">
         <div className="max-w-6xl mx-auto">
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-white">Lineup Board</h1>
@@ -98,7 +119,7 @@ export default function LineupBoard() {
           </div>
         </div>
       </main>
-      <Footer />
+      <Footer chatTheme={chatTheme} />
     </div>
   );
 }

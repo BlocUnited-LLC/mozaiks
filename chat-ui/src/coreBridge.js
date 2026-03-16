@@ -89,6 +89,10 @@ export async function fetchNavigation() {
   return coreFetch('/api/navigation');
 }
 
+export async function fetchAdminConfig() {
+  return coreFetch('/api/admin-config');
+}
+
 // ---------------------------------------------------------------------------
 // Settings API
 // ---------------------------------------------------------------------------
@@ -280,6 +284,7 @@ const coreBridge = {
   coreFetch,
   // Navigation
   fetchNavigation,
+  fetchAdminConfig,
   // Settings
   fetchSettingsConfig,
   fetchSettings,

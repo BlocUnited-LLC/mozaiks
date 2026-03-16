@@ -1,123 +1,27 @@
-# Mozaiks Core: Workflow Architecture
+# Workflow Architecture
 
-**Last updated:** 2026-03-12  
-**Status:** Current architecture reference
+This document defines the role of workflows inside the broader Mozaiks
+architecture.
 
-Mozaiks is a runtime for hybrid applications where:
+Workflows are first-class, but they are not the entire app model.
 
-- AI workflows
-- triggered actions
-- modules/pages
-- artifacts
+## Core Rule
 
-coexist inside one app bundle.
+A workflow is an AI runtime unit for reasoning, orchestration, and HITL.
 
----
+It is not:
 
-## Scope
+- the canonical place to store business state
+- the canonical source of product navigation
+- the contract by which CRUD mutations trigger automation
 
-This document defines the workflow/runtime architecture in the current unified
-repo.
-
-Two axes are intentionally separate:
-
-1. runtime layers in this repo
-2. execution modes in consuming apps
-
-Do not treat those as the same thing.
-
----
-
-## Repository Mapping
-
-| Architecture concept | Primary implementation paths |
-|---|---|
-| Engine-neutral runtime contracts | `mozaiksai/core/ports/` |
-| Workflow runtime and orchestration support | `mozaiksai/core/workflow/`, `mozaiksai/core/orchestration/`, `mozaiksai/core/adapters/` |
-| Transport and runtime event handling | `mozaiksai/core/transport/`, `mozaiksai/core/events/`, `shared_app.py` |
-| Substrate/module/settings/notifications layer | `mozaikscore/core/` |
-| Shared frontend runtime/surfaces | `chat-ui/src/` |
-| App bundle inputs | `platform/` |
-
-Import/ownership direction:
-
-```text
-platform bundle inputs -> runtime loaders -> execution/transport/substrate
-```
-
-And at the core engine boundary:
-
-```text
-runtime -> OrchestrationPort -> AG2 adapter
-```
-
----
-
-## Runtime Structure
-
-### AI Runtime Layer (`mozaiksai`)
-
-Owns:
-
-- workflow execution
-- workflow config loading
-- AG2 adapter boundary
-- workflow transport
-- runtime event routing
-- MFJ and journey orchestration support
-- artifact attachments and workflow persistence support
-
-Representative paths:
-
-- `mozaiksai/core/ports/orchestration.py`
-- `mozaiksai/core/adapters/ag2_orchestration.py`
-- `mozaiksai/core/workflow/`
-- `mozaiksai/core/transport/`
-- `mozaiksai/core/events/`
-- `shared_app.py`
-
-### Substrate Layer (`mozaikscore`)
-
-Owns:
-
-- module management
-- navigation/theme/settings/subscription config loading
-- substrate event bus
-- websocket push bridge for substrate events
-
-Representative paths:
-
-- `mozaikscore/core/director.py`
-- `mozaikscore/core/module_manager.py`
-- `mozaikscore/core/config_loader.py`
-- `mozaikscore/core/event_bus.py`
-- `mozaikscore/core/websocket_event_bridge.py`
-
-### Shared Frontend Runtime (`chat-ui`)
-
-Owns:
-
-- chat page and UI surfaces
-- mode/layout state
-- navigation and shell state
-- workflow selection
-- rendering of inline/artifact UI tool components
-
-Representative paths:
-
-- `chat-ui/src/pages/ChatPage.js`
-- `chat-ui/src/state/uiSurfaceReducer.js`
-- `chat-ui/src/providers/NavigationProvider.jsx`
-- `chat-ui/src/config/workflowConfig.js`
-- `chat-ui/src/utils/resolveWorkflow.js`
-
----
+Those concerns belong to the app substrate and automation boundary.
 
 ## Workflow Inputs
 
-Workflows are runtime inputs under `platform/workflows/`.
+Workflows are declared under `platform/workflows/`.
 
-Per-workflow files:
+Stable workflow files:
 
 - `orchestrator.yaml`
 - `agents.yaml`
@@ -127,137 +31,146 @@ Per-workflow files:
 - `tools.yaml`
 - `ui_config.yaml`
 - `hooks.yaml`
-- `_pack/workflow_graph.json`
 - `tools/*.py`
 - `ui/*`
+- `_pack/workflow_graph.json`
 
-Global workflow graph:
+This file contract stays intact in this architecture rewrite.
 
+## How Workflows Start
+
+A workflow may be started in three ways.
+
+### 1. Direct user entry
+
+The user launches a workflow from a visible surface such as:
+
+- chat
+- a module action
+- a shell entrypoint
+
+### 2. Automation-triggered entry
+
+A validated domain event matches an automation route and the AI runtime decides
+to:
+
+- run a workflow
+- resume a workflow
+
+This decision is owned by the AI side, not by the substrate emitter.
+
+### 3. Internal orchestration entry
+
+A workflow or workflow pack routes into another workflow through:
+
+- pack graphs
+- journeys
+- explicit orchestration
+
+## The Three Workflow Layers
+
+### Workflow-local execution
+
+Owned by the workflow's own files and the engine adapter.
+
+Examples:
+
+- agent roster
+- prompts
+- handoffs
+- local tools
+- UI pauses
+
+### Workflow graph execution
+
+Owned by compiled graph inputs such as:
+
+- `platform/workflows/{name}/_pack/workflow_graph.json`
 - `platform/workflows/_pack/workflow_graph.json`
 
-Loader:
+These govern MFJ and journey-level sequencing.
 
-- `mozaiksai/core/workflow/workflow_manager.py`
+### Automation routing into workflows
 
----
+Owned by the automation boundary.
 
-## App-Level AI Bootstrap
+This is where a domain event becomes:
 
-Workflow selection and chat boot are now split cleanly:
+- `workflow.run`
+- `workflow.resume`
 
-- app-level AI bootstrap: `platform/config/ai.json`
-- workflow-local execution startup: `orchestrator.yaml`
+The workflow runtime executes the resulting route. It does not own the policy
+decision that selected the route.
 
-### `platform/config/ai.json`
+## What Workflows Should Own
 
-Owns:
+Workflows should own:
 
-- `engine.framework`
-- `chat.startup_mode`
-- `workflows.entry_point`
+- reasoning
+- contextual tool use
+- structured human checkpoints
+- orchestration
+- artifact generation
+- conversational guidance
 
-### `orchestrator.yaml`
+## What Workflows Should Not Own By Default
 
-Owns workflow-local execution settings such as:
+Workflows should not be the default home for:
 
-- `workflow_name`
-- `max_turns`
-- `startup_mode` (`AgentDriven`, `UserDriven`, `BackendOnly`)
-- `initial_message`
-- `initial_agent`
+- basic CRUD
+- list and detail screens
+- deterministic form saves
+- navigation declarations
+- module registration
+- direct domain event naming
 
-These are different concepts and should not be conflated.
+If a capability can be expressed as an action and a view, start there first.
 
----
+## Artifacts as the Bridge
 
-## Entry Point Resolution
+Artifacts are the main bridge between workflow execution and durable app
+surfaces.
 
-Each app may designate at most one default workflow in
-`platform/config/ai.json` under `workflows.entry_point`.
+Typical path:
 
-The backend projects that into `/api/workflows` as `entry_point: true` for the
-matching workflow.
-
-Frontend resolution chain:
-
-1. explicit workflow
-2. backend-projected entry point
-3. singleton workflow auto-select
-4. null
-
-This is frontend boot metadata only.
-It does not affect runtime orchestration semantics like MFJ or universal routing.
-
----
-
-## Three Execution Modes
-
-### Mode 1: AI Workflow
-
-- full workflow execution
-- uses orchestration runtime
-- usually uses WebSocket stream
-
-### Mode 2: Triggered Action
-
-- bounded operation or mini-run
-- may or may not use the full workflow runtime
-- may use HTTP only or HTTP + stream
-
-### Mode 3: Plain App
-
-- module/page interaction without workflow execution
-- typically uses substrate/module APIs
-
-Artifacts bridge these modes.
-
----
-
-## AG-UI Boundary
-
-AG-UI, when used, is a protocol concern for frontend/workflow stream
-interoperability.
-
-It is not the place to model:
-
-- subscriptions
-- settings
-- notifications
-- app shell config
-- business/commercial policy
-
-Those remain runtime or substrate concerns.
-
----
-
-## Artifact Bridge
-
-Artifacts are the shared contract between AI and non-AI surfaces.
-
-Typical lifecycle:
-
-1. workflow creates or updates artifact
+1. workflow creates or updates an artifact
 2. artifact is persisted
-3. module/page reads artifact
-4. triggered action or follow-up workflow mutates artifact
-5. UI re-renders from persisted state
+3. a module or view renders the artifact
+4. a later action or workflow updates it
 
----
+This lets workflows and the app substrate collaborate without collapsing into
+one abstraction.
 
-## Guardrails
+## Universal Orchestrator's Role
 
-1. Do not treat workflows as the whole app.
-2. Do not treat app-level AI config as workflow-local execution config.
-3. Do not reimplement AG2-native semantics in core without a proven gap.
-4. Do not put product-specific builder meaning into the runtime just because the
-   builder is the current hard use case.
+`UniversalOrchestrator` should stay coarse.
 
----
+It should execute normalized workflow routes such as:
+
+- run this workflow
+- resume this workflow
+- transfer between workflows
+
+It should not become:
+
+- the substrate event broker
+- the CRUD layer
+- the builder's entire control plane
+
+An automation router or equivalent policy layer should sit in front of it for
+domain-event-driven triggers.
+
+## `_pack/workflow_graph.json`
+
+The graph files may evolve in how they are produced, but their role stays the
+same:
+
+- they are compiled graph inputs
+- they are not prose logic
+- they are not the place where app domain policy lives
 
 ## Cross References
 
-- [core-product-app-bundle-boundary.md](core-product-app-bundle-boundary.md)
+- [workflow-authoring-contracts.md](workflow-authoring-contracts.md)
+- [declarative-ag2-mapping.md](declarative-ag2-mapping.md)
 - [event-system-architecture.md](event-system-architecture.md)
-- [process-and-event-map.md](process-and-event-map.md)
-- [app-bundle-declaratives.md](app-bundle-declaratives.md)
-

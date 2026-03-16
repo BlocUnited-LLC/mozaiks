@@ -172,13 +172,23 @@
   }
 
   /* Full width panels on mobile */
-  .artifact-panel,
+  .artifact-panel:not(.artifact-panel-mobile),
   .side-panel {
     width: 100%;
     max-width: 100%;
     position: fixed;
     inset: 0;
     z-index: 50;
+  }
+
+  /* Embedded artifact panels inside the mobile bottom drawer must stay in-flow. */
+  .artifact-panel-mobile {
+    position: relative;
+    inset: auto;
+    z-index: auto;
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
   }
 }
 
@@ -241,6 +251,11 @@
   background: rgba(148, 163, 184, 0.4);
   border-radius: 2px;
   margin: 12px auto 8px;
+}
+
+/* Floating widget anchor with safe-area support (iOS notch/home indicator). */
+.widget-safe-bottom {
+  bottom: max(1rem, calc(env(safe-area-inset-bottom, 0px) + 1rem));
 }
 
 /* ==========================================================================

@@ -17,7 +17,7 @@
  * </ChatUIProvider>
  * ```
  */
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useChatUI } from '../context/ChatUIContext';
 import PersistentChatWidget from '../components/chat/PersistentChatWidget';
@@ -34,7 +34,9 @@ const GlobalChatWidgetWrapper = () => {
   const location = useLocation();
   const {
     isInWidgetMode,
+    setIsInWidgetMode,
     isWidgetVisible,
+    setIsWidgetVisible,
     activeChatId,
     activeWorkflowName,
     conversationMode,
@@ -46,6 +48,19 @@ const GlobalChatWidgetWrapper = () => {
     pathSegments.length === 0 ||
     pathSegments[0] === 'chat' ||
     (pathSegments[0] === 'app' && pathSegments.length >= 3); // /app/:appId/:workflow pattern
+
+  // Ensure widget mode is active on non-chat routes.
+  // This keeps the persistent widget available across module/admin/discovery pages
+  // without requiring each page to call useWidgetMode().
+  useEffect(() => {
+    if (isPrimaryChatRoute) return;
+    if (!isInWidgetMode) {
+      setIsInWidgetMode(true);
+    }
+    if (!isWidgetVisible) {
+      setIsWidgetVisible(true);
+    }
+  }, [isPrimaryChatRoute, isInWidgetMode, isWidgetVisible, setIsInWidgetMode, setIsWidgetVisible]);
 
   // Don't render anything on primary chat routes
   if (isPrimaryChatRoute) {

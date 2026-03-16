@@ -56,7 +56,7 @@ const Header = ({
   onNotificationClick = () => {},
   onAction = () => {},
 }) => {
-  const { pages, headerPages } = useNavigation();
+  const { pages, headerPages, headerControls } = useNavigation();
   const handleNavigationItem = useNavigationActions();
   // Resolve header config from theme with defaults
   const headerConfig = {
@@ -184,28 +184,107 @@ const Header = ({
     );
   };
 
-  // --- Discover auto-wiring: collect navigable pages from navigation.json ---
+  const normalizePageToken = (value) => (
+    typeof value === 'string' ? value.trim().toLowerCase() : ''
+  );
+  const pageGroupToken = (page) => (
+    normalizePageToken(
+      page?.group
+      || page?.surface
+      || page?.meta?.group
+      || page?.meta?.surface
+    )
+  );
+  const isDiscoverAssignedPage = (page) => {
+    if (!page) return false;
+    if (page.discover === true || page?.meta?.discover === true) return true;
+    const group = pageGroupToken(page);
+    return group === 'discover' || group === 'discovery';
+  };
+
+  // --- Discover auto-wiring: only pages assigned to discovery when present. ---
   const discoverItems = React.useMemo(() => {
-    return (pages || [])
-      .filter((p) => p && (p.path || p.href || p.trigger))
+    const routablePages = (pages || []).filter((p) => p && (p.path || p.href || p.trigger));
+    const assignedPages = routablePages.filter(isDiscoverAssignedPage);
+    const effectivePages = assignedPages.length > 0
+      ? assignedPages
+      : routablePages;
+
+    return effectivePages
       .map((p, i) => ({
-        id:      p.id || p.path || `page-${i}`,
-        label:   p.label || p.title || p.id || p.path,
-        path:    p.path || null,
-        href:    p.href || null,
+        id: p.id || p.path || `page-${i}`,
+        label: p.label || p.title || p.id || p.path,
+        path: p.path || null,
+        href: p.href || null,
         trigger: p.trigger || null,
-        icon:    p.icon || null,
-        order:   p.order ?? i,
+        icon: p.icon || null,
+        order: p.order ?? i,
       }))
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   }, [pages]);
 
+  // Header controls can be declared in navigation_config.json.
+  // Known semantic controls map to built-in UI: UserProfile, Notifications, Discover.
+  const PROFILE_CONTROL_ALIASES = ['userprofile', 'user-profile', 'user_profile', 'profile'];
+  const NOTIFICATION_CONTROL_ALIASES = ['notifications', 'notification'];
+  const DISCOVER_CONTROL_ALIASES = ['discover', 'discovery'];
+
+  const normalizeControlToken = (value) => (
+    typeof value === 'string' ? value.trim().toLowerCase() : ''
+  );
+  const controlTokens = (control) => (
+    [control?.id, control?.type, control?.action, control?.label]
+      .map(normalizeControlToken)
+      .filter(Boolean)
+  );
+  const controlMatches = (control, aliases) => {
+    const aliasSet = new Set((aliases || []).map((a) => normalizeControlToken(a)));
+    return controlTokens(control).some((token) => aliasSet.has(token));
+  };
+
+  const visibleHeaderControls = React.useMemo(() => (
+    Array.isArray(headerControls)
+      ? headerControls.filter((control) => control && control.visible !== false)
+      : []
+  ), [headerControls]);
+
+  const hasDeclaredHeaderControls = visibleHeaderControls.length > 0;
+  const hasDeclaredControl = (aliases) => {
+    if (!hasDeclaredHeaderControls) return true;
+    return visibleHeaderControls.some((control) => controlMatches(control, aliases));
+  };
+
+  const showProfileControl = showProfile && hasDeclaredControl(PROFILE_CONTROL_ALIASES);
+  const showNotificationsControl = showNotifications && notificationIcon && hasDeclaredControl(NOTIFICATION_CONTROL_ALIASES);
+  const showDiscoverControl = hasDeclaredControl(DISCOVER_CONTROL_ALIASES);
+  const discoverControl = React.useMemo(() => (
+    visibleHeaderControls.find((control) => controlMatches(control, DISCOVER_CONTROL_ALIASES)) || null
+  ), [visibleHeaderControls]);
+  const discoverHasDirectTarget = Boolean(
+    discoverControl && (discoverControl.path || discoverControl.href || discoverControl.trigger)
+  );
+  const discoverSingleItem = discoverItems.length === 1 ? discoverItems[0] : null;
+  const discoverUsesDropdown = discoverItems.length > 1;
+
   // --- Unified responsive action buttons ---
   const handleActionClick = (action) => {
-    const effectiveItems = action.id === 'discover' && discoverItems.length > 0
-      ? discoverItems
-      : action.items;
-    if (Array.isArray(effectiveItems) && effectiveItems.length > 0) {
+    if (action.id === 'discover') {
+      if (discoverUsesDropdown) {
+        setOpenActionMenuId((prev) => (prev === action.id ? null : action.id));
+        return;
+      }
+      if (discoverSingleItem) {
+        handleNavigationItem(discoverSingleItem);
+        return;
+      }
+      if (discoverHasDirectTarget) {
+        handleNavigationItem(discoverControl);
+        return;
+      }
+    }
+
+    const effectiveItems = Array.isArray(action.items) ? action.items : [];
+    if (effectiveItems.length > 0) {
       setOpenActionMenuId((prev) => (prev === action.id ? null : action.id));
       return;
     }
@@ -214,17 +293,61 @@ const Header = ({
 
   const handleActionItemClick = (action, item) => {
     setOpenActionMenuId(null);
-    if (action.id === 'discover' && item && (item.path || item.trigger)) {
+    if (action.id === 'discover' && item && (item.path || item.href || item.trigger)) {
       handleNavigationItem(item);
       return;
     }
     onAction(item?.id || action.id, item || action);
   };
 
+  const handleHeaderControlClick = (control) => {
+    if (!control) return;
+    const actionId = control.action || control.id;
+
+    if (actionId === 'open-settings-overlay') {
+      setIsSettingsOpen(true);
+      return;
+    }
+
+    if (control.path || control.href || control.trigger) {
+      handleNavigationItem(control);
+      return;
+    }
+
+    onAction(actionId, control);
+  };
+
+  const HeaderControls = () => {
+    const controls = hasDeclaredHeaderControls
+      ? visibleHeaderControls.filter((control) => (
+          !controlMatches(control, PROFILE_CONTROL_ALIASES)
+          && !controlMatches(control, NOTIFICATION_CONTROL_ALIASES)
+          && !controlMatches(control, DISCOVER_CONTROL_ALIASES)
+        ))
+      : [];
+
+    return controls.map((control) => (
+      <button
+        key={control.id || control.label}
+        type="button"
+        onClick={() => handleHeaderControlClick(control)}
+        className="p-1.5 rounded-lg hover:bg-white/10 transition-colors flex items-center justify-center text-[rgba(var(--color-primary-light-rgb),0.6)] hover:text-[var(--color-primary-light)]"
+        title={control.label || control.id}
+      >
+        {control.icon ? (
+          <ActionIcon icon={control.icon} className="w-5 h-5" />
+        ) : (
+          <span className="text-xs font-semibold oxanium">{control.label || control.id}</span>
+        )}
+      </button>
+    ));
+  };
+
   const ActionButtons = () => {
-    const actions = headerConfig.actions || DEFAULT_HEADER_CONFIG.actions || [];
+    const actions = (headerConfig.actions || DEFAULT_HEADER_CONFIG.actions || [])
+      .filter((action) => action.id !== 'discover' || showDiscoverControl);
     return actions.filter(a => a.visible !== false).map(action => {
-      const effectiveItems = action.id === 'discover' && discoverItems.length > 0
+      const effectiveItems = action.id === 'discover' && discoverUsesDropdown
         ? discoverItems
         : (action.items || []);
       const isOpen = openActionMenuId === action.id && effectiveItems.length > 0;
@@ -307,7 +430,7 @@ const Header = ({
     <React.Fragment>
     <SettingsOverlay isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     <header ref={headerRef} className={`
-      fixed top-0 left-0 right-0 z-50 transition-all duration-300
+      fixed top-0 left-0 right-0 z-50 pt-[env(safe-area-inset-top)] transition-all duration-300
       ${isScrolled ? 'backdrop-blur-md bg-black/25' : 'backdrop-blur-md bg-black/15'}
       border-b border-[rgba(var(--color-primary-rgb),0.1)]
     `}>
@@ -335,7 +458,7 @@ const Header = ({
         {/* RIGHT: Commander, notifications, actions */}
         <div className="flex items-center gap-2 md:gap-3">
           {/* Commander (conditionally rendered) */}
-          {showProfile && (
+          {showProfileControl && (
             <div className="relative" ref={dropdownRef}>
               <button onClick={toggleProfileDropdown} className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-white/10 transition-colors" title="Command Profile">
                 <div className="relative">
@@ -392,7 +515,7 @@ const Header = ({
           )}
 
           {/* Notifications (conditionally rendered — requires ui.notifications.icon in theme_config.json) */}
-          {showNotifications && notificationIcon && (
+          {showNotificationsControl && (
             <div className="relative">
               <button onClick={toggleNotificationDropdown} className="relative p-1.5 rounded-lg hover:bg-white/10 transition-colors flex items-center justify-center" title="Mission Alerts">
                 <ActionIcon icon={notificationIcon} className="w-6 h-6 text-[var(--color-primary-light)]" />
@@ -411,17 +534,8 @@ const Header = ({
             </div>
           )}
 
-          {/* Settings gear (runtime control — always visible) */}
-          <button
-            onClick={() => setIsSettingsOpen(true)}
-            className="p-1.5 rounded-lg hover:bg-white/10 transition-colors flex items-center justify-center text-[rgba(var(--color-primary-light-rgb),0.6)] hover:text-[var(--color-primary-light)]"
-            title="Settings"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.43l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </button>
+          {/* Additional custom header controls from navigation_config.json */}
+          <HeaderControls />
 
           {/* Config-driven action buttons */}
           <ActionButtons />

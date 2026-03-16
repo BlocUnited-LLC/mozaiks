@@ -25,7 +25,7 @@ classifiers = [
 keywords = ["mozaiks", "ag2", "autogen", "ai", "agents", "workflows", "multi-tenant", "runtime"]
 
 dependencies = [
-    "ag2[openai,lmm]",
+    "ag2[a2a,openai,lmm]",
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.20.0",
     "websockets>=11.0",
@@ -54,6 +54,9 @@ dev = [
     "pytest-cov>=4.1.0",
     "ruff>=0.1.0",
     "watchdog",
+]
+broker = [
+    "faststream[nats]>=0.5.35",
 ]
 tracing = [
     "opentelemetry-sdk>=1.27.0",
@@ -95,6 +98,7 @@ packages = [
     "mozaiks.core",
     "mozaiks.core.artifacts",
     "mozaiks.core.auth",
+    "mozaiks.core.automation",
     "mozaiks.core.capabilities",
     "mozaiks.core.data",
     "mozaiks.core.data.persistence",
@@ -120,6 +124,7 @@ packages = [
     "mozaiksai.core.adapters",
     "mozaiksai.core.artifacts",
     "mozaiksai.core.auth",
+    "mozaiksai.core.automation",
     "mozaiksai.core.capabilities",
     "mozaiksai.core.data",
     "mozaiksai.core.data.persistence",

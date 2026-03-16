@@ -1,192 +1,147 @@
 # Process and Event Map
 
-**Status:** Current architecture reference  
-**Last updated:** 2026-03-12
+This document maps the main runtime processes and how events move between them.
 
----
-
-## Purpose
-
-This document maps the live runtime processes, transports, and event flows in
-the current repo.
-
-It answers:
-
-- what processes are actually running
-- what transports connect them
-- where the event channels originate and terminate
-
----
+It is the operational view of the architecture.
 
 ## Runtime Processes
 
 ### Process 1: Frontend shell
 
-- Runtime: `chat-ui/src/`
-- Primary state owners:
-  - `chat-ui/src/state/uiSurfaceReducer.js`
-  - `chat-ui/src/providers/NavigationProvider.jsx`
-- Consumes:
-  - workflow/runtime stream events
-  - substrate websocket push events
+Owns:
 
-### Process 2: AI runtime server
+- shell state
+- navigation and layout
+- module surfaces
+- workflow transcript and artifact rendering
 
-- Primary entrypoint: `shared_app.py`
-- Key runtime paths:
-  - `mozaiksai/core/transport/`
-  - `mozaiksai/core/events/`
-  - `mozaiksai/core/workflow/`
-  - `mozaiksai/core/adapters/`
-- Owns:
-  - workflow execution
-  - workflow transport
-  - runtime event dispatch
-  - workflow/session APIs
+Consumes:
 
-### Process 3: Substrate/core server components
+- workflow runtime stream
+- shell push events
+- HTTP APIs from substrate and AI runtime
 
-- Primary paths:
-  - `mozaikscore/core/director.py`
-  - `mozaikscore/core/module_manager.py`
-  - `mozaikscore/core/event_bus.py`
-  - `mozaikscore/core/websocket_event_bridge.py`
-- Owns:
-  - module routes
-  - settings/notifications/subscriptions
-  - substrate event bus and websocket push
+### Process 2: App substrate
 
-### Process 4: Persistence layer
+Owns:
 
-- Workflow/chat persistence:
-  - `mozaiksai/core/data/persistence/`
-- Substrate config/state/data:
-  - `mozaikscore/core/database.py`
-  - manager-specific persistence paths
+- entities, views, actions, modules, policies
+- shared platform services such as settings and notifications
+- post-commit domain event emission
 
-### Process 5: External integrations
+Current implementation zone:
 
-- third-party APIs called by tools, module handlers, or app routes
+- `mozaikscore/`
 
----
+### Process 3: Broker or ingress boundary
+
+Owns transport for domain facts between the substrate and AI runtime.
+
+Target:
+
+- NATS with FastStream
+
+Transitional option:
+
+- HTTP ingress to the AI runtime
+
+### Process 4: AI runtime
+
+Owns:
+
+- workflow execution
+- automation route matching
+- runtime control plane
+- artifacts
+- runtime stream delivery
+
+Current implementation zone:
+
+- `mozaiksai/`
+
+### Process 5: Persistence and external integrations
+
+Owns:
+
+- durable workflow state
+- app data persistence
+- third-party systems
 
 ## Transport Map
 
-| Transport | Direction | Typical payloads |
-|---|---|---|
-| WebSocket | Frontend <-> AI runtime | workflow stream events, UI tool events, replay-safe runtime envelopes |
-| HTTP | Frontend <-> AI runtime | chat/session/workflow APIs, input submission, component actions |
-| HTTP | Frontend <-> mozaikscore | navigation/theme/module/settings/subscription APIs |
-| WebSocket push | mozaikscore -> frontend | notifications, settings, subscription, module-level substrate events |
-| DB/persistence | runtime/substrate -> persistence | chat sessions, event history, artifacts, module/state data |
-| Outbound HTTP | runtime/tools -> external services | tool/service integrations |
+| Transport | Direction | Purpose |
+| --- | --- | --- |
+| HTTP | frontend to substrate | app and module APIs |
+| HTTP | frontend to AI runtime | chat and workflow APIs |
+| WebSocket | frontend to AI runtime | workflow runtime stream |
+| WebSocket push | substrate to frontend | shell push events |
+| NATS | substrate to AI runtime and subscribers | domain event mesh |
+| HTTP ingress | substrate to AI runtime | transitional domain event transport |
 
----
+## Flow A: Plain App Interaction
 
-## Runtime Entry Surfaces
+```text
+user
+  -> module or view
+  -> substrate action
+  -> database commit
+  -> response to frontend
+```
 
-### AI runtime
+This path may end here if no automation route applies.
 
-Representative endpoints in `shared_app.py`:
+## Flow B: Domain Event Triggers Automation
 
-- `POST /api/chats/{app_id}/{workflow_name}/start`
-- `GET /api/chats/{app_id}/{workflow_name}`
-- `GET /api/sessions/list/{app_id}/{user_id}`
-- `GET /api/sessions/recent/{app_id}/{user_id}`
-- `POST /chat/{app_id}/{chat_id}/{user_id}/input`
-- `POST /chat/{app_id}/{chat_id}/component_action`
-- `GET /api/workflows`
-- `GET /api/workflows/config`
-- `GET /api/workflows/{workflow_name}/transport`
-- `GET /api/workflows/{workflow_name}/tools`
-- `GET /api/workflows/{workflow_name}/ui-tools`
-- `WS /ws/{workflow_name}/{app_id}/{chat_id}/{user_id}`
+```text
+user or integration
+  -> substrate mutation
+  -> commit
+  -> domain event emitted
+  -> broker or HTTP ingress
+  -> automation route matched
+  -> workflow run or resume
+  -> runtime stream and artifacts
+```
 
-### Substrate/core
+This is the key hybrid path.
 
-Representative endpoints in `mozaikscore/core/director.py`:
+## Flow C: Direct Workflow Interaction
 
-- `/api/navigation-config`
-- `/api/navigation`
-- `/api/theme-config`
-- `/api/settings-config`
-- module and subscription-related substrate routes
+```text
+user
+  -> workflow entrypoint
+  -> AI runtime
+  -> engine execution
+  -> runtime stream
+  -> optional artifacts or actions
+```
 
----
+This path does not require a substrate event to exist first.
 
-## Event Categories
+## Flow D: Artifact Returns to App Surface
 
-### A. Workflow/runtime stream events
+```text
+workflow
+  -> artifact created or updated
+  -> persistence
+  -> module or view reads artifact
+  -> user continues through app substrate
+```
 
-Examples:
-
-- `process.*`
-- `task.*`
-- `chat.*`
-- `artifact.*`
-- `ui.tool.*`
-- `transport.*`
-- `runtime.*`
-
-Flow:
-
-1. workflow execution emits normalized runtime facts
-2. dispatcher routes to listeners
-3. transport sends replay-safe frontend envelopes
-
-### B. Substrate/business events
-
-Examples in current code:
-
-- `subscription_updated`
-- `notification_created`
-- `settings_updated`
-- `module_executed`
-- `theme_changed`
-
-Flow:
-
-1. mozaikscore manager publishes to `event_bus`
-2. in-process subscribers react
-3. websocket bridge optionally pushes to users
-
-### C. Cross-cutting telemetry/usage signals
-
-Examples:
-
-- usage summary events
-- observability/business log events
-
-These may flow through runtime dispatch, logging, or ingest paths depending on
-the subsystem.
-
----
-
-## Mode Usage Across Processes
-
-| Mode | Uses AI runtime | Uses workflow WebSocket | Uses substrate/module APIs |
-|---|---|---|---|
-| Mode 1: AI Workflow | Yes | Yes | Often |
-| Mode 2: Triggered Action | Sometimes | Sometimes | Often |
-| Mode 3: Plain App | No | No | Yes |
-
-Artifacts and module pages bridge these modes.
-
----
+Artifacts are one of the clean bridges between the two halves of the system.
 
 ## Guardrails
 
-1. Do not equate the frontend shell with the workflow runtime.
-2. Do not equate mozaikscore event bus traffic with workflow stream traffic.
-3. Do not document retired endpoints or old repo paths as current.
-4. Keep workflow-local execution config separate from app-level shell/AI config.
+Do not:
 
----
+- use the workflow stream as the substrate event mesh
+- let the substrate choose workflow names directly
+- assume every substrate mutation must open a chat
+
+The architecture only stays modular if those paths remain optional and explicit.
 
 ## Cross References
 
-- [workflow-architecture.md](workflow-architecture.md)
 - [event-system-architecture.md](event-system-architecture.md)
-- [event-taxonomy.md](event-taxonomy.md)
-- [app-bundle-declaratives.md](app-bundle-declaratives.md)
-
+- [workflow-architecture.md](workflow-architecture.md)
+- [ui-surface-and-layout-architecture.md](ui-surface-and-layout-architecture.md)

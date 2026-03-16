@@ -123,6 +123,8 @@ if (-not $KeepLogs) {
 # MongoDB collections cleanup (clears documents only, preserves collections/indexes)
 if (-not $KeepDB) {
     Write-Host "`n🗄️  Clearing MongoDB collections (documents only)..." -ForegroundColor Yellow
+    $mongoStartupAttempted = $false
+    $mongoCleanupExitCode = $null
     
     # Helper function to check if MongoDB is reachable
     function Test-MongoConnection {
@@ -152,10 +154,28 @@ except:
         $checkScript | & $pythonCmd - 2>$null
         return $LASTEXITCODE -eq 0
     }
+
+    function Wait-ForMongoConnection {
+        param(
+            [int]$TimeoutSeconds = 20,
+            [int]$PollIntervalSeconds = 2
+        )
+
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        while ((Get-Date) -lt $deadline) {
+            if (Test-MongoConnection) {
+                return $true
+            }
+            Start-Sleep -Seconds $PollIntervalSeconds
+        }
+
+        return Test-MongoConnection
+    }
     
     # Try to ensure MongoDB is running
     $mongoRunning = Test-MongoConnection
     if (-not $mongoRunning) {
+        $mongoStartupAttempted = $true
         Write-Host "   MongoDB not reachable, attempting to start..." -ForegroundColor Yellow
         
         # Try 1: Docker container named 'mongodb' or 'mongo'
@@ -167,13 +187,32 @@ except:
                 Write-Host "   Starting existing Docker container '$existingContainer'..." -ForegroundColor Gray
                 $startOut = & docker start $existingContainer 2>&1
                 $dockerStartExit = $LASTEXITCODE
-                Start-Sleep -Seconds 3
-                $mongoRunning = Test-MongoConnection
+                $mongoRunning = Wait-ForMongoConnection
                 if (-not $mongoRunning -and $dockerStartExit -ne 0) {
                     Write-Host "   Docker start error: $startOut" -ForegroundColor Gray
                 }
             }
             
+            # Try 1b: docker compose (handles image-missing after Full nuke)
+            if (-not $mongoRunning) {
+                 $composeFile = Join-Path -Path $RepoRoot -ChildPath "infra/compose/docker-compose.yml"
+                if (Test-Path $composeFile) {
+                    Write-Host "   Starting MongoDB via docker compose..." -ForegroundColor Gray
+                    $composeOut = & docker compose -f $composeFile up -d mongo 2>&1
+                    $composeExit = $LASTEXITCODE
+                    $mongoRunning = Wait-ForMongoConnection -TimeoutSeconds 60
+                    if (-not $mongoRunning) {
+                        if ($composeOut) {
+                            Write-Host "   Docker compose output:" -ForegroundColor Gray
+                            Write-Host "      $($composeOut -join [Environment]::NewLine + '      ')" -ForegroundColor Gray
+                        }
+                        if ($composeExit -ne 0) {
+                            Write-Host "   Docker compose exited with code $composeExit" -ForegroundColor Gray
+                        }
+                    }
+                }
+            }
+
             # If still not running, optionally create a standalone container.
             # Disabled by default to avoid pulling extra images/creating artifacts
             # during routine cleanses.
@@ -181,8 +220,7 @@ except:
                 Write-Host "   Creating standalone MongoDB Docker container (fallback enabled)..." -ForegroundColor Gray
                 $runOut = & docker run -d --name mongodb -p 27017:27017 mongo:latest 2>&1
                 $dockerRunExit = $LASTEXITCODE
-                Start-Sleep -Seconds 5
-                $mongoRunning = Test-MongoConnection
+                $mongoRunning = Wait-ForMongoConnection -TimeoutSeconds 60
                 if (-not $mongoRunning -and $dockerRunExit -ne 0) {
                     Write-Host "   Docker run error: $runOut" -ForegroundColor Gray
                 }
@@ -199,19 +237,11 @@ except:
                 if ($mongoService.Status -ne 'Running') {
                     Write-Host "   Starting MongoDB Windows service..." -ForegroundColor Gray
                     Start-Service -Name "MongoDB" -ErrorAction SilentlyContinue
-                    Start-Sleep -Seconds 3
-                    $mongoRunning = Test-MongoConnection
+                    $mongoRunning = Wait-ForMongoConnection
                 }
             }
         }
         
-        if ($mongoRunning) {
-            Write-Host "   ✅ MongoDB started successfully" -ForegroundColor Green
-        } else {
-            Write-Host "   ⚠️  Could not start MongoDB automatically" -ForegroundColor Yellow
-            Write-Host "      If you use MozaiksAI docker compose, start it with: docker compose -f infra/compose/docker-compose.yml up -d mongo" -ForegroundColor Gray
-            Write-Host "      Or run standalone Mongo: docker run -d --name mongodb -p 27017:27017 mongo:latest" -ForegroundColor Gray
-        }
     }
     
     # Now attempt the cleanup - ONLY MozaiksAI database
@@ -221,10 +251,11 @@ except:
         $pythonCmd = if (Test-Path ".venv\Scripts\python.exe") { ".venv\Scripts\python.exe" } else { "python" }
         $allowNonLocal = $AllowNonLocalMongo -or ($env:CLEAR_COLLECTIONS_ALLOW_NONLOCAL -and $env:CLEAR_COLLECTIONS_ALLOW_NONLOCAL.ToLower() -eq 'true')
         
-        $args = @($clearScript, '--action', 'delete', '--yes', '--database', $DatabaseName)
-        if ($allowNonLocal) { $args += '--allow-nonlocal' }
-        $output = & $pythonCmd @args 2>&1
-        if ($LASTEXITCODE -eq 0) {
+        $clearArgs = @($clearScript, '--action', 'delete', '--yes', '--database', $DatabaseName)
+        if ($allowNonLocal) { $clearArgs += '--allow-nonlocal' }
+        $output = & $pythonCmd @clearArgs 2>&1
+        $mongoCleanupExitCode = $LASTEXITCODE
+        if ($mongoCleanupExitCode -eq 0) {
             Write-Host "   ✅ Cleared MongoDB documents in '$DatabaseName' (collections/indexes preserved)" -ForegroundColor Green
         } else {
             Write-Host "   ⚠️  Skipped/failed Mongo cleanup:" -ForegroundColor Yellow
@@ -232,6 +263,17 @@ except:
         }
     } else {
         Write-Host "   ⚠️  clear_collections.py not found, skipping collection cleanup" -ForegroundColor Gray
+    }
+
+    if ($mongoStartupAttempted) {
+        $mongoRunning = Test-MongoConnection
+        if ($mongoRunning -or $mongoCleanupExitCode -eq 0) {
+            Write-Host "   ✅ MongoDB started successfully" -ForegroundColor Green
+        } else {
+            Write-Host "   ⚠️  Could not start MongoDB automatically" -ForegroundColor Yellow
+            Write-Host "      If you use MozaiksAI docker compose, start it with: docker compose -f infra/compose/docker-compose.yml up -d mongo" -ForegroundColor Gray
+            Write-Host "      Or run standalone Mongo: docker run -d --name mongodb -p 27017:27017 mongo:latest" -ForegroundColor Gray
+        }
     }
 } else {
     Write-Host "`n🗄️  Keeping MongoDB data (-KeepDB flag set)" -ForegroundColor Gray

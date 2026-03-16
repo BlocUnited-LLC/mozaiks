@@ -478,7 +478,7 @@ class WorkflowPackCoordinator:
         child_workflow_to_run = (
             spec_name
             if spawn_mode == "workflow"
-            else str(trigger.fan_out.generator_workflow or "").strip()
+            else str(trigger.fan_out.authoring_workflow or "").strip()
         )
         if not child_workflow_to_run:
             return None
@@ -487,8 +487,8 @@ class WorkflowPackCoordinator:
             return None
 
         child_chat_id = (
-            f"chat_gen_{spec_name}_{uuid.uuid4().hex[:8]}"
-            if spawn_mode == "generator_subrun"
+            f"chat_author_{spec_name}_{uuid.uuid4().hex[:8]}"
+            if spawn_mode == "workflow_authoring_subrun"
             else f"chat_{child_workflow_to_run}_{uuid.uuid4().hex[:8]}"
         )
 
@@ -499,12 +499,12 @@ class WorkflowPackCoordinator:
 
         initial_message = child_spec.get("initial_message")
         if not isinstance(initial_message, str) or not initial_message.strip():
-            if spawn_mode == "generator_subrun":
+            if spawn_mode == "workflow_authoring_subrun":
                 description = child_spec.get("description")
                 initial_message = (
-                    f"Generate workflow '{spec_name}'. Description: {description.strip()}"
+                    f"Author workflow '{spec_name}'. Description: {description.strip()}"
                     if isinstance(description, str) and description.strip()
-                    else f"Generate workflow '{spec_name}'."
+                    else f"Author workflow '{spec_name}'."
                 )
             else:
                 initial_message = None
@@ -562,7 +562,7 @@ class WorkflowPackCoordinator:
             "task_key": task_key,
             "chat_id": child_chat_id,
             "workflow_name": child_workflow_to_run,
-            "generated_workflow_name": spec_name if spawn_mode == "generator_subrun" else None,
+            "authored_workflow_name": spec_name if spawn_mode == "workflow_authoring_subrun" else None,
             "app_id": active.app_id,
             "user_id": active.user_id,
         }
@@ -582,7 +582,7 @@ class WorkflowPackCoordinator:
             "mfj_cycle": active.mfj_cycle,
             "is_child_workflow": True,
             "spawn_mode": trigger.fan_out.spawn_mode,
-            "generated_workflow_name": child_spec.get("name"),
+            "authored_workflow_name": child_spec.get("name"),
             "mfj_trigger_output": active.structured_data_snapshot,
             "mfj_child_spec": child_spec,
         }

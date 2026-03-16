@@ -19,7 +19,8 @@
       "Bash(docker compose:*)",
       "Bash(curl:*)",
       "Bash(cmd /c \"taskkill /F /PID 152796\")",
-      "Bash(python run_server.py:*)"
+      "Bash(python run_server.py:*)",
+      "Bash(cd:*)"
     ]
   }
 }

@@ -1,544 +1,263 @@
 # App Bundle Declaratives
 
-**Last updated:** 2026-03-12  
-**Status:** Current architecture reference  
-**Audience:** Core maintainers, generator authors, and app-bundle designers
+This document defines the declarative families that make up a Mozaiks app
+bundle.
 
----
+The app bundle is the output of planning and generation. It is not the place
+where intent is still ambiguous.
 
-## Purpose
+The bundle should also be understood relative to the enterprise core:
 
-This document defines the declarative file families that Mozaiks Core should
-consume from an application bundle.
+- core provisions handle recurring SaaS infrastructure concerns
+- the bundle configures those provisions where needed
+- the bundle declares only the app-specific substrate, automation, workflows,
+  and thin stubs that remain
 
-The goal is to make app generation:
+## Core Thesis
 
-- structured
-- opinionated
-- scalable
-- not dependent on freeform code generation for every app concern
+Mozaiks should compile user intent into a structured bundle with six declarative
+families:
 
-This document exists because Mozaiks already has a strong workflow declarative
-story, but its non-workflow app model has been underspecified.
+1. app identity
+2. shell
+3. app substrate
+4. modules
+5. automation
+6. workflows
 
-If another doc is vague about how CRUD/basic app behavior should be represented,
-this doc wins.
+Each family answers a different question. Mixing them produces weak generators
+and blurry runtime boundaries.
 
----
+## Declarative Families
 
-## Thesis
+| Family | Purpose | Canonical target path |
+| --- | --- | --- |
+| App manifest | App identity and deployment metadata | `platform/app.json` |
+| Shell model | Navigation, theme, shell controls, discover | `platform/shell/*` |
+| App substrate model | Entities, views, actions, policies | `platform/data/*` |
+| Module model | Durable user-facing product areas | `platform/modules/*` |
+| Automation model | Domain events and event-to-effect routing | `platform/automations/*` |
+| Workflow model | AI reasoning and orchestration | `platform/workflows/*` |
 
-Mozaiks should not ask generators to "build an app" by directly improvising
-React components and backend logic as the primary target.
+## 1. App Manifest
 
-Mozaiks should ask generators to emit a **compiled app bundle** with typed,
-opinionated declaratives for:
+Owns:
 
-- app identity and deployment
-- AI/chat runtime behavior
-- shell behavior
-- module registration
-- data entities
-- CRUD views
-- actions and integrations
-- access policies
-- workflows
+- app identity
+- tenant and auth metadata
+- endpoint roots
+- deployment metadata
 
-Then the runtime and frontend shell consume those declaratives.
+Does not own:
 
-That is how Mozaiks scales beyond workflow demos.
+- shell structure
+- workflow entry logic
+- automation routing
 
----
+## 2. Shell Model
 
-## Before Files: The Missing Decomposition Step
+Owns:
 
-The app bundle is the output target.
+- landing behavior
+- navigation groups
+- semantic header controls
+- discover behavior
+- theme identity
 
-It is not the first thing the system should reason about.
+Does not own:
 
-Before generating any `platform/` files, Mozaiks should decompose user intent
-into typed app concerns.
+- entity schemas
+- module business logic
+- workflow definitions
 
-The intended sequence is:
+The shell exists to compose product surfaces, not to define the product model.
 
-```text
-User intent
-  -> Capability map
-  -> EntitySpec / ViewSpec / ActionSpec / ModuleSpec / WorkflowSpec / PolicySpec
-  -> Bundle plan
-  -> platform/ files
-```
-
-This matters because a request like:
-
-- `build me a marketplace`
-
-does not immediately tell the system:
-
-- which durable entities exist
-- which surfaces should be modules
-- which mutations should be actions
-- which experiences require workflows
-
-If Mozaiks skips this decomposition step, generation becomes shallow and
-inconsistent.
-
-See also:
+## 3. App Substrate Model
 
-- [App Creation Guide](app-creation-guide.md)
-- [Builder Execution Model](builder-execution-model.md)
-
----
-
-## The Bundle Families
-
-An app bundle should be thought of as seven declarative families.
-
-| Family | Purpose | Current path |
-|---|---|---|
-| App manifest | Deployment/platform identity | `platform/app.json` |
-| AI manifest | Engine + chat/workflow startup behavior | `platform/config/ai.json` |
-| Shell manifest | Landing spot + shell chrome + discover behavior | `platform/config/navigation_config.json` today |
-| Theme manifest | Visual identity | `platform/config/theme_config.json` |
-| Module registry | Durable app surfaces/pages | `platform/config/module_registry.json` |
-| App model | Entities, views, actions, policies | Not first-class yet |
-| Workflow model | AI workflows and orchestration graphs | `platform/workflows/**` |
-
-Important distinction:
-
-- The **workflow model** is only one part of the app bundle.
-- The **app model** must become first-class too.
-
-The practical classification rule is:
-
-- data -> entities
-- durable screens -> modules + views
-- deterministic mutations -> actions
-- role/plan access -> policies
-- conversational or orchestrated intelligence -> workflows
-
----
-
-## Canonical Layout
-
-This is the target bundle layout Mozaiks should consume.
-
-```text
-platform/
-├── app.json
-│
-├── config/
-│   ├── ai.json
-│   ├── navigation_config.json      # shell config today; should narrow to shell-only concerns
-│   ├── theme_config.json
-│   ├── module_registry.json
-│   ├── notifications_config.json
-│   ├── settings_config.json
-│   └── subscription_config.json
-│
-├── entities/
-│   └── *.json
-│
-├── views/
-│   └── *.json
-│
-├── actions/
-│   └── *.json
-│
-├── policies/
-│   └── *.json
-│
-├── modules/
-│   └── {module_name}/
-│       ├── module.json
-│       ├── handler.py
-│       └── ui/
-│           ├── index.js
-│           └── *.jsx
-│
-└── workflows/
-    ├── _pack/
-    │   └── workflow_graph.json
-    └── {workflow_name}/
-        ├── orchestrator.yaml
-        ├── agents.yaml
-        ├── handoffs.yaml
-        ├── context_variables.yaml
-        ├── structured_outputs.yaml
-        ├── tools.yaml
-        ├── ui_config.yaml
-        ├── hooks.yaml
-        ├── tools/
-        ├── ui/
-        └── _pack/
-            └── workflow_graph.json
-```
-
----
-
-## File Responsibilities
-
-### 1. `platform/app.json`
-
-This file is for deployment/platform identity only.
-
-It should own:
-
-- `appName`
-- `appId`
-- `apiUrl`
-- `wsUrl`
-- `platforms`
-- `auth`
-- `dev`
-
-It should not own:
-
-- workflow entry selection
-- chat startup mode
-- engine choice for workflow runtime
-- shell routing behavior beyond deployment identity
-
-Those belong in the AI or shell manifest.
-
-### 2. `platform/config/ai.json`
-
-This file is the AI runtime manifest.
+Owns the non-AI app contract.
 
-It should own:
+### Entities
 
-- `engine.framework`
-- chat boot defaults like `chat.startup_mode`
-- workflow startup defaults like `workflows.entry_point`
-- future AI-runtime options that are app-level rather than workflow-level
-
-Example:
-
-```json
-{
-  "engine": {
-    "framework": "ag2"
-  },
-  "chat": {
-    "startup_mode": "workflow"
-  },
-  "workflows": {
-    "entry_point": "GreenRoom"
-  }
-}
-```
-
-### 3. `platform/config/navigation_config.json`
-
-Conceptually, this is the **shell manifest**.
+Describe durable business objects and relationships.
 
-Today it is still named `navigation_config.json`. That is acceptable for now,
-but it should own only shell concerns:
+Examples:
 
-- `landing_spot`
-- discover/header/footer behavior
-- optional static non-module pages
+- `Lead`
+- `Booking`
+- `WriterRoom`
+- `EpisodeDraft`
 
-It should not be the canonical place where modules are declared.
+### Views
 
-Modules already have their own registry and should be derived into the shell.
-
-The long-term shape should be:
+Describe persistent ways to interact with entities.
 
-- shell config describes shell chrome and optional static pages
-- module registry describes module surfaces
-- the shell combines them
+Examples:
 
-### 4. `platform/config/theme_config.json`
+- list
+- detail
+- form
+- board
+- timeline
+- dashboard
 
-This is the visual identity manifest.
+### Actions
 
-It should own:
+Describe deterministic behavior.
 
-- identity
-- assets
-- colors
-- fonts
-- shell-level UI chrome styling
+Examples:
 
-It should not own app logic.
+- create booking
+- update deal stage
+- send invoice
+- approve submission
 
-### 5. `platform/config/module_registry.json`
+If a capability is deterministic and auditable, it should start here, not in a
+workflow.
 
-This is the canonical module registry.
+### Policies
 
-It should answer:
+Describe access and constraint rules.
 
-- what modules exist
-- whether they are enabled
-- what backend handler they use
+Examples:
 
-It should not duplicate shell routing concerns more than necessary.
+- role-based access
+- plan entitlements
+- tenant boundaries
+- approval rules
 
-### 6. `platform/entities/*.json`
+## 4. Module Model
 
-This is the missing declarative family Mozaiks needs for CRUD/basic app scale.
+Modules are durable product surfaces built from substrate primitives.
 
-Each entity file should define:
+A module may reference:
 
-- `name`
-- `display_name`
-- `fields`
-- `relations`
-- `validation`
-- `indexes`
-- `default_sort`
+- one or more views
+- one or more actions
+- optional workflow entrypoints
+- shell placement metadata
 
-Example concerns:
+Modules should not be the only place where business behavior is defined. They
+compose existing declaratives into a user-facing area.
 
-- `Customer`
-- `Order`
-- `Product`
-- `Project`
-- `Ticket`
+## 5. Automation Model
 
-This is the canonical app-data layer.
+This is the missing family that ties the app substrate to the AI runtime.
 
-### 7. `platform/views/*.json`
+It has two parts:
 
-Views define how entities are surfaced.
+### Event catalog
 
-They should represent:
+Declares the business facts the app emits or consumes.
 
-- list views
-- detail views
-- create forms
-- edit forms
-- filters
-- search
-- sort
-- tabs/sections
+Examples:
 
-Example view kinds:
+- `crm.lead.created`
+- `booking.request.approved`
+- `writers_room.brief.updated`
+- `settings.updated`
 
-- `entity_list`
-- `entity_detail`
-- `entity_create`
-- `entity_edit`
-- `dashboard`
-- `kanban`
-- `table`
+### Routes
 
-A generator should not default to inventing each page from scratch. It should
-compile to view specs first.
+Map domain events to automation effects.
 
-### 8. `platform/actions/*.json`
+Examples:
 
-Actions define executable operations.
+- run a workflow
+- resume a waiting workflow
+- create or update an artifact
+- notify a user
+- no-op
 
-This is how Mozaiks avoids forcing every operation into a full workflow.
+Important rule:
 
-Action kinds should include:
+- domain events are facts
+- routes are policy
+- workflow names appear in routes, not in emitted event types
 
-- `crud.create`
-- `crud.update`
-- `crud.delete`
-- `service.call`
-- `integration.sync`
-- `ai.action`
-- `workflow.start`
+## 6. Workflow Model
 
-This is important: not all AI belongs in `workflows/`.
+Workflows own:
 
-Some AI behavior is just a bounded operation:
-
-- summarize a ticket
-- score a lead
-- rewrite product copy
-- classify a message
-
-Those should be representable as declarative `ai.action` actions.
-
-### 9. `platform/policies/*.json`
-
-Policies define access and behavior constraints.
-
-They should cover:
-
-- visibility
-- editability
-- role access
-- subscription gates
-- field-level restrictions
-- action eligibility
-
-This lets generators stay opinionated and safe without burying rules in prompts.
-
-### 10. `platform/modules/{name}/module.json`
-
-Modules are durable product surfaces/pages.
-
-They should own:
-
-- route identity
-- page metadata
-- component entry point
-- relationship to views/actions
-
-Modules should be the persistent UX layer beyond chat.
-
-### 11. `platform/workflows/**`
-
-Workflows remain the canonical AI orchestration layer.
-
-They should own:
-
-- conversational/multi-agent logic
-- UI tools
+- reasoning
 - handoffs
-- lifecycle hooks
-- MFJ graphs
-- workflow-local context
+- HITL pauses
+- orchestration
+- tool use
+- workflow-local UI
 
-They should not be forced to represent all app logic.
+Workflow files remain stable and are intentionally not redesigned in this
+rewrite.
 
----
+## What Should Not Be First-Class
 
-## CRUD and Basic AI: The Scalable Model
+These are derived or transitional, not foundational:
 
-The scalable app model is:
+- giant `config/` buckets with mixed concerns
+- a hand-authored `module_registry.json` as the main source of truth
+- per-feature bespoke code as the planning target
+- direct coupling from CRUD mutations to workflow names
 
-- **entities** define the data
-- **views** define how data is presented
-- **actions** define what can happen
-- **policies** define what is allowed
-- **modules** surface those views in durable app pages
-- **workflows** handle rich AI orchestration and guided interaction
+## Enterprise Core Versus App-Authored Output
 
-This is how Mozaiks supports:
+The builder should not treat every app concern as generated implementation work.
 
-- plain CRUD pages
-- hybrid pages with AI assistance
-- full workflow-driven experiences
+Use this decision order:
 
-without turning every use case into a groupchat.
+1. already handled by core
+2. handled by core but app-configured
+3. thin app-authored stub on top of core
+4. bespoke app logic
 
----
+Examples of concerns that should usually land in core or core configuration:
 
-## What Generators Should Emit
+- auth
+- tenancy
+- notifications
+- subscriptions
+- shell chrome
+- websocket delivery
+- automation transport
+- workflow runtime
 
-Generators should emit typed planning artifacts that compile into the bundle.
+Examples of concerns that should usually remain app-authored:
 
-The generator should not directly target ad hoc files first.
+- domain entities
+- domain views and actions
+- domain event catalog entries
+- automation routes
+- domain-specific workflow definitions
+- thin integration stubs
 
-### Minimum Structured Outputs
+## Compiler View
 
-At minimum, the generator side should produce:
+The generator should reason in this order:
 
-- `AppSpec`
-- `ShellSpec`
-- `EntitySpec[]`
-- `ViewSpec[]`
-- `ActionSpec[]`
-- `PolicySpec[]`
-- `ModuleSpec[]`
-- `WorkflowSpec[]`
+```text
+Intent
+  -> app substrate model
+  -> automation model
+  -> workflow model
+  -> shell and module composition
+  -> compiled bundle
+```
 
-These are planning/compilation artifacts, not necessarily runtime files.
+The runtime then consumes the compiled bundle without needing the original
+planning conversation.
 
-### Compiler Direction
+## Current Flagship Example
 
-| Structured output | Compiles to |
-|---|---|
-| `AppSpec` | `platform/app.json` + high-level bundle metadata |
-| `ShellSpec` | `platform/config/navigation_config.json` today |
-| `EntitySpec[]` | `platform/entities/*.json` |
-| `ViewSpec[]` | `platform/views/*.json` |
-| `ActionSpec[]` | `platform/actions/*.json` |
-| `PolicySpec[]` | `platform/policies/*.json` |
-| `ModuleSpec[]` | `platform/modules/*/module.json` + UI skeleton |
-| `WorkflowSpec[]` | `platform/workflows/**` |
+The current `platform/` directory in this repo is the flagship runtime-output
+example.
 
----
+It still uses some transitional runtime projections such as
+`platform/config/*.json` and `platform/brand/*`.
 
-## Generator Responsibility Map
+Those are valid current outputs, but the builder should still reason in terms
+of the six canonical families above and treat the transitional files as compiled
+projections of shell or substrate concerns.
 
-This is the opinionated split I would use for generator agents.
+## Cross References
 
-| Generator role | Output |
-|---|---|
-| Value / product-definition agent | `AppSpec` |
-| Shell planner | `ShellSpec` |
-| Data model planner | `EntitySpec[]` |
-| CRUD/view planner | `ViewSpec[]` |
-| Action / integration planner | `ActionSpec[]` |
-| Policy planner | `PolicySpec[]` |
-| Module planner | `ModuleSpec[]` |
-| Workflow planner | `WorkflowSpec[]` |
-| Bundle compiler | concrete files in `platform/` |
-
-This keeps generation disciplined and reviewable.
-
----
-
-## What Not To Do
-
-Do not ask generators to:
-
-- invent page/data structure from scratch every time
-- treat workflows as the representation for all app behavior
-- duplicate module declarations in multiple config files
-- bury access rules in prompts instead of policies
-- generate arbitrary React/Python first for simple CRUD when a view/action spec would do
-- use prose as the orchestration contract when a typed file can exist
-
----
-
-## The Core Boundary
-
-Mozaiks Core should consume these declarative families.
-
-Mozaiks Core should not hardcode builder-specific or app-specific meaning into
-them.
-
-Core should provide:
-
-- loaders
-- validation
-- execution/runtime semantics
-- eventing
-- rendering hooks
-
-The first-party product (`mozaiks.ai`) should provide:
-
-- the generator
-- the prompt strategy
-- the compilation flow
-- the first-party builder UX
-
-That keeps core modular while still making app generation scalable.
-
----
-
-## Transitional Notes
-
-Current repo state:
-
-- `navigation_config.json` still mixes shell and module-nav concerns
-- `entities/`, `views/`, `actions/`, and `policies/` are not yet first-class
-- workflows are much more mature than app-model declaratives
-
-That is acceptable as a transition state.
-
-The next architecture work should focus on making the missing app-model
-declaratives real, not on adding more workflow complexity.
-
----
-
-## Bottom Line
-
-If Mozaiks wants to scale beyond workflow demos, it needs a compiled app bundle
-contract with **both**:
-
-- a strong workflow model
-- a strong app/data model
-
-The workflow model already exists.
-
-The app/data model is the next thing to formalize.
-
+- [canonical-app-structure.md](canonical-app-structure.md)
+- [app-creation-guide.md](app-creation-guide.md)
+- [workflow-architecture.md](workflow-architecture.md)

@@ -13,6 +13,16 @@ tools:
   tool_type: Agent_Tool
   auto_invoke: false
 
+- agent: PremiseCanonAgent
+  file: premise_pulse.py
+  function: present_premise_pulse
+  description: Emit an inline premise pulse card after canon capture.
+  tool_type: UI_Tool
+  auto_invoke: false
+  ui:
+    component: PremisePulseCard
+    mode: inline
+
 lifecycle_tools:
 - trigger: after_chat
   agent: null

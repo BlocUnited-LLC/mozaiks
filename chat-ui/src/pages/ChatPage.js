@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import Header from "../components/layout/Header";
+import Footer from "../components/layout/Footer";
 import ChatInterface from '../components/chat/ChatInterface';
 import ArtifactPanel from '../components/chat/ArtifactPanel';
 import WorkflowCompletion from '../components/chat/WorkflowCompletion';
@@ -221,12 +222,15 @@ const AskHistorySidebar = ({
 };
 
 const MobileAskHistoryDrawer = ({
+  mode = 'ask',
   open,
   sessions = [],
   activeChatId,
   loading,
   onSelectChat,
+  onSelectWorkflow,
   onStartNewChat,
+  onStartEntryWorkflow,
   onRefresh,
   onClear,
   onClose,
@@ -235,95 +239,131 @@ const MobileAskHistoryDrawer = ({
     return null;
   }
 
+  const isWorkflowMode = mode === 'workflow';
   const hasSessions = Array.isArray(sessions) && sessions.length > 0;
+  const title = isWorkflowMode ? 'Recent Workflows' : 'Recent Chats';
+  const modeLabel = isWorkflowMode ? 'Workflow' : 'Ask';
+  const emptyText = isWorkflowMode
+    ? 'Start a workflow run to see it appear here.'
+    : 'Start a conversation to see it appear here.';
+  const countText = hasSessions
+    ? `${sessions.length} saved ${isWorkflowMode ? `workflow run${sessions.length === 1 ? '' : 's'}` : `conversation${sessions.length === 1 ? '' : 's'}`}`
+    : (isWorkflowMode ? 'No saved workflow runs yet.' : 'No saved conversations yet.');
+  const launchButtonLabel = isWorkflowMode ? 'Open Workflow' : 'New Chat';
 
   return (
-    <div className="fixed inset-0 z-40 flex lg:hidden">
+    <div className="fixed inset-0 z-[70] lg:hidden pointer-events-none">
       <button
         type="button"
-        aria-label="Close Ask history"
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        aria-label={`Close ${modeLabel} history`}
+        className="absolute inset-0 bg-black/55 backdrop-blur-sm pointer-events-auto"
         onClick={onClose}
       ></button>
-      <div className="relative z-10 h-full w-full max-w-full bg-[rgba(5,10,24,0.96)] backdrop-blur-2xl border border-[rgba(var(--color-primary-light-rgb),0.3)] shadow-[0_20px_60px_rgba(2,6,23,0.85)] flex flex-col">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[rgba(var(--color-primary-light-rgb),0.25)]">
-          <div>
-            <p className="text-[10px] tracking-[0.3em] uppercase text-[rgba(148,163,184,0.8)]">Ask</p>
-            <h2 className="text-base font-semibold text-white">Conversations</h2>
+      <div className="absolute inset-x-0 bottom-0 pointer-events-auto px-2 sm:px-3 pb-[calc(env(safe-area-inset-bottom,0px)+0.35rem)]">
+        <div className="mx-auto w-full max-w-3xl rounded-t-3xl border border-[rgba(var(--color-primary-light-rgb),0.35)] bg-[rgba(5,10,24,0.96)] backdrop-blur-2xl shadow-[0_20px_60px_rgba(2,6,23,0.85)] flex flex-col overflow-hidden max-h-[min(78dvh,720px)]">
+          <div className="flex justify-center pt-2 pb-1">
+            <div className="h-1 w-10 rounded-full bg-[rgba(148,163,184,0.45)]" />
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onClear}
-              disabled={loading}
-              className="px-2 py-1 rounded-lg border border-[rgba(248,113,113,0.45)] text-[11px] text-[rgba(254,202,202,0.95)] hover:border-[rgba(248,113,113,0.8)] hover:text-white transition disabled:opacity-60"
-            >
-              Clear
-            </button>
-            <button
-              type="button"
-              onClick={onRefresh}
-              disabled={loading}
-              className="px-2 py-1 rounded-lg border border-[rgba(var(--color-primary-light-rgb),0.35)] text-[11px] text-[rgba(148,163,184,0.95)] hover:border-[rgba(var(--color-primary-light-rgb),0.7)] hover:text-white transition disabled:opacity-60"
-            >
-              {loading ? '…' : 'Refresh'}
-            </button>
+
+          <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-[rgba(var(--color-primary-light-rgb),0.25)]">
+            <div>
+              <p className="text-[10px] tracking-[0.3em] uppercase text-[rgba(148,163,184,0.8)]">{modeLabel}</p>
+              <h2 className="text-base font-semibold text-white">{title}</h2>
+            </div>
             <button
               type="button"
               onClick={onClose}
-              className="w-8 h-8 rounded-full border border-[rgba(148,163,184,0.4)] text-white flex items-center justify-center hover:border-[rgba(var(--color-primary-light-rgb),0.7)]"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[rgba(var(--color-primary-light-rgb),0.35)] text-[11px] tracking-[0.15em] uppercase text-[rgba(226,232,240,0.95)] hover:border-[rgba(var(--color-primary-light-rgb),0.75)] hover:text-white transition"
             >
-              ✕
+              <span aria-hidden="true">←</span>
+              Back To Chat
             </button>
           </div>
-        </div>
-        <div className="px-4 py-3 border-b border-[rgba(148,163,184,0.35)]">
-          <button
-            type="button"
-            onClick={onStartNewChat}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-[rgba(var(--color-secondary-rgb),0.35)] bg-[rgba(var(--color-secondary-rgb),0.15)] py-2 text-sm font-semibold text-white"
-          >
-            <span className="text-lg" aria-hidden="true">＋</span>
-            New Chat
-          </button>
-          <p className="mt-2 text-[12px] text-[rgba(148,163,184,0.9)]">
-            {hasSessions ? `${sessions.length} saved conversation${sessions.length === 1 ? '' : 's'}` : 'No saved conversations yet.'}
-          </p>
-        </div>
-        <div className="flex-1 overflow-y-auto my-scroll1 px-3 py-3 space-y-2">
-          {hasSessions ? (
-            sessions.map((session) => {
-              const chatId = session?.chat_id;
-              if (!chatId) return null;
-              const isActive = chatId === activeChatId;
-              const label = session?.label || `Chat ${chatId.slice(-4)}`;
-              const summary = session?.summary || session?.last_message_preview || 'Tap to resume conversation.';
-              const timestamp = formatHistoryTimestamp(session?.last_updated_at || session?.updated_at);
-              return (
-                <button
-                  key={chatId}
-                  type="button"
-                  onClick={() => {
-                    onSelectChat(chatId);
-                    onClose?.();
-                  }}
-                  className={`w-full text-left rounded-2xl border px-3 py-2 transition focus:outline-none focus:ring-2 focus:ring-[rgba(var(--color-primary-light-rgb),0.6)] ${isActive
-                    ? 'border-[rgba(var(--color-primary-light-rgb),0.7)] bg-[rgba(var(--color-primary-rgb),0.15)] shadow-[0_10px_35px_rgba(6,182,212,0.15)]'
-                    : 'border-[rgba(148,163,184,0.2)] bg-[rgba(15,23,42,0.65)] hover:border-[rgba(148,163,184,0.4)] hover:bg-[rgba(15,23,42,0.8)]'}`}
-                >
-                  <div className="flex items-center justify-between text-[11px] text-[rgba(148,163,184,0.95)]">
-                    <span className="font-semibold text-[rgba(226,232,240,0.95)] text-sm">{label}</span>
-                    <span>{timestamp}</span>
-                  </div>
-                  <p className="mt-1 text-[13px] leading-relaxed text-[rgba(226,232,240,0.85)] max-h-[3.6rem] overflow-hidden">{summary}</p>
-                </button>
-              );
-            })
-          ) : (
-            <div className="rounded-2xl border border-dashed border-[rgba(148,163,184,0.4)] px-3 py-6 text-center text-[13px] text-[rgba(148,163,184,0.9)]">
-              Start a conversation to see it appear here.
+
+          <div className="px-4 py-3 border-b border-[rgba(148,163,184,0.35)]">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (isWorkflowMode) {
+                    onStartEntryWorkflow?.();
+                  } else {
+                    onStartNewChat?.();
+                  }
+                  onClose?.();
+                }}
+                className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl border border-[rgba(var(--color-secondary-rgb),0.35)] bg-[rgba(var(--color-secondary-rgb),0.15)] py-2 text-sm font-semibold text-white"
+              >
+                <span className="text-lg" aria-hidden="true">＋</span>
+                {launchButtonLabel}
+              </button>
+              <button
+                type="button"
+                onClick={onRefresh}
+                disabled={loading}
+                className="px-3 py-2 rounded-xl border border-[rgba(var(--color-primary-light-rgb),0.35)] text-xs text-[rgba(148,163,184,0.95)] hover:border-[rgba(var(--color-primary-light-rgb),0.7)] hover:text-white transition disabled:opacity-60"
+              >
+                {loading ? '…' : 'Refresh'}
+              </button>
+              <button
+                type="button"
+                onClick={onClear}
+                disabled={loading}
+                className="px-3 py-2 rounded-xl border border-[rgba(248,113,113,0.45)] text-xs text-[rgba(254,202,202,0.95)] hover:border-[rgba(248,113,113,0.8)] hover:text-white transition disabled:opacity-60"
+              >
+                Clear
+              </button>
             </div>
-          )}
+            <p className="mt-2 text-[12px] text-[rgba(148,163,184,0.9)]">
+              {countText}
+            </p>
+          </div>
+
+          <div className="flex-1 overflow-y-auto my-scroll1 px-3 py-3 space-y-2">
+            {hasSessions ? (
+              sessions.map((session) => {
+                const chatId = session?.chat_id;
+                if (!chatId) return null;
+                const isActive = chatId === activeChatId;
+                const label = isWorkflowMode
+                  ? (session?.workflow_name || `Workflow ${chatId.slice(-4)}`)
+                  : (session?.label || `Chat ${chatId.slice(-4)}`);
+                const summary = isWorkflowMode
+                  ? (session?.last_artifact?.component_name
+                      ? `Last artifact: ${session.last_artifact.component_name}`
+                      : 'Tap to resume workflow run.')
+                  : (session?.summary || session?.last_message_preview || 'Tap to resume conversation.');
+                const timestamp = formatHistoryTimestamp(session?.last_updated_at || session?.updated_at);
+                return (
+                  <button
+                    key={chatId}
+                    type="button"
+                    onClick={() => {
+                      if (isWorkflowMode) {
+                        onSelectWorkflow?.(chatId, session?.workflow_name || null);
+                      } else {
+                        onSelectChat?.(chatId);
+                      }
+                      onClose?.();
+                    }}
+                    className={`w-full text-left rounded-2xl border px-3 py-2 transition focus:outline-none focus:ring-2 focus:ring-[rgba(var(--color-primary-light-rgb),0.6)] ${isActive
+                      ? 'border-[rgba(var(--color-primary-light-rgb),0.7)] bg-[rgba(var(--color-primary-rgb),0.15)] shadow-[0_10px_35px_rgba(6,182,212,0.15)]'
+                      : 'border-[rgba(148,163,184,0.2)] bg-[rgba(15,23,42,0.65)] hover:border-[rgba(148,163,184,0.4)] hover:bg-[rgba(15,23,42,0.8)]'}`}
+                  >
+                    <div className="flex items-center justify-between text-[11px] text-[rgba(148,163,184,0.95)]">
+                      <span className="font-semibold text-[rgba(226,232,240,0.95)] text-sm">{label}</span>
+                      <span>{timestamp}</span>
+                    </div>
+                    <p className="mt-1 text-[13px] leading-relaxed text-[rgba(226,232,240,0.85)] max-h-[3.6rem] overflow-hidden">{summary}</p>
+                  </button>
+                );
+              })
+            ) : (
+              <div className="rounded-2xl border border-dashed border-[rgba(148,163,184,0.4)] px-3 py-6 text-center text-[13px] text-[rgba(148,163,184,0.9)]">
+                {emptyText}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -548,13 +588,21 @@ const ChatPage = () => {
   const artifactCacheValidRef = useRef(false);
   const lastErrorIdRef = useRef(null); // Track last error to prevent duplicates
   const workflowMessagesCacheRef = useRef([]);
+  const workflowReplayPendingRef = useRef(false);
+  const workflowMessagesSharedRef = useRef([]);
   const generalMessagesCacheRef = useRef([]);
   const resumeOldestFromWidgetRef = useRef(false);
-  const layoutModeForConversation = conversationMode === 'ask' ? 'full' : 'split';
+  const layoutModeForConversation = conversationMode === 'ask' ? 'full' : layoutMode;
   // Respect explicit layout state in workflow mode; force full in ask mode.
   const effectiveLayoutMode = conversationMode === 'ask' ? 'full' : layoutMode;
   const isViewMode = effectiveLayoutMode === 'view';
-  const mainPaddingClass = 'pt-16 md:pt-16';
+  const mainPaddingClass = 'pt-14 md:pt-16';
+  const mainContentStyle = isMobileView
+    ? { paddingTop: 'calc(env(safe-area-inset-top, 0px) + 3.5rem)' }
+    : undefined;
+  const chatPageShellStyle = isMobileView
+    ? { height: '100vh', minHeight: '100dvh' }
+    : undefined;
 
   const defaultWorkflow = resolveWorkflow(urlWorkflowName) || '';
   const [currentWorkflowName, setCurrentWorkflowName] = useState(defaultWorkflow);
@@ -720,11 +768,19 @@ const ChatPage = () => {
   const queryResumeHandledRef = useRef(null);
   const validatedChatIdRef = useRef(null);
   const validatingChatIdRef = useRef(false);
+
+  useEffect(() => {
+    workflowMessagesSharedRef.current = Array.isArray(workflowMessages) ? workflowMessages : [];
+  }, [workflowMessages]);
   
   useEffect(() => {
     if (conversationMode === 'workflow') {
-      workflowMessagesCacheRef.current = messages;
-      setWorkflowMessages(messages);
+      // Resume clears the visible transcript briefly while the backend replays.
+      // Keep the last shared workflow snapshot intact during that window.
+      if (!(workflowReplayPendingRef.current && messages.length === 0)) {
+        workflowMessagesCacheRef.current = messages;
+        setWorkflowMessages(messages);
+      }
     } else {
       generalMessagesCacheRef.current = messages;
     }
@@ -1227,6 +1283,7 @@ const ChatPage = () => {
 
   useEffect(() => {
     if (conversationMode !== 'workflow') return;
+    if (workflowReplayPendingRef.current) return;
     if (messagesRef.current && messagesRef.current.length > 0) return;
     if (workflowMessages && workflowMessages.length > 0) {
       console.log(`📦 [WORKFLOW_RESTORE] Restoring ${workflowMessages.length} shared workflow messages`);
@@ -1314,9 +1371,10 @@ const ChatPage = () => {
         const isText = outerType === 'chat.text';
         const isInputRequest = outerType === 'chat.input_request';
         const isMeta = outerType === 'chat_meta' || outerType === 'chat.chat_meta';
+        const isStreamChunk = outerType === 'chat.stream_chunk';
         const serializedText = !isText && !isInputRequest && typeof data.content === 'string' && 
           (data.content.includes('"type":"chat.text"') || data.content.includes('"type":"chat.input_request"'));
-        if (isText || isInputRequest || isMeta || serializedText) {
+        if (isText || isInputRequest || isMeta || isStreamChunk || serializedText) {
           initSpinnerHiddenOnceRef.current = true;
           if (showInitSpinner) console.log('🧹 [SPINNER] Hiding spinner (ready event). text?', isText, 'input?', isInputRequest, 'meta?', isMeta, 'serialized?', serializedText);
           setShowInitSpinner(false);
@@ -1712,17 +1770,19 @@ const ChatPage = () => {
         return;
       }
       case 'stream_chunk': {
-        // Real-time token streaming from AG2 IOStream bridge.
-        // Each chunk is a small piece of an agent's LLM response
-        // arriving character-by-character for live display.
+        // Real-time token streaming from AG2/transport chunk pipeline.
+        // Each chunk is one word (or small slice) of the agent response.
         const agentNameChunk = extractAgentName(data);
         const chunkContent = data.content || '';
         if (!chunkContent) return;
         // Hide init spinner on first streaming token
         if (showInitSpinner) setShowInitSpinner(false);
+        initSpinnerHiddenOnceRef.current = true;
         setMessagesWithLogging(prev => {
-          const updated = [...prev];
-          // Find an existing streaming message from the same agent
+          // Clear thinking bubbles when the first chunk of a new message arrives
+          const withoutThinking = prev.filter(m => !m.isThinking);
+          const updated = [...withoutThinking];
+          // Append to an existing in-progress streaming message for this agent
           for (let i = updated.length - 1; i >= 0; i--) {
             const m = updated[i];
             if (m.__streaming && m.agentName === agentNameChunk) {
@@ -1730,7 +1790,7 @@ const ChatPage = () => {
               return updated;
             }
           }
-          // No existing streaming message — create one
+          // No existing streaming message — create one using event metadata
           updated.push({
             id: `stream-chunk-${Date.now()}`,
             sender: 'agent',
@@ -1739,18 +1799,18 @@ const ChatPage = () => {
             isStreaming: true,
             __streaming: true,
             __streamId: data.stream_id || null,
-            isStructuredCapable: false,
-            isVisual: true,
-            isToolAgent: false,
+            isStructuredCapable: !!(data.is_structured_capable),
+            isVisual: data.is_visual !== undefined ? !!data.is_visual : true,
+            isToolAgent: !!(data.is_tool_agent),
           });
           return updated;
         });
         return;
       }
       case 'stream_end': {
-        // End of a streaming turn — finalize the message.
-        // The backend sends the full accumulated content so we can
-        // replace any partial chunks with the authoritative final text.
+        // End of a streaming turn — finalize the streamed message.
+        // stream_end carries the authoritative full_content plus any capability
+        // metadata (is_visual, structured_output, etc.) that were on chat.text.
         const agentNameEnd = extractAgentName(data);
         const finalContent = data.full_content || data.content || '';
         setMessagesWithLogging(prev => {
@@ -1762,10 +1822,17 @@ const ChatPage = () => {
               m.isStreaming = false;
               delete m.__streaming;
               delete m.__streamId;
+              // Apply capability flags forwarded from the original chat.text data
+              if (data.is_structured_capable !== undefined) m.isStructuredCapable = !!data.is_structured_capable;
+              if (data.is_visual !== undefined) m.isVisual = !!data.is_visual;
+              if (data.is_tool_agent !== undefined) m.isToolAgent = !!data.is_tool_agent;
+              if (data.structured_output) m.structuredOutput = data.structured_output;
+              if (data.structured_schema) m.structuredSchema = data.structured_schema;
+              if (data.metadata) m.metadata = data.metadata;
               return updated;
             }
           }
-          // If no streaming message found, just append the final text
+          // No in-progress streaming message found — add a finished message directly
           if (finalContent) {
             updated.push({
               id: `stream-end-${Date.now()}`,
@@ -1773,10 +1840,20 @@ const ChatPage = () => {
               agentName: agentNameEnd,
               content: finalContent,
               isStreaming: false,
+              isStructuredCapable: !!(data.is_structured_capable),
+              isVisual: data.is_visual !== undefined ? !!data.is_visual : true,
+              isToolAgent: !!(data.is_tool_agent),
+              structuredOutput: data.structured_output || null,
+              structuredSchema: data.structured_schema || null,
+              metadata: data.metadata || null,
             });
           }
           return updated;
         });
+        // Mobile badge: notify if the artifact drawer is covering the chat feed
+        if (isMobileView && mobileDrawerState === 'expanded') {
+          setHasUnseenChat(true);
+        }
         return;
       }
       case 'print': {
@@ -1861,6 +1938,19 @@ const ChatPage = () => {
         } catch {}
         const content = data.content || '';
         const metadataSource = data.metadata || data.data?.metadata || {};
+        const isReplayEvent = Boolean(data.replay);
+        const replayIndexRaw = data.index;
+        const replayIndex = Number.isFinite(replayIndexRaw)
+          ? Number(replayIndexRaw)
+          : Number.isFinite(Number(replayIndexRaw))
+            ? Number(replayIndexRaw)
+            : null;
+        const serverSequenceRaw = data.sequence;
+        const serverSequence = Number.isFinite(serverSequenceRaw)
+          ? Number(serverSequenceRaw)
+          : Number.isFinite(Number(serverSequenceRaw))
+            ? Number(serverSequenceRaw)
+            : null;
         const normalizedAgent = (data.agent || data.agent_name || data.sender || '').toLowerCase();
         const isGeneralUserEcho = metadataSource?.source === 'general_agent' && normalizedAgent === 'user';
         const isWorkflowUserMessage = !isGeneralUserEcho && (
@@ -1869,6 +1959,38 @@ const ChatPage = () => {
           metadataSource?.source === 'workflow_user' ||
           Boolean(metadataSource?.input_request_id)
         );
+        try {
+          const wfCfg = workflowConfig?.getWorkflowConfig(currentWorkflowName);
+          const startupMode = String(wfCfg?.startup_mode || '').trim().toLowerCase();
+          const hasInitialGreeting = Boolean(String(wfCfg?.initial_message_to_user || wfCfg?.initial_message || '').trim());
+          const isSyntheticUserDrivenReplay = (
+            isReplayEvent &&
+            isWorkflowUserMessage &&
+            startupMode === 'userdriven' &&
+            hasInitialGreeting &&
+            String(content).trim() === '.' &&
+            replayIndex === 0
+          );
+          if (isSyntheticUserDrivenReplay) {
+            if (debugFlag('mozaiks.debug_pipeline')) {
+              console.log('[PIPELINE] suppressing replayed synthetic UserDriven trigger', {
+                workflow: currentWorkflowName,
+                replayIndex,
+              });
+            }
+            return;
+          }
+        } catch {}
+        if (isReplayEvent && conversationMode !== 'workflow' && metadataSource?.source !== 'general_agent') {
+          if (debugFlag('mozaiks.debug_pipeline')) {
+            console.log('[PIPELINE] skipping workflow replay while not in workflow mode', {
+              conversationMode,
+              agent: data.agent || data.agent_name || data.sender || null,
+              index: replayIndex,
+            });
+          }
+          return;
+        }
         if (isGeneralUserEcho) {
           const recent = messagesRef.current[messagesRef.current.length - 1];
           if (recent && recent.sender === 'user') {
@@ -1907,6 +2029,9 @@ const ChatPage = () => {
           }
         } catch {}
         if (!content.trim()) return;
+        if (workflowReplayPendingRef.current && conversationMode === 'workflow' && metadataSource?.source !== 'general_agent') {
+          workflowReplayPendingRef.current = false;
+        }
         const displayAsUser = isGeneralUserEcho || isWorkflowUserMessage;
         const agentName = displayAsUser ? 'You' : extractAgentName(data);
         const computedSender = displayAsUser ? 'user' : 'agent';
@@ -1923,6 +2048,33 @@ const ChatPage = () => {
             const last = updated[updated.length-1];
             if (last.__streaming && last.agentName === agentName) {
               last.isStreaming = false; delete last.__streaming; if(!last.content.endsWith(content)) last.content+=content; return updated;
+            }
+          }
+
+          if (isReplayEvent) {
+            const normalizedContent = String(content).trim();
+            for (let i = updated.length - 1; i >= 0; i -= 1) {
+              const candidate = updated[i];
+              if (!candidate || candidate.sender !== computedSender || candidate.agentName !== agentName) {
+                continue;
+              }
+              const candidateContent = String(candidate.content || '').trim();
+              if (!candidateContent || candidateContent !== normalizedContent) {
+                continue;
+              }
+              const candidateReplayIndex = Number.isFinite(candidate.replayIndex)
+                ? Number(candidate.replayIndex)
+                : null;
+              if (replayIndex !== null && candidateReplayIndex !== null && candidateReplayIndex !== replayIndex) {
+                continue;
+              }
+              updated[i] = {
+                ...candidate,
+                metadata: metadataSource,
+                replayIndex: replayIndex ?? candidateReplayIndex,
+                serverSequence: serverSequence ?? candidate.serverSequence ?? null,
+              };
+              return updated;
             }
           }
           
@@ -1943,7 +2095,9 @@ const ChatPage = () => {
             structuredSchema,
             isVisual,
             isToolAgent,
-            metadata: metadataSource
+            metadata: metadataSource,
+            replayIndex,
+            serverSequence,
           });
           if (debugFlag('mozaiks.debug_pipeline')) {
             console.log('[PIPELINE] appended final text message', { agent: agentName, len: content.length, isStructuredCapable, hasStructuredOutput: !!structuredOutput });
@@ -1992,6 +2146,12 @@ const ChatPage = () => {
       }
       case 'input_request': {
         console.log('📥 [INPUT_REQUEST] Received input_request event:', data);
+        // Clear thinking bubbles - we're now waiting for user input, not agent thinking
+        setMessagesWithLogging(prev => prev.filter(m => !m.isThinking));
+        // Hide spinner since we're waiting for user, not processing
+        if (showInitSpinner) setShowInitSpinner(false);
+        initSpinnerHiddenOnceRef.current = true;
+
         if (data.request_id) {
           console.log('🔖 [INPUT_REQUEST] Storing pending request_id:', data.request_id);
           setPendingInputRequestId(data.request_id);
@@ -2417,6 +2577,18 @@ const ChatPage = () => {
         // Acknowledgment: no UI mutation needed
         return;
       case 'resume_boundary':
+        if (workflowReplayPendingRef.current) {
+          workflowReplayPendingRef.current = false;
+          const payload = data.data || {};
+          const replayedCount = Number(payload.replayed_messages ?? payload.replayed_events ?? 0);
+          if (replayedCount <= 0 && messagesRef.current.length === 0) {
+            const cachedWorkflow = workflowMessagesSharedRef.current || [];
+            if (cachedWorkflow.length > 0) {
+              console.log(`📦 [WORKFLOW_RESTORE] Replay empty; restoring ${cachedWorkflow.length} cached workflow messages`);
+              setMessagesWithLogging(cachedWorkflow);
+            }
+          }
+        }
         if (showSystemMessages) {
           // Replay boundary marker for debug visibility
           setMessagesWithLogging(prev => [...prev, { id:`resume-${Date.now()}`, sender:'system', agentName:'System', content:`🔄 Session replay complete. Live events resumed.`, isStreaming:false }]);
@@ -3273,6 +3445,7 @@ useEffect(() => {
     if (conversationMode === 'ask') {
       return true;
     }
+    workflowReplayPendingRef.current = false;
     console.log('🧠 [MODE_TOGGLE] Switching to ask mode (sending chat.enter_general_mode)');
     const sent = sendWsMessage({ type: 'chat.enter_general_mode' });
     
@@ -3499,7 +3672,14 @@ useEffect(() => {
 
     // Reset visible transcript before workflow replay arrives to avoid
     // mixing Ask-mode messages with workflow history.
+    workflowReplayPendingRef.current = true;
     setMessagesWithLogging([]);
+
+    // Clear cached workflow messages to prevent stale restore on resume_boundary.
+    // This ensures that if the backend has no persisted messages (fresh start),
+    // we don't accidentally restore old cached messages from a previous session.
+    workflowMessagesSharedRef.current = [];
+    workflowMessagesCacheRef.current = [];
 
     const sent = sendWsMessage({
       type: 'chat.switch_workflow',
@@ -3514,6 +3694,8 @@ useEffect(() => {
       console.log('🔁 [WORKFLOW_RESUME] Workflow mode restored, cached general messages count:', messagesRef.current.length);
       return true;
     }
+
+    workflowReplayPendingRef.current = false;
 
     return false;
   }, [currentWorkflowName, sendWsMessage, setActiveChatId, setActiveWorkflowName, setConversationMode, setCurrentWorkflowName, setCurrentChatId, setMessagesWithLogging]);
@@ -3531,7 +3713,6 @@ useEffect(() => {
 
     const resumed = resumeWorkflowSession(chatId, targetWorkflow);
     if (resumed) {
-      if (setLayoutMode) setLayoutMode('split');
       refreshWorkflowSessions();
     }
   }, [
@@ -3787,7 +3968,6 @@ useEffect(() => {
         }
 
         ensureWorkflowMode();
-        if (setLayoutMode) setLayoutMode('split');
         return;
       }
 
@@ -3827,7 +4007,6 @@ useEffect(() => {
             connectionInProgressRef.current = false;
 
             setConversationMode('workflow');
-            if (setLayoutMode) setLayoutMode('split');
             generalMessagesCacheRef.current = messagesRef.current;
             refreshWorkflowSessions();
             console.log('✅ [MODE_CHANGE] Entry_point workflow session started, WS will connect on re-render');
@@ -3861,7 +4040,6 @@ useEffect(() => {
           console.log(`🎯 [MODE_CHANGE] Resuming workflow via ${strategy}: ${targetWorkflowName} (${target.chat_id})`);
           resumed = resumeWorkflowSession(target.chat_id, targetWorkflowName);
           if (resumed) {
-            if (setLayoutMode) setLayoutMode('split');
             generalMessagesCacheRef.current = messagesRef.current;
             refreshWorkflowSessions();
             break;
@@ -3873,7 +4051,6 @@ useEffect(() => {
           const started = await startEntryWorkflowSession();
           if (!started) {
             ensureWorkflowMode();
-            if (setLayoutMode) setLayoutMode('split');
           }
         }
       } catch (err) {
@@ -3881,7 +4058,6 @@ useEffect(() => {
         console.log('🔄 [MODE_CHANGE] Falling back to ensureWorkflowMode (backend unavailable)');
         // Fallback: switch to workflow mode locally even if backend is down
         ensureWorkflowMode();
-        if (setLayoutMode) setLayoutMode('split');
       }
     }
     console.log('✅ [MODE_CHANGE] handleConversationModeChange completed');
@@ -4586,6 +4762,7 @@ useEffect(() => {
               isOnChatPage={false}
               generalSessionsLoading={generalSessionsLoading}
               showAskHistoryMenu={false}
+              showHistoryMenu={false}
               hideHeader={true}
               disableMobileShellChrome={true}
               plainContainer={true}
@@ -4601,20 +4778,25 @@ useEffect(() => {
 
   const shouldReserveArtifactSpace = conversationMode === 'workflow';
   const mobileChatPaddingBottomClass = shouldReserveArtifactSpace
-    ? (mobileDrawerState === 'expanded' ? 'pb-[0.75rem]' : 'pb-[4.5em]')
-    : 'pb-2';
-  const mobileChatTopMarginClass = shouldReserveArtifactSpace ? 'mt-[1.25rem]' : 'mt-[1.25rem]';
+    ? (mobileDrawerState === 'expanded'
+        ? 'pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)]'
+        : 'pb-[calc(env(safe-area-inset-bottom,0px)+5.75rem)]')
+    : 'pb-[calc(env(safe-area-inset-bottom,0px)+0.5rem)]';
+  const mobileChatTopMarginClass = 'mt-0';
 
   const isChatPageSurface = isPrimaryChatRoute && !isInWidgetMode && !isViewMode;
   const showAskHistorySidebar = isChatPageSurface && !isMobileView && conversationMode === 'ask';
   const showWorkflowHistorySidebar = isChatPageSurface && !isMobileView && conversationMode === 'workflow';
   const showMobileAskHistoryMenu = isChatPageSurface && isMobileView && conversationMode === 'ask';
+  const showMobileWorkflowHistoryMenu = isChatPageSurface && isMobileView && conversationMode === 'workflow';
+  const showMobileHistoryMenu = showMobileAskHistoryMenu || showMobileWorkflowHistoryMenu;
+  const mobileHistoryLabel = conversationMode === 'workflow' ? 'Workflows' : 'Chats';
 
   useEffect(() => {
-    if (!showMobileAskHistoryMenu && isAskHistoryDrawerOpen) {
+    if (!showMobileHistoryMenu && isAskHistoryDrawerOpen) {
       setIsAskHistoryDrawerOpen(false);
     }
-  }, [showMobileAskHistoryMenu, isAskHistoryDrawerOpen]);
+  }, [showMobileHistoryMenu, isAskHistoryDrawerOpen]);
 
   useEffect(() => {
     if (!isAskHistoryDrawerOpen) {
@@ -4660,6 +4842,9 @@ useEffect(() => {
         generalSessionsLoading={generalSessionsLoading}
         showAskHistoryMenu={showMobileAskHistoryMenu}
         onAskHistoryToggle={() => setIsAskHistoryDrawerOpen((prev) => !prev)}
+        showHistoryMenu={showMobileHistoryMenu}
+        onHistoryToggle={() => setIsAskHistoryDrawerOpen((prev) => !prev)}
+        historyMenuLabel={mobileHistoryLabel}
         artifactContext={currentArtifactContext}
         onArtifactAction={sendArtifactAction}
         actionStatusMap={actionStatusMap}
@@ -4673,7 +4858,7 @@ useEffect(() => {
   if (isInWidgetMode) {
     if (discoveryChatMinimized) {
       return (
-        <div className="fixed right-4 z-50 widget-safe-bottom">
+        <div className="fixed right-4 bottom-4 z-50 widget-safe-bottom">
           <button
             type="button"
             onClick={toggleDiscoveryChatMinimized}
@@ -4696,7 +4881,7 @@ useEffect(() => {
     }
 
     return (
-      <div className="fixed right-4 z-50 flex flex-col items-end gap-0 pointer-events-none widget-safe-bottom">
+      <div className="fixed right-4 bottom-4 z-50 flex flex-col items-end gap-0 pointer-events-none widget-safe-bottom">
         <button
           type="button"
           onClick={toggleDiscoveryChatMinimized}
@@ -4719,7 +4904,10 @@ useEffect(() => {
   }
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden relative">
+    <div
+      className="relative flex flex-col h-screen min-h-screen overflow-hidden"
+      style={chatPageShellStyle}
+    >
       {showInitSpinner && (
         // Make the overlay visually blocking but non-interactive so background UI can still receive events
         <div className="fixed inset-0 flex items-center justify-center bg-black/20 backdrop-blur-sm z-50 pointer-events-none">
@@ -4742,7 +4930,10 @@ useEffect(() => {
       />
       
       {/* Main content area that fills remaining screen height - no scrolling */}
-      <div className={`flex-1 flex flex-col min-h-0 overflow-hidden ${mainPaddingClass}`}>{/* Padding for header */}
+      <div
+        className={`flex-1 flex flex-col min-h-0 overflow-hidden ${mainPaddingClass}`}
+        style={mainContentStyle}
+      >{/* Padding for header */}
         {workflowCompleted ? (
           /* Workflow Completion Screen */
           <div className="flex-1 flex items-center justify-center px-4">
@@ -4810,16 +5001,19 @@ useEffect(() => {
               />
             )}
 
-            {showMobileAskHistoryMenu && (
+            {showMobileHistoryMenu && (
               <MobileAskHistoryDrawer
+                mode={conversationMode}
                 open={isAskHistoryDrawerOpen}
-                sessions={generalChatSessions}
-                activeChatId={activeGeneralChatId}
-                loading={generalSessionsLoading}
+                sessions={conversationMode === 'workflow' ? workflowSessions : generalChatSessions}
+                activeChatId={conversationMode === 'workflow' ? (activeChatId || currentChatId) : activeGeneralChatId}
+                loading={conversationMode === 'workflow' ? workflowSessionsLoading : generalSessionsLoading}
                 onSelectChat={handleSelectGeneralChat}
+                onSelectWorkflow={handleSelectWorkflowSession}
                 onStartNewChat={handleStartGeneralChat}
-                onRefresh={handleRefreshGeneralSessions}
-                onClear={handleClearGeneralSessions}
+                onStartEntryWorkflow={() => handleConversationModeChange('workflow')}
+                onRefresh={conversationMode === 'workflow' ? handleRefreshWorkflowSessions : handleRefreshGeneralSessions}
+                onClear={conversationMode === 'workflow' ? handleClearWorkflowSessions : handleClearGeneralSessions}
                 onClose={() => setIsAskHistoryDrawerOpen(false)}
               />
             )}
@@ -4889,6 +5083,7 @@ useEffect(() => {
           </div>
         )}
       </div>
+      <Footer chatTheme={chatTheme} />
       
     </div>
   );

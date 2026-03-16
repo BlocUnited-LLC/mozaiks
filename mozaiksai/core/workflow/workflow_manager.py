@@ -787,6 +787,7 @@ class UnifiedWorkflowManager:
 
         Canonical files: orchestrator.yaml, agents.yaml, handoffs.yaml, context_variables.yaml,
         structured_outputs.yaml, tools.yaml, ui_config.yaml, hooks.yaml.
+        Optional file: a2a.yaml.
         Tools file expected to expose unified 'tools' list (no legacy agent_tools/ui_tools splitting).
         
         Top-level merge rules:
@@ -804,7 +805,7 @@ class UnifiedWorkflowManager:
         config.update(orchestrator)
         
         # Sectioned files
-        for section_name in ['agents', 'handoffs', 'context_variables', 'structured_outputs', 'hooks']:
+        for section_name in ['agents', 'handoffs', 'context_variables', 'structured_outputs', 'hooks', 'a2a']:
             data = self._load_config_if_exists(workflow_path, section_name)
             if data:
                 config[section_name] = data

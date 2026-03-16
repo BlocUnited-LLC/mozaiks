@@ -1,44 +1,55 @@
 # Canonical App Structure
 
-**Last updated:** 2026-03-12  
-**Status:** Current architecture reference  
-**Audience:** App-bundle authors, generator authors, and core maintainers  
-**Prerequisites:** [app-bundle-declaratives.md](app-bundle-declaratives.md), [workflow-architecture.md](workflow-architecture.md)
+This document defines the target app-bundle structure for Mozaiks.
 
----
+It reflects the architecture in this directory, not every legacy file layout in
+the current repo.
 
-## Purpose
+The current `platform/` directory in this repo should still be treated as the
+flagship runtime-output example used to test this model.
 
-This document defines the canonical file structure Mozaiks Core currently
-consumes from an app bundle in this repo.
+## Core Rule
 
-This is not a generic "any app repo" sketch.
-It is the concrete structure the current runtime is built around.
+The bundle must separate:
 
----
+- app substrate declaratives
+- automation declaratives
+- workflow declaratives
+- shell declaratives
 
-## Canonical Bundle Layout
+If those concerns collapse into one `config/` bucket, the generator cannot stay
+coherent.
+
+## Canonical Target Layout
 
 ```text
 platform/
 ├── app.json
 │
-├── config/
-│   ├── ai.json
-│   ├── navigation_config.json
-│   ├── theme_config.json
-│   ├── module_registry.json
-│   ├── notifications_config.json
-│   ├── settings_config.json
-│   └── subscription_config.json
+├── shell/
+│   ├── navigation.json
+│   └── theme.json
+│
+├── data/
+│   ├── entities/
+│   │   └── *.json
+│   ├── views/
+│   │   └── *.json
+│   ├── actions/
+│   │   └── *.json
+│   └── policies/
+│       └── *.json
 │
 ├── modules/
 │   └── {module_name}/
 │       ├── module.json
-│       ├── handler.py
 │       └── ui/
 │           ├── index.js
 │           └── *.{js,jsx}
+│
+├── automations/
+│   ├── event_catalog.json
+│   └── routes.json
 │
 └── workflows/
     ├── _pack/
@@ -61,275 +72,134 @@ platform/
             └── *.{js,jsx}
 ```
 
-This is the current production-facing bundle shape.
+## Stable Versus Transitional
 
-Important:
+### Stable
 
-This is the compiled bundle shape the runtime consumes.
+The workflow folder contract is intentionally preserved:
 
-It is not the planning model the builder should start with.
+- `orchestrator.yaml`
+- `agents.yaml`
+- `handoffs.yaml`
+- `context_variables.yaml`
+- `structured_outputs.yaml`
+- `tools.yaml`
+- `ui_config.yaml`
+- `hooks.yaml`
+- `tools/*.py`
+- `ui/*`
+- `_pack/workflow_graph.json`
 
-The builder should first decompose user intent into typed app concerns, then
-compile those into this layout.
+### Transitional
 
-See:
+The current repo still uses:
 
-- [App Creation Guide](app-creation-guide.md)
-- [App Bundle Declaratives](app-bundle-declaratives.md)
+- `platform/config/navigation_config.json`
+- `platform/config/theme_config.json`
+- `platform/config/module_registry.json`
+- other `platform/config/*.json` files
 
----
+Treat those as transitional compiled projections of shell or substrate concerns.
+They should not be the long-term conceptual source of truth for the generator.
 
-## File Family Responsibilities
+In practice today:
+
+- `platform/config/navigation_config.json` behaves like a shell projection
+- `platform/config/theme_config.json` behaves like a shell projection
+- `platform/config/module_registry.json` behaves like a derived module index
+
+The builder should understand those paths because the runtime consumes them
+today, but it should still plan against the canonical families first.
+
+## Responsibility by Family
 
 ### `platform/app.json`
 
-Deployment and identity manifest.
+Owns app identity and deployment metadata:
 
-Owns:
+- `app_id`
+- `app_name`
+- endpoint base URLs
+- auth and platform metadata
 
-- `appName`
-- `appId`
-- `apiUrl`
-- `wsUrl`
-- `platforms`
-- `auth`
-- `dev`
+It does not own workflow routing, domain events, or shell chrome behavior.
 
-Does not own:
+### `platform/shell/*`
 
-- workflow entry selection
-- chat startup mode
-- shell chrome behavior
+Owns shell behavior:
 
-### `platform/config/ai.json`
+- landing surface
+- navigation
+- semantic header controls
+- discover and shell chrome
+- theme identity
 
-AI runtime manifest.
+Shell declaratives do not define entities, actions, or automation.
 
-Owns:
+### `platform/data/*`
 
-- `engine.framework`
-- `chat.startup_mode`
-- `workflows.entry_point`
+Owns durable app substrate behavior:
 
-This is the app-level AI/chat boot contract.
+- `entities`: business objects and schemas
+- `views`: list, detail, form, board, dashboard, search
+- `actions`: deterministic mutations and service calls
+- `policies`: role, plan, tenant, and capability rules
 
-### `platform/config/navigation_config.json`
+This is the non-AI application model.
 
-Current shell/navigation manifest.
+### `platform/modules/*`
 
-Owns:
+Owns user-facing composed surfaces.
 
-- `landing_spot`
-- shell nav/default items
-- optional static pages
-- module navigation projections
+Modules are where the shell exposes real product areas such as:
 
-Transitional note:
+- CRM
+- Marketplace
+- Calendar
+- Inbox
+- Admin
 
-- this file is currently doing more than pure shell configuration
-- long-term it should narrow toward shell concerns, while modules stay canonical
-  in `module_registry.json`
+A module references views, actions, and optionally workflow entrypoints. It is
+not the same thing as an entity or a workflow.
 
-### `platform/config/theme_config.json`
+### `platform/automations/*`
 
-Visual identity manifest.
+Owns the event-driven bridge between the substrate and the AI runtime.
 
-Owns:
+- `event_catalog.json` declares the domain events the app emits or consumes
+- `routes.json` maps event types and predicates to automation effects
 
-- app identity
-- colors
-- fonts
-- shell chrome styling
-- theme-level UI defaults
+Automation routes belong to the app bundle, but they execute on the AI side.
 
-### `platform/config/module_registry.json`
+### `platform/workflows/*`
 
-Canonical module registry.
+Owns workflow-local reasoning, orchestration, UI pauses, and tooling.
 
-Owns:
+The workflow directory is not the whole application.
 
-- what modules exist
-- whether they are enabled
-- backend handler import paths
-- module-level metadata used by the substrate
+## Module Registry Direction
 
-### `platform/modules/{name}/module.json`
+`module_registry.json` should become derived, not canonical.
 
-Module declaration for a durable app surface.
+Long-term rule:
 
-Owns:
+- `modules/{name}/module.json` is canonical
+- shell declarations decide placement and visibility
+- any registry file is a compiled index, not the authoring model
 
-- module identity
-- route metadata
-- UI entrypoint path
-- display metadata for shell integration
+## Why This Structure
 
-### `platform/modules/{name}/handler.py`
+This separation lets the generator answer four different questions cleanly:
 
-Module backend adapter.
+1. What business model does the app have?
+2. What shell and surfaces does the app expose?
+3. What domain events can cause automation?
+4. What workflows exist, and what do they do?
 
-Owns:
+Without that split, CRUD logic and workflow logic collapse into one substrate.
 
-- module actions
-- module data loading
-- integration with persistence or substrate services
+## Cross References
 
-### `platform/modules/{name}/ui/*`
-
-Module page UI.
-
-Owns:
-
-- page-level persistent UI beyond chat/workflow surfaces
-
-### `platform/workflows/_pack/workflow_graph.json`
-
-Global workflow-journey graph.
-
-Owns:
-
-- cross-workflow ordering
-- sequential/global journey structure
-
-### `platform/workflows/{name}/orchestrator.yaml`
-
-Workflow execution bootstrap.
-
-Owns:
-
-- `workflow_name`
-- `max_turns`
-- workflow-local `startup_mode` (`AgentDriven`, `UserDriven`, `BackendOnly`)
-- `orchestration_pattern`
-- `initial_message`
-- `initial_agent`
-
-Important:
-
-- this `startup_mode` is workflow-local execution behavior
-- it is not the app-level chat startup mode from `platform/config/ai.json`
-
-### `platform/workflows/{name}/agents.yaml`
-
-Agent roster and prompts for the workflow.
-
-### `platform/workflows/{name}/handoffs.yaml`
-
-Agent-to-agent routing rules inside the workflow.
-
-### `platform/workflows/{name}/context_variables.yaml`
-
-Typed workflow/application context bindings.
-
-### `platform/workflows/{name}/structured_outputs.yaml`
-
-Structured output contracts the runtime uses for validation, auto-tool, and MFJ
-trigger semantics.
-
-### `platform/workflows/{name}/tools.yaml`
-
-Declared tool bindings and UI tool metadata.
-
-### `platform/workflows/{name}/ui_config.yaml`
-
-Frontend exposure metadata for workflow agents/components.
-
-### `platform/workflows/{name}/hooks.yaml`
-
-Workflow lifecycle hook registration.
-
-### `platform/workflows/{name}/_pack/workflow_graph.json`
-
-Workflow-level MFJ graph.
-
-Owns:
-
-- trigger agent
-- fan-out mode
-- fan-in resume location
-
-### `platform/workflows/{name}/tools/*.py`
-
-Python tool implementations declared by `tools.yaml`.
-
-### `platform/workflows/{name}/ui/*`
-
-Workflow-specific inline/artifact UI components.
-
----
-
-## What Is Missing Today
-
-The current bundle structure is strong for workflows and modules, but weak for
-general app/data declaratives.
-
-The missing first-class families are:
-
-- `platform/entities/`
-- `platform/views/`
-- `platform/actions/`
-- `platform/policies/`
-
-These are described in [app-bundle-declaratives.md](app-bundle-declaratives.md)
-and should be introduced as first-class bundle inputs rather than improvised
-per-app code patterns.
-
----
-
-## Runtime Discovery Anchors
-
-The current runtime discovers and consumes the bundle through these anchors:
-
-- workflows: `platform/workflows/*/orchestrator.yaml`
-- global journey graph: `platform/workflows/_pack/workflow_graph.json`
-- modules: `platform/config/module_registry.json`
-- shell/navigation: `platform/config/navigation_config.json`
-- AI bootstrap: `platform/config/ai.json`
-
----
-
-## Boundary Rules
-
-Do not put these in the app bundle:
-
-- AG2 adapter internals
-- transport internals
-- event dispatcher internals
-- persistence manager internals
-- auth middleware internals
-
-Those belong in:
-
-- `mozaiksai/core/`
-- `mozaikscore/core/`
-- `shared_app.py`
-- `chat-ui/src/`
-
-The app bundle is a runtime input, not a runtime implementation layer.
-
----
-
-## Validation Checklist
-
-- [ ] `platform/app.json` contains only deployment/app identity concerns.
-- [ ] `platform/config/ai.json` owns app-level AI/chat startup concerns.
-- [ ] `platform/config/module_registry.json` is the canonical module registry.
-- [ ] Every active workflow has `orchestrator.yaml`.
-- [ ] Every active module has `module.json`, `handler.py`, and a UI entrypoint.
-- [ ] Global journey logic and workflow-level MFJ graphs are kept separate.
-- [ ] No core runtime internals are reimplemented inside `platform/`.
-
----
-
-## Bottom Line
-
-Today, the canonical app structure for Mozaiks is:
-
-- `platform/` is the app bundle
-- `config/` holds app-wide manifests
-- `modules/` holds durable app surfaces
-- `workflows/` holds AI orchestration inputs
-
-That is the structure generators should target until the missing app/data
-declarative families become first-class.
-
+- [app-bundle-declaratives.md](app-bundle-declaratives.md)
+- [workflow-architecture.md](workflow-architecture.md)
+- [event-system-architecture.md](event-system-architecture.md)

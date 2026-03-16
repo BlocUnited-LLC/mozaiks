@@ -81,6 +81,7 @@ import './registry/coreComponents';
 
 // Pages
 export { default as ChatPage } from './pages/ChatPage';
+export { default as DiscoverPage } from './pages/DiscoverPage';
 // AdminPortal is now a platform module — import from platform/modules/admin_portal/ui/
 
 // AdminPortal extensibility API — section registry, auth hooks, shared primitives

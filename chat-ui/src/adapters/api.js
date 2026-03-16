@@ -427,7 +427,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
         
         // Handle resume boundary
         if (data.type === 'chat.resume_boundary') {
-          console.log(`✅ Resume completed: ${data.data?.replayed_events || 0} events replayed`);
+          console.log(`✅ Resume completed: ${data.data?.replayed_messages ?? data.data?.replayed_events ?? 0} events replayed`);
           resumePending = false;
         }
         

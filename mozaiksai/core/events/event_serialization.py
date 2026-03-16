@@ -109,6 +109,22 @@ def serialize_event_content(raw: Any) -> Any:
 def extract_agent_name(obj: Any) -> Optional[str]:
 	"""Attempt to extract the logical agent/sender name from diverse AG2 objects."""
 	try:
+		if isinstance(obj, dict):
+			for k in ("sender", "agent", "agent_name", "name"):
+				v = obj.get(k)
+				if isinstance(v, str) and v.strip():
+					return v.strip()
+			for k in ("sender", "agent", "agent_name", "name", "content"):
+				v = obj.get(k)
+				if isinstance(v, dict):
+					inner = extract_agent_name(v)
+					if inner:
+						return inner
+				if isinstance(v, str):
+					import re
+					m = re.search(r"sender(?:=|\"\s*:)['\"]([^'\"\\]+)['\"]", v)
+					if m:
+						return m.group(1).strip()
 		# Direct attributes
 		for k in ("sender", "agent", "agent_name", "name"):
 			v = getattr(obj, k, None)

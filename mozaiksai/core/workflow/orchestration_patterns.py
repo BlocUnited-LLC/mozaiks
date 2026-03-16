@@ -112,6 +112,25 @@ __all__ = [
     'create_ag2_pattern'
 ]
 
+
+def _make_static_greeting_reply(greeting: str):
+    """One-shot register_reply function for UserDriven workflows.
+
+    Returns the static greeting on first call (no LLM), then falls through
+    to normal agent behavior on all subsequent calls.  This makes the
+    greeting part of AG2's native transcript so resume/replay works
+    automatically.
+    """
+    fired = {"done": False}
+
+    def _reply_func(recipient, messages, sender, config):
+        if fired["done"]:
+            return False, None  # fall through to LLM
+        fired["done"] = True
+        return True, greeting
+
+    return _reply_func
+
 # ===================================================================
 # AG2 INTERNAL LOGGING CONFIGURATION
 # ===================================================================
@@ -137,6 +156,7 @@ async def _resume_or_initialize_chat(
     workflow_name: str,
     user_id: Optional[str],
     initial_message: Optional[str],
+    initial_agent_name: Optional[str],
     wf_logger,
 ):
     resumed_messages = await persistence_manager.resume_chat(chat_id, app_id) or []
@@ -240,6 +260,10 @@ async def _resume_or_initialize_chat(
                 wf_logger.debug(f" Failed to persist initial messages for {chat_id}: {init_persist_err}")
 
     if not initial_messages:
+        # UserDriven greeting is handled by register_reply on the initial
+        # agent (AG2-native). Do NOT seed it here — let AG2 emit it as a
+        # normal TextEvent so resume/replay track it natively.
+
         seed = config.get("initial_message")
         if seed:
             initial_messages = [
@@ -256,6 +280,13 @@ async def _resume_or_initialize_chat(
                     )
                 except Exception as seed_persist_err:  # pragma: no cover
                     wf_logger.debug(f" Failed to persist config seed message for {chat_id}: {seed_persist_err}")
+        elif config.get("startup_mode", "").strip().lower() == "userdriven":
+            # UserDriven needs a synthetic trigger so AG2 can start the group
+            # chat loop.  The register_reply on the initial agent intercepts
+            # before the LLM is ever called and returns the static greeting.
+            initial_messages = [
+                {"role": "user", "name": "user", "content": ".", "_mozaiks_seed_kind": "userdriven_trigger"}
+            ]
 
     return resumed_messages, initial_messages
 
@@ -349,9 +380,11 @@ def _ensure_user_proxy(
         # ChatUI (and the HTTP transport) provide real user input and should never trigger
         # AG2's terminal/CLI-style feedback prompts ("Please give feedback to chat_manager...").
         # Keep the auto-created user proxy non-interactive.
-        if startup_mode in {"BackendOnly", "UserDriven"}:
+        if startup_mode in {"BackendOnly"}:
             human_input_mode = "NEVER"
         else:
+            # AgentDriven and UserDriven both need InputRequestEvent so the
+            # runtime pauses for real user input over WebSocket.
             human_input_mode = "TERMINATE"
         user_proxy_agent = UserProxyAgent(
             name="user",
@@ -657,7 +690,7 @@ async def _stream_events(
             if (
                 isinstance(seed, dict)
                 and seed.get('role') == 'user'
-                and seed.get('_mozaiks_seed_kind') == 'initial_message'
+                and seed.get('_mozaiks_seed_kind') in ('initial_message', 'userdriven_trigger')
             ):
                 content = seed.get('content')
                 if isinstance(content, str) and content.strip():
@@ -791,40 +824,12 @@ async def run_workflow_orchestration(
                 workflow_name=workflow_name,
                 user_id=user_id,
                 initial_message=initial_message,
+                initial_agent_name=initial_agent_name,
                 wf_logger=wf_logger,
             )
 
             # Track resume mode early so downstream logging can reference it safely
             resumed_mode = bool(resumed_messages)
-
-            # Emit optional user-facing bootstrap text for NEW workflow runs.
-            # This is presentation-only and intentionally separate from
-            # `initial_message`, which seeds agent execution.
-            ui_bootstrap_message = config.get("initial_message_to_user")
-            if (
-                not resumed_mode
-                and isinstance(ui_bootstrap_message, str)
-                and ui_bootstrap_message.strip()
-                and startup_mode != "UserDriven"
-            ):
-                try:
-                    await transport.send_event_to_ui(
-                        {
-                            "kind": "text",
-                            "event_type": "TextEvent",
-                            "agent": "Assistant",
-                            "content": ui_bootstrap_message.strip(),
-                            "source": "orchestrator.initial_message_to_user",
-                        },
-                        chat_id,
-                    )
-                except Exception as ui_seed_err:
-                    wf_logger.warning(
-                        " [%s] Failed to emit initial_message_to_user for chat %s: %s",
-                        workflow_name_upper,
-                        chat_id,
-                        ui_seed_err,
-                    )
 
             # -----------------------------------------------------------------
             # 3) LLM config (per-chat cache seed)
@@ -1067,6 +1072,71 @@ async def run_workflow_orchestration(
             )
 
             # -----------------------------------------------------------------
+            # 7.5) UserDriven static greeting via register_reply (AG2-native)
+            # -----------------------------------------------------------------
+            # For NEW UserDriven chats, register a one-shot reply on the
+            # initial agent that returns the greeting without an LLM call.
+            # This prevents AG2 from making an LLM call for the first response.
+            # NOTE: ws_protocol.py MAY send the greeting on initial connection,
+            # so we check the connection flag to decide whether to suppress.
+            if (
+                not resumed_mode
+                and startup_mode == "UserDriven"
+                and config.get("initial_message_to_user")
+            ):
+                _greeting = str(config["initial_message_to_user"]).strip()
+                if _greeting:
+                    # Check if ws_protocol.py already sent the greeting
+                    _bootstrap_already_visible = False
+                    if transport and hasattr(transport, 'connections') and chat_id:
+                        _conn = transport.connections.get(chat_id, {})
+                        _bootstrap_already_visible = _conn.get("userdriven_bootstrap_visible", False)
+
+                    if _bootstrap_already_visible:
+                        # ws_protocol.py already sent greeting - suppress to prevent duplicate
+                        _final_greeting = f"[_MOZAIKS_SUPPRESS_UI]{_greeting}"
+                        wf_logger.info(
+                            f" [{workflow_name_upper}] Greeting already sent by ws_protocol - suppressing"
+                        )
+                    else:
+                        # No greeting sent yet (mode switch case) - send it normally
+                        _final_greeting = _greeting
+                        wf_logger.info(
+                            f" [{workflow_name_upper}] No prior greeting - will send via register_reply"
+                        )
+
+                    _reply_fn = _make_static_greeting_reply(_final_greeting)
+                    initiating_agent.register_reply(
+                        [ConversableAgent, None], _reply_fn, position=0,
+                    )
+                    wf_logger.info(
+                        f" [{workflow_name_upper}] Registered static greeting reply on "
+                        f"{getattr(initiating_agent, 'name', '?')} (UserDriven, no LLM)"
+                    )
+
+            # -----------------------------------------------------------------
+            # 7.6) Early select_speaker event for UI thinking indicator
+            # -----------------------------------------------------------------
+            # Emit a synthetic select_speaker event so the frontend can show
+            # a thinking bubble immediately, before AG2 emits its own events.
+            if transport and not resumed_mode:
+                _init_agent_name = getattr(initiating_agent, 'name', None)
+                if _init_agent_name:
+                    try:
+                        _select_speaker_evt = {
+                            "kind": "select_speaker",
+                            "agent": _init_agent_name,
+                            "source": "workflow_init",
+                            "_synthetic": True,
+                        }
+                        asyncio.create_task(transport.send_event_to_ui(_select_speaker_evt, chat_id))
+                        wf_logger.info(
+                            f" [{workflow_name_upper}] Emitted early select_speaker for {_init_agent_name}"
+                        )
+                    except Exception as _ss_err:
+                        wf_logger.debug(f" [{workflow_name_upper}] Early select_speaker failed: {_ss_err}")
+
+            # -----------------------------------------------------------------
             # 8) STRICT resume prep: normalize + enforce HIL (no tail stripping)
             # -----------------------------------------------------------------
             initial_messages = _normalize_to_strict_ag2(initial_messages, default_user_name="user")
@@ -1176,6 +1246,13 @@ async def run_workflow_orchestration(
             except Exception as lc_err:
                 wf_logger.debug(f" [{workflow_name_upper}] Lifecycle before_chat failed: {lc_err}")
             
+            # -----------------------------------------------------------------
+            # 10.6) Token streaming handled by transport layer
+            # -----------------------------------------------------------------
+            # The SimpleTransport automatically chunks chat.text events into
+            # stream_chunk + stream_end for typewriter effect (see lines 660-714
+            # in simple_transport.py). No additional setup needed here.
+
             # -----------------------------------------------------------------
             # 11) Execute AG2 group chat with proper event streaming
             # -----------------------------------------------------------------

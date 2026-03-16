@@ -150,6 +150,9 @@ const ModernChatInterface = ({
   generalSessionsLoading = false,
   showAskHistoryMenu = false,
   onAskHistoryToggle,
+  showHistoryMenu = false,
+  onHistoryToggle = null,
+  historyMenuLabel = 'Recents',
   structuredOutputs = {},
   startupMode,
   initialMessageToUser,
@@ -180,7 +183,10 @@ const ModernChatInterface = ({
     : `${formattedWorkflowName || 'AI-Powered Workflow'}${workflowHasChildren ? ' · Pack' : ''}`;
   // When not on chat page: allow brand click if provided, else only show 🧠 (ask→workflow toggle)
   const showModeToggle = isOnChatPage || conversationMode === 'ask' || Boolean(onBrandClick);
-  const showAskHistoryToggle = showAskHistoryMenu && typeof onAskHistoryToggle === 'function';
+  const historyToggleHandler = typeof onHistoryToggle === 'function'
+    ? onHistoryToggle
+    : (typeof onAskHistoryToggle === 'function' ? onAskHistoryToggle : null);
+  const showAskHistoryToggle = (showHistoryMenu || showAskHistoryMenu) && typeof historyToggleHandler === 'function';
   const avatarIcon = conversationMode === 'ask' ? '🧠' : '🤖';
   // const renderCountRef = useRef(0); // For debugging renders if needed
 
@@ -432,7 +438,7 @@ const ModernChatInterface = ({
   );
 
   return (
-    <div className={`relative chat-shell ${conversationMode === 'ask' ? 'chat-shell-ask' : 'chat-shell-workflow'} flex flex-col h-full rounded-2xl border border-[rgba(var(--color-primary-light-rgb),0.3)] md:overflow-hidden overflow-visible shadow-2xl bg-gradient-to-br from-white/5 to-[rgba(var(--color-primary-rgb),0.05)] backdrop-blur-sm ${plainContainer ? '' : 'cosmic-ui-module artifact-panel'} p-0`} style={{ overflow: 'clip' }}>
+    <div className={`relative chat-shell ${conversationMode === 'ask' ? 'chat-shell-ask' : 'chat-shell-workflow'} flex flex-col h-full rounded-2xl border border-[rgba(var(--color-primary-light-rgb),0.3)] md:overflow-hidden overflow-visible shadow-2xl bg-gradient-to-br from-white/5 to-[rgba(var(--color-primary-rgb),0.05)] backdrop-blur-sm ${plainContainer ? '' : 'cosmic-ui-module'} p-0`} style={{ overflow: 'clip' }}>
       {/* Per-turn loading: rely on subtle typing indicator inside messages area; avoid full-page spinner after init */}
 
       {/* Fixed Command Center Header - Dark background to match artifact */}
@@ -443,9 +449,10 @@ const ModernChatInterface = ({
             {showAskHistoryToggle && (
               <button
                 type="button"
-                onClick={onAskHistoryToggle}
+                onClick={historyToggleHandler}
                 className="md:hidden inline-flex flex-col gap-1.5 p-2 rounded-lg border border-[rgba(var(--color-primary-light-rgb),0.35)] text-white/80 hover:text-white hover:border-[rgba(var(--color-primary-light-rgb),0.7)] transition focus:outline-none focus:ring-2 focus:ring-[rgba(var(--color-primary-light-rgb),0.6)]"
-                aria-label="Show Ask conversations"
+                aria-label={`Show recent ${conversationMode === 'workflow' ? 'workflows' : 'chats'}`}
+                title={historyMenuLabel || 'Recents'}
               >
                 <span className="w-5 h-0.5 bg-current rounded-full"></span>
                 <span className="w-5 h-0.5 bg-current rounded-full"></span>
@@ -454,7 +461,7 @@ const ModernChatInterface = ({
             )}
             {/* Chat Icon + Title */}
             {/* Avatar is clickable ONLY in workflow mode (to switch to Ask) */}
-            {showModeToggle && conversationMode === 'workflow' ? (
+            {conversationMode === 'workflow' ? (
               <button
                 type="button"
                 onClick={handleAvatarClick}

@@ -1,0 +1,16 @@
+{
+  "events": [
+    {
+      "event_type": "report.requested",
+      "source_event": "report_requested",
+      "description": "A report or generated package was requested from the substrate.",
+      "post_commit_only": true
+    },
+    {
+      "event_type": "module.executed",
+      "source_event": "module_executed",
+      "description": "A substrate module action completed successfully.",
+      "post_commit_only": true
+    }
+  ]
+}

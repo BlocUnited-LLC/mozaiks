@@ -214,10 +214,8 @@ class TestNavigationConfigMerged:
         for page in nav["pages"]:
             assert "component" in page
 
-    def test_has_default_nav(self, nav):
-        assert "default" in nav
-        labels = [d["label"] for d in nav["default"]]
-        assert "AI" in labels
+    def test_no_default_nav_section(self, nav):
+        assert "default" not in nav
 
     def test_no_modules_section(self, nav):
         # Module route metadata now comes from module.json -> module_registry.json,

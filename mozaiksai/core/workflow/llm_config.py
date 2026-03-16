@@ -369,9 +369,10 @@ async def get_llm_config(
     if response_format is not None:
         llm_config["response_format"] = response_format
     if stream:
-        # Autogen uses stream via runtime / event layer; we'll handle streaming at the transport level
-        # DO NOT add _stream flag to llm_config as it confuses AG2 config validation
-        logger.debug("[LLM_CONFIG] Stream mode requested but not adding _stream flag to avoid AG2 validation issues")
+        # AG2 0.11+ supports streaming via ModelClientStreamingChunkEvent
+        # Enable stream=True so OpenAI returns tokens incrementally
+        llm_config["stream"] = True
+        logger.debug("[LLM_CONFIG] Stream mode enabled (stream=True added to llm_config)")
     if extra_config:
         # Merge remaining extras without overwriting core entries already set unless user explicitly wants it
         for k, v in extra_config.items():

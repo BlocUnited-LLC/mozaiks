@@ -152,7 +152,7 @@ function validateNavigation(nav) {
 
   // Pages (canonical flat array)
   const pages = Array.isArray(nav.pages) ? nav.pages : [];
-  const CORE_PATHS = ['/', '/chat', '/admin'];
+  const CORE_PATHS = ['/', '/chat', '/app'];
   pages.forEach((page, i) => {
     if (!page.path && !page.href && !page.trigger) {
       issues.push({ level: 'error', file, message: `pages[${i}] has no "path", "href", or "trigger". Every page needs at least one navigation target.` });
@@ -165,6 +165,33 @@ function validateNavigation(nav) {
     }
     if (page.icon && !ICON_FILE_RE.test(page.icon) && !URL_RE.test(page.icon)) {
       issues.push({ level: 'warn', file, message: `pages[${i}].icon="${page.icon}" is not a valid asset filename. Use "icon-name.svg" not "icon-name".` });
+    }
+  });
+
+  // Optional header_controls (top-right utility buttons)
+  const headerControls = Array.isArray(nav.header_controls) ? nav.header_controls : [];
+  headerControls.forEach((control, i) => {
+    const tokens = [control?.id, control?.type, control?.action, control?.label]
+      .filter((v) => typeof v === 'string')
+      .map((v) => v.trim().toLowerCase());
+    const semanticControlIds = new Set([
+      'userprofile', 'user-profile', 'user_profile', 'profile',
+      'notifications', 'notification',
+      'discover', 'discovery',
+    ]);
+    const isSemanticControl = tokens.some((t) => semanticControlIds.has(t));
+
+    if (!control.id) {
+      issues.push({ level: 'warn', file, message: `header_controls[${i}] is missing an "id".` });
+    }
+    if (!control.label) {
+      issues.push({ level: 'warn', file, message: `header_controls[${i}] is missing a "label".` });
+    }
+    if (!isSemanticControl && !control.action && !control.path && !control.href && !control.trigger) {
+      issues.push({ level: 'error', file, message: `header_controls[${i}] has no "action", "path", "href", or "trigger".` });
+    }
+    if (control.icon && !ICON_FILE_RE.test(control.icon) && !URL_RE.test(control.icon)) {
+      issues.push({ level: 'warn', file, message: `header_controls[${i}].icon="${control.icon}" is not a valid asset filename. Use "icon-name.svg" not "icon-name".` });
     }
   });
 
@@ -304,7 +331,7 @@ export async function validateAllConfigs() {
   else if (themeResult.missing) results.push({ level: 'error', file: 'theme_config.json', message: 'Not found. This is the core visual identity config — your app needs it. Create app/config/theme_config.json.' });
 
   if (navResult.data) results.push(...validateNavigation(navResult.data));
-  else if (navResult.missing) results.push({ level: 'info', file: 'navigation_config.json', message: 'Not found — the core shell (Chat + Admin) will load with no extra pages.' });
+  else if (navResult.missing) results.push({ level: 'info', file: 'navigation_config.json', message: 'Not found — the core shell will load; module routes may still arrive from backend navigation.' });
 
   // Auth is now validated as part of app.json (no separate auth.json)
   // validateAppConfig handles the auth sub-section internally.

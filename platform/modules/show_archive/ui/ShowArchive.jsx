@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useChatUI, Header, Footer, Card, Stat } from '@mozaiks/chat-ui';
+import { useNavigate } from 'react-router-dom';
+import { useChatUI, useTheme, Header, Footer, Card, Stat } from '@mozaiks/chat-ui';
 import { executeModule } from '@mozaiks/chat-ui/coreBridge';
 
 const FALLBACK_SHOWS = [
@@ -22,9 +23,29 @@ const FALLBACK_SHOWS = [
 ];
 
 export default function ShowArchive() {
-  const { user, loading } = useChatUI();
+  const navigate = useNavigate();
+  const { user, loading, logout } = useChatUI();
+  const { theme: chatTheme, loading: themeLoading } = useTheme();
   const [shows, setShows] = useState(FALLBACK_SHOWS);
   const [source, setSource] = useState('mock');
+
+  const handleHeaderAction = (actionId, action = null) => {
+    if (actionId === 'discover') {
+      navigate('/discover');
+      return;
+    }
+    if (actionId === 'signout' || action?.action === 'signout') {
+      logout();
+      return;
+    }
+    const target = action?.path || action?.href;
+    if (!target) return;
+    if (/^https?:\/\//i.test(target)) {
+      window.location.href = target;
+      return;
+    }
+    navigate(target);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -56,9 +77,9 @@ export default function ShowArchive() {
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(244,114,182,0.18),_transparent_28%),linear-gradient(180deg,_#0b0b14,_#161224)]">
-      <Header user={user} />
-      <main className="pt-20 pb-12 px-4">
+    <div className="min-h-screen flex flex-col bg-[radial-gradient(circle_at_top_left,_rgba(244,114,182,0.18),_transparent_28%),linear-gradient(180deg,_#0b0b14,_#161224)]">
+      <Header user={user} chatTheme={chatTheme} themeLoading={themeLoading} onAction={handleHeaderAction} />
+      <main className="flex-1 pt-20 pb-12 px-4">
         <div className="max-w-6xl mx-auto space-y-8">
           <div>
             <h1 className="text-3xl font-bold text-white">Show Archive</h1>
@@ -103,7 +124,7 @@ export default function ShowArchive() {
           </div>
         </div>
       </main>
-      <Footer />
+      <Footer chatTheme={chatTheme} />
     </div>
   );
 }

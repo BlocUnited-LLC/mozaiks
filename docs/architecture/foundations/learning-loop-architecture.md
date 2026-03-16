@@ -1,112 +1,77 @@
 # Learning Loop Architecture
 
-**Status:** Current architecture reference  
-**Last updated:** 2026-02-26
+This document defines how learning and feedback loops should fit into Mozaiks
+without blurring runtime boundaries.
 
-## Purpose
+## Core Rule
 
-This document defines how mozaiks supports continuous workflow quality improvement through runtime telemetry and feedback loops.
+Learning loops are downstream improvement systems.
 
-It does not prescribe private automation pipelines. It defines OSS runtime contracts and integration points.
+They should observe:
 
-## Core Model
+- domain events
+- control events
+- runtime events
+- user feedback
 
-Learning is a loop, not a runtime layer.
+They should not silently mutate live app behavior inside the runtime without an
+explicit review or compilation step.
 
-1. Execute workflow
-2. Capture telemetry
-3. Persist telemetry
-4. Compute quality signals
-5. Feed signals into future workflow design and runtime decisions
+## Inputs
 
-## Ownership Boundary
+Useful learning inputs include:
 
-### Mozaiks runtime (`core` + `orchestration`)
+- automation route outcomes
+- workflow completion and failure patterns
+- user approvals and rejections
+- artifact quality feedback
+- substrate usage and operational telemetry
 
-- emits runtime events
-- persists run/event history
-- exposes queryable artifacts/events
-- supports graph injection hooks
+## Outputs
 
-### Consuming app/tooling
+Learning systems may produce:
 
-- computes custom quality scores
-- tracks generation-time metadata (if applicable)
-- applies policy for prompt/workflow improvements
+- prompt improvements
+- workflow design suggestions
+- automation route suggestions
+- template upgrades
+- policy recommendations
+- generator heuristics
 
-## Telemetry Contract
+These outputs should usually flow back into:
 
-Reserved namespace: `telemetry.*`.
+- product templates
+- bundle revisions
+- reviewed config changes
 
-Recommended baseline events:
+Not directly into opaque live self-modification.
 
-- `telemetry.run.started`
-- `telemetry.run.completed`
-- `telemetry.run.failed`
-- `telemetry.run.summary`
-- `telemetry.tool.outcome`
-- `telemetry.hitl.requested`
-- `telemetry.hitl.resolved`
+## Why This Boundary Matters
 
-`telemetry.run.summary` is the preferred aggregation anchor for scoring pipelines.
+If the learning loop writes directly into the running architecture without a
+clear contract:
 
-## Data Pipeline
+- workflow behavior drifts invisibly
+- app policy becomes hard to audit
+- generator outputs become non-deterministic
 
-### Step 1: Runtime execution
+The platform should learn, but it should learn through explicit artifacts and
+reviewable changes.
 
-Workflows execute in orchestration runtime and emit lifecycle events.
+## Recommended Pattern
 
-### Step 2: Telemetry emission
+```text
+runtime and substrate facts
+  -> telemetry and analysis
+  -> recommendation artifact
+  -> review
+  -> bundle or template update
+```
 
-Runtime emits telemetry facts tied to `run_id` and workflow metadata.
-
-### Step 3: Persistence
-
-Telemetry is persisted alongside event history in the event store.
-
-### Step 4: Scoring
-
-Deployment-specific jobs compute quality metrics (pattern quality, tool reliability, prompt efficiency, etc.).
-
-### Step 5: Feedback
-
-Scores are injected back into workflow selection/design paths (for example via graph injection queries).
-
-## What Can Improve
-
-| Target | Signals |
-|---|---|
-| workflow decomposition quality | completion/failure, retry, abandonment |
-| prompt and agent config quality | turn counts, error concentration, HITL rate |
-| tool wiring quality | tool success/failure and latency |
-| artifact quality and usability | post-run edits, follow-up actions |
-| routing/gating quality | branch success and dead-end rates |
-
-## Minimal Runtime Hooks to Preserve
-
-1. stable `telemetry.*` namespace in taxonomy
-2. `run_id` correlation across lifecycle and telemetry events
-3. post-run summary emission path
-4. durable event persistence and replay
-5. graph injection extension points for score reads
-
-## Risk Controls
-
-- Keep telemetry schema versioned and explicit.
-- Avoid coupling runtime correctness to scoring availability.
-- Treat scoring pipelines as optional extensions, not core runtime dependencies.
-
-## Open Questions
-
-1. Which score calculations should remain app-defined vs standardized?
-2. What minimum sample size is required before acting on quality signals?
-3. How should score decay and recency weighting be handled?
-4. Which feedback actions require human review?
+This keeps the architecture observable and debuggable.
 
 ## Cross References
 
-- [event-taxonomy.md](event-taxonomy.md)
-- [process-and-event-map.md](process-and-event-map.md)
-- [graph-injection-contract.md](graph-injection-contract.md)
-- [workflow-architecture.md](workflow-architecture.md)
-
+- [event-system-architecture.md](event-system-architecture.md)
+- [runtime-state-and-control-events.md](runtime-state-and-control-events.md)
+- [app-builder-architecture.md](app-builder-architecture.md)

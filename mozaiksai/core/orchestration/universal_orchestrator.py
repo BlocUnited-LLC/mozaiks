@@ -109,6 +109,9 @@ class UniversalOrchestrator:
             return await self.handle_structured_event(payload)
         return await self.handle_free_text_event(payload)
 
+    async def dispatch_route(self, *, route: str, payload: Dict[str, Any]) -> RouteResult:
+        return await self._dispatch(route=route, payload=payload)
+
     async def _dispatch(self, *, route: str, payload: Dict[str, Any]) -> RouteResult:
         handler = self._handlers.get(route)
         if handler is not None:

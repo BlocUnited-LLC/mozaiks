@@ -39,7 +39,9 @@
 
 ### 💬 Embeddable Floating Widget
 
-![Widget Demo](assets/widgetAction.gif)
+<video controls muted loop playsinline width="700">
+  <source src="assets/widgetAction_compressed.mp4" type="video/mp4">
+</video>
 
 *Drop a floating assistant anywhere in your app - click the button to expand/collapse the chat interface*
 

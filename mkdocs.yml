@@ -120,6 +120,7 @@ nav:
           - App Creation Guide: architecture/foundations/app-creation-guide.md
           - App Planning Contracts: architecture/foundations/app-planning-contracts.md
           - Workflow Architecture: architecture/foundations/workflow-architecture.md
+          - Declarative AG2 Mapping: architecture/foundations/declarative-ag2-mapping.md
           - Workflow Authoring Contracts: architecture/foundations/workflow-authoring-contracts.md
           - UI Surface and Layout: architecture/foundations/ui-surface-and-layout-architecture.md
           - Core vs Product vs App Bundle: architecture/foundations/core-product-app-bundle-boundary.md
@@ -133,6 +134,10 @@ nav:
           - Event Taxonomy: architecture/foundations/event-taxonomy.md
           - Event System Architecture: architecture/foundations/event-system-architecture.md
           - Process and Event Map: architecture/foundations/process-and-event-map.md
+      - Development:
+          - Overview: architecture/development/overview.md
+          - Substrate UI Planning Spec: architecture/development/substrate-ui-planning-spec.md
+          - Substrate UI Dependency Matrix: architecture/development/substrate-ui-dependency-matrix.md
       - Keycloak Auth: architecture/keycloak-auth.md
       - Mobile Client Contract: architecture/mobile-client-contract.md
       - Orchestration and Decomposition: architecture/orchestration-and-decomposition.md

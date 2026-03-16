@@ -1,6 +1,6 @@
 ﻿# MozaiksAI Requirements
 # Core runtime
-ag2[openai,lmm,tracing]>=0.11.2
+ag2[a2a,openai,lmm,tracing]>=0.11.2
 fastapi>=0.100.0
 uvicorn[standard]>=0.20.0
 websockets>=11.0
@@ -9,6 +9,7 @@ python-dotenv>=1.0.0
 pyyaml>=6.0
 httpx
 aiohttp>=3.8.0
+faststream[nats]>=0.5.35
 
 # Database
 motor>=3.3.0

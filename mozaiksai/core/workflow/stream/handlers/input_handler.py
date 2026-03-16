@@ -123,6 +123,18 @@ class InputRequestHandler(BaseEventHandler):
         if prompt_hint is not None:
             setattr(event, "_mozaiks_prompt", prompt_hint)
 
+        # Persist pending input request for resume support
+        try:
+            await ctx.persistence_manager.save_pending_input_request(
+                chat_id=ctx.chat_id,
+                app_id=ctx.app_id,
+                request_id=request_id,
+                agent=state.turn_agent or "Agent",
+                prompt=prompt_hint or "",
+            )
+        except Exception as e:
+            ctx.wf_logger.debug(f"Failed to persist pending input request: {e}")
+
         # Build input_request payload for UI
         return {
             "kind": "input_request",

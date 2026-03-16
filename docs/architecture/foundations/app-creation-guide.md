@@ -1,398 +1,279 @@
 # App Creation Guide
 
-**Last updated:** 2026-03-12  
-**Status:** Current architecture reference  
-**Audience:** App-bundle authors, generator authors, and platform maintainers
-
----
-
-## Purpose
-
-This guide explains how Mozaiks should turn user intent into a structured app
+This guide explains how Mozaiks should turn raw user intent into a coherent app
 bundle.
 
-The important shift is:
+The builder must decompose intent into separate reviewed models before it
+writes files.
 
-- do not think in terms of `backend/` and `frontend/` first
-- do not start by generating loose code files
-- start from app intent
-- decompose that intent into typed app concerns
-- compile those concerns into the `platform/` bundle
+## Core Rule
 
-If another doc is vague about how to move from a user idea to concrete app
-files, this doc wins.
+Do not jump from:
 
----
+- user prompt
 
-## The Core Problem
+directly to:
 
-Most app generators fail here:
+- workflows
+- modules
+- React files
+- handlers
 
-1. user gives a broad idea
-2. the system jumps straight into code generation
-3. one agent tries to build everything
-4. the result is flimsy, shallow, or structurally inconsistent
+First produce a typed architecture and a bounded build plan.
 
-Mozaiks should do the opposite.
-
-It should decompose app intent before it writes bundle files.
-
----
-
-## The Correct Mental Model
-
-Mozaiks is not compiling intent directly into:
+## The Correct Pipeline
 
 ```text
-backend/
-frontend/
+User intent
+  -> ConceptBlueprint
+  -> IntentBrief
+  -> CapabilityMap
+  -> PlatformProvisionPlan
+  -> app substrate model
+  -> automation model
+  -> workflow model
+  -> bundle plan
+  -> build graph
+  -> compiled platform bundle
 ```
 
-That tree is too implementation-specific and too unconstrained for scalable
-generation.
+For change flows, insert `ImpactSet` before compile so the builder knows what
+must actually be touched.
 
-Mozaiks should compile intent into a structured app bundle under `platform/`.
+## Step 1: Produce a `ConceptBlueprint`
 
-That means the builder should reason in these families:
+Start by deciding:
 
-- `app`
-- `ai`
-- `shell`
-- `theme`
-- `modules`
-- `entities`
-- `views`
-- `actions`
-- `policies`
-- `workflows`
+- what the app is
+- who it serves
+- why it is valuable
+- what is in v1 scope
+- what is deferred
 
-Then the runtime and frontend consume those declaratives.
+This is the approval-facing artifact for the builder wizard.
 
-See also:
+It should prevent requests like "build me Facebook" from immediately turning
+into unbounded technical generation.
 
-- [Canonical App Structure](canonical-app-structure.md)
-- [App Bundle Declaratives](app-bundle-declaratives.md)
-- [App Planning Contracts](app-planning-contracts.md)
+## Step 2: Normalize `IntentBrief`
 
----
+Identify:
 
-## The Decomposition Pipeline
+- business objects
+- user roles
+- important relationships
+- external systems
+- constraints
+- non-goals
 
-The intended path is:
+This stops the builder from building a shell before it understands the app.
 
-```text
-User Intent
-  -> Capability Map
-  -> App Model
-  -> Execution Model
-  -> Bundle Plan
-  -> Compiled platform/ files
-```
+## Step 3: Build a `CapabilityMap`
 
-Each stage answers a different question.
+Translate the request into concrete capabilities.
 
-### 1. User Intent
+Examples:
 
-Start with the raw user request.
+- create deal
+- review booking request
+- publish room brief
+- summarize meeting notes
+- escalate overdue task
 
-Example:
+Use product language first. Do not assign everything to workflows yet.
 
-- `build me a campus marketplace`
-- `I want an app for comedy club bookings and lineup management`
-- `build a creator drop platform with launch rooms`
+## Step 4: Classify Platform Provisions First
 
-This is too vague to build directly.
+Before generating app-specific work, ask what the enterprise core already
+provides.
 
-### 2. Capability Map
+For each recurring SaaS concern, classify it as:
 
-Turn the request into concrete capabilities.
+- `core_provided`
+- `core_configured`
+- `app_stub`
+- `external_integration`
+- `disabled`
 
-Use verb+noun statements.
+Examples:
 
-Example:
+- auth is usually `core_configured`
+- websocket delivery is usually `core_provided`
+- notifications are usually `core_configured`
+- a custom CRM adapter may be `external_integration`
 
-- browse listings
-- create listing
-- save favorites
-- message seller
-- moderate reports
-- manage event schedule
-- generate launch copy
+This is the point where the builder decides what does not need to be invented
+again.
 
-At this stage, do not decide files yet.
+## Step 5: Execute Capability Classification
 
-### 3. App Model
+For each capability, answer these questions.
 
-Now classify capabilities into app-bundle concerns.
+| Question | If yes | Primary output |
+| --- | --- | --- |
+| Does it need durable business state? | yes | entity |
+| Does it need a persistent product surface? | yes | module and view |
+| Is it a deterministic mutation or service call? | yes | action |
+| Does it need reasoning, orchestration, or HITL? | yes | workflow |
 
-This is the step that has been missing.
+Then ask one more question:
 
-For each capability, decide:
+| Question | If yes | Output |
+| --- | --- | --- |
+| Should this happen because of a domain event rather than direct user intent? | yes | automation route |
 
-- does it require a durable data entity?
-- does it require a persistent page or module?
-- does it require a triggered action?
-- does it require an AI workflow?
-- does it require a policy or permission rule?
+This is the missing cause-and-effect layer.
 
-That produces:
+## Step 6: Build the App Substrate Model
+
+Define:
 
 - `EntitySpec`
 - `ViewSpec`
 - `ActionSpec`
-- `ModuleSpec`
-- `WorkflowSpec`
 - `PolicySpec`
+- `ModuleSpec`
 
-### 4. Execution Model
+This is the non-AI app.
 
-After the app model is defined, decide how the capability should execute.
+If the app cannot stand on its own without workflows, the substrate model is
+still incomplete.
 
-Use these buckets:
+## Step 7: Build the Automation Model
 
-- `workflow`
-  - conversational, multi-step, HITL, agentic
-- `action`
-  - deterministic mutation, button/API trigger, service call
-- `module`
-  - durable page or application surface
+Define:
 
-This prevents the common failure mode where everything gets forced into chat.
+- domain events the app emits
+- predicates that matter
+- automation effects
+- correlation keys
+- surface decisions
 
-### 5. Bundle Plan
+Example:
 
-Now define which files must exist in `platform/`.
+```yaml
+event_type: booking.request.approved
+when:
+  priority: high
+effect:
+  kind: workflow.run
+  workflow: ApprovalConcierge
+  correlation: booking_id
+  surface: existing_chat_or_background
+```
 
-Examples:
+This route belongs to the app bundle and executes on the AI side.
 
-- `platform/entities/listing.json`
-- `platform/views/listings_list.json`
-- `platform/actions/save_favorite.json`
-- `platform/modules/marketplace_home/module.json`
-- `platform/workflows/Concierge/orchestrator.yaml`
+## Step 8: Build the Workflow Model
 
-This is the first stage where file generation becomes appropriate.
+Only now decide which workflows exist.
 
-### 6. Compile
+A workflow should exist when the system needs:
 
-Finally, compile the plan into the real bundle.
+- reasoning
+- multi-turn conversation
+- orchestration across agents
+- structured HITL checkpoints
+- AI-mediated tool use
 
-This is where code generation happens.
+Examples that are not automatically workflows:
 
-The generated code should be constrained by the declaratives, not invented from
-scratch without structure.
+- save form
+- update record
+- list records
+- fetch dashboard data
 
----
+## Step 9: Produce the `BundlePlan`
 
-## The Classification Matrix
+The plan should answer:
 
-This is the practical rule Mozaiks needs when decomposing capabilities.
+- which declaratives must exist
+- which runtime projections must exist
+- which generated files must exist
+- which surfaces are pure substrate versus workflow-enabled
 
-| Question | If yes | Output |
-|---|---|---|
-| Does the app need to persist this as business data? | yes | `EntitySpec` |
-| Does the user need a durable page/screen for it? | yes | `ModuleSpec` + `ViewSpec` |
-| Is it a list/detail/create/edit/filter/search concern? | yes | `ViewSpec` |
-| Is it a deterministic mutation or service call? | yes | `ActionSpec` |
-| Does it require reasoning, orchestration, or multi-turn conversation? | yes | `WorkflowSpec` |
-| Does access differ by role, plan, or tenant? | yes | `PolicySpec` |
+The bundle plan is the first step that should talk in file paths.
 
-Examples:
+## Step 10: Produce the `BuildGraph`
 
-| Capability | Result |
-|---|---|
-| `create listing` | entity + action + form/detail view |
-| `browse listings` | list view + module |
-| `generate pitch options` | workflow |
-| `approve final plan` | workflow checkpoint or action, depending on complexity |
-| `message seller` | entity + module + optional workflow if AI mediation is involved |
-| `regenerate product description` | action or workflow depending on whether conversational iteration is required |
+Break the approved architecture into bounded `BuildTask`s.
 
----
+Each task should declare:
 
-## What Counts As CRUD In Mozaiks
+- one builder workflow owner
+- dependencies
+- capability refs
+- provision refs
+- owned bundle paths
 
-CRUD is not a separate world outside the platform.
+This is where planning becomes executable authoring work.
 
-In Mozaiks, CRUD should come from:
+## Create Versus Change
 
-- entities
-- views
-- actions
-- modules
-- policies
+Use the same pipeline for both, but with different entry points.
 
-That means:
+### Create flow
 
-- data structure is typed
-- pages are generated from view contracts
-- actions are declared
-- modules surface the behavior
+```text
+ConceptBlueprint
+  -> IntentBrief
+  -> CapabilityMap
+  -> PlatformProvisionPlan
+  -> DecompositionPackage
+  -> BuildGraph
+```
 
-This is how CRUD becomes dynamic and scalable without every app turning into a
-one-off hand-built codebase.
+### Change flow
 
----
+```text
+ChangeIntent
+  -> ImpactSet
+  -> ConceptBlueprint if value or scope changed
+  -> replanned BuildGraph only where needed
+```
 
-## What Counts As AI In Mozaiks
+Not every change should restart the whole app build.
 
-AI behavior should come from workflows.
+## Practical Classification Examples
 
-Use workflows when you need:
+| Capability | Primary model | Secondary model |
+| --- | --- | --- |
+| Create lead | entity + action + form view | module |
+| Browse pipeline | view + module | none |
+| Auto-triage new lead | workflow | automation route |
+| Approve booking | action or workflow depending on rules | automation route |
+| Generate room concept | workflow | optional artifact view |
+| Send notification after status change | core-configured provision or integration | domain event |
 
-- multi-turn reasoning
-- handoffs
-- human checkpoints
-- orchestration
-- decomposition
-- tool use with contextual reasoning
+## Flagship Runtime Example
 
-Do not use a workflow just because a feature sounds advanced.
+The current `platform/` directory in this repo is the flagship runtime-output
+example.
 
-Examples:
+It shows that builder output today may still include transitional projections
+such as:
 
-- `generate 5 pitch directions` -> workflow
-- `summarize user requirements` -> workflow
-- `classify a change request` -> workflow or structured action
-- `save profile form` -> not a workflow
+- `platform/config/navigation_config.json`
+- `platform/config/theme_config.json`
 
----
+That does not change the conceptual model. Those files should be understood as
+compiled shell projections, not as the conceptual center of the architecture.
 
-## A Simple Example
+## Generator Discipline
 
-Intent:
+The builder must keep these outputs separate:
 
-- `Build a comedy club operating system`
+- concept and value review
+- platform provision planning
+- app structure
+- automation policy
+- workflow behavior
+- shell composition
 
-Capability map:
+If one artifact tries to do all six jobs, the model will collapse again.
 
-- manage lineup
-- archive sets
-- generate roast directions
-- review performer brief
-- show crowd scoreboard
+## Cross References
 
-App model:
-
-- entities:
-  - `Performer`
-  - `Set`
-  - `Show`
-- views:
-  - lineup board
-  - archive list
-  - performer detail
-- actions:
-  - save performer
-  - publish lineup
-  - archive set
-- modules:
-  - `lineup_board`
-  - `show_archive`
-- workflows:
-  - `GreenRoom`
-  - `WritersRoom`
-  - `MainStage`
-
-Compiled bundle output:
-
-- `platform/modules/lineup_board/*`
-- `platform/modules/show_archive/*`
-- `platform/workflows/GreenRoom/*`
-- `platform/workflows/WritersRoom/*`
-- `platform/workflows/MainStage/*`
-- future:
-  - `platform/entities/*.json`
-  - `platform/views/*.json`
-  - `platform/actions/*.json`
-
----
-
-## The Planning Artifacts Mozaiks Needs
-
-To make this scalable, generators should not jump straight to files.
-
-They should emit typed planning artifacts first.
-
-Recommended planning artifacts:
-
-- `AppSpec`
-- `CapabilityMap`
-- `EntitySpec[]`
-- `ViewSpec[]`
-- `ActionSpec[]`
-- `ModuleSpec[]`
-- `WorkflowSpec[]`
-- `PolicySpec[]`
-- `BundlePlan`
-
-Then the compiler/generator turns those into the `platform/` files.
-
-This is what keeps the system opinionated.
-
-These contracts are now typed in runtime at:
-
-- `mozaiksai/core/orchestration/planning_contracts.py`
-
----
-
-## What The Builder Should Actually Do
-
-The builder should follow this sequence:
-
-1. interview and refine intent
-2. create `AppSpec`
-3. derive a capability map
-4. classify capabilities into:
-   - entities
-   - views
-   - actions
-   - modules
-   - workflows
-   - policies
-5. create a `BundlePlan`
-6. decompose the plan into a build `TaskGraph`
-7. generate the actual files
-
-This is how Mozaiks can scale beyond workflow-only demos.
-
----
-
-## What Not To Do
-
-Do not:
-
-- treat every capability as a workflow
-- generate raw backend/frontend file trees first
-- let one agent freestyle all app structure
-- collapse CRUD, actions, and workflows into one vague “feature” bucket
-- ask the runtime to infer app shape from prose after generation starts
-
----
-
-## Recommended AI-Agent Workflow
-
-When an AI coding agent is involved, do not ask it to “build the app” in one
-shot.
-
-Instead:
-
-1. use a decomposition prompt pack
-2. have it emit typed planning artifacts
-3. review the resulting plan
-4. then let it compile the plan into `platform/` files
-
-See:
-
-- [Prompt Packs For AI Coding Agents](../../instruction-prompts/prompt-packs.md)
-- [Prompt Pack: Decompose App Intent](../../instruction-prompts/app-planning/decompose-app-intent.md)
-
----
-
-## Next Reading
-
-- [App Bundle Declaratives](app-bundle-declaratives.md)
-- [Canonical App Structure](canonical-app-structure.md)
-- [App Planning Contracts](app-planning-contracts.md)
-- [Builder Execution Model](builder-execution-model.md)
-- [App Builder Architecture](app-builder-architecture.md)
+- [app-planning-contracts.md](app-planning-contracts.md)
+- [app-bundle-declaratives.md](app-bundle-declaratives.md)
+- [builder-execution-model.md](builder-execution-model.md)

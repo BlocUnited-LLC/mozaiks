@@ -11,6 +11,7 @@ from autogen import ConversableAgent, UpdateSystemMessage
 
 from ..outputs import get_structured_outputs_for_workflow
 from ..workflow_manager import workflow_manager
+from .a2a import create_a2a_remote_agent, load_a2a_agent_specs
 
 # Import context utilities (extracted for modularity)
 from ..context.context_utils import (
@@ -216,14 +217,24 @@ async def create_agents(
         logger.warning(f"[AGENTS] Invalid agents config shape for '{workflow_name}': {type(agent_configs)}")
         agent_configs = {}
 
-    try:
-        from ..validation.llm_config import get_llm_config as _get_base_llm_config
+    a2a_specs = load_a2a_agent_specs(workflow_config)
+    local_agent_names = [name for name in agent_configs.keys() if name not in a2a_specs]
 
-        extra = {"cache_seed": cache_seed} if cache_seed is not None else None
-        _, base_llm_config = await _get_base_llm_config(stream=True, extra_config=extra)
-    except Exception as err:
-        logger.error(f"[AGENTS] Failed to load base LLM config: {err}")
-        return {}
+    base_llm_config: Dict[str, Any] = {}
+    if local_agent_names:
+        try:
+            from ..validation.llm_config import get_llm_config as _get_base_llm_config
+
+            extra = {"cache_seed": cache_seed} if cache_seed is not None else None
+            _, base_llm_config = await _get_base_llm_config(stream=True, extra_config=extra)
+        except Exception as err:
+            logger.error(f"[AGENTS] Failed to load base LLM config: {err}")
+            return {}
+    else:
+        logger.info(
+            "[AGENTS] Workflow '%s' uses only A2A remote agents; skipping local LLM config bootstrap",
+            workflow_name,
+        )
 
     try:
         from .tools import load_agent_tool_functions
@@ -258,6 +269,29 @@ async def create_agents(
     agents: Dict[str, ConversableAgent] = {}
 
     for agent_name, agent_config in agent_configs.items():
+        a2a_spec = a2a_specs.get(agent_name)
+        if a2a_spec is not None:
+            try:
+                remote_agent = create_a2a_remote_agent(a2a_spec, context_variables=context_variables)
+                setattr(remote_agent, "_mozaiks_agent_kind", "a2a_remote")
+                setattr(remote_agent, "_mozaiks_auto_tool_mode", False)
+                agents[agent_name] = remote_agent
+                logger.info(
+                    "[AGENTS] Created A2A remote agent '%s' for workflow '%s' (url=%s)",
+                    agent_name,
+                    workflow_name,
+                    a2a_spec.url,
+                )
+                continue
+            except Exception as a2a_err:
+                logger.error(
+                    "[AGENTS] Failed to create A2A remote agent '%s' for workflow '%s': %s",
+                    agent_name,
+                    workflow_name,
+                    a2a_err,
+                )
+                raise
+
         try:
             from ..outputs.structured import get_llm_for_workflow as _get_structured_llm
 
@@ -479,6 +513,7 @@ async def create_agents(
                 setattr(agent, "_mozaiks_structured_model_name", model_name)
             setattr(agent, "_mozaiks_structured_model_cls", structured_model_cls)
         setattr(agent, "_mozaiks_base_system_message", base_system_message)
+        setattr(agent, "_mozaiks_agent_kind", "local")
         agents[agent_name] = agent
 
     duration = perf_counter() - start_time

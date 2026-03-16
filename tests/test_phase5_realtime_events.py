@@ -204,8 +204,8 @@ class TestCrossSubstrateBridge:
     # Outbound: mozaikscore → mozaiksai
     def test_outbound_events_defined(self, source):
         assert "_OUTBOUND_EVENTS" in source
-        assert "user_action" in source
-        assert "module_executed" in source
+        assert "get_automation_event_catalog" in source
+        assert "source_event" in source
 
     def test_relay_function(self, source):
         assert "_relay_to_mozaiksai" in source
@@ -216,6 +216,10 @@ class TestCrossSubstrateBridge:
 
     def test_register_outbound(self, source):
         assert "def register_outbound_relay" in source
+
+    def test_supports_nats_transport(self, source):
+        assert "use_nats_transport" in source
+        assert "get_substrate_event_nats_publisher" in source
 
     def test_includes_internal_api_key(self, source):
         assert "X-Internal-API-Key" in source

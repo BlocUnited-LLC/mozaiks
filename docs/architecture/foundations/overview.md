@@ -1,64 +1,154 @@
 # Architecture Foundations
 
-This section contains the core architecture references for Mozaiks.
+This directory defines the target architecture for Mozaiks as a modular,
+dynamic, agentic application platform.
 
-These docs explain the stable model behind:
+The central shift in this rewrite is simple:
 
-- the modular runtime
-- the app bundle under `platform/`
-- workflow execution and orchestration
-- the event system
-- the relationship between core capabilities and first-party product behavior
+- the non-AI app substrate is first-class
+- the AI workflow runtime is first-class
+- the boundary between them is event-driven and declarative
+- the first-party builder is a product on top of that boundary, not the
+  architecture itself
+- the enterprise-grade core should absorb recurring SaaS concerns so the
+  generator mostly configures core and authors thin app-specific stubs
 
-If you need the high-level architecture, start here before opening deep dives or older notes.
+## The Four-Layer Model
 
-## Recommended Reading Order
+### 1. App substrate
 
-1. [Canonical App Structure](canonical-app-structure.md)
-2. [App Bundle Declaratives](app-bundle-declaratives.md)
-3. [App Creation Guide](app-creation-guide.md)
-4. [App Planning Contracts](app-planning-contracts.md)
-5. [Workflow Architecture](workflow-architecture.md)
-6. [UI Surface and Layout Architecture](ui-surface-and-layout-architecture.md)
-7. [Core vs Product vs App Bundle](core-product-app-bundle-boundary.md)
-8. [Event Taxonomy](event-taxonomy.md)
-9. [Event System Architecture](event-system-architecture.md)
-10. [Process and Event Map](process-and-event-map.md)
+Owns durable application behavior:
 
-Use the builder-focused documents after that if you are working on `mozaiks.ai` as a first-party product.
+- entities
+- views
+- actions
+- modules
+- policies
+- settings, notifications, subscriptions
+- post-commit domain event emission
 
-## The Foundations
+Primary implementation zone today:
 
-| Document | What it answers |
-|---|---|
-| [canonical-app-structure.md](canonical-app-structure.md) | What the live repo and app bundle structure look like today |
-| [app-bundle-declaratives.md](app-bundle-declaratives.md) | Which declarative files make up a Mozaiks app bundle |
-| [app-creation-guide.md](app-creation-guide.md) | How intent becomes a structured plan before app-bundle generation |
-| [app-planning-contracts.md](app-planning-contracts.md) | Typed planning schemas and validation rules for decomposition outputs |
-| [workflow-architecture.md](workflow-architecture.md) | How workflows, modules, execution modes, and the runtime fit together |
-| [workflow-authoring-contracts.md](workflow-authoring-contracts.md) | How to author workflows that use pauses, UI tools, handoffs, and MFJ correctly |
-| [ui-surface-and-layout-architecture.md](ui-surface-and-layout-architecture.md) | How ask/workflow/view surfaces and layouts behave |
-| [core-product-app-bundle-boundary.md](core-product-app-bundle-boundary.md) | What belongs in core runtime, the first-party product, and the app bundle |
-| [event-taxonomy.md](event-taxonomy.md) | Event families, naming rules, and payload expectations |
-| [event-system-architecture.md](event-system-architecture.md) | Event channels, dispatch responsibilities, and runtime ownership |
-| [process-and-event-map.md](process-and-event-map.md) | Runtime processes and how they map onto events and transports |
-| [graph-injection-contract.md](graph-injection-contract.md) | How graph mutation and injection are represented |
-| [learning-loop-architecture.md](learning-loop-architecture.md) | Telemetry and feedback-loop boundaries |
+- `mozaikscore/`
 
-## First-Party Builder Docs
+### 2. Event and automation boundary
 
-These docs are still important, but they describe the first-party `mozaiks.ai` builder on top of Mozaiks rather than the core platform itself.
+Owns the contract between business facts and AI automation:
 
-| Document | What it answers |
-|---|---|
-| [runtime-state-and-control-events.md](runtime-state-and-control-events.md) | Generic runtime state and typed control-event contracts in core |
-| [builder-orchestration-taxonomy.md](builder-orchestration-taxonomy.md) | Canonical nouns and states used in builder execution docs |
-| [app-builder-state-and-routing.md](app-builder-state-and-routing.md) | How visible builder state, routing, and orchestration fit together |
-| [builder-execution-model.md](builder-execution-model.md) | How decomposition, task graphs, MFJ waves, and code context fit together |
-| [app-builder-architecture.md](app-builder-architecture.md) | The first-party builder user experience and workflow map |
+- canonical event envelope
+- domain event taxonomy
+- automation routing rules
+- transport between substrate and AI runtime
 
-## Use This Section With
+Key rule:
 
-- [Architecture Overview](../index.md)
-- [Reference Deep Dives](../../reference/deep-dives/index.md)
-- [Prompt Packs](../../instruction-prompts/prompt-packs.md)
+- `mozaikscore` emits domain facts, never workflow names
+- `mozaiksai` owns mapping from domain event to automation effect
+
+### 3. AI runtime
+
+Owns workflow execution and orchestration:
+
+- workflow loading
+- engine adapters
+- chat and run transport
+- artifacts
+- run lifecycle
+- workflow routing and resume semantics
+
+Primary implementation zone today:
+
+- `mozaiksai/`
+
+### 4. Product and generator
+
+Owns intent decomposition and bundle generation:
+
+- turns user intent into a typed app model
+- turns concept review into a bounded build plan
+- decides which capabilities are core provisions versus app-authored stubs
+- defines automation routes
+- authors workflows
+- compiles app bundles
+
+The builder is a first-party app on the platform. It is not the platform.
+
+## Core Thesis
+
+Mozaiks should not force all application behavior into chat or groupchat.
+
+It should support three equally real execution paths:
+
+- plain app behavior through modules, views, and actions
+- event-driven automation triggered by domain facts
+- user-facing workflows for reasoning, orchestration, and HITL
+
+The architecture is sound only if those paths remain distinct and composable.
+
+## Enterprise Core Thesis
+
+Mozaiks core should try to cover as many recurring SaaS infrastructure concerns
+as possible without collapsing app-specific behavior into runtime internals.
+
+That means the generator should usually be doing one of three things:
+
+- enabling or configuring a core provision
+- declaring app-specific substrate or automation
+- authoring thin stubs on top of core
+
+It should not repeatedly reinvent auth, tenancy, notifications, shell chrome,
+event transport, or workflow streaming for each app.
+
+## Current Runtime Example
+
+The current `platform/` directory in this repo should be treated as the flagship
+runtime-output example used to test the architecture.
+
+It already demonstrates:
+
+- app manifest output
+- shell projections in `platform/config/*`
+- modules in `platform/modules/*`
+- automation contracts in `platform/automations/*`
+- workflows in `platform/workflows/*`
+
+That runtime example is important for the builder because it shows the concrete
+shape the generated bundle still has to satisfy today.
+
+## Reading Order
+
+Read these first:
+
+1. [canonical-app-structure.md](canonical-app-structure.md)
+2. [app-bundle-declaratives.md](app-bundle-declaratives.md)
+3. [core-product-app-bundle-boundary.md](core-product-app-bundle-boundary.md)
+4. [event-taxonomy.md](event-taxonomy.md)
+5. [event-system-architecture.md](event-system-architecture.md)
+6. [workflow-architecture.md](workflow-architecture.md)
+
+Then read the generator and builder references:
+
+1. [app-creation-guide.md](app-creation-guide.md)
+2. [app-planning-contracts.md](app-planning-contracts.md)
+3. [builder-orchestration-taxonomy.md](builder-orchestration-taxonomy.md)
+4. [builder-execution-model.md](builder-execution-model.md)
+5. [app-builder-state-and-routing.md](app-builder-state-and-routing.md)
+6. [app-builder-architecture.md](app-builder-architecture.md)
+
+## What Changed
+
+These docs now assume:
+
+- workflows stay real and important
+- the workflow file contract remains stable
+- modules are not the same thing as entities, views, or actions
+- config files are not the architecture
+- NATS or FastStream belongs on the substrate event mesh, not on the frontend
+  run stream
+- chat is one surface, not the default answer to every feature
+
+## Cross References
+
+- [app-bundle-declaratives.md](app-bundle-declaratives.md)
+- [event-system-architecture.md](event-system-architecture.md)
+- [workflow-architecture.md](workflow-architecture.md)

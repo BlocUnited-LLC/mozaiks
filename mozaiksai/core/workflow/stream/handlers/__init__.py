@@ -18,6 +18,7 @@ Each handler processes a specific set of AG2 event types:
     - GroupChatRunHandler: GroupChatRunChatEvent
     - GroupChatResumeHandler: GroupChatResumeEvent
     - ErrorHandler: ErrorEvent
+    - StreamingEventHandler: StreamEvent (token streaming)
 """
 
 from .base import BaseEventHandler, DefaultEventHandler
@@ -29,6 +30,7 @@ from .completion_handler import CompletionHandler, UsageSummaryHandler
 from .transition_handler import TransitionHandler
 from .group_chat_handler import GroupChatRunHandler, GroupChatResumeHandler
 from .error_handler import ErrorHandler
+from .streaming_handler import StreamingEventHandler
 
 __all__ = [
     # Base classes
@@ -36,6 +38,8 @@ __all__ = [
     "DefaultEventHandler",
     # Message handlers
     "TextEventHandler",
+    # Streaming handlers
+    "StreamingEventHandler",
     # Input handlers
     "InputRequestHandler",
     # Speaker handlers

@@ -293,6 +293,10 @@ class WebSocketProtocolMixin:
             return
 
         try:
+            conn_meta = self.connections.get(chat_id) or {}
+            if conn_meta.get("userdriven_bootstrap_visible"):
+                return
+
             if session_dedupe_token:
                 seen_tokens = getattr(self, "_userdriven_bootstrap_session_seen", None)
                 if seen_tokens is None:
@@ -390,11 +394,126 @@ class WebSocketProtocolMixin:
                 },
             )
             await self._flush_message_queue(chat_id)
+            if chat_id in self.connections:
+                self.connections[chat_id]["userdriven_bootstrap_visible"] = True
             if session_dedupe_token:
                 self._userdriven_bootstrap_session_seen.add(session_dedupe_token)
             logger.info("[USERDRIVEN] Emitted bootstrap prompt for chat %s (%s)", chat_id, workflow_name)
         except Exception as e:
             logger.warning("[USERDRIVEN] Failed bootstrap emit for chat %s: %s", chat_id, e)
+
+    async def _emit_persisted_userdriven_bootstrap_if_needed(
+        self,
+        chat_id: str,
+        user_id: str,
+        workflow_name: Optional[str],
+        app_id: Optional[str],
+        *,
+        session_dedupe_token: Optional[str] = None,
+    ) -> bool:
+        """Re-emit a previously persisted bootstrap prompt for bootstrap-only chats.
+
+        This is a narrow fallback for UserDriven workflows where the transcript already
+        contains the initial assistant prompt but the frontend currently has no visible
+        workflow messages to render.
+        """
+        if not workflow_name:
+            return False
+
+        try:
+            conn_meta = self.connections.get(chat_id) or {}
+            if conn_meta.get("userdriven_bootstrap_visible"):
+                return False
+
+            if session_dedupe_token:
+                seen_tokens = getattr(self, "_userdriven_persisted_bootstrap_session_seen", None)
+                if seen_tokens is None:
+                    seen_tokens = set()
+                    self._userdriven_persisted_bootstrap_session_seen = seen_tokens
+                if session_dedupe_token in seen_tokens:
+                    return False
+
+            from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+            cfg = workflow_manager.get_config(str(workflow_name)) or {}
+            startup_mode = str(cfg.get("startup_mode", "AgentDriven")).strip().lower()
+            if startup_mode != "userdriven":
+                return False
+
+            pm_factory = getattr(self, "_get_or_create_persistence_manager", None)
+            if not callable(pm_factory):
+                return False
+
+            pm = pm_factory()
+            coll = await pm._coll()
+            query: Dict[str, Any] = {
+                "_id": chat_id,
+                "user_id": user_id,
+            }
+            if app_id:
+                query["app_id"] = app_id
+
+            doc = await coll.find_one(query, {"messages": 1, "userdriven_bootstrap_sent": 1})
+            if not doc or not doc.get("userdriven_bootstrap_sent"):
+                return False
+
+            messages = doc.get("messages") or []
+            if not isinstance(messages, list) or not messages:
+                return False
+
+            # Only use this fallback before the user has engaged the workflow.
+            has_user_message = any(isinstance(msg, dict) and str(msg.get("role") or "").lower() == "user" for msg in messages)
+            if has_user_message:
+                return False
+
+            first_message = messages[0] if isinstance(messages[0], dict) else None
+            if not first_message:
+                return False
+
+            role = str(first_message.get("role") or "").lower()
+            content = str(first_message.get("content") or "").strip()
+            if role != "assistant" or not content:
+                return False
+
+            bootstrap_agent = (
+                str(first_message.get("agent_name") or first_message.get("name") or cfg.get("initial_agent") or "Assistant").strip()
+                or "Assistant"
+            )
+            timestamp = first_message.get("timestamp")
+            if isinstance(timestamp, datetime):
+                timestamp = timestamp.isoformat()
+
+            await self._queue_message_with_backpressure(
+                chat_id,
+                {
+                    "type": "chat.text",
+                    "data": {
+                        "content": content,
+                        "agent": bootstrap_agent,
+                        "sender": bootstrap_agent,
+                        "role": "assistant",
+                        "timestamp": timestamp,
+                        "source": "orchestrator.initial_message_to_user",
+                        "ui_visibility": "default",
+                        "metadata": {
+                            "source": "orchestrator.initial_message_to_user",
+                            "startup_mode": "UserDriven",
+                            "pre_workflow": True,
+                            "persisted_bootstrap": True,
+                        },
+                    },
+                },
+            )
+            await self._flush_message_queue(chat_id)
+            if chat_id in self.connections:
+                self.connections[chat_id]["userdriven_bootstrap_visible"] = True
+            if session_dedupe_token:
+                self._userdriven_persisted_bootstrap_session_seen.add(session_dedupe_token)
+            logger.info("[USERDRIVEN] Re-emitted persisted bootstrap prompt for chat %s (%s)", chat_id, workflow_name)
+            return True
+        except Exception as e:
+            logger.warning("[USERDRIVEN] Failed persisted bootstrap fallback for chat %s: %s", chat_id, e)
+            return False
 
     # ==================================================================================
     # CONNECTION CLEANUP

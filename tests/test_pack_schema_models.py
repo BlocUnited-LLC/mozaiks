@@ -137,3 +137,34 @@ def test_parse_workflow_pack_graph_rejects_non_mfj_inject_key() -> None:
                 ],
             }
         )
+
+
+def test_parse_workflow_pack_graph_requires_authoring_workflow_for_authoring_subrun() -> None:
+    with pytest.raises(ValueError):
+        parse_workflow_pack_graph(
+            {
+                "version": 3,
+                "mid_flight_journeys": [
+                    {
+                        "id": "mfj",
+                        "trigger_agent": "Planner",
+                        "trigger_on": "structured_output",
+                        "fan_out": {
+                            "spawn_mode": "workflow_authoring_subrun",
+                            "max_children": 3,
+                            "timeout_seconds": 10,
+                            "input_contract": {"required": [], "optional": []},
+                        },
+                        "fan_in": {
+                            "resume_agent": "HostAgent",
+                            "resume_entry_agent": "ResumeRouterAgent",
+                            "aggregation_strategy": "collect_all",
+                            "inject_as": "mfj_outputs",
+                            "on_partial_failure": "resume_with_available",
+                            "timeout_seconds": 10,
+                        },
+                        "output_contract": {"required": [], "optional": []},
+                    }
+                ],
+            }
+        )

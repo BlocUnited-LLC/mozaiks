@@ -90,6 +90,54 @@ async def handle_switch_workflow(
         "timestamp": utc_timestamp()
     })
 
+    # UserDriven auto-start: start the AG2 run immediately so the initial
+    # agent's register_reply can emit the static greeting as a native AG2 event.
+    # On resume the greeting is already in the transcript — auto_resume handles it.
+    try:
+        from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+        target_chat_id_str = str(target_chat_id)
+        try:
+            workflow_manager.reload_workflow(str(active_context.workflow_name))
+        except Exception:
+            pass
+        cfg = workflow_manager.get_config(str(active_context.workflow_name)) or {}
+        startup_mode = str(cfg.get("startup_mode", "AgentDriven")).strip().lower()
+        has_native_seed = bool(
+            str(cfg.get("initial_message_to_user") or cfg.get("initial_message") or "").strip()
+        )
+        existing_task = transport._background_tasks.get(target_chat_id_str)
+        if startup_mode == "userdriven" and has_native_seed:
+            if not (existing_task and not existing_task.done()):
+                pm = transport._get_or_create_persistence_manager()
+                coll = await pm._coll()
+                doc = await coll.find_one(
+                    {"_id": target_chat_id_str},
+                    {"status": 1, "last_sequence": 1, "messages": {"$slice": 1}},
+                )
+                status = int(doc.get("status", -1)) if doc else -1
+                last_sequence = int(doc.get("last_sequence", 0) or 0) if doc else 0
+                has_messages = bool(doc and doc.get("messages"))
+
+                if status == 0 and last_sequence == 0 and not has_messages:
+                    transport._background_tasks[target_chat_id_str] = asyncio.create_task(
+                        transport._run_workflow_background(
+                            chat_id=target_chat_id_str,
+                            workflow_name=str(active_context.workflow_name),
+                            app_id=str(active_context.app_id),
+                            user_id=str(active_context.user_id),
+                            ws_id=ws_id,
+                            initial_message=None,
+                        )
+                    )
+    except Exception as native_start_err:
+        logger.warning(
+            "UserDriven auto-start failed for chat %s (ws_id=%s): %s",
+            target_chat_id,
+            ws_id,
+            native_start_err,
+        )
+
     # Replay persisted transcript when switching back into workflow mode so the
     # UI can reliably reconstruct workflow messages after Ask-mode transitions.
     if replay_on_switch:
@@ -104,37 +152,50 @@ async def handle_switch_workflow(
 
                 kind = event_dict.get("kind")
                 if kind == "text":
-                    await websocket.send_json({
+                    text_payload = {
+                        "index": event_dict.get("index", 0),
+                        "content": event_dict.get("content", ""),
+                        "role": event_dict.get("role", "user"),
+                        "agent": event_dict.get("agent", "user"),
+                        "sender": event_dict.get("agent", "user"),
+                        "replay": event_dict.get("replay", True),
+                        "timestamp": event_dict.get("timestamp"),
+                        "metadata": event_dict.get("metadata"),
+                        "uiToolEvent": event_dict.get("uiToolEvent"),
+                        "ui_tool_completed": event_dict.get("ui_tool_completed"),
+                        "ui_tool_status": event_dict.get("ui_tool_status"),
+                    }
+                    envelope = {
                         "type": "chat.text",
-                        "data": {
-                            "index": event_dict.get("index", 0),
-                            "content": event_dict.get("content", ""),
-                            "role": event_dict.get("role", "user"),
-                            "agent": event_dict.get("agent", "user"),
-                            "sender": event_dict.get("agent", "user"),
-                            "replay": event_dict.get("replay", True),
-                            "timestamp": event_dict.get("timestamp"),
-                            "metadata": event_dict.get("metadata"),
-                            "uiToolEvent": event_dict.get("uiToolEvent"),
-                            "ui_tool_completed": event_dict.get("ui_tool_completed"),
-                            "ui_tool_status": event_dict.get("ui_tool_status"),
-                        },
+                        "data": text_payload,
                         "timestamp": utc_timestamp(),
-                    })
+                    }
+                    await websocket.send_json(transport._serialize_ag2_events(envelope))
                 elif kind == "resume_boundary":
                     boundary = {k: v for k, v in event_dict.items() if k != "kind"}
-                    await websocket.send_json({
+                    envelope = {
                         "type": "chat.resume_boundary",
                         "data": boundary,
                         "timestamp": utc_timestamp(),
-                    })
+                    }
+                    await websocket.send_json(transport._serialize_ag2_events(envelope))
 
             await resumer.handle_resume_request(
                 chat_id=str(target_chat_id),
                 app_id=str(active_context.app_id),
                 last_client_index=-1,
                 send_event=send_event_wrapper,
+                startup_mode=cfg.get("startup_mode"),
             )
+            # Mark greeting as visible so orchestration_patterns.py suppresses the
+            # register_reply greeting (prevents double message on mode switch)
+            target_chat_id_str = str(target_chat_id)
+            if target_chat_id_str in transport.connections:
+                transport.connections[target_chat_id_str]["userdriven_bootstrap_visible"] = True
+                logger.info(
+                    "[WORKFLOW_SWITCH] Set userdriven_bootstrap_visible=True for chat %s after replay",
+                    target_chat_id_str,
+                )
         except Exception as replay_err:
             logger.warning(
                 "Workflow switch replay failed for chat %s (ws_id=%s): %s",
@@ -142,19 +203,6 @@ async def handle_switch_workflow(
                 ws_id,
                 replay_err,
             )
-
-    # UserDriven UX: when switching from Ask -> Workflow, emit pre-run bootstrap
-    # if this workflow chat has no transcript yet. We bypass only the persisted
-    # "sent" guard here and use per-session dedupe to avoid duplicate emits on
-    # repeated toggles within the same websocket session.
-    await transport._emit_userdriven_bootstrap_if_needed(
-        chat_id=target_chat_id,
-        user_id=active_context.user_id,
-        workflow_name=active_context.workflow_name,
-        app_id=active_context.app_id,
-        ignore_sent_guard=True,
-        session_dedupe_token=f"{ws_id}:{target_chat_id}",
-    )
 
 
 async def handle_start_workflow(

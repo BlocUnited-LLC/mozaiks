@@ -29,6 +29,14 @@ These docs explain the current event system, inventories, and implementation not
 
 - [Event Architecture Notes](events/overview.md)
 
+### Development
+
+These docs are development-stage planning specs focused on how the builder
+derives non-AI CRUD, UI page surfaces, and event-route policy from typed
+contracts.
+
+- [Development Specs](development/overview.md)
+
 ## Suggested Reading Paths
 
 ### I want to understand the platform quickly

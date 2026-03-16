@@ -39,7 +39,9 @@ const shouldOpenArtifactPanel = (layoutMode) => layoutMode !== 'full';
 
 export const createInitialSurfaceState = (conversationMode = 'workflow') => {
   const normalizedConversation = normalizeConversationMode(conversationMode);
-  const layoutMode = normalizedConversation === 'ask' ? 'full' : 'split';
+  // Always start in 'full' (chat-only) layout — the artifact pane opens only
+  // when an actual artifact event is received.
+  const layoutMode = 'full';
   return {
     conversationMode: normalizedConversation,
     layoutMode,
@@ -86,9 +88,12 @@ export const uiSurfaceReducer = (state, action) => {
         };
       }
 
+      // Restore non-full layout only if the user had previously opened the
+      // artifact pane in this session; otherwise keep 'full' so the pane
+      // stays closed until a real artifact arrives.
       const restoredLayout = state.previousLayoutMode && state.previousLayoutMode !== 'full'
         ? state.previousLayoutMode
-        : 'split';
+        : 'full';
       const normalizedLayout = normalizeLayoutMode(restoredLayout);
       return {
         ...state,

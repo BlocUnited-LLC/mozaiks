@@ -1,181 +1,194 @@
 # Event System Architecture
 
-**Status:** Core architecture reference  
-**Last updated:** 2026-03-12
+This document defines the event architecture that connects the app substrate,
+automation boundary, and AI runtime.
 
----
+It is the most important seam in the system.
 
-## Purpose
-
-This document defines the current target architecture for event handling in the
-unified `mozaiks` repo.
-
-It is the reference for:
-
-- event channels
-- event ownership
-- dispatch responsibilities
-- the boundary between runtime stream events and substrate/business events
-
----
-
-## Design Principles
+## Core Rules
 
 1. Events are immutable facts.
-2. Runtime stream events and substrate business events are different channels.
-3. Event ownership follows repo boundaries.
-4. Typed runtime events should not depend on AG2 types.
-5. Event docs must point to live code, not retired paths.
+2. Domain events and workflow runtime events are different channels.
+3. `mozaikscore` emits business facts, never workflow names.
+4. `mozaiksai` owns mapping from domain event to automation effect.
+5. WebSocket is a client transport, not the backbone for substrate-to-AI
+   automation.
 
----
+## The Four Event Channels
 
-## The Three Active Event Channels
-
-### Channel 1: Runtime stream channel
+### Channel 1: Workflow runtime stream
 
 Purpose:
 
-- workflow/run lifecycle
-- chat/runtime/UI-tool stream delivery
-- orchestration reactions such as MFJ and journey progression
+- run lifecycle
+- chat stream
+- task progress
+- artifacts
+- UI tool requests and responses
 
-Primary code paths:
+Typical consumers:
 
-- `mozaiksai/core/ports/orchestration.py`
-- `mozaiksai/core/events/unified_event_dispatcher.py`
-- `mozaiksai/core/transport/simple_transport.py`
-- `shared_app.py`
+- frontend chat and workflow surfaces
 
-Typical event families:
+Typical transport:
+
+- WebSocket
+
+Typical families:
 
 - `process.*`
 - `task.*`
 - `chat.*`
 - `artifact.*`
 - `ui.tool.*`
-- `transport.*`
-- `runtime.*`
 
-### Channel 2: Substrate/business event bus
+### Channel 2: Domain event mesh
 
 Purpose:
+
+- communicate post-commit business facts
+- bridge substrate behavior to automation policy
+- support app-to-app or integration-driven triggers
+
+Typical producers:
+
+- `mozaikscore`
+- external integrations
+- app actions
+
+Typical consumers:
+
+- automation router
+- non-AI subscribers
+- telemetry sinks
+
+Target transport:
+
+- NATS through FastStream
+
+Transitional transport:
+
+- HTTP ingress is acceptable until the broker layer is in place
+
+Typical families:
+
+- app-owned domain events such as `crm.lead.created`
+- shared substrate events such as `settings.updated`
+
+### Channel 3: Shell push channel
+
+Purpose:
+
+- push substrate-side user updates to connected clients
+
+Examples:
 
 - notifications
-- settings
-- subscriptions
-- module execution and substrate-side user events
+- settings refresh
+- module-level UI refresh hints
 
-Primary code paths:
+Typical transport:
 
-- `mozaikscore/core/event_bus.py`
-- `mozaikscore/core/notifications_manager.py`
-- `mozaikscore/core/settings_manager.py`
-- `mozaikscore/core/subscription_manager.py`
-- `mozaikscore/core/module_manager.py`
+- WebSocket push from substrate services
 
-Typical event names today:
+This is separate from the workflow runtime stream even if the same frontend
+renders both.
 
-- `notification_created`
-- `settings_updated`
-- `subscription_updated`
-- `module_executed`
-- `theme_changed`
-
-These are not yet aligned to the canonical dot-taxonomy.
-That is a known gap, not a hidden feature.
-
-### Channel 3: WebSocket push bridge
+### Channel 4: Telemetry and analytics
 
 Purpose:
 
-- forward substrate-side events to connected frontend clients
+- observability
+- audit
+- usage analytics
+- learning and improvement loops
 
-Primary code path:
+This channel should remain downstream of the other channels. It should not be
+the place where business behavior is decided.
 
-- `mozaikscore/core/websocket_event_bridge.py`
+## Canonical Domain Event Flow
 
-This is not the same thing as the runtime workflow stream.
+```text
+user or integration action
+  -> substrate mutation commits
+  -> domain event emitted
+  -> broker or ingress transport
+  -> automation router validates and matches
+  -> workflow route selected or ignored
+  -> AI runtime executes run or resume
+  -> runtime stream reaches frontend if needed
+```
 
----
+## Canonical User-Driven Workflow Flow
 
-## Core Components
+```text
+user invokes workflow
+  -> AI runtime loads workflow
+  -> workflow executes through engine adapter
+  -> runtime events stream to frontend
+  -> artifacts and explicit actions update durable state
+```
 
-| Component | Responsibility | Path |
-|---|---|---|
-| `DomainEvent` | engine-agnostic runtime envelope | `mozaiksai/core/ports/orchestration.py` |
-| `AG2OrchestrationAdapter` | engine execution + runtime event production | `mozaiksai/core/adapters/ag2_orchestration.py` |
-| `UnifiedEventDispatcher` | runtime event routing and orchestration listeners | `mozaiksai/core/events/unified_event_dispatcher.py` |
-| `WorkflowPackCoordinator` | MFJ listener/consumer | `mozaiksai/core/workflow/pack/workflow_pack_coordinator.py` |
-| `JourneyOrchestrator` | global journey completion listener | `mozaiksai/core/workflow/pack/journey_orchestrator.py` |
-| `UniversalOrchestrator` | typed reroute/change routing | `mozaiksai/core/orchestration/universal_orchestrator.py` |
-| `EventBus` | substrate in-process pub/sub | `mozaikscore/core/event_bus.py` |
-| `websocket_event_bridge` | substrate event -> websocket push | `mozaikscore/core/websocket_event_bridge.py` |
-
----
-
-## Event Ownership
-
-### `mozaiksai`
-
-Owns:
-
-- workflow runtime events
-- orchestration listeners
-- engine-neutral envelopes
-- UI tool stream semantics
-- workflow completion / fan-in / reroute triggers
+## Ownership Model
 
 ### `mozaikscore`
 
 Owns:
 
-- module/settings/notifications/subscription substrate events
-- user-targeted/broadcast push for those substrate events
+- app and substrate event production
+- post-commit fact emission
+- substrate-side push events
+
+Does not own:
+
+- workflow selection
+- workflow resume policy
+- groupchat meaning
+
+### `mozaiksai`
+
+Owns:
+
+- event validation at the automation boundary
+- automation route matching
+- run and resume decisions
+- workflow runtime stream
 
 ### Frontend
 
 Consumes:
 
-- workflow/runtime stream events via the AI transport
-- substrate push events via the websocket bridge
+- runtime stream events
+- shell push events
 
-These should remain conceptually separate even when they both end up in the UI.
+The frontend may merge these into one user experience, but the backend should
+not pretend they are the same channel.
 
----
+## FastStream and NATS Guidance
 
-## Flow A: Runtime Workflow Events
+Use FastStream and NATS first for Channel 2, the domain event mesh.
 
-1. `shared_app.py` or transport starts/resumes a workflow.
-2. The AG2 adapter emits normalized runtime/domain events.
-3. `UnifiedEventDispatcher` routes those events.
-4. `WorkflowPackCoordinator`, `JourneyOrchestrator`, and other listeners react.
-5. `SimpleTransport` sends replay-safe envelopes to the frontend.
+Do not start by moving:
 
----
+- the frontend runtime stream
+- UI tool round-trips
+- direct browser push
 
-## Flow B: Substrate Business Events
+onto the broker.
 
-1. mozaikscore manager emits an event through `event_bus`.
-2. In-process subscribers react.
-3. `websocket_event_bridge` optionally forwards user-targeted/broadcast events
-   to connected clients.
-
----
+That would blur the boundary again.
 
 ## Guardrails
 
-1. Do not collapse all events into one giant bus.
-2. Do not pretend the substrate event bus already matches the canonical runtime
-   taxonomy.
-3. Do not route business/commercial behavior through AG2-oriented runtime
-   streams.
-4. Do not document retired components as if they still exist.
+Do not:
 
----
+- emit commands disguised as events
+- put workflow names in domain event types
+- use WebSocket as the backend-to-backend automation backbone
+- collapse substrate events and workflow events into one bus
 
 ## Cross References
 
 - [event-taxonomy.md](event-taxonomy.md)
 - [process-and-event-map.md](process-and-event-map.md)
 - [workflow-architecture.md](workflow-architecture.md)
-

@@ -9,15 +9,21 @@
 
 import { registerComponent } from './componentRegistry';
 
-// Core pages — ChatPage only.
-// AdminPortal is now a platform module registered via @modules auto-discovery.
+// Core pages shipped with chat-ui.
+// AdminPortal remains a platform module registered via @modules auto-discovery.
 import ChatPage from '../pages/ChatPage';
+import DiscoverPage from '../pages/DiscoverPage';
 
 registerComponent('ChatPage', ChatPage, {
   core: true,
   description: 'Main chat interface page',
 });
 
-export const CORE_COMPONENTS = ['ChatPage'];
+registerComponent('DiscoverPage', DiscoverPage, {
+  core: true,
+  description: 'Discovery launcher page',
+});
+
+export const CORE_COMPONENTS = ['ChatPage', 'DiscoverPage'];
 
 console.log('[CoreComponents] Registered core chat-ui components:', CORE_COMPONENTS);

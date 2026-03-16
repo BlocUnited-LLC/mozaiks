@@ -180,6 +180,10 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
 async def startup_event():
     logger.info("Starting MozaiksCore (%s)", APP_ID)
 
+    from mozaikscore.core.automation_nats import (
+        get_substrate_event_nats_publisher,
+        use_nats_transport,
+    )
     from mozaikscore.core.database import verify_connection, initialize_database
     from mozaikscore.core.module_manager import module_manager
     from mozaikscore.core.notifications_manager import create_notification_indexes
@@ -192,6 +196,8 @@ async def startup_event():
     await module_manager.load_modules()
     await create_notification_indexes()
     await event_bus.start_background_processing()
+    if use_nats_transport():
+        await get_substrate_event_nats_publisher().start()
     register_websocket_events()
     register_outbound_relay()
 
@@ -202,12 +208,18 @@ async def startup_event():
 async def shutdown_event():
     logger.info("Shutting down MozaiksCore (%s)", APP_ID)
 
+    from mozaikscore.core.automation_nats import (
+        get_substrate_event_nats_publisher,
+        use_nats_transport,
+    )
     from mozaikscore.core.state_manager import state_manager
     from mozaikscore.core.database import db_cache
     from mozaikscore.core.notifications_manager import notifications_manager
     from mozaikscore.core.event_bus import event_bus
 
     await event_bus.stop_background_processing()
+    if use_nats_transport():
+        await get_substrate_event_nats_publisher().stop()
     await notifications_manager.stop_background_processing()
     state_manager.clear()
     if hasattr(db_cache, "clear"):

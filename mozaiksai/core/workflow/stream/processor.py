@@ -42,6 +42,7 @@ from .handlers import (
     GroupChatResumeHandler,
     ErrorHandler,
     DefaultEventHandler,
+    StreamingEventHandler,
 )
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,7 @@ class EventStreamProcessor:
         registry = EventHandlerRegistry()
 
         # Register handlers in priority order
+        registry.register(StreamingEventHandler())  # Priority 10 - token streaming (highest)
         registry.register(TransitionHandler())      # Priority 10 - handoff detection
         registry.register(ErrorHandler())           # Priority 20 - error handling
         registry.register(CompletionHandler())      # Priority 50 - completion

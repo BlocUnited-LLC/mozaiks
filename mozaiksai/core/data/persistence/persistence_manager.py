@@ -989,6 +989,24 @@ class AG2PersistenceManager:
                     content_str = str(raw_content)
             else:
                 content_str = str(raw_content)
+
+            # UserDriven workflows use a synthetic "." user message only to kick off
+            # AG2 group chat execution. It is internal coordination, not transcript.
+            if role == "user" and content_str.strip() == "." and seq == 1 and wf_name:
+                try:
+                    from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+                    cfg = workflow_manager.get_config(str(wf_name)) or {}
+                    startup_mode = str(cfg.get("startup_mode") or "").strip().lower()
+                    if startup_mode == "userdriven":
+                        logger.debug(
+                            "[SAVE_EVENT] Skipping synthetic UserDriven trigger for chat_id=%s workflow=%s",
+                            chat_id,
+                            wf_name,
+                        )
+                        return
+                except Exception:
+                    pass
             # --------------------------------------------------
             # Post-process: extract inner message content to avoid storing the
             # verbose debug string: "uuid=UUID('...') content='...' sender='Agent' ..."
@@ -1733,6 +1751,104 @@ class AG2PersistenceManager:
                 )
         except Exception as e:
             logger.error(f"[UI_TOOL_COMPLETE] Failed to update completion for {chat_id}: {e}", exc_info=True)
+
+    # Pending Input Request Persistence ------------------------------------
+    async def save_pending_input_request(
+        self,
+        *,
+        chat_id: str,
+        app_id: Optional[str] = None,
+        request_id: str,
+        agent: str,
+        prompt: str,
+    ) -> None:
+        """Save pending input request state to the chat document.
+
+        When an input_request is issued, we persist its metadata so that
+        on resume, the UI can be notified that user input is still needed.
+
+        Args:
+            chat_id: Chat session identifier
+            app_id: App identifier
+            request_id: The input request ID
+            agent: The agent that requested input
+            prompt: The prompt text shown to the user
+        """
+        resolved_app_id = coalesce_app_id(app_id=app_id)
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        try:
+            coll = await self._coll()
+            await coll.update_one(
+                {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
+                {
+                    "$set": {
+                        "pending_input_request": {
+                            "request_id": request_id,
+                            "agent": agent,
+                            "prompt": prompt,
+                            "created_at": datetime.now(UTC).isoformat(),
+                        },
+                        "last_updated_at": datetime.now(UTC),
+                    }
+                }
+            )
+            logger.info(f"[PENDING_INPUT] Saved pending input request {request_id} for chat {chat_id}")
+        except Exception as e:
+            logger.error(f"[PENDING_INPUT] Failed to save pending input request for {chat_id}: {e}")
+
+    async def clear_pending_input_request(
+        self,
+        *,
+        chat_id: str,
+        app_id: Optional[str] = None,
+    ) -> None:
+        """Clear pending input request state from the chat document.
+
+        Called when user provides input or the workflow completes.
+        """
+        resolved_app_id = coalesce_app_id(app_id=app_id)
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        try:
+            coll = await self._coll()
+            await coll.update_one(
+                {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
+                {
+                    "$unset": {"pending_input_request": ""},
+                    "$set": {"last_updated_at": datetime.now(UTC)},
+                }
+            )
+            logger.debug(f"[PENDING_INPUT] Cleared pending input request for chat {chat_id}")
+        except Exception as e:
+            logger.error(f"[PENDING_INPUT] Failed to clear pending input request for {chat_id}: {e}")
+
+    async def get_pending_input_request(
+        self,
+        *,
+        chat_id: str,
+        app_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Get pending input request state from the chat document.
+
+        Returns:
+            The pending input request dict if exists, None otherwise.
+        """
+        resolved_app_id = coalesce_app_id(app_id=app_id)
+        if not resolved_app_id:
+            return None
+        try:
+            coll = await self._coll()
+            doc = await coll.find_one(
+                {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
+                {"pending_input_request": 1}
+            )
+            if doc and doc.get("pending_input_request"):
+                return doc["pending_input_request"]
+            return None
+        except Exception as e:
+            logger.error(f"[PENDING_INPUT] Failed to get pending input request for {chat_id}: {e}")
+            return None
 
 #############################################
 #############################################

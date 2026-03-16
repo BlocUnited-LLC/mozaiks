@@ -1,0 +1,43 @@
+{
+  "routes": [
+    {
+      "route_id": "greenroom-run-on-report-request",
+      "event_type": "report.requested",
+      "when": {
+        "payload.workflow": "GreenRoom"
+      },
+      "effect": {
+        "kind": "workflow.run",
+        "workflow": "GreenRoom",
+        "surface": "background",
+        "message_template": "A substrate report was requested for {payload.workflow}."
+      },
+      "bindings": {
+        "app_id": "tenant.app_id",
+        "user_id": "tenant.user_id",
+        "chat_id": "tenant.chat_id"
+      },
+      "enabled": true
+    },
+    {
+      "route_id": "writersroom-resume-on-module-executed",
+      "event_type": "module.executed",
+      "when": {
+        "payload.module": "lineup_board",
+        "payload.action": "resume_writers_room"
+      },
+      "effect": {
+        "kind": "workflow.resume",
+        "workflow": "WritersRoom",
+        "surface": "existing_chat",
+        "message_template": "Resuming {payload.workflow} after module action {payload.action}."
+      },
+      "bindings": {
+        "app_id": "tenant.app_id",
+        "user_id": "tenant.user_id",
+        "chat_id": "tenant.chat_id"
+      },
+      "enabled": true
+    }
+  ]
+}

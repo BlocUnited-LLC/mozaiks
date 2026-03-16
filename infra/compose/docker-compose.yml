@@ -74,6 +74,15 @@ services:
       timeout: 5s
       retries: 20
 
+  nats:
+    image: nats:2.10-alpine
+    container_name: mozaiksai-nats
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    restart: unless-stopped
+
   app:
     build:
       context: ../..    # repo root
@@ -102,10 +111,14 @@ services:
       # In docker mode, use the compose-network mongo service.
       # Override by setting MONGO_URI in the repo-root .env (or your shell env).
       MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/MozaiksAI}
+      # In docker mode, use the compose-network NATS service.
+      MOZAIKS_NATS_URL: ${MOZAIKS_NATS_URL:-nats://nats:4222}
       # AZURE_* still supplied via env_file
     depends_on:
       mongo:
         condition: service_healthy
+      nats:
+        condition: service_started
       keycloak:
         condition: service_healthy
     volumes:
