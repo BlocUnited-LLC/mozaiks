@@ -6,11 +6,16 @@
   "author": "MozaiksAI",
   "category": "platform",
   "icon": "library",
+  "enabled": true,
+  "required_tier": "free",
   "navigation": {
     "label": "Show Archive",
     "path": "/archive",
     "icon": "library",
     "component": "ShowArchive",
-    "ui": "platform/modules/show_archive/ui/index.js"
+    "ui": "platform/modules/show_archive/ui/index.js",
+    "showInHeader": true,
+    "order": 40,
+    "meta": { "title": "Show Archive", "requiresAuth": true }
   }
 }

@@ -191,6 +191,9 @@ async def get_navigation(user: dict = Depends(get_current_user)):
                 continue
             final_nav.append(item)
 
+        # Track paths already covered by static pages to avoid duplicates
+        static_paths = {item.get("path") or item.get("href") for item in final_nav}
+
         for mod_item in installed:
             mod_name = mod_item.get("name")
             if not mod_name or mod_name == "subscription_manager":
@@ -200,20 +203,25 @@ async def get_navigation(user: dict = Depends(get_current_user)):
             if MONETIZATION and not await subscription_manager.is_module_accessible(user["user_id"], mod_name):
                 continue
 
+            mod_path = mod_item.get("path") or f"/modules/{mod_name}"
+            if mod_path in static_paths:
+                continue
+
             module_label = mod_item.get("label") or mod_item.get("display_name") or mod_name
-            final_nav.append(
-                {
-                    "module_name": mod_name,
-                    "label": module_label,
-                    "path": mod_item.get("path") or f"/modules/{mod_name}",
-                    "icon": mod_item.get("icon") or "puzzle",
-                    "component": mod_item.get("component") or "ModulePage",
-                    "showInHeader": bool(mod_item.get("showInHeader", False)),
-                    "order": mod_item.get("order", 50),
-                    "meta": mod_item.get("meta")
-                    or {"title": module_label, "requiresAuth": True},
-                }
-            )
+            nav_entry = {
+                "module_name": mod_name,
+                "label": module_label,
+                "path": mod_path,
+                "icon": mod_item.get("icon") or "puzzle",
+                "component": mod_item.get("component") or "ModulePage",
+                "showInHeader": bool(mod_item.get("showInHeader", False)),
+                "order": mod_item.get("order", 50),
+                "meta": mod_item.get("meta")
+                or {"title": module_label, "requiresAuth": True},
+            }
+            if mod_item.get("ui"):
+                nav_entry["ui"] = mod_item["ui"]
+            final_nav.append(nav_entry)
 
         ttl = 60 if ENV == "development" else 300
         state_manager.set(cache_key, final_nav, expire_in=ttl)

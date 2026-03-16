@@ -131,7 +131,7 @@ class ModuleManager:
                                 {
                                     k: v
                                     for k, v in extra.items()
-                                    if k in ("display_name", "description", "version", "required_tier", "enabled", "icon")
+                                    if k in ("display_name", "description", "version", "required_tier", "enabled", "icon", "author", "category")
                                 }
                             )
 
@@ -152,6 +152,9 @@ class ModuleManager:
                                     metadata["order"] = nav.get("order")
                                 if isinstance(nav.get("meta"), dict):
                                     metadata["meta"] = nav.get("meta")
+                                ui = nav.get("ui")
+                                if isinstance(ui, str) and ui.strip():
+                                    metadata["ui"] = ui.strip()
                         except Exception as exc:
                             logger.warning("Could not read %s: %s", meta_path, exc)
                         break
