@@ -13,7 +13,7 @@ extra:
 theme:
   name: material
   logo: assets/mozaik_logo.svg
-  favicon: assets/mozaik.png
+  favicon: assets/mozaik_logo.svg
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
