@@ -23,8 +23,6 @@ from mozaikscore.core.config_loader import (
     get_module_registry,
     get_settings_config,
     get_notifications_config,
-    get_config_path,
-    reload_configs,
 )
 
 logger = logging.getLogger("mozaikscore.module_manager")
@@ -71,8 +69,14 @@ class ModuleManager:
     # Registry scanning
     # ------------------------------------------------------------------
     def update_registry(self):
-        """Scan the modules directory and rebuild module_registry.json."""
-        registry_path = get_config_path() / "module_registry.json"
+        """Scan the modules directory and rebuild the in-memory registry.
+
+        The scanned result is kept in ``_registry_cache`` and returned by
+        ``get_module_registry()`` for all callers.  The on-disk
+        ``module_registry.json`` is only read as a seed / fallback — it is
+        **not** overwritten at runtime so the declarative config layer stays
+        immutable while the server runs.
+        """
 
         try:
             if not os.path.isdir(MODULES_DIR):
@@ -132,8 +136,6 @@ class ModuleManager:
                             )
 
                             # Canonical module navigation metadata lives in module.json.
-                            # We project it into module_registry.json to avoid duplicating
-                            # the same route/component data in navigation_config.json.
                             nav = extra.get("navigation") if isinstance(extra, dict) else None
                             if isinstance(nav, dict):
                                 path = nav.get("path")
@@ -156,16 +158,10 @@ class ModuleManager:
 
                 registry["modules"].append(metadata)
 
-            # Persist registry
-            os.makedirs(registry_path.parent, exist_ok=True)
-            with open(registry_path, "w", encoding="utf-8") as f:
-                json.dump(registry, f, indent=2)
-
             self._registry_cache = registry
             self._registry_last_refresh = time.time()
-            reload_configs()
 
-            logger.info("Updated module registry: %d modules", len(registry["modules"]))
+            logger.info("Updated module registry (in-memory): %d modules", len(registry["modules"]))
             return registry
 
         except Exception as exc:
@@ -378,11 +374,9 @@ class ModuleManager:
                             "default_enabled": notif.get("default_enabled", True),
                         })
 
-            # Persist
-            config_path = get_config_path() / "settings_config.json"
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(settings_config, f, indent=2)
-            reload_configs()
+            # Settings config is updated in-memory only — the on-disk
+            # settings_config.json stays immutable while the server runs.
+            logger.debug("Registered notification fields for module %s (in-memory)", module_name)
 
         except Exception as exc:
             logger.error("Error registering notifications for module %s: %s", module_name, exc)

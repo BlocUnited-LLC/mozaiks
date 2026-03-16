@@ -9,7 +9,6 @@ import threading
 import traceback
 import asyncio
 import time
-from functools import wraps
 
 logger = logging.getLogger("mozaikscore.event_bus")
 
@@ -21,9 +20,6 @@ class EventBus:
         self.event_history: dict[str, list] = {}
         self.max_history_per_event = 100
         self.max_retry_count = 3
-        self.async_queue: asyncio.Queue = asyncio.Queue()
-        self.is_processing = False
-        self.task = None
 
         # Delivery statistics
         self.stats = {
@@ -114,52 +110,15 @@ class EventBus:
                 await self._process_async_callback(callback, data, event_name, retry_count + 1)
 
     # ------------------------------------------------------------------
-    # Background queue processing
+    # Lifecycle hooks (called from core_app startup/shutdown)
     # ------------------------------------------------------------------
     async def start_background_processing(self):
-        if not self.is_processing:
-            self.is_processing = True
-            self.task = asyncio.create_task(self._process_queue())
-            logger.info("Started background event processing")
+        """No-op — async callbacks are dispatched inline via create_task."""
+        logger.info("EventBus ready (inline dispatch)")
 
     async def stop_background_processing(self):
-        if self.is_processing and self.task:
-            self.is_processing = False
-            self.task.cancel()
-            try:
-                await self.task
-            except asyncio.CancelledError:
-                pass
-            logger.info("Stopped background event processing")
-
-    async def _process_queue(self):
-        while self.is_processing:
-            try:
-                event, data = await self.async_queue.get()
-                await self._dispatch_event(event, data)
-                self.async_queue.task_done()
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.error("Error processing event queue: %s", exc)
-                logger.error(traceback.format_exc())
-
-    async def _dispatch_event(self, event: str, data):
-        with self.lock:
-            subscribers = self.subscribers.get(event, []).copy()
-
-        for callback in subscribers:
-            try:
-                if asyncio.iscoroutinefunction(callback):
-                    await callback(data)
-                else:
-                    callback(data)
-                with self.lock:
-                    self.stats["events_delivered"] += 1
-            except Exception as exc:
-                with self.lock:
-                    self.stats["delivery_failures"] += 1
-                logger.error("Error in event callback: %s", exc)
+        """No-op — nothing to tear down."""
+        logger.info("EventBus stopped")
 
     # ------------------------------------------------------------------
     # Statistics & history

@@ -9,6 +9,11 @@ from .app_metadata import router as app_metadata_router
 from .push_subscriptions import router as push_subscriptions_router
 from .events import router as events_router
 from .subscription_sync import router as subscription_sync_router
+from .theme import router as theme_router
+from .settings import router as settings_router
+from .profile import router as profile_router
+from .modules import router as modules_router
+from .subscriptions import router as subscriptions_router
 
 __all__ = [
     "admin_users_router",
@@ -20,4 +25,9 @@ __all__ = [
     "push_subscriptions_router",
     "events_router",
     "subscription_sync_router",
+    "theme_router",
+    "settings_router",
+    "profile_router",
+    "modules_router",
+    "subscriptions_router",
 ]

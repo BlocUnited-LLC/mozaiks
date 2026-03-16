@@ -95,6 +95,11 @@ from mozaikscore.core.routes import (  # noqa: E402
     push_subscriptions_router,
     events_router,
     subscription_sync_router,
+    theme_router,
+    settings_router,
+    profile_router,
+    modules_router,
+    subscriptions_router,
 )
 
 app.include_router(admin_users_router)
@@ -106,6 +111,11 @@ app.include_router(app_metadata_router)
 app.include_router(push_subscriptions_router)
 app.include_router(events_router)
 app.include_router(subscription_sync_router)
+app.include_router(theme_router)
+app.include_router(settings_router)
+app.include_router(profile_router)
+app.include_router(modules_router)
+app.include_router(subscriptions_router)
 
 # Cross-substrate event relay (mozaiksai → mozaikscore inbound)
 from mozaikscore.core.cross_substrate_bridge import router as relay_router  # noqa: E402
@@ -158,7 +168,28 @@ async def global_exception_handler(request: Request, exc: Exception):
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
     from mozaikscore.core.websocket_manager import websocket_manager
 
-    await websocket_manager.connect(user_id, websocket)
+    # Authenticate the WebSocket connection using the shared mozaiksai auth
+    try:
+        from mozaiksai.core.auth.websocket_auth import authenticate_websocket
+        ws_user = await authenticate_websocket(websocket)
+        if ws_user is None:
+            return  # Connection already closed with 1008 by authenticate_websocket
+
+        # Verify the authenticated user matches the requested user_id
+        if ws_user.user_id != user_id:
+            await websocket.close(code=1008, reason="User ID mismatch")
+            return
+    except ImportError:
+        # Dev fallback: no mozaiksai auth available — accept as-is
+        if ENV != "production":
+            logger.warning("WebSocket auth unavailable — accepting unauthenticated connection (dev mode)")
+            await websocket.accept()
+        else:
+            await websocket.close(code=1008, reason="Auth service unavailable")
+            return
+
+    websocket_manager.active_connections.setdefault(user_id, []).append(websocket)
+    logger.info("User %s connected via WebSocket (authenticated)", user_id)
     try:
         while True:
             # Keep connection alive; client can send pings or commands
