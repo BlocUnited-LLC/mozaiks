@@ -1,8 +1,10 @@
 import React from "react";
 import { DEFAULT_FOOTER_CONFIG } from "../../styles/themeProvider";
+import { useNavigation } from "../../providers/NavigationProvider";
 
-const Footer = ({ chatTheme = null }) => {
-  const footerConfig = { ...DEFAULT_FOOTER_CONFIG, ...chatTheme?.footer };
+const Footer = () => {
+  const { footer: navFooter } = useNavigation();
+  const footerConfig = { ...DEFAULT_FOOTER_CONFIG, ...navFooter };
 
   if (footerConfig.visible === false) return null;
 

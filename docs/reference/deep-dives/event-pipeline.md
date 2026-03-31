@@ -14,7 +14,7 @@ These are normalized Mozaiks runtime facts and `DomainEvent` envelopes used for 
 
 ### 3. Platform and business events
 
-These are substrate-level events for modules, notifications, subscriptions, settings, and other platform concerns.
+These are app-backend and platform-level events for modules, notifications, subscriptions, settings, and other shared platform concerns.
 
 ## Current Anchors
 

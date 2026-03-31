@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/transport/handlers/base.py
+# FILE: mozaiksai/core/transport/handlers/base.py
 # DESCRIPTION: Base protocol and utilities for WebSocket message handlers
 # ==============================================================================
 from __future__ import annotations

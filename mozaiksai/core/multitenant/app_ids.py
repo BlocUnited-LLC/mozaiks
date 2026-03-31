@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Optional
 
 
 def normalize_app_id(value: Any) -> Optional[str]:
@@ -37,21 +37,9 @@ def dual_write_app_scope(doc: Dict[str, Any], app_id: str) -> Dict[str, Any]:
     return doc
 
 
-def extract_app_id(payload: Mapping[str, Any], *, default: Optional[str] = None) -> Optional[str]:
-    """Extract app_id from mixed-casing payloads (HTTP/WS/UI)."""
-
-    for key in ("app_id", "appId", "AppId"):
-        if key in payload:
-            resolved = normalize_app_id(payload.get(key))
-            if resolved:
-                return resolved
-    return default
-
-
 __all__ = [
     "normalize_app_id",
     "coalesce_app_id",
     "build_app_scope_filter",
     "dual_write_app_scope",
-    "extract_app_id",
 ]

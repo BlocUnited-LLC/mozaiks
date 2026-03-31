@@ -5,7 +5,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $ScriptDir
 $EnvFile = Join-Path $RepoRoot ".env"
 
-Write-Host "=== MozaiksAI Backend Coordination Smoke Test ===" -ForegroundColor Cyan
+Write-Host "=== mozaiksai Backend Coordination Smoke Test ===" -ForegroundColor Cyan
 Write-Host "Repo Root: $RepoRoot"
 
 # 2. Load .env if present

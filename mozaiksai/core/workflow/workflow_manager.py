@@ -1,7 +1,6 @@
 # ==============================================================================
-# FILE: core/workflow/unified_workflow_manager.py
-# DESCRIPTION: Unified workflow management - combines config loading and lifecycle management
-#              Optimized single-responsibility design with clean separation of concerns
+# FILE: mozaiksai/core/workflow/workflow_manager.py
+# DESCRIPTION: Loads workflow declaratives, caches parsed configs, and indexes workflow UI tool metadata.
 # ==============================================================================
 
 import json
@@ -13,6 +12,17 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from logs.logging_config import get_workflow_logger
+from .declarative import (
+    parse_a2a_config,
+    parse_agents_config,
+    parse_context_variables_config,
+    parse_handoffs_config,
+    parse_hooks_config,
+    parse_orchestrator_config,
+    parse_structured_outputs_config,
+    parse_tools_config,
+    parse_ui_config,
+)
 
 logger = get_workflow_logger(workflow_name="unified_workflow_manager")
 
@@ -47,6 +57,7 @@ class UnifiedWorkflowManager:
     """
 
     _instance = None
+    _ALLOWED_STARTUP_MODES = {"AgentDriven", "UserDriven", "BackendOnly"}
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -77,20 +88,26 @@ class UnifiedWorkflowManager:
         )
 
     # ------------------------- UI TOOLS -------------------------
-    def _load_workflow_tools(self, workflow_path: str) -> None:
+    def _load_workflow_tools(self, workflow_path: str, *, tools_payload: Optional[Dict[str, Any]] = None) -> None:
         from pathlib import Path as _P
         tools_yaml_path = _P(workflow_path) / "tools.yaml"
-        
-        if not tools_yaml_path.exists():
-            return
 
         workflow_name = _P(workflow_path).name
         if workflow_name in self._ui_loaded_workflows:
             return
 
         try:
-            with open(tools_yaml_path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f) or {}
+            data: Dict[str, Any] = {}
+            if isinstance(tools_payload, dict):
+                data = dict(tools_payload)
+            elif tools_yaml_path.exists():
+                with open(tools_yaml_path, 'r', encoding='utf-8') as f:
+                    raw = yaml.safe_load(f) or {}
+                data = parse_tools_config(raw)
+
+            if not data:
+                logger.debug(f"No tools.yaml for workflow {workflow_name}")
+                return
             
             entries = data.get('tools', [])
             if not isinstance(entries, list):
@@ -129,35 +146,19 @@ class UnifiedWorkflowManager:
                 module_path = f"workflows.{workflow_name}.tools.{mod}:{function}"
 
                 # Agent field
-                agent = entry.get('agent') or entry.get('caller') or entry.get('executor')
+                agent = entry.get('agent')
 
                 # UI detection
                 ui_block = entry.get('ui') if isinstance(entry.get('ui'), dict) else None
-                tool_type = entry.get('tool_type') or entry.get('type')
+                tool_type = entry.get('tool_type')
                 has_meaningful_ui = bool(ui_block and (ui_block.get('component') or ui_block.get('mode')))
-                # If ui block provided, assume UI_Tool when tool_type missing
-                if not tool_type and has_meaningful_ui:
-                    tool_type = 'UI_Tool'
 
                 # inside _load_workflow_tools(), in the for-entry loop:
                 if has_meaningful_ui or tool_type == 'UI_Tool':
                     ui_ct += 1
-                    component = None
-                    mode = 'inline'
-                    if ui_block:
-                        component = ui_block.get('component')
-                        mode = ui_block.get('mode', 'inline')
-                    else:
-                        component = entry.get('component')
-                        mode = entry.get('mode', 'inline')
-
-                    # Fallback: if "function" not present, try to pull it from module_path "pkg.mod:func"
+                    component = ui_block.get('component') if ui_block else None
+                    mode = ui_block.get('mode') if ui_block else None
                     fn_name = function
-                    if not fn_name and isinstance(module_path, str) and ':' in module_path:
-                        fn_name = module_path.split(':', 1)[1].strip() or None
-
-                    # Use component name as tool_id if available (tools call use_ui_tool with component name)
-                    # Otherwise fall back to function name
                     lookup_id = component if component else tool_id
 
                     rec = {
@@ -211,23 +212,14 @@ class UnifiedWorkflowManager:
                     
                     # UI detection for lifecycle tools
                     ui_block = entry.get('ui') if isinstance(entry.get('ui'), dict) else None
-                    tool_type = entry.get('tool_type') or entry.get('type')
+                    tool_type = entry.get('tool_type')
                     has_meaningful_ui = bool(ui_block and (ui_block.get('component') or ui_block.get('mode')))
-                    if not tool_type and has_meaningful_ui:
-                        tool_type = 'UI_Tool'
                     
                     if has_meaningful_ui or tool_type == 'UI_Tool':
                         ui_ct += 1
-                        component = None
-                        mode = 'inline'
-                        if ui_block:
-                            component = ui_block.get('component')
-                            mode = ui_block.get('mode', 'inline')
-                        
+                        component = ui_block.get('component') if ui_block else None
+                        mode = ui_block.get('mode') if ui_block else None
                         fn_name = function
-                        
-                        # Use component name as tool_id if available (tools call use_ui_tool with component name)
-                        # Otherwise fall back to function name
                         lookup_id = component if component else tool_id
                         
                         rec = {
@@ -251,13 +243,13 @@ class UnifiedWorkflowManager:
             self._ui_loaded_workflows.add(workflow_name)
             logger.info(f"Tools loaded for {workflow_name}: ui={ui_ct}")
         except Exception as e:  # pragma: no cover
-            logger.error(f"Failed parsing tools.json for {workflow_name}: {e}")
+            logger.error(f"Failed parsing tool config for {workflow_name}: {e}")
 
 
     def get_ui_tool_record(self, tool_path_or_id: str) -> Optional[Dict[str, Any]]:
         """Lookup UI tool record by module path or tool id.
 
-        Accepts either the full python path (used in tools.json) or the tool_id.
+        Accepts either the full python path or the tool_id.
         """
         registry_key = self._ui_tool_path_cache.get(tool_path_or_id)
         if registry_key and registry_key in self._ui_registry:
@@ -293,15 +285,9 @@ class UnifiedWorkflowManager:
         workflows = []
         for item in self.workflows_base_path.iterdir():
             if item.is_dir() and not item.name.startswith('.'):
-                # Check for modular YAML config files
                 if (item / "orchestrator.yaml").exists():
                     workflows.append(item.name)
                     logger.debug(f"Discovered workflow (orchestrator.yaml): {item.name}")
-                # Also treat workflows that declare configuration via tools.yaml as first-class
-                elif (item / "tools.yaml").exists() or (item / "tools").exists():
-                    workflows.append(item.name)
-                    logger.debug(f"Discovered workflow (tools.yaml): {item.name}")
-                    logger.debug(f"Discovered workflow (tools.json): {item.name}")
         
         return workflows
     
@@ -338,17 +324,24 @@ class UnifiedWorkflowManager:
         
         if not workflow_path.exists():
             raise ValueError(f"Workflow not found: {workflow_name}")
-        # Load configuration directly (modular JSON files) – canonical, no legacy keys
+        # Load configuration directly from modular YAML files.
         config = self._load_modular_workflow_config(workflow_path)
         if not config:
             logger.warning(f"⚠️ Empty config for workflow: {workflow_name}")
             config = {}
+        self._validate_orchestrator_contract(workflow_name, config)
 
         workflow_info = WorkflowInfo(name=workflow_name, config=config, path=str(workflow_path))
 
         # UI tools
         try:
-            self._load_workflow_tools(str(workflow_path))
+            self._load_workflow_tools(
+                str(workflow_path),
+                tools_payload={
+                    "tools": config.get("tools", []),
+                    "lifecycle_tools": config.get("lifecycle_tools", []),
+                },
+            )
             has_ui_tools = any(r.get('workflow_name') == workflow_name for r in getattr(self, '_ui_registry', {}).values())
             workflow_info.tools_loaded = has_ui_tools
         except Exception as e:  # pragma: no cover
@@ -437,25 +430,10 @@ class UnifiedWorkflowManager:
             Set of agent names with auto_tool_mode=true (e.g., {"ContextAgent", "APIKeyAgent"})
         """
         config = self.get_config(workflow_name)
-        agents_data = config.get('agents', {})
-        
-        agents_dict: Dict[str, Any] = {}
-
-        # Handle double-nesting: agents.agents.{agent_name}
-        if isinstance(agents_data, dict) and 'agents' in agents_data:
-            nested = agents_data.get('agents')
-            if isinstance(nested, dict):
-                agents_dict = nested
-            elif isinstance(nested, list):
-                for item in nested:
-                    if isinstance(item, dict) and isinstance(item.get('name'), str):
-                        agents_dict[item['name']] = item
-        elif isinstance(agents_data, dict):
-            agents_dict = agents_data
-        elif isinstance(agents_data, list):
-            for item in agents_data:
-                if isinstance(item, dict) and isinstance(item.get('name'), str):
-                    agents_dict[item['name']] = item
+        agents_section = config.get("agents", {})
+        agents_dict = agents_section.get("agents", {}) if isinstance(agents_section, dict) else {}
+        if not isinstance(agents_dict, dict):
+            return set()
         
         auto_tool_agents: Set[str] = set()
         
@@ -472,7 +450,7 @@ class UnifiedWorkflowManager:
     def get_ui_hidden_triggers(self, workflow_name: str) -> Dict[str, Set[str]]:
         """Return mapping of agent_name -> set of ui_hidden trigger values.
 
-        Extracts state variables with ui_hidden: true from context_variables.json
+        Extracts state variables with ui_hidden: true from context_variables.yaml
         and returns a dict mapping each source agent to the set of trigger values
         that should be hidden from the UI.
 
@@ -480,23 +458,14 @@ class UnifiedWorkflowManager:
             Dict mapping agent_name to Set of trigger values (e.g., {"InterviewAgent": {"NEXT"}})
         """
         config = self.get_config(workflow_name)
-        context_vars = config.get('context_variables', {})
-        # Handle double-nesting: context_variables.context_variables.definitions
-        if 'context_variables' in context_vars:
-            context_vars = context_vars['context_variables']
-        definitions = context_vars.get('definitions', {})
+        context_vars = config.get("context_variables", {})
+        definitions = context_vars.get("definitions", {}) if isinstance(context_vars, dict) else {}
 
         hidden_triggers: Dict[str, Set[str]] = {}
+        if not isinstance(definitions, dict):
+            return hidden_triggers
 
-        # Most workflows use list-based definitions: [{name, type, source, ...}, ...]
-        if isinstance(definitions, list):
-            iterable = [(d.get('name'), d) for d in definitions if isinstance(d, dict)]
-        elif isinstance(definitions, dict):
-            iterable = list(definitions.items())
-        else:
-            iterable = []
-
-        for var_name, var_config in iterable:
+        for _, var_config in definitions.items():
             if not isinstance(var_config, dict):
                 continue
             source = var_config.get('source', {})
@@ -521,41 +490,17 @@ class UnifiedWorkflowManager:
         return hidden_triggers
 
     def get_structured_output_registry(self, workflow_name: str) -> Dict[str, Optional[str]]:
-        """Return a normalized mapping: agent_name -> model_name or None.
-
-        Supports both the new dict-based registry ({"Agent": "Model"|None})
-        and the legacy list-based registry ([{"agent": "...","agent_definition": "...|None"}]).
-        """
+        """Return a normalized mapping: agent_name -> model_name or None."""
         config = self.get_config(workflow_name)
         so = config.get("structured_outputs") or {}
         reg = so.get("registry")
 
         normalized: Dict[str, Optional[str]] = {}
 
-        # New schema: dict mapping
         if isinstance(reg, dict):
             for agent, model in reg.items():
                 if isinstance(agent, str):
                     normalized[agent] = model if isinstance(model, str) else None
-            return normalized
-
-        # Legacy schema: list of {agent, agent_definition}
-        if isinstance(reg, list):
-            for item in reg:
-                if isinstance(item, dict):
-                    agent = item.get("agent")
-                    model = item.get("agent_definition")
-                    if isinstance(agent, str):
-                        normalized[agent] = model if isinstance(model, str) else None
-            return normalized
-
-        # Defensive: handle accidental nesting like {"structured_outputs": {...}}
-        if isinstance(reg, dict) and "structured_outputs" in reg:
-            nested = reg.get("structured_outputs")
-            if isinstance(nested, dict):
-                for agent, model in nested.items():
-                    if isinstance(agent, str):
-                        normalized[agent] = model if isinstance(model, str) else None
 
         return normalized
 
@@ -666,7 +611,9 @@ class UnifiedWorkflowManager:
             validation_result['info']['has_orchestrator_yaml'] = True
             try:
                 with open(orchestrator_yaml, 'r', encoding='utf-8') as f:
-                    yaml.safe_load(f)
+                    orchestrator_data = yaml.safe_load(f) or {}
+                parsed_orchestrator = parse_orchestrator_config(orchestrator_data)
+                self._validate_orchestrator_contract(workflow_name, parsed_orchestrator)
                 validation_result['info']['orchestrator_yaml_valid'] = True
             except Exception as e:
                 validation_result['errors'].append(f"Invalid orchestrator.yaml: {e}")
@@ -674,12 +621,32 @@ class UnifiedWorkflowManager:
         else:
             validation_result['warnings'].append("No orchestrator.yaml found")
         
-        # Check for other config files (YAML only)
-        config_names = ['agents', 'handoffs', 'tools', 'ui_config', 'hooks']
-        for config_name in config_names:
-            yaml_path = workflow_path / f"{config_name}.yaml"
-            if yaml_path.exists():
-                validation_result['info'][f'has_{config_name}'] = True
+        # Validate other declarative config files against strict contracts.
+        section_parsers = {
+            "agents": parse_agents_config,
+            "handoffs": parse_handoffs_config,
+            "context_variables": parse_context_variables_config,
+            "structured_outputs": parse_structured_outputs_config,
+            "tools": parse_tools_config,
+            "ui_config": parse_ui_config,
+            "hooks": parse_hooks_config,
+            "a2a": parse_a2a_config,
+        }
+        for section_name, parser in section_parsers.items():
+            yaml_path = workflow_path / f"{section_name}.yaml"
+            if not yaml_path.exists():
+                continue
+            validation_result['info'][f'has_{section_name}'] = True
+            try:
+                with open(yaml_path, "r", encoding="utf-8-sig") as f:
+                    payload = yaml.safe_load(f)
+                if payload is None:
+                    payload = {}
+                parser(payload)
+                validation_result['info'][f'{section_name}_valid'] = True
+            except Exception as e:
+                validation_result['errors'].append(f"Invalid {section_name}.yaml: {e}")
+                validation_result['valid'] = False
         
         # Check for tools directory
         tools_dir = workflow_path / "tools"
@@ -734,9 +701,9 @@ class UnifiedWorkflowManager:
         return self.get_status_summary()
 
     # ========================================================================
-    # INTERNAL CONFIG LOADING (replaces legacy file_manager)
+    # INTERNAL CONFIG LOADING
     # ========================================================================
-    def _load_config_if_exists(self, base_path: Path, config_name: str) -> Dict[str, Any]:
+    def _load_config_if_exists(self, base_path: Path, config_name: str) -> Optional[Dict[str, Any]]:
         """Load YAML config file.
         
         Args:
@@ -744,20 +711,23 @@ class UnifiedWorkflowManager:
             config_name: Base name without extension (e.g., 'orchestrator', 'agents')
         
         Returns:
-            Parsed config dict, or empty dict if file doesn't exist
+            Parsed config dict (possibly empty), or None if file doesn't exist.
         """
         yaml_path = base_path / f"{config_name}.yaml"
         
         if not yaml_path.exists():
-            return {}
+            return None
         
         try:
             with open(yaml_path, 'r', encoding='utf-8-sig') as f:
                 data = yaml.safe_load(f)
-                return data if isinstance(data, dict) else {}
+            if data is None:
+                return {}
+            if not isinstance(data, dict):
+                raise ValueError(f"{yaml_path} must contain a mapping at root")
+            return data
         except Exception as e:
-            logger.error(f"Failed reading YAML {yaml_path}: {e}")
-            return {}
+            raise ValueError(f"Failed reading YAML {yaml_path}: {e}") from e
 
     def _resolve_ai_config_path(self) -> Path:
         raw = (os.getenv("MOZAIKS_AI_CONFIG_PATH") or "").strip()
@@ -788,42 +758,51 @@ class UnifiedWorkflowManager:
         Canonical files: orchestrator.yaml, agents.yaml, handoffs.yaml, context_variables.yaml,
         structured_outputs.yaml, tools.yaml, ui_config.yaml, hooks.yaml.
         Optional file: a2a.yaml.
-        Tools file expected to expose unified 'tools' list (no legacy agent_tools/ui_tools splitting).
-        
+        Tools file is expected to expose a unified 'tools' list.
+
         Top-level merge rules:
           - orchestrator keys merged at root
           - explicit sections under their key (agents, handoffs, context_variables, structured_outputs)
-          - tools contributes its root keys (currently only 'tools') without transformation
+          - tools contributes its root keys ('tools' and 'lifecycle_tools') without transformation
           - ui_config contributes its root keys
         """
         config: Dict[str, Any] = {}
         if not workflow_path.exists():
             return config
-        
+
         # Orchestrator (top-level keys)
-        orchestrator = self._load_config_if_exists(workflow_path, 'orchestrator')
+        orchestrator_raw = self._load_config_if_exists(workflow_path, "orchestrator")
+        if orchestrator_raw is None:
+            raise ValueError(f"Workflow '{workflow_path.name}' is missing required file: orchestrator.yaml")
+        orchestrator = parse_orchestrator_config(orchestrator_raw)
         config.update(orchestrator)
-        
+
         # Sectioned files
-        for section_name in ['agents', 'handoffs', 'context_variables', 'structured_outputs', 'hooks', 'a2a']:
-            data = self._load_config_if_exists(workflow_path, section_name)
-            if data:
-                config[section_name] = data
+        section_parsers = {
+            "agents": parse_agents_config,
+            "handoffs": parse_handoffs_config,
+            "context_variables": parse_context_variables_config,
+            "structured_outputs": parse_structured_outputs_config,
+            "hooks": parse_hooks_config,
+            "a2a": parse_a2a_config,
+        }
+        for section_name, parser in section_parsers.items():
+            raw_data = self._load_config_if_exists(workflow_path, section_name)
+            if raw_data is None:
+                continue
+            config[section_name] = parser(raw_data)
         
         # Tools file (canonical unified list under 'tools')
-        tools_data = self._load_config_if_exists(workflow_path, 'tools')
-        if tools_data:
-            # Validate: ensure only 'tools' key we care about; ignore legacy keys if appear
-            tools_list = tools_data.get('tools')
-            lifecycle_tools = tools_data.get('lifecycle_tools')
-            if isinstance(tools_list, list):
-                config['tools'] = tools_list
-            if isinstance(lifecycle_tools, list):
-                config['lifecycle_tools'] = lifecycle_tools
+        tools_raw = self._load_config_if_exists(workflow_path, "tools")
+        if tools_raw is not None:
+            tools_data = parse_tools_config(tools_raw)
+            config["tools"] = tools_data.get("tools", [])
+            config["lifecycle_tools"] = tools_data.get("lifecycle_tools", [])
         
         # UI config
-        ui_data = self._load_config_if_exists(workflow_path, 'ui_config')
-        if ui_data:
+        ui_raw = self._load_config_if_exists(workflow_path, "ui_config")
+        if ui_raw is not None:
+            ui_data = parse_ui_config(ui_raw)
             # Merge UI config keys at root (e.g., visual_agents)
             config.update(ui_data)
 
@@ -836,6 +815,30 @@ class UnifiedWorkflowManager:
             config.pop("entry_point", None)
         
         return config
+
+    def _validate_orchestrator_contract(self, workflow_name: str, config: Dict[str, Any]) -> None:
+        """Enforce required orchestrator contract fields for runtime safety."""
+        declared_name = str(config.get("workflow_name") or "").strip()
+        if not declared_name:
+            raise ValueError(f"Workflow '{workflow_name}' is missing required field: workflow_name")
+
+        if declared_name.lower() != workflow_name.lower():
+            raise ValueError(
+                f"Workflow '{workflow_name}' has mismatched workflow_name '{declared_name}' in orchestrator.yaml"
+            )
+
+        startup_mode = str(config.get("workflow_startup_mode") or "").strip()
+        if not startup_mode:
+            raise ValueError(
+                f"Workflow '{workflow_name}' is missing required field: workflow_startup_mode"
+            )
+
+        if startup_mode not in self._ALLOWED_STARTUP_MODES:
+            allowed = ", ".join(sorted(self._ALLOWED_STARTUP_MODES))
+            raise ValueError(
+                f"Workflow '{workflow_name}' has invalid workflow_startup_mode '{startup_mode}'. "
+                f"Allowed values: {allowed}"
+            )
 
     # ========================================================================
     # RUNTIME HANDLER REGISTRY
@@ -901,7 +904,7 @@ class UnifiedWorkflowManager:
     # HOOKS API
     # ========================================================================
     def register_hooks(self, workflow_name: str, agents: Dict[str, Any], force: bool = False) -> List[Any]:
-        """Register hooks for a workflow using hooks.json.
+        """Register hooks for a workflow using hooks config.
 
         Parameters
         ----------
@@ -1007,18 +1010,13 @@ def get_workflow_manager() -> UnifiedWorkflowManager:
 
 def initialize_workflows(base_path: str = "workflows") -> Dict[str, Dict[str, Any]]:
     """Initialize workflows with custom base path"""
-    global _unified_workflow_manager
-    # Create new instance with custom path
-    new_manager = object.__new__(UnifiedWorkflowManager)
-    new_manager.workflows_base_path = Path(base_path)
-    new_manager._ai_config = {}
-    new_manager._workflows = {}
-    new_manager._config_cache = {}
-    new_manager._initialized = False
-    new_manager._load_all_workflows()
-    new_manager._initialized = True
-    
-    _unified_workflow_manager = new_manager
+    global _unified_workflow_manager, workflow_manager
+
+    # Reset singleton so all runtime caches are correctly reinitialized.
+    UnifiedWorkflowManager._instance = None
+    _unified_workflow_manager = UnifiedWorkflowManager(workflows_base_path=base_path)
+    workflow_manager = _unified_workflow_manager
+
     return {
         name: info.to_dict() 
         for name, info in _unified_workflow_manager._workflows.items()

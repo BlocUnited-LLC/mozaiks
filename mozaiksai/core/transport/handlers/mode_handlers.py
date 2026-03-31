@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/transport/handlers/mode_handlers.py
+# FILE: mozaiksai/core/transport/handlers/mode_handlers.py
 # DESCRIPTION: Handlers for general mode and mode switching operations
 # ==============================================================================
 from __future__ import annotations

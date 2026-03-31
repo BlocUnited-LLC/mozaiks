@@ -1,6 +1,6 @@
 # ==============================================================================
-# FILE: core\core_config.py
-# DESCRIPTION: Configuration for Azure Key Vault, MongoDB, LLMs, and Tokens API
+# FILE: mozaiksai/core/core_config.py
+# DESCRIPTION: Lazy runtime config for MongoDB, optional Key Vault secrets, and app-backend settings.
 # NOTES: Avoid module-level cloud calls; build credentials lazily and prefer
 #        environment variables to keep local/dev robust.
 # ==============================================================================
@@ -133,9 +133,9 @@ def get_app_id_from_chat_or_context(chat_id: Optional[str] = None) -> Optional[s
 
 
 # -----------------------------
-# Mozaiks Backend integration (GitHub deploy pipeline)
+# App backend integration
 # -----------------------------
-MOZAIKS_BACKEND_URL = os.getenv("MOZAIKS_BACKEND_URL", "https://api.mozaiks.ai").strip().rstrip("/")
+MOZAIKS_BACKEND_URL = os.getenv("MOZAIKS_BACKEND_URL", "http://localhost:8000").strip().rstrip("/")
 INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "").strip()
 
 __all__ = [

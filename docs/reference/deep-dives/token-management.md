@@ -11,6 +11,8 @@ Token tracking should support:
 - cost attribution
 - workflow diagnostics
 
+At the product boundary, subscription policy and admin enforcement should consume token data as a native platform capability rather than push token logic into workflow authoring.
+
 It should not leak into product logic or workflow authoring unless the workflow explicitly needs budget-aware behavior.
 
 ## Related Guides

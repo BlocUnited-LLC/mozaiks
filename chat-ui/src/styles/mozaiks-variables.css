@@ -1,0 +1,62 @@
+/**
+ * mozaiks CSS Variables
+ *
+ * Include this file to get default styling, or override these variables
+ * in your own CSS to customize the chat appearance.
+ *
+ * Usage:
+ *   import '@mozaiks/chat-ui/dist/mozaiks-variables.css';
+ *
+ * Or copy these variables to your own CSS and customize:
+ *   :root {
+ *     --mozaiks-primary: #your-brand-color;
+ *   }
+ */
+
+:root {
+  /* Primary brand color - used for buttons, user messages, accents */
+  --mozaiks-primary: #6366f1;
+  --mozaiks-primary-hover: #4f46e5;
+
+  /* Background colors */
+  --mozaiks-bg: #ffffff;
+  --mozaiks-bg-secondary: #f9fafb;
+
+  /* Text colors */
+  --mozaiks-text: #111827;
+  --mozaiks-text-secondary: #6b7280;
+
+  /* Border color */
+  --mozaiks-border: #e5e7eb;
+
+  /* Font family */
+  --mozaiks-font: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* Border radius */
+  --mozaiks-radius: 0.5rem;
+  --mozaiks-radius-lg: 1rem;
+
+  /* Shadow */
+  --mozaiks-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --mozaiks-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+/* Dark mode support (optional) */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --mozaiks-bg: #1f2937;
+    --mozaiks-bg-secondary: #374151;
+    --mozaiks-text: #f9fafb;
+    --mozaiks-text-secondary: #9ca3af;
+    --mozaiks-border: #4b5563;
+  }
+}
+
+/* Manual dark mode class */
+.dark {
+  --mozaiks-bg: #1f2937;
+  --mozaiks-bg-secondary: #374151;
+  --mozaiks-text: #f9fafb;
+  --mozaiks-text-secondary: #9ca3af;
+  --mozaiks-border: #4b5563;
+}

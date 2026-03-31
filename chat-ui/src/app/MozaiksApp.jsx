@@ -6,7 +6,6 @@ import ShellUIToolRenderer from '../core/ui/ShellUIToolRenderer';
 import NavigationProvider from '../providers/NavigationProvider';
 import RouteRenderer from '../components/RouteRenderer';
 import { initializeWorkflows } from '@chat-workflows/index';
-import { initializeModules } from '@modules/index';
 import ConfigValidationOverlay from '../config/ConfigValidationOverlay';
 
 /**
@@ -32,7 +31,7 @@ function AppShell({ onAuthRequired }) {
  *   appName         {string}   App display name
  *   defaultAppId    {string}   App identifier sent to the backend
  *   apiAdapter      {object}   API adapter — use mockApiAdapter for local dev, RestApiAdapter for production
- *   authAdapter     {object}   Auth adapter (Keycloak by default, mock for VITE_MOCK_MODE)
+ *   authAdapter     {object}   Auth adapter — host-provided (any OIDC provider, or mock for VITE_MOCK_MODE)
  *   uiConfig        {object}   Full uiConfig override (replaces individual props when supplied)
  *   children        {node}     Override the default page renderer
  */
@@ -67,7 +66,6 @@ export default function MozaiksApp({
 
   const moduleInitializer = (registerComponent) => {
     initializeWorkflows(registerComponent);
-    initializeModules(registerComponent);
   };
 
   return (

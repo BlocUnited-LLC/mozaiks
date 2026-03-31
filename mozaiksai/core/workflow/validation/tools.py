@@ -1,9 +1,9 @@
 # ==============================================================================
-# FILE: core/workflow/tool_validation.py
+# FILE: mozaiksai/core/workflow/validation/tools.py
 # DESCRIPTION: Shared helpers to validate tool calls against structured output
 #              models and emit standardized sentinel payloads when validation
 #              fails. Designed to keep the runtime AG2-native while enforcing
-#              modular JSON contracts defined in structured_outputs.json.
+#              modular contracts defined in structured_outputs.yaml.
 # ==============================================================================
 from __future__ import annotations
 
@@ -141,4 +141,3 @@ __all__ = [
     "SENTINEL_AGENT_KEY",
     "SENTINEL_TOOL_KEY",
 ]
-

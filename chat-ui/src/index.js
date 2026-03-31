@@ -1,127 +1,93 @@
-// Full web entrypoint for chat-ui.
-// React Native or other non-browser hosts should import chat-ui/core.js instead.
+// =============================================================================
+// @mozaiks/chat-ui — Main Entry Point
+// =============================================================================
+//
+// SIMPLE USAGE:
+//   import { ChatWidget, WorkflowChat, useMozaiks } from '@mozaiks/chat-ui';
+//
+// =============================================================================
 
-// Chat UI Components
+// -----------------------------------------------------------------------------
+// CORE COMPONENTS
+// -----------------------------------------------------------------------------
+
+// ChatWidget: Standalone floating chat overlay
+export { default as ChatWidget } from './components/chat/ChatWidget';
+
+// WorkflowChat: Embeddable workflow chat component
+export { default as WorkflowChat } from './components/chat/WorkflowChat';
+
+// ChatInterface: Presentational chat component
+export { default as ChatInterface } from './components/chat/ChatInterface';
+
+// PersistentChatWidget: Context-aware widget (for full apps)
+export { default as PersistentChatWidget } from './components/chat/PersistentChatWidget';
+
+// MozaiksApp: Full application shell with routing and navigation
+export { default as MozaiksApp } from './app/MozaiksApp';
+
+// -----------------------------------------------------------------------------
+// HOOKS
+// -----------------------------------------------------------------------------
+
+// useMozaiks: Trigger workflows from UI
+export { useMozaiks } from './hooks/useMozaiks';
+
+// useChatWebSocket: Low-level WebSocket management
+export { useChatWebSocket } from './pages/hooks';
+
+// -----------------------------------------------------------------------------
+// API ADAPTERS
+// -----------------------------------------------------------------------------
+
+export { ApiAdapter, WebSocketApiAdapter, RestApiAdapter, appApi } from './adapters/api';
+
+// -----------------------------------------------------------------------------
+// CONFIGURATION
+// -----------------------------------------------------------------------------
+
+export { createAppConfig, resolveAppManifest, deriveWsUrl } from './platform/appManifest';
+
+// -----------------------------------------------------------------------------
+// SUPPORTING COMPONENTS (for building custom UIs)
+// -----------------------------------------------------------------------------
+
 export { default as ArtifactPanel } from './components/chat/ArtifactPanel';
 export { default as ChatBubble } from './components/chat/ChatBubble';
-export { default as ChatInterface } from './components/chat/ChatInterface';
 export { default as ChatMessage } from './components/chat/ChatMessage';
 export { default as ChatOverlay } from './components/chat/ChatOverlay';
 export { default as ConnectionStatus } from './components/chat/ConnectionStatus';
-export { default as FluidChatLayout } from './components/chat/FluidChatLayout';
 export { default as MobileArtifactDrawer } from './components/chat/MobileArtifactDrawer';
-export { default as PersistentChatWidget } from './components/chat/PersistentChatWidget';
-export { default as WorkflowCompletion } from './components/chat/WorkflowCompletion';
 
-// Layout Components
-export { default as Header } from './components/layout/Header';
-export { default as Footer } from './components/layout/Footer';
-export { default as RouteRenderer } from './components/RouteRenderer';
-
-// Error Handling
-export { default as ErrorBoundary, ChatMessageErrorFallback, ChatInterfaceErrorFallback, ArtifactErrorFallback } from './components/ErrorBoundary';
-
-// Widget
-export { default as GlobalChatWidgetWrapper } from './widget/GlobalChatWidgetWrapper';
+// Error handling
+export { default as ErrorBoundary } from './components/ErrorBoundary';
 
 // Context
 export * from './context/ChatUIContext';
 
-// Hooks
-export * from './hooks/useWidgetMode';
-
-// ChatPage extracted hooks
-export { useConversation, useArtifacts, useChatWebSocket } from './pages/hooks';
-
-// Core utilities
-export {
-  getValueByPath,
-  interpolateString,
-  interpolateParams,
-  deriveArtifactId,
-  applyJsonPatch,
-  applyArtifactUpdate,
-  applyOptimisticUpdate,
-} from './core/actions/actionUtils';
-
-// Core runtime
-export { default as ShellUIToolRenderer } from './core/ui/ShellUIToolRenderer';
+// UI tool rendering
 export { default as UIToolRenderer } from './core/ui/UIToolRenderer';
-export { default as UserInputRequest } from './core/ui/UserInputRequest';
 export { dynamicUIHandler } from './core/dynamicUIHandler';
-export { default as eventDispatcher, handleEvent, registerEventHandler } from './core/eventDispatcher';
-export { default as WorkflowUIRouter } from './core/WorkflowUIRouter';
 
-// Adapters
-export { ApiAdapter, WebSocketApiAdapter, RestApiAdapter, appApi } from './adapters/api';
-export * from './adapters/auth';
-export { KeycloakAuthAdapter, createKeycloakAuthAdapter } from './adapters/keycloakAuth';
-
-// Config
-export { default as config } from './config';
-export { default as workflowConfig } from './config/workflowConfig';
-
-// Providers
-export { default as BrandingProvider } from './providers/BrandingProvider';
-export { default as NavigationProvider } from './providers/NavigationProvider';
-
-// Registry
+// Component registry
 export { default as componentRegistry } from './registry/componentRegistry';
 
-// App shell — top-level application wrapper
-export { default as MozaiksApp } from './app/MozaiksApp';
-
-// Development adapters — stubs API/WS/Auth calls without a backend
-export { default as mockApiAdapter } from './adapters/mockApiAdapter';
-export { default as mockAuthAdapter, createMockAuthAdapter } from './adapters/mockAuthAdapter';
-
-// Side-effect: registers core pages (ChatPage) in the component registry.
-// Platform modules (AdminPortal etc.) are registered via @modules auto-discovery.
+// Side-effect: registers core components
 import './registry/coreComponents';
 
-// Pages
-export { default as ChatPage } from './pages/ChatPage';
-export { default as DiscoverPage } from './pages/DiscoverPage';
-// AdminPortal is now a platform module — import from platform/modules/admin_portal/ui/
+// -----------------------------------------------------------------------------
+// THEMING & BRANDING
+// -----------------------------------------------------------------------------
 
-// AdminPortal extensibility API — section registry, auth hooks, shared primitives
-export {
-  registerAdminSection,
-  getAdminSection,
-  getAllAdminSections,
-  unregisterAdminSection,
-  // Legacy aliases
-  registerDashboardSection,
-  getDashboardSection,
-  getAllDashboardSections,
-  unregisterDashboardSection,
-  useIsAdmin,
-  useHasRole,
-  useAuthConfig,
-  Card as AdminCard,
-  Stat as AdminStat,
-  ProgressBar as AdminProgressBar,
-  // Original names — for platform module UIs that import from '@mozaiks/chat-ui'
-  Card,
-  Stat,
-  ProgressBar,
-} from './adminPortalRegistry';
-
-// Admin bridge functions (used by platform/modules/admin_portal/ui)
-export { adminListUsers, adminGetAnalytics } from './coreBridge';
-
-
-// Navigation
-export { readNavigationCache, writeNavigationCache } from './navigation/navigationCache';
-export { default as useNavigationActions } from './navigation/useNavigationActions';
-
-// Styles
-export * as themeProvider from './styles/themeProvider';
+// Theme hook
 export { default as useTheme } from './styles/useTheme';
-export * from './styles/artifactDesignSystem';
 
-// Primitives
-export * from './primitives';
+// Branding provider
+export { default as BrandingProvider } from './providers/BrandingProvider';
 
-// State
-export * from './state/uiSurfaceReducer';
+// Theme utilities
+export * as themeProvider from './styles/themeProvider';
+export { loadBrand } from './theme/loadBrand';
+
+// CSS Variables (import in your app)
+// import '@mozaiks/chat-ui/styles/mozaiks-variables.css';

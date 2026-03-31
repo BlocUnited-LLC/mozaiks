@@ -10,7 +10,7 @@ services:
       POSTGRES_USER: keycloak
       POSTGRES_PASSWORD: ${KC_DB_PASSWORD}
     volumes:
-      - mozaiksai_keycloak_db:/var/lib/postgresql/data
+      - MozaiksAI_keycloak_db:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U keycloak"]
@@ -59,7 +59,7 @@ services:
     ports:
       - "27017:27017"
     volumes:
-      - mozaiksai_mongo_data:/data/db
+      - MozaiksAI_mongo_data:/data/db
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "mongodb://127.0.0.1:27017/admin", "--eval", "db.runCommand({ ping: 1 }).ok"]
@@ -68,7 +68,7 @@ services:
       retries: 20
 
   # ---------------------------------------------------------------------------
-  # MozaiksAI Runtime - Workflow execution engine
+  # mozaiksai Runtime - Workflow execution engine
   # ---------------------------------------------------------------------------
   runtime:
     build:
@@ -82,7 +82,7 @@ services:
       - "8000:8000"
     environment:
       # MongoDB connection (uses compose network)
-      MONGO_URI: "mongodb://mongo:27017/MozaiksAI"
+      MONGO_URI: "mongodb://mongo:27017/mozaiksai"
       # Auth
       AUTH_ENABLED: "true"
       MOZAIKS_OIDC_AUTHORITY: http://keycloak:8080/realms/mozaiks
@@ -112,5 +112,5 @@ services:
       start_period: 15s
 
 volumes:
-  mozaiksai_mongo_data:
-  mozaiksai_keycloak_db:
+  MozaiksAI_mongo_data:
+  MozaiksAI_keycloak_db:

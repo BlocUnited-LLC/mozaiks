@@ -1,6 +1,8 @@
 # Runtime Rules
 
-Use these rules when touching runtime-oriented code such as:
+**Reference:** See [/ARCHITECTURE.md](/ARCHITECTURE.md) and [/mozaiksai/README.md](/mozaiksai/README.md) for context.
+
+Use these rules when touching:
 - `mozaiksai/**`
 - orchestration, adapters, transport, persistence, workers, or engine code
 

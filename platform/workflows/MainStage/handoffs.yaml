@@ -1,8 +1,0 @@
-handoff_rules:
-- source_agent: StageHostAgent
-  target_agent: user
-  handoff_type: after_work
-  condition_type: null
-  condition_scope: null
-  condition: null
-  transition_target: RevertToUserTarget

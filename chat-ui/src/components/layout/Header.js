@@ -2,9 +2,6 @@ import React, { useState, useRef, useEffect } from "react";
 import { DEFAULT_HEADER_CONFIG } from "../../styles/themeProvider";
 import { useNavigation } from "../../providers/NavigationProvider";
 import { useNavigationActions } from "../../navigation/useNavigationActions";
-import { useCoreNotifications } from "../../hooks/useCoreNotifications";
-import NotificationsDropdown from "./NotificationsDropdown";
-import SettingsOverlay from "./SettingsOverlay";
 import "./header-styles.css";
 
 const ICON_FILE_RE = /\.(svg|png|jpe?g|gif|webp|ico)$/i;
@@ -18,18 +15,10 @@ const resolveIconSource = (iconValue) => {
 
 /**
  * ActionIcon — renders a brand-owned asset file as a color-inheriting icon.
- * The icon value MUST be a file path (absolute, http, or a filename resolved
- * from /assets/). Named string shortcuts ("bell", "sparkle", etc.) are NOT
- * supported — set the actual filename in theme_config.json.
  */
 const ActionIcon = ({ icon, className = "w-5 h-5" }) => {
   const src = resolveIconSource(icon);
-  if (!src) {
-    console.warn(`⚠️ [HEADER] ActionIcon received icon="${icon}" which is not a resolvable asset path. Set a valid filename (e.g. "sparkle.svg") in theme_config.json.`);
-    return null;
-  }
-  // mask-image renders the SVG as a shape filled with currentColor,
-  // so the icon inherits theme color from its parent element.
+  if (!src) return null;
   return (
     <span
       aria-hidden="true"
@@ -53,53 +42,28 @@ const Header = ({
   user = null,
   chatTheme = null,
   themeLoading = false,
-  onNotificationClick = () => {},
   onAction = () => {},
 }) => {
-  const { pages, headerPages, headerControls } = useNavigation();
+  const { pages, headerPages, header: navHeader, profile: navProfile } = useNavigation();
   const handleNavigationItem = useNavigationActions();
-  // Resolve header config from theme with defaults
+
   const headerConfig = {
     ...DEFAULT_HEADER_CONFIG,
-    ...chatTheme?.header,
+    ...navHeader,
   };
-  const logoConfig   = { ...DEFAULT_HEADER_CONFIG.logo, ...headerConfig?.logo };
-  const brandConfig  = { ...{ name: 'MozaiksAI' }, ...chatTheme?.branding };
+  const logoConfig = { ...DEFAULT_HEADER_CONFIG.logo, ...headerConfig?.logo };
+  const brandConfig = { ...{ name: 'mozaiksai' }, ...chatTheme?.branding };
 
-  // Profile and notifications come from the ui section within theme_config.json.
-  // Icons MUST be set as asset filenames in theme_config.json — no built-in fallbacks.
-  const profileIcon         = chatTheme?.profile?.icon  ? resolveIconSource(chatTheme.profile.icon)  : null;
-  const showProfile         = chatTheme?.profile?.show  !== false;
-  const profileDefaultLabel = chatTheme?.profile?.defaultLabel || 'User';
-  const profileSublabel     = chatTheme?.profile?.sublabel     || null;
-  const profileMenu         = chatTheme?.profile?.menu         || [];
-  if (!themeLoading && showProfile && !profileIcon) {
-    console.warn('⚠️ [HEADER] profile.show is true but profile.icon is not set in theme_config.json — profile button hidden');
-  }
-
-  const notificationIcon  = chatTheme?.notifications?.icon ? resolveIconSource(chatTheme.notifications.icon) : null;
-  const showNotifications = chatTheme?.notifications?.show !== false;
-  if (!themeLoading && showNotifications && !notificationIcon) {
-    console.warn('⚠️ [HEADER] notifications.show is true but notifications.icon is not set in theme_config.json — notification button hidden');
-  }
+  const profileIcon = navProfile?.icon ? resolveIconSource(navProfile.icon) : null;
+  const showProfile = navProfile?.show !== false;
+  const profileDefaultLabel = navProfile?.defaultLabel || 'User';
 
   const currentUser = user || { id: 'anonymous', firstName: 'Guest', userPhoto: null };
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
-  const [isNotificationDropdownOpen, setIsNotificationDropdownOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [notificationCount, setNotificationCount] = useState(0);
   const [isScrolled, setIsScrolled] = useState(false);
-  const [openActionMenuId, setOpenActionMenuId] = useState(null);
   const dropdownRef = useRef(null);
   const headerRef = useRef(null);
 
-  // Live notification count from mozaikscore
-  const { count: coreNotificationCount, refresh: refreshNotifications } = useCoreNotifications();
-  useEffect(() => {
-    setNotificationCount(coreNotificationCount);
-  }, [coreNotificationCount]);
-
-  // Handle scroll effect for dynamic blur
   useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 10);
@@ -108,21 +72,15 @@ const Header = ({
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Close dropdowns when clicking outside or pressing Escape
   useEffect(() => {
     const handleGlobalPointer = (e) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
         if (isProfileDropdownOpen) setIsProfileDropdownOpen(false);
       }
-      if (openActionMenuId && headerRef.current && !headerRef.current.contains(e.target)) {
-        setOpenActionMenuId(null);
-      }
     };
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        if (isProfileDropdownOpen) setIsProfileDropdownOpen(false);
-        if (isNotificationDropdownOpen) setIsNotificationDropdownOpen(false);
-        if (openActionMenuId) setOpenActionMenuId(null);
+      if (e.key === 'Escape' && isProfileDropdownOpen) {
+        setIsProfileDropdownOpen(false);
       }
     };
     document.addEventListener('mousedown', handleGlobalPointer);
@@ -133,44 +91,12 @@ const Header = ({
       document.removeEventListener('touchstart', handleGlobalPointer);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isProfileDropdownOpen, isNotificationDropdownOpen, openActionMenuId]);
+  }, [isProfileDropdownOpen]);
 
   const toggleProfileDropdown = () => {
     setIsProfileDropdownOpen(!isProfileDropdownOpen);
-    if (isNotificationDropdownOpen) {
-      setIsNotificationDropdownOpen(false);
-    }
   };
 
-  const toggleNotificationDropdown = () => {
-    setIsNotificationDropdownOpen(!isNotificationDropdownOpen);
-    if (isProfileDropdownOpen) setIsProfileDropdownOpen(false);
-  };
-
-  // Render a single profile menu item from theme_config.json ui.profile.menu declaration
-  const renderProfileMenuItem = (item) => {
-    if (!item) return null;
-    if (item.type === 'divider') {
-      return <div key={item.id} className="border-t border-[rgba(var(--color-primary-light-rgb),0.2)] my-2" />;
-    }
-    const isDanger = item.variant === 'danger';
-    return (
-      <button
-        key={item.id}
-        onClick={() => onAction(item.action || item.id, item)}
-        className={`w-full px-3 py-2.5 text-left rounded-xl transition-colors flex items-center gap-3 ${
-          isDanger
-            ? 'text-[var(--color-error)] hover:bg-[rgba(var(--color-error-rgb),0.1)]'
-            : 'text-white hover:bg-[rgba(var(--color-primary-light-rgb),0.1)]'
-        }`}
-      >
-        {item.icon && <ActionIcon icon={item.icon} className="w-4 h-4" />}
-        <span className="oxanium text-sm">{item.label}</span>
-      </button>
-    );
-  };
-
-  // --- Config-driven Logo ---
   const LogoSection = () => {
     const Wrapper = logoConfig.href ? 'a' : 'div';
     const wrapperProps = logoConfig.href
@@ -184,259 +110,14 @@ const Header = ({
     );
   };
 
-  const normalizePageToken = (value) => (
-    typeof value === 'string' ? value.trim().toLowerCase() : ''
-  );
-  const pageGroupToken = (page) => (
-    normalizePageToken(
-      page?.group
-      || page?.surface
-      || page?.meta?.group
-      || page?.meta?.surface
-    )
-  );
-  const isDiscoverAssignedPage = (page) => {
-    if (!page) return false;
-    if (page.discover === true || page?.meta?.discover === true) return true;
-    const group = pageGroupToken(page);
-    return group === 'discover' || group === 'discovery';
-  };
-
-  // --- Discover auto-wiring: only pages assigned to discovery when present. ---
-  const discoverItems = React.useMemo(() => {
-    const routablePages = (pages || []).filter((p) => p && (p.path || p.href || p.trigger));
-    const assignedPages = routablePages.filter(isDiscoverAssignedPage);
-    const effectivePages = assignedPages.length > 0
-      ? assignedPages
-      : routablePages;
-
-    return effectivePages
-      .map((p, i) => ({
-        id: p.id || p.path || `page-${i}`,
-        label: p.label || p.title || p.id || p.path,
-        path: p.path || null,
-        href: p.href || null,
-        trigger: p.trigger || null,
-        icon: p.icon || null,
-        order: p.order ?? i,
-      }))
-      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  }, [pages]);
-
-  // Header controls can be declared in navigation_config.json.
-  // Known semantic controls map to built-in UI: UserProfile, Notifications, Discover.
-  const PROFILE_CONTROL_ALIASES = ['userprofile', 'user-profile', 'user_profile', 'profile'];
-  const NOTIFICATION_CONTROL_ALIASES = ['notifications', 'notification'];
-  const DISCOVER_CONTROL_ALIASES = ['discover', 'discovery'];
-
-  const normalizeControlToken = (value) => (
-    typeof value === 'string' ? value.trim().toLowerCase() : ''
-  );
-  const controlTokens = (control) => (
-    [control?.id, control?.type, control?.action, control?.label]
-      .map(normalizeControlToken)
-      .filter(Boolean)
-  );
-  const controlMatches = (control, aliases) => {
-    const aliasSet = new Set((aliases || []).map((a) => normalizeControlToken(a)));
-    return controlTokens(control).some((token) => aliasSet.has(token));
-  };
-
-  const visibleHeaderControls = React.useMemo(() => (
-    Array.isArray(headerControls)
-      ? headerControls.filter((control) => control && control.visible !== false)
-      : []
-  ), [headerControls]);
-
-  const hasDeclaredHeaderControls = visibleHeaderControls.length > 0;
-  const hasDeclaredControl = (aliases) => {
-    if (!hasDeclaredHeaderControls) return true;
-    return visibleHeaderControls.some((control) => controlMatches(control, aliases));
-  };
-
-  const showProfileControl = showProfile && hasDeclaredControl(PROFILE_CONTROL_ALIASES);
-  const showNotificationsControl = showNotifications && notificationIcon && hasDeclaredControl(NOTIFICATION_CONTROL_ALIASES);
-  const showDiscoverControl = hasDeclaredControl(DISCOVER_CONTROL_ALIASES);
-  const discoverControl = React.useMemo(() => (
-    visibleHeaderControls.find((control) => controlMatches(control, DISCOVER_CONTROL_ALIASES)) || null
-  ), [visibleHeaderControls]);
-  const discoverHasDirectTarget = Boolean(
-    discoverControl && (discoverControl.path || discoverControl.href || discoverControl.trigger)
-  );
-  const discoverSingleItem = discoverItems.length === 1 ? discoverItems[0] : null;
-  const discoverUsesDropdown = discoverItems.length > 1;
-
-  // --- Unified responsive action buttons ---
-  const handleActionClick = (action) => {
-    if (action.id === 'discover') {
-      if (discoverUsesDropdown) {
-        setOpenActionMenuId((prev) => (prev === action.id ? null : action.id));
-        return;
-      }
-      if (discoverSingleItem) {
-        handleNavigationItem(discoverSingleItem);
-        return;
-      }
-      if (discoverHasDirectTarget) {
-        handleNavigationItem(discoverControl);
-        return;
-      }
-    }
-
-    const effectiveItems = Array.isArray(action.items) ? action.items : [];
-    if (effectiveItems.length > 0) {
-      setOpenActionMenuId((prev) => (prev === action.id ? null : action.id));
-      return;
-    }
-    onAction(action.id, action);
-  };
-
-  const handleActionItemClick = (action, item) => {
-    setOpenActionMenuId(null);
-    if (action.id === 'discover' && item && (item.path || item.href || item.trigger)) {
-      handleNavigationItem(item);
-      return;
-    }
-    onAction(item?.id || action.id, item || action);
-  };
-
-  const handleHeaderControlClick = (control) => {
-    if (!control) return;
-    const actionId = control.action || control.id;
-
-    if (actionId === 'open-settings-overlay') {
-      setIsSettingsOpen(true);
-      return;
-    }
-
-    if (control.path || control.href || control.trigger) {
-      handleNavigationItem(control);
-      return;
-    }
-
-    onAction(actionId, control);
-  };
-
-  const HeaderControls = () => {
-    const controls = hasDeclaredHeaderControls
-      ? visibleHeaderControls.filter((control) => (
-          !controlMatches(control, PROFILE_CONTROL_ALIASES)
-          && !controlMatches(control, NOTIFICATION_CONTROL_ALIASES)
-          && !controlMatches(control, DISCOVER_CONTROL_ALIASES)
-        ))
-      : [];
-
-    return controls.map((control) => (
-      <button
-        key={control.id || control.label}
-        type="button"
-        onClick={() => handleHeaderControlClick(control)}
-        className="p-1.5 rounded-lg hover:bg-white/10 transition-colors flex items-center justify-center text-[rgba(var(--color-primary-light-rgb),0.6)] hover:text-[var(--color-primary-light)]"
-        title={control.label || control.id}
-      >
-        {control.icon ? (
-          <ActionIcon icon={control.icon} className="w-5 h-5" />
-        ) : (
-          <span className="text-xs font-semibold oxanium">{control.label || control.id}</span>
-        )}
-      </button>
-    ));
-  };
-
-  const ActionButtons = () => {
-    const actions = (headerConfig.actions || DEFAULT_HEADER_CONFIG.actions || [])
-      .filter((action) => action.id !== 'discover' || showDiscoverControl);
-    return actions.filter(a => a.visible !== false).map(action => {
-      const effectiveItems = action.id === 'discover' && discoverUsesDropdown
-        ? discoverItems
-        : (action.items || []);
-      const isOpen = openActionMenuId === action.id && effectiveItems.length > 0;
-
-      return (
-        <React.Fragment key={action.id}>
-          {/* Single responsive button — icon-only on small screens, full on md+ */}
-          <button
-            onClick={() => handleActionClick(action)}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-secondary)] border border-[var(--color-primary-light)] text-white oxanium hover:shadow-[0_0_20px_rgba(51,240,250,0.5)] transition-all duration-300 font-bold w-10 h-10 md:w-auto md:h-auto md:px-4 md:py-2 md:rounded-lg md:border-2"
-            title={action.label || action.id}
-            style={{ boxShadow: '0 0 10px rgba(51,240,250,0.3)' }}
-          >
-            <ActionIcon icon={action.icon} className="w-5 h-5" />
-            <span className="hidden md:inline font-bold tracking-wide text-sm">{action.label || action.id}</span>
-          </button>
-          {/* Responsive dropdown: desktop popover / mobile bottom sheet */}
-          {isOpen && (
-            <>
-              {/* Backdrop overlay (mobile only) — closes on tap */}
-              <div
-                className="md:hidden fixed inset-0 bg-black/50 z-[60]"
-                onClick={() => setOpenActionMenuId(null)}
-              />
-              {/* Dropdown panel */}
-              <div className={`
-                fixed md:absolute z-[70]
-                inset-x-0 bottom-0 md:inset-auto md:right-0 md:top-full md:mt-2
-                w-full md:w-56
-                rounded-t-2xl md:rounded-2xl
-                border border-[rgba(var(--color-primary-light-rgb),0.35)]
-                bg-[rgba(5,10,24,0.97)] backdrop-blur-xl
-                shadow-[0_-10px_40px_rgba(2,6,23,0.8)] md:shadow-[0_20px_60px_rgba(2,6,23,0.6)]
-                overflow-hidden
-                max-h-[60vh] md:max-h-[400px] overflow-y-auto
-              `}>
-                {/* Drag handle (mobile) */}
-                <div className="md:hidden flex justify-center pt-3 pb-1">
-                  <div className="w-10 h-1 rounded-full bg-white/20" />
-                </div>
-                {/* Title bar */}
-                <div className="flex items-center justify-between px-4 py-2.5 border-b border-[rgba(var(--color-primary-light-rgb),0.15)]">
-                  <span className="text-xs font-semibold text-[rgba(var(--color-primary-light-rgb),0.7)] uppercase tracking-widest oxanium">
-                    {action.label || action.id}
-                  </span>
-                  <button
-                    onClick={() => setOpenActionMenuId(null)}
-                    className="md:hidden w-7 h-7 flex items-center justify-center rounded-full hover:bg-white/10 text-[rgba(var(--color-primary-light-rgb),0.6)]"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-                {/* Items */}
-                <div className="flex flex-col py-2">
-                  {effectiveItems.map((item) => (
-                    <button
-                      key={item.id || item.label}
-                      type="button"
-                      onClick={() => handleActionItemClick(action, item)}
-                      className="w-full text-left px-4 py-3.5 md:py-2.5 text-sm text-[rgba(226,232,240,0.9)] hover:bg-white/10 active:bg-white/15 transition flex items-center gap-3"
-                    >
-                      {item.icon && <ActionIcon icon={item.icon} className="w-5 h-5 md:w-4 md:h-4 opacity-60" />}
-                      <span className="oxanium">{item.label || item.id}</span>
-                    </button>
-                  ))}
-                </div>
-                {/* Safe area spacer for bottom-sheet on mobile */}
-                <div className="md:hidden h-6" />
-              </div>
-            </>
-          )}
-        </React.Fragment>
-      );
-    });
-  };
-
   return (
-    <React.Fragment>
-    <SettingsOverlay isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     <header ref={headerRef} className={`
       fixed top-0 left-0 right-0 z-50 pt-[env(safe-area-inset-top)] transition-all duration-300
       ${isScrolled ? 'backdrop-blur-md bg-black/25' : 'backdrop-blur-md bg-black/15'}
       border-b border-[rgba(var(--color-primary-rgb),0.1)]
     `}>
-      {/* Main header content - single compact row */}
       <div className="relative h-14 md:h-16 flex items-center justify-between px-4 md:px-6 lg:px-8">
-        {/* LEFT: Brand (config-driven) */}
+        {/* LEFT: Brand */}
         <div className="flex items-center gap-3 md:gap-4">
           <LogoSection />
           {headerPages.length > 0 && (
@@ -455,12 +136,11 @@ const Header = ({
           )}
         </div>
 
-        {/* RIGHT: Commander, notifications, actions */}
+        {/* RIGHT: Profile */}
         <div className="flex items-center gap-2 md:gap-3">
-          {/* Commander (conditionally rendered) */}
-          {showProfileControl && (
+          {showProfile && profileIcon && (
             <div className="relative" ref={dropdownRef}>
-              <button onClick={toggleProfileDropdown} className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-white/10 transition-colors" title="Command Profile">
+              <button onClick={toggleProfileDropdown} className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-white/10 transition-colors" title="Profile">
                 <div className="relative">
                   <div className="w-8 h-8 rounded-full overflow-hidden border border-[rgba(var(--color-primary-light-rgb),0.3)]">
                     {currentUser.userPhoto ? (
@@ -469,80 +149,20 @@ const Header = ({
                       <img src={profileIcon} alt="profile" className="w-full h-full object-cover" />
                     ) : (
                       <span className="w-full h-full flex items-center justify-center text-[var(--color-primary-light)] text-xs font-bold">
-                        {(currentUser.firstName?.[0] || currentUser.username?.[0] || '?').toUpperCase()}
+                        {(currentUser.firstName?.[0] || '?').toUpperCase()}
                       </span>
                     )}
                   </div>
-                  <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-[var(--color-success)] rounded-full border border-slate-900"></div>
                 </div>
                 <div className="hidden lg:block text-left">
-                  <div className="text-[var(--color-primary-light)] text-slate-200 text-xs font-medium oxanium">{currentUser.firstName || profileDefaultLabel}</div>
+                  <div className="text-slate-200 text-xs font-medium oxanium">{currentUser.firstName || profileDefaultLabel}</div>
                 </div>
-                <svg className="w-3 h-3 text-[rgba(var(--color-primary-light-rgb),0.6)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
               </button>
-              {isProfileDropdownOpen && (
-                <div className="absolute right-0 top-full mt-2 w-64 bg-slate-900/95 border border-[rgba(var(--color-primary-light-rgb),0.4)] rounded-2xl backdrop-blur-xl overflow-hidden z-50">
-                  <div className="relative p-4 border-b border-[rgba(var(--color-primary-light-rgb),0.2)]">
-                    <div className="flex items-center space-x-3">
-                      <div className="relative">
-                        <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-[rgba(var(--color-primary-light-rgb),0.4)]">
-                          {currentUser.userPhoto ? (
-                            <img src={currentUser.userPhoto} alt="User" className="w-full h-full object-cover" />
-                          ) : profileIcon ? (
-                            <img src={profileIcon} alt="profile" className="w-full h-full object-cover" />
-                          ) : (
-                            <span className="w-full h-full flex items-center justify-center text-[var(--color-primary-light)] text-sm font-bold">
-                              {(currentUser.firstName?.[0] || currentUser.username?.[0] || '?').toUpperCase()}
-                            </span>
-                          )}
-                        </div>
-                        <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-[var(--color-success)] rounded-full border-2 border-slate-900"></div>
-                      </div>
-                      <div>
-                        <div className="text-[var(--color-primary-light)] text-white font-semibold oxanium">{currentUser.firstName || profileDefaultLabel}</div>
-                        {profileSublabel && <div className="text-[rgba(var(--color-primary-light-rgb),0.7)] text-xs oxanium">{profileSublabel}</div>}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="relative p-2">
-                    {profileMenu.map(renderProfileMenuItem)}
-                  </div>
-                </div>
-              )}
             </div>
           )}
-
-          {/* Notifications (conditionally rendered — requires ui.notifications.icon in theme_config.json) */}
-          {showNotificationsControl && (
-            <div className="relative">
-              <button onClick={toggleNotificationDropdown} className="relative p-1.5 rounded-lg hover:bg-white/10 transition-colors flex items-center justify-center" title="Mission Alerts">
-                <ActionIcon icon={notificationIcon} className="w-6 h-6 text-[var(--color-primary-light)]" />
-                {notificationCount > 0 && (
-                  <div className="absolute top-0 right-0">
-                    <div className="w-4 h-4 bg-[var(--color-error)] rounded-full flex items-center justify-center border border-slate-900/60">
-                      <span className="text-white text-[10px] font-bold oxanium">{notificationCount}</span>
-                    </div>
-                  </div>
-                )}
-              </button>
-              <NotificationsDropdown
-                isOpen={isNotificationDropdownOpen}
-                onClose={() => setIsNotificationDropdownOpen(false)}
-              />
-            </div>
-          )}
-
-          {/* Additional custom header controls from navigation_config.json */}
-          <HeaderControls />
-
-          {/* Config-driven action buttons */}
-          <ActionButtons />
         </div>
       </div>
     </header>
-    </React.Fragment>
   );
 };
 

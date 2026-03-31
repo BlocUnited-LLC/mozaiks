@@ -1,5 +1,5 @@
 """
-Shared logging helpers for backend tool implementations.
+Tool logging utilities with rotating file output and redaction for workflow tool execution.
 """
 
 import logging

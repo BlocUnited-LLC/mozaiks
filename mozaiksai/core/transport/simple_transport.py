@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/transport/simple_transport.py
+# FILE: mozaiksai/core/transport/simple_transport.py
 # DESCRIPTION: Lean transport system for real-time UI communication
 # ==============================================================================
 import asyncio
@@ -1142,7 +1142,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         try:
             conn_meta = self.connections.get(chat_id) or {}
             app_id = conn_meta.get('app_id')
-            startup_mode = None
+            workflow_startup_mode = None
             if not app_id:
                 raise RuntimeError("Missing app_id for resume")
 
@@ -1152,9 +1152,9 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
                     cfg = workflow_manager.get_config(str(workflow_name)) or {}
-                    startup_mode = cfg.get('startup_mode')
+                    workflow_startup_mode = cfg.get('workflow_startup_mode')
                 except Exception:
-                    startup_mode = None
+                    workflow_startup_mode = None
 
             # Use the AG2-aligned resumer so visibility filtering and UI tool replay
             # semantics stay consistent with live events (no leaking hidden agents).
@@ -1166,7 +1166,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 app_id=str(app_id),
                 last_client_index=int(last_client_index),
                 send_event=self.send_event_to_ui,
-                startup_mode=startup_mode,
+                workflow_startup_mode=workflow_startup_mode,
             )
 
             # Real-time sequence continuity: do not reduce existing counter.
@@ -1285,6 +1285,22 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             "ws_id": ws_id,  # Track WebSocket ID for session switching
         }
         logger.info(f"🔌 WebSocket connected for chat_id: {chat_id} (ws_id={ws_id})")
+
+        try:
+            session_registry.add_workflow(
+                ws_id=ws_id,
+                chat_id=chat_id,
+                workflow_name=str(workflow_name),
+                app_id=str(app_id) if app_id is not None else "",
+                user_id=str(user_id),
+                auto_activate=True,
+            )
+        except Exception as registry_err:
+            logger.warning(
+                "Failed to register workflow context on websocket connect for chat %s: %s",
+                chat_id,
+                registry_err,
+            )
         
         # H2: Start heartbeat for connection
         await self._start_heartbeat(chat_id, websocket)

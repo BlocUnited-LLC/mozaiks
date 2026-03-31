@@ -1,10 +1,10 @@
 # ==============================================================================
-# FILE: core/events/__init__.py
+# FILE: mozaiksai/core/events/__init__.py
 # DESCRIPTION: Events package initialization - unified event system exports
 # ==============================================================================
 
 """
-MozaiksAI Unified Event System - Three Distinct Event Types
+mozaiksai Unified Event System - Three Distinct Event Types
 
 This package handles THREE separate event systems, each with different purposes:
 

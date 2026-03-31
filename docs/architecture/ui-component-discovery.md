@@ -180,7 +180,7 @@ workflow-ui-discover -c ./config/ui-discovery.json ./frontend/workflows
 2. **Atomic Updates**: Index files are written only when content changes
 3. **Deterministic Output**: Same input files always produce same output (ignoring timestamp)
 4. **No Manual Steps**: Self-hosters never need to run scripts manually
-5. **Hot Reload Compatible**: Changes are detected and applied without restart
+5. **Hot Reload Friendly**: Changes are detected and applied without restart
 
 ### Error Handling
 

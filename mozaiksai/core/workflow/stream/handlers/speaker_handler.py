@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/stream/handlers/speaker_handler.py
+# FILE: mozaiksai/core/workflow/stream/handlers/speaker_handler.py
 # DESCRIPTION: Handler for SelectSpeakerEvent (turn transitions)
 # ==============================================================================
 

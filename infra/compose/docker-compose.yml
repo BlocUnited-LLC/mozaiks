@@ -20,7 +20,7 @@ services:
       POSTGRES_USER: keycloak
       POSTGRES_PASSWORD: ${KC_DB_PASSWORD:-keycloak}
     volumes:
-      - mozaiksai_keycloak_db:/var/lib/postgresql/data
+      - MozaiksAI_keycloak_db:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U keycloak"]
@@ -66,22 +66,13 @@ services:
     ports:
       - "27017:27017"
     volumes:
-      - mozaiksai_mongo_data:/data/db
+      - MozaiksAI_mongo_data:/data/db
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "mongodb://127.0.0.1:27017/admin", "--eval", "db.runCommand({ ping: 1 }).ok"]
       interval: 10s
       timeout: 5s
       retries: 20
-
-  nats:
-    image: nats:2.10-alpine
-    container_name: mozaiksai-nats
-    command: ["-js", "-m", "8222"]
-    ports:
-      - "4222:4222"
-      - "8222:8222"
-    restart: unless-stopped
 
   app:
     build:
@@ -110,15 +101,11 @@ services:
       DOCKERIZED: "true"
       # In docker mode, use the compose-network mongo service.
       # Override by setting MONGO_URI in the repo-root .env (or your shell env).
-      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/MozaiksAI}
-      # In docker mode, use the compose-network NATS service.
-      MOZAIKS_NATS_URL: ${MOZAIKS_NATS_URL:-nats://nats:4222}
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/mozaiksai}
       # AZURE_* still supplied via env_file
     depends_on:
       mongo:
         condition: service_healthy
-      nats:
-        condition: service_started
       keycloak:
         condition: service_healthy
     volumes:
@@ -132,6 +119,6 @@ services:
       retries: 10
 
 volumes:
-  mozaiksai_mongo_data:
-  mozaiksai_keycloak_db:
+  MozaiksAI_mongo_data:
+  MozaiksAI_keycloak_db:
 

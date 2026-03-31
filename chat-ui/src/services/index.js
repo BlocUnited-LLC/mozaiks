@@ -1,10 +1,11 @@
 import config from '../config';
-import { TokenAuthAdapter } from '../adapters/auth';
 import { WebSocketApiAdapter, RestApiAdapter } from '../adapters/api';
 
+/**
+ * Simple service layer for chat-ui
+ */
 class ChatUIServices {
   constructor() {
-    this.authAdapter = null;
     this.apiAdapter = null;
     this.initialized = false;
   }
@@ -12,51 +13,26 @@ class ChatUIServices {
   initialize(options = {}) {
     if (this.initialized) return;
 
-    // Initialize auth adapter
-    this.authAdapter = this.createAuthAdapter(options.authAdapter);
-    
-    // Initialize API adapter
     this.apiAdapter = this.createApiAdapter(options.apiAdapter);
-
     this.initialized = true;
-    console.log('ChatUI Services initialized');
-  }
-
-  createAuthAdapter(customAdapter) {
-    if (customAdapter) return customAdapter;
-
-    return new TokenAuthAdapter(config.get('api.baseUrl'));
   }
 
   createApiAdapter(customAdapter) {
     if (customAdapter) return customAdapter;
+
     const apiConfig = config.get('api');
     const hasWs = apiConfig.wsUrl;
-    const hasHttp = apiConfig.baseUrl;
 
     // Prefer WebSocket adapter when wsUrl is configured
     if (hasWs) {
       return new WebSocketApiAdapter(apiConfig);
     }
-    // Fallback to REST adapter when HTTP baseUrl is configured
-    if (hasHttp) {
-      return new RestApiAdapter(apiConfig);
-    }
-    // Default fallback
-    return new RestApiAdapter(apiConfig);
-  }
 
-  getAuthAdapter() {
-    return this.authAdapter;
+    return new RestApiAdapter(apiConfig);
   }
 
   getApiAdapter() {
     return this.apiAdapter;
-  }
-
-  // Convenience methods
-  async getCurrentUser() {
-    return this.authAdapter?.getCurrentUser();
   }
 
   createWebSocketConnection(appId, userId, callbacks, workflowName, chatId) {
@@ -64,7 +40,5 @@ class ChatUIServices {
   }
 }
 
-// Singleton instance
 const services = new ChatUIServices();
-
 export default services;

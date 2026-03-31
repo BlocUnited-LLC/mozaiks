@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/db_manager.py
+# FILE: mozaiksai/core/data/persistence/db_manager.py
 # DESCRIPTION: Agent-friendly database operations manager 
 # PURPOSE: Provides simple CRUD operations for agents via json configuration
 # ==============================================================================
@@ -370,7 +370,7 @@ def _get_database_config(workflow_name: Optional[str], database_name: Optional[s
             if workflow_config and 'database_manager' in workflow_config:
                 db_config = workflow_config['database_manager']
                 
-                resolved_db = database_name or db_config.get('default_database', 'MozaiksAI')
+                resolved_db = database_name or db_config.get('default_database', 'mozaiksai')
                 resolved_collection = collection_name or db_config.get('default_collection')
                 
                 if resolved_collection:

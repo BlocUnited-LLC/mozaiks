@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/stream/handlers/tool_handler.py
+# FILE: mozaiksai/core/workflow/stream/handlers/tool_handler.py
 # DESCRIPTION: Handlers for ToolCallEvent, ToolResponseEvent, and UI interactions
 # ==============================================================================
 

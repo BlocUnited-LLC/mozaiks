@@ -55,9 +55,6 @@ dev = [
     "ruff>=0.1.0",
     "watchdog",
 ]
-broker = [
-    "faststream[nats]>=0.5.35",
-]
 tracing = [
     "opentelemetry-sdk>=1.27.0",
     "opentelemetry-exporter-otlp>=1.27.0",
@@ -73,8 +70,7 @@ e2b = [
 ]
 
 [project.scripts]
-mozaiks = "mozaiksai.cli.main:cli"
-mozaikscore = "mozaikscore.core_app:app"
+mozaiks = "mozaiks_cli.main:main"
 
 [project.urls]
 Homepage = "https://github.com/BlocUnited-LLC/mozaiks"
@@ -98,7 +94,6 @@ packages = [
     "mozaiks.core",
     "mozaiks.core.artifacts",
     "mozaiks.core.auth",
-    "mozaiks.core.automation",
     "mozaiks.core.capabilities",
     "mozaiks.core.data",
     "mozaiks.core.data.persistence",
@@ -124,7 +119,6 @@ packages = [
     "mozaiksai.core.adapters",
     "mozaiksai.core.artifacts",
     "mozaiksai.core.auth",
-    "mozaiksai.core.automation",
     "mozaiksai.core.capabilities",
     "mozaiksai.core.data",
     "mozaiksai.core.data.persistence",
@@ -147,10 +141,9 @@ packages = [
     "mozaiksai.core.workflow.validation",
     # ── support packages (repo-root modules used by mozaiksai) ──
     "logs",
-    # ── mozaikscore substrate (application services / CRUD) ──
-    "mozaikscore",
-    "mozaikscore.core",
-    "mozaikscore.core.routes",
+    # ── mozaiks_cli (project scaffolding) ──
+    "mozaiks_cli",
+    "mozaiks_cli.commands",
 ]
 
 [tool.ruff.lint]

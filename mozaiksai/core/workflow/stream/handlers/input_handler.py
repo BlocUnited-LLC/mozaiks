@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/stream/handlers/input_handler.py
+# FILE: mozaiksai/core/workflow/stream/handlers/input_handler.py
 # DESCRIPTION: Handler for InputRequestEvent (user input prompts)
 # ==============================================================================
 

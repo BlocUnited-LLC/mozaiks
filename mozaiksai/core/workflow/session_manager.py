@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/session_manager.py
+# FILE: mozaiksai/core/workflow/session_manager.py
 # DESCRIPTION: Manage workflow sessions and artifact instances for multi-workflow navigation
 # ==============================================================================
 

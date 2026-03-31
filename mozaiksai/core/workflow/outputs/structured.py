@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/structured_outputs.py
+# FILE: mozaiksai/core/workflow/outputs/structured.py
 # DESCRIPTION: Clean, simplified structured output models for AG2 workflows
 # ==============================================================================
 
@@ -237,10 +237,6 @@ def load_workflow_structured_outputs(workflow_name: str) -> tuple[Dict[str, type
     
     structured_config = workflow_config.get('structured_outputs', {})
     
-    # Handle nested structure from json files
-    if 'structured_outputs' in structured_config:
-        structured_config = structured_config['structured_outputs']
-    
     models_config = structured_config.get('models', {})
     registry_config = structured_config.get('registry', {})
     
@@ -307,7 +303,7 @@ def get_structured_output_model_fields(workflow_name: str, agent_name: str) -> D
         # Pydantic v2: model_fields contains field info
         return {fname: getattr(finfo.annotation, '__name__', str(finfo.annotation)) for fname, finfo in getattr(model_cls, 'model_fields', {}).items()}  # type: ignore[attr-defined]
     except Exception:
-        try:  # fallback for any incompatibility
+        try:  # fallback for models without pydantic v2 field metadata
             return {fname: type(getattr(model_cls, fname)).__name__ for fname in dir(model_cls) if not fname.startswith('_')}
         except Exception:
             return {}
@@ -423,5 +419,3 @@ async def get_llm_for_workflow(
     
     # Fallback to plain LLM config
     return await get_llm_config(stream=should_stream, extra_config=extra_config)
-
-

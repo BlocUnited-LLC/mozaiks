@@ -5,7 +5,6 @@ Provides database access and real-time AG2 persistence utilities.
 
 from .models import WorkflowStatus, ChatSessionDoc
 
-ChatSession = ChatSessionDoc  # Backward compatibility alias
 from .persistence import (
     PersistenceManager,
     AG2PersistenceManager,
@@ -27,7 +26,6 @@ from .themes import (
 __all__ = [
     "WorkflowStatus",
     "ChatSessionDoc",
-    "ChatSession",
     "PersistenceManager",
     "AG2PersistenceManager",
     "get_db_manager",

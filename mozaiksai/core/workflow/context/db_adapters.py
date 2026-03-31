@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/context/db_adapters.py
+# FILE: mozaiksai/core/workflow/context/db_adapters.py
 # DESCRIPTION: Database adapters for modular context variable loading.
 # ==============================================================================
 
@@ -89,7 +89,7 @@ _ADAPTER_REGISTRY: Dict[str, DatabaseAdapter] = {
 def get_db_adapter(source: ContextVariableSource) -> Optional[DatabaseAdapter]:
     """
     Factory function to get a database adapter based on the source definition.
-    Defaults to MongoDB if db_type is not specified for backward compatibility.
+    Defaults to MongoDB when db_type is not specified.
     """
     db_type = getattr(source, "db_type", "mongodb") or "mongodb"
     adapter = _ADAPTER_REGISTRY.get(db_type.lower())

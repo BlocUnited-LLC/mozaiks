@@ -86,7 +86,7 @@ Runtime token counts stay entirely server-side. Generators only need to know whe
 
 ### 3.2 Agent Guidance Updates
 
-- `agents.json` entries for planning-focused agents (notably `WorkflowImplementationAgent`) must include a directive to **determine where the free-trial split occurs** whenever `MONETIZATION_ENABLED=true`. This includes naming the phase/agent that owns the split and providing any metadata the runtime can later map to AG2 settings.
+- `agents.yaml` entries for planning-focused agents (notably `WorkflowImplementationAgent`) must include a directive to **determine where the free-trial split occurs** whenever `MONETIZATION_ENABLED=true`. This includes naming the phase/agent that owns the split and providing any metadata the runtime can later map to AG2 settings.
 - Update prompts so ActionPlan/Implementation steps describe *how* the free-trial branch is enforced. Remove all references to token quantities, balance checks, or premium tiers.
 - The generator output must tag phases with `monetization_scope` (`"free_trial"`, `"paid"`, or `"shared"`) and set `free_trial_entry=true` on the phase where the split occurs. These tags live inside the existing ActionPlan semantic wrapper so UI and runtime logic can read them without guessing.
 - `update_agent_state_pattern.py` remains a generator-only helper: it can keep deriving state variables for the free-trial branch but must not leak into runtime. Future workflows that skip this generator function should still operate because the runtime does not depend on it.
@@ -132,7 +132,7 @@ Runtime token counts stay entirely server-side. Generators only need to know whe
    - `ChatUI/src/workflows/Generator/components/ActionPlan.js` renders free-trial vs paid badges using `phase.monetization_scope` and highlights the split when `free_trial_entry=true`.
 5. **Generator + prompts**
    - Ensure `ContextVariablesPlan` always includes `free_trial_enabled` + `MONETIZATION_ENABLED`.
-   - Update `agents.json`, WorkflowImplementationAgent, HandoffsAgent, and `update_agent_state_pattern.py` to emit the new tagging metadata plus `max_consecutive_auto_reply` assignments.
+   - Update `agents.yaml`, WorkflowImplementationAgent, HandoffsAgent, and `update_agent_state_pattern.py` to emit the new tagging metadata plus `max_consecutive_auto_reply` assignments.
    - Structured outputs and orchestration templates consume the tags without referencing raw token counts.
 6. **QA / validation**
    - Smoke test: free-trial workflow (monetization on/off), auto-reply limit enforcement, paywall/resume flow, Ask Mozaiks availability while workflow chat is paused.

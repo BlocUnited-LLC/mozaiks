@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/agents/factory.py
+# FILE: mozaiksai/core/workflow/agents/factory.py
 # DESCRIPTION: ConversableAgent factory - orchestrates agent creation with tools, context, and hooks
 # ==============================================================================
 from __future__ import annotations
@@ -16,8 +16,6 @@ from .a2a import create_a2a_remote_agent, load_a2a_agent_specs
 # Import context utilities (extracted for modularity)
 from ..context.context_utils import (
     context_to_dict as _context_to_dict,
-    stringify_context_value as _stringify_context_value,
-    render_default_context_fragment as _render_default_context_fragment,
     apply_context_exposures as _apply_context_exposures,
     build_exposure_update_hook as _build_exposure_update_hook,
 )
@@ -76,111 +74,6 @@ def _compose_prompt_sections(sections: Sequence[Dict[str, Any]] | Dict[str, Any]
         elif content:
             parts.append(content)
     return "\n\n".join(part.strip() for part in parts if part).strip()
-
-
-# ==============================================================================
-# INTERVIEWAGENT TESTING UTILITIES (TEMPORARY - REMOVE FOR PRODUCTION)
-# ==============================================================================
-# NOTE: All InterviewAgent-specific code is consolidated in this section.
-# To remove InterviewAgent testing hooks, delete this entire section and the
-# corresponding registration code (search for "##INTERVIEWAGENT##" markers).
-# ==============================================================================
-
-def _build_interview_message_hook(
-    exposures: List[Dict[str, Any]],
-    fallback_variables: List[str],
-) -> Callable[..., Any]:
-    """Build a process_message_before_send hook for InterviewAgent.
-    
-    TESTING MODE ONLY - REMOVE FOR PRODUCTION
-    
-    First message: Shows context variables and asks the automation question.
-    Second+ messages: Auto-responds with "NEXT" for testing purposes.
-    
-    To disable auto-NEXT behavior, comment out the reply_count check below.
-    """
-    exposures_copy = [exp.copy() for exp in exposures if isinstance(exp, dict)] or []
-    
-    # Track number of times InterviewAgent has sent a message (conversation counter)
-    reply_count = {"count": 0}
-
-    def _hook(sender=None, message=None, recipient=None, silent=False):
-        try:
-            # Increment reply count for this agent
-            reply_count["count"] += 1
-            current_count = reply_count["count"]
-            
-            logger.debug(f"[InterviewAgent][HOOK] Processing message #{current_count} before send")
-            
-            # TESTING MODE: Auto-respond with "NEXT" on second+ replies
-            # Comment out this block for production to allow natural conversation
-            if current_count > 1:
-                logger.info(f"[InterviewAgent][HOOK] Auto-responding with NEXT (reply #{current_count})")
-                if isinstance(message, dict):
-                    updated = dict(message)
-                    updated["content"] = "NEXT"
-                    return updated
-                return "NEXT"
-            
-            # First message: Build context-aware greeting
-            raw_message = message.get("content") if isinstance(message, dict) else message
-            if not isinstance(raw_message, str):
-                logger.debug(f"[InterviewAgent][HOOK] Non-string message, returning as-is")
-                return message
-                
-            container = getattr(sender, "context_variables", None)
-            context_dict = _context_to_dict(container) if container is not None else {}
-
-            if fallback_variables:
-                visible_snapshot: Dict[str, str] = {}
-                for var in fallback_variables:
-                    if not isinstance(var, str) or not var.strip():
-                        continue
-                    value = _stringify_context_value(context_dict.get(var), "null")
-                    if len(value) > 500:
-                        value = f"{value[:497]}..."
-                    visible_snapshot[var] = value
-                if visible_snapshot:
-                    logger.info(
-                        "[InterviewAgent][HOOK] Context variables snapshot",
-                        extra={"variables": visible_snapshot},
-                    )
-
-            if exposures_copy:
-                fragment = _apply_context_exposures("", exposures_copy, context_dict, fallback_variables).strip()
-            else:
-                fragment = _render_default_context_fragment(fallback_variables, context_dict).strip()
-                
-            if fragment:
-                header, _, body = fragment.partition("\n")
-                header = header.strip() or "Context Variables"
-                body = body.strip()
-                if not body:
-                    body = "null"
-                context_block = f"{header}:\n{body}"
-            else:
-                context_block = "Context Variables:\nnull"
-                
-            question_line = "What would you like to automate?"
-            final = f"{question_line}\n\n{context_block}".strip()
-            
-            logger.debug(f"[InterviewAgent][HOOK] First message prepared: {final!r}")
-            
-            if isinstance(message, dict):
-                updated = dict(message)
-                updated["content"] = final
-                return updated
-            return final
-            
-        except Exception as hook_err:  # pragma: no cover
-            logger.error(f"[InterviewAgent][HOOK] Error in message hook: {hook_err}", exc_info=True)
-            return message
-
-    return _hook
-
-# ==============================================================================
-# END INTERVIEWAGENT TESTING UTILITIES
-# ==============================================================================
 
 
 async def create_agents(
@@ -368,43 +261,35 @@ async def create_agents(
         else:
             system_message = base_system_message
 
-        # Load update_agent_state hooks from hooks.json for this agent
+        # Load update_agent_state hooks from hooks.yaml
         # CRITICAL: These must be added BEFORE agent construction to work with AG2's update_agent_state_before_reply
         try:
-            from ..execution.hooks import _resolve_import
+            from ..execution.hooks import _resolve_import, load_hook_entries
             from pathlib import Path
-            
-            hooks_json_path = Path("workflows") / workflow_name / "hooks.json"
-            if hooks_json_path.exists():
-                import json
-                with open(hooks_json_path, 'r', encoding='utf-8') as f:
-                    hooks_data = json.load(f) or {}
-                hooks_entries = hooks_data.get("hooks") or []
-                
-                for entry in hooks_entries:
-                    if (isinstance(entry, dict) and 
-                        entry.get("hook_type") == "update_agent_state" and 
-                        entry.get("hook_agent") == agent_name):
-                        
-                        file_value = entry.get("filename")
-                        fn_value = entry.get("function")
-                        
-                        if file_value and fn_value:
-                            workflow_path = Path("workflows") / workflow_name
-                            fn, qual = _resolve_import(workflow_name, file_value, fn_value, workflow_path)
-                            if fn:
-                                update_hooks.append(fn)
-                                logger.debug(f"[AGENTS] Pre-loaded update_agent_state hook {qual} for {agent_name}")
+            workflows_root = Path(str(workflow_manager.workflows_base_path))
+            hooks_entries = load_hook_entries(
+                workflow_name,
+                base_path=str(workflows_root),
+            )
+
+            for entry in hooks_entries:
+                if (
+                    isinstance(entry, dict)
+                    and entry.get("hook_type") == "update_agent_state"
+                    and entry.get("hook_agent") == agent_name
+                ):
+                    file_value = entry.get("filename")
+                    fn_value = entry.get("function")
+
+                    if file_value and fn_value:
+                        workflow_path = workflows_root / workflow_name
+                        fn, qual = _resolve_import(workflow_name, file_value, fn_value, workflow_path)
+                        if fn:
+                            update_hooks.append(fn)
+                            logger.debug(f"[AGENTS] Pre-loaded update_agent_state hook {qual} for {agent_name}")
         except Exception as hook_load_err:
             logger.debug(f"[AGENTS] Failed to pre-load update_agent_state hooks for {agent_name}: {hook_load_err}")
 
-        # ##INTERVIEWAGENT## TESTING MODE - Build auto-NEXT hook (REMOVE FOR PRODUCTION)
-        interview_message_hook = None
-        if agent_name == "InterviewAgent":
-            interview_message_hook = _build_interview_message_hook(agent_exposures, agent_variables)
-            logger.debug(f"[AGENTS] Built interview message hook for InterviewAgent (auto-NEXT enabled for testing)")
-        # ##INTERVIEWAGENT## END
-        
         try:
             raw_human_mode = agent_config.get("human_input_mode")
             if raw_human_mode and str(raw_human_mode).upper() not in ("", "NEVER", "NONE"):
@@ -425,16 +310,7 @@ async def create_agents(
             )
             if isinstance(prompt_sections, Sequence) and prompt_sections:
                 setattr(agent, "_mozaiks_prompt_sections", prompt_sections)
-            
-            # ##INTERVIEWAGENT## TESTING MODE - Register auto-NEXT hook (REMOVE FOR PRODUCTION)
-            if agent_name == "InterviewAgent" and interview_message_hook:
-                try:
-                    agent.register_hook("process_message_before_send", interview_message_hook)
-                    logger.info(f"[AGENTS][HOOK] ✓ Registered process_message_before_send hook for InterviewAgent (auto-NEXT enabled)")
-                except Exception as hook_reg_err:
-                    logger.error(f"[AGENTS][HOOK] Failed to register InterviewAgent message hook: {hook_reg_err}", exc_info=True)
-            # ##INTERVIEWAGENT## END
-            
+
         except Exception as err:
             logger.error(f"[AGENTS] CRITICAL ERROR creating ConversableAgent {agent_name}: {err}")
             raise

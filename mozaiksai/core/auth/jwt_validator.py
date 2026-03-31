@@ -34,7 +34,7 @@ class TokenClaims:
     roles: List[str]
     scopes: List[str]
     raw_claims: Dict[str, Any]
-    # MozaiksCore execution claims (optional, populated if present)
+    # Execution claims (optional, populated if present)
     mozaiks_token_use: Optional[str] = None
     mozaiks_app_id: Optional[str] = None
     mozaiks_chat_id: Optional[str] = None
@@ -48,13 +48,13 @@ class TokenClaims:
 
     @property
     def is_execution_token(self) -> bool:
-        """Check if this is a MozaiksCore execution token."""
+        """Check if this is an execution token."""
         return self.mozaiks_token_use == "execution"
 
     def validate_app_id(self, path_app_id: str) -> bool:
         """Validate that token app_id matches path/payload app_id."""
         if not self.mozaiks_app_id:
-            # No app_id claim in token - allow (legacy token)
+            # User tokens may omit app binding.
             return True
         return str(self.mozaiks_app_id) == str(path_app_id)
 
@@ -228,7 +228,7 @@ class JWTValidator:
         else:
             scopes = []
 
-        # Extract MozaiksCore execution claims (optional)
+        # Extract execution claims (optional)
         mozaiks_token_use = claims.get("mozaiks_token_use")
         mozaiks_app_id = claims.get("mozaiks_app_id") or claims.get("app_id")
         mozaiks_chat_id = claims.get("mozaiks_chat_id") or claims.get("chat_id")

@@ -1,6 +1,6 @@
 # ==============================================================================
 # FILE: shared_app.py
-# DESCRIPTION: FastAPI app - workflow agnostic, tools handled by workflows
+# DESCRIPTION: FastAPI runtime entrypoint for chat, workflow, transport, and auth-facing APIs.
 # ==============================================================================
 import logging
 import os
@@ -21,15 +21,6 @@ from bson.objectid import ObjectId
 from uuid import uuid4
 import autogen
 from pydantic import BaseModel, Field, ValidationError
-from mozaiksai.core.automation import (
-    SubstrateEventEnvelope,
-    get_automation_router,
-    reload_automation_router,
-)
-from mozaiksai.core.automation.nats_consumer import (
-    get_automation_nats_consumer,
-    use_nats_transport as use_nats_automation_transport,
-)
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.transport.simple_transport import SimpleTransport
 from mozaiksai.core.workflow.workflow_manager import workflow_status_summary, get_workflow_transport, get_workflow_tools
@@ -206,10 +197,10 @@ async def read_root():
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     """Serve a favicon for backend-origin requests (e.g., Swagger/docs probes)."""
-    assets_dir = Path(__file__).parent / "platform" / "brand" / "assets"
-    ico_path = assets_dir / "favicon.ico"
-    svg_path = assets_dir / "mozaik_logo.svg"
-    png_path = assets_dir / "mozaik.png"
+    brand_dir = Path(__file__).parent / "platform" / "brand"
+    ico_path = brand_dir / "favicon.ico"
+    svg_path = brand_dir / "assets" / "mozaik_logo.svg"
+    png_path = brand_dir / "assets" / "mozaik.png"
 
     if ico_path.exists():
         return FileResponse(str(ico_path), media_type="image/x-icon")
@@ -289,7 +280,7 @@ else:
 # ---------------------------------------------------------------------------
 # Principal Header Enforcement Middleware
 # ---------------------------------------------------------------------------
-# When MozaiksCore is the gateway, it attaches x-app-id and x-user-id headers
+# When an upstream gateway is present, it attaches x-app-id and x-user-id headers
 # derived from the authenticated context. This middleware validates that those
 # headers (if present) match path parameters for defense-in-depth.
 
@@ -301,7 +292,7 @@ async def principal_header_middleware(request: Request, call_next):
     if not _ENFORCE_PRINCIPAL_HEADERS:
         return await call_next(request)
     
-    # Extract headers (MozaiksCore gateway sets these)
+    # Extract headers (upstream gateway sets these)
     hdr_app_id = request.headers.get("x-app-id") or request.headers.get("x-mozaiks-app-id")
     hdr_user_id = request.headers.get("x-user-id") or request.headers.get("x-mozaiks-user-id")
     
@@ -534,7 +525,6 @@ async def _handle_chat_upload(
                     "kind": "attachment_uploaded",
                     "chat_id": chat_id,
                     "app_id": app_id,
-                    "app_id": app_id,
                     "user_id": user_id,
                     "workflow_name": workflow_name,
                     "attachment": res.attachment,
@@ -552,27 +542,9 @@ async def _handle_chat_upload(
         "success": True,
         "chat_id": chat_id,
         "app_id": app_id,
-        "app_id": app_id,
         "user_id": user_id,
         "attachment": res.attachment,
     }
-
-
-# # ------------------------------------------------------------------------------
-# # SERVICE REGISTRY (backend-agnostic routing for artifact modules)
-# # Map logical service names -> base URLs. Change via env vars per environment.
-# # ------------------------------------------------------------------------------
-# import httpx  # HTTP client for proxying requests
-# SERVICE_REGISTRY = {
-#     # Most of your app is .NET — point this to your .NET gateway/base URL.
-#     # e.g., "http://localhost:5000" or "https://api.mycorp.internal"
-#     "dotnet": os.getenv("DOTNET_BASE", "http://localhost:5000"),
-
-#     # Your FastAPI (this app) can also be targeted by name if you want:
-#     "fastapi": os.getenv("FASTAPI_BASE", "http://localhost:8000"),
-#     # Add more services as needed:
-#     # "java": os.getenv("JAVA_BASE", "http://java-service:8080"),
-# }
 
 
 @app.on_event("startup")
@@ -687,15 +659,6 @@ async def startup():
         # Log workflow and tool summary
         status = workflow_status_summary()
 
-        automation_router = reload_automation_router()
-        wf_logger.info(
-            "AUTOMATION_ROUTER_READY: loaded %d event type(s) from platform/automations",
-            len(automation_router.known_event_types()),
-        )
-        if use_nats_automation_transport():
-            await get_automation_nats_consumer().start()
-            wf_logger.info("AUTOMATION_NATS_CONSUMER_READY: substrate event consumer connected")
-
         # Start declared startup services (workflow plugins)
         global _runtime_services
         try:
@@ -761,9 +724,6 @@ async def shutdown():
             except Exception:
                 pass
         _runtime_services = []
-
-        if use_nats_automation_transport():
-            await get_automation_nats_consumer().stop()
 
         if simple_transport:
             # No explicit disconnect needed for websockets with this transport design
@@ -853,46 +813,6 @@ async def get_event_metrics(
         logger.error(f"❌ Failed to get event metrics: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve event metrics")
 
-
-@app.post("/api/substrate-events")
-async def ingest_substrate_event(request: Request):
-    """Ingress for post-commit substrate domain events."""
-    _validate_internal_api_key(request)
-
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
-
-    try:
-        event = SubstrateEventEnvelope.model_validate(body)
-    except ValidationError as exc:
-        raise HTTPException(status_code=400, detail=exc.errors())
-
-    automation_router = get_automation_router()
-    decision, route_result = await automation_router.dispatch(event)
-
-    if decision.status.value == "invalid":
-        raise HTTPException(status_code=400, detail=decision.detail or {"reason": "invalid automation event"})
-
-    if route_result is not None and route_result.status in {"failed", "invalid"}:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "route": route_result.route,
-                "dispatch_status": route_result.status,
-                "detail": route_result.detail or {},
-            },
-        )
-
-    return {
-        "status": decision.status.value,
-        "route_id": decision.route_id,
-        "route": decision.route,
-        "dispatch": route_result.detail if route_result else None,
-        "dispatch_status": route_result.status if route_result else None,
-    }
-
 @app.get("/api/health")
 async def health_check(
     principal: UserPrincipal = Depends(require_any_auth),
@@ -961,7 +881,7 @@ def _maybe_enforce_principal_headers(*, app_id: str, user_id: Optional[str], hea
     """Defense-in-depth: if a gateway supplies principal headers, enforce they match path/body values.
 
     This keeps the runtime compatible with local/dev usage (headers absent) while allowing
-    MozaiksCore to pass trusted IDs derived from auth context and have the runtime verify them.
+    an upstream gateway to pass trusted IDs derived from auth context and have the runtime verify them.
     """
     try:
         expected_app_id = coalesce_app_id(app_id=app_id)
@@ -1592,9 +1512,9 @@ async def chat_meta(
     try:
         has_children = False
         try:
-            from mozaiksai.core.workflow.pack.graph import workflow_has_nested_chats
+            from mozaiksai.core.workflow.pack.graph import workflow_has_mid_flight_journeys
 
-            has_children = workflow_has_nested_chats(workflow_name)
+            has_children = workflow_has_mid_flight_journeys(workflow_name)
         except Exception:
             has_children = False
 
@@ -1639,7 +1559,6 @@ async def chat_meta(
             "last_artifact": doc.get("last_artifact"),  # UI tool artifacts (legacy/quick restore)
             "artifact_instance_id": artifact_instance_id,  # WorkflowSession artifact ID
             "artifact_state": artifact_state,  # Full artifact state for multi-workflow navigation
-            "app_id": app_id,
             "app_id": app_id,
         }
     except Exception as e:
@@ -1876,9 +1795,9 @@ async def websocket_endpoint(
     try:
         has_children = False
         try:
-            from mozaiksai.core.workflow.pack.graph import workflow_has_nested_chats
+            from mozaiksai.core.workflow.pack.graph import workflow_has_mid_flight_journeys
 
-            has_children = workflow_has_nested_chats(workflow_name)
+            has_children = workflow_has_mid_flight_journeys(workflow_name)
         except Exception:
             has_children = False
 
@@ -1951,7 +1870,6 @@ async def websocket_endpoint(
                 extra={
                     "chat_id": active_chat_id,
                     "workflow_name": workflow_name,
-                    "app_id": app_id,
                     "app_id": app_id,
                     "cache_seed": cache_seed,
                     "chat_exists": chat_exists,
@@ -2166,32 +2084,24 @@ async def get_workflow_ui_tools_manifest(
 # PLATFORM CONFIG ENDPOINTS
 # ==============================================================================
 
-@app.get("/api/navigation-config")
-async def get_navigation_config():
-    """Return navigation config for frontend (no auth required for config)."""
+@app.get("/api/shell-config")
+async def get_shell_config():
+    """Return shell config derived from ai.json for frontend startup."""
     config_dir = Path(__file__).parent / "platform" / "config"
-    nav_path = config_dir / "navigation_config.json"
     ai_path = config_dir / "ai.json"
-
-    if not nav_path.exists():
-        raise HTTPException(status_code=404, detail="Navigation config not found")
+    if not ai_path.exists():
+        return {"chat_startup_mode": "ask"}
     try:
-        nav = json.loads(nav_path.read_text(encoding="utf-8"))
-        if ai_path.exists():
-            ai = json.loads(ai_path.read_text(encoding="utf-8"))
-            startup_mode = ((ai.get("chat") or {}).get("startup_mode"))
-            if startup_mode is not None:
-                nav = {**nav, "startup_mode": startup_mode}
-            workflows = ai.get("workflows") or {}
-            entry_point = workflows.get("entry_point")
-            resume_policy = workflows.get("resume_policy")
-            if entry_point is not None:
-                nav = {**nav, "entry_point": entry_point}
-            if resume_policy is not None:
-                nav = {**nav, "resume_policy": resume_policy}
-        return nav
+        ai = json.loads(ai_path.read_text(encoding="utf-8"))
+        chat = ai.get("chat") or {}
+        workflows = ai.get("workflows") or {}
+        return {
+            "chat_startup_mode": chat.get("chat_startup_mode") or chat.get("startup_mode") or "ask",
+            "entry_point": workflows.get("entry_point"),
+            "resume_policy": workflows.get("resume_policy"),
+        }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to read navigation config: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to read shell config: {e}")
 
 @app.get("/api/theme-config")
 async def get_theme_config():
@@ -2215,32 +2125,6 @@ async def get_app_theme(app_id: str):
         return json.loads(config_path.read_text(encoding="utf-8"))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read theme config: {e}")
-
-
-@app.get("/api/admin-config")
-async def get_admin_config():
-    """Return admin portal config for frontend."""
-    config_path = Path(__file__).parent / "platform" / "config" / "admin.json"
-    if not config_path.exists():
-        raise HTTPException(status_code=404, detail="Admin config not found")
-    try:
-        return json.loads(config_path.read_text(encoding="utf-8"))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to read admin config: {e}")
-
-
-@app.get("/api/available-modules")
-async def get_available_modules():
-    """Return available platform modules for frontend discovery."""
-    config_path = Path(__file__).parent / "platform" / "config" / "module_registry.json"
-    if not config_path.exists():
-        return {"modules": []}
-    try:
-        registry = json.loads(config_path.read_text(encoding="utf-8"))
-        modules = registry.get("modules", [])
-        return {"modules": [m for m in modules if m.get("enabled", True)]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to read module registry: {e}")
 
 
 @app.get("/api/workflows")

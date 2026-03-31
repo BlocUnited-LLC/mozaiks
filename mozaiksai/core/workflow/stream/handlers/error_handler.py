@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/stream/handlers/error_handler.py
+# FILE: mozaiksai/core/workflow/stream/handlers/error_handler.py
 # DESCRIPTION: Handler for ErrorEvent
 # ==============================================================================
 

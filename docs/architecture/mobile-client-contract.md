@@ -160,7 +160,7 @@ Common `type` values:
 - Control/ack events such as `ack.input`, `ack.ui_tool_response`, `chat.mode_changed`, `chat.workflow_started`
 
 Note:
-- A legacy `chat_meta` event type is currently emitted (not namespaced as `chat.chat_meta`).
+- A `chat_meta` event type is currently emitted (not namespaced as `chat.chat_meta`).
 
 ## 5) Resume and Replay Contract
 

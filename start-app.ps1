@@ -49,7 +49,7 @@ if ($env:AZURE_CLIENT_ID -and $env:AZURE_TENANT_ID -and $env:AZURE_CLIENT_SECRET
   Write-Host "Using .env file for Azure credentials" -ForegroundColor Gray
 }
 
-Write-Host ("$rocket Starting MozaiksAI...") -ForegroundColor Green
+Write-Host ("$rocket Starting mozaiksai...") -ForegroundColor Green
 
 if (-not $NoBuild) {
   if ($CleanBuild) {

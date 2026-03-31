@@ -1,5 +1,5 @@
 # === MOZAIKS-CORE-HEADER ===
-# FILE: core/workflow/pack/workflow_pack_coordinator.py
+# FILE: mozaiksai/core/workflow/pack/workflow_pack_coordinator.py
 # DESCRIPTION: Runtime fan-out/fan-in coordinator for per-workflow mid-flight journeys.
 # ==============================================================================
 
@@ -125,7 +125,7 @@ class WorkflowPackCoordinator:
     # Event handlers
     # ------------------------------------------------------------------
 
-    async def handle_structured_output_ready(self, event: Dict[str, Any]) -> None:
+    async def handle_journey_triggered(self, event: Dict[str, Any]) -> None:
         try:
             agent_name = str(event.get("agent_name") or event.get("agent") or "").strip()
             structured_data = event.get("structured_data")
@@ -136,18 +136,27 @@ class WorkflowPackCoordinator:
             return
 
         if not agent_name or not parent_chat_id or not parent_workflow:
+            logger.debug(
+                "[PACK] Ignored trigger with incomplete context agent=%s chat=%s workflow=%s",
+                agent_name,
+                parent_chat_id,
+                parent_workflow,
+            )
             return
 
         # At most one active MFJ per parent chat.
         if parent_chat_id in self._active_by_parent:
+            logger.debug("[PACK] Ignored duplicate trigger for active parent=%s", parent_chat_id)
             return
 
         pack_graph = load_workflow_pack_graph(parent_workflow)
         if pack_graph is None:
+            logger.debug("[PACK] No pack graph loaded for workflow=%s", parent_workflow)
             return
 
         trigger = self._find_trigger(pack_graph.mid_flight_journeys, agent_name)
         if trigger is None:
+            logger.debug("[PACK] No MFJ trigger for workflow=%s agent=%s", parent_workflow, agent_name)
             return
 
         parent_ctx = context.get("context_variables")
@@ -168,6 +177,7 @@ class WorkflowPackCoordinator:
                 app_id = ""
         app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not app_id:
+            logger.warning("[PACK] Missing app_id for parent=%s trigger=%s", parent_chat_id, trigger.id)
             return
 
         if not await self._check_requires(app_id, parent_chat_id, trigger.requires):
@@ -198,6 +208,7 @@ class WorkflowPackCoordinator:
 
         child_specs = self._extract_child_specs(structured_data)
         if not child_specs:
+            logger.info("[PACK] No child specs extracted for parent=%s trigger=%s", parent_chat_id, trigger.id)
             return
 
         max_children = int(trigger.fan_out.max_children)
@@ -215,6 +226,7 @@ class WorkflowPackCoordinator:
         ws_id_raw = parent_conn.get("ws_id")
         ws_id = int(ws_id_raw) if isinstance(ws_id_raw, int) else None
         if not user_id:
+            logger.warning("[PACK] Missing user_id for parent=%s trigger=%s", parent_chat_id, trigger.id)
             return
 
         # Pause parent before spawning children.
@@ -288,6 +300,7 @@ class WorkflowPackCoordinator:
                 )
 
         if not active.child_runs:
+            logger.info("[PACK] Trigger produced no runnable child workflows parent=%s trigger=%s", parent_chat_id, trigger.id)
             await self._resume_parent(
                 transport=transport,
                 active=active,
@@ -301,6 +314,12 @@ class WorkflowPackCoordinator:
             return
 
         self._active_by_parent[parent_chat_id] = active
+        logger.info(
+            "[PACK] Spawned %s child workflow(s) for parent=%s trigger=%s",
+            len(active.child_runs),
+            parent_chat_id,
+            trigger.id,
+        )
         if active.fan_out_timeout_seconds > 0:
             active._timeout_task = asyncio.create_task(
                 self._timeout_watchdog(parent_chat_id, active.fan_out_timeout_seconds)
@@ -364,6 +383,8 @@ class WorkflowPackCoordinator:
 
         all_done = True
         for child_chat_id in active.child_chat_ids:
+            if child_chat_id == chat_id:
+                continue
             task = transport._background_tasks.get(child_chat_id)
             if task and not task.done():
                 all_done = False
@@ -380,7 +401,7 @@ class WorkflowPackCoordinator:
     @staticmethod
     def _find_trigger(mfjs: Sequence[MidFlightJourney], agent_name: str) -> Optional[MidFlightJourney]:
         for entry in mfjs:
-            if entry.trigger_on != "structured_output":
+            if entry.trigger_on != "agent_output":
                 continue
             if entry.trigger_agent == agent_name:
                 return entry

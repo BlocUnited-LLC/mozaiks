@@ -1,0 +1,35 @@
+{
+  "global": {},
+  "workflows": {
+    "AgentGenerator": {
+      "concept_overview": "You are building a SaaS operations copilot for small accounting firms. The app should collect client context, propose next actions, and generate implementation-ready workflow bundles.",
+      "concept_api_endpoints": [
+        {
+          "name": "GetClientProfile",
+          "method": "GET",
+          "path": "/api/clients/{client_id}",
+          "purpose": "Fetches client profile and current engagement metadata."
+        },
+        {
+          "name": "CreateWorkflowRun",
+          "method": "POST",
+          "path": "/api/workflows/runs",
+          "purpose": "Creates a persisted workflow execution record."
+        }
+      ],
+      "concept_blueprint": {
+        "domains": [
+          "client_management",
+          "workflow_orchestration",
+          "audit_trail"
+        ],
+        "primary_user": "Operations Manager",
+        "success_criteria": [
+          "Generate executable workflow bundle from user intent",
+          "Persist all run events for observability"
+        ]
+      },
+      "chat_attachments": []
+    }
+  }
+}

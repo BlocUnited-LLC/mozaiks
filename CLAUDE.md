@@ -1,45 +1,67 @@
 # Mozaiks Claude Context
 
-This file is the top-level Claude project context.
-Detailed scoped rules live under `.claude/rules/`.
-Repeatable workflows live under `.claude/skills/`.
+**Read [ARCHITECTURE.md](ARCHITECTURE.md) first.** That file is the source of truth for how the system works.
 
-## Default Posture
+## Core Service
 
-Treat Mozaiks as an agentic runtime, not a product-specific agent app.
+| Service | Purpose | Key Entry Point |
+|---------|---------|-----------------|
+| `mozaiksai/` | AI workflow runtime | `core/workflow/orchestration_patterns.py` |
+| `chat-ui/` | React chat component library | `src/app/MozaiksApp.jsx` |
 
-Favor:
-- modular extensions over large core rewrites
-- canonical replacements over compatibility shims
-- declarative workflow changes over hardcoded runtime behavior
-- concise, specific instructions over broad prose
+> **Note:** `mozaikscore` has been removed. App backend functionality is provided by
+> external greenfield templates that communicate with the AI runtime through the
+> generic `AppBackendPort` adapter (`mozaiksai/core/ports/app_backend.py`).
 
-## Runtime Priorities
+## Where to Put Code
 
-For runtime changes, reason in terms of:
-- `Application`
-- `Run`
-- `ExecutionWorker`
-- `ExecutionEngine`
-- `Event`
+| If you're adding... | Put it in... |
+|---------------------|--------------|
+| AI workflow logic | `platform/workflows/{name}/` |
+| Business logic module | `platform/modules/{name}/` |
+| Multi-module page | `platform/pages/{name}/` |
+| Runtime infrastructure | `mozaiksai/core/` |
+| Backend adapter | `mozaiksai/core/adapters/` |
+| Port / contract | `mozaiksai/core/ports/` |
+| AG2 tool function | `mozaiksai/core/workflow/` |
 
-Protect:
-- engine-agnostic boundaries
-- event persistence and streaming
-- async safety and event loop responsiveness
-- tenant isolation across `app_id`, `user_id`, `chat_id`, and `run_id`
+## App Backend Integration
 
-## Routing Guidance
+The runtime communicates with external backends via a generic adapter pattern:
 
-When the request targets:
-- `mozaiksai/`, `platform/`, `workers/`, `transport/`, or orchestration code: use the runtime rules first
-- `chat-ui/` or `app/`: follow the frontend rules when those files are in scope
-- `docs/`, `mkdocs.yml`, or Markdown files: follow the docs rules when those files are in scope
+| Layer | File | Purpose |
+|-------|------|---------|
+| Port (contract) | `core/ports/app_backend.py` | `AppBackendPort` — `request()`, `emit()`, `health()` |
+| Adapter (impl) | `core/adapters/http_app_backend.py` | `HttpAppBackendAdapter` — generic HTTP client |
+| AG2 tools | `core/workflow/app_backend_tools.py` | `backend_request()`, `emit_event()`, `check_backend_health()` |
 
-Do not put application logic into the runtime unless the user explicitly wants an architectural change there.
+No hardcoded API paths or verbs in the port or adapter.  Paths are passed as
+arguments by the workflow tools or agent context.
+
+## Don't
+
+- Hardcode workflow behavior in the runtime
+- Hardcode backend API paths in ports or adapters
+- Add duplicate interfaces or aliases (make canonical changes)
+- Bake app-specific logic into the AI runtime
+
+## Terminology
+
+| Current Term | Meaning |
+|--------------|---------|
+| AI runtime | mozaiksai workflow execution layer |
+| app backend | external CRUD service (greenfield templates) |
+| AppBackendPort | generic contract for runtime ↔ backend communication |
+| unified event bus | shared in-process event transport |
+| module | deterministic app capability surface |
+| triggers | workflow start or resume declarations in `orchestrator.yaml` |
+
+## Rules
+
+Scoped rules live in `.claude/rules/`. Apply them when working in their target directories.
 
 ## Markdown Naming
 
-When creating new Markdown files, prefer lowercase kebab-case names such as `conversation-modes.md`.
+Use lowercase kebab-case: `conversation-modes.md`
 
-Use uppercase or special convention filenames only when required, for example `README.md`, `AGENTS.md`, `CLAUDE.md`, or `SKILL.md`.
+Exception: `README.md`, `CLAUDE.md`, `ARCHITECTURE.md`

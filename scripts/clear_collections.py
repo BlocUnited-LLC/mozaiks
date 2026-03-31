@@ -1,4 +1,4 @@
-"""MozaiksAI dev utility: clear MongoDB collections (documents only).
+"""mozaiksai dev utility: clear MongoDB collections (documents only).
 
 Designed to be called by `scripts/cleanse.ps1`.
 Safety goals:
@@ -77,9 +77,9 @@ def _resolve_database_name(mongo_uri: str, override: Optional[str]) -> Optional[
     db = parsed.get("database")
     if db:
         return str(db)
-    # MozaiksAI runtime consistently uses client["MozaiksAI"], even if the URI omits a DB.
+    # mozaiksai runtime consistently uses client["mozaiksai"], even if the URI omits a DB.
     # Default here so cleanse works with plain mongodb://host:27017
-    return os.getenv("MONGO_DB_NAME") or "MozaiksAI"
+    return os.getenv("MONGO_DB_NAME") or "mozaiksai"
 
 
 def _ping(client: MongoClient) -> None:

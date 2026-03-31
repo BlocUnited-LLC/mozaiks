@@ -1,7 +1,7 @@
-﻿// ============================================================================
+// ============================================================================
 // FILE: chat-ui/src/styles/themeProvider.js
 // PURPOSE: Dynamic theme system for multi-tenant branding
-// USAGE: Theme is loaded from the mozaikscore /api/theme-config endpoint
+// USAGE: Theme is loaded from the /api/theme-config endpoint
 //        (backed by app/config/theme_config.json). In platform mode,
 //        /api/themes/{appId} overrides are deep-merged on top.
 // ============================================================================
@@ -41,7 +41,7 @@ const BARE_FALLBACK_THEME = {
   },
   branding: {
     name: 'App',
-    backgroundImage: '/assets/chat_bg_template.png',
+    chatbackgroundImage: '/assets/chat_bg_template.png',
     loadingIcon: null,
   },
   profile: {
@@ -114,37 +114,14 @@ function themeConfigToTheme(config, basePath) {
     logo:            resolveBrandAsset(basePath, rawAssets.logo),
     wordmark:        resolveBrandAsset(basePath, rawAssets.wordmark),
     favicon:         resolveBrandAsset(basePath, rawAssets.favicon),
-    backgroundImage: resolveBrandAsset(basePath, rawAssets.backgroundImage),
+    chatbackgroundImage: resolveBrandAsset(basePath, rawAssets.chatbackgroundImage),
     loadingIcon:     resolveBrandAsset(basePath, rawAssets.loadingIcon),
   };
 
-  // --- UI chrome ---
-  const rawProfile       = ui.profile       || {};
-  const rawNotifications = ui.notifications || {};
-  const rawHeader        = ui.header        || {};
-  const rawLogo          = rawHeader.logo   || {};
-
-  const headerActions = Array.isArray(rawHeader.actions)
-    ? rawHeader.actions.map((action) => {
-        if (!action || typeof action !== 'object') return action;
-        return { ...action, icon: resolveHeaderIconValue(basePath, action.icon) };
-      })
-    : fallback.header.actions;
-
-  const profileIcon       = resolveBrandAsset(basePath, rawProfile.icon)       || null;
-  const notificationsIcon = resolveBrandAsset(basePath, rawNotifications.icon) || null;
-
-  // Resolve icons inside profile.menu items
-  const profileMenu = Array.isArray(rawProfile.menu)
-    ? rawProfile.menu.map((item) =>
-        item && item.icon ? { ...item, icon: resolveBrandAsset(basePath, item.icon) } : item
-      )
-    : fallback.profile.menu;
-
   // --- Fallback warnings ---
   const _bn = identity.name || 'theme';
-  if (!assets.backgroundImage)
-    console.warn(`⚠️ [THEME] [${_bn}] assets.backgroundImage not set — using fallback: chat_bg_template.png`);
+  if (!assets.chatbackgroundImage)
+    console.warn(`⚠️ [THEME] [${_bn}] assets.chatbackgroundImage not set — using fallback: chat_bg_template.png`);
   if (!assets.logo)
     console.warn(`⚠️ [THEME] [${_bn}] assets.logo not set — header logo will be missing`);
   if (!assets.favicon)
@@ -157,17 +134,6 @@ function themeConfigToTheme(config, basePath) {
     console.warn(`⚠️ [THEME] [${_bn}] colors block not configured — using bare fallback palette`);
   if (!config.shadows)
     console.warn(`⚠️ [THEME] [${_bn}] shadows block not configured — using bare fallback shadows`);
-  if (!profileIcon)
-    console.warn(`⚠️ [THEME] [${_bn}] ui.profile.icon not set — profile button will be hidden`);
-  if (!notificationsIcon && rawNotifications.show !== false)
-    console.warn(`⚠️ [THEME] [${_bn}] ui.notifications.icon not set — notification button will be hidden`);
-
-  const headerLogo = {
-    src:      resolveBrandAsset(basePath, rawLogo.src) || assets.logo,
-    wordmark: resolveBrandAsset(basePath, rawLogo.wordmark) || assets.wordmark,
-    alt:      rawLogo.alt  || identity.name || fallback.header.logo.alt,
-    href:     rawLogo.href || fallback.header.logo.href,
-  };
 
   return {
     fonts:   config.fonts   || fallback.fonts,
@@ -175,36 +141,26 @@ function themeConfigToTheme(config, basePath) {
     shadows: config.shadows || fallback.shadows,
     branding: {
       name:            identity.name              || fallback.branding.name,
-      backgroundImage: assets.backgroundImage     || fallback.branding.backgroundImage,
+      chatbackgroundImage: assets.chatbackgroundImage     || fallback.branding.chatbackgroundImage,
       loadingIcon:     assets.loadingIcon         || fallback.branding.loadingIcon,
       favicon:         assets.favicon,
       logo:            assets.logo,
     },
-    profile: {
-      icon:         profileIcon                         || fallback.profile.icon,
-      show:         rawProfile.show                     ?? fallback.profile.show,
-      defaultLabel: rawProfile.defaultLabel             || fallback.profile.defaultLabel,
-      sublabel:     rawProfile.sublabel                 ?? fallback.profile.sublabel,
-      menu:         profileMenu.length > 0 ? profileMenu : fallback.profile.menu,
-    },
-    notifications: {
-      icon:      notificationsIcon                  || fallback.notifications.icon,
-      show:      rawNotifications.show              ?? fallback.notifications.show,
-      emptyText: rawNotifications.emptyText         || fallback.notifications.emptyText,
-    },
+    // Shell chrome (header, profile, notifications, footer) defaults are
+    // provided by NavigationProvider and can be overridden via theme_config.json ui section.
+    // Fallback stubs remain here for backward-compat with useTheme consumers.
+    profile:       fallback.profile,
+    notifications: fallback.notifications,
     chat:   ui.chat   || fallback.chat,
-    header: {
-      logo:    headerLogo,
-      actions: headerActions,
-    },
-    footer: ui.footer || fallback.footer,
+    header: fallback.header,
+    footer: fallback.footer,
     _basePath: basePath,
     _source:   'config',
   };
 }
 
 /**
- * Load theme from the declarative theme_config.json via mozaikscore API.
+ * Load theme from the declarative theme_config.json via backend API.
  * Falls back to BARE_FALLBACK_THEME when the API is unavailable.
  * Assets are still served from the Vite publicDir (/assets/, /fonts/).
  */
@@ -250,12 +206,6 @@ function getAccessToken() {
 
   return null;
 }
-
-// The brand used when no app-specific theme exists.
-// Apps can configure this via ChatUIProvider → uiConfig.brandId.
-// Brand is determined by the deployment's publicDir; no runtime brand switching.
-// setDefaultBrandId kept for API compatibility but is a no-op.
-export function setDefaultBrandId(_brandId) { /* no-op: brand is set by deployment */ }
 
 function normalizeAppId(appId) {
   if (appId == null) return 'default';
@@ -431,10 +381,10 @@ export function applyTheme(theme) {
 
     // Asset CSS variables (used by components via var() references)
     const root = document.documentElement;
-    if (branding.backgroundImage) {
-      root.style.setProperty('--brand-bg-url', `url("${branding.backgroundImage}")`);
+    if (branding.chatbackgroundImage) {
+      root.style.setProperty('--brand-bg-url', `url("${branding.chatbackgroundImage}")`);
     } else {
-      console.warn('⚠️ [THEME] branding.backgroundImage is empty after resolution — --brand-bg-url will not be set');
+      console.warn('⚠️ [THEME] branding.chatbackgroundImage is empty after resolution — --brand-bg-url will not be set');
       root.style.removeProperty('--brand-bg-url');
     }
     if (branding.logo)            root.style.setProperty('--brand-logo-url', branding.logo);

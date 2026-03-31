@@ -2,27 +2,17 @@
   "version": 2,
   "workflows": [
     {
-      "id": "GreenRoom",
-      "description": "Interview the performer, lock the set brief, and capture boundaries."
+      "id": "JokeFactory",
+      "description": "Interactive joke generation workflow"
     },
     {
-      "id": "WritersRoom",
-      "description": "Decompose the premise into parallel comedy lanes and synthesize the strongest set."
+      "id": "SmokeChild",
+      "description": "Minimal child workflow used by the live MFJ smoke path"
     },
     {
-      "id": "MainStage",
-      "description": "Package the selected material into a final stage-ready set."
+      "id": "SmokeParent",
+      "description": "Minimal parent workflow used by the live MFJ smoke path"
     }
   ],
-  "journeys": [
-    {
-      "id": "backstage_showcase",
-      "description": "Intake in the green room, parallel writing in the writers room, then final polish on main stage.",
-      "steps": [
-        "GreenRoom",
-        "WritersRoom",
-        "MainStage"
-      ]
-    }
-  ]
+  "journeys": []
 }

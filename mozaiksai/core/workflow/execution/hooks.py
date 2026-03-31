@@ -1,9 +1,9 @@
 """Hook loading and registration utilities for AG2 hooks.
 
-This module reads a workflow's `hooks.json` (if present) and registers the
+This module reads a workflow's `hooks.yaml` and registers the
 declared hook functions on the appropriate `ConversableAgent` instances.
 
-JSON FORMAT (current implementation expects either of these per entry):
+HOOK ENTRY FORMAT:
 
   - hook_type: process_message_before_send | update_agent_state | process_last_received_message | process_all_messages_before_reply
     hook_agent: <AgentName> | "all"   # Use "all" to apply hook to every agent in workflow
@@ -16,7 +16,7 @@ Resolution rules:
    - Otherwise we use `workflows.<workflow>.<module>`.
 2. If only `function` provided and it contains ':' or '.', we attempt to parse module + function directly.
 3. Fallback function name default: if only module path given with no explicit function
-   we look for a top-level symbol named exactly as provided in json `function`.
+   we look for a top-level symbol named exactly as provided in hook config `function`.
 
 Safety & Validation:
  - Missing agent: logged and skipped.
@@ -34,7 +34,9 @@ import inspect
 import logging
 import time
 from functools import wraps
-import json
+import yaml
+
+from ..declarative import parse_hooks_config
 
 logger = logging.getLogger("hooks_loader")
 
@@ -125,8 +127,37 @@ def _validate_signature(hook_type: str, fn: Callable) -> None:
         logger.warning(f"Hook {fn.__name__} signature may be invalid for {hook_type}: expected 1 param, got {len(params)}")
 
 
+def _read_hook_config(workflow_path: Path) -> tuple[Dict[str, Any], str | None]:
+    """Load hook config from hooks.yaml."""
+    hooks_yaml = workflow_path / "hooks.yaml"
+
+    if hooks_yaml.exists():
+        try:
+            with open(hooks_yaml, "r", encoding="utf-8") as f:
+                payload = yaml.safe_load(f) or {}
+            parsed = parse_hooks_config(payload)
+            return parsed, str(hooks_yaml)
+        except Exception as e:  # pragma: no cover
+            logger.error("Failed reading hooks.yaml for workflow at %s: %s", workflow_path, e)
+
+    return {}, None
+
+
+def load_hook_entries(workflow_name: str, *, base_path: str = "workflows") -> List[Dict[str, Any]]:
+    """Load hook entries from hooks.yaml."""
+    workflow_path = Path(base_path) / workflow_name
+    data, source = _read_hook_config(workflow_path)
+    if not source:
+        return []
+    entries = data.get("hooks") or []
+    if not isinstance(entries, list):
+        logger.warning("Hook config has invalid 'hooks' list in %s", source)
+        return []
+    return [entry for entry in entries if isinstance(entry, dict)]
+
+
 def register_hooks_for_workflow(workflow_name: str, agents: Dict[str, Any], *, base_path: str = "workflows") -> List[RegisteredHook]:
-    """Load hooks.json for `workflow_name` and register hooks on provided agents.
+    """Load hooks config for `workflow_name` and register hooks on provided agents.
 
     Parameters
     ----------
@@ -140,22 +171,15 @@ def register_hooks_for_workflow(workflow_name: str, agents: Dict[str, Any], *, b
         Hooks successfully registered.
     """
     workflow_path = Path(base_path) / workflow_name
-    hooks_json = workflow_path / "hooks.json"
-    logger.info(f"Loading hooks for workflow '{workflow_name}' from: {hooks_json}")
-    if not hooks_json.exists():
-        logger.debug(f"No hooks.json for workflow {workflow_name}")
+    data, source = _read_hook_config(workflow_path)
+    if not source:
+        logger.debug(f"No hooks.yaml for workflow {workflow_name}")
         return []
-
-    try:
-        with open(hooks_json, "r", encoding="utf-8") as f:
-            data = json.load(f) or {}
-    except Exception as e:  # pragma: no cover
-        logger.error(f"Failed reading hooks.json for {workflow_name}: {e}")
-        return []
+    logger.info(f"Loading hooks for workflow '{workflow_name}' from: {source}")
 
     entries = data.get("hooks") or []
     if not isinstance(entries, list):
-        logger.warning(f"hooks.json invalid structure (hooks not list) for {workflow_name}")
+        logger.warning(f"Hook config invalid structure (hooks not list) for {workflow_name}")
         return []
 
     registered: List[RegisteredHook] = []
@@ -299,21 +323,11 @@ def register_hooks_for_workflow(workflow_name: str, agents: Dict[str, Any], *, b
 
 def summarize_hooks(workflow_name: str) -> List[Dict[str, Any]]:
     """Return raw hook declarations (without importing) for inspection."""
-    workflow_path = Path("workflows") / workflow_name
-    hooks_json = workflow_path / "hooks.json"
-    if not hooks_json.exists():
-        return []
-    try:
-        with open(hooks_json, "r", encoding="utf-8") as f:
-            data = json.load(f) or {}
-        entries = data.get("hooks") or []
-        return entries if isinstance(entries, list) else []
-    except Exception:  # pragma: no cover
-        return []
+    return load_hook_entries(workflow_name, base_path="workflows")
 
 __all__ = [
     "register_hooks_for_workflow",
+    "load_hook_entries",
     "summarize_hooks",
     "RegisteredHook",
 ]
-

@@ -1,8 +1,8 @@
 /**
  * Config Validator
  *
- * Validates the declarative config files (theme_config.json, navigation_config.json)
- * fetched from the mozaikscore API at startup and surfaces human-readable errors.
+ * Validates the declarative config file (theme_config.json)
+ * fetched from the backend API at startup and surfaces human-readable errors.
  * Designed for non-technical founders — messages explain WHAT is wrong and HOW to fix it.
  *
  * Runs once during app init. Returns an array of { level, file, message }
@@ -41,10 +41,10 @@ function validateThemeConfig(config) {
     if (!config.assets.logo) {
       issues.push({ level: 'warn', file, message: 'Missing "assets.logo". The header will have no logo image.' });
     } else if (!ICON_FILE_RE.test(config.assets.logo) && !URL_RE.test(config.assets.logo)) {
-      issues.push({ level: 'error', file, message: `assets.logo="${config.assets.logo}" doesn't look like a file. Use a filename like "logo.svg" (placed in brand/public/assets/).` });
+      issues.push({ level: 'error', file, message: `assets.logo="${config.assets.logo}" doesn't look like a file. Use a filename like "logo.svg" (placed in platform/brand/assets/).` });
     }
-    if (!config.assets.backgroundImage) {
-      issues.push({ level: 'info', file, message: 'No "assets.backgroundImage" set. The chat background will be a solid color.' });
+    if (!config.assets.chatbackgroundImage) {
+      issues.push({ level: 'info', file, message: 'No "assets.chatbackgroundImage" set. The chat background will be a solid color.' });
     }
   }
 
@@ -97,7 +97,7 @@ function validateThemeConfig(config) {
     if (ui.profile) {
       if (ui.profile.show !== false && ui.profile.icon) {
         if (!ICON_FILE_RE.test(ui.profile.icon) && !URL_RE.test(ui.profile.icon)) {
-          issues.push({ level: 'error', file, message: `ui.profile.icon="${ui.profile.icon}" is not a valid asset filename. Use "profile.svg" (placed in brand/public/assets/).` });
+          issues.push({ level: 'error', file, message: `ui.profile.icon="${ui.profile.icon}" is not a valid asset filename. Use "profile.svg" (placed in platform/brand/assets/).` });
         }
       }
       if (Array.isArray(ui.profile.menu)) {
@@ -130,102 +130,18 @@ function validateThemeConfig(config) {
   return issues;
 }
 
-function validateNavigation(nav) {
-  const issues = [];
-  const file = 'navigation_config.json';
-
-  if (!nav || typeof nav !== 'object') {
-    issues.push({ level: 'warn', file, message: 'Config is empty or missing. Default navigation will be used.' });
-    return issues;
-  }
-
-  if (!nav.version) {
-    issues.push({ level: 'info', file, message: 'Missing "version" field. Consider adding "version": "1.0.0".' });
-  }
-
-  // landing_spot
-  if (nav.landing_spot && typeof nav.landing_spot === 'string') {
-    if (!nav.landing_spot.startsWith('/')) {
-      issues.push({ level: 'error', file, message: `landing_spot="${nav.landing_spot}" must start with "/". Example: "/" or "/dashboard".` });
-    }
-  }
-
-  // Pages (canonical flat array)
-  const pages = Array.isArray(nav.pages) ? nav.pages : [];
-  const CORE_PATHS = ['/', '/chat', '/app'];
-  pages.forEach((page, i) => {
-    if (!page.path && !page.href && !page.trigger) {
-      issues.push({ level: 'error', file, message: `pages[${i}] has no "path", "href", or "trigger". Every page needs at least one navigation target.` });
-    }
-    if (!page.label && !page.title) {
-      issues.push({ level: 'warn', file, message: `pages[${i}] has no "label". It will show as "${page.id || page.path || 'unnamed'}" in the Discover menu.` });
-    }
-    if (page.path && CORE_PATHS.includes(page.path)) {
-      issues.push({ level: 'warn', file, message: `pages[${i}].path="${page.path}" is a core route — it's already built-in and will be ignored here.` });
-    }
-    if (page.icon && !ICON_FILE_RE.test(page.icon) && !URL_RE.test(page.icon)) {
-      issues.push({ level: 'warn', file, message: `pages[${i}].icon="${page.icon}" is not a valid asset filename. Use "icon-name.svg" not "icon-name".` });
-    }
-  });
-
-  // Optional header_controls (top-right utility buttons)
-  const headerControls = Array.isArray(nav.header_controls) ? nav.header_controls : [];
-  headerControls.forEach((control, i) => {
-    const tokens = [control?.id, control?.type, control?.action, control?.label]
-      .filter((v) => typeof v === 'string')
-      .map((v) => v.trim().toLowerCase());
-    const semanticControlIds = new Set([
-      'userprofile', 'user-profile', 'user_profile', 'profile',
-      'notifications', 'notification',
-      'discover', 'discovery',
-    ]);
-    const isSemanticControl = tokens.some((t) => semanticControlIds.has(t));
-
-    if (!control.id) {
-      issues.push({ level: 'warn', file, message: `header_controls[${i}] is missing an "id".` });
-    }
-    if (!control.label) {
-      issues.push({ level: 'warn', file, message: `header_controls[${i}] is missing a "label".` });
-    }
-    if (!isSemanticControl && !control.action && !control.path && !control.href && !control.trigger) {
-      issues.push({ level: 'error', file, message: `header_controls[${i}] has no "action", "path", "href", or "trigger".` });
-    }
-    if (control.icon && !ICON_FILE_RE.test(control.icon) && !URL_RE.test(control.icon)) {
-      issues.push({ level: 'warn', file, message: `header_controls[${i}].icon="${control.icon}" is not a valid asset filename. Use "icon-name.svg" not "icon-name".` });
-    }
-  });
-
-  return issues;
-}
-
-function validateAuth(auth) {
+function validateAuth(auth, app = {}) {
   const issues = [];
   const file = 'app.json → auth';
+  const topLevelAdmins = Array.isArray(app.admins) ? app.admins : [];
 
   if (!auth || typeof auth !== 'object') {
-    issues.push({ level: 'warn', file, message: 'File is empty or missing. Auth will use defaults (Keycloak on localhost:8080).' });
+    issues.push({ level: 'info', file, message: 'No auth config. Auth is handled by the host app or authAdapter prop.' });
     return issues;
   }
 
   if (!auth.provider) {
-    issues.push({ level: 'info', file, message: 'No "provider" set. Defaulting to "keycloak".' });
-  }
-
-  if (auth.provider === 'keycloak' || !auth.provider) {
-    const kc = auth.keycloak;
-    if (!kc) {
-      issues.push({ level: 'warn', file, message: 'Missing "keycloak" block. Auth server defaults (localhost:8080/mozaiks) will be used.' });
-    } else {
-      if (!kc.authority || !URL_RE.test(kc.authority)) {
-        issues.push({ level: 'warn', file, message: `keycloak.authority="${kc.authority || ''}" — make sure this points to your Keycloak server URL.` });
-      }
-      if (!kc.realm) {
-        issues.push({ level: 'warn', file, message: 'keycloak.realm is missing. Defaulting to "mozaiks".' });
-      }
-      if (!kc.clientId) {
-        issues.push({ level: 'warn', file, message: 'keycloak.clientId is missing. Defaulting to "mozaiks-app".' });
-      }
-    }
+    issues.push({ level: 'info', file, message: 'No "provider" set. Auth adapter must be supplied by the host app.' });
   }
 
   // Roles
@@ -233,8 +149,8 @@ function validateAuth(auth) {
     if (!auth.roles.admin) {
       issues.push({ level: 'info', file, message: 'roles.admin not set. The admin role name defaults to "admin".' });
     }
-    if (!Array.isArray(auth.roles.adminEmails) || auth.roles.adminEmails.length === 0) {
-      issues.push({ level: 'info', file, message: 'roles.adminEmails is empty. No user will have admin access to the Admin Portal.' });
+    if ((!Array.isArray(auth.roles.adminEmails) || auth.roles.adminEmails.length === 0) && topLevelAdmins.length === 0) {
+      issues.push({ level: 'info', file, message: 'No admin users declared. Add app.json → admins to make the Admin Portal easier to bootstrap.' });
     }
   }
 
@@ -253,34 +169,19 @@ function validateAppConfig(app) {
   if (!app.appName) {
     issues.push({ level: 'warn', file, message: 'Missing "appName". Your app will be titled "My App".' });
   }
-  if (!app.appId) {
-    issues.push({ level: 'warn', file, message: 'Missing "appId". A default app ID will be used.' });
+  if (!app.targets || typeof app.targets !== 'object') {
+    issues.push({ level: 'warn', file, message: 'Missing "targets". The app will default to web enabled and mobile disabled.' });
   }
-  if (!app.apiUrl) {
-    issues.push({ level: 'error', file, message: 'Missing "apiUrl". The app won\'t be able to connect to the backend. Example: "http://localhost:8000".' });
+  if (app.authRequired !== undefined && typeof app.authRequired !== 'boolean') {
+    issues.push({ level: 'error', file, message: '"authRequired" must be true or false.' });
   }
-  if (!app.wsUrl) {
-    issues.push({ level: 'warn', file, message: 'Missing "wsUrl". WebSocket connections will fall back to the apiUrl.' });
+  if (app.admins && (!Array.isArray(app.admins) || app.admins.some((value) => typeof value !== 'string'))) {
+    issues.push({ level: 'error', file, message: '"admins" must be an array of email strings.' });
   }
 
-  // Validate auth section inline (was previously a separate auth.json)
+  // Advanced auth overrides remain supported, but are no longer required.
   if (app.auth) {
-    issues.push(...validateAuth(app.auth));
-  } else {
-    issues.push({ level: 'info', file, message: 'No "auth" section. Auth will use Keycloak defaults (localhost:8080/mozaiks).' });
-  }
-
-  // Validate dev section
-  if (app.dev) {
-    if (app.dev.autoLogin && (!Array.isArray(app.dev.users) || app.dev.users.length === 0)) {
-      issues.push({ level: 'warn', file, message: 'dev.autoLogin is true but dev.users is empty. Auto-login needs at least one user.' });
-    }
-    if (Array.isArray(app.dev.users)) {
-      app.dev.users.forEach((u, i) => {
-        if (!u.username) issues.push({ level: 'error', file, message: `dev.users[${i}] is missing "username".` });
-        if (!u.password) issues.push({ level: 'error', file, message: `dev.users[${i}] is missing "password".` });
-      });
-    }
+    issues.push(...validateAuth(app.auth, app));
   }
 
   return issues;
@@ -317,21 +218,18 @@ export async function validateAllConfigs() {
     }
   };
 
-  // Resolve mozaikscore base URL
+  // Resolve backend base URL
   const coreUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_CORE_URL) || '';
   const baseUrl = coreUrl.replace(/\/+$/, '');
 
-  // Load configs from mozaikscore API
-  const [themeResult, navResult] = await Promise.all([
-    safeLoad(baseUrl ? `${baseUrl}/api/theme-config` : '/api/theme-config', 'theme_config.json'),
-    safeLoad(baseUrl ? `${baseUrl}/api/navigation-config` : '/api/navigation-config', 'navigation_config.json'),
-  ]);
+  // Load theme config from backend API
+  const themeResult = await safeLoad(
+    baseUrl ? `${baseUrl}/api/theme-config` : '/api/theme-config',
+    'theme_config.json',
+  );
 
   if (themeResult.data) results.push(...validateThemeConfig(themeResult.data));
-  else if (themeResult.missing) results.push({ level: 'error', file: 'theme_config.json', message: 'Not found. This is the core visual identity config — your app needs it. Create app/config/theme_config.json.' });
-
-  if (navResult.data) results.push(...validateNavigation(navResult.data));
-  else if (navResult.missing) results.push({ level: 'info', file: 'navigation_config.json', message: 'Not found — the core shell will load; module routes may still arrive from backend navigation.' });
+  else if (themeResult.missing) results.push({ level: 'error', file: 'theme_config.json', message: 'Not found. This is the core visual identity config — your app needs it. Create platform/config/theme_config.json.' });
 
   // Auth is now validated as part of app.json (no separate auth.json)
   // validateAppConfig handles the auth sub-section internally.

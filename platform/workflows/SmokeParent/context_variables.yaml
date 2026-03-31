@@ -1,0 +1,69 @@
+definitions:
+  mfj_smoke_results:
+    type: object
+    description: Merged payload injected by the MFJ fan-in step.
+    source:
+      type: state
+      default: null
+
+  smoke_presented_summary:
+    type: string
+    description: Final summary captured after resume consumption.
+    source:
+      type: state
+      default: null
+
+  _mfj_resume_pending:
+    type: boolean
+    description: Runtime resume pending flag for MFJ fan-in.
+    source:
+      type: state
+      default: false
+
+  _mfj_resume_target_agent:
+    type: string
+    description: Runtime resume target agent.
+    source:
+      type: state
+      default: null
+
+  _mfj_resume_entry_agent:
+    type: string
+    description: Runtime resume entry agent.
+    source:
+      type: state
+      default: null
+
+  _mfj_resume_nonce:
+    type: string
+    description: Runtime resume nonce for idempotent consumption.
+    source:
+      type: state
+      default: null
+
+  _mfj_resume_consumed_nonce:
+    type: string
+    description: Resume nonce consumed by the presenter tool.
+    source:
+      type: state
+      default: null
+
+agents:
+  PlannerAgent:
+    variables: []
+
+  ResumeRouterAgent:
+    variables:
+      - _mfj_resume_pending
+      - _mfj_resume_target_agent
+      - _mfj_resume_nonce
+      - _mfj_resume_consumed_nonce
+
+  PresenterAgent:
+    variables:
+      - mfj_smoke_results
+      - smoke_presented_summary
+      - _mfj_resume_pending
+      - _mfj_resume_target_agent
+      - _mfj_resume_nonce
+      - _mfj_resume_consumed_nonce

@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/stream/handlers/__init__.py
+# FILE: mozaiksai/core/workflow/stream/handlers/__init__.py
 # DESCRIPTION: Event handler implementations for AG2 events
 # ==============================================================================
 

@@ -1,0 +1,47 @@
+# JokeFactory Structured Outputs
+# Runtime uses these typed models for deterministic validation.
+
+registry:
+  JokeWriterAgent: JokeCollection
+  JokeCriticAgent: JokeRating
+
+models:
+  JokeItem:
+    type: model
+    fields:
+      text:
+        type: str
+        description: The full joke text.
+      style:
+        type: str
+        description: The requested joke style.
+      topic:
+        type: str
+        description: The requested joke topic.
+
+  JokeCollection:
+    type: model
+    fields:
+      jokes:
+        type: list
+        items: JokeItem
+        description: Ordered list of generated jokes.
+      count:
+        type: int
+        description: Number of jokes returned.
+
+  JokeRating:
+    type: model
+    fields:
+      joke_index:
+        type: int
+        description: Index of the joke being rated.
+      rating:
+        type: int
+        description: Rating from 1 to 5.
+      emoji_rating:
+        type: str
+        description: Emoji representation of the rating.
+      feedback:
+        type: str
+        description: Brief feedback comment for the joke.

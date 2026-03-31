@@ -5,12 +5,12 @@ Mozaiks.
 
 The rewrite adds one boundary that must stay explicit:
 
-- app substrate behavior
+- app backend behavior
 - AI workflow behavior
 
 ## The Five Ownership Zones
 
-### 1. App substrate core
+### 1. App backend core
 
 Owns generic non-AI application capabilities:
 
@@ -80,9 +80,9 @@ Its main job is to turn intent into:
 
 Owns application-specific declaratives:
 
-- substrate model
+- app-backend model
 - modules
-- automation routes
+- workflow triggers
 - workflows
 - shell composition
 
@@ -102,12 +102,12 @@ meaning.
 - workflow route selection
 - run and resume execution
 
-This is the boundary that prevents the non-AI substrate from becoming a hidden
+This is the boundary that prevents the non-AI runtime from becoming a hidden
 workflow engine.
 
-## What Belongs in the App Substrate
+## What Belongs in the App App backend
 
-A feature belongs in the substrate if it is primarily about:
+A feature belongs in the app backend if it is primarily about:
 
 - durable business state
 - persistent product surfaces
@@ -116,7 +116,7 @@ A feature belongs in the substrate if it is primarily about:
 - platform services such as notifications or settings
 
 If the feature should still make sense with AI turned off, it probably starts in
-the substrate.
+the app backend.
 
 ## What Belongs in the AI Runtime
 
@@ -166,7 +166,7 @@ runtime architecture.
 
 ## Decision Test
 
-Put it in the substrate if:
+Put it in the app backend if:
 
 - it is a fact about app state or a deterministic app action
 
@@ -194,3 +194,4 @@ Keep it in AG2 if:
 - [workflow-architecture.md](workflow-architecture.md)
 - [event-system-architecture.md](event-system-architecture.md)
 - [app-bundle-declaratives.md](app-bundle-declaratives.md)
+

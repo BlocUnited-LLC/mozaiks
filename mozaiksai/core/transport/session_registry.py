@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: session_registry.py
+# FILE: mozaiksai/core/transport/session_registry.py
 # DESCRIPTION: Tracks multiple workflow contexts per WebSocket connection
 # ==============================================================================
 

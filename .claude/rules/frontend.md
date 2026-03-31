@@ -25,9 +25,7 @@ Prefer:
 
 When working in `platform/config/`:
 - keep startup and workflow boot behavior in `ai.json`
-- keep landing routes and shell navigation in `navigation_config.json`
 - keep visual shell state in `theme_config.json`
-- keep module route metadata in `module_registry.json`
 
 ## UI Editing Rules
 

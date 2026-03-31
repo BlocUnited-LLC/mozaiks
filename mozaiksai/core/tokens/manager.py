@@ -30,16 +30,6 @@ class TokenManager:
     """
 
     @staticmethod
-    async def ensure_can_start_chat(  # noqa: D401
-        user_id: str,
-        enterprise_id: str,
-        workflow_name: str,
-        persistence_manager: Any,
-    ) -> Dict[str, Any]:
-        """Legacy compatibility shim: runtime never gates chat start."""
-        return {"allowed": True}
-
-    @staticmethod
     async def emit_usage_delta(
         *,
         chat_id: str,

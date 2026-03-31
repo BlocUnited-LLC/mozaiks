@@ -10,12 +10,12 @@ typed planning contracts during build.
 ## Why This Folder Exists
 
 The workflow/runtime docs explain AI execution behavior. They do not fully
-cover the non-AI substrate derivation path.
+cover the non-AI app derivation path.
 
 This folder closes that gap by defining:
 
 - how CRUD and page logic are planned
-- how domain events are emitted from substrate actions
+- how domain events are emitted from app actions
 - how event routes trigger workflows without leaking workflow names into
   `mozaikscore`
 - which stubs are generated and what strict signatures they must follow
@@ -33,8 +33,8 @@ These development specs were derived from:
 The archived docs are used as derivation style input, not as canonical runtime
 file contracts.
 
-## Documents
+## Status
 
-- [Substrate UI Planning Spec](./substrate-ui-planning-spec.md)
-- [Substrate UI Dependency Matrix](./substrate-ui-dependency-matrix.md)
-
+These development-stage planning docs are being rewritten around the current
+app-backend plus workflow-trigger model. No additional development specs in
+this folder are considered canonical right now.

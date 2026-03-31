@@ -7,35 +7,31 @@
 
 ## Purpose
 
-This document summarizes the current declarative runtime pattern in this repo.
+This document summarizes the declarative runtime pattern in this repo.
 
 It answers a practical question:
 
-"What configuration files does the runtime actually consume today, and which
-parts of the system are still declarative versus code-driven?"
+"What configuration files does the runtime actually consume, and which
+parts of the system are declarative versus code-driven?"
 
 This is not the primary contract doc.
-Use it as a map of the current implementation shape.
+Use it as a map of the implementation shape.
 
 ---
 
-## Declarative Families In Use Today
+## Declarative Families In Use
 
-The runtime currently consumes these declarative families under `platform/`:
+The repo uses these declarative families under `platform/`:
 
 - `platform/app.json`
 - `platform/config/ai.json`
-- `platform/config/navigation_config.json`
 - `platform/config/theme_config.json`
-- `platform/config/module_registry.json`
-- `platform/config/notifications_config.json`
-- `platform/config/settings_config.json`
-- `platform/config/subscription_config.json`
+- `platform/pages/{page}/page.json`
 - `platform/workflows/_pack/workflow_graph.json`
 - `platform/workflows/{workflow}/**`
 - `platform/modules/{module}/module.json`
 
-The most mature declarative surface today is still the workflow layer.
+The most mature declarative surface is the workflow layer.
 
 ---
 
@@ -43,22 +39,19 @@ The most mature declarative surface today is still the workflow layer.
 
 ### 1. App/config loading
 
-Current config loading is split across:
-
-- `mozaikscore/core/config_loader.py`
-- `mozaiksai/core/workflow/workflow_manager.py`
-
-These loaders currently project declarative config into runtime-facing metadata.
+App-level config is split between app-shell concerns and workflow-runtime bootstrap.
+The workflow runtime consumes the pieces it needs through
+`mozaiksai/core/workflow/workflow_manager.py`.
 
 Examples:
 
 - `ai.json` defines app-level AI bootstrap
 - `workflow_manager` projects `workflows.entry_point` into workflow configs
-- `config_loader` projects `chat.startup_mode` into the shell/nav response
+- app-shell consumers project chat and navigation settings into frontend state
 
 ### 2. Workflow loading
 
-Current workflow declaratives are loaded from:
+Workflow declaratives are loaded from:
 
 - `platform/workflows/{workflow}/orchestrator.yaml`
 - `agents.yaml`
@@ -78,40 +71,41 @@ Primary loader:
 
 Modules are declared under:
 
-- `platform/config/module_registry.json`
 - `platform/modules/{module}/module.json`
 
-Primary loader:
+These are app-backend or app-shell surfaces, not core `mozaiksai` runtime
+contracts.
 
-- `mozaikscore/core/module_manager.py`
+### 4. Page loading
 
-### 4. Event-facing declaratives
+Pages are declared under:
 
-Substrate-level config still includes:
+- `platform/pages/{page}/page.json`
 
-- `notifications_config.json`
-- `settings_config.json`
-- `subscription_config.json`
+These are app-shell composition surfaces, not core `mozaiksai` runtime
+contracts.
 
-These are consumed by mozaikscore managers and related API routes rather than
-the workflow engine itself.
+### 5. Event-facing declaratives
+
+Event-facing config is handled by external app backends (greenfield templates)
+rather than the runtime itself.
 
 ---
 
 ## What Is Declarative vs Code-Driven
 
-### Declarative today
+### Declarative
 
 - workflow structure
 - workflow prompts/agents
 - handoffs
 - structured outputs
 - UI tool metadata
-- shell/theme/module registration
+- shell/theme/page/adapter registration
 - app-level AI startup behavior
 - subscription/settings/notification config
 
-### Still code-driven today
+### Code-driven
 
 - module backend behavior in `handler.py`
 - workflow tool implementation in `tools/*.py`
@@ -122,12 +116,12 @@ the workflow engine itself.
 
 That last point is the important gap:
 
-Mozaiks is declarative-first for workflows, but not yet equally declarative for
+Mozaiks is declarative-first for workflows, but not equally declarative for
 entities, views, actions, and policies.
 
 ---
 
-## The Current Design Guardrails
+## Design Guardrails
 
 1. Keep workflow behavior declarative when it can be expressed in bundle files.
 2. Keep runtime internals in code, not in app bundles.
@@ -136,9 +130,9 @@ entities, views, actions, and policies.
 
 ---
 
-## What This Means Architecturally
+## Architecture Notes
 
-The current repo is in a transitional but coherent state:
+The repo is workflow-declarative first:
 
 - strong workflow declaratives
 - decent shell/module declaratives
@@ -157,4 +151,5 @@ See:
 
 - [app-bundle-declaratives.md](../foundations/app-bundle-declaratives.md)
 - [canonical-app-structure.md](../foundations/canonical-app-structure.md)
+
 

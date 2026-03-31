@@ -20,7 +20,15 @@
       "Bash(curl:*)",
       "Bash(cmd /c \"taskkill /F /PID 152796\")",
       "Bash(python run_server.py:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(del mozaikscorecorecross_substrate_bridge.py)",
+      "Bash(Remove-Item -Recurse -Force \"c:\\\\Users\\\\mbari\\\\OneDrive\\\\Desktop\\\\BlocUnited\\\\BlocUnited Code\\\\mozaiks\\\\docs\\\\guides\\\\adding-workflows\")",
+      "Bash(Remove-Item -Recurse -Force \"c:\\\\Users\\\\mbari\\\\OneDrive\\\\Desktop\\\\BlocUnited\\\\BlocUnited Code\\\\mozaiks\\\\docs\\\\guides\\\\custom-brand-integration\")",
+      "Bash(git checkout:*)",
+      "Bash(python run_test.py:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(npx kill-port:*)",
+      "Bash(taskkill:*)"
     ]
   }
 }

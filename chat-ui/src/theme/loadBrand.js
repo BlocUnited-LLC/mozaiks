@@ -27,7 +27,7 @@ export async function loadBrand() {
   const logoFile   = declared.logo             || 'logo.svg';
   const fgFile     = declared.wordmark         || null;
   const faviconFile= declared.favicon          || 'favicon.ico';
-  const bgFile     = declared.backgroundImage  || null;
+  const bgFile     = declared.chatbackgroundImage  || null;
   const loadingFile= declared.loadingIcon      || null;
 
   function resolveAsset(file) { return file ? `${ASSETS_PATH}/${file}` : null; }
@@ -36,7 +36,7 @@ export async function loadBrand() {
     logo:            resolveAsset(logoFile),
     wordmark:        fgFile && await assetExists(`${ASSETS_PATH}/${fgFile}`)       ? `${ASSETS_PATH}/${fgFile}`        : null,
     favicon:         await assetExists(`${ASSETS_PATH}/${faviconFile}`)             ? `${ASSETS_PATH}/${faviconFile}`   : resolveAsset(logoFile),
-    backgroundImage: bgFile && await assetExists(`${ASSETS_PATH}/${bgFile}`)       ? `${ASSETS_PATH}/${bgFile}`        : null,
+    chatbackgroundImage: bgFile && await assetExists(`${ASSETS_PATH}/${bgFile}`)       ? `${ASSETS_PATH}/${bgFile}`        : null,
     loadingIcon:     loadingFile && await assetExists(`${ASSETS_PATH}/${loadingFile}`) ? `${ASSETS_PATH}/${loadingFile}` : null,
   };
 
@@ -203,8 +203,8 @@ export function applyBrand(brand) {
   faviconEl.href = brand.assets?.favicon || brand.assets?.logo || '';
 
   // ─── Asset CSS variables ──────────────────────────────────────────────────
-  if (brand.assets?.backgroundImage) {
-    root.style.setProperty('--brand-bg-url', `url("${brand.assets.backgroundImage}")`);
+  if (brand.assets?.chatbackgroundImage) {
+    root.style.setProperty('--brand-bg-url', `url("${brand.assets.chatbackgroundImage}")`);
   } else {
     root.style.removeProperty('--brand-bg-url');
   }

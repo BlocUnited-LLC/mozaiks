@@ -1,0 +1,76 @@
+# JokeFactory Context Variables
+# Tracks workflow state and user preferences.
+
+definitions:
+  joke_style:
+    type: string
+    description: >
+      The style of jokes requested by the user (puns, dad jokes, one-liners,
+      knock-knock, observational, etc.)
+    source:
+      type: state
+      default: null
+
+  joke_topic:
+    type: string
+    description: >
+      The topic or theme for the jokes (technology, animals, food, work, etc.)
+    source:
+      type: state
+      default: null
+
+  joke_count:
+    type: integer
+    description: Number of jokes to generate (1-5)
+    source:
+      type: state
+      default: 3
+
+  host_complete:
+    type: boolean
+    description: >
+      True once JokeHostAgent has gathered all preferences from the user.
+      Triggers handoff to JokeWriterAgent.
+    source:
+      type: state
+      default: false
+      triggers:
+        - type: agent_text
+          agent: JokeHostAgent
+          ui_hidden: true
+          match:
+            equals: NEXT
+
+  jokes_written:
+    type: array
+    description: Array of jokes produced by JokeWriterAgent for the current session
+    source:
+      type: computed
+      default: []
+
+  session_joke_count:
+    type: integer
+    description: Running count of total jokes generated in this session
+    source:
+      type: state
+      default: 0
+
+agents:
+  JokeHostAgent:
+    variables:
+      - joke_style
+      - joke_topic
+      - joke_count
+      - host_complete
+
+  JokeWriterAgent:
+    variables:
+      - joke_style
+      - joke_topic
+      - joke_count
+      - jokes_written
+
+  JokeCriticAgent:
+    variables:
+      - jokes_written
+      - session_joke_count

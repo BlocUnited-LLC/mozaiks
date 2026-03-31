@@ -1,5 +1,5 @@
 param(
-  [string]$Repo = "",                       # e.g. BlocUnited-LLC/MozaiksAI
+  [string]$Repo = "",                       # e.g. BlocUnited-LLC/mozaiksai
   [string]$ResourceGroup = "mozaiksai-docs-rg",
   [string]$Location = "eastus2",
   [string]$StaticWebAppName = "",

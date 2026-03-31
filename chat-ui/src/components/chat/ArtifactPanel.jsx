@@ -1,6 +1,10 @@
 import React from 'react';
 import UIToolRenderer from '../../core/ui/UIToolRenderer';
 import ArtifactActionsBar from '../actions/ArtifactActionsBar';
+import {
+  applyBrandImageFallback,
+  getBrandLogoSrc,
+} from '../../styles/brandAssets';
 
 const ArtifactPanel = ({
   onClose,
@@ -12,10 +16,12 @@ const ArtifactPanel = ({
   onExitView = null,
   onArtifactAction = null,
   actionStatusMap = null,
+  chatTheme = null,
   floatingWidget = null,
 }) => {
   const isMobileEmbedded = Boolean(isMobile && isEmbedded);
   const isViewSurface = Boolean(viewMode);
+  const brandLogoSrc = getBrandLogoSrc(chatTheme);
 
   const containerClasses = isMobileEmbedded
     ? 'flex flex-col w-full h-full min-h-0'
@@ -61,13 +67,10 @@ const ArtifactPanel = ({
               <div className="flex flex-1 items-center justify-center min-h-full md:min-h-[500px]">
                 <div className="w-24 h-24 sm:w-32 sm:h-32 md:w-40 md:h-40 bg-gradient-to-br from-[var(--color-primary)]/20 to-[var(--color-secondary)]/20 rounded-2xl sm:rounded-3xl border-2 border-[var(--color-primary-light)]/50 flex items-center justify-center backdrop-blur-sm shadow-2xl">
                   <img
-                    src="/assets/mozaik_logo.svg"
+                    src={brandLogoSrc}
                     alt="Mozaiks Logo"
                     className="w-16 h-16 sm:w-20 sm:h-20 md:w-28 md:h-28"
-                    onError={(e) => {
-                      e.target.onerror = null;
-                      e.target.src = "/assets/mozaik.png";
-                    }}
+                    onError={applyBrandImageFallback}
                   />
                 </div>
               </div>

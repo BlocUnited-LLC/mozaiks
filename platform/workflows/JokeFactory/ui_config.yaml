@@ -1,0 +1,13 @@
+# JokeFactory UI Configuration
+
+visual_agents:
+  - JokeHostAgent
+  - JokeWriterAgent
+  - JokeCriticAgent
+  - user
+
+# Chat pane customization
+chat_pane_agents:
+  - JokeHostAgent
+  - JokeWriterAgent
+  - JokeCriticAgent

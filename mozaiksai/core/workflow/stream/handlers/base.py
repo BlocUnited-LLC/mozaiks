@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/stream/handlers/base.py
+# FILE: mozaiksai/core/workflow/stream/handlers/base.py
 # DESCRIPTION: Abstract base class for AG2 event handlers
 # ==============================================================================
 

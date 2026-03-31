@@ -1,7 +1,7 @@
 # ============================================================================
-# FILE: core/workflow/agent_tools.py
-# DESCRIPTION:
-#   Agent tool function loading from workflows/<flow>/tools.json
+# FILE: mozaiksai/core/workflow/agents/tools.py
+# DESCRIPTION: Loads workflow-declared agent tools and binds AG2-compatible callables with context support.
+#   Agent tool function loading from workflows/<flow>/tools.yaml
 #   Loads ALL tools (Agent_Tool and UI_Tool) as agent functions.
 #   UI_Tools get special handling during execution but are still bound to agents.
 #   
@@ -13,7 +13,7 @@
 #   Available in ContextVariables:
 #   - workflow_name, app_id, chat_id, user_id (auto-injected by orchestrator)
 #   - concept_overview, schema_overview (loaded by context_variables.py)
-#   - Any other workflow-specific data from context_variables.json
+#   - Any other workflow-specific data from context_variables.yaml
 #   
 #   NOTE: UI interaction handling logic lives in ui_tools.py.
 # ============================================================================
@@ -25,10 +25,11 @@ import sys
 import inspect
 from functools import wraps
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
-import json
+from typing import Any, Callable, Dict, List, Optional
+import yaml
 
 from ..workflow_manager import workflow_manager
+from ..declarative import parse_tools_config
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +208,7 @@ def _wrap_with_validation(
 def load_agent_tool_functions(workflow_name: str) -> Dict[str, List[Callable]]:
     """Discover and import per-agent tool functions for a workflow.
 
-    Reads workflows/<workflow_name>/tools.json and returns a mapping of
+    Reads workflows/<workflow_name>/tools.yaml and returns a mapping of
     agent_name -> list[callable] so callers can pass functions=... to
     ConversableAgent at construction time.
 
@@ -224,20 +225,22 @@ def load_agent_tool_functions(workflow_name: str) -> Dict[str, List[Callable]]:
     mapping: Dict[str, List[Callable]] = {}
     base_dir = Path(str(workflow_manager.workflows_base_path)) / workflow_name
     tools_yaml_path = base_dir / 'tools.yaml'
-    
-    if not tools_yaml_path.exists():
+
+    data: Dict[str, Any] = {}
+    if tools_yaml_path.exists():
+        try:
+            raw = yaml.safe_load(tools_yaml_path.read_text(encoding='utf-8')) or {}
+            data = parse_tools_config(raw)
+        except Exception as yerr:
+            logger.warning(f"[TOOLS] Failed to parse tools.yaml for '{workflow_name}': {yerr}")
+
+    if not data:
         logger.debug(f"[TOOLS] No tools.yaml for workflow '{workflow_name}'")
         return mapping
-    
-    try:
-        import yaml
-        data = yaml.safe_load(tools_yaml_path.read_text(encoding='utf-8')) or {}
-    except Exception as jerr:
-        logger.warning(f"[TOOLS] Failed to parse tools.yaml for '{workflow_name}': {jerr}")
-        return mapping
+
     entries = data.get('tools', []) or []
     if not isinstance(entries, list):
-        logger.warning(f"[TOOLS] tools.json 'tools' section not a list in '{workflow_name}'")
+        logger.warning(f"[TOOLS] Tool config 'tools' section is not a list in '{workflow_name}'")
         return mapping
     # Discover which agents have structured outputs for schema enforcement
     try:

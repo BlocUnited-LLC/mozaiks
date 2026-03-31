@@ -11,25 +11,25 @@ It does not define chat startup defaults or workflow entry selection.
 
 ### `platform/app.json`
 
-Owns the app-facing auth declaration:
+Owns the app-facing auth declaration and client-target manifest:
 
-- auth provider
-- Keycloak authority
-- realm
-- client ID
-- web auth provider selection
-- mobile auth settings
-- native redirect configuration
-- requested native scopes
+- `authRequired`
+- `admins`
+- target enablement under `targets.*`
+- optional advanced `auth` overrides
+- optional advanced `mobile.auth` overrides
 
 In the current manifest shape, this means:
 
-- `auth.*` owns the primary app auth declaration for web/backend defaults
-- `platforms.mobile.auth.*` owns mobile-native auth behavior
+- `authRequired` expresses whether the app requires sign-in
+- `admins` expresses the author-facing default admin list
+- `auth.*` is advanced override territory
+- `mobile.auth.*` is advanced native/mobile auth override territory
+- `targets.*` is the browser/mobile target declaration
 
 `platform/app.json` does not own:
 
-- `chat.startup_mode`
+- `chat.chat_startup_mode`
 - `workflows.entry_point`
 
 Those belong in `platform/config/ai.json`.
@@ -38,7 +38,7 @@ Those belong in `platform/config/ai.json`.
 
 Owns app-level AI boot defaults such as:
 
-- `chat.startup_mode`
+- `chat.chat_startup_mode`
 - `workflows.entry_point`
 
 These settings affect how the app boots into chat/workflow mode.
@@ -46,12 +46,15 @@ They do not define authentication.
 
 ### Environment Variables
 
-Own the deployment-time backend overrides, such as:
+Own deployment-time backend overrides and local dev auth convenience, such as:
 
 - `MOZAIKS_OIDC_AUTHORITY`
 - `AUTH_AUDIENCE`
 - `AUTH_REQUIRED_SCOPE`
 - `AUTH_ROLES_CLAIM`
+- `VITE_DEV_AUTH_MODE`
+- `VITE_DEV_AUTOLOGIN`
+- `VITE_MOCK_MODE`
 
 ### `platform/brand/login-theme/`
 
@@ -91,7 +94,7 @@ Key points:
 - config is passed in from the host app
 - no separate `auth.json` is used
 - Keycloak uses Authorization Code + PKCE flow in the browser
-- native/mobile auth selection is declared in `platform/app.json -> platforms.mobile.auth`
+- native/mobile auth selection is declared in `platform/app.json -> mobile.auth`
 
 ## Backend
 
@@ -122,24 +125,16 @@ Use this order of operations:
 Do not reintroduce:
 
 - `auth.json`
-- `brand/public/auth.json`
 - split frontend/backend auth files for the same app
 
-Do not move `entry_point` or `chat.startup_mode` into `platform/app.json`.
+Do not move `entry_point` or `chat.chat_startup_mode` into `platform/app.json`.
 
 ## Minimal Example
 
 ```json
 {
-  "auth": {
-    "provider": "keycloak",
-    "keycloak": {
-      "authority": "http://localhost:8080",
-      "realm": "mozaiks",
-      "clientId": "mozaiks-app",
-      "themeName": "mozaiks"
-    }
-  }
+  "authRequired": true,
+  "admins": ["owner@example.com"]
 }
 ```
 
@@ -148,7 +143,7 @@ Separate app-level boot example:
 ```json
 {
   "chat": {
-    "startup_mode": "ask"
+    "chat_startup_mode": "ask"
   },
   "workflows": {
     "entry_point": "GreenRoom"
@@ -162,18 +157,42 @@ For mobile:
 
 ```json
 {
-  "platforms": {
-    "mobile": {
-      "auth": {
-        "provider": "token",
-        "redirectScheme": "myapp",
-        "redirectPath": "oauthredirect",
-        "scopes": ["openid", "profile", "email"]
-      }
+  "mobile": {
+    "auth": {
+      "provider": "token",
+      "redirectScheme": "myapp",
+      "redirectPath": "oauthredirect",
+      "scopes": ["openid", "profile", "email"]
     }
   }
 }
 ```
+
+For web, keep the target declaration minimal:
+
+```json
+{
+  "targets": {
+    "web": true
+  }
+}
+```
+
+For desktop, do not over-specify config until a real desktop client exists.
+Today this is usually enough:
+
+```json
+{
+  "targets": {
+    "desktop": false
+  }
+}
+```
+
+That field currently expresses intent, not a full desktop runtime contract.
+
+For the broader manifest model, read
+[App Manifest And Platform Targets](foundations/app-manifest-and-platform-targets.md).
 
 ## Verification
 

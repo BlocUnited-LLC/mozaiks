@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/streaming/openai_streaming_wrapper.py
+# FILE: mozaiksai/core/workflow/streaming/openai_streaming_wrapper.py
 # DESCRIPTION: OpenAI wrapper that emits streaming chunks to WebSocket
 # ==============================================================================
 
@@ -9,8 +9,8 @@ OpenAI Streaming Wrapper
 Wraps the OpenAI client to intercept streaming responses and emit
 individual tokens to the WebSocket transport in real-time.
 
-This enables typewriter effect in the frontend while maintaining
-compatibility with AG2's aggregated response handling.
+This enables typewriter effect in the frontend while preserving
+AG2's aggregated response handling.
 
 Usage:
     from mozaiksai.core.workflow.streaming import install_streaming_wrapper

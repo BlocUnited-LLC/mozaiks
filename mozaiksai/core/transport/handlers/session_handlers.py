@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/transport/handlers/session_handlers.py
+# FILE: mozaiksai/core/transport/handlers/session_handlers.py
 # DESCRIPTION: Handlers for session management (resume, artifact actions)
 # ==============================================================================
 from __future__ import annotations

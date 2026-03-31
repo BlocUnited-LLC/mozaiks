@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/transport/handlers/workflow_handlers.py
+# FILE: mozaiksai/core/transport/handlers/workflow_handlers.py
 # DESCRIPTION: Handlers for workflow start, switch, and batch operations
 # ==============================================================================
 from __future__ import annotations
@@ -102,12 +102,12 @@ async def handle_switch_workflow(
         except Exception:
             pass
         cfg = workflow_manager.get_config(str(active_context.workflow_name)) or {}
-        startup_mode = str(cfg.get("startup_mode", "AgentDriven")).strip().lower()
+        workflow_startup_mode = str(cfg.get("workflow_startup_mode", "AgentDriven")).strip().lower()
         has_native_seed = bool(
             str(cfg.get("initial_message_to_user") or cfg.get("initial_message") or "").strip()
         )
         existing_task = transport._background_tasks.get(target_chat_id_str)
-        if startup_mode == "userdriven" and has_native_seed:
+        if workflow_startup_mode == "userdriven" and has_native_seed:
             if not (existing_task and not existing_task.done()):
                 pm = transport._get_or_create_persistence_manager()
                 coll = await pm._coll()
@@ -185,7 +185,7 @@ async def handle_switch_workflow(
                 app_id=str(active_context.app_id),
                 last_client_index=-1,
                 send_event=send_event_wrapper,
-                startup_mode=cfg.get("startup_mode"),
+                workflow_startup_mode=workflow_startup_mode,
             )
             # Mark greeting as visible so orchestration_patterns.py suppresses the
             # register_reply greeting (prevents double message on mode switch)

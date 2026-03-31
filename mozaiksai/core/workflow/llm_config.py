@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 def _attach_autogen_cache(llm_config: Dict[str, Any]) -> None:
     """Attach an Autogen disk cache rooted in a writable location.
 
-    Autogen's legacy cache behavior uses cache_root='.cache', which can fail on
+    Autogen's default cache behavior uses cache_root='.cache', which can fail on
     Docker Desktop + bind mounts. Injecting a Cache object forces Autogen to use
     our explicit cache root instead.
     """
@@ -68,7 +68,7 @@ def _attach_autogen_cache(llm_config: Dict[str, Any]) -> None:
     cache_root = (
         os.getenv("MOZAIKS_AUTOGEN_CACHE_DIR")
         or os.getenv("AUTOGEN_CACHE_DIR")
-        or os.path.join(tempfile.gettempdir(), "mozaiksai_autogen_cache")
+        or os.path.join(tempfile.gettempdir(), "MozaiksAI_autogen_cache")
     )
 
     try:
@@ -324,8 +324,8 @@ async def get_llm_config(
 ) -> Tuple[Optional[Any], Dict[str, Any]]:
     """Build (or retrieve from cache) an LLM runtime config.
 
-    Returns a tuple (wrapper_placeholder, llm_config). The first element is kept for backward
-    compatibility with earlier callers but is always None; the second is the dict passed to
+    Returns a tuple (wrapper_placeholder, llm_config). The first element is
+    reserved and currently always None; the second is the dict passed to
     ConversableAgent.
     """
     cache_key = _build_llm_cache_key(

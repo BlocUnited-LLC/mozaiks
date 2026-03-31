@@ -1,9 +1,9 @@
 # ==============================================================================
-# FILE: persistence_manager.py
-# DESCRIPTION: 
+# FILE: mozaiksai/core/data/persistence/persistence_manager.py
+# DESCRIPTION: Mongo-backed persistence layer for chat sessions, indexes, and runtime usage tracking.
 # ==============================================================================
 
-"""Persistence layer for MozaiksAI workflows.
+"""Persistence layer for mozaiksai workflows.
 
 Clean implementation aligned with AG2 event system:
   * PersistenceManager: Mongo client + indexes (runtime-owned only)
@@ -35,9 +35,23 @@ except ImportError:
         pass
     class TextEvent:  # type: ignore[no-redef]
         pass
-from mozaiksai.core.workflow.outputs.structured import agent_has_structured_output, get_structured_output_model_fields
+# Lazy import to avoid circular dependency - see _format_message_for_storage
 
 logger = get_workflow_logger("persistence")
+
+
+def _has_index_with_keys(existing_indexes: List[Dict[str, Any]], expected_keys: List[tuple[str, int]]) -> bool:
+    """Return whether an equivalent index key pattern already exists."""
+    expected = list(expected_keys)
+    for idx in existing_indexes:
+        key_spec = idx.get("key")
+        if hasattr(key_spec, "items"):
+            try:
+                if list(key_spec.items()) == expected:
+                    return True
+            except Exception:
+                continue
+    return False
 
 
 def _resolve_agent_log_limit(env_key: str, default: Optional[int]) -> Optional[int]:
@@ -79,10 +93,11 @@ class PersistenceManager:
             self.client = get_mongo_client()
             try:
                 # Primary chat session collection (canonical)
-                coll = self.client["MozaiksAI"]["ChatSessions"]
+                coll = self.client["mozaiksai"]["ChatSessions"]
                 # Check if index already exists before creating
                 existing_indexes = await coll.list_indexes().to_list(length=None)
                 index_names = [idx["name"] for idx in existing_indexes]
+                app_workflow_created_keys = [("app_id", 1), ("workflow_name", 1), ("created_at", -1)]
                 
                 # Create app/workflow/created index if not exists
                 ent_wf_created_exists = any(
@@ -90,12 +105,12 @@ class PersistenceManager:
                     for name in index_names
                 )
                 if not ent_wf_created_exists:
-                    await coll.create_index([("app_id", 1), ("workflow_name", 1), ("created_at", -1)], name="cs_ent_wf_created")
+                    await coll.create_index(app_workflow_created_keys, name="cs_ent_wf_created")
                     logger.debug("Created app/workflow/created index")
 
                 # Canonical app/workflow/created index (new name)
-                if "cs_app_wf_created" not in index_names:
-                    await coll.create_index([("app_id", 1), ("workflow_name", 1), ("created_at", -1)], name="cs_app_wf_created")
+                if "cs_app_wf_created" not in index_names and not _has_index_with_keys(existing_indexes, app_workflow_created_keys):
+                    await coll.create_index(app_workflow_created_keys, name="cs_app_wf_created")
                     logger.debug("Created app/workflow/created index")
                 
                 # Create status index if not exists  
@@ -107,19 +122,20 @@ class PersistenceManager:
                 # were removed to reduce collection noise; WorkflowStats now holds
                 # live rollup documents (mon_ prefix) only, so no per-event index is needed.
 
-                general_coll = self.client["MozaiksAI"][_GENERAL_CHAT_COLLECTION]
+                general_coll = self.client["mozaiksai"][_GENERAL_CHAT_COLLECTION]
                 general_indexes = await general_coll.list_indexes().to_list(length=None)
                 general_index_names = [idx["name"] for idx in general_indexes]
+                app_user_created_keys = [("app_id", 1), ("user_id", 1), ("created_at", -1)]
                 if "gc_ent_user_created" not in general_index_names:
                     await general_coll.create_index(
-                        [("app_id", 1), ("user_id", 1), ("created_at", -1)],
+                        app_user_created_keys,
                         name="gc_ent_user_created",
                     )
                     logger.debug("Created general chat app/user index")
 
-                if "gc_app_user_created" not in general_index_names:
+                if "gc_app_user_created" not in general_index_names and not _has_index_with_keys(general_indexes, app_user_created_keys):
                     await general_coll.create_index(
-                        [("app_id", 1), ("user_id", 1), ("created_at", -1)],
+                        app_user_created_keys,
                         name="gc_app_user_created",
                     )
                     logger.debug("Created general chat app/user index")
@@ -127,20 +143,21 @@ class PersistenceManager:
                     await general_coll.create_index("status", name="gc_status")
                     logger.debug("Created general chat status index")
 
-                counter_coll = self.client["MozaiksAI"][_GENERAL_CHAT_COUNTER_COLLECTION]
+                counter_coll = self.client["mozaiksai"][_GENERAL_CHAT_COUNTER_COLLECTION]
                 counter_indexes = await counter_coll.list_indexes().to_list(length=None)
                 counter_names = [idx["name"] for idx in counter_indexes]
+                app_user_counter_keys = [("app_id", 1), ("user_id", 1)]
                 if "gc_counter_ent_user" not in counter_names:
                     await counter_coll.create_index(
-                        [("app_id", 1), ("user_id", 1)],
+                        app_user_counter_keys,
                         name="gc_counter_ent_user",
                         unique=True,
                     )
                     logger.debug("Created general chat counter unique index")
 
-                if "gc_counter_app_user" not in counter_names:
+                if "gc_counter_app_user" not in counter_names and not _has_index_with_keys(counter_indexes, app_user_counter_keys):
                     await counter_coll.create_index(
-                        [("app_id", 1), ("user_id", 1)],
+                        app_user_counter_keys,
                         name="gc_counter_app_user",
                         unique=True,
                     )
@@ -167,29 +184,29 @@ class AG2PersistenceManager:
     async def _coll(self):
         await self.persistence._ensure_client()
         assert self.persistence.client is not None, "Mongo client not initialized"
-        return self.persistence.client["MozaiksAI"]["ChatSessions"]
+        return self.persistence.client["mozaiksai"]["ChatSessions"]
 
     async def _workflow_stats_coll(self):
         await self.persistence._ensure_client()
         assert self.persistence.client is not None, "Mongo client not initialized"
-        coll = self.persistence.client["MozaiksAI"]["WorkflowStats"]
+        coll = self.persistence.client["mozaiksai"]["WorkflowStats"]
         if not getattr(self, "_workflow_stats_indexes_checked", False):
             await self._ensure_workflow_stats_indexes(coll)
         return coll
 
     async def _ensure_workflow_stats_indexes(self, coll):
-        """Drop legacy unique indexes that conflict with rollup documents."""
+        """Drop stale unique indexes that conflict with rollup documents."""
         try:
             existing = await coll.list_indexes().to_list(length=None)
-            legacy_index_names = {"ux_chat_seq", "ux_workflow_chat_seq"}
+            stale_index_names = {"ux_chat_seq", "ux_workflow_chat_seq"}
             for idx in existing:
                 name = idx.get("name")
-                if name in legacy_index_names:
+                if name in stale_index_names:
                     try:
                         await coll.drop_index(name)
-                        logger.info("Dropped legacy WorkflowStats index %s", name)
+                        logger.info("Dropped stale WorkflowStats index %s", name)
                     except Exception as drop_err:
-                        logger.warning("Failed to drop legacy WorkflowStats index %s: %s", name, drop_err)
+                        logger.warning("Failed to drop stale WorkflowStats index %s: %s", name, drop_err)
             self._workflow_stats_indexes_checked = True
         except Exception as idx_err:
             logger.warning("WorkflowStats index check failed: %s", idx_err)
@@ -199,12 +216,12 @@ class AG2PersistenceManager:
     async def _general_coll(self):
         await self.persistence._ensure_client()
         assert self.persistence.client is not None, "Mongo client not initialized"
-        return self.persistence.client["MozaiksAI"][_GENERAL_CHAT_COLLECTION]
+        return self.persistence.client["mozaiksai"][_GENERAL_CHAT_COLLECTION]
 
     async def _general_counter_coll(self):
         await self.persistence._ensure_client()
         assert self.persistence.client is not None, "Mongo client not initialized"
-        return self.persistence.client["MozaiksAI"][_GENERAL_CHAT_COUNTER_COLLECTION]
+        return self.persistence.client["mozaiksai"][_GENERAL_CHAT_COUNTER_COLLECTION]
 
     async def get_or_assign_cache_seed(
         self,
@@ -492,7 +509,7 @@ class AG2PersistenceManager:
             base_doc = await coll.find_one({"_id": chat_id, **build_app_scope_filter(resolved_app_id)}, {"created_at": 1})
             created_at = base_doc.get("created_at") if base_doc else None
             if isinstance(created_at, datetime) and created_at.tzinfo is None:
-                # Mongo can return naive datetimes when tz_aware=False; treat as UTC for compatibility.
+                # Mongo can return naive datetimes when tz_aware=False; treat them as UTC.
                 created_at = created_at.replace(tzinfo=UTC)
             dur = float((now - created_at).total_seconds()) if isinstance(created_at, datetime) else 0.0
             res = await coll.update_one({"_id": chat_id, **build_app_scope_filter(resolved_app_id)}, {"$set": {
@@ -997,8 +1014,8 @@ class AG2PersistenceManager:
                     from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
                     cfg = workflow_manager.get_config(str(wf_name)) or {}
-                    startup_mode = str(cfg.get("startup_mode") or "").strip().lower()
-                    if startup_mode == "userdriven":
+                    workflow_startup_mode = str(cfg.get("workflow_startup_mode") or "").strip().lower()
+                    if workflow_startup_mode == "userdriven":
                         logger.debug(
                             "[SAVE_EVENT] Skipping synthetic UserDriven trigger for chat_id=%s workflow=%s",
                             chat_id,
@@ -1050,6 +1067,8 @@ class AG2PersistenceManager:
                 msg["agent_name"] = "user"
             # Structured output attachment (if agent registered for structured outputs in workflow)
             try:
+                # Lazy import to avoid circular dependency
+                from mozaiksai.core.workflow.outputs.structured import agent_has_structured_output, get_structured_output_model_fields
                 if role == "assistant" and wf_name and raw_name and agent_has_structured_output(wf_name, raw_name):
                     # Attempt to parse JSON from cleaned content
                     parsed = self._extract_json_from_text(content_str, agent_name=raw_name)
@@ -1630,7 +1649,7 @@ class AG2PersistenceManager:
         
         Args:
             chat_id: Chat session identifier
-            app_id: App identifier (legacy: app_id)
+            app_id: App identifier
             event_id: UI tool event identifier (for correlation)
             metadata: UI tool metadata (ui_tool_id, display, payload, etc.)
         """
@@ -1709,7 +1728,7 @@ class AG2PersistenceManager:
         
         Args:
             chat_id: Chat session identifier
-            app_id: App identifier (legacy: app_id)
+            app_id: App identifier
             event_id: UI tool event identifier (for correlation)
             completed: Whether the tool interaction is complete
             status: Completion status ("completed", "dismissed", etc.)

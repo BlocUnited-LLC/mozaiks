@@ -35,10 +35,10 @@ The mode is stored in `ChatUIContext` as `conversationMode` and persisted to `lo
 The bootstrap effect in ChatPage determines the starting mode using this priority:
 
 1. **URL query param** — `?mode=ask` or `?mode=workflow` always wins (used by widget navigation and deep links)
-2. **`startup_mode` from `platform/config/ai.json`** — `"ask"` or `"workflow"`. This is the app-level default that controls what the user sees when they first open the app
-3. **Fallback** — if `startup_mode` is not set, the app defaults to `workflow`
+2. **`chat_startup_mode` from `platform/config/ai.json`** — `"ask"` or `"workflow"`. This is the app-level default that controls what the user sees when they first open the app
+3. **Fallback** — if `chat_startup_mode` is not set, the app defaults to `workflow`
 
-The current platform example ships with `startup_mode: "ask"` during local testing, so the app opens in ask mode. The user can toggle to workflow mode at any time, and the configured entry-point workflow, currently `GreenRoom`, will start automatically.
+The current platform example ships with `chat_startup_mode: "ask"` during local testing, so the app opens in ask mode. The user can toggle to workflow mode at any time, and the configured entry-point workflow, currently `GreenRoom`, will start automatically.
 
 ### Mode changes after load
 
@@ -64,14 +64,14 @@ The toggle is always safe to click. It either picks up where the user left off o
 
 ---
 
-## How `startup_mode` and `entry_point` relate
+## How `chat_startup_mode` and `entry_point` relate
 
 These are two separate settings that work together:
 
-- **`startup_mode`** (in `platform/config/ai.json`) — decides which **mode** the ChatPage opens in. It doesn't know or care about specific workflows.
+- **`chat_startup_mode`** (in `platform/config/ai.json`) — decides which **mode** the ChatPage opens in. It doesn't know or care about specific workflows.
 - **`entry_point`** (configured in `platform/config/ai.json`) — decides which **workflow** runs when the app needs one. It doesn't know or care about modes.
 
-The connection: when `startup_mode` is `"ask"` and the user toggles to workflow mode, the app needs to know *which* workflow to start — that's where `entry_point` comes in. When `startup_mode` is `"workflow"`, the entry_point workflow connects immediately on load.
+The connection: when `chat_startup_mode` is `"ask"` and the user toggles to workflow mode, the app needs to know *which* workflow to start — that's where `entry_point` comes in. When `chat_startup_mode` is `"workflow"`, the entry_point workflow connects immediately on load.
 
 ---
 

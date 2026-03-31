@@ -19,9 +19,9 @@ Consumes:
 
 - workflow runtime stream
 - shell push events
-- HTTP APIs from substrate and AI runtime
+- HTTP APIs from app backend and AI runtime
 
-### Process 2: App substrate
+### Process 2: App backend
 
 Owns:
 
@@ -33,24 +33,21 @@ Current implementation zone:
 
 - `mozaikscore/`
 
-### Process 3: Broker or ingress boundary
+### Process 3: Automation ingress boundary
 
-Owns transport for domain facts between the substrate and AI runtime.
+Owns transport for domain facts between the app backend and AI runtime.
 
-Target:
+Current transport:
 
-- NATS with FastStream
-
-Transitional option:
-
-- HTTP ingress to the AI runtime
+- in-process ingress in unified deployment
+- HTTP ingress to the AI runtime in split local development
 
 ### Process 4: AI runtime
 
 Owns:
 
 - workflow execution
-- automation route matching
+- workflow trigger matching
 - runtime control plane
 - artifacts
 - runtime stream delivery
@@ -71,34 +68,34 @@ Owns:
 
 | Transport | Direction | Purpose |
 | --- | --- | --- |
-| HTTP | frontend to substrate | app and module APIs |
+| HTTP | frontend to app backend | app and module APIs |
 | HTTP | frontend to AI runtime | chat and workflow APIs |
 | WebSocket | frontend to AI runtime | workflow runtime stream |
-| WebSocket push | substrate to frontend | shell push events |
-| NATS | substrate to AI runtime and subscribers | domain event mesh |
-| HTTP ingress | substrate to AI runtime | transitional domain event transport |
+| WebSocket push | app backend to frontend | shell push events |
+| In-process ingress | app backend to AI runtime | domain event mesh in unified deployment |
+| HTTP ingress | app backend to AI runtime | domain event mesh in split local development |
 
 ## Flow A: Plain App Interaction
 
 ```text
 user
   -> module or view
-  -> substrate action
+  -> app backend action
   -> database commit
   -> response to frontend
 ```
 
-This path may end here if no automation route applies.
+This path may end here if no workflow trigger applies.
 
 ## Flow B: Domain Event Triggers Automation
 
 ```text
 user or integration
-  -> substrate mutation
+  -> app backend mutation
   -> commit
   -> domain event emitted
-  -> broker or HTTP ingress
-  -> automation route matched
+  -> in-process or HTTP ingress
+  -> workflow trigger matched
   -> workflow run or resume
   -> runtime stream and artifacts
 ```
@@ -116,7 +113,7 @@ user
   -> optional artifacts or actions
 ```
 
-This path does not require a substrate event to exist first.
+This path does not require a app backend event to exist first.
 
 ## Flow D: Artifact Returns to App Surface
 
@@ -125,7 +122,7 @@ workflow
   -> artifact created or updated
   -> persistence
   -> module or view reads artifact
-  -> user continues through app substrate
+  -> user continues through app backend
 ```
 
 Artifacts are one of the clean bridges between the two halves of the system.
@@ -134,9 +131,9 @@ Artifacts are one of the clean bridges between the two halves of the system.
 
 Do not:
 
-- use the workflow stream as the substrate event mesh
-- let the substrate choose workflow names directly
-- assume every substrate mutation must open a chat
+- use the workflow stream as the app backend event mesh
+- let the app backend choose workflow names directly
+- assume every app backend mutation must open a chat
 
 The architecture only stays modular if those paths remain optional and explicit.
 
@@ -145,3 +142,4 @@ The architecture only stays modular if those paths remain optional and explicit.
 - [event-system-architecture.md](event-system-architecture.md)
 - [workflow-architecture.md](workflow-architecture.md)
 - [ui-surface-and-layout-architecture.md](ui-surface-and-layout-architecture.md)
+

@@ -2,13 +2,13 @@
 Phase 4 — Dynamic Architecture: validation tests.
 
 Tests verify:
-1. ModulePage.jsx exists and is well-structured
+1. Generic module routing is removed
 2. useCoreNotifications hook exists with correct API
 3. Header.js uses real notification hook
-4. RouteRenderer includes dynamic module route
-5. coreComponents.js registers ModulePage
+4. RouteRenderer keeps only shell-owned core routes
+5. coreComponents.js does not register generic module routes
 6. coreBridge.js exports module/theme/profile APIs
-7. NavigationProvider does module auto-discovery
+7. NavigationProvider discovers pages and only route-enabled modules
 """
 
 import os
@@ -29,29 +29,16 @@ def read_file(relpath):
 # ── 1. Module architecture ────────────────────────────────────────────────────
 
 class TestModulePage:
-    """ModulePage.jsx removed — modules now navigate to dedicated paths
-    (e.g. admin_portal → /admin) via module.json navigation.path."""
+    """ModulePage.jsx removed — modules now navigate to dedicated paths."""
 
     def test_module_page_file_deleted(self):
         full = os.path.join(ROOT, "chat-ui", "src", "pages", "ModulePage.jsx")
         assert not os.path.isfile(full), "ModulePage.jsx should be deleted"
 
-    def test_admin_portal_module_json_has_dedicated_path(self):
-        import json
-        full = os.path.join(ROOT, "platform", "modules", "admin_portal", "module.json")
-        assert os.path.isfile(full), "admin_portal/module.json missing"
-        with open(full, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        nav = data.get("navigation", {})
-        assert nav.get("path") == "/admin", "admin_portal should navigate to /admin"
-
-    def test_admin_portal_module_json_has_component(self):
-        import json
-        full = os.path.join(ROOT, "platform", "modules", "admin_portal", "module.json")
-        with open(full, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        nav = data.get("navigation", {})
-        assert nav.get("component") == "AdminPortal", "admin_portal component should be AdminPortal"
+    def test_admin_portal_exists_in_platform_pages(self):
+        # Admin is at platform/pages/admin/ (should eventually be first-class like chat-ui)
+        full = os.path.join(ROOT, "platform", "pages", "admin", "ui", "AdminPortal.jsx")
+        assert os.path.isfile(full), "AdminPortal should exist at platform/pages/admin/ui/"
 
 
 # ── 2. useCoreNotifications ─────────────────────────────────────────────────
@@ -121,8 +108,8 @@ class TestRouteRendererDynamic:
         assert "/modules/:moduleName" not in source
 
     def test_admin_not_hardcoded_route(self, source):
-        # AdminPortal is now a platform module — /admin route comes from nav config,
-        # not hardcoded in CORE_ROUTES
+        # Admin portal is a first-class framework surface (like chat-ui),
+        # not a hardcoded route in CORE_ROUTES.
         assert "path: '/admin'" not in source and 'path: "/admin"' not in source
 
 
@@ -137,15 +124,22 @@ class TestCoreComponentsDynamic:
         # ModulePage removed — modules use dedicated routes
         assert not re.search(r"registerComponent\(\s*['\"]ModulePage['\"]" , source)
 
-    def test_admin_portal_registered_via_modules(self):
-        # AdminPortal is now registered via @modules auto-discovery, not coreComponents.
-        # Verify the @modules index exists and scans platform/modules/*
+    def test_module_catalog_still_scans_platform_modules(self):
+        # Durable first-class modules remain under platform/modules/*
         modules_index = os.path.join(ROOT, "chat-ui", "src", "@modules", "index.js")
         assert os.path.isfile(modules_index), "@modules/index.js should exist"
         with open(modules_index, "r", encoding="utf-8") as f:
             content = f.read()
         assert "platform/modules" in content, "@modules index should scan platform/modules"
         assert "initializeModules" in content
+
+    def test_page_catalog_still_scans_platform_pages(self):
+        pages_index = os.path.join(ROOT, "chat-ui", "src", "@pages", "index.js")
+        assert os.path.isfile(pages_index), "@pages/index.js should exist"
+        with open(pages_index, "r", encoding="utf-8") as f:
+            content = f.read()
+        assert "platform/pages" in content, "@pages index should scan platform/pages"
+        assert "initializePages" in content
 
     def test_core_components_list_no_module_page(self, source):
         assert "'ModulePage'" not in source and '"ModulePage"' not in source
@@ -192,28 +186,16 @@ class TestCoreBridgeDynamic:
             assert fn in source, f"Missing from default export: {fn}"
 
 
-# ── 7. NavigationProvider — module auto-discovery ───────────────────────────
+# ── 7. NavigationProvider — shell config ────────────────────────────────────
 
 class TestNavigationProviderDynamic:
     @pytest.fixture
     def source(self):
         return read_file("chat-ui/src/providers/NavigationProvider.jsx")
 
-    def test_fetches_available_modules(self, source):
-        assert "/api/available-modules" in source
+    def test_fetches_shell_config(self, source):
+        assert "/api/shell-config" in source
 
-    def test_creates_module_page_entries(self, source):
-        assert "ModulePage" in source or "modulePage" in source.lower()
-
-    def test_deduplicates_paths(self, source):
-        assert "existingPaths" in source
-
-    def test_sets_module_meta(self, source):
-        assert "requiresAuth" in source
-
-    def test_non_fatal_module_discovery(self, source):
-        # Module fetch failure should not crash navigation
+    def test_non_fatal_failure(self, source):
+        # Fetch failure should not crash navigation
         assert "unavailable" in source.lower() or "catch" in source.lower()
-
-    def test_auto_discovers_label(self, source):
-        assert "display_name" in source

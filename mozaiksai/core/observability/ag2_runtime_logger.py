@@ -1,6 +1,6 @@
 # ==============================================================================
-# FILE: ag2_runtime_logger.py
-# DESCRIPTION: 
+# FILE: mozaiksai/core/observability/ag2_runtime_logger.py
+# DESCRIPTION: Controls AG2 runtime logging and forwards usage and event data into Mozaiks observability.
 # ==============================================================================
 
 # === MOZAIKS-CORE-HEADER ===

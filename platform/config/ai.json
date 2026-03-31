@@ -1,12 +1,12 @@
 {
-  "engine": {
-    "framework": "ag2"
+  "ask": {
+    "ask_mode_prompt": "You are a helpful assistant for our product. Answer questions about features, pricing, and usage.",
+    "ask_context_variables": null    
   },
   "chat": {
-    "startup_mode": "ask"
+    "chat_startup_mode": "ask"
   },
   "workflows": {
-    "entry_point": "GreenRoom",
-    "resume_policy": "last_active_then_oldest_then_entry_point"
+    "entry_point": "CustomerSupport"
   }
 }

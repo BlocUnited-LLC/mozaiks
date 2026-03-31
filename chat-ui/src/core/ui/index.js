@@ -1,5 +1,5 @@
 // ==============================================================================
-// FILE: chat-ui/src/core/ui/index.js  
+// FILE: chat-ui/src/core/ui/index.js
 // DESCRIPTION: Export shell core UI components
 // ==============================================================================
 

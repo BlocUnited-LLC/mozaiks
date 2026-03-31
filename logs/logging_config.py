@@ -1,5 +1,6 @@
 # ======================================================================
-# FILE: logs/logging_config.py (refactored)
+# FILE: logs/logging_config.py
+# DESCRIPTION: Unified logging configuration for the runtime, AG2 events, and observability sinks.
 # CHANGELOG: Unified setup, removed premature global logger creation,
 # added secret redaction + safe_extra, clarified helpers.
 # ======================================================================

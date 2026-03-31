@@ -1,9 +1,9 @@
 # ==============================================================================
-# FILE: core/workflow/context/context_utils.py
+# FILE: mozaiksai/core/workflow/context/context_utils.py
 # DESCRIPTION: Context variable exposure utilities for agent system messages
 # ==============================================================================
 """
-Context exposure utilities for MozaiksAI agent factory.
+Context exposure utilities for mozaiksai agent factory.
 
 Purpose:
 - Convert context containers to dictionaries

@@ -1,6 +1,6 @@
 # @mozaiks/chat-ui
 
-The single frontend package for the mozaiks stack — UI primitives, state machine, pages, adapters, theming, and event dispatch.
+The single frontend package for the mozaiks stack — UI primitives, state machine, pages, theming, event dispatch, and technical adapters (API/auth).
 
 ## Structure
 
@@ -119,7 +119,7 @@ configurePlatform({
 
 Use a synchronous store for `storage`. `AsyncStorage` is not suitable for the current shared core because some reads happen synchronously during initialization.
 
-Web-only adapters such as `keycloakAuth` and `mockAuthAdapter` should not be imported from a native host.
+Web-only auth adapters (e.g. `mockAuthAdapter`) should not be imported from a native host. Auth is host-injected via the `authAdapter` prop.
 
 ## Dev Demo
 

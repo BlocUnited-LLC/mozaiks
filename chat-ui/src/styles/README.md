@@ -1,4 +1,4 @@
-# MozaiksAI Design System & Dynamic Theming
+# mozaiksai Design System & Dynamic Theming
 
 ## Overview
 Multi-tenant design system enabling app-specific branding (fonts, colors, logos) at runtime while maintaining consistent UI patterns across all workflow artifacts.
@@ -38,7 +38,7 @@ import { typography, components, spacing, layouts } from './styles/artifactDesig
 
 **Key Functions:**
 - `initializeTheme(appId)` - Load and apply theme (call once in App.js)
-- `DEFAULT_THEME` - Fallback MozaiksAI branding
+- `DEFAULT_THEME` - Fallback mozaiksai branding
 - `loadThemeFromAPI(appId)` - Fetch from `/api/themes/{appId}` with timeout + graceful fallback
 - `applyTheme(theme)` - Inject fonts, CSS variables, favicon
 - `clearThemeCache(appId?)` - Invalidate per-app or global cache for hot-reload
@@ -277,7 +277,7 @@ UIFileGenerator automatically includes design system imports and uses constants 
 ```javascript
 // In themeProvider.js loadThemeFromAPI, replace with:
 const MOCK_THEMES = {
-  'default': { /* MozaiksAI cyan/violet */ },
+  'default': { /* mozaiksai cyan/violet */ },
   'app-a': { /* Corporate blue */ },
   'app-b': { /* Startup green */ },
   'app-c': { /* Agency purple */ },

@@ -23,6 +23,7 @@ Current live implementation anchors:
 
 - runtime event dispatch: `mozaiksai/core/events/unified_event_dispatcher.py`
 - runtime event envelope: `mozaiksai/core/ports/orchestration.py`
-- substrate event bus: `mozaikscore/core/event_bus.py`
-- substrate websocket bridge: `mozaikscore/core/websocket_event_bridge.py`
+- transport push bridge: `mozaiksai/core/transport/simple_transport.py`
+- app backend integration boundary: `mozaiksai/core/ports/app_backend.py`
+
 

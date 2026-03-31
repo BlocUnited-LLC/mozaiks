@@ -1,11 +1,8 @@
 /**
- * Branding Provider (compatibility wrapper)
+ * Branding Provider
  *
- * Historical versions loaded a separate /branding.json shape. The runtime now
- * uses a single theme contract from styles/themeProvider:
- *   /brand.json + optional /ui.json + optional /api/themes/{appId} overrides.
- *
- * This provider remains for API compatibility, but reads the unified theme.
+ * Loads the unified theme contract from styles/themeProvider and exposes it
+ * through the branding context consumed by chat-ui.
  */
 
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
@@ -96,9 +93,7 @@ export const BrandingProvider = ({
   const getThemeConfig = () => branding || {};
   const getLayout = () => ({});
 
-  const setThemeMode = () => {
-    console.warn('[BrandingProvider] setThemeMode is deprecated in unified theme mode');
-  };
+  const setThemeMode = () => {};
 
   const contextValue = {
     branding,

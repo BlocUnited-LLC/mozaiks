@@ -4,10 +4,9 @@ Thanks for contributing.
 
 ## Ground Rules
 
-- Keep changes aligned with `docs/architecture/source-of-truth/`.
-- Preserve layer direction: `contracts <- core <- orchestration`.
-- Do not add imports from `mozaiks.orchestration` into `mozaiks.core`.
-- Keep frontend surface semantics intact: `ask | workflow | view` and `view != sandbox`.
+- Keep changes aligned with `ARCHITECTURE.md` and `docs/architecture/`.
+- Keep the AI runtime (`mozaiksai`) modular and engine-agnostic.
+- Keep frontend surface semantics intact: `ask | workflow | view`.
 
 ## Development Setup
 
@@ -21,20 +20,18 @@ Run before opening a PR:
 
 ```bash
 pytest tests/ -v
-mypy src/mozaiks/
-ruff check src/
 ```
 
 ## Pull Request Expectations
 
 - Explain scope and motivation.
-- Call out public API changes (`mozaiks.core.*`, `mozaiks.orchestration.*`, `mozaiks.contracts.*`).
-- Update source-of-truth docs when behavior or paths change.
+- Call out public API changes in `mozaiksai/`.
+- Update architecture docs when behavior or paths change.
 - Add or update tests for behavior changes.
 
 ## Documentation Rule
 
-If code and source-of-truth docs diverge, update both in the same change set.
+If code and architecture docs diverge, update both in the same change set.
 
 ## Commit Hygiene
 

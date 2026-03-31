@@ -1,5 +1,5 @@
 # =============================================================================
-# FILE: core/data/theme_validation.py
+# FILE: mozaiksai/core/data/themes/theme_validation.py
 # DESCRIPTION: Shared utilities for validating app theme configurations
 # =============================================================================
 from __future__ import annotations
@@ -115,7 +115,7 @@ def auto_validate_theme(data: Dict[str, Any]) -> ThemeValidationResult:
 
 
 def validate_theme(data: Dict[str, Any], *, mode: str = "auto") -> ThemeValidationResult:
-    """Backward-compatible dispatcher that normalizes the legacy entry point."""
+    """Validate a theme payload using the requested validation mode."""
 
     normalized_mode = (mode or "auto").lower()
     if normalized_mode == "auto":

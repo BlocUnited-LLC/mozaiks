@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/lifecycle_tools.py
+# FILE: mozaiksai/core/workflow/execution/lifecycle.py
 # DESCRIPTION: Workflow-agnostic lifecycle tool execution for orchestration hooks
 # ==============================================================================
 
@@ -43,6 +43,7 @@ import yaml
 
 from logs.logging_config import get_workflow_logger
 from logs.tools_logs import get_tool_logger, log_tool_event
+from ..declarative import parse_tools_config
 
 logger = logging.getLogger(__name__)
 
@@ -117,8 +118,9 @@ class LifecycleToolManager:
 
         try:
             data = yaml.safe_load(tools_yaml_path.read_text(encoding='utf-8'))
-            if not isinstance(data, dict):
-                raise ValueError("tools.yaml must contain a mapping at root")
+            if data is None:
+                data = {}
+            data = parse_tools_config(data)
         except Exception as err:
             logger.warning(f"[LIFECYCLE] Failed to parse tools.yaml for '{self.workflow_name}': {err}")
             self._loaded = True
@@ -139,8 +141,8 @@ class LifecycleToolManager:
 
             # Validate required fields
             trigger_str = entry.get('trigger')
-            file_name = entry.get('file') or entry.get('function_file')
-            func_name = entry.get('function') or entry.get('function_name')
+            file_name = entry.get('file')
+            func_name = entry.get('function')
 
             if not all([trigger_str, file_name, func_name]):
                 logger.warning(
@@ -270,7 +272,7 @@ class LifecycleToolManager:
         trigger: "LifecycleTrigger | str",
         **kwargs: Any,
     ) -> None:
-        """Compatibility shim for legacy trigger dispatchers."""
+        """Dispatch a lifecycle trigger through the public trigger entry point."""
 
         # Normalize trigger value to LifecycleTrigger enum where possible
         resolved_trigger: Optional[LifecycleTrigger]
@@ -309,7 +311,7 @@ class LifecycleToolManager:
             await self.trigger_after_agent(agent_name=agent_name, context_variables=ctx_vars)
             return
 
-        logger.debug(f"[LIFECYCLE] Trigger '{resolved_trigger.value}' not supported in compatibility shim")
+        logger.debug(f"[LIFECYCLE] Trigger '{resolved_trigger.value}' is not supported")
 
     async def _execute_tools(
         self,

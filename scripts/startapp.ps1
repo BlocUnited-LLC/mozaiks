@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    MozaiksAI Test Run - Full cleanse + full run with logging
+    mozaiksai Test Run - Full cleanse + full run with logging
 
 .DESCRIPTION
     One-command workflow for testing:
@@ -47,7 +47,7 @@ $ErrorActionPreference = 'Stop'
 $ScriptRoot = Split-Path -Parent $PSScriptRoot
 
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  MozaiksAI Test Run" -ForegroundColor Cyan
+Write-Host "  mozaiksai Test Run" -ForegroundColor Cyan
 Write-Host "  Mode: $Mode | Port: $AppPort" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 

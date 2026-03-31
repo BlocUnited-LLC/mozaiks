@@ -1,6 +1,6 @@
 # ==============================================================================
-# FILE: resume_groupchat.py
-# DESCRIPTION: 
+# FILE: mozaiksai/core/transport/resume_groupchat.py
+# DESCRIPTION: Rebuilds AG2-compatible message history and state for paused workflow resume flows.
 # ==============================================================================
 
 # === MOZAIKS-CORE-HEADER ===
@@ -28,7 +28,7 @@ class GroupChatResumer:
         chat_id: str,
         app_id: Optional[str],
         send_event: SendEventFunc,
-        startup_mode: Optional[str] = None,
+        workflow_startup_mode: Optional[str] = None,
     ) -> Optional[int]:
         """Replay persisted messages for in-progress chats when a socket connects."""
         if not app_id:
@@ -40,7 +40,7 @@ class GroupChatResumer:
             self.logger.debug("[AUTO_RESUME] No persisted chat found for %s", chat_id)
             return None
 
-        startup_mode = self._resolve_startup_mode(startup_mode, doc.get("workflow_name"))
+        workflow_startup_mode = self._resolve_startup_mode(workflow_startup_mode, doc.get("workflow_name"))
 
         try:
             from mozaiksai.core.data.models import WorkflowStatus
@@ -68,7 +68,7 @@ class GroupChatResumer:
             chat_status="in_progress",
             start_index=0,
             context={"reason": "on_connect"},
-            startup_mode=startup_mode,
+            workflow_startup_mode=workflow_startup_mode,
         )
         return replay_result.get("last_index")
 
@@ -79,7 +79,7 @@ class GroupChatResumer:
         app_id: Optional[str],
         last_client_index: int,
         send_event: SendEventFunc,
-        startup_mode: Optional[str] = None,
+        workflow_startup_mode: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Process an explicit client.resume handshake request."""
         if not app_id:
@@ -88,7 +88,7 @@ class GroupChatResumer:
         doc = await self._fetch_chat_doc(chat_id, app_id, projection={"status": 1, "messages": 1, "workflow_name": 1})
         messages: List[Dict[str, Any]] = doc.get("messages", []) or []
         status = doc.get("status", "unknown")
-        startup_mode = self._resolve_startup_mode(startup_mode, doc.get("workflow_name"))
+        workflow_startup_mode = self._resolve_startup_mode(workflow_startup_mode, doc.get("workflow_name"))
 
         if last_client_index < -1:
             last_client_index = -1
@@ -124,7 +124,7 @@ class GroupChatResumer:
             chat_status=status,
             start_index=start_index,
             context={"reason": "client_resume", "last_client_index": last_client_index},
-            startup_mode=startup_mode,
+            workflow_startup_mode=workflow_startup_mode,
         )
         return {
             "replayed_messages": replay_result.get("replayed_messages", 0),
@@ -145,7 +145,7 @@ class GroupChatResumer:
         chat_status: str,
         start_index: int,
         context: Optional[Dict[str, Any]],
-        startup_mode: Optional[str] = None,
+        workflow_startup_mode: Optional[str] = None,
     ) -> Dict[str, int]:
         slice_messages = messages[start_index:]
         if not slice_messages:
@@ -165,7 +165,7 @@ class GroupChatResumer:
             )
             return {"last_index": start_index - 1, "replayed_messages": 0}
 
-        normalized_startup_mode = str(startup_mode or "").strip().lower()
+        normalized_startup_mode = str(workflow_startup_mode or "").strip().lower()
         replayed_messages: List[Dict[str, Any]] = []
         last_index = start_index - 1
         for offset, message in enumerate(slice_messages):
@@ -189,8 +189,8 @@ class GroupChatResumer:
                 is_marked_userdriven_trigger = (
                     seed_kind == "userdriven_trigger" or metadata_seed_kind == "userdriven_trigger"
                 )
-                is_legacy_userdriven_trigger = absolute_index == 0 and role == "user" and content.strip() == "."
-                if is_marked_userdriven_trigger or is_legacy_userdriven_trigger:
+                is_dot_userdriven_trigger = absolute_index == 0 and role == "user" and content.strip() == "."
+                if is_marked_userdriven_trigger or is_dot_userdriven_trigger:
                     self.logger.debug(
                         "[AUTO_RESUME] Skipping synthetic UserDriven trigger (index=%d, chat_id=%s)",
                         absolute_index, chat_id
@@ -246,8 +246,8 @@ class GroupChatResumer:
 
         return {"last_index": last_index, "replayed_messages": len(replayed_messages)}
 
-    def _resolve_startup_mode(self, startup_mode: Optional[str], workflow_name: Optional[str]) -> Optional[str]:
-        normalized = str(startup_mode or "").strip().lower()
+    def _resolve_startup_mode(self, workflow_startup_mode: Optional[str], workflow_name: Optional[str]) -> Optional[str]:
+        normalized = str(workflow_startup_mode or "").strip().lower()
         if normalized:
             return normalized
         if not workflow_name:
@@ -256,7 +256,7 @@ class GroupChatResumer:
             from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
             cfg = workflow_manager.get_config(str(workflow_name)) or {}
-            resolved = str(cfg.get("startup_mode") or "").strip().lower()
+            resolved = str(cfg.get("workflow_startup_mode") or "").strip().lower()
             return resolved or None
         except Exception:
             return None

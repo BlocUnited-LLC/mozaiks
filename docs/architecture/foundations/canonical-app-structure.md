@@ -1,205 +1,213 @@
 # Canonical App Structure
 
-This document defines the target app-bundle structure for Mozaiks.
-
-It reflects the architecture in this directory, not every legacy file layout in
-the current repo.
-
-The current `platform/` directory in this repo should still be treated as the
-flagship runtime-output example used to test this model.
+This document defines the app bundle shape Mozaiks should optimize for.
 
 ## Core Rule
 
-The bundle must separate:
+The bundle should describe the app, not the platform internals.
 
-- app substrate declaratives
-- automation declaratives
-- workflow declaratives
-- shell declaratives
+That means the main authoring folders should focus on:
 
-If those concerns collapse into one `config/` bucket, the generator cannot stay
-coherent.
+- what screens exist (`pages/`)
+- what workflows exist (`workflows/`)
+- what modules provide business logic (`modules/`)
+- what events connect them (declared in `module.json` and `orchestrator.yaml`)
 
-## Canonical Target Layout
+## Canonical Layout
 
 ```text
 platform/
 ├── app.json
-│
-├── shell/
-│   ├── navigation.json
-│   └── theme.json
-│
-├── data/
-│   ├── entities/
-│   │   └── *.json
-│   ├── views/
-│   │   └── *.json
-│   ├── actions/
-│   │   └── *.json
-│   └── policies/
-│       └── *.json
-│
-├── modules/
-│   └── {module_name}/
-│       ├── module.json
+├── brand/
+│   ├── assets/
+│   ├── fonts/
+│   └── login-theme/
+├── pages/
+│   ├── _shared/
+│   │   └── ui/
+│   │       └── *.{js,jsx}
+│   ├── admin/                  # admin dashboard (first-class page)
+│   │   └── ui/
+│   │       └── AdminPortal.jsx
+│   └── {page_name}/
+│       ├── page.json
 │       └── ui/
 │           ├── index.js
 │           └── *.{js,jsx}
-│
-├── automations/
-│   ├── event_catalog.json
-│   └── routes.json
-│
-└── workflows/
-    ├── _pack/
-    │   └── workflow_graph.json
-    └── {workflow_name}/
-        ├── orchestrator.yaml
-        ├── agents.yaml
-        ├── handoffs.yaml
-        ├── context_variables.yaml
-        ├── structured_outputs.yaml
-        ├── tools.yaml
-        ├── ui_config.yaml
-        ├── hooks.yaml
-        ├── _pack/
-        │   └── workflow_graph.json
-        ├── tools/
-        │   └── *.py
-        └── ui/
-            ├── index.js
-            └── *.{js,jsx}
+├── workflows/
+│   └── {workflow_name}/
+│       ├── orchestrator.yaml   # includes triggers (no separate automations/)
+│       ├── admin.yaml          # optional, admin dashboard declarations
+│       ├── subscription.yaml   # optional, entitlement requirements
+│       ├── agents.yaml
+│       ├── handoffs.yaml
+│       ├── context_variables.yaml
+│       ├── structured_outputs.yaml
+│       ├── tools.yaml
+│       ├── ui_config.yaml
+│       ├── hooks.yaml
+│       ├── tools/
+│       │   └── *.py
+│       ├── admin/              # optional, admin UI components
+│       │   └── *AdminPanel.jsx
+│       └── ui/                 # optional, main user-facing UI
+│           ├── index.js
+│           └── *.{js,jsx}
+├── modules/
+│   └── {module_name}/
+│       ├── module.json         # includes events.emits, events.handles
+│       ├── admin.yaml          # optional, admin dashboard declarations
+│       ├── subscription.yaml   # optional, entitlement requirements
+│       ├── handler.py
+│       ├── admin/              # optional, admin UI components
+│       │   └── *AdminPanel.jsx
+│       └── ui/                 # optional, main UI components
+│           ├── index.js
+│           └── *.{js,jsx}
+└── config/
+    ├── ai.json                 # LLM provider, model, temperature
+    └── theme_config.json       # Color schemes, fonts, shell chrome
 ```
 
-## Stable Versus Transitional
+**REMOVED (no longer exists):**
+- `automations/` — Triggers now declared in `orchestrator.yaml`
+- `adapters/` — Admin dashboard is a first-class page, not an adapter
+- `subscription_config.json` — Belongs in greenfield app backend
+- `navigation_config.json` — Shell config derived from ai.json
+- `admin.json`, `module_registry.json`, `settings_config.json`, `notifications_config.json` — App backend concerns
 
-### Stable
+## What Each Family Means
 
-The workflow folder contract is intentionally preserved:
+### `app.json`
 
-- `orchestrator.yaml`
-- `agents.yaml`
-- `handoffs.yaml`
-- `context_variables.yaml`
-- `structured_outputs.yaml`
-- `tools.yaml`
-- `ui_config.yaml`
-- `hooks.yaml`
-- `tools/*.py`
-- `ui/*`
-- `_pack/workflow_graph.json`
+Small author-facing app manifest.
 
-### Transitional
+It should answer:
 
-The current repo still uses:
+- what is this app called
+- what targets are enabled
+- should people sign in
+- who are the default admins
 
-- `platform/config/navigation_config.json`
-- `platform/config/theme_config.json`
-- `platform/config/module_registry.json`
-- other `platform/config/*.json` files
+It should not force the user to hand-author platform plumbing.
 
-Treat those as transitional compiled projections of shell or substrate concerns.
-They should not be the long-term conceptual source of truth for the generator.
+It should not own shell colors or brand assets.
 
-In practice today:
+### `brand/*`
 
-- `platform/config/navigation_config.json` behaves like a shell projection
-- `platform/config/theme_config.json` behaves like a shell projection
-- `platform/config/module_registry.json` behaves like a derived module index
+Shell branding assets and login theme files.
 
-The builder should understand those paths because the runtime consumes them
-today, but it should still plan against the canonical families first.
+Use this family for:
 
-## Responsibility by Family
+- logos
+- icons
+- fonts
+- Keycloak login-theme assets
 
-### `platform/app.json`
+Use `platform/config/theme_config.json` to point at those assets.
 
-Owns app identity and deployment metadata:
+### `pages/*`
 
-- `app_id`
-- `app_name`
-- endpoint base URLs
-- auth and platform metadata
+Normal routeable app screens.
 
-It does not own workflow routing, domain events, or shell chrome behavior.
+Examples:
 
-### `platform/shell/*`
+- `discover` — Browse content
+- `admin` — Admin dashboard (NOTE: currently here, should be first-class)
+- Custom pages (lineup, dashboard, settings, etc.)
 
-Owns shell behavior:
+Pages are where most CRUD-style app experience should live.
 
-- landing surface
-- navigation
-- semantic header controls
-- discover and shell chrome
-- theme identity
+Shared page UI belongs under `pages/_shared/`.
 
-Shell declaratives do not define entities, actions, or automation.
+**Admin Dashboard Note:**
 
-### `platform/data/*`
+Currently located at `platform/pages/admin/`. This makes it app-level, but admin should be a **first-class framework component** (like chat-ui).
 
-Owns durable app substrate behavior:
+Think of admin as the "admin user profile" — when an admin logs in, they see a dashboard with system health, token usage, subscription controls, etc. It's not an optional "adapter", it's a core role-based view.
 
-- `entities`: business objects and schemas
-- `views`: list, detail, form, board, dashboard, search
-- `actions`: deterministic mutations and service calls
-- `policies`: role, plan, tenant, and capability rules
+**Future:** Should be promoted to first-class `admin-ui/` directory at repo root (parallel to `chat-ui/`).
 
-This is the non-AI application model.
+### `workflows/*`
 
-### `platform/modules/*`
+Agentic execution definitions.
 
-Owns user-facing composed surfaces.
+Use workflows for:
 
-Modules are where the shell exposes real product areas such as:
+- reasoning
+- orchestration
+- review loops
+- long-running generation
+- HITL
 
-- CRM
-- Marketplace
-- Calendar
-- Inbox
-- Admin
+**Event triggers are declared in `orchestrator.yaml`:**
 
-A module references views, actions, and optionally workflow entrypoints. It is
-not the same thing as an entity or a workflow.
+```yaml
+# platform/workflows/WritersRoom/orchestrator.yaml
+triggers:
+  - event: set.brief_confirmed
+    action: run
+    when:
+      payload.status: approved
+    message_template: "Start writing for {payload.set_type}."
+```
 
-### `platform/automations/*`
+### `modules/*`
 
-Owns the event-driven bridge between the substrate and the AI runtime.
+Support bundles for shared logic.
 
-- `event_catalog.json` declares the domain events the app emits or consumes
-- `routes.json` maps event types and predicates to automation effects
+Modules should not be the main mental model for app authors.
 
-Automation routes belong to the app bundle, but they execute on the AI side.
+Use them when you need:
 
-### `platform/workflows/*`
+- shared page backing logic
+- reusable handlers
+- shared feature UI helpers
+- page-triggered workflow helpers
 
-Owns workflow-local reasoning, orchestration, UI pauses, and tooling.
+### `config/*`
 
-The workflow directory is not the whole application.
+Runtime-facing generated or platform-owned config.
 
-## Module Registry Direction
+This folder should not be the primary authoring target.
 
-`module_registry.json` should become derived, not canonical.
+## Practical Authoring Order
 
-Long-term rule:
+For most new apps:
 
-- `modules/{name}/module.json` is canonical
-- shell declarations decide placement and visibility
-- any registry file is a compiled index, not the authoring model
+1. Create `app.json`
+2. Create shell brand config only if the app needs custom identity
+3. Create pages (including admin if needed)
+4. Create workflow definitions (with triggers in `orchestrator.yaml`)
+5. Create modules (with events in `module.json`)
+6. Add `admin.yaml` and `subscription.yaml` as needed
 
-## Why This Structure
+## CRUD Minimalism
 
-This separation lets the generator answer four different questions cleanly:
+Do not model every database concern up front.
 
-1. What business model does the app have?
-2. What shell and surfaces does the app expose?
-3. What domain events can cause automation?
-4. What workflows exist, and what do they do?
+For the current phase, a CRUD-like app should usually start with:
 
-Without that split, CRUD logic and workflow logic collapse into one substrate.
+- a page manifest
+- a page UI stub
+- a thin module handler if the page needs backend reads or actions
+- a workflow only when reasoning is actually needed
+
+That is enough to prove the product shape without drowning the user in schema.
+
+## Current Repo Reality
+
+The repo still contains older generated and runtime projection files under
+`platform/config/*`.
+
+Treat those as implementation outputs, not the ideal authoring model.
+
+The derived module catalog is one example of this. It should be derived from
+`platform/modules/*/module.json`, not hand-authored as a separate source of
+truth.
 
 ## Cross References
 
+- [overview.md](overview.md)
+- [page-model.md](page-model.md)
 - [app-bundle-declaratives.md](app-bundle-declaratives.md)
-- [workflow-architecture.md](workflow-architecture.md)
-- [event-system-architecture.md](event-system-architecture.md)

@@ -1,9 +1,9 @@
 # Declarative Config to AG2 Mapping
 
-This document maps workflow declaratives to AG2-native execution.
+This document maps canonical workflow YAML declaratives to AG2-native execution.
 
-It also makes clear which parts of the Mozaiks architecture do not map to AG2
-because they belong to the substrate or automation boundary.
+Runtime loading is strict. Files are validated by typed contracts (Pydantic with
+`extra="forbid"`), so examples here use only canonical shapes.
 
 ## Core Point
 
@@ -11,10 +11,10 @@ Only workflow declaratives map to AG2.
 
 These do not map to AG2:
 
-- app substrate declaratives
+- app backend declaratives
 - shell declaratives
 - domain event contracts
-- automation routes
+- workflow triggers
 
 Those are Mozaiks layers that exist before a workflow starts.
 
@@ -44,6 +44,9 @@ Maps to workflow-local execution concerns such as:
 - initial message
 - turn budget
 
+Canonical startup key is `workflow_startup_mode` (`AgentDriven`, `UserDriven`,
+`BackendOnly`).
+
 ### `agents.yaml`
 
 Each agent entry becomes an AG2 agent definition after prompt composition and
@@ -57,14 +60,50 @@ Maps to AG2 handoff conditions and targets.
 
 Maps to the shared workflow state container used during execution.
 
+Canonical shape:
+
+```yaml
+definitions:
+  var_name:
+    type: string
+    source:
+      type: state
+      default: null
+agents:
+  AgentName:
+    variables:
+      - var_name
+```
+
 ### `tools.yaml`
 
 Maps to callable tool registration, with optional Mozaiks validation or wrapper
 behavior.
 
+Canonical shape:
+
+```yaml
+tools:
+  - agent: AgentName
+    file: tool_file.py
+    function: run_tool
+    tool_type: Agent_Tool
+lifecycle_tools: []
+```
+
 ### `hooks.yaml`
 
 Maps to AG2 hook registration and workflow lifecycle integration.
+
+Canonical shape:
+
+```yaml
+hooks:
+  - hook_type: update_agent_state
+    hook_agent: AgentName
+    filename: hook_file.py
+    function: update_state
+```
 
 ## Mozaiks-Only Workflow Layers
 
@@ -75,6 +114,19 @@ Used for:
 - typed validation
 - deterministic auto-tool flows
 - stronger execution guarantees than prompt text alone
+
+Canonical shape:
+
+```yaml
+registry:
+  AgentName: ModelName
+models:
+  ModelName:
+    type: model
+    fields:
+      field_name:
+        type: str
+```
 
 ### `ui_config.yaml`
 
@@ -99,8 +151,8 @@ The following app-bundle families are consumed before AG2 is involved:
 
 - `platform/data/*`
 - `platform/modules/*`
-- `platform/automations/*`
 - `platform/shell/*`
+- workflow `triggers:` declared in `platform/workflows/*/orchestrator.yaml`
 
 Most importantly:
 
@@ -124,6 +176,10 @@ Use AG2 for what it is good at:
 - handoffs
 - tool use
 - agent coordination inside a workflow
+
+## Authoring Note
+
+Use `*.yaml` declaratives in workflow bundles.
 
 ## Cross References
 

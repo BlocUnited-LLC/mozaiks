@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/stream/handlers/text_handler.py
+# FILE: mozaiksai/core/workflow/stream/handlers/text_handler.py
 # DESCRIPTION: Handler for TextEvent and PrintEvent (agent messages)
 # ==============================================================================
 
@@ -48,7 +48,7 @@ from mozaiksai.core.events.event_serialization import (
     extract_agent_name,
     normalize_text_content,
     serialize_event_content,
-    build_structured_output_ready_event,
+    build_agent_output_validated_event,
 )
 
 # System signal markers for internal coordination
@@ -275,8 +275,8 @@ class TextEventHandler(BaseEventHandler):
         else:
             display_message = f"{sender_name} prepared structured output."
 
-        # Emit structured output ready event
-        await self._emit_structured_output_event(
+        # Emit agent output validated event
+        await self._emit_agent_output_validated(
             sender_name, normalized_structured, ctx, state, auto_mode=auto_mode
         )
 
@@ -363,7 +363,7 @@ class TextEventHandler(BaseEventHandler):
                 f" [{ctx.workflow_name_upper}] Failed to save agent output: {save_err}"
             )
 
-    async def _emit_structured_output_event(
+    async def _emit_agent_output_validated(
         self,
         sender_name: str,
         normalized_structured: Dict[str, Any],
@@ -372,7 +372,7 @@ class TextEventHandler(BaseEventHandler):
         *,
         auto_mode: bool,
     ) -> None:
-        """Emit structured_output_ready event through dispatcher."""
+        """Emit chat.agent_output_validated event through dispatcher."""
         # Build turn key for idempotency
         turn_uuid = uuid.uuid5(
             uuid.NAMESPACE_URL, f"{ctx.chat_id}:{state.sequence_counter}"
@@ -401,23 +401,21 @@ class TextEventHandler(BaseEventHandler):
             return
 
         # Build and emit event
-        structured_event = build_structured_output_ready_event(
+        validated_event = build_agent_output_validated_event(
             agent=sender_name,
             model_name=model_name,
             structured_data=normalized_structured,
             auto_tool_mode=auto_mode,
             context=context_payload,
         )
-        structured_event["turn_idempotency_key"] = turn_key
+        validated_event["turn_idempotency_key"] = turn_key
 
         if ctx.dispatcher:
             ctx.wf_logger.info(
-                f" [{ctx.workflow_name_upper}] Dispatching chat.structured_output_ready "
+                f" [{ctx.workflow_name_upper}] Dispatching chat.agent_output_validated "
                 f"for {sender_name} (turn_key={turn_key})"
             )
-            asyncio.create_task(
-                ctx.dispatcher.emit("chat.structured_output_ready", structured_event)
-            )
+            await ctx.dispatcher.emit("chat.agent_output_validated", validated_event)
 
     def _build_auto_tool_context_payload(
         self,

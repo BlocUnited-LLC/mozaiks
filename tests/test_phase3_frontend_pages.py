@@ -3,12 +3,11 @@ Phase 3 — Frontend Pages: validation tests.
 
 Tests verify:
 1. All new frontend files exist and have non-trivial content
-2. navigation_config.json is valid and contains expected pages
-3. CoreBridge exports are present
-4. coreComponents.js registers the new pages
-5. RouteRenderer declares new core routes
-6. AdminPortal imports coreBridge functions
-7. NavigationProvider accepts coreApiUrl prop
+2. CoreBridge exports are present
+3. coreComponents.js only registers shell-owned pages
+4. RouteRenderer declares new core routes
+5. AdminPortal imports coreBridge functions
+6. NavigationProvider loads shell config
 """
 
 import json
@@ -49,43 +48,6 @@ class TestFileExistence:
     def test_file_not_empty(self, relpath):
         content = read_file(relpath)
         assert len(content) > 200, f"{relpath} is too small ({len(content)} bytes)"
-
-
-# ── 2. navigation_config.json ────────────────────────────────────────────────
-
-class TestNavigationConfig:
-    @pytest.fixture
-    def nav(self):
-        raw = read_file("platform/config/navigation_config.json")
-        return json.loads(raw)
-
-    def test_valid_json(self, nav):
-        assert isinstance(nav, dict)
-
-    def test_has_pages(self, nav):
-        # pages[] is used for config-driven nav routes; core overlays (settings, notifications)
-        # are now embedded in the header and are not in pages[].
-        assert "pages" in nav
-        assert isinstance(nav["pages"], list)
-
-    def test_settings_not_a_page(self, nav):
-        # Settings moved to header SettingsOverlay — must NOT be a page route.
-        paths = [p["path"] for p in nav["pages"]]
-        assert "/settings" not in paths
-
-    def test_notifications_not_a_page(self, nav):
-        # Notifications moved to header NotificationsDropdown — must NOT be a page route.
-        paths = [p["path"] for p in nav["pages"]]
-        assert "/notifications" not in paths
-
-    def test_pages_have_component(self, nav):
-        for page in nav["pages"]:
-            assert "component" in page, f"Page {page.get('path')} missing component"
-
-    def test_all_pages_require_auth(self, nav):
-        for page in nav["pages"]:
-            meta = page.get("meta", {})
-            assert meta.get("requiresAuth", True), f"Page {page['path']} should require auth"
 
 
 # ── 3. coreBridge.js ────────────────────────────────────────────────────────
@@ -140,8 +102,11 @@ class TestCoreComponents:
     def test_imports_chat_page(self, source):
         assert "ChatPage" in source
 
+    def test_discover_page_not_in_core_components(self, source):
+        assert "DiscoverPage" not in source
+
     def test_admin_portal_not_in_core_components(self, source):
-        # AdminPortal is now a platform module registered via @modules auto-discovery,
+        # AdminPortal is now an adapter registered via @adapters auto-discovery,
         # not a hardcoded core component — no import or registerComponent call.
         assert not re.search(r"import\s+AdminPortal\b", source)
         assert not re.search(r"registerComponent\(\s*['\"]AdminPortal['\"]", source)
@@ -150,7 +115,7 @@ class TestCoreComponents:
         assert re.search(r"registerComponent\(\s*['\"]ChatPage['\"]", source)
 
     def test_no_admin_portal_registration(self, source):
-        # AdminPortal registered via @modules, not coreComponents
+        # AdminPortal registered via @adapters, not coreComponents
         assert not re.search(r"registerComponent\(\s*['\"]AdminPortal['\"]", source)
 
     def test_no_settings_page_registration(self, source):
@@ -164,6 +129,7 @@ class TestCoreComponents:
     def test_core_components_list(self, source):
         assert "CORE_COMPONENTS" in source
         assert "'ChatPage'" in source or '"ChatPage"' in source
+        assert "'DiscoverPage'" not in source and '"DiscoverPage"' not in source
         # AdminPortal is no longer in the core components list
         assert "'AdminPortal'" not in source and '"AdminPortal"' not in source
 
@@ -185,8 +151,7 @@ class TestRouteRenderer:
         assert "'/chat/*'" in source or '"/chat/*"' in source
 
     def test_admin_not_core_route(self, source):
-        # AdminPortal is now a platform module, not a hardcoded core route.
-        # /admin comes from navigation_config.json modules[] section.
+        # Admin portal is a first-class framework surface, not a hardcoded core route.
         assert "path: '/admin'" not in source and 'path: "/admin"' not in source
 
     def test_no_settings_route(self, source):
@@ -205,14 +170,14 @@ class TestRouteRenderer:
 # ── 6. AdminPortal ───────────────────────────────────────────────────────────────────────────
 
 class TestAdminPortal:
-    """AdminPortal is now a platform module (not a chat-ui core page).
-    The component lives in platform/modules/admin_portal/ui/.
+    """AdminPortal is a first-class framework surface (like chat-ui).
+    Currently lives at platform/pages/admin/ui/ (should eventually move to first-class location).
     The section registry APIs (registerAdminSection etc.) are in adminPortalRegistry.js.
     """
 
     @pytest.fixture
     def source(self):
-        return read_file("platform/modules/admin_portal/ui/AdminPortal.jsx")
+        return read_file("platform/pages/admin/ui/AdminPortal.jsx")
 
     def test_is_not_in_pages_dir(self):
         full = os.path.join(ROOT, "chat-ui", "src", "pages", "AdminPortal.js")
@@ -221,7 +186,7 @@ class TestAdminPortal:
     def test_platform_ui_file_exists(self, source):
         assert len(source) > 500
 
-    def test_imports_core_bridge(self, source):
+    def test_imports_admin_api_functions(self, source):
         assert "adminListUsers" in source
 
     def test_calls_admin_list_users(self, source):
@@ -269,16 +234,27 @@ class TestNavigationProvider:
     def test_accepts_core_api_url(self, source):
         assert "coreApiUrl" in source
 
-    def test_fetches_core_navigation(self, source):
-        assert "/api/navigation" in source
-
-    def test_merges_pages(self, source):
-        # Should deduplicate by path
-        assert "existingPaths" in source or "Set(" in source
+    def test_fetches_shell_config(self, source):
+        assert "/api/shell-config" in source
 
     def test_non_fatal_core_failure(self, source):
         # Core fetch failure should not crash the provider
         assert "unavailable" in source.lower() or "catch" in source.lower()
+
+
+class TestPagesRegistry:
+    @pytest.fixture
+    def source(self):
+        return read_file("chat-ui/src/@pages/index.js")
+
+    def test_pages_loader_exists(self, source):
+        assert len(source) > 200
+
+    def test_scans_platform_pages(self, source):
+        assert "platform/pages" in source
+
+    def test_initializes_pages(self, source):
+        assert "initializePages" in source
 
 
 # ── 8. SettingsOverlay.jsx ─────────────────────────────────────────────────────

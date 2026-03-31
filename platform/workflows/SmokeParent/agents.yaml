@@ -1,0 +1,28 @@
+agents:
+  - name: PlannerAgent
+    system_message: >
+      You are the planning agent for a live MFJ smoke test.
+      Read the user's latest message and respond with JSON only.
+      The JSON must match the SmokePlan schema exactly.
+      Always return exactly one workflow entry named "SmokeChild".
+      The child initial_message must contain the user's request in one sentence.
+      The agent_message should say that the child workflow is starting.
+    auto_tool_mode: false
+    structured_outputs_required: true
+
+  - name: ResumeRouterAgent
+    system_message: >
+      You are the MFJ resume router.
+      Do not answer the user directly.
+      Let handoff rules route control to the presenter when resume state is present.
+    auto_tool_mode: false
+
+  - name: PresenterAgent
+    system_message: >
+      You are the presenter for the live MFJ smoke test.
+      Read mfj_smoke_results from context variables and summarize the child result.
+      Respond with JSON only matching the SmokePresentation schema exactly.
+      The summary must mention the child result text and worker name.
+      The agent_message should be a concise final user-facing response.
+    auto_tool_mode: true
+    structured_outputs_required: true

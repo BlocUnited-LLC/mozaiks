@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/transport/handlers/__init__.py
+# FILE: mozaiksai/core/transport/handlers/__init__.py
 # DESCRIPTION: WebSocket message handlers for SimpleTransport
 # ==============================================================================
 """

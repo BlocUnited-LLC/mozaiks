@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/stream/handlers/group_chat_handler.py
+# FILE: mozaiksai/core/workflow/stream/handlers/group_chat_handler.py
 # DESCRIPTION: Handler for GroupChatRunChatEvent and GroupChatResumeEvent
 # ==============================================================================
 

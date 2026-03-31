@@ -1,11 +1,11 @@
 # ==============================================================================
-# FILE: core/events/unified_event_dispatcher.py
-# DESCRIPTION: Centralized event dispatcher for all event types in MozaiksAI
+# FILE: mozaiksai/core/events/unified_event_dispatcher.py
+# DESCRIPTION: Centralized event dispatcher for all event types in mozaiksai
 # ==============================================================================
 
 """Unified Event Dispatcher.
 
-Centralized dispatcher for MozaiksAI runtime events.
+Centralized dispatcher for mozaiksai runtime events.
 
 This module is responsible for:
 - BusinessLogEvent / UIToolEvent internal domain events
@@ -44,7 +44,7 @@ except Exception:  # pragma: no cover
 
 class EventCategory(Enum):
     """
-    MozaiksAI Event System Categories:
+    mozaiksai Event System Categories:
     
     BUSINESS: System monitoring and lifecycle events
               - Uses 'log_event_type' field for classification
@@ -159,7 +159,7 @@ class DomainEventHandler(EventHandler):
 
 class UnifiedEventDispatcher:
     """
-    Central event dispatcher for MozaiksAI's three-layer event system:
+    Central event dispatcher for mozaiksai's three-layer event system:
     
     1. Business Events: Use emit_business_event(log_event_type=...) for monitoring
     2. UI Tool Events: Use emit_ui_tool_event(ui_tool_id=...) for agent-UI interaction  
@@ -171,6 +171,11 @@ class UnifiedEventDispatcher:
     def __init__(self):
         self.handlers: List[EventHandler] = []
         self._event_handlers: Dict[str, List[Callable[[Dict[str, Any]], Awaitable[Any] | Any]]] = {}
+        # Greeting echo dedup: tracks (chat_id, agent_name) pairs where
+        # ws_protocol already sent the greeting before the workflow started.
+        # The next text message from that agent is a transcript echo and
+        # should be converted to a silent 'greeting_echo' event.
+        self._greeting_echo_keys: set = set()
         self.metrics: Dict[str, Any] = {
             "events_processed": 0,
             "events_failed": 0,
@@ -184,8 +189,8 @@ class UnifiedEventDispatcher:
         # Advisory-only usage ingest (measurement signals only; no billing mutations).
         self._usage_ingest = get_usage_ingest_client()
         self._setup_default_handlers()
-        self.register_handler("chat.structured_output_ready", self._auto_tool_handler.handle_structured_output_ready)
-        self.register_handler("chat.structured_output_ready", self._pack_coordinator.handle_structured_output_ready)
+        self.register_handler("chat.agent_output_validated", self._auto_tool_handler.handle_tool_dispatch)
+        self.register_handler("chat.agent_output_validated", self._pack_coordinator.handle_journey_triggered)
         self.register_handler("chat.run_complete", self._pack_coordinator.handle_run_complete)
         # Journey auto-advance (pack v2)
         self.register_handler("chat.run_complete", self._journey_orchestrator.handle_run_complete)
@@ -286,6 +291,12 @@ class UnifiedEventDispatcher:
             self.metrics["events_failed"] += 1
             return False
 
+    def mark_greeting_echo(self, chat_id: str, agent_name: str) -> None:
+        """Flag that the next text from *agent_name* in *chat_id* is a greeting
+        echo (already sent by ws_protocol) and should be silently dropped."""
+        if chat_id and agent_name:
+            self._greeting_echo_keys.add((chat_id, agent_name))
+
     def get_metrics(self) -> Dict[str, Any]:
         return {**self.metrics, "handler_count": len(self.handlers), "timestamp": datetime.now(UTC).isoformat()}
 
@@ -366,36 +377,33 @@ class UnifiedEventDispatcher:
         event_dict: Dict[str, Any] = raw_event  # type: ignore[assignment]
         kind = str(event_dict.get('kind', 'unknown'))
         base_kind = kind.split('.', 1)[1] if kind.startswith('chat.') else kind
-        
-        # DEBUG: Log what we're checking
-        logger.info(f"🔍 [UI_HIDDEN_DEBUG] base_kind={base_kind}, workflow_manager={'present' if workflow_manager else 'MISSING'}, workflow_name={workflow_name}")
-        
+
+        # ── Greeting echo detection (no workflow_manager dependency) ──
+        # If ws_protocol already sent the UserDriven greeting, the AG2
+        # transcript replay is just bookkeeping — emit as chat.greeting_echo
+        # so the frontend silently ignores it.
+        if base_kind in ('text', 'print') and chat_id:
+            _agent = event_dict.get('agent') or event_dict.get('sender')
+            _key = (chat_id, _agent)
+            if _key in self._greeting_echo_keys:
+                self._greeting_echo_keys.discard(_key)
+                logger.info("[GREETING_ECHO] Converting duplicate greeting from %s to chat.greeting_echo", _agent)
+                return {
+                    "type": "chat.greeting_echo",
+                    "data": event_dict,
+                    "chat_id": chat_id,
+                    "timestamp": timestamp,
+                }
+
         # SUPPRESSION CHECKS (must happen BEFORE other flags)
         if base_kind in ('text', 'print') and workflow_manager and workflow_name:
             agent_name = event_dict.get('agent') or event_dict.get('sender')
             content = event_dict.get('content', '')
             
-            logger.info(f"🔍 [UI_HIDDEN_DEBUG] Checking message: agent={agent_name}, content='{content[:50] if content else 'EMPTY'}...'")
-            
             # Check 0: System resume signals (always suppress)
             if isinstance(content, str) and '[SYSTEM_RESUME_SIGNAL]' in content:
                 event_dict['_mozaiks_hide'] = True
                 logger.info(f"🚫 [SYSTEM_SIGNAL] Suppressing internal resume signal from {agent_name}")
-                return {
-                    "type": f"chat.{base_kind}",
-                    "data": event_dict,
-                    "chat_id": chat_id,
-                    "timestamp": timestamp
-                }
-
-            # Check 0.3: UserDriven static greeting (already sent by ws_protocol.py)
-            # This marker indicates the greeting was already sent before workflow started
-            if isinstance(content, str) and content.startswith('[_MOZAIKS_SUPPRESS_UI]'):
-                # Strip the marker from content for persistence but hide from UI
-                actual_content = content.replace('[_MOZAIKS_SUPPRESS_UI]', '', 1)
-                event_dict['content'] = actual_content
-                event_dict['_mozaiks_hide'] = True
-                logger.info(f"🚫 [USERDRIVEN_GREETING] Suppressing duplicate static greeting from {agent_name}")
                 return {
                     "type": f"chat.{base_kind}",
                     "data": event_dict,
@@ -409,12 +417,12 @@ class UnifiedEventDispatcher:
                 # Check if this is a userdriven workflow
                 try:
                     wf_config = workflow_manager.get_config(workflow_name)  # type: ignore
-                    startup_mode = str(wf_config.get("startup_mode", "")).strip().lower() if wf_config else ""
+                    workflow_startup_mode = str(wf_config.get("workflow_startup_mode", "")).strip().lower() if wf_config else ""
                     sender_lower = str(agent_name or "").lower()
                     # Suppress if userdriven mode AND sender looks like a user proxy
-                    if startup_mode == "userdriven" and sender_lower in {"user", "userproxy", "chat_manager", "manager"}:
+                    if workflow_startup_mode == "userdriven" and sender_lower in {"user", "userproxy", "chat_manager", "manager"}:
                         event_dict['_mozaiks_hide'] = True
-                        logger.info(f"🚫 [USERDRIVEN_TRIGGER] Suppressing synthetic '.' trigger from {agent_name} (startup_mode={startup_mode})")
+                        logger.info(f"🚫 [USERDRIVEN_TRIGGER] Suppressing synthetic '.' trigger from {agent_name} (workflow_startup_mode={workflow_startup_mode})")
                         return {
                             "type": f"chat.{base_kind}",
                             "data": event_dict,
@@ -422,7 +430,7 @@ class UnifiedEventDispatcher:
                             "timestamp": timestamp
                         }
                 except Exception as e:
-                    logger.debug(f"[USERDRIVEN_TRIGGER] Could not check startup_mode: {e}")
+                    logger.debug(f"[USERDRIVEN_TRIGGER] Could not check workflow_startup_mode: {e}")
 
             if agent_name and isinstance(content, str):
                 # Check 1: UI_HIDDEN triggers (exact match suppression)
@@ -493,7 +501,7 @@ class UnifiedEventDispatcher:
                     event_dict['sequence'] = get_sequence_cb(chat_id)
                 except Exception:
                     pass
-        if kind == 'structured_output_ready' and isinstance(event_dict, dict):
+        if kind == 'agent_output_validated' and isinstance(event_dict, dict):
             if 'structured_data' in event_dict:
                 event_dict['structured_data'] = serialize_event_content(event_dict['structured_data'])
             if 'auto_tool_mode' in event_dict:
@@ -503,9 +511,10 @@ class UnifiedEventDispatcher:
             'print': 'chat.print', 'text': 'chat.text', 'input_request': 'chat.input_request', 'input_ack': 'chat.input_ack',
             'input_timeout': 'chat.input_timeout', 'select_speaker': 'chat.select_speaker', 'resume_boundary': 'chat.resume_boundary',
             'usage_delta': 'chat.usage_delta', 'usage_summary': 'chat.usage_summary', 'run_complete': 'chat.run_complete', 'error': 'chat.error', 'tool_call': 'chat.tool_call', 'tool_response': 'chat.tool_response',
-            'structured_output_ready': 'chat.structured_output_ready', 'run_start': 'chat.run_start', 'ui_tool_dismiss': 'chat.ui_tool_dismiss',
+            'agent_output_validated': 'chat.agent_output_validated', 'run_start': 'chat.run_start', 'ui_tool_dismiss': 'chat.ui_tool_dismiss',
             'attachment_uploaded': 'chat.attachment_uploaded',
             'stream_chunk': 'chat.stream_chunk', 'stream_end': 'chat.stream_end', 'custom_event': 'chat.custom_event',
+            'greeting_echo': 'chat.greeting_echo',
         }
         mapped_type = kind if kind.startswith('chat.') else ns_map.get(kind, kind)
         

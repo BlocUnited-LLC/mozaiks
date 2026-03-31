@@ -1,5 +1,5 @@
 # === MOZAIKS-CORE-HEADER ===
-# FILE: core/workflow/pack/merge.py
+# FILE: mozaiksai/core/workflow/pack/merge.py
 # DESCRIPTION: Pluggable merge strategies for fan-in result aggregation.
 #
 # When N child GroupChats complete, their outputs must be combined before

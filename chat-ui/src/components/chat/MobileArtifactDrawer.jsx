@@ -1,4 +1,8 @@
 import React from 'react';
+import {
+  applyBrandImageFallback,
+  getBrandLogoSrc,
+} from '../../styles/brandAssets';
 
 const MobileArtifactDrawer = ({
   state = 'hidden',
@@ -8,12 +12,14 @@ const MobileArtifactDrawer = ({
   hasUnseenChat = false,
   hasUnseenArtifact = false,
   viewMode = false,
+  chatTheme = null,
   onExitView = null
 }) => {
   const isExpanded = viewMode || state === 'expanded';
   const isHidden = state === 'hidden';
   const isPeek = !isExpanded && !isHidden;
   const heightClass = viewMode ? 'h-full' : (isExpanded ? 'h-[calc(100vh-5rem)]' : isHidden ? 'h-0' : 'h-20');
+  const brandLogoSrc = getBrandLogoSrc(chatTheme);
 
   const baseContainerClasses = 'relative w-full bg-[rgba(3,6,15,0.96)] backdrop-blur-2xl border border-[rgba(var(--color-primary-light-rgb),0.45)] shadow-[0_-12px_40px_rgba(2,6,23,0.65)] overflow-hidden transition-all duration-300 pointer-events-auto flex flex-col';
   const expandedShapeClasses = 'w-full rounded-none rounded-t-3xl';
@@ -61,13 +67,10 @@ const MobileArtifactDrawer = ({
             <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
               <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-secondary)] flex items-center justify-center shadow-lg p-1.5 sm:p-2 flex-shrink-0">
                 <img
-                  src="/assets/mozaik_logo.svg"
+                  src={brandLogoSrc}
                   alt="Mozaiks"
                   className="w-full h-full object-contain"
-                  onError={(e) => {
-                    e.currentTarget.onerror = null;
-                    e.currentTarget.src = '/assets/mozaik.png';
-                  }}
+                  onError={applyBrandImageFallback}
                 />
               </div>
               <div className="min-w-0 flex-1">
@@ -111,13 +114,10 @@ const MobileArtifactDrawer = ({
               <div className="h-full flex items-center justify-center px-4">
                 <div className="w-24 h-24 sm:w-32 sm:h-32 bg-gradient-to-br from-[var(--color-primary)]/25 to-[var(--color-secondary)]/25 rounded-2xl sm:rounded-3xl border-2 border-[var(--color-primary-light)]/50 flex items-center justify-center backdrop-blur-sm shadow-2xl">
                   <img
-                    src="/assets/mozaik_logo.svg"
+                    src={brandLogoSrc}
                     alt="Mozaiks Logo"
                     className="w-16 h-16 sm:w-20 sm:h-20"
-                    onError={(e) => {
-                      e.currentTarget.onerror = null;
-                      e.currentTarget.src = '/assets/mozaik.png';
-                    }}
+                    onError={applyBrandImageFallback}
                   />
                 </div>
               </div>

@@ -87,7 +87,7 @@ def _valid_payload() -> dict:
         "events": [
             {
                 "event_type": "listing.saved",
-                "producer": "mozaikscore",
+                "producer": "app_backend",
                 "description": "A listing was saved to favorites",
                 "source_event": "listing_saved",
                 "correlation_keys": ["listing_id", "user_id"],
@@ -133,12 +133,9 @@ def _valid_payload() -> dict:
                 "platform/shell/navigation.json",
                 "platform/shell/theme.json",
             ],
-            "substrate_paths": ["platform/data/entities/listing.json"],
+            "app_backend_paths": ["platform/data/entities/listing.json"],
             "module_paths": ["platform/modules/marketplace_home/module.json"],
-            "automation_paths": [
-                "platform/automations/event_catalog.json",
-                "platform/automations/routes.json",
-            ],
+            "automation_paths": [],
             "workflow_paths": ["platform/workflows/Concierge/orchestrator.yaml"],
         },
     }
@@ -213,7 +210,7 @@ def test_platform_provision_plan_rejects_unknown_dependency() -> None:
                         "mode": "core_configured",
                         "summary": "Use platform navigation and theme.",
                         "depends_on": ["missing-provision"],
-                        "config_paths": ["platform/config/navigation_config.json"],
+                        "config_paths": ["platform/config/theme_config.json"],
                     }
                 ]
             }
@@ -227,7 +224,7 @@ def test_platform_provision_app_stub_requires_stub_paths() -> None:
                 "provision_id": "custom-crm-adapter",
                 "label": "Custom CRM adapter",
                 "category": "integration",
-                "runtime_owner": "mozaikscore",
+                "runtime_owner": "app_backend",
                 "mode": "app_stub",
                 "summary": "App-specific adapter written on top of the enterprise core.",
             }

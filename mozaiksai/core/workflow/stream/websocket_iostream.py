@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/stream/websocket_iostream.py
+# FILE: mozaiksai/core/workflow/stream/websocket_iostream.py
 # DESCRIPTION: Custom IOStream that forwards AG2 output to WebSocket transport
 # ==============================================================================
 

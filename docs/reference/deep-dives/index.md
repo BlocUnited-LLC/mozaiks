@@ -37,10 +37,6 @@ They are useful when you need implementation detail, but they are not the best p
 - [Token Management](token-management.md)
 - [Token Manager Plan](token-manager-plan.md)
 
-## Older Platform Notes
-
-- [Mozaiks Platform Dual Substrate](mozaiks-platform-dual-substrate.md)
-
 ## How To Use Deep Dives
 
 Use these docs to answer precise questions after you already know the high-level model from:

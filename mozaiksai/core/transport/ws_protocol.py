@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/transport/ws_protocol.py
+# FILE: mozaiksai/core/transport/ws_protocol.py
 # DESCRIPTION: WebSocket protocol layer - heartbeat, backpressure, message queuing
 # ==============================================================================
 """
@@ -214,17 +214,17 @@ class WebSocketProtocolMixin:
                 logger.debug(f"[AUTO_RESUME] No app_id for {chat_id}, skipping auto-resume")
                 return
 
-            # Get workflow name and startup_mode from connection
+            # Get workflow name and workflow_startup_mode from connection
             workflow_name = None
-            startup_mode = None
+            workflow_startup_mode = None
             if chat_id in self.connections:
                 workflow_name = self.connections[chat_id].get("workflow_name")
                 if workflow_name:
                     try:
                         from mozaiksai.core.workflow.workflow_manager import workflow_manager
                         config = workflow_manager.get_config(workflow_name)
-                        startup_mode = config.get("startup_mode", "AgentDriven")
-                        logger.debug(f"[AUTO_RESUME] Retrieved startup_mode={startup_mode} for workflow={workflow_name}")
+                        workflow_startup_mode = config.get("workflow_startup_mode", "AgentDriven")
+                        logger.debug(f"[AUTO_RESUME] Retrieved workflow_startup_mode={workflow_startup_mode} for workflow={workflow_name}")
                     except Exception as cfg_err:
                         logger.warning(f"[AUTO_RESUME] Failed to get workflow config: {cfg_err}")
 
@@ -261,12 +261,12 @@ class WebSocketProtocolMixin:
                         "data": boundary
                     })
 
-            # Call the resumer with startup_mode filtering
+            # Call the resumer with workflow_startup_mode filtering
             await resumer.auto_resume_if_needed(
                 chat_id=chat_id,
                 app_id=app_id,
                 send_event=send_event_wrapper,
-                startup_mode=startup_mode,
+                workflow_startup_mode=workflow_startup_mode,
             )
 
             await self._flush_message_queue(chat_id)
@@ -308,8 +308,8 @@ class WebSocketProtocolMixin:
             from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
             cfg = workflow_manager.get_config(str(workflow_name)) or {}
-            startup_mode = str(cfg.get("startup_mode", "AgentDriven")).strip().lower()
-            if startup_mode != "userdriven":
+            workflow_startup_mode = str(cfg.get("workflow_startup_mode", "AgentDriven")).strip().lower()
+            if workflow_startup_mode != "userdriven":
                 return
 
             prompt = str(cfg.get("initial_message_to_user") or "").strip()
@@ -387,7 +387,7 @@ class WebSocketProtocolMixin:
                         "ui_visibility": "default",
                         "metadata": {
                             "source": "orchestrator.initial_message_to_user",
-                            "startup_mode": "UserDriven",
+                            "workflow_startup_mode": "UserDriven",
                             "pre_workflow": True,
                         },
                     },
@@ -436,8 +436,8 @@ class WebSocketProtocolMixin:
             from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
             cfg = workflow_manager.get_config(str(workflow_name)) or {}
-            startup_mode = str(cfg.get("startup_mode", "AgentDriven")).strip().lower()
-            if startup_mode != "userdriven":
+            workflow_startup_mode = str(cfg.get("workflow_startup_mode", "AgentDriven")).strip().lower()
+            if workflow_startup_mode != "userdriven":
                 return False
 
             pm_factory = getattr(self, "_get_or_create_persistence_manager", None)
@@ -497,7 +497,7 @@ class WebSocketProtocolMixin:
                         "ui_visibility": "default",
                         "metadata": {
                             "source": "orchestrator.initial_message_to_user",
-                            "startup_mode": "UserDriven",
+                            "workflow_startup_mode": "UserDriven",
                             "pre_workflow": True,
                             "persisted_bootstrap": True,
                         },

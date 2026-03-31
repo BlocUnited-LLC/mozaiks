@@ -2,7 +2,7 @@
 
 This note explains the current role of `auto_tool_mode` in Mozaiks.
 
-## What It Means Today
+## Runtime Meaning
 
 `auto_tool_mode: true` means the runtime may deterministically invoke a mapped tool after validating a structured output.
 
@@ -18,7 +18,7 @@ Do not use it just because an agent has structured outputs.
 
 AG2 can now support structured outputs and normal tool calling together.
 
-That means `auto_tool_mode` is no longer a workaround for an AG2 limitation. It is a Mozaiks opinionated execution mode for cases where the runtime, not the model, should own the final tool invocation step.
+`auto_tool_mode` is a Mozaiks execution mode for cases where the runtime, not the model, should own the final tool invocation step.
 
 ## Related Docs
 

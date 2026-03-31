@@ -1,5 +1,5 @@
 ﻿# ==============================================================================
-# MozaiksAI - Deep Cleanse Script
+# mozaiksai - Deep Cleanse Script
 # Removes all cache, build artifacts, logs, and optionally runtime state
 # ==============================================================================
 
@@ -11,8 +11,8 @@ param(
     [switch]$Full
 )
 
-# SAFETY: Only ever touch MozaiksAI database - hardcoded to prevent accidents
-$DatabaseName = "MozaiksAI"
+# SAFETY: Only ever touch mozaiksai database - hardcoded to prevent accidents
+$DatabaseName = "mozaiksai"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 
 function Stop-MozaiksDevProcesses {
@@ -47,7 +47,7 @@ function Stop-MozaiksDevProcesses {
     return $stopped
 }
 
-Write-Host " Starting MozaiksAI deep cleanse..." -ForegroundColor Cyan
+Write-Host " Starting mozaiksai deep cleanse..." -ForegroundColor Cyan
 
 # Python bytecode and __pycache__
 Write-Host "`n Cleaning Python bytecode..." -ForegroundColor Yellow
@@ -244,7 +244,7 @@ except:
         
     }
     
-    # Now attempt the cleanup - ONLY MozaiksAI database
+    # Now attempt the cleanup - ONLY mozaiksai database
     $clearScript = Join-Path -Path $PSScriptRoot -ChildPath "clear_collections.py"
     if (Test-Path $clearScript) {
         # Run with .venv Python to ensure pymongo is available
@@ -271,7 +271,7 @@ except:
             Write-Host "   ✅ MongoDB started successfully" -ForegroundColor Green
         } else {
             Write-Host "   ⚠️  Could not start MongoDB automatically" -ForegroundColor Yellow
-            Write-Host "      If you use MozaiksAI docker compose, start it with: docker compose -f infra/compose/docker-compose.yml up -d mongo" -ForegroundColor Gray
+            Write-Host "      If you use mozaiksai docker compose, start it with: docker compose -f infra/compose/docker-compose.yml up -d mongo" -ForegroundColor Gray
             Write-Host "      Or run standalone Mongo: docker run -d --name mongodb -p 27017:27017 mongo:latest" -ForegroundColor Gray
         }
     }

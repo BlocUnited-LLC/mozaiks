@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/stream/processor.py
+# FILE: mozaiksai/core/workflow/stream/processor.py
 # DESCRIPTION: Main event stream processor for AG2 orchestration
 # ==============================================================================
 

@@ -12,7 +12,7 @@
  * The actual font families are loaded dynamically per app
  * via themeProvider.js and tailwind.config.js
  * 
- * Default (MozaiksAI brand):
+ * Default (mozaiksai brand):
  * - Body/Default: Rajdhani (font-sans)
  * - Headings: Orbitron (font-heading)
  * - Logo/Branding: Fagrak Inline (font-logo)

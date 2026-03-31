@@ -15,7 +15,6 @@ export { useConversation, useArtifacts, useChatWebSocket } from '../pages/hooks'
 export { useCoreWebSocket } from '../hooks/useCoreWebSocket';
 
 export { ApiAdapter, WebSocketApiAdapter, RestApiAdapter, appApi } from '../adapters/api';
-export { AuthAdapter, ExternalAuthAdapter, TokenAuthAdapter } from '../adapters/auth';
 
 export { default as services } from '../services';
 export { default as config } from '../config';

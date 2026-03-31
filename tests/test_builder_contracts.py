@@ -64,7 +64,7 @@ def _decomposition_payload() -> dict:
         "events": [
             {
                 "event_type": "listing.saved",
-                "producer": "mozaikscore",
+                "producer": "app_backend",
                 "source_event": "listing_saved",
                 "correlation_keys": ["listing_id", "user_id"],
                 "post_commit_only": True,
@@ -99,12 +99,9 @@ def _decomposition_payload() -> dict:
                 "platform/shell/navigation.json",
                 "platform/shell/theme.json",
             ],
-            "substrate_paths": ["platform/data/entities/listing.json"],
+            "app_backend_paths": ["platform/data/entities/listing.json"],
             "module_paths": ["platform/modules/marketplace_home/module.json"],
-            "automation_paths": [
-                "platform/automations/event_catalog.json",
-                "platform/automations/routes.json",
-            ],
+            "automation_paths": [],
             "workflow_paths": ["platform/workflows/Concierge/orchestrator.yaml"],
         },
     }
@@ -163,7 +160,7 @@ def _builder_blueprint_payload() -> dict:
                     "provision_id": "auth-runtime",
                     "label": "Auth runtime",
                     "category": "auth",
-                    "runtime_owner": "mozaikscore",
+                    "runtime_owner": "app_backend",
                     "mode": "core_configured",
                     "summary": "Use the core auth system and app manifest auth metadata.",
                     "config_paths": ["platform/app.json"],
@@ -186,7 +183,7 @@ def _builder_blueprint_payload() -> dict:
                     "category": "automation_transport",
                     "runtime_owner": "shared",
                     "mode": "core_provided",
-                    "summary": "Use the core domain-event transport for automation delivery.",
+                    "summary": "Use the core domain-event transport for workflow trigger delivery.",
                     "notes": ["No app-authored broker implementation is required."],
                 },
             ]
@@ -230,12 +227,12 @@ def _builder_blueprint_payload() -> dict:
                     ],
                 },
                 {
-                    "task_id": "compile_substrate",
-                    "title": "Write substrate declaratives",
+                    "task_id": "compile_app_backend",
+                    "title": "Write app backend declaratives",
                     "builder_workflow": "BundleCompiler",
                     "depends_on": ["architecture"],
                     "capability_refs": ["browse_listings"],
-                    "declarative_families": ["app_substrate"],
+                    "declarative_families": ["app_backend"],
                     "bundle_paths": ["platform/data/entities/listing.json"],
                 },
                 {
@@ -248,24 +245,12 @@ def _builder_blueprint_payload() -> dict:
                     "bundle_paths": ["platform/modules/marketplace_home/module.json"],
                 },
                 {
-                    "task_id": "compile_automation",
-                    "title": "Write automation declaratives",
-                    "builder_workflow": "BundleCompiler",
-                    "depends_on": ["architecture"],
-                    "capability_refs": ["assistant_flow"],
-                    "provision_refs": ["automation-transport"],
-                    "declarative_families": ["automation"],
-                    "bundle_paths": [
-                        "platform/automations/event_catalog.json",
-                        "platform/automations/routes.json",
-                    ],
-                },
-                {
                     "task_id": "author_workflow",
                     "title": "Author concierge workflow",
                     "builder_workflow": "WorkflowAuthor",
                     "depends_on": ["architecture"],
                     "capability_refs": ["assistant_flow"],
+                    "provision_refs": ["automation-transport"],
                     "declarative_families": ["workflows"],
                     "bundle_paths": ["platform/workflows/Concierge/orchestrator.yaml"],
                 },
@@ -276,9 +261,8 @@ def _builder_blueprint_payload() -> dict:
                     "depends_on": [
                         "compile_manifest",
                         "compile_shell",
-                        "compile_substrate",
+                        "compile_app_backend",
                         "compile_modules",
-                        "compile_automation",
                         "author_workflow",
                     ],
                     "report_paths": ["build/reports/validation.json"],
@@ -298,9 +282,9 @@ def _flagship_platform_blueprint_payload() -> dict:
             "product_summary": "A flagship backstage experience with workflow orchestration and durable modules.",
             "value_proposition": "Show the full runtime stack with a demo app built mostly from core primitives.",
             "primary_users": ["creator", "operator"],
-            "approved_scope": ["platform admin module", "GreenRoom workflow trigger"],
+            "approved_scope": ["archive module", "WritersRoom workflow trigger"],
             "core_outcomes": ["show shell, modules, automation, and workflows together"],
-            "success_signals": ["user can reach platform admin and GreenRoom surfaces"],
+            "success_signals": ["user can reach archive and WritersRoom surfaces"],
         },
         "intent_brief": {
             "source_request": "Build the flagship runtime demo with admin surfaces and comedy workflows.",
@@ -309,29 +293,29 @@ def _flagship_platform_blueprint_payload() -> dict:
             "bounded_contexts": ["platform", "comedy"],
             "business_entities": ["SetBrief"],
             "constraints": ["reuse core platform capabilities"],
-            "success_criteria": ["navigation loads platform surfaces", "automation can launch GreenRoom"],
+            "success_criteria": ["navigation loads platform surfaces", "automation can launch WritersRoom"],
         },
         "capability_map": {
             "capabilities": [
                 {
-                    "capability_id": "platform_admin",
-                    "label": "Platform admin",
-                    "summary": "Operators can enter a durable admin surface from the shell.",
+                    "capability_id": "archive_surface",
+                    "label": "Archive surface",
+                    "summary": "Users can reach a durable archive surface from the shell.",
                     "actor": "operator",
                     "primary_surface": "module",
                     "requires_durable_state": True,
-                    "module_candidates": ["admin_portal"],
+                    "module_candidates": ["show_archive"],
                 },
                 {
-                    "capability_id": "greenroom_automation",
-                    "label": "GreenRoom automation",
-                    "summary": "Automation can launch GreenRoom from substrate-side facts.",
+                    "capability_id": "writersroom_automation",
+                    "label": "WritersRoom automation",
+                    "summary": "Automation can launch WritersRoom from backstage domain facts.",
                     "actor": "creator",
                     "primary_surface": "workflow",
                     "requires_reasoning": True,
                     "can_be_event_triggered": True,
-                    "workflow_candidates": ["GreenRoom"],
-                    "notes": ["Triggered from report.requested in the flagship bundle."],
+                    "workflow_candidates": ["WritersRoom"],
+                    "notes": ["Triggered from set.brief_confirmed in the flagship bundle."],
                 },
             ]
         },
@@ -341,7 +325,7 @@ def _flagship_platform_blueprint_payload() -> dict:
                     "provision_id": "app-auth",
                     "label": "App auth",
                     "category": "auth",
-                    "runtime_owner": "mozaikscore",
+                    "runtime_owner": "app_backend",
                     "mode": "core_configured",
                     "summary": "Use core auth and mobile/web platform metadata from the app manifest.",
                     "config_paths": ["platform/app.json"],
@@ -354,7 +338,6 @@ def _flagship_platform_blueprint_payload() -> dict:
                     "mode": "core_configured",
                     "summary": "Use the current flagship shell projections in platform/config.",
                     "config_paths": [
-                        "platform/config/navigation_config.json",
                         "platform/config/theme_config.json",
                     ],
                 },
@@ -364,7 +347,7 @@ def _flagship_platform_blueprint_payload() -> dict:
                     "category": "automation_transport",
                     "runtime_owner": "shared",
                     "mode": "core_provided",
-                    "summary": "Use core substrate-to-AI transport without app-authored broker code.",
+                    "summary": "Use the core backend-to-AI event transport without app-authored broker code.",
                 },
             ]
         },
@@ -374,25 +357,25 @@ def _flagship_platform_blueprint_payload() -> dict:
                 "summary": "Flagship runtime demo",
                 "user_personas": ["creator", "operator"],
                 "bounded_contexts": ["platform", "comedy"],
-                "core_jobs": ["open admin portal", "trigger GreenRoom automation"],
+                "core_jobs": ["open admin portal", "trigger WritersRoom automation"],
                 "constraints": ["reuse existing platform output layout"],
             },
             "capabilities": [
                 {
-                    "capability_id": "platform_admin",
-                    "label": "Platform admin",
+                    "capability_id": "archive_surface",
+                    "label": "Archive surface",
                     "primary_surface": "module",
                     "actor": "operator",
-                    "module_refs": ["admin_portal"],
+                    "module_refs": ["show_archive"],
                 },
                 {
-                    "capability_id": "greenroom_automation",
-                    "label": "GreenRoom automation",
+                    "capability_id": "writersroom_automation",
+                    "label": "WritersRoom automation",
                     "primary_surface": "workflow",
                     "actor": "creator",
-                    "workflow_refs": ["GreenRoom"],
-                    "event_refs": ["report.requested"],
-                    "automation_route_refs": ["greenroom-report-request"],
+                    "workflow_refs": ["WritersRoom"],
+                    "event_refs": ["set.brief_confirmed"],
+                    "automation_route_refs": ["writersroom-run-on-brief-confirmed"],
                 },
             ],
             "entities": [],
@@ -400,29 +383,29 @@ def _flagship_platform_blueprint_payload() -> dict:
             "actions": [],
             "modules": [
                 {
-                    "name": "admin_portal",
-                    "purpose": "Flagship platform overview",
-                    "route": "/platform",
+                    "name": "show_archive",
+                    "purpose": "Flagship archive surface",
+                    "route": "/archive",
                 }
             ],
             "events": [
                 {
-                    "event_type": "report.requested",
-                    "producer": "mozaikscore",
-                    "source_event": "report_requested",
+                    "event_type": "set.brief_confirmed",
+                    "producer": "app_backend",
+                    "source_event": "set_brief_confirmed",
                     "correlation_keys": ["app_id", "user_id"],
                     "post_commit_only": True,
                 }
             ],
             "automation_routes": [
                 {
-                    "route_id": "greenroom-report-request",
-                    "event_type": "report.requested",
-                    "when": {"payload.workflow": "GreenRoom"},
+                    "route_id": "writersroom-run-on-brief-confirmed",
+                    "event_type": "set.brief_confirmed",
+                    "when": {"payload.status": "approved"},
                     "effect": {
                         "kind": "workflow.run",
-                        "workflow": "GreenRoom",
-                        "surface": "background",
+                        "workflow": "WritersRoom",
+                        "surface": "existing_chat",
                     },
                     "bindings": {
                         "app_id": "tenant.app_id",
@@ -432,25 +415,21 @@ def _flagship_platform_blueprint_payload() -> dict:
             ],
             "workflows": [
                 {
-                    "name": "GreenRoom",
-                    "purpose": "Warm conversational intake for the backstage demo",
-                    "entry_reason": "Needs reasoning, clarifying questions, and artifact setup",
+                    "name": "WritersRoom",
+                    "purpose": "Parallel comedy writing for the backstage demo",
+                    "entry_reason": "Needs reasoning, fan-out coordination, and synthesis",
                 }
             ],
             "policies": [],
             "bundle_plan": {
                 "manifest_paths": ["platform/app.json"],
                 "shell_paths": [
-                    "platform/config/navigation_config.json",
                     "platform/config/theme_config.json",
                 ],
-                "substrate_paths": [],
-                "module_paths": ["platform/modules/admin_portal/module.json"],
-                "automation_paths": [
-                    "platform/automations/event_catalog.json",
-                    "platform/automations/routes.json",
-                ],
-                "workflow_paths": ["platform/workflows/GreenRoom/orchestrator.yaml"],
+                "app_backend_paths": [],
+                "module_paths": ["platform/modules/show_archive/module.json"],
+                "automation_paths": [],
+                "workflow_paths": ["platform/workflows/WritersRoom/orchestrator.yaml"],
             },
         },
         "build_graph": {
@@ -486,40 +465,27 @@ def _flagship_platform_blueprint_payload() -> dict:
                     "provision_refs": ["shell-config"],
                     "declarative_families": ["shell"],
                     "bundle_paths": [
-                        "platform/config/navigation_config.json",
                         "platform/config/theme_config.json",
                     ],
                 },
                 {
                     "task_id": "compile_modules",
-                    "title": "Write admin module",
+                    "title": "Write archive module",
                     "builder_workflow": "BundleCompiler",
                     "depends_on": ["architecture"],
-                    "capability_refs": ["platform_admin"],
+                    "capability_refs": ["archive_surface"],
                     "declarative_families": ["modules"],
-                    "bundle_paths": ["platform/modules/admin_portal/module.json"],
+                    "bundle_paths": ["platform/modules/show_archive/module.json"],
                 },
                 {
-                    "task_id": "compile_automation",
-                    "title": "Write flagship automation",
-                    "builder_workflow": "BundleCompiler",
-                    "depends_on": ["architecture"],
-                    "capability_refs": ["greenroom_automation"],
-                    "provision_refs": ["automation-transport"],
-                    "declarative_families": ["automation"],
-                    "bundle_paths": [
-                        "platform/automations/event_catalog.json",
-                        "platform/automations/routes.json",
-                    ],
-                },
-                {
-                    "task_id": "author_greenroom",
-                    "title": "Author GreenRoom workflow",
+                    "task_id": "author_writersroom",
+                    "title": "Author WritersRoom workflow",
                     "builder_workflow": "WorkflowAuthor",
                     "depends_on": ["architecture"],
-                    "capability_refs": ["greenroom_automation"],
+                    "capability_refs": ["writersroom_automation"],
+                    "provision_refs": ["automation-transport"],
                     "declarative_families": ["workflows"],
-                    "bundle_paths": ["platform/workflows/GreenRoom/orchestrator.yaml"],
+                    "bundle_paths": ["platform/workflows/WritersRoom/orchestrator.yaml"],
                 },
                 {
                     "task_id": "validate",
@@ -529,8 +495,7 @@ def _flagship_platform_blueprint_payload() -> dict:
                         "compile_manifest",
                         "compile_shell",
                         "compile_modules",
-                        "compile_automation",
-                        "author_greenroom",
+                        "author_writersroom",
                     ],
                     "report_paths": ["build/reports/flagship-validation.json"],
                 },
@@ -564,7 +529,7 @@ def test_build_graph_rejects_duplicate_bundle_path_ownership() -> None:
 
 def test_builder_blueprint_requires_full_bundle_plan_ownership() -> None:
     payload = _builder_blueprint_payload()
-    payload["build_graph"]["tasks"][6]["bundle_paths"] = ["platform/automations/event_catalog.json"]
+    payload["build_graph"]["tasks"][6]["bundle_paths"] = ["platform/workflows/Concierge/triggers.yaml"]
     with pytest.raises(ValueError):
         _contracts.build_builder_blueprint(payload)
 
@@ -610,7 +575,6 @@ def test_builder_blueprint_validates_flagship_platform_example() -> None:
     blueprint = _contracts.build_builder_blueprint(_flagship_platform_blueprint_payload())
     assert blueprint.decomposition.bundle_plan is not None
     assert blueprint.decomposition.bundle_plan.shell_paths == [
-        "platform/config/navigation_config.json",
         "platform/config/theme_config.json",
     ]
 
@@ -624,11 +588,8 @@ def test_builder_blueprint_change_mode_accepts_valid_impact_set() -> None:
         "affected_capability_ids": ["assistant_flow"],
         "affected_provision_ids": ["automation-transport"],
         "affected_workflows": ["Concierge"],
-        "affected_bundle_paths": [
-            "platform/automations/routes.json",
-            "platform/workflows/Concierge/orchestrator.yaml",
-        ],
-        "affected_declarative_families": ["automation", "workflows"],
+        "affected_bundle_paths": ["platform/workflows/Concierge/orchestrator.yaml"],
+        "affected_declarative_families": ["workflows"],
         "requires_concept_revision": False,
         "requires_replan": True,
         "requires_rebuild": True,

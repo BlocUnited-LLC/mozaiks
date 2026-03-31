@@ -17,9 +17,9 @@
 
 ---
 
-## 🎯 What is MozaiksAI?
+## 🎯 What is mozaiksai?
 
-**MozaiksAI Runtime** is a production-ready orchestration engine that transforms AG2 (Microsoft Autogen) into an app-grade platform with:
+**mozaiksai Runtime** is a production-ready orchestration engine that transforms AG2 (Microsoft Autogen) into an app-grade platform with:
 
 - ✅ **Event-Driven Architecture** -> Every action flows through unified event pipeline
 - ✅ **Real-Time WebSocket Transport** -> Live streaming to React frontends
@@ -29,7 +29,7 @@
 - ✅ **Declarative Workflows** -> JSON manifests, no code changes needed
 - ✅ **Comprehensive Observability** -> Built-in metrics, logging, and token tracking
 
-**MozaiksAI = AG2 + Production Infrastructure + Event-Driven Core**
+**mozaiksai = AG2 + Production Infrastructure + Event-Driven Core**
 
 ---
 

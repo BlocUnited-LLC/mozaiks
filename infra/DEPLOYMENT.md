@@ -1,4 +1,4 @@
-# MozaiksAI Runtime - Deployment Guide
+# mozaiksai Runtime - Deployment Guide
 
 ## Quick Start (Local Development)
 
@@ -10,7 +10,7 @@ docker compose up -d
 
 This starts:
 - **MongoDB** on `localhost:27017`
-- **MozaiksAI Runtime** on `localhost:8000`
+- **mozaiksai Runtime** on `localhost:8000`
 
 ## Quick Start (Production)
 
@@ -38,7 +38,7 @@ Create a `.env` file in the repo root (or pass via `-e` flags):
 OPENAI_API_KEY=sk-...
 
 # MongoDB (default works for compose)
-MONGO_URI=mongodb://mongo:27017/MozaiksAI
+MONGO_URI=mongodb://mongo:27017/mozaiksai
 
 # Optional - Azure Key Vault (if using Azure for secrets)
 # AZURE_KEYVAULT_NAME=your-keyvault

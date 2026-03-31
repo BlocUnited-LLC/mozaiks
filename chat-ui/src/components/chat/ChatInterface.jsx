@@ -2,6 +2,10 @@ import React, { useEffect, useState, useRef } from "react";
 import ChatMessage from "./ChatMessage";
 import { useNavigate, useParams } from "react-router-dom";
 import UIToolRenderer from "../../core/ui/UIToolRenderer";
+import {
+  applyBrandImageFallback,
+  getBrandLogoSrc,
+} from "../../styles/brandAssets";
 
 // UI Tool Renderer - handles workflow-agnostic UI tool events
 // NOTE: Hooks must run unconditionally; define state first, then early-return.
@@ -162,6 +166,7 @@ const ModernChatInterface = ({
   isOnChatPage = true, // Whether we're on the primary chat page (not discovery/workflows)
   hideHeader = false, // Hide the header (used when widget has its own header)
   plainContainer = false, // Skip decorative cosmic-ui-module styling (used in widget)
+  chatTheme = null,
   artifactContext = null,
   overlayMode = false,
   onOverlayClose = null,
@@ -188,6 +193,7 @@ const ModernChatInterface = ({
     : (typeof onAskHistoryToggle === 'function' ? onAskHistoryToggle : null);
   const showAskHistoryToggle = (showHistoryMenu || showAskHistoryMenu) && typeof historyToggleHandler === 'function';
   const avatarIcon = conversationMode === 'ask' ? '🧠' : '🤖';
+  const brandLogoSrc = getBrandLogoSrc(chatTheme);
   // const renderCountRef = useRef(0); // For debugging renders if needed
 
   // Optional debug: enable to trace renders
@@ -472,7 +478,7 @@ const ModernChatInterface = ({
                   <span className="text-xl sm:text-2xl" role="img" aria-hidden="true">🤖</span>
                 </span>
                 <span className="text-left min-w-0 flex-1">
-                  <span className="block text-sm sm:text-lg md:text-xl font-bold text-white tracking-tight truncate">MozaiksAI</span>
+                  <span className="block text-sm sm:text-lg md:text-xl font-bold text-white tracking-tight truncate">mozaiksai</span>
                   <span className="block text-[10px] sm:text-xs text-gray-400 truncate">{conversationSubtitle}</span>
                 </span>
               </button>
@@ -485,7 +491,7 @@ const ModernChatInterface = ({
                   <span className="text-xl sm:text-2xl" role="img" aria-hidden="true">{avatarIcon}</span>
                 </span>
                 <span className="text-left min-w-0 flex-1">
-                  <span className="block text-sm sm:text-lg md:text-xl font-bold text-white tracking-tight truncate">MozaiksAI</span>
+                  <span className="block text-sm sm:text-lg md:text-xl font-bold text-white tracking-tight truncate">mozaiksai</span>
                   <span className="block text-[10px] sm:text-xs text-gray-400 truncate">{conversationSubtitle}</span>
                 </span>
               </div>
@@ -524,9 +530,10 @@ const ModernChatInterface = ({
                 title={conversationMode === 'ask' ? 'Switch to Workflow Mode' : (artifactToggleLabel || 'Toggle Artifact Canvas')}
               >
                 <img
-                  src="/assets/mozaik_logo.svg"
+                  src={brandLogoSrc}
                   className="w-8 h-8 md:w-10 md:h-10 opacity-70 group-hover:opacity-100 transition-all duration-300 group-hover:scale-105"
                   alt={conversationMode === 'ask' ? 'Switch to Workflow' : 'Artifact Canvas'}
+                  onError={applyBrandImageFallback}
                 />
                 <div className="absolute inset-0 bg-[rgba(var(--color-primary-light-rgb),0.1)] rounded-lg blur opacity-0 group-hover:opacity-100 transition-opacity duration-300 -z-10"></div>
               </button>
@@ -544,9 +551,10 @@ const ModernChatInterface = ({
                 title={conversationMode === 'ask' ? 'Switch to Workflow Mode' : (artifactToggleLabel || 'Toggle Artifact Canvas')}
               >
                 <img
-                  src="/assets/mozaik_logo.svg"
+                  src={brandLogoSrc}
                   className="w-7 h-7 opacity-80 group-hover:opacity-100 transition-all duration-300 group-hover:scale-105"
                   alt={conversationMode === 'ask' ? 'Switch to Workflow' : 'Artifact Canvas'}
+                  onError={applyBrandImageFallback}
                 />
               </button>
             </>
@@ -560,9 +568,10 @@ const ModernChatInterface = ({
               title={artifactToggleLabel || 'Toggle Artifact Canvas'}
             >
               <img
-                src="/assets/mozaik_logo.svg"
+                src={brandLogoSrc}
                 className="w-8 h-8 md:w-10 md:h-10 opacity-70 group-hover:opacity-100 transition-all duration-300 group-hover:scale-105"
                 alt="Artifact Canvas"
+                onError={applyBrandImageFallback}
               />
               <div className="absolute inset-0 bg-[rgba(var(--color-primary-light-rgb),0.1)] rounded-lg blur opacity-0 group-hover:opacity-100 transition-opacity duration-300 -z-10"></div>
             </button>

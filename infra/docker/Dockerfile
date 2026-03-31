@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# MozaiksAI Runtime - Production Dockerfile
+# mozaiksai Runtime - Production Dockerfile
 # ==========================================
 # Build: docker build -t mozaiks/runtime:latest -f infra/docker/Dockerfile .
 # Run:   docker run -p 8000:8000 --env-file .env mozaiks/runtime:latest

@@ -1,7 +1,7 @@
 # === MOZAIKS-CORE-HEADER ===
-# FILE: core/ports/orchestration.py
+# FILE: mozaiksai/core/ports/orchestration.py
 # DESCRIPTION: OrchestrationPort — the engine-agnostic contract surface for all
-#              workflow execution in MozaiksAI.
+#              workflow execution in mozaiksai.
 #
 # This is the single boundary between the runtime layer and the execution engine.
 # Everything above this contract (transport, API routes, websocket handlers) is

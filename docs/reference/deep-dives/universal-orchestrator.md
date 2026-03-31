@@ -5,6 +5,8 @@
 > This is process-independent: the same routing model applies to the build pipeline,
 > a future marketing process, a financial planning process, or anything else.
 
+**Status note:** Treat this document as a routing design reference, not as proof that every path is live-validated in the current AG2 runtime. Correctness claims for runtime behavior should come from code and targeted smoke coverage, not from this document alone.
+
 ---
 
 ## Core Concept

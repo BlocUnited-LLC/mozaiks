@@ -11,25 +11,20 @@
 
 </div>
 
-> **Note**: This is the unified Mozaiks stack. BlocUnited offers a managed platform with app generation tools at [mozaiks.ai](https://mozaiks.ai), but you're welcome to self-host and build everything yourself.
+## 🎯 What is This?
 
-> **Zero-Code Setup**: New to development? No problem! Copy the [AI Setup Prompt](https://docs.mozaiks.ai/setup-prompt/) into your AI coding agent (Claude Code, Cursor, Copilot, etc.) and let AI guide you through the entire setup.
+### **mozaiksai Runtime**
+Production-ready declarative orchestration engine for AG2 (Microsoft Autogen):
 
----
+- ✅ **Event-Driven Architecture** — Every action flows through unified event pipeline
+- ✅ **Real-Time WebSocket Transport** — Live streaming to React frontends
+- ✅ **Persistent State Management** — Resume conversations exactly where they left off
+- ✅ **Multi-Tenant Isolation** — App-scoped data and execution contexts
+- ✅ **Dynamic UI Integration** — Agents can invoke React components during workflows
+- ✅ **Declarative Workflows** — YAML manifests, no code changes needed
+- ✅ **Comprehensive Observability** — Built-in metrics, logging, and token tracking
 
-## 🎯 What is MozaiksAI?
-
-**MozaiksAI Runtime** is a production-ready orchestration engine that transforms AG2 (Microsoft Autogen) into an app-grade platform with:
-
-- ✅ **Event-Driven Architecture** -> Every action flows through unified event pipeline
-- ✅ **Real-Time WebSocket Transport** -> Live streaming to React frontends
-- ✅ **Persistent State Management** -> Resume conversations exactly where they left off
-- ✅ **Multi-Tenant Isolation** -> app-scoped data and execution contexts
-- ✅ **Dynamic UI Integration** -> Agents can invoke React components during workflows
-- ✅ **Declarative Workflows** -> JSON manifests, no code changes needed
-- ✅ **Comprehensive Observability** -> Built-in metrics, logging, and token tracking
-
-**MozaiksAI = AG2 + Production Infrastructure + Event-Driven Core**
+**Soon:** `pip install mozaiksai`
 
 ---
 
@@ -41,7 +36,7 @@
 
 ![Widget Demo](./docs/assets/widgetAction.gif)
 
-*Drop a floating assistant anywhere in your app - click the button to expand/collapse the chat interface*
+*Drop a floating assistant anywhere in your app — click the button to expand/collapse the chat interface*
 
 ---
 
@@ -53,8 +48,48 @@
 | *Chat + Artifact split view* | *Full chat with history sidebar* |
 
 </div>
+---
+
+## 📚 Documentation
+
+- [Architecture Overview](ARCHITECTURE.md) — System design and component model
+- [Separation Plan](SEPARATION_PLAN.md) — How we're splitting runtime from template
+- [Getting Started](docs/getting-started.md) — Full setup guide
+- [Workflow Authoring Contracts](docs/architecture/foundations/workflow-authoring-contracts.md) — Canonical strict YAML contract
+- [Contributing](CONTRIBUTING.md) — Development workflow
 
 ---
+
+## Declarative Contract Snapshot
+
+Mozaiks workflows are authored as strict YAML bundles. The runtime validates
+these contracts and rejects unknown fields.
+
+```text
+platform/workflows/{workflow_name}/
+  orchestrator.yaml
+  agents.yaml
+  handoffs.yaml
+  context_variables.yaml
+  structured_outputs.yaml
+  tools.yaml
+  ui_config.yaml
+  hooks.yaml
+```
+
+Minimal `context_variables.yaml` shape:
+
+```yaml
+definitions: {}
+agents:
+  GreeterAgent:
+    variables: []
+```
+
+Use the canonical contract guide for full file schemas and required fields.
+
+---
+
 ## Contributing
 
 See `CONTRIBUTING.md`.

@@ -1,6 +1,6 @@
 # UI UI patterns
 
-This document describes standard patterns for tool-UI interactions in the MozaiksAI runtime.
+This document describes standard patterns for tool-UI interactions in the mozaiksai runtime.
 
 ---
 
@@ -148,20 +148,26 @@ async def collect_api_keys_bundle(services: List[str]):
 - Example: API key inputs, file downloads, confirmations
 
 **Configuration**:
-```json
-// tools.json
-{
-  "ui_tools": [
-    {
-      "tool_id": "ActionPlan",
-      "mode": "artifact"  // Opens in side panel
-    },
-    {
-      "tool_id": "FileDownloadCenter", 
-      "mode": "inline"  // Appears in chat
-    }
-  ]
-}
+```yaml
+# tools.yaml
+tools:
+  - agent: ActionPlanAgent
+    file: render_action_plan.py
+    function: render_action_plan
+    tool_type: UI_Tool
+    auto_invoke: true
+    ui:
+      component: ActionPlan
+      mode: artifact
+  - agent: DeliveryAgent
+    file: open_download_center.py
+    function: open_download_center
+    tool_type: UI_Tool
+    auto_invoke: true
+    ui:
+      component: FileDownloadCenter
+      mode: inline
+lifecycle_tools: []
 ```
 
 ---
@@ -287,17 +293,18 @@ function MyComponent({ payload }) {
    - Return early with clear status message
    - Don't perform action if user cancelled
 
-5. **Document in tools.json**
-   ```json
-   {
-     "function": "my_tool",
-     "parameters": {
-       "confirmation_only": {
-         "type": "boolean",
-         "description": "If true, ask confirmation before action (two-step). If false, perform immediately (single-step).",
-         "default": true
-       }
-     }
-   }
+5. **Document in `tools.yaml`**
+   ```yaml
+   tools:
+     - agent: PlannerAgent
+       file: my_tool.py
+       function: my_tool
+       tool_type: UI_Tool
+       auto_invoke: true
+       description: "If confirmation_only=true, do a two-step UI flow."
+       ui:
+         component: MyComponent
+         mode: inline
+   lifecycle_tools: []
    ```
 

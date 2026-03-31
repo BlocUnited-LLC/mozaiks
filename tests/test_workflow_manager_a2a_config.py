@@ -22,7 +22,7 @@ def test_workflow_manager_loads_optional_a2a_yaml(tmp_path: Path) -> None:
                 "workflow_name: FlowA",
                 "max_turns: 10",
                 "human_in_the_loop: true",
-                "startup_mode: AgentDriven",
+                "workflow_startup_mode: AgentDriven",
             ]
         ),
     )
@@ -64,3 +64,29 @@ def test_workflow_manager_loads_optional_a2a_yaml(tmp_path: Path) -> None:
     assert isinstance(entries, list)
     assert entries and entries[0].get("name") == "RemotePlanner"
     assert entries[0].get("url") == "https://example.com/agents/planner"
+
+
+def test_workflow_manager_rejects_legacy_startup_mode_only(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "FlowLegacy"
+    wf_dir.mkdir(parents=True)
+
+    _write_yaml(
+        wf_dir / "orchestrator.yaml",
+        "\n".join(
+            [
+                "workflow_name: FlowLegacy",
+                "startup_mode: UserDriven",
+                "human_in_the_loop: true",
+            ]
+        ),
+    )
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    manager = _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(tmp_path))
+    cfg = manager.get_config("FlowLegacy")
+    info = manager.get_workflow_info("FlowLegacy")
+
+    assert cfg == {}
+    assert info is not None
+    assert info.get("status") == "error"
+    assert "workflow_startup_mode" in str(info.get("error") or "")

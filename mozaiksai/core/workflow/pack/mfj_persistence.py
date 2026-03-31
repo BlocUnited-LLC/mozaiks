@@ -28,7 +28,7 @@ class MFJCompletionStore:
         client = self._pm.persistence.client  # noqa: SLF001
         if client is None:
             raise RuntimeError("Mongo client is not initialized")
-        return client["MozaiksAI"][self._collection_name]
+        return client["mozaiksai"][self._collection_name]
 
     async def ensure_indexes(self) -> None:
         if self._indexes_ready:

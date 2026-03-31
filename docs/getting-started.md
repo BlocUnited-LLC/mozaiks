@@ -2,25 +2,20 @@
 
 !!! tip "New to Development?"
 
-    **Let AI do the hard parts!** Copy this prompt into Claude Code:
+    **Let AI do the hard parts!** In Claude Code, just run:
 
     ```
-    I want to set up Mozaiks from scratch.
-
-    Please read the instruction prompt at:
-    instruction-prompts/getting-started/full-setup-from-clone.md
-
-    My OpenAI API key is: [PASTE YOUR KEY HERE]
-
-    Walk me through the complete setup. Check for any issues along the way
-    and help me fix them.
+    /setup
     ```
 
     The AI will handle prerequisites, environment setup, Docker, and verify everything works.
 
 ---
 
-Everything you need to go from clone → running app in minutes.
+Everything you need to go from clone to a running local Mozaiks app.
+
+The current sample bundle is `Backstage`, built from `platform/` with the
+seeded workflows `GreenRoom`, `WritersRoom`, and `MainStage`.
 
 ---
 
@@ -53,15 +48,13 @@ Docker is required — it runs **MongoDB** (app database), **PostgreSQL** (Keycl
 
 ## Fastest path (recommended)
 
-Use the bootstrap ritual + doctor checks:
+Use the `/setup` skill in Claude Code:
 
-```powershell
-python -m mozaiksai.cli init --llm
-python -m mozaiksai.cli doctor
-python -m mozaiksai.cli up --frontend
+```
+/setup
 ```
 
-This is the best path for first-time developers because it configures `platform/app.json`, `.env`, and generated Keycloak artifacts before startup.
+This is the best path for first-time developers because it walks you through configuring `platform/app.json`, `.env`, Docker, and local auth defaults before startup. The skill will verify everything works.
 
 ---
 
@@ -70,7 +63,7 @@ This is the best path for first-time developers because it configures `platform/
 ```
 mozaiks/
 ├── platform/                   # Declarative app bundle consumed by the runtime
-│   ├── app.json                # App identity and deployment config
+│   ├── app.json                # App identity, auth requirement, admin emails
 │   ├── config/                 # AI, modules, navigation, subscriptions
 │   ├── workflows/              # Workflow definitions and UI tools
 │   └── modules/                # Persistent modules/pages
@@ -119,19 +112,7 @@ Open `.env` and set your OpenAI API key:
 OPENAI_API_KEY=sk-...
 ```
 
-That's the only required edit. Everything else has working defaults:
-
-| Key | Required | Default | Description |
-|---|---|---|---|
-| `OPENAI_API_KEY` | **Yes** | — | Your OpenAI API key |
-| `MONGO_URI` | — | `mongodb://localhost:27017` | MongoDB connection string |
-| `MONGO_DB_NAME` | — | `MozaiksAI` | App database name |
-| `AUTH_ENABLED` | — | `true` | Enable Keycloak JWT validation |
-| `KC_ADMIN_USER` | — | `admin` | Keycloak admin console username |
-| `KC_ADMIN_PASSWORD` | — | `admin` | Keycloak admin console password |
-| `KC_DB_PASSWORD` | — | `keycloak` | Keycloak Postgres password |
-| `MOZAIKS_OIDC_AUTHORITY` | — | `http://localhost:8080/realms/mozaiks` | Keycloak realm URL |
-| `AUTH_AUDIENCE` | — | `mozaiks-app` | JWT audience (matches Keycloak client ID) |
+That's the only required edit. Everything else has working defaults.
 
 See `.env.example` for the full list with inline comments.
 
@@ -158,7 +139,7 @@ This starts **three services** automatically:
     - **PostgreSQL**: Keycloak creates and manages its own schema on first boot.
     - **Keycloak realm**: Auto-imported from `infra/keycloak/realm-export.json` on first start — creates the `mozaiks` realm, `mozaiks-app` client, and a `dev` test user.
 
-    Data persists in Docker volumes (`mozaiksai_mongo_data`, `mozaiksai_keycloak_db`). Stopping containers does NOT delete data. Only `docker compose down -v` removes volumes.
+    Data persists in Docker volumes (`MozaiksAI_mongo_data`, `MozaiksAI_keycloak_db`). Stopping containers does NOT delete data. Only `docker compose down -v` removes volumes.
 
 ### Verify databases are healthy
 
@@ -211,7 +192,7 @@ From here you can manage users, roles, and login settings. The `mozaiks` realm i
     In a separate terminal:
 
     ```powershell
-    # Start frontend (http://localhost:5173)
+    # Start frontend (http://localhost:3000)
     cd app
     npm install   # first time only
     npm run dev
@@ -238,14 +219,16 @@ From here you can manage users, roles, and login settings. The `mozaiks` realm i
 
 | Check | URL | Expected |
 |---|---|---|
-| Frontend | [http://localhost:5173](http://localhost:5173) | Keycloak login page (redirects automatically) |
-| Backend health | [http://localhost:8000/api/health](http://localhost:8000/api/health) | `{"status": "ok"}` |
+| Frontend | [http://localhost:3000](http://localhost:3000) | App loads and auto-signs into the seeded dev user by default |
+| Backend health | [http://localhost:8000/api/health](http://localhost:8000/api/health) | Health payload includes `"status": "healthy"` |
 | Loaded workflows | [http://localhost:8000/api/workflows](http://localhost:8000/api/workflows) | Shows `GreenRoom`, `WritersRoom`, and `MainStage` |
 | Keycloak admin | [http://localhost:8080/admin](http://localhost:8080/admin) | Admin console (admin/admin) |
 
 ### First login
 
-When you open the frontend, you'll be redirected to Keycloak's login page. Use the test user:
+By default, the frontend uses local dev auto-login. If Keycloak is running, it signs into the seeded dev user automatically.
+
+If you disable auto-login, use the test user:
 
 - **Username:** `dev`
 - **Password:** `dev`
@@ -259,13 +242,16 @@ After login, you're redirected back to the app with a valid JWT session.
 ```json
 {
   "appName": "My App",
-  "appId": "my-app",
-  "apiUrl": "http://localhost:8000",
-  "wsUrl": "ws://localhost:8000"
+  "targets": {
+    "web": true,
+    "mobile": false
+  },
+  "authRequired": true,
+  "admins": ["owner@example.com"]
 }
 ```
 
-`appName` appears in the browser tab and is also used by the mobile shell. User identity always comes from the auth adapter (Keycloak, token, external, or mock) — no user ID in this file. The active workflow is resolved automatically from backend config, with the canonical entry-point workflow declared in `platform/config/ai.json`. Set `apiUrl` and `wsUrl` to your deployed backend URL when going to production.
+`appName` appears in the browser tab and is also used by the mobile shell. `authRequired` says whether the product needs sign-in. `admins` says which signed-in users should count as admins. The active workflow is resolved automatically from backend config, with the canonical entry-point workflow declared in `platform/config/ai.json`. Backend URLs and local dev auth behavior now live in `.env`.
 
 For most users, this is the only config file they should touch. The `clients/mobile` directory is the repo-owned native implementation layer.
 
@@ -284,7 +270,7 @@ For most users, this is the only config file they should touch. The `clients/mob
 No migrations needed — collections are created automatically on first use. To inspect data, connect with any MongoDB client:
 
 ```
-mongodb://localhost:27017/MozaiksAI
+mongodb://localhost:27017/mozaiksai
 ```
 
 ### PostgreSQL (Keycloak's data)
@@ -308,7 +294,7 @@ This re-creates all volumes and re-imports the realm from `realm-export.json`.
     Keycloak needs ~30-60 seconds to initialize its database and import the realm. Run `docker compose logs keycloak -f` and wait for `Running the server in development mode`. Then `docker compose up -d` again.
 
 ??? question "Port 8080 already in use"
-    Another service is using port 8080. Either stop it or change Keycloak's port in `docker-compose.yml` and update `auth.keycloak.authority` in `platform/app.json` to match.
+    Another service is using port 8080. Either stop it or change Keycloak's port in `docker-compose.yml` and update `MOZAIKS_OIDC_AUTHORITY` in `.env` to match.
 
 ??? question "Port 27017 already in use"
     A local MongoDB is already running. Either stop it (`brew services stop mongodb-community` or stop the Windows service) or change the port mapping in `docker-compose.yml`.
@@ -317,7 +303,7 @@ This re-creates all volumes and re-imports the realm from `realm-export.json`.
     Keycloak isn't running or isn't reachable. Check `docker compose ps` — Keycloak should be `healthy`. If you want temporary fallback mode, set `AUTH_ENABLED=false` in `.env` and restart backend/frontend.
 
 ??? question "I want to skip auth during development"
-    Set `AUTH_ENABLED=false` in `.env` to disable backend JWT validation. This is temporary fallback mode and should not be used for production parity testing.
+    For frontend-only work, set `VITE_MOCK_MODE=true` in `.env`. If you need backend auth bypass too, set `AUTH_ENABLED=false`. Keep both off for production-parity testing.
 
 ??? question "How do I connect to MongoDB Atlas instead of local?"
     Set `MONGO_URI` in `.env` to your Atlas connection string. You can then skip starting the local mongo container: `docker compose up keycloak-db keycloak -d`
@@ -326,47 +312,16 @@ This re-creates all volumes and re-imports the realm from `realm-export.json`.
 
 ## Next steps
 
-<div class="grid cards" markdown>
+Use Claude Code skills to build on top of Mozaiks:
 
--   :fontawesome-solid-sitemap: **Add a workflow**
+| Task | Skill | What it does |
+|------|-------|--------------|
+| **Add a workflow** | `/create-workflow` | Creates a new AI workflow with agents, tools, and UI |
+| **Customize branding** | `/add-branding` | Configure themes, colors, navigation, and logos |
 
-    ---
+Or explore the architecture:
 
-    Create your own workflow under `platform/workflows/` with agents, tools, handoffs, and UI tools.
-
-    [:octicons-arrow-right-24: Adding a Workflow](guides/adding-workflows/01-overview.md)
-
--   :fontawesome-solid-palette: **Configure your app shell**
-
-    ---
-
-    Configure branding, shell behavior, and auth without modifying the runtime.
-
-    [:octicons-arrow-right-24: Customize Frontend](guides/custom-brand-integration/01-overview.md)
-
--   :material-robot-outline: **Use prompt packs**
-
-    ---
-
-    Hand setup or implementation work to an AI coding agent with task-specific prompt packs.
-
-    [:octicons-arrow-right-24: Prompt Packs](instruction-prompts/prompt-packs.md)
-
--   :fontawesome-solid-lock: **Configure auth**
-
-    ---
-
-    Configure Keycloak authority/client/realm from `platform/app.json`.
-
-    [:octicons-arrow-right-24: Auth (app.json)](guides/custom-brand-integration/06-auth-json.md)
-
--   :fontawesome-solid-server: **Architecture**
-
-    ---
-
-    How auth, databases, and the runtime fit together.
-
-    [:octicons-arrow-right-24: Keycloak Auth Architecture](architecture/keycloak-auth.md)
-
-</div>
+- [Keycloak Auth Architecture](architecture/keycloak-auth.md) — How auth, databases, and the runtime fit together
+- [Workflow Architecture](architecture/foundations/workflow-architecture.md) — How workflows, tools, and agents work
+- [Event System](architecture/foundations/event-system-architecture.md) — The event-driven architecture
 

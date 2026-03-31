@@ -172,7 +172,7 @@ async def stop_services(services: list[Any]) -> None:
 
 
 # =============================================================================
-# LIFECYCLE HOOKS - Workflow-declared build/workflow lifecycle notifications
+# LIFECYCLE HOOKS - Workflow-declared execution lifecycle notifications
 # =============================================================================
 
 def get_workflow_lifecycle_hooks(workflow_name: str) -> dict[str, Any]:
@@ -181,7 +181,7 @@ def get_workflow_lifecycle_hooks(workflow_name: str) -> dict[str, Any]:
     Workflows can declare lifecycle hooks in their orchestrator.yaml via
     runtime_extensions with kind: lifecycle_hooks. This allows workflows
     to notify external systems (e.g., a platform control plane) when the
-    workflow starts, completes, or fails.
+    workflow execution starts, completes, or fails.
 
     Example orchestrator.yaml:
         runtime_extensions:
@@ -190,16 +190,14 @@ def get_workflow_lifecycle_hooks(workflow_name: str) -> dict[str, Any]:
 
     The entrypoint should return a dict with optional callables:
         {
-            "is_build_workflow": callable(workflow_name) -> bool,
-            "on_start": async callable(app_id, user_id, chat_id, workflow_name),
-            "on_complete": async callable(app_id, user_id, chat_id, workflow_name, result),
-            "on_fail": async callable(app_id, user_id, chat_id, workflow_name, error),
+            "on_start": async callable(app_id, execution_id, chat_id, user_id, workflow_name),
+            "on_complete": async callable(app_id, execution_id, chat_id, user_id, workflow_name),
+            "on_fail": async callable(app_id, execution_id, chat_id, user_id, workflow_name, message, details=None),
         }
 
     Returns dict with None values if no hooks are declared (safe to call without checking).
     """
     empty_hooks = {
-        "is_build_workflow": None,
         "on_start": None,
         "on_complete": None,
         "on_fail": None,

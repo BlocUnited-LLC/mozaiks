@@ -1,6 +1,6 @@
 # ============================================================================
-# FILE: core/data/theme_manager.py
-# DESCRIPTION: Persistence and validation for app theme configuration (legacy: app)
+# FILE: mozaiksai/core/data/themes/theme_manager.py
+# DESCRIPTION: Persistence and validation for app theme configuration.
 # ============================================================================
 
 from __future__ import annotations
@@ -224,7 +224,7 @@ DEFAULT_THEME: Dict[str, Any] = {
         "focus": "0 0 0 3px rgba(8, 145, 178, 0.55)",
     },
     "branding": {
-        "name": "MozaiksAI",
+        "name": "mozaiksai",
         "logo": "/mozaik_logo.svg",
         "favicon": "/mozaik.png",
     },
@@ -256,10 +256,10 @@ class ThemeManager:
             await self._persistence._ensure_client()
             assert self._persistence.client is not None
 #################################################################################
-            db = self._persistence.client["MozaiksAI"]
+            db = self._persistence.client["mozaiksai"]
             self._collection = db["Themes"]
             # _id is the canonical key; keep secondary indexes non-unique to avoid
-            # unique-null collisions for legacy docs missing newer fields.
+            # unique-null collisions when optional fields are absent.
             await self._collection.create_index("app_id")
             return self._collection
 ################################################################################

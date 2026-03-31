@@ -15,14 +15,12 @@ The current web shell and platform primarily rely on:
 - `GET /api/health`
 - `GET /api/workflows`
 - `GET /api/theme-config`
-- `GET /api/navigation-config`
-- module-related routes exposed by `mozaikscore/core/director.py`
+- `GET /api/shell-config`
 - workflow and chat/session routes exposed by the shared app
 
 ## Where To Look In Code
 
 - `shared_app.py`
-- `mozaikscore/core/director.py`
 - `mozaiksai/core/transport/`
 - `mozaiksai/core/workflow/`
 

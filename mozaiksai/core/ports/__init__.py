@@ -1,5 +1,5 @@
 # === MOZAIKS-CORE-HEADER ===
-# FILE: core/ports/__init__.py
+# FILE: mozaiksai/core/ports/__init__.py
 # DESCRIPTION: Port protocols — engine-agnostic contracts for the runtime layer.
 # ==============================================================================
 
@@ -12,24 +12,22 @@ from .orchestration import (
     DomainEvent,
 )
 
-from .core_service import (
-    CoreServicePort,
-    ModuleRequest,
-    ModuleResult,
-    NotificationRequest,
-    SubstrateHealth,
+from .app_backend import (
+    AppBackendPort,
+    BackendResponse,
+    BackendHealth,
 )
 
 __all__ = [
+    # Orchestration
     "OrchestrationPort",
     "RunRequest",
     "ResumeRequest",
     "RunResult",
     "RunStatus",
     "DomainEvent",
-    "CoreServicePort",
-    "ModuleRequest",
-    "ModuleResult",
-    "NotificationRequest",
-    "SubstrateHealth",
+    # App backend
+    "AppBackendPort",
+    "BackendResponse",
+    "BackendHealth",
 ]

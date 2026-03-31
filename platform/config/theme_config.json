@@ -8,7 +8,7 @@
   "assets": {
     "logo": "mozaik_logo.svg",
     "wordmark": "mozaik.png",
-    "favicon": "mozaik_logo.svg",
+    "favicon": "/favicon.ico",
     "backgroundImage": "chat_bg_template.png"
   },
 

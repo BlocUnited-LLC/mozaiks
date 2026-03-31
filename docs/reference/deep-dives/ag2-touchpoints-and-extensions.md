@@ -163,7 +163,7 @@ coordination state as a fake "human message" — a workaround within a workaroun
 ══════════════════════════════════════════════════════════════
 
 [MOZAIKS] WorkflowPackCoordinator
-        │  Listening on "structured_output_ready" event
+        │  Listening on "agent_output_validated" event
         │
         ▼
 [MOZAIKS] detect PatternSelection structured output with workflows[]
@@ -237,9 +237,9 @@ User message → [MOZAIKS] simple_transport.handle_user_input_from_api()
               [MOZAIKS] stream_and_process_events()
                       │  async for event in response:
                       │     ├─ Translate BaseEvent → WebSocket JSON
-                      │     ├─ Detect structured_output_ready
-                      │     │    └─ [MOZAIKS] dispatcher.emit("structured_output_ready")
-                      │     │         └─ [MOZAIKS] WorkflowPackCoordinator.handle_structured_output_ready()
+                      │     ├─ Detect agent_output_validated
+                      │     │    └─ [MOZAIKS] dispatcher.emit("agent_output_validated")
+                      │     │         └─ [MOZAIKS] WorkflowPackCoordinator.handle_journey_triggered()
                       │     │               ├─ cancel parent asyncio.Task  ← Phase 1 end
                       │     │               └─ spawn N child asyncio.Tasks ← Phase 2 begin
                       │     ├─ Persist each turn to MongoDB

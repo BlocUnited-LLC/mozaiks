@@ -1,5 +1,5 @@
 /**
- * useCoreWebSocket — Persistent WebSocket connection to mozaikscore.
+ * useCoreWebSocket — Persistent WebSocket connection to the backend.
  *
  * Connects to ws://host:8000/ws/{userId}, auto-reconnects on drop,
  * dispatches incoming events to registered listeners, and exposes

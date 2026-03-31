@@ -2,7 +2,7 @@
   "workflow_name": "TestDatabaseSchema_095c75900e",
   "orchestrator_output": {
     "workflow_name": "TestDatabaseSchema_095c75900e",
-    "startup_mode": "BackendOnly"
+    "workflow_startup_mode": "BackendOnly"
   },
   "agents_output": {
     "agents": []

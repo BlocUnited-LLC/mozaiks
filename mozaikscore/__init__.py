@@ -1,1 +1,0 @@
-# mozaikscore — application substrate package

@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/streaming/__init__.py
+# FILE: mozaiksai/core/workflow/streaming/__init__.py
 # DESCRIPTION: Streaming utilities for real-time token emission
 # ==============================================================================
 

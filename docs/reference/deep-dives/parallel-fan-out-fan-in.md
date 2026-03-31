@@ -27,7 +27,7 @@ The system must:
 
 ---
 
-## 2. Why AG2 Can't Do This Today
+## 2. Why AG2 Can't Do This Yet
 
 Three things block this:
 
@@ -72,7 +72,7 @@ back into a running GroupChat.
 The bidirectional streaming API from the redesign proposal eliminates the workaround:
 
 ```python
-# TODAY — three separate AG2 invocations, MongoDB round-trips to bridge them
+# CURRENT RUNTIME — three separate AG2 invocations, MongoDB round-trips to bridge them
 response = await a_run_group_chat(pattern, messages, max_rounds)  # Phase 1
 # ... cancel task, run N children, read MongoDB, call a_resume()  # Phase 2-3
 
@@ -80,7 +80,7 @@ response = await a_run_group_chat(pattern, messages, max_rounds)  # Phase 1
 async with agent.stream() as stream:
     async for event in stream.listen():
         if is_decomposition_trigger(event):
-            # Fan out — same as today
+            # Fan out — same runtime step
             child_results = await asyncio.gather(*[run_child(c) for c in children])
             # Fan in — THIS IS THE MISSING PIECE
             await stream.writer().send(aggregate(child_results))
@@ -90,7 +90,7 @@ async with agent.stream() as stream:
 `stream.writer().send()` is the primitive that makes fan-out/fan-in native. Without it,
 we need three phases. With it, we need one `async with` block.
 
-A key consequence: today we **require** MongoDB as a state bridge between phases — child
+A key consequence: the current runtime **requires** MongoDB as a state bridge between phases — child
 `ContextVariables` are serialized to MongoDB because the Python objects die when tasks are
 cancelled, and `a_resume()` replays full history from MongoDB because the parent GroupChat
 was killed. With bidirectional streaming, the parent never stops — its `ContextVariables`
@@ -103,7 +103,7 @@ parent and children.
 
 ## Summary
 
-We have a production system doing parallel fan-out/fan-in on top of AG2 today. The
+Mozaiks runs parallel fan-out/fan-in on top of AG2 in production. The
 workaround — cancel parent, run N children, resume parent from MongoDB — works but exists
 solely because the current event stream is output-only.
 

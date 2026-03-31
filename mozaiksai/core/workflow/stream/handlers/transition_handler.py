@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/stream/handlers/transition_handler.py
+# FILE: mozaiksai/core/workflow/stream/handlers/transition_handler.py
 # DESCRIPTION: Handler for AfterWorksTransitionEvent (handoff_to_user)
 # ==============================================================================
 
@@ -22,7 +22,7 @@ from .base import BaseEventHandler
 if TYPE_CHECKING:
     from ..context import StreamContext, StreamState
 
-# Import AG2 transition types conditionally (version compatibility)
+# Import AG2 transition types conditionally.
 try:
     from autogen.agentchat.group import RevertToUserTarget
     from autogen.agentchat.group.events import AfterWorksTransitionEvent

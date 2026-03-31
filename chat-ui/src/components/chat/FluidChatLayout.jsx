@@ -100,7 +100,7 @@ const FluidChatLayout = ({
                     className="text-sm font-semibold text-white"
                     style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
                   >
-                    MozaiksAI
+                    mozaiksai
                   </span>
                   <span
                     className="text-xs text-gray-500"

@@ -59,8 +59,6 @@ export default defineConfig({
       '@mozaiks/chat-ui': path.resolve(__dirname, '../chat-ui/src'),
       // Resolves @chat-workflows to the auto-discovery registry that scans platform/workflows.
       '@chat-workflows':  path.resolve(__dirname, '../chat-ui/src/@chat-workflows'),
-      // Resolves @modules to the auto-discovery registry that scans platform/modules.
-      '@modules':         path.resolve(__dirname, '../chat-ui/src/@modules'),
       // React Native Web: translate react-native imports to browser-compatible equivalents.
       // This allows chat-ui/src/ui/ components (built with RN primitives) to run in the browser.
       'react-native':     'react-native-web',

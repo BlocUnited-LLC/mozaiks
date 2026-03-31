@@ -5,7 +5,7 @@ belongs in Mozaiks core.
 
 It is separate from:
 
-- substrate domain events
+- app backend domain events
 - workflow stream events
 - first-party builder vocabulary
 
@@ -129,5 +129,6 @@ The generic contract should stay reusable even if the product meaning changes.
 ## Cross References
 
 - [event-taxonomy.md](event-taxonomy.md)
-- [app-builder-state-and-routing.md](app-builder-state-and-routing.md)
-- [builder-execution-model.md](builder-execution-model.md)
+- Builder state-routing and execution specializations are maintained privately in
+  `mozaiks-platform/`.
+

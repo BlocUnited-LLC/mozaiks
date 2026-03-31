@@ -15,11 +15,15 @@ Owns:
 - semantic header controls
 - discover
 - shell-level layout and chrome
+- brand and theme chrome
 
 This is where controls such as `UserProfile`, `Notifications`, and `Discover`
 belong.
 
-### 2. Module surface
+Shell defaults (such as startup mode and landing spot) are derived from
+`platform/config/ai.json` and served via `/api/shell-config`.
+
+### 2. Page surface
 
 Owns:
 
@@ -29,7 +33,11 @@ Owns:
 - dashboards
 - boards
 
-Modules are the default surface for non-AI product behavior.
+Pages are the default surface for non-AI product behavior.
+
+Shared page UI should live in `platform/pages/_shared/`.
+
+Admin is a first-class framework surface (like chat-ui), not an app-level page.
 
 ### 3. Workflow surface
 
@@ -42,7 +50,7 @@ Owns:
 
 This surface is live and session-oriented rather than durable by default.
 
-### 4. Artifact surface
+### 5. Artifact surface
 
 Owns persisted outputs that cross the module and workflow boundary.
 
@@ -61,10 +69,10 @@ Artifacts can be rendered in modules, side panels, or workflow sessions.
 
 The shell decides what major surfaces are visible and where entrypoints live.
 
-### Modules persist
+### Pages persist
 
 If the user expects to come back to a screen, filter, board, or record, it
-should usually be a module surface.
+should usually be a page surface.
 
 ### Workflows guide
 
@@ -74,7 +82,7 @@ surface.
 ### Artifacts bridge
 
 If a workflow produces something the app should keep using, promote it to an
-artifact or substrate state rather than leaving it only in chat.
+artifact or app-backend state rather than leaving it only in chat.
 
 ## Hybrid Surface Patterns
 
@@ -114,12 +122,14 @@ Examples:
 
 These are shell concerns. They are not workflow authoring concerns.
 
+Discovered pages and adapters should provide the actual route surfaces.
+
 ## Guardrails
 
 Do not:
 
 - use chat as the only product surface
-- use modules as a substitute for shell layout
+- use modules as a substitute for pages
 - leave durable outputs trapped inside transcripts
 
 ## Cross References
@@ -127,3 +137,4 @@ Do not:
 - [canonical-app-structure.md](canonical-app-structure.md)
 - [workflow-architecture.md](workflow-architecture.md)
 - [process-and-event-map.md](process-and-event-map.md)
+

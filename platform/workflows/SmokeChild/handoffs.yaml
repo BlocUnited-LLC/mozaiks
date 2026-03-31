@@ -1,0 +1,4 @@
+handoff_rules:
+  - source_agent: ChildWorkerAgent
+    target_agent: terminate
+    handoff_type: after_work

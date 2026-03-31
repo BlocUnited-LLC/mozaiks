@@ -69,12 +69,12 @@ They do not own:
 - shell layout
 - module registration
 
-### Automation routes are not graph nodes
+### Workflow triggers are not graph nodes
 
-A domain event to workflow mapping belongs in automation declaratives, not in
+A domain event to workflow mapping belongs in workflow trigger declaratives, not in
 `workflow_graph.json`.
 
-The route may select a workflow entry or resume point, but it should not mutate
+The trigger may select a workflow entry or resume point, but it should not mutate
 the graph contract itself.
 
 ## Why This Matters
@@ -91,5 +91,4 @@ human can all reason about it.
 ## Cross References
 
 - [workflow-architecture.md](workflow-architecture.md)
-- [builder-execution-model.md](builder-execution-model.md)
-- [app-planning-contracts.md](app-planning-contracts.md)
+- Private builder graph planning contracts (maintained in `mozaiks-platform/`)

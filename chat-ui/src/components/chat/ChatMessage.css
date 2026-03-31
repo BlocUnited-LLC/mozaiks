@@ -20,7 +20,7 @@
   --chat-bubble-padding-x: 1.15rem;
   --chat-bubble-line-height: 1.45;
 
-  /* Derived from brand theme vars — fallbacks match the MozaiksAI default palette */
+  /* Derived from brand theme vars — fallbacks match the mozaiksai default palette */
   --chat-bubble-shadow:
     0 18px 40px rgba(var(--color-surface-rgb, 2, 6, 23), 0.55);
   --chat-user-bg: linear-gradient(

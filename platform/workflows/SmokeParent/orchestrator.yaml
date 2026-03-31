@@ -1,0 +1,8 @@
+workflow_name: SmokeParent
+max_turns: 8
+human_in_the_loop: true
+workflow_startup_mode: UserDriven
+orchestration_pattern: DefaultPattern
+initial_message_to_user: >
+  Send a short request to start the live MFJ smoke workflow.
+initial_agent: PlannerAgent

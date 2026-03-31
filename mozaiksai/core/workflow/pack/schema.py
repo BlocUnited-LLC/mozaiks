@@ -232,7 +232,7 @@ class MidFlightJourney(BaseModel):
     id: str
     description: Optional[str] = None
     trigger_agent: str
-    trigger_on: Literal["structured_output"] = "structured_output"
+    trigger_on: Literal["agent_output"] = "agent_output"
     requires: List[str] = Field(default_factory=list)
     fan_out: MFJFanOutConfig
     fan_in: MFJFanInConfig

@@ -8,7 +8,7 @@
 
 - The runtime control plane is deterministic.
 - `workflow_graph.json` is a compiled execution artifact, not a place for prose reasoning.
-- Natural-language `logic` fields do not belong in runtime graphs.
+- Natural-language reasoning does not belong in runtime graphs.
 - LLMs may produce plans, classifications, and structured outputs inside workflows.
 - The runtime may execute those outputs, but it must not interpret vague prose to decide control flow.
 
@@ -177,11 +177,12 @@ Use it for:
 - `GreenRoom` set brief
 - any other workflow-to-workflow carry
 
-## Current Runtime Constraint
+## Runtime Event Flow
 
-Today, the runtime emits `chat.structured_output_ready` for any agent with a registered structured-output model.
+The runtime emits `chat.agent_output_validated` for any agent with a registered structured-output model. Two downstream handlers react:
 
-Only agents with `auto_tool_mode: true` will trigger the auto-tool executor.
+- **`handle_tool_dispatch`** — invoked only when the agent has `auto_tool_mode: true`. Runs the mapped tool function deterministically.
+- **`handle_journey_triggered`** — invoked only when the agent matches a `trigger_agent` in the workflow's MFJ pack graph. Starts fan-out.
 
 That means:
 

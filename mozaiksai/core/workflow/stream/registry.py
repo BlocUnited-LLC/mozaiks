@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/stream/registry.py
+# FILE: mozaiksai/core/workflow/stream/registry.py
 # DESCRIPTION: Handler registry for AG2 event dispatch
 # ==============================================================================
 

@@ -1,5 +1,4 @@
-# === MOZAIKS-CORE-HEADER ===
-# FILE: core/adapters/ag2_orchestration.py
+# FILE: mozaiksai/core/adapters/ag2_orchestration.py
 # DESCRIPTION: AG2-specific implementation of OrchestrationPort.
 #
 # This is one of 2-3 files that import AG2 types directly.
@@ -19,7 +18,7 @@ Responsibilities:
 
 This adapter does NOT own fan-out/fan-in logic.  That belongs to
 WorkflowPackCoordinator, which reacts to events emitted by the adapter
-(chat.structured_output_ready, chat.run_complete) through the
+(chat.agent_output_validated, chat.run_complete) through the
 UnifiedEventDispatcher.
 
 Architecture (Layer 1.5):

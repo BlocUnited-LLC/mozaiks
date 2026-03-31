@@ -5,7 +5,7 @@ This document defines the runtime meaning ("semantics") and taxonomy of `workflo
 `workflow_graph.json` is **app-agnostic**: it describes relationships between **workflow types** (templates).  
 At runtime, those rules are evaluated inside a **scope** (this runtime calls the scope key `app_id`, but integrators can treat it as any stable isolation id).
 
-This is a **v2 schema**: there are no `nodes`/`edges` and no legacy fields.
+This is a **v2 schema**: there are no `nodes`/`edges` and no alternate historical fields.
 
 ---
 
@@ -128,7 +128,7 @@ If a journey sets:
 then when a chat session for `steps[i]` completes, the runtime:
 - creates (or reuses) a `ChatSession` for `steps[i+1]` in the same scope
 - switches the UI to the new `chat_id` (`chat.context_switched`)
-- auto-starts the next workflow if its `startup_mode` is `AgentDriven`
+- auto-starts the next workflow if its `workflow_startup_mode` is `AgentDriven`
 
 ### 3.4 Persisted journey fields
 

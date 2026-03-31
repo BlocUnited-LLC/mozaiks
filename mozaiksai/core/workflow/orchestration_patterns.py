@@ -1,10 +1,10 @@
 # ==============================================================================
-# FILE: core/workflow/orchestration_patterns.py
+# FILE: mozaiksai/core/workflow/orchestration_patterns.py
 # DESCRIPTION: COMPLETE AG2 execution engine - Single-responsibility pattern for all workflow orchestration
 # ==============================================================================
 
 """
-MozaiksAI Orchestration Engine (organized)
+mozaiksai Orchestration Engine (organized)
 
 Purpose
 - Single entry point to run a workflow using AG2 patterns with streaming, tools, persistence, and perforamnce.
@@ -64,7 +64,6 @@ from mozaiksai.core.data.persistence import AG2PersistenceManager as _PM
 from mozaiksai.core.events.event_serialization import (
     build_ui_event_payload as unified_build_ui_event_payload,
     EventBuildContext as UnifiedEventBuildContext,
-    build_structured_output_ready_event,
     serialize_event_content,
 )
 
@@ -143,7 +142,6 @@ logging.getLogger("autogen.agentchat.group").setLevel(logging.INFO)
 # NOTE: Helper functions have been extracted to separate modules:
 # - orchestration_utils.py: Config loading, usage reconciliation, task management
 # - message_utils.py: Message normalization, text extraction, agent name resolution
-# - event_payload_builder.py: UI event payload construction
 # - pattern_factory.py: AG2 pattern creation
 # ===================================================================
 
@@ -280,7 +278,7 @@ async def _resume_or_initialize_chat(
                     )
                 except Exception as seed_persist_err:  # pragma: no cover
                     wf_logger.debug(f" Failed to persist config seed message for {chat_id}: {seed_persist_err}")
-        elif config.get("startup_mode", "").strip().lower() == "userdriven":
+        elif config.get("workflow_startup_mode", "").strip().lower() == "userdriven":
             # UserDriven needs a synthetic trigger so AG2 can start the group
             # chat loop.  The register_reply on the initial agent intercepts
             # before the LLM is ever called and returns the static greeting.
@@ -366,7 +364,7 @@ async def _create_agents(agents_factory: Optional[Callable], workflow_name: str,
 def _ensure_user_proxy(
     agents: Dict[str, ConversableAgent],
     config: Dict[str, Any],
-    startup_mode: str,
+    workflow_startup_mode: str,
     llm_config: Dict[str, Any],
     human_in_loop: bool,
 ) -> Tuple[Dict[str, ConversableAgent], Optional[UserProxyAgent], bool]:
@@ -380,7 +378,7 @@ def _ensure_user_proxy(
         # ChatUI (and the HTTP transport) provide real user input and should never trigger
         # AG2's terminal/CLI-style feedback prompts ("Please give feedback to chat_manager...").
         # Keep the auto-created user proxy non-interactive.
-        if startup_mode in {"BackendOnly"}:
+        if workflow_startup_mode in {"BackendOnly"}:
             human_input_mode = "NEVER"
         else:
             # AgentDriven and UserDriven both need InputRequestEvent so the
@@ -794,7 +792,7 @@ async def run_workflow_orchestration(
             config = cfg["config"]
             max_turns = cfg["max_turns"]
             orchestration_pattern = cfg["orchestration_pattern"]
-            startup_mode = cfg["startup_mode"]
+            workflow_startup_mode = cfg["workflow_startup_mode"]
             human_in_loop = cfg["human_in_loop"]
             initial_agent_name = cfg["initial_agent_name"]
 
@@ -807,7 +805,7 @@ async def run_workflow_orchestration(
             # Brief, structured visibility into effective normalized config
             try:
                 wf_logger.info(
-                    f" [{workflow_name_upper}] CONFIG: startup_mode={startup_mode} human_in_loop={human_in_loop} pattern={orchestration_pattern} initial_agent={initial_agent_name}"
+                    f" [{workflow_name_upper}] CONFIG: workflow_startup_mode={workflow_startup_mode} human_in_loop={human_in_loop} pattern={orchestration_pattern} initial_agent={initial_agent_name}"
                 )
             except Exception as _cfg_log_err:  # pragma: no cover
                 logger.debug(f"config log failed: {_cfg_log_err}")
@@ -862,7 +860,7 @@ async def run_workflow_orchestration(
                 chat_id=chat_id,
                 user_id=user_id,
                 pattern=orchestration_pattern,
-                startup_mode=startup_mode,
+                workflow_startup_mode=workflow_startup_mode,
                 initial_message_count=len(initial_messages),
                 trace_id=trace_id_hex,
             )
@@ -1035,7 +1033,7 @@ async def run_workflow_orchestration(
 
             wf_logger.debug(
                 f" [{workflow_name_upper}] Chat START chat_id={chat_id} agents={len(agents)} max_turns={max_turns} "
-                f"startup_mode={startup_mode} human_in_loop={human_in_loop} context_vars={context_var_count} resumed={resumed_mode}"
+                f"workflow_startup_mode={workflow_startup_mode} human_in_loop={human_in_loop} context_vars={context_var_count} resumed={resumed_mode}"
             )
 
             # -----------------------------------------------------------------
@@ -1053,7 +1051,7 @@ async def run_workflow_orchestration(
             agents, user_proxy_agent, human_in_loop = _ensure_user_proxy(
                 agents=agents,
                 config=config,
-                startup_mode=startup_mode,
+                workflow_startup_mode=workflow_startup_mode,
                 llm_config=llm_config,
                 human_in_loop=human_in_loop,
             )
@@ -1081,7 +1079,7 @@ async def run_workflow_orchestration(
             # so we check the connection flag to decide whether to suppress.
             if (
                 not resumed_mode
-                and startup_mode == "UserDriven"
+                and workflow_startup_mode == "UserDriven"
                 and config.get("initial_message_to_user")
             ):
                 _greeting = str(config["initial_message_to_user"]).strip()
@@ -1093,10 +1091,19 @@ async def run_workflow_orchestration(
                         _bootstrap_already_visible = _conn.get("userdriven_bootstrap_visible", False)
 
                     if _bootstrap_already_visible:
-                        # ws_protocol.py already sent greeting - suppress to prevent duplicate
-                        _final_greeting = f"[_MOZAIKS_SUPPRESS_UI]{_greeting}"
+                        # ws_protocol already sent greeting — flag the dispatcher so
+                        # the AG2 transcript echo is emitted as chat.greeting_echo
+                        # instead of a duplicate chat.text.
+                        _final_greeting = _greeting
+                        try:
+                            from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
+                            get_event_dispatcher().mark_greeting_echo(
+                                chat_id, getattr(initiating_agent, 'name', None)
+                            )
+                        except Exception:
+                            pass
                         wf_logger.info(
-                            f" [{workflow_name_upper}] Greeting already sent by ws_protocol - suppressing"
+                            f" [{workflow_name_upper}] Greeting already sent by ws_protocol - flagged as echo"
                         )
                     else:
                         # No greeting sent yet (mode switch case) - send it normally

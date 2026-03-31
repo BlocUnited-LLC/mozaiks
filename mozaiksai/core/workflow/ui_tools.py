@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/ui_tools.py
+# FILE: mozaiksai/core/workflow/ui_tools.py
 # DESCRIPTION: Centralized helper utilities for agent-driven UI interactions.
 #   - UI tool emission + response handling
 #   - InputTimeoutEvent (kept lightweight)
@@ -144,7 +144,7 @@ async def use_ui_tool(
 
     Returns the UI response dict augmented with ui_event_id.
     
-    The `display` parameter is now optional and will be auto-resolved from tools.json
+    The `display` parameter is now optional and will be auto-resolved from tool
     configuration if not provided. This eliminates redundancy between tool declarations
     and tool function implementations.
     """

@@ -13,6 +13,6 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
 Write-Host "[mongo] Starting MongoDB via docker compose..." -ForegroundColor Cyan
-docker compose -f $ComposeFile up -d mongo
+& "$PSScriptRoot/run-infra.ps1" -Profile mongo -ComposeFile $ComposeFile
 
 Write-Host "[mongo] Done. Mongo should be available on localhost:27017" -ForegroundColor Green

@@ -2,6 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useChatUI } from '../../context/ChatUIContext';
 import ChatInterface from './ChatInterface';
+import useTheme from '../../styles/useTheme';
+import {
+  applyBrandImageFallback,
+  getBrandLogoSrc,
+} from '../../styles/brandAssets';
 
 /**
  * PersistentChatWidget - Floating chat widget in bottom-right corner
@@ -89,6 +94,8 @@ const PersistentChatWidget = ({
   // Resolve app/user identity from context (provided by the host app via ChatUIProvider props)
   const resolvedAppId = user?.app_id || config?.appId || config?.app_id || null;
   const resolvedUserId = user?.id || user?.user_id || user?.sub || null;
+  const { theme: chatTheme } = useTheme(resolvedAppId);
+  const brandLogoSrc = getBrandLogoSrc(chatTheme);
 
   // A workflow is "active" if status is not idle OR there are cached workflow messages
   const hasActiveWorkflow =
@@ -217,10 +224,10 @@ const PersistentChatWidget = ({
         >
           <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-[rgba(var(--color-primary-light-rgb),0.2)] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
           <img
-            src="/assets/mozaik_logo.svg"
-            alt="MozaiksAI"
+            src={brandLogoSrc}
+            alt="mozaiksai"
             className="w-11 h-11 relative z-10 group-hover:scale-110 transition-transform"
-            onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/assets/mozaik.png'; }}
+            onError={applyBrandImageFallback}
           />
           {/* Unread presence dot */}
           {unreadChatCount > 0 && (
@@ -232,7 +239,7 @@ const PersistentChatWidget = ({
   }
 
   // ─── Expanded state ─────────────────────────────────────────────────────────
-  const leftLabel = showingWorkflowContext ? 'Ask Mode' : 'MozaiksAI';
+  const leftLabel = showingWorkflowContext ? 'Ask Mode' : 'mozaiksai';
   const leftSubLabel = showingWorkflowContext ? 'Switch to ask' : 'Chat Station';
   const leftTitle = showingWorkflowContext ? 'Switch to ask mode' : 'Open Chat Station';
 
@@ -282,10 +289,10 @@ const PersistentChatWidget = ({
                 title="Back to workspace"
               >
                 <img
-                  src="/assets/mozaik_logo.svg"
+                  src={brandLogoSrc}
                   className="w-8 h-8 opacity-70 group-hover:opacity-100 transition-all duration-300 group-hover:scale-105"
                   alt="Back to workspace"
-                  onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/assets/mozaik.png'; }}
+                  onError={applyBrandImageFallback}
                 />
                 <div className="absolute inset-0 bg-[rgba(var(--color-primary-light-rgb),0.1)] rounded-lg blur opacity-0 group-hover:opacity-100 transition-opacity duration-300 -z-10" />
               </button>
@@ -324,6 +331,7 @@ const PersistentChatWidget = ({
             hideHeader={true}
             disableMobileShellChrome={true}
             plainContainer={true}
+            chatTheme={chatTheme}
           />
         </div>
       </div>

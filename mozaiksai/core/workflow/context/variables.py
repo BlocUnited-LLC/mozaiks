@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/context_variables.py
+# FILE: mozaiksai/core/workflow/context/variables.py
 # DESCRIPTION: Context variable loading for the Mozaiks runtime (agent-centric schema)
 # ==============================================================================
 
@@ -26,6 +26,7 @@ business_logger = get_workflow_logger("context_variables")
 _TRUE_FLAG_VALUES = {"1", "true", "yes", "on"}
 TRUNCATE_CHARS = int(os.getenv("CONTEXT_SCHEMA_TRUNCATE_CHARS", "4000") or 4000)
 _FILE_CONTEXT_ALLOW_OUTSIDE_ROOT = os.getenv("CONTEXT_FILE_ALLOW_OUTSIDE_ROOT", "false").strip().lower() in _TRUE_FLAG_VALUES
+_DATA_REFERENCE_PLACEHOLDERS_ENV = "MOZAIKS_CONTEXT_PLACEHOLDERS_FILE"
 
 
 def _find_repo_root() -> Path:
@@ -164,6 +165,95 @@ def _resolve_file_source(definition: ContextVariableDefinition) -> Any:
         return _coerce_value(definition, yaml.safe_load(raw))
     # default json
     return _coerce_value(definition, json.loads(raw))
+
+
+def _load_data_reference_placeholders() -> Dict[str, Any]:
+    """Load optional data_reference placeholder values from a JSON file.
+
+    File path is configured through MOZAIKS_CONTEXT_PLACEHOLDERS_FILE.
+    Expected shape:
+    {
+      "global": { "var_name": <value> },
+      "workflows": {
+        "WorkflowName": { "var_name": <value> }
+      }
+    }
+
+    For convenience, a flat object without `global/workflows` is treated as
+    global placeholders.
+    """
+
+    raw_path = (os.getenv(_DATA_REFERENCE_PLACEHOLDERS_ENV) or "").strip()
+    if not raw_path:
+        return {}
+
+    repo_root = _find_repo_root()
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = repo_root / path
+
+    try:
+        resolved = path.resolve()
+    except Exception as err:
+        business_logger.warning("Invalid %s path '%s': %s", _DATA_REFERENCE_PLACEHOLDERS_ENV, str(path), err)
+        return {}
+
+    if not _is_within_root(resolved, repo_root) and not _FILE_CONTEXT_ALLOW_OUTSIDE_ROOT:
+        business_logger.warning(
+            "Refusing to load context placeholder file outside repo root (set CONTEXT_FILE_ALLOW_OUTSIDE_ROOT=true to override): %s",
+            resolved,
+        )
+        return {}
+
+    if not resolved.exists():
+        business_logger.warning("Context placeholder file does not exist: %s", resolved)
+        return {}
+
+    try:
+        payload = json.loads(resolved.read_text(encoding="utf-8"))
+    except Exception as err:
+        business_logger.warning("Failed parsing context placeholder file %s: %s", resolved, err)
+        return {}
+
+    if not isinstance(payload, dict):
+        business_logger.warning("Context placeholder file must contain a JSON object: %s", resolved)
+        return {}
+
+    business_logger.info("Loaded context placeholder file: %s", resolved)
+    return payload
+
+
+def _lookup_data_reference_placeholder(
+    placeholders: Dict[str, Any],
+    workflow_name: str,
+    variable_name: str,
+) -> Any:
+    """Return placeholder value for a data_reference variable or None."""
+
+    if not placeholders or not variable_name:
+        return None
+
+    def _find_workflow_scope(workflows: Any, wf_name: str) -> Dict[str, Any]:
+        if not isinstance(workflows, dict):
+            return {}
+        for key, value in workflows.items():
+            if isinstance(key, str) and key.strip().lower() == wf_name.strip().lower() and isinstance(value, dict):
+                return value
+        return {}
+
+    workflows_scope = _find_workflow_scope(placeholders.get("workflows"), workflow_name)
+    if variable_name in workflows_scope:
+        return workflows_scope.get(variable_name)
+
+    global_scope = placeholders.get("global")
+    if isinstance(global_scope, dict) and variable_name in global_scope:
+        return global_scope.get(variable_name)
+
+    # Convenience mode: root object behaves as global map when no wrapper is used.
+    if "global" not in placeholders and "workflows" not in placeholders and variable_name in placeholders:
+        return placeholders.get(variable_name)
+
+    return None
 
 
 def _create_minimal_context(workflow_name: str, app_id: Optional[str]):
@@ -327,35 +417,15 @@ def _load_workflow_plan(workflow_name: str) -> Tuple[ContextVariablesPlan, Dict[
         context_section = workflow_config.get("context_variables") or {}
         if isinstance(context_section, dict):
             raw_section = context_section
-        if not raw_section:
-            from pathlib import Path
-            import json
-
-            wf_info = getattr(workflow_manager, "_workflows", {}).get(workflow_name.lower())
-            if wf_info and hasattr(wf_info, "path"):
-                ext_file = Path(wf_info.path) / "context_variables.json"
-                if ext_file.exists():
-                    raw = ext_file.read_text(encoding="utf-8-sig")
-                    data = json.loads(raw)
-                    ctx_section = data.get("context_variables") or data
-                    if isinstance(ctx_section, dict):
-                        raw_section = ctx_section
     except Exception as err:  # pragma: no cover
         business_logger.warning(f"Unable to load context config for {workflow_name}: {err}")
 
-    try:
-        plan = load_context_variables_config(raw_section)
-    except ValueError as err:
-        business_logger.warning(
-            f"Context variables validation failed for {workflow_name}: {err}"
-        )
-        plan = ContextVariablesPlan()
-        raw_section = {}
+    plan = load_context_variables_config(raw_section)
     return plan, raw_section
 
 
 # ---------------------------------------------------------------------------
-# Schema utilities (optional, reused from legacy implementation)
+# Schema utilities shared by context loading and inspection paths
 # ---------------------------------------------------------------------------
 
 async def _get_all_collections_first_docs(database_name: str) -> Dict[str, Any]:
@@ -500,6 +570,7 @@ async def _load_context_async(workflow_name: str, app_id: Optional[str]):
 
     definitions = plan.definitions or {}
     default_db = _database_defaults(raw_context_section)
+    placeholders = _load_data_reference_placeholders()
     data_entity_managers: List[DataEntityManager] = []
 
     for name, definition in definitions.items():
@@ -519,6 +590,15 @@ async def _load_context_async(workflow_name: str, app_id: Optional[str]):
                 app_id=internal_app_id,
                 context=context,
             )
+            if value is None:
+                placeholder_value = _lookup_data_reference_placeholder(placeholders, workflow_name, name)
+                if placeholder_value is not None:
+                    value = _coerce_value(definition, placeholder_value)
+                    business_logger.info(
+                        "[DATA_REFERENCE] Using placeholder fallback for '%s' in workflow '%s'",
+                        name,
+                        workflow_name,
+                    )
             context.set(name, value)
             business_logger.info(f"[DATA_REFERENCE] Loaded '{name}' - type={type(value).__name__}, value_preview={str(value)[:100] if value else 'None'}")
             business_logger.info("Loaded data_reference %s", name)

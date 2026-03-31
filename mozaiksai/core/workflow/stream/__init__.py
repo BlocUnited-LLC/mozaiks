@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/stream/__init__.py
+# FILE: mozaiksai/core/workflow/stream/__init__.py
 # DESCRIPTION: Event stream processing module for AG2 orchestration
 # ==============================================================================
 

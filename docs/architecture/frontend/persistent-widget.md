@@ -46,7 +46,7 @@ The expanded widget header has a strict maximum of two buttons. This is a delibe
 | Current display | Left button label | Action |
 |-----------------|------------------|--------|
 | Showing workflow messages | "Ask Mode" | Switch widget display to ask context inline — no navigation |
-| Showing ask messages | "MozaiksAI" / "Chat Station" | Navigate to ChatPage in ask mode |
+| Showing ask messages | "mozaiksai" / "Chat Station" | Navigate to ChatPage in ask mode |
 
 The left button never navigates away from the current page unless the user is already in ask context, at which point tapping it takes them to the full chat experience.
 

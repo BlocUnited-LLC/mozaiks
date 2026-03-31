@@ -1,6 +1,6 @@
 # ==============================================================================
-# FILE: auto_tool_handler.py
-# DESCRIPTION: 
+# FILE: mozaiksai/core/events/auto_tool_handler.py
+# DESCRIPTION: Handles structured output events by auto-invoking mapped UI tools with agent context.
 # ==============================================================================
 
 # === MOZAIKS-CORE-HEADER ===
@@ -9,18 +9,20 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, Optional
 
 from pydantic import ValidationError
+import yaml
 
 from mozaiksai.core.workflow.agents.tools import load_agent_tool_functions
+from mozaiksai.core.workflow.declarative import parse_tools_config
 from mozaiksai.core.workflow.outputs.structured import get_structured_outputs_for_workflow
 from mozaiksai.core.events.event_serialization import serialize_event_content
 from mozaiksai.core.workflow.context.adapter import create_context_container
+from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
 if TYPE_CHECKING:
     from mozaiksai.core.transport.simple_transport import SimpleTransport
@@ -50,7 +52,7 @@ class AutoToolBinding:
 
 
 class AutoToolEventHandler:
-    """Handle chat.structured_output_ready events by running the mapped UI tool."""
+    """Handle chat.agent_output_validated events by running the mapped UI tool."""
 
     _CACHE_LIMIT = 512
 
@@ -59,11 +61,11 @@ class AutoToolEventHandler:
         self._processed_keys: set[str] = set()
         self._processed_order: asyncio.Queue[str] = asyncio.Queue()
 
-    async def handle_structured_output_ready(self, event: Dict[str, Any]) -> None:
-        """Process a structured-output-ready event and trigger the corresponding tool."""
+    async def handle_tool_dispatch(self, event: Dict[str, Any]) -> None:
+        """Process an agent_output_validated event and trigger the corresponding tool."""
 
         try:
-            logger.info("[AUTO_TOOL] Received structured_output_ready event: agent=%s turn=%s", event.get('agent_name') or event.get('agent'), event.get('turn_idempotency_key'))
+            logger.info("[AUTO_TOOL] Received agent_output_validated event: agent=%s turn=%s", event.get('agent_name') or event.get('agent'), event.get('turn_idempotency_key'))
             auto_mode = bool(event.get("auto_tool_mode"))
             if not auto_mode:
                 logger.debug("[AUTO_TOOL] Event marked auto_tool_mode=false; ignoring")
@@ -78,7 +80,7 @@ class AutoToolEventHandler:
             # Extract pattern context reference if available (for write-back)
             pattern_context_ref = event.get("_pattern_context_ref")
         except Exception as exc:  # pragma: no cover - defensive guard
-            logger.warning("[AUTO_TOOL] Malformed structured_output_ready event: %s", exc)
+            logger.warning("[AUTO_TOOL] Malformed agent_output_validated event: %s", exc)
             return
 
         if not workflow_name:
@@ -212,16 +214,21 @@ class AutoToolEventHandler:
             }
             logger.debug("[AUTO_TOOL] Agent %s has functions: %s", agent, list(agent_function_index[agent].keys()))
 
-        tools_path = Path("workflows") / workflow_name / "tools.json"
-        try:
-            tools_data = json.loads(tools_path.read_text(encoding="utf-8")) if tools_path.exists() else {}
-        except Exception as err:
-            logger.warning(
-                "[AUTO_TOOL] Failed parsing tools.json for workflow %s: %s",
-                workflow_name,
-                err,
-            )
-            tools_data = {}
+        workflows_root = Path(str(workflow_manager.workflows_base_path))
+        workflow_path = workflows_root / workflow_name
+        tools_yaml_path = workflow_path / "tools.yaml"
+        tools_data: Dict[str, Any] = {}
+
+        if tools_yaml_path.exists():
+            try:
+                raw = yaml.safe_load(tools_yaml_path.read_text(encoding="utf-8")) or {}
+                tools_data = parse_tools_config(raw)
+            except Exception as err:
+                logger.warning(
+                    "[AUTO_TOOL] Failed parsing tools.yaml for workflow %s: %s",
+                    workflow_name,
+                    err,
+                )
         entries = tools_data.get("tools") or []
         if not isinstance(entries, list):
             entries = []

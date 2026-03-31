@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/transport/handlers/input_handlers.py
+# FILE: mozaiksai/core/transport/handlers/input_handlers.py
 # DESCRIPTION: Handlers for user input and UI tool response messages
 # ==============================================================================
 from __future__ import annotations
@@ -95,20 +95,20 @@ async def handle_user_input_submit(
         target_app_id = target_conn.get("app_id") or target_app_id
         target_user_id = target_conn.get("user_id") or target_user_id
 
-        startup_mode = "AgentDriven"
+        workflow_startup_mode = "AgentDriven"
         if isinstance(target_workflow_name, str) and target_workflow_name.strip():
             try:
                 from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
                 cfg = workflow_manager.get_config(str(target_workflow_name))
-                startup_mode = str((cfg or {}).get("startup_mode", "AgentDriven"))
+                workflow_startup_mode = str((cfg or {}).get("workflow_startup_mode", "AgentDriven"))
             except Exception:
-                startup_mode = "AgentDriven"
+                workflow_startup_mode = "AgentDriven"
 
         # For UserDriven workflows, the first free-form user message should
         # start (or continue) orchestration through the same smart router used
-        # by HTTP input. For other modes, keep legacy "persist-only" behavior.
-        if startup_mode == "UserDriven":
+        # by HTTP input. For other modes, persist the message without routing it.
+        if workflow_startup_mode == "UserDriven":
             if not target_app_id or not target_workflow_name:
                 await transport._send_ws_error(
                     websocket,

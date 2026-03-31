@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/stream/context.py
+# FILE: mozaiksai/core/workflow/stream/context.py
 # DESCRIPTION: Context and state dataclasses for AG2 event stream processing
 # ==============================================================================
 

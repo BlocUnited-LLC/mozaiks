@@ -1,6 +1,6 @@
 # ==============================================================================
-# FILE: websocket.py
-# DESCRIPTION: 
+# FILE: mozaiksai/core/transport/websocket.py
+# DESCRIPTION: WebSocket protocol helpers for runtime event delivery, heartbeats, and connection state.
 # ==============================================================================
 
 # === MOZAIKS-CORE-HEADER ===

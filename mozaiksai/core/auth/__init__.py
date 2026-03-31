@@ -1,24 +1,17 @@
 """
-MozaiksAI Authentication Module (Transport-Level Only).
+mozaiksai Authentication Module - Provider-Agnostic Auth System.
 
 This module provides **authentication**, not authorization.
 
-    MozaiksAI authenticates requests but does not authorize behavior.
-    Authorization is delegated to the host control plane (MozaiksCore or customer app).
+    mozaiksai authenticates requests but does not authorize behavior.
+    Authorization is delegated to the host control plane or customer app.
 
-See: docs/source_of_truth/04_AUTH_BOUNDARY.md
-
-What This Module Does (Authentication):
-    - Validates JWT signatures via OIDC discovery / JWKS
-    - Verifies issuer, audience, expiration
-    - Extracts identity claims (sub, email, scopes)
-    - Rejects anonymous/invalid traffic
-
-What This Module Does NOT Do (Authorization):
-    - User account management
-    - Subscription/entitlement checks
-    - "Is user allowed to run workflow X?" decisions
-    - Billing or feature gating
+Supported Auth Providers:
+    - none: No authentication (demo/development mode)
+    - jwt: Generic OIDC/JWT (any compliant provider)
+    - supabase: Supabase Auth
+    - keycloak: Keycloak
+    - Custom: Register your own adapter
 
 Quick Start:
     # HTTP route protection
@@ -41,73 +34,69 @@ Quick Start:
         # websocket.state.user_id is now set
 
 Configuration (environment variables):
-    # OIDC Discovery (recommended - provider-agnostic)
-    MOZAIKS_OIDC_AUTHORITY=https://mozaiks.ciamlogin.com
-    MOZAIKS_OIDC_TENANT_ID=9d0073d5-42e8-46f0-a325-5b4be7b1a38d
-    MOZAIKS_OIDC_DISCOVERY_URL=    # Optional explicit override
 
-    # Override (skip discovery for these if set)
-    AUTH_ISSUER=                   # Explicit issuer override
-    AUTH_JWKS_URL=                 # Explicit JWKS URL override
+    # Provider Selection (auto-detected if not set)
+    AUTH_PROVIDER=none|jwt|supabase|keycloak
+    AUTH_ENABLED=true|false   # false = same as AUTH_PROVIDER=none
 
-    # Validation
-    AUTH_ENABLED=true              # Set false for local dev bypass
-    AUTH_AUDIENCE=api://mozaiks-auth
-    AUTH_REQUIRED_SCOPE=access_as_user
-
-    # Claim mappings
+    # Generic JWT Configuration
+    AUTH_JWKS_URL=https://.../.well-known/jwks.json
+    AUTH_ISSUER=https://...
+    AUTH_AUDIENCE=my-api
     AUTH_USER_ID_CLAIM=sub
     AUTH_EMAIL_CLAIM=email
     AUTH_ROLES_CLAIM=roles
+    AUTH_SCOPES_CLAIM=scp
+    AUTH_SCOPES_FORMAT=space|array
 
-    # Caching
-    AUTH_JWKS_CACHE_TTL=3600       # JWKS cache TTL (seconds)
-    AUTH_DISCOVERY_CACHE_TTL=86400 # Discovery cache TTL (seconds)
+    # Supabase Configuration
+    SUPABASE_URL=https://xyzcompany.supabase.co
+    SUPABASE_JWT_SECRET=...  # Optional for local dev
+
+    # Keycloak Configuration
+    KEYCLOAK_URL=https://keycloak.example.com
+    KEYCLOAK_REALM=myrealm
+    KEYCLOAK_CLIENT_ID=my-app
+
+Custom Adapter Registration:
+    from mozaiksai.core.auth.adapters import register_adapter
+
+    class MyCustomAdapter:
+        name = "my-custom"
+
+        async def validate_token(self, token: str) -> UserClaims:
+            # Your validation logic
+            ...
+
+        def is_enabled(self) -> bool:
+            return True
+
+    register_adapter("my-custom", MyCustomAdapter)
 """
 
-# Configuration
-from mozaiksai.core.auth.config import (
-    AuthConfig,
-    get_auth_config,
-    clear_auth_config_cache,
-)
-
-# OIDC Discovery
-from mozaiksai.core.auth.discovery import (
-    OIDCDiscoveryClient,
-    CachedDiscovery,
-    get_discovery_client,
-    reset_discovery_client,
-)
-
-# JWT validation
-from mozaiksai.core.auth.jwt_validator import (
-    JWTValidator,
-    TokenClaims,
+# Adapters (new pluggable system)
+from mozaiksai.core.auth.adapters import (
+    AuthAdapter,
+    UserClaims,
     AuthError,
-    get_jwt_validator,
-    reset_jwt_validator,
+    get_auth_adapter,
+    register_adapter,
+    list_adapters,
 )
-
-# JWKS client
-from mozaiksai.core.auth.jwks import (
-    JWKSClient,
-    get_jwks_client,
-    reset_jwks_client,
+from mozaiksai.core.auth.adapters.registry import (
+    is_auth_enabled,
+    reset_auth_adapter,
 )
 
 # HTTP dependencies
 from mozaiksai.core.auth.dependencies import (
     UserPrincipal,
-    ServicePrincipal,
     require_user,
     require_user_scope,
     require_any_auth,
-    require_internal,
     require_role,
     require_any_role,
     optional_user,
-    require_execution_token,
     validate_path_app_id,
     validate_path_chat_id,
     validate_user_id_against_principal,
@@ -127,37 +116,31 @@ from mozaiksai.core.auth.websocket_auth import (
     WS_CLOSE_ACCESS_DENIED,
 )
 
+# Legacy compatibility - keep old config exports
+from mozaiksai.core.auth.config import (
+    AuthConfig,
+    get_auth_config,
+    clear_auth_config_cache,
+)
+
 __all__ = [
-    # Config
-    "AuthConfig",
-    "get_auth_config",
-    "clear_auth_config_cache",
-    # OIDC Discovery
-    "OIDCDiscoveryClient",
-    "CachedDiscovery",
-    "get_discovery_client",
-    "reset_discovery_client",
-    # JWT
-    "JWTValidator",
-    "TokenClaims",
+    # Adapters (new)
+    "AuthAdapter",
+    "UserClaims",
     "AuthError",
-    "get_jwt_validator",
-    "reset_jwt_validator",
-    # JWKS
-    "JWKSClient",
-    "get_jwks_client",
-    "reset_jwks_client",
+    "get_auth_adapter",
+    "register_adapter",
+    "list_adapters",
+    "is_auth_enabled",
+    "reset_auth_adapter",
     # HTTP Dependencies
     "UserPrincipal",
-    "ServicePrincipal",
     "require_user",
     "require_user_scope",
     "require_any_auth",
-    "require_internal",
     "require_role",
     "require_any_role",
     "optional_user",
-    "require_execution_token",
     "validate_path_app_id",
     "validate_path_chat_id",
     "validate_user_id_against_principal",
@@ -172,4 +155,8 @@ __all__ = [
     "WS_CLOSE_AUTH_REQUIRED",
     "WS_CLOSE_AUTH_INVALID",
     "WS_CLOSE_ACCESS_DENIED",
+    # Legacy config (for backwards compatibility)
+    "AuthConfig",
+    "get_auth_config",
+    "clear_auth_config_cache",
 ]

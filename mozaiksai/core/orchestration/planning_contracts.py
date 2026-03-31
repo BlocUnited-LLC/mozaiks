@@ -72,7 +72,7 @@ class AutomationEffectKind(str, Enum):
 class DeclarativeFamily(str, Enum):
     APP_MANIFEST = "app_manifest"
     SHELL = "shell"
-    APP_SUBSTRATE = "app_substrate"
+    APP_BACKEND = "app_backend"
     MODULES = "modules"
     AUTOMATION = "automation"
     WORKFLOWS = "workflows"
@@ -109,7 +109,7 @@ _ALLOWED_DECLARATIVE_FAMILIES_BY_ROLE: Dict[BuilderWorkflowRole, frozenset[Decla
         {
             DeclarativeFamily.APP_MANIFEST,
             DeclarativeFamily.SHELL,
-            DeclarativeFamily.APP_SUBSTRATE,
+            DeclarativeFamily.APP_BACKEND,
             DeclarativeFamily.MODULES,
             DeclarativeFamily.AUTOMATION,
         }
@@ -702,7 +702,7 @@ class AutomationRouteSpec(PlanningBaseModel):
 class BundlePlan(PlanningBaseModel):
     manifest_paths: List[str] = Field(default_factory=list)
     shell_paths: List[str] = Field(default_factory=list)
-    substrate_paths: List[str] = Field(default_factory=list)
+    app_backend_paths: List[str] = Field(default_factory=list)
     module_paths: List[str] = Field(default_factory=list)
     automation_paths: List[str] = Field(default_factory=list)
     workflow_paths: List[str] = Field(default_factory=list)
@@ -710,7 +710,7 @@ class BundlePlan(PlanningBaseModel):
     @field_validator(
         "manifest_paths",
         "shell_paths",
-        "substrate_paths",
+        "app_backend_paths",
         "module_paths",
         "automation_paths",
         "workflow_paths",
@@ -723,7 +723,7 @@ class BundlePlan(PlanningBaseModel):
         return {
             DeclarativeFamily.APP_MANIFEST: list(self.manifest_paths),
             DeclarativeFamily.SHELL: list(self.shell_paths),
-            DeclarativeFamily.APP_SUBSTRATE: list(self.substrate_paths),
+            DeclarativeFamily.APP_BACKEND: list(self.app_backend_paths),
             DeclarativeFamily.MODULES: list(self.module_paths),
             DeclarativeFamily.AUTOMATION: list(self.automation_paths),
             DeclarativeFamily.WORKFLOWS: list(self.workflow_paths),
@@ -733,7 +733,7 @@ class BundlePlan(PlanningBaseModel):
         return [
             *self.manifest_paths,
             *self.shell_paths,
-            *self.substrate_paths,
+            *self.app_backend_paths,
             *self.module_paths,
             *self.automation_paths,
             *self.workflow_paths,

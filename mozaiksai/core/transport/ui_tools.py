@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/transport/ui_tools.py
+# FILE: mozaiksai/core/transport/ui_tools.py
 # DESCRIPTION: UI Tool event handling - interactive component communication
 # ==============================================================================
 """

@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/workflow/orchestration_utils.py
+# FILE: mozaiksai/core/workflow/orchestration_utils.py
 # DESCRIPTION: Utility functions extracted from orchestration_patterns.py
 # ==============================================================================
 
@@ -98,7 +98,7 @@ def _load_workflow_config(workflow_name: str) -> Dict[str, Any]:
         "config": config,
         "max_turns": config.get("max_turns", 50),
         "orchestration_pattern": config.get("orchestration_pattern", "AutoPattern"),
-        "startup_mode": config.get("startup_mode", "AgentDriven"),
+        "workflow_startup_mode": config.get("workflow_startup_mode", "AgentDriven"),
         "human_in_loop": _normalize_human_in_the_loop(config.get("human_in_the_loop", False)),
         "initial_agent_name": config.get("initial_agent", None),
     }

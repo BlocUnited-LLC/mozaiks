@@ -121,7 +121,7 @@ class PerformanceManager:
             if client_obj is None:
                 raise RuntimeError("Mongo client unavailable")
             # Updated collection name
-            self._chat_coll = client_obj["MozaiksAI"]["ChatSessions"]
+            self._chat_coll = client_obj["mozaiksai"]["ChatSessions"]
         return self._chat_coll
 
     async def initialize(self):

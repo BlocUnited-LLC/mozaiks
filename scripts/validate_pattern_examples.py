@@ -125,7 +125,7 @@ def _expect_min_shapes(docs: Sequence[Any], path: Path) -> List[ValidationIssue]
         "workflow_name",
         "max_turns",
         "human_in_the_loop",
-        "startup_mode",
+        "workflow_startup_mode",
         "orchestration_pattern",
         "initial_agent",
         "visual_agents",

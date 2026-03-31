@@ -245,7 +245,7 @@ class AG2TerminationHandler:
         """
         try:
             coll = await self.persistence_manager._coll()
-            # New schema stores the session id as _id; chat_id maintained for compatibility.
+            # Sessions are stored under the canonical _id value.
             session = await coll.find_one({"_id": self.chat_id, "app_id": self.app_id})
 
             if not session:

@@ -41,7 +41,7 @@ def test_parse_workflow_pack_graph_rejects_legacy_keys() -> None:
             {
                 "version": 3,
                 "mid_flight_journeys": [],
-                "nested_chats": [],
+                "legacy_journeys": [],
             }
         )
 
@@ -54,7 +54,7 @@ def test_parse_workflow_pack_graph_accepts_custom_strategy_name() -> None:
                 {
                     "id": "mfj",
                     "trigger_agent": "Planner",
-                    "trigger_on": "structured_output",
+                    "trigger_on": "agent_output",
                     "fan_out": {
                         "spawn_mode": "workflow",
                         "max_children": 3,
@@ -87,7 +87,7 @@ def test_parse_workflow_pack_graph_requires_resume_entry_agent() -> None:
                     {
                         "id": "mfj",
                         "trigger_agent": "Planner",
-                        "trigger_on": "structured_output",
+                        "trigger_on": "agent_output",
                         "fan_out": {
                             "spawn_mode": "workflow",
                             "max_children": 3,
@@ -117,7 +117,7 @@ def test_parse_workflow_pack_graph_rejects_non_mfj_inject_key() -> None:
                     {
                         "id": "mfj",
                         "trigger_agent": "Planner",
-                        "trigger_on": "structured_output",
+                        "trigger_on": "agent_output",
                         "fan_out": {
                             "spawn_mode": "workflow",
                             "max_children": 3,
@@ -148,7 +148,7 @@ def test_parse_workflow_pack_graph_requires_authoring_workflow_for_authoring_sub
                     {
                         "id": "mfj",
                         "trigger_agent": "Planner",
-                        "trigger_on": "structured_output",
+                        "trigger_on": "agent_output",
                         "fan_out": {
                             "spawn_mode": "workflow_authoring_subrun",
                             "max_children": 3,

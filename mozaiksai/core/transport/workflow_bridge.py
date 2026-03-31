@@ -1,5 +1,5 @@
 # ==============================================================================
-# FILE: core/transport/workflow_bridge.py
+# FILE: mozaiksai/core/transport/workflow_bridge.py
 # DESCRIPTION: Workflow integration layer - orchestration execution bridge
 # ==============================================================================
 """
@@ -67,20 +67,12 @@ class WorkflowBridgeMixin:
         """
         try:
             starting_new_workflow = False
-            is_build = False
 
             # Load workflow-declared lifecycle hooks (modular, per-workflow)
             lifecycle = get_workflow_lifecycle_hooks(workflow_name)
-            _is_build_workflow = lifecycle.get("is_build_workflow")
-            _emit_build_started = lifecycle.get("on_start")
-            _emit_build_completed = lifecycle.get("on_complete")
-            _emit_build_failed = lifecycle.get("on_fail")
-
-            try:
-                if callable(_is_build_workflow):
-                    is_build = bool(_is_build_workflow(workflow_name))
-            except Exception:
-                is_build = False
+            _emit_execution_started = lifecycle.get("on_start")
+            _emit_execution_completed = lifecycle.get("on_complete")
+            _emit_execution_failed = lifecycle.get("on_fail")
 
             # Check if there's an active AG2 session waiting for user input
             has_active_session = bool(self._input_request_registries.get(chat_id))
@@ -149,12 +141,13 @@ class WorkflowBridgeMixin:
                     logger.debug(f"Early persistence of user message failed (non-fatal): {persist_err}")
 
             # Build lifecycle reporting (best-effort; non-blocking).
-            if is_build and _emit_build_started is not None:
+            if _emit_execution_started is not None:
                 try:
                     asyncio.create_task(
-                        _emit_build_started(
+                        _emit_execution_started(
                             app_id=app_id,
-                            build_id=chat_id,
+                            execution_id=chat_id,
+                            chat_id=chat_id,
                             user_id=user_id,
                             workflow_name=workflow_name,
                         )
@@ -173,12 +166,13 @@ class WorkflowBridgeMixin:
                 initial_agent_name_override=initial_agent_name_override,
             ))
 
-            if is_build and _emit_build_completed is not None:
+            if _emit_execution_completed is not None:
                 try:
                     asyncio.create_task(
-                        _emit_build_completed(
+                        _emit_execution_completed(
                             app_id=app_id,
-                            build_id=chat_id,
+                            execution_id=chat_id,
+                            chat_id=chat_id,
                             user_id=user_id,
                             workflow_name=workflow_name,
                         )
@@ -190,13 +184,14 @@ class WorkflowBridgeMixin:
 
         except Exception as e:
             logger.error(f"User input handling failed for chat {chat_id}: {e}\n{traceback.format_exc()}")
-            if starting_new_workflow and is_build and _emit_build_failed is not None:
+            if starting_new_workflow and _emit_execution_failed is not None:
                 try:
                     err_details = traceback.format_exc()
                     asyncio.create_task(
-                        _emit_build_failed(
+                        _emit_execution_failed(
                             app_id=app_id,
-                            build_id=chat_id,
+                            execution_id=chat_id,
+                            chat_id=chat_id,
                             user_id=user_id,
                             workflow_name=workflow_name,
                             message=str(e),

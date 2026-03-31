@@ -4,7 +4,7 @@ AG2 Pattern Factory - Creates AG2 orchestration patterns with proper configurati
 Purpose:
 - Factory for creating AG2 Pattern instances (AutoPattern, DefaultPattern, etc.)
 - Handles pattern-specific configuration and constructor signatures
-- Provides fallback logic for compatibility with different AG2 versions
+- Handles constructor differences across supported AG2 releases
 
 Extracted from orchestration_patterns.py to improve separation of concerns.
 """
@@ -137,7 +137,7 @@ def create_ag2_pattern(
     except Exception as e:
         logger.warning(f" Failed to create {pattern_name} with all args, trying minimal: {e}")
         
-        # Fallback to minimal constructor for compatibility
+        # Retry with the minimal constructor accepted across AG2 releases
         minimal_args = {
             "initial_agent": initial_agent,
             "agents": agents,
@@ -153,4 +153,3 @@ def create_ag2_pattern(
         logger.info(f" {pattern_name} AG2 pattern created with minimal args")
         
         return minimal_pattern
-

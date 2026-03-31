@@ -19,13 +19,12 @@ log = get_workflow_logger("handoffs")
 
 """Production handoff integration for AG2 group orchestration.
 
-Standardized JSON schema (handoffs.json):
-  handoffs:
-    handoff_rules:
-      - source_agent: <name>
-        target_agent: <name|user|terminate>
-        handoff_type: after_work | condition
-        condition: <natural language or context expression with ${...}> | null
+Standardized schema (handoffs.yaml):
+  handoff_rules:
+    - source_agent: <name>
+      target_agent: <name|user|terminate>
+      handoff_type: after_work | condition
+      condition: <natural language or context expression with ${...}> | null
 
 Rules:
   - Multiple condition rules per source preserved in order.
@@ -63,8 +62,6 @@ class HandoffManager:
         }
         config = workflow_manager.get_config(workflow_name) or {}
         handoffs_block = config.get("handoffs", {})
-        if "handoffs" in handoffs_block:  # tolerate nested key structure
-            handoffs_block = handoffs_block["handoffs"]
         rules: List[Dict[str, Any]] = handoffs_block.get("handoff_rules", []) or []
         summary["rules_total"] = len(rules)
         if not rules:
@@ -361,5 +358,3 @@ def wire_handoffs_with_debugging(workflow_name: str, agents: Dict[str, Any]) -> 
 
 
 __all__ = ["wire_handoffs", "wire_handoffs_with_debugging", "handoff_manager", "HandoffManager"]
-
-

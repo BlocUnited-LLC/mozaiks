@@ -250,7 +250,7 @@ const WorkflowUIRouter = ({
             eventId={eventId}
             sourceWorkflowName={sourceWorkflowName}
             generatedWorkflowName={generatedWorkflowName}
-            // Compatibility prop for older components
+            // Shared workflow identifier prop for UI components
             workflowName={generatedWorkflowName || sourceWorkflowName}
             componentId={componentType}
           />

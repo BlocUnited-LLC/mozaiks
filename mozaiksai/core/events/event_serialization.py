@@ -1,13 +1,13 @@
 # ==============================================================================
-# FILE: event_serialization.py
-# DESCRIPTION: 
+# FILE: mozaiksai/core/events/event_serialization.py
+# DESCRIPTION: Serializes AG2 runtime events into normalized WebSocket payloads for the UI.
 # ==============================================================================
 
 # === MOZAIKS-CORE-HEADER ===
 
 """AG2 Runtime Event Serialization - Third Event Type Handler
 
-This module handles the THIRD type of event in MozaiksAI's event system:
+This module handles the THIRD type of event in mozaiksai's event system:
 
 1. Business Events: emit_business_event(log_event_type=...) -> UnifiedEventDispatcher  
 2. UI Tool Events: emit_ui_tool_event(ui_tool_id=...) -> UnifiedEventDispatcher
@@ -445,16 +445,16 @@ def build_ui_event_payload(*, ev: Any, ctx: EventBuildContext) -> Optional[Dict[
 	payload.update({"kind": "unknown"})
 	return payload
 
-def build_structured_output_ready_event(
+def build_agent_output_validated_event(
 	agent: str,
 	model_name: str,
 	structured_data: Any,
 	auto_tool_mode: bool,
 	context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-	"""Build normalized payload for chat.structured_output_ready events."""
+	"""Build normalized payload for chat.agent_output_validated events."""
 	return {
-		"kind": "structured_output_ready",
+		"kind": "agent_output_validated",
 		"agent": agent,
 		"agent_name": agent,
 		"model_name": model_name,
@@ -463,11 +463,12 @@ def build_structured_output_ready_event(
 		"context": context or {},
 	}
 
+
 __all__ = [
 	"EventBuildContext",
 	"normalize_text_content",
 	"serialize_event_content",
 	"extract_agent_name",
 	"build_ui_event_payload",
-	"build_structured_output_ready_event",
+	"build_agent_output_validated_event",
 ]

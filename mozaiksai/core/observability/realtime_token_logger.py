@@ -1,9 +1,7 @@
 # ==============================================================================
-# FILE: realtime_token_logger.py
-# DESCRIPTION: 
+# FILE: mozaiksai/core/observability/realtime_token_logger.py
+# DESCRIPTION: AG2 BaseLogger for real-time token tracking with async-safe loop handling.
 # ==============================================================================
-
-# === MOZAIKS-CORE-HEADER ===
 
 """Real-time token tracking for AG2 runtime logging.
 

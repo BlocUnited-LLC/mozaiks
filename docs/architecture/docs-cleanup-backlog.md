@@ -70,7 +70,6 @@ These were updated in the current cleanup pass:
 - `docs/architecture/events/overview.md`
 - `docs/guides/custom-brand-integration/*`
 - `docs/instruction-prompts/custom-brand-integration/*`
-- `docs/reference/deep-dives/mozaiks-platform-dual-substrate.md`
 - `docs/instruction-prompts/workflows/create-new-workflow.md`
 - `docs/instruction-prompts/adding-workflows/*`
 - `docs/guides/mobile/*`
@@ -82,4 +81,3 @@ These were updated in the current cleanup pass:
 ## Next Recommended Pass
 
 No open backlog items are currently tracked in this file.
-

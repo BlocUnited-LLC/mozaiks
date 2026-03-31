@@ -1,5 +1,9 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  applyBrandImageFallback,
+  getBrandLogoSrc,
+} from '../../styles/brandAssets';
 
 /**
  * ChatOverlay - Full-screen chat interface that appears when bubble is clicked
@@ -14,6 +18,7 @@ const ChatOverlay = ({
   workflowName = null
 }) => {
   const navigate = useNavigate();
+  const brandLogoSrc = getBrandLogoSrc(null);
 
   if (!isOpen) return null;
 
@@ -78,7 +83,12 @@ const ChatOverlay = ({
           <div className="h-full flex items-center justify-center p-8">
             <div className="text-center space-y-4 max-w-md">
               <div className="w-20 h-20 mx-auto rounded-full bg-gradient-to-br from-[var(--color-primary)]/20 to-[var(--color-secondary)]/20 flex items-center justify-center">
-                <img src="/assets/mozaik_logo.svg" alt="Mozaik" className="w-12 h-12 opacity-50" />
+                <img
+                  src={brandLogoSrc}
+                  alt="Mozaik"
+                  className="w-12 h-12 opacity-50"
+                  onError={applyBrandImageFallback}
+                />
               </div>
               <div>
                 <h4 className="text-lg font-semibold text-white mb-2">

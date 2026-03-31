@@ -1,22 +1,20 @@
 """Config Consolidation — validation tests.
 
 Tests verify:
-1. All config files exist in platform/config/
+1. Config files exist in platform/config/
 2. theme_config.json has merged brand + ui data
-3. navigation_config.json has merged pages + nav data
+3. ai.json has workflow entry point and startup mode
 4. Old brand/public config files are removed
 5. config_loader.py resolves to platform/config/
 6. themeProvider.js fetches from API
-7. NavigationProvider.jsx fetches from API
-8. validateConfig.js validates new config shape
-9. director.py has navigation-config API route
+7. validateConfig.js validates new config shape
+8. director.py has shell-config API route
 """
 
 import json
 import os
 import re
 import pytest
-from tests.import_utils import import_module_directly
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -37,11 +35,6 @@ def load_json(relpath):
 CONFIG_FILES = [
     "platform/config/ai.json",
     "platform/config/theme_config.json",
-    "platform/config/navigation_config.json",
-    "platform/config/module_registry.json",
-    "platform/config/notifications_config.json",
-    "platform/config/settings_config.json",
-    "platform/config/subscription_config.json",
 ]
 
 
@@ -69,7 +62,7 @@ class TestAIConfig:
         assert ai["workflows"]["entry_point"] == "GreenRoom"
 
     def test_has_chat_startup_mode(self, ai):
-        assert ai["chat"]["startup_mode"] == "ask"
+        assert ai["chat"]["chat_startup_mode"] == "ask"
 
 
 # ── 2. theme_config.json — merged brand + ui ────────────────────────────────
@@ -81,7 +74,7 @@ class TestThemeConfigMerged:
 
     def test_has_identity(self, theme):
         assert "identity" in theme
-        assert theme["identity"]["name"] == "MozaiksAI"
+        assert theme["identity"]["name"] == "mozaiksai"
 
     def test_has_tagline(self, theme):
         assert theme["identity"]["tagline"] == "AI-Powered Workflows"
@@ -175,63 +168,23 @@ class TestThemeConfigMerged:
         assert "Rajdhani" in theme["typography"]["font_family"]
 
 
-# ── 3. navigation_config.json — merged pages + nav ──────────────────────────
+# ── 3. Deprecated config files removed ───────────────────────────────────────
 
-class TestNavigationConfigMerged:
-    @pytest.fixture
-    def nav(self):
-        return load_json("platform/config/navigation_config.json")
-
-    def test_has_version(self, nav):
-        assert nav["version"] == "1.1.0"
-
-    def test_has_landing_spot(self, nav):
-        assert nav["landing_spot"] == "/"
-
-    def test_raw_navigation_config_has_no_startup_mode(self, nav):
-        assert "startup_mode" not in nav
-
-    def test_raw_navigation_config_has_no_entry_point(self, nav):
-        assert "entry_point" not in nav
-
-    def test_has_pages(self, nav):
-        # pages[] lists config-driven nav routes; core overlays (settings, notifications)
-        # are now embedded in the header gear/bell and are not page routes.
-        assert "pages" in nav
-        assert isinstance(nav["pages"], list)
-
-    def test_settings_not_a_page(self, nav):
-        # Settings moved to SettingsOverlay in the header.
-        paths = [p["path"] for p in nav["pages"]]
-        assert "/settings" not in paths
-
-    def test_notifications_not_a_page(self, nav):
-        # Notifications moved to NotificationsDropdown in the header.
-        paths = [p["path"] for p in nav["pages"]]
-        assert "/notifications" not in paths
-
-    def test_pages_have_component(self, nav):
-        for page in nav["pages"]:
-            assert "component" in page
-
-    def test_no_default_nav_section(self, nav):
-        assert "default" not in nav
-
-    def test_no_modules_section(self, nav):
-        # Module route metadata now comes from module.json -> module_registry.json,
-        # not from duplicated entries in navigation_config.json.
-        assert "modules" not in nav
+REMOVED_CONFIG_FILES = [
+    "platform/config/navigation_config.json",
+    "platform/config/settings_config.json",
+    "platform/config/notifications_config.json",
+    "platform/config/admin.json",
+    "platform/config/module_registry.json",
+    "platform/config/subscription_config.json",
+]
 
 
-class TestModuleRegistryNavigationMetadata:
-    @pytest.fixture
-    def registry(self):
-        return load_json("platform/config/module_registry.json")
-
-    def test_admin_portal_has_route_metadata(self, registry):
-        admin = next(m for m in registry["modules"] if m.get("name") == "admin_portal")
-        assert admin["path"] == "/admin"
-        assert admin["component"] == "AdminPortal"
+class TestDeprecatedConfigsRemoved:
+    @pytest.mark.parametrize("relpath", REMOVED_CONFIG_FILES)
+    def test_deprecated_config_removed(self, relpath):
+        full = os.path.join(ROOT, relpath.replace("/", os.sep))
+        assert not os.path.exists(full), f"Deprecated config still exists: {relpath}"
 
 
 # ── 4. Old files removed ────────────────────────────────────────────────────
@@ -252,29 +205,6 @@ class TestOldFilesRemoved:
     def test_old_config_dir_gone(self):
         old = os.path.join(ROOT, "config")
         assert not os.path.isdir(old), "Old config/ directory still exists at repo root"
-
-
-# ── 5. config_loader.py → platform/config ───────────────────────────────────
-
-class TestConfigLoader:
-    @pytest.fixture
-    def source(self):
-        return read_file("mozaikscore/core/config_loader.py")
-
-    def test_resolves_to_platform_config(self, source):
-        assert '"platform"' in source or "'platform'" in source
-        assert '"config"' in source or "'config'" in source
-
-    def test_no_old_app_config_path(self, source):
-        lines = source.split("\n")
-        for line in lines:
-            if "parent.parent.parent" in line and '"config"' in line:
-                assert '"platform"' in line, "config_loader still resolves to old app/config/ path"
-
-    def test_navigation_loader_projects_ai_startup_mode(self):
-        loader = import_module_directly("mozaikscore.core.config_loader")
-        nav = loader.get_navigation_config()
-        assert nav["startup_mode"] == "ask"
 
 
 # ── 6. themeProvider.js → API fetch ─────────────────────────────────────────
@@ -306,30 +236,7 @@ class TestThemeProviderUpdated:
         assert "fetchPlatformOverrides" in source
 
 
-# ── 7. NavigationProvider.jsx → API fetch ────────────────────────────────────
-
-class TestNavigationProviderUpdated:
-    @pytest.fixture
-    def source(self):
-        return read_file("chat-ui/src/providers/NavigationProvider.jsx")
-
-    def test_no_navigation_json_fetch(self, source):
-        assert "'/navigation.json'" not in source
-
-    def test_no_config_path_prop(self, source):
-        assert "configPath" not in source
-
-    def test_fetches_navigation_config_api(self, source):
-        assert "/api/navigation-config" in source
-
-    def test_still_merges_core_navigation(self, source):
-        assert "/api/navigation" in source
-
-    def test_still_discovers_modules(self, source):
-        assert "/api/available-modules" in source
-
-
-# ── 8. validateConfig.js → merged validators ────────────────────────────────
+# ── 7. validateConfig.js → merged validators ────────────────────────────────
 
 class TestValidateConfigUpdated:
     @pytest.fixture
@@ -348,26 +255,25 @@ class TestValidateConfigUpdated:
     def test_validates_theme_config(self, source):
         assert "validateThemeConfig" in source
 
-    def test_validates_navigation(self, source):
-        assert "validateNavigation" in source
-
     def test_fetches_from_api(self, source):
         assert "/api/theme-config" in source
-        assert "/api/navigation-config" in source
 
 
-# ── 9. director.py — navigation-config route ────────────────────────────────
-
-class TestDirectorRoutes:
+class TestNavigationProviderUpdated:
     @pytest.fixture
     def source(self):
-        return read_file("mozaikscore/core/director.py")
+        return read_file("chat-ui/src/providers/NavigationProvider.jsx")
 
-    def test_has_navigation_config_route(self, source):
-        assert "/api/navigation-config" in source
+    def test_fetches_shell_config_api(self, source):
+        assert "/api/shell-config" in source
 
-    def test_has_theme_config_route(self, source):
-        assert "/api/theme-config" in source
+    def test_no_routes_api(self, source):
+        # Routes endpoint removed — runtime is mozaiksai + chat-ui only
+        assert "/api/routes" not in source
 
-    def test_app_config_uses_identity(self, source):
-        assert "identity" in source
+    def test_no_components_api(self, source):
+        # Components endpoint was removed - admin is now first-class
+        assert "/api/available-components" not in source
+
+    def test_no_adapters_reference(self, source):
+        assert "/api/available-adapters" not in source

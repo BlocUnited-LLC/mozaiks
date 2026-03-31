@@ -240,7 +240,7 @@ class TestValidateOutputContract:
 
 
 class TestFindTrigger:
-    def _make_mfj(self, trigger_agent, trigger_id="t1", trigger_on="structured_output"):
+    def _make_mfj(self, trigger_agent, trigger_id="t1", trigger_on="agent_output"):
         class _FanOut:
             spawn_mode = "workflow"
             max_children = 10
@@ -274,7 +274,7 @@ class TestFindTrigger:
 
     def test_wrong_trigger_on_returns_none(self):
         mfj = self._make_mfj("PlannerAgent")
-        mfj.trigger_on = "message"  # not structured_output
+        mfj.trigger_on = "message"  # not agent_output
         result = WorkflowPackCoordinator._find_trigger([mfj], "PlannerAgent")
         assert result is None
 

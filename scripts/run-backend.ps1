@@ -1,12 +1,13 @@
 <#
 .SYNOPSIS
-  Start Mozaiks backend (uvicorn), optionally ensuring Mongo and NATS are running first.
+  Start Mozaiks backend (uvicorn), optionally ensuring local infra is running first.
 #>
 
 param(
   [int]$Port = 8000,
-  [switch]$SkipMongo,
-  [switch]$SkipNats,
+  [switch]$SkipInfra,
+  [ValidateSet("example", "mongo")]
+  [string]$InfraProfile = "example",
   [switch]$ForceStop
 )
 
@@ -69,11 +70,6 @@ function Get-ConfigValue {
   }
 
   return $Default
-}
-
-function Use-NatsAutomationTransport {
-  $transportMode = (Get-ConfigValue -Name "MOZAIKS_AUTOMATION_TRANSPORT" -Default "http").Trim().ToLowerInvariant()
-  return $transportMode -in @("nats", "dual")
 }
 
 function Get-ListeningProcessInfo {
@@ -142,14 +138,9 @@ function Ensure-PortAvailable {
   throw "Port $LocalPort is busy."
 }
 
-if (-not $SkipMongo) {
-  Write-Host "[backend] Ensuring Mongo is running..." -ForegroundColor Cyan
-  & "$PSScriptRoot/run-mongo.ps1"
-}
-
-if (-not $SkipNats -and (Use-NatsAutomationTransport)) {
-  Write-Host "[backend] Ensuring NATS is running..." -ForegroundColor Cyan
-  & "$PSScriptRoot/run-nats.ps1"
+if (-not $SkipInfra) {
+  Write-Host ("[backend] Ensuring '{0}' infra is running..." -f $InfraProfile) -ForegroundColor Cyan
+  & "$PSScriptRoot/run-infra.ps1" -Profile $InfraProfile
 }
 
 Ensure-PortAvailable -LocalPort $Port -KillExisting:$ForceStop

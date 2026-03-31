@@ -1,6 +1,6 @@
 # ==============================================================================
-# FILE: models.py
-# DESCRIPTION: 
+# FILE: mozaiksai/core/data/models.py
+# DESCRIPTION: Defines persisted chat, workflow summary, and rollup Pydantic models.
 # ==============================================================================
 """Unified Pydantic schemas + rollup for ChatSessions & WorkflowSummaries.
 
@@ -17,7 +17,7 @@ Deliberate simplifications / removals:
     * collections. WorkflowStats therefore contains three logical types:
     *   - per-session metrics docs: `metrics_{chat_id}` (real-time usage/metrics)
     *   - append-only normalized event rows (audit/trace)
-    *   - pre-computed rollup summaries: `mon_{app_id}_{workflow_name}` (legacy: app_id)
+    *   - pre-computed rollup summaries: `mon_{app_id}_{workflow_name}`
 
 Key Collections (post‑refactor):
     ChatSessions        : One doc per chat (messages + minimal usage + status)
@@ -25,13 +25,13 @@ Key Collections (post‑refactor):
     WorkflowSummaries   : One aggregated rollup per (app_id, workflow_name)
 
 ChatSessions Stored Fields (superset; some optional):
-    _id, app_id (+ legacy app_id), workflow_name, user_id, status, created_at, last_updated_at,
+    _id, app_id, workflow_name, user_id, status, created_at, last_updated_at,
     completed_at?, trace_id?, duration_sec (float),
     usage_prompt_tokens_final?, usage_completion_tokens_final?, usage_total_tokens_final?,
     usage_total_cost_final?, usage_summary_raw?, messages[]
 
 WorkflowSummaryDoc Stored Fields:
-    _id, app_id (+ legacy app_id), workflow_name, overall_avg, chat_sessions, agents
+    _id, app_id, workflow_name, overall_avg, chat_sessions, agents
 
 NOTE: We intentionally keep rollup computation *read‑only* over ChatSessions;
             token & cost fields are copied from flattened usage_* finals in sessions.
@@ -50,6 +50,19 @@ from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id
 from logs.logging_config import get_workflow_logger
 
 logger = get_workflow_logger("chat_workflow_models")
+
+
+def _has_index_with_keys(existing_indexes: List[Dict[str, Any]], expected_keys: List[tuple[str, int]]) -> bool:
+    expected = list(expected_keys)
+    for idx in existing_indexes:
+        key_spec = idx.get("key")
+        if hasattr(key_spec, "items"):
+            try:
+                if list(key_spec.items()) == expected:
+                    return True
+            except Exception:
+                continue
+    return False
 
 # ===========================================
 # EXACT PYDANTIC MODELS (MATCH SPECIFICATION)
@@ -264,7 +277,7 @@ class ChatWorkflowManager:
             if self.client is not None:
                 return
             self.client = get_mongo_client()
-            self.db = self.client["MozaiksAI"]
+            self.db = self.client["mozaiksai"]
             self.chat_sessions = self.db["ChatSessions"]
             # Store rollup summaries in WorkflowStats collection to keep only
             # two top-level collections: ChatSessions and WorkflowStats
@@ -277,18 +290,15 @@ class ChatWorkflowManager:
             # Check existing indexes to avoid conflicts
             existing_indexes = await self.chat_sessions.list_indexes().to_list(length=None)
             index_names = [idx["name"] for idx in existing_indexes]
+            app_workflow_created_keys = [("app_id", 1), ("workflow_name", 1), ("created_at", -1)]
             
             # workflow_summaries points to WorkflowStats now
             # ChatSessions (query accelerators) - use consistent naming
             if not any(name in ["idx_ent_wf_created", "cs_ent_wf_created"] for name in index_names):
-                await self.chat_sessions.create_index([
-                    ("app_id", 1), ("workflow_name", 1), ("created_at", -1)
-                ], name="cs_ent_wf_created")
+                await self.chat_sessions.create_index(app_workflow_created_keys, name="cs_ent_wf_created")
 
-            if "cs_app_wf_created" not in index_names:
-                await self.chat_sessions.create_index([
-                    ("app_id", 1), ("workflow_name", 1), ("created_at", -1)
-                ], name="cs_app_wf_created")
+            if "cs_app_wf_created" not in index_names and not _has_index_with_keys(existing_indexes, app_workflow_created_keys):
+                await self.chat_sessions.create_index(app_workflow_created_keys, name="cs_app_wf_created")
                 
             if not any(name in ["idx_status", "cs_status_created"] for name in index_names):
                 await self.chat_sessions.create_index([

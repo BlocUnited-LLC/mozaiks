@@ -18,6 +18,11 @@ import { dynamicUIHandler } from '../core/dynamicUIHandler';
 import platform from '../platform/index.js';
 import LoadingSpinner from '../utils/AgentChatLoadingSpinner';
 import useTheme from "../styles/useTheme";
+import {
+  applyBrandImageFallback,
+  getBrandLogoSrc,
+  getChatBackgroundSrc,
+} from "../styles/brandAssets";
 import { readNavigationCache, writeNavigationCache } from '../navigation/navigationCache';
 import ErrorBoundary, { ArtifactErrorFallback, ChatInterfaceErrorFallback } from '../components/ErrorBoundary';
 import {
@@ -460,9 +465,9 @@ const ChatPage = () => {
   const location = useLocation();
   // Navigation config (null-safe — dev shell may omit NavigationProvider)
   const navContext = useContext(NavigationContext);
-  const configuredStartupMode = navContext?.startup_mode || null;
+  const configuredStartupMode = navContext?.chat_startup_mode || 'ask';  // "ask" or "workflow"
   const configuredEntryWorkflow = navContext?.entry_point || null;
-  const configuredResumePolicy = navContext?.resume_policy || 'last_active_then_oldest_then_entry_point';
+  const configuredResumePolicy = 'last_active_then_oldest_then_entry_point';
   const navigationLoading = navContext?.loading ?? false;
   // Core state
   const [messages, setMessages] = useState([]);
@@ -804,6 +809,8 @@ const ChatPage = () => {
     implicitDevAppId ||
     null;
   const { theme: chatTheme, loading: themeLoading } = useTheme(currentAppId);
+  const brandLogoSrc = getBrandLogoSrc(chatTheme);
+  const chatBackgroundSrc = getChatBackgroundSrc(chatTheme);
   const currentUserId = user?.id || user?.user_id || user?.sub || getUserIdFromToken() || 'anonymous';
   const [generalSessionsLoading, setGeneralSessionsLoading] = useState(false);
   const [workflowSessionsLoading, setWorkflowSessionsLoading] = useState(false);
@@ -1146,13 +1153,13 @@ const ChatPage = () => {
     if (conversationBootstrapRef.current) {
       return;
     }
-    // Wait for navigation config so ai.chat.startup_mode can be honored.
+    // Wait for navigation config so ai.chat.chat_startup_mode can be honored.
     // Explicit URL mode (?mode=ask|workflow) still takes precedence immediately.
     if (!queryMode && navigationLoading) {
       return;
     }
     conversationBootstrapRef.current = true;
-    console.log('🧭 [BOOTSTRAP] startup_mode resolved to:', configuredStartupMode || 'workflow');
+    console.log('🧭 [BOOTSTRAP] chat_startup_mode resolved to:', configuredStartupMode);
     
     // Respect explicit mode from URL query param (e.g., ?mode=ask from widget navigation)
     if (queryMode === 'ask') {
@@ -1207,10 +1214,11 @@ const ChatPage = () => {
       return;
     }
     
-    // Default to configured startup mode (projected from platform/config/ai.json) or 'workflow'
-    const startupDefault = configuredStartupMode || 'workflow';
+    // Default to configured chat_startup_mode (from platform/config/ai.json)
+    // "ask" = start in Ask mode, "workflow" = go directly to entry_point workflow
+    const startupDefault = configuredStartupMode;
     if (startupDefault === 'ask') {
-      console.log('🧭 [BOOTSTRAP] startup_mode is "ask" — entering Ask mode');
+      console.log('🧭 [BOOTSTRAP] chat_startup_mode is "ask" — entering Ask mode');
       setConversationMode('ask');
       setTimeout(() => {
         setIsSidePanelOpen(false);
@@ -3917,7 +3925,7 @@ useEffect(() => {
       // Reset mobile drawer to peek state (no artifacts in Ask mode)
       if (isMobileView) setMobileDrawerState('peek');
     } else {
-      // Switching from Ask -> Workflow follows ai.workflows.resume_policy.
+      // Switching from Ask -> Workflow follows the framework default resume order.
       console.log('🤖 [MODE_CHANGE] Switching to workflow mode, resolving session with resume policy');
       console.log('🤖 [MODE_CHANGE] isInWidgetMode:', isInWidgetMode);
       console.log('🤖 [MODE_CHANGE] API available?', !!api);
@@ -4668,13 +4676,10 @@ useEffect(() => {
         >
           <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-[rgba(var(--color-primary-light-rgb),0.2)] to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
           <img
-            src="/assets/mozaik_logo.svg"
+            src={brandLogoSrc}
             alt="Mozaiks"
             className="w-11 h-11 relative z-10 group-hover:scale-110 transition-transform"
-            onError={(e) => {
-              e.currentTarget.onerror = null;
-              e.currentTarget.src = '/assets/mozaik.png';
-            }}
+            onError={applyBrandImageFallback}
           />
         </button>
       )}
@@ -4713,7 +4718,7 @@ useEffect(() => {
                   <span className="text-xl sm:text-2xl" role="img" aria-hidden="true">🧠</span>
                 </span>
                 <span className="text-left min-w-0 flex-1">
-                  <span className="block text-sm sm:text-lg font-bold text-white tracking-tight truncate">MozaiksAI</span>
+                  <span className="block text-sm sm:text-lg font-bold text-white tracking-tight truncate">mozaiksai</span>
                   <span className="block text-[10px] sm:text-xs text-gray-400 truncate">Chat Station</span>
                 </span>
               </button>
@@ -4724,13 +4729,10 @@ useEffect(() => {
                 title="Resume Workflow"
               >
                 <img
-                  src="/assets/mozaik_logo.svg"
+                  src={brandLogoSrc}
                   className="w-8 h-8 opacity-70 group-hover:opacity-100 transition-all duration-300 group-hover:scale-105"
                   alt="Workflow"
-                  onError={(e) => {
-                    e.currentTarget.onerror = null;
-                    e.currentTarget.src = '/assets/mozaik.png';
-                  }}
+                  onError={applyBrandImageFallback}
                 />
                 <div className="absolute inset-0 bg-[rgba(var(--color-primary-light-rgb),0.1)] rounded-lg blur opacity-0 group-hover:opacity-100 transition-opacity duration-300 -z-10"></div>
               </button>
@@ -4766,6 +4768,7 @@ useEffect(() => {
               hideHeader={true}
               disableMobileShellChrome={true}
               plainContainer={true}
+              chatTheme={chatTheme}
               artifactContext={currentArtifactContext}
               onArtifactAction={sendArtifactAction}
               actionStatusMap={actionStatusMap}
@@ -4845,6 +4848,7 @@ useEffect(() => {
         showHistoryMenu={showMobileHistoryMenu}
         onHistoryToggle={() => setIsAskHistoryDrawerOpen((prev) => !prev)}
         historyMenuLabel={mobileHistoryLabel}
+        chatTheme={chatTheme}
         artifactContext={currentArtifactContext}
         onArtifactAction={sendArtifactAction}
         actionStatusMap={actionStatusMap}
@@ -4867,13 +4871,10 @@ useEffect(() => {
           >
             <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-[rgba(var(--color-primary-light-rgb),0.2)] to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
             <img 
-              src="/assets/mozaik_logo.svg" 
-              alt="MozaiksAI" 
+              src={brandLogoSrc} 
+              alt="mozaiksai" 
               className="w-11 h-11 relative z-10 group-hover:scale-110 transition-transform"
-              onError={(e) => {
-                e.currentTarget.onerror = null;
-                e.currentTarget.src = '/assets/mozaik.png';
-              }}
+              onError={applyBrandImageFallback}
             />
           </button>
         </div>
@@ -4917,7 +4918,7 @@ useEffect(() => {
         </div>
       )}
       <img
-        src={chatTheme?.branding?.backgroundImage || '/assets/chat_bg_template.png'}
+        src={chatBackgroundSrc}
         alt=""
         className="z-[-10] fixed sm:-w-auto w-full h-full top-0 object-cover"
       />
@@ -4975,6 +4976,7 @@ useEffect(() => {
                   setIsSidePanelOpen(false);
                 }}
                 viewMode={isViewMode}
+                chatTheme={chatTheme}
                 onExitView={exitViewMode}
                 artifactContent={
                   <ErrorBoundary fallback={<ArtifactErrorFallback onRetry={() => setMobileDrawerState('peek')} />}>
@@ -4990,6 +4992,7 @@ useEffect(() => {
                       messages={currentArtifactMessages}
                       chatId={currentChatId}
                       workflowName={currentWorkflowName}
+                      chatTheme={chatTheme}
                       onArtifactAction={sendArtifactAction}
                       actionStatusMap={actionStatusMap}
                       floatingWidget={viewWidget}
@@ -5072,6 +5075,7 @@ useEffect(() => {
                       messages={currentArtifactMessages}
                       chatId={currentChatId}
                       workflowName={currentWorkflowName}
+                      chatTheme={chatTheme}
                       onArtifactAction={sendArtifactAction}
                       actionStatusMap={actionStatusMap}
                       floatingWidget={viewWidget}
@@ -5083,7 +5087,7 @@ useEffect(() => {
           </div>
         )}
       </div>
-      <Footer chatTheme={chatTheme} />
+      <Footer />
       
     </div>
   );

@@ -1,0 +1,14 @@
+# JokeFactory Workflow Orchestrator
+# A fun, interactive joke generation workflow
+
+workflow_name: JokeFactory
+max_turns: 20
+human_in_the_loop: true
+workflow_startup_mode: AgentDriven
+orchestration_pattern: DefaultPattern
+initial_message_to_user: null
+initial_message: >
+  You are part of a collaborative comedy team. JokeHostAgent, welcome the user
+  and ask them what kind of jokes they'd like to hear today.
+initial_agent: JokeHostAgent
+

@@ -37,16 +37,16 @@ python -m mozaiksai.cli up --frontend
 `python -m mozaiksai.cli init` runs deterministic prompts without LLM.
 
 1. app name
-2. app id
-3. backend URLs
-4. auth default
+2. targets
+3. whether auth is required
+4. admin emails
 5. optional OpenAI key
 
 Then it:
 
 1. writes/updates `platform/app.json`
 2. creates `.env` from `.env.example` if needed
-3. updates key env values
+3. updates key env values, including local dev auth defaults
 4. regenerates Keycloak realm + theme artifacts
 
 ---
