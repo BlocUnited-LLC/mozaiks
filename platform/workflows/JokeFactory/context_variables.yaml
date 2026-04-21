@@ -1,5 +1,7 @@
 # JokeFactory Context Variables
 # Tracks workflow state and user preferences.
+# MFJ inject keys (mfj_joke_results) and the five _mfj_resume_* handshake
+# fields are auto-synthesized by the runtime from workflow_graph.json.
 
 definitions:
   joke_style:
@@ -19,18 +21,11 @@ definitions:
       type: state
       default: null
 
-  joke_count:
-    type: integer
-    description: Number of jokes to generate (1-5)
-    source:
-      type: state
-      default: 3
-
   host_complete:
     type: boolean
     description: >
       True once JokeHostAgent has gathered all preferences from the user.
-      Triggers handoff to JokeWriterAgent.
+      Triggers handoff to JokeDecomposerAgent.
     source:
       type: state
       default: false
@@ -41,16 +36,9 @@ definitions:
           match:
             equals: NEXT
 
-  jokes_written:
-    type: array
-    description: Array of jokes produced by JokeWriterAgent for the current session
-    source:
-      type: computed
-      default: []
-
-  session_joke_count:
+  jokes_presentation_count:
     type: integer
-    description: Running count of total jokes generated in this session
+    description: Running count of joke rounds presented to the user.
     source:
       type: state
       default: 0
@@ -60,17 +48,16 @@ agents:
     variables:
       - joke_style
       - joke_topic
-      - joke_count
       - host_complete
 
-  JokeWriterAgent:
+  JokeDecomposerAgent:
     variables:
       - joke_style
       - joke_topic
-      - joke_count
-      - jokes_written
 
-  JokeCriticAgent:
+  ResumeRouterAgent:
+    variables: []
+
+  JokePresenterAgent:
     variables:
-      - jokes_written
-      - session_joke_count
+      - jokes_presentation_count

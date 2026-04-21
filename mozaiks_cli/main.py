@@ -5,13 +5,14 @@ Mozaiks CLI - Main entry point.
 Commands:
   mozaiks init <preset>     Create new project from preset
   mozaiks add <feature>     Add feature to existing project
+  mozaiks gen <mode>        Generate workflows or apps using AI
   mozaiks info              Show current config and available presets
 """
 
 import argparse
 import sys
 
-from mozaiks_cli.commands import init_command, add_command, info_command
+from mozaiks_cli.commands import init_command, add_command, info_command, gen_command
 
 
 def create_parser():
@@ -71,6 +72,30 @@ def create_parser():
         help="Upgrade to a preset instead of individual feature",
     )
 
+    # mozaiks gen
+    gen_parser = subparsers.add_parser(
+        "gen",
+        help="Generate workflows or apps using AI",
+        description="Generate AI agent workflows or full apps from a descriptive prompt.",
+    )
+    gen_parser.add_argument(
+        "mode",
+        nargs="?",
+        default=None,
+        choices=["workflow", "app"],
+        help="What to generate: 'workflow' for agent workflows only, 'app' for full application",
+    )
+    gen_parser.add_argument(
+        "--prompt", "-p",
+        default=None,
+        help="Description of what you want to build (be detailed)",
+    )
+    gen_parser.add_argument(
+        "--output", "-o",
+        default=None,
+        help="Output directory (default: ./generated)",
+    )
+
     # mozaiks info
     info_parser = subparsers.add_parser(
         "info",
@@ -100,6 +125,14 @@ def main():
             init_command.run(args)
         elif args.command == "add":
             add_command.run(args)
+        elif args.command == "gen":
+            # Interactive mode if no mode or prompt provided
+            if not args.mode or not args.prompt:
+                result = gen_command.run_interactive(args)
+            else:
+                result = gen_command.run(args)
+            if result:
+                sys.exit(result)
         elif args.command == "info":
             info_command.run(args)
         else:

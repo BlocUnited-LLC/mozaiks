@@ -3,7 +3,7 @@
 # DESCRIPTION: Rebuilds AG2-compatible message history and state for paused workflow resume flows.
 # ==============================================================================
 
-# === MOZAIKS-CORE-HEADER ===
+
 
 from __future__ import annotations
 
@@ -35,12 +35,17 @@ class GroupChatResumer:
             self.logger.debug("[AUTO_RESUME] Missing app_id for %s; skipping", chat_id)
             return None
 
-        doc = await self._fetch_chat_doc(chat_id, app_id, projection={"status": 1, "messages": 1, "workflow_name": 1})
+        doc = await self._fetch_chat_doc(
+            chat_id,
+            app_id,
+            projection={"status": 1, "messages": 1, "workflow_name": 1, "user_id": 1},
+        )
         if not doc:
             self.logger.debug("[AUTO_RESUME] No persisted chat found for %s", chat_id)
             return None
 
         workflow_startup_mode = self._resolve_startup_mode(workflow_startup_mode, doc.get("workflow_name"))
+        resume_state = await self._load_resume_state(app_id=app_id, user_id=doc.get("user_id"))
 
         try:
             from mozaiksai.core.data.models import WorkflowStatus
@@ -69,6 +74,7 @@ class GroupChatResumer:
             start_index=0,
             context={"reason": "on_connect"},
             workflow_startup_mode=workflow_startup_mode,
+            resume_state=resume_state,
         )
         return replay_result.get("last_index")
 
@@ -85,10 +91,15 @@ class GroupChatResumer:
         if not app_id:
             raise RuntimeError("Missing app_id for resume flow")
 
-        doc = await self._fetch_chat_doc(chat_id, app_id, projection={"status": 1, "messages": 1, "workflow_name": 1})
+        doc = await self._fetch_chat_doc(
+            chat_id,
+            app_id,
+            projection={"status": 1, "messages": 1, "workflow_name": 1, "user_id": 1},
+        )
         messages: List[Dict[str, Any]] = doc.get("messages", []) or []
         status = doc.get("status", "unknown")
         workflow_startup_mode = self._resolve_startup_mode(workflow_startup_mode, doc.get("workflow_name"))
+        resume_state = await self._load_resume_state(app_id=app_id, user_id=doc.get("user_id"))
 
         if last_client_index < -1:
             last_client_index = -1
@@ -111,6 +122,7 @@ class GroupChatResumer:
                     start_index=start_index,
                     events_slice=[],
                     context={"reason": "client_resume", "last_client_index": last_client_index},
+                    resume_state=resume_state,
                 ),
                 chat_id,
             )
@@ -125,6 +137,7 @@ class GroupChatResumer:
             start_index=start_index,
             context={"reason": "client_resume", "last_client_index": last_client_index},
             workflow_startup_mode=workflow_startup_mode,
+            resume_state=resume_state,
         )
         return {
             "replayed_messages": replay_result.get("replayed_messages", 0),
@@ -146,6 +159,7 @@ class GroupChatResumer:
         start_index: int,
         context: Optional[Dict[str, Any]],
         workflow_startup_mode: Optional[str] = None,
+        resume_state: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, int]:
         slice_messages = messages[start_index:]
         if not slice_messages:
@@ -160,6 +174,7 @@ class GroupChatResumer:
                     start_index=start_index,
                     events_slice=[],
                     context=context,
+                    resume_state=resume_state,
                 ),
                 chat_id,
             )
@@ -216,6 +231,7 @@ class GroupChatResumer:
                 start_index=start_index,
                 events_slice=replayed_messages,
                 context=context,
+                resume_state=resume_state,
             ),
             chat_id,
         )
@@ -322,6 +338,7 @@ class GroupChatResumer:
         start_index: int,
         events_slice: List[Dict[str, Any]],
         context: Optional[Dict[str, Any]],
+        resume_state: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         ag2_resume = {
             "mode": mode,
@@ -345,6 +362,8 @@ class GroupChatResumer:
         }
         if context:
             boundary["resume_context"] = context
+        if resume_state is not None:
+            boundary["resume_state"] = resume_state
         return boundary
 
     def _sanitize_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
@@ -403,6 +422,27 @@ class GroupChatResumer:
             from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
             self._persistence_manager = AG2PersistenceManager()
         return self._persistence_manager
+
+    async def _load_resume_state(self, *, app_id: Optional[str], user_id: Any) -> Optional[Dict[str, Any]]:
+        resolved_app_id = str(app_id or "").strip()
+        resolved_user_id = str(user_id or "").strip()
+        if not resolved_app_id or not resolved_user_id:
+            return None
+        try:
+            from mozaiksai.core.session import get_session_router
+
+            return await get_session_router().get_session_snapshot(
+                app_id=resolved_app_id,
+                user_id=resolved_user_id,
+            )
+        except Exception as exc:
+            self.logger.debug(
+                "[AUTO_RESUME] Failed to load session snapshot for %s/%s: %s",
+                resolved_app_id,
+                resolved_user_id,
+                exc,
+            )
+            return None
 
     def _build_input_request_event(
         self,

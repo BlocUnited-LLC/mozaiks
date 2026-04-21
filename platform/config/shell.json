@@ -1,0 +1,59 @@
+{
+  "header": {
+    "logo": {
+      "src": "mozaik_logo.svg",
+      "wordmark": "mozaik.png",
+      "alt": "Mozaiks logo",
+      "href": "https://mozaiks.ai"
+    },
+    "actions": [
+      {
+        "id": "discover",
+        "label": "Discover",
+        "icon": "sparkle.svg",
+        "variant": "gradient",
+        "visible": true
+      }
+    ]
+  },
+  "profile": {
+    "icon": "profile.svg",
+    "show": true,
+    "defaultLabel": "Commander",
+    "sublabel": "Mission Control",
+    "menu": [
+      {
+        "id": "admin-portal",
+        "label": "Admin Portal",
+        "icon": "settings.svg",
+        "action": "navigate",
+        "href": "/admin",
+        "requiresRole": "admin"
+      },
+      {
+        "id": "divider-before-signout",
+        "type": "divider"
+      },
+      {
+        "id": "signout",
+        "label": "Sign Out",
+        "icon": "logout.svg",
+        "action": "signout",
+        "variant": "danger"
+      }
+    ]
+  },
+  "notifications": {
+    "icon": "notifications.svg",
+    "show": true,
+    "emptyText": "No alerts"
+  },
+  "footer": {
+    "links": [
+      { "label": "Legal Notice", "href": "/legal" },
+      { "label": "Terms of Service", "href": "/terms" },
+      { "label": "Cookie Policy", "href": "/cookies" }
+    ],
+    "visible": true
+  }
+}

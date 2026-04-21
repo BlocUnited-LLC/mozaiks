@@ -8,7 +8,7 @@ Run with:
 Then:
     - Health check: http://localhost:8000/ai/health
     - List workflows: http://localhost:8000/ai/workflows
-    - WebSocket: ws://localhost:8000/ai/ws/JokeFactory/{app_id}/{chat_id}/{user_id}
+    - WebSocket: ws://localhost:8000/ai/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}
 """
 
 import os

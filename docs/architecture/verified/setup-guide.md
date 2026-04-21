@@ -117,11 +117,11 @@ platform/
 ├── config/
 │   └── ai.json                    # Chat startup + entry point config
 └── workflows/
-    ├── _pack/
-    │   └── workflow_graph.json    # Universal pack graph (optional)
+    ├── extended_orchestration/
+    │   └── extension_registry.json   # Cross-workflow pack registry (optional)
     └── {workflow_name}/
-        ├── _pack/
-        │   └── workflow_graph.json    # Mid-flight journey graph (optional)
+        ├── extended_orchestration/
+        │   └── mfj_extension.json    # Per-workflow MFJ config (optional)
         ├── orchestrator.yaml
         ├── agents.yaml
         ├── handoffs.yaml

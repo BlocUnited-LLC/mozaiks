@@ -19,9 +19,8 @@ Responsibilities:
 
 import asyncio
 import json
-import uuid
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Set, Type
 
 from pydantic import ValidationError
@@ -33,13 +32,7 @@ if TYPE_CHECKING:
 
 # Import AG2 event types
 from autogen.events.agent_events import TextEvent
-
-try:
-    from autogen.events.print_event import PrintEvent
-    HAS_PRINT_EVENT = True
-except ImportError:
-    HAS_PRINT_EVENT = False
-    PrintEvent = type(None)  # type: ignore
+from autogen.events.print_event import PrintEvent
 
 # Import serialization utilities
 from mozaiksai.core.events.event_serialization import (
@@ -48,11 +41,24 @@ from mozaiksai.core.events.event_serialization import (
     extract_agent_name,
     normalize_text_content,
     serialize_event_content,
-    build_agent_output_validated_event,
 )
-
-# System signal markers for internal coordination
-_SYSTEM_SIGNAL_MARKERS: tuple[str, ...] = ("[SYSTEM_RESUME_SIGNAL]",)
+from mozaiksai.core.events.ag2_events import emit_decomposition_planned
+from mozaiksai.core.events.runtime_events import (
+    RUNTIME_AGENT_OUTPUT_VALIDATED,
+    RUNTIME_DECOMPOSITION_PLANNED,
+    build_runtime_agent_output_validated_event,
+    build_runtime_context_payload,
+    build_runtime_decomposition_planned_event,
+    build_turn_idempotency_key,
+)
+from mozaiksai.core.multitenant import build_app_scope_filter
+from mozaiksai.core.ports.orchestration import DomainEvent
+from mozaiksai.core.workflow.pack.resume_contract import (
+    MFJ_RESUME_PENDING_KEY,
+    MFJ_RESUME_TARGET_KEY,
+    mark_resume_consumed,
+)
+from mozaiksai.core.workflow.runtime_signals import SYSTEM_RESUME_SIGNAL
 
 
 class TextEventHandler(BaseEventHandler):
@@ -69,10 +75,7 @@ class TextEventHandler(BaseEventHandler):
 
     def event_types(self) -> Set[Type]:
         """Handle TextEvent and PrintEvent."""
-        types: Set[Type] = {TextEvent}
-        if HAS_PRINT_EVENT:
-            types.add(PrintEvent)
-        return types
+        return {TextEvent, PrintEvent}
 
     async def handle(
         self,
@@ -107,7 +110,6 @@ class TextEventHandler(BaseEventHandler):
         # Extract sender and content
         sender_name = extract_agent_name(event)
         message_content = normalize_text_content(getattr(event, "content", None))
-
         # Emit synthetic speaker selection if needed
         if sender_name and sender_name != state.turn_agent:
             await self._emit_synthetic_speaker(sender_name, message_content, ctx, state)
@@ -119,7 +121,8 @@ class TextEventHandler(BaseEventHandler):
                 sender_name = sender_attr.strip()
             elif hasattr(sender_attr, "name") and isinstance(getattr(sender_attr, "name"), str):
                 sender_name = getattr(sender_attr, "name").strip()
-        sender_name = sender_name or "Agent"
+        sender_name = sender_name or state.turn_agent or "Agent"
+        sender_name = self._resolve_validated_output_sender(sender_name, ctx, state) or sender_name
 
         # Seed message deduplication
         if state.is_seed_message(message_content, sender_name):
@@ -183,7 +186,7 @@ class TextEventHandler(BaseEventHandler):
             # Check if this is a system resume signal
             is_internal_signal = (
                 isinstance(content, str)
-                and any(marker in content for marker in _SYSTEM_SIGNAL_MARKERS)
+                and SYSTEM_RESUME_SIGNAL in content
             )
 
             # Use 'system' for internal signals instead of actual sender
@@ -217,7 +220,7 @@ class TextEventHandler(BaseEventHandler):
         Returns:
             Tuple of (display_message, is_structured)
         """
-        if sender_name not in ctx.structured_agents:
+        if sender_name not in ctx.validated_output_agents:
             return content, False
 
         auto_mode = sender_name in ctx.auto_tool_agents
@@ -251,7 +254,7 @@ class TextEventHandler(BaseEventHandler):
         if model_cls is not None:
             try:
                 validated = model_cls.model_validate(structured_blob)
-                normalized_structured = validated.model_dump()
+                normalized_structured = validated.model_dump(mode="json")
             except ValidationError as err:
                 ctx.wf_logger.warning(
                     f" [{ctx.workflow_name_upper}] Structured output validation failed "
@@ -279,8 +282,56 @@ class TextEventHandler(BaseEventHandler):
         await self._emit_agent_output_validated(
             sender_name, normalized_structured, ctx, state, auto_mode=auto_mode
         )
+        await self._emit_decomposition_planned(
+            sender_name, normalized_structured, ctx, state
+        )
+        await self._consume_resume_contract_if_needed(sender_name, ctx)
 
         return display_message, True
+
+    async def _consume_resume_contract_if_needed(
+        self,
+        sender_name: str,
+        ctx: "StreamContext",
+    ) -> None:
+        """Mark MFJ resume metadata consumed once the target agent actually replies."""
+        ctx_vars = ctx.context_variables
+        if ctx_vars is None:
+            return
+
+        try:
+            resume_pending = bool(ctx_vars.get(MFJ_RESUME_PENDING_KEY)) if hasattr(ctx_vars, "get") else False
+        except Exception:
+            resume_pending = False
+        if not resume_pending:
+            return
+
+        try:
+            resume_target = ctx_vars.get(MFJ_RESUME_TARGET_KEY) if hasattr(ctx_vars, "get") else None
+        except Exception:
+            resume_target = None
+        if not isinstance(resume_target, str) or resume_target.strip() != sender_name:
+            return
+
+        updates = mark_resume_consumed(ctx_vars)
+        if not updates:
+            return
+
+        try:
+            coll = await ctx.persistence_manager._coll()
+            await coll.update_one(
+                {"_id": ctx.chat_id, **build_app_scope_filter(ctx.app_id)},
+                {"$set": updates},
+            )
+        except Exception as persist_err:
+            ctx.wf_logger.warning(
+                f" [{ctx.workflow_name_upper}] Failed to persist MFJ resume consumption: {persist_err}"
+            )
+            return
+
+        ctx.wf_logger.info(
+            f" [{ctx.workflow_name_upper}] Marked MFJ resume consumed for {sender_name}"
+        )
 
     async def _extract_structured_output(
         self,
@@ -372,12 +423,8 @@ class TextEventHandler(BaseEventHandler):
         *,
         auto_mode: bool,
     ) -> None:
-        """Emit chat.agent_output_validated event through dispatcher."""
-        # Build turn key for idempotency
-        turn_uuid = uuid.uuid5(
-            uuid.NAMESPACE_URL, f"{ctx.chat_id}:{state.sequence_counter}"
-        )
-        turn_key = f"turn-{turn_uuid.hex}"
+        """Emit canonical runtime.agent_output_validated event through dispatcher."""
+        turn_key = build_turn_idempotency_key(ctx.chat_id, state.sequence_counter)
 
         # Build context payload
         context_payload = self._build_auto_tool_context_payload(ctx, state)
@@ -401,21 +448,107 @@ class TextEventHandler(BaseEventHandler):
             return
 
         # Build and emit event
-        validated_event = build_agent_output_validated_event(
+        validated_event = build_runtime_agent_output_validated_event(
             agent=sender_name,
             model_name=model_name,
             structured_data=normalized_structured,
             auto_tool_mode=auto_mode,
             context=context_payload,
+            turn_idempotency_key=turn_key,
+            pattern_context_ref=ctx.context_variables,
         )
-        validated_event["turn_idempotency_key"] = turn_key
 
         if ctx.dispatcher:
             ctx.wf_logger.info(
-                f" [{ctx.workflow_name_upper}] Dispatching chat.agent_output_validated "
+                f" [{ctx.workflow_name_upper}] Dispatching {RUNTIME_AGENT_OUTPUT_VALIDATED} "
                 f"for {sender_name} (turn_key={turn_key})"
             )
-            await ctx.dispatcher.emit("chat.agent_output_validated", validated_event)
+            await ctx.dispatcher.emit(RUNTIME_AGENT_OUTPUT_VALIDATED, validated_event)
+
+    async def _emit_decomposition_planned(
+        self,
+        sender_name: str,
+        normalized_structured: Dict[str, Any],
+        ctx: "StreamContext",
+        state: "StreamState",
+    ) -> None:
+        """Emit explicit decomposition event for MFJ-capable workflows."""
+        if not self._should_emit_decomposition_event(sender_name, normalized_structured, ctx):
+            return
+
+        model_name = None
+        agent_obj = ctx.agents.get(sender_name)
+        if agent_obj:
+            model_name = getattr(agent_obj, "_mozaiks_structured_model_name", None)
+        if not model_name:
+            model_cls = ctx.structured_registry.get(sender_name)
+            if model_cls is not None:
+                model_name = getattr(model_cls, "__name__", None)
+        if not model_name:
+            return
+
+        payload = build_runtime_decomposition_planned_event(
+            agent=sender_name,
+            model_name=model_name,
+            structured_data=normalized_structured,
+            context=self._build_auto_tool_context_payload(ctx, state),
+        )
+
+        emitted_via_ag2 = emit_decomposition_planned(
+            agent_name=sender_name,
+            chat_id=ctx.chat_id,
+            workflow_name=ctx.workflow_name,
+            model_name=model_name,
+            structured_data=normalized_structured,
+            context=payload.get("context") if isinstance(payload.get("context"), dict) else {},
+        )
+        if emitted_via_ag2:
+            ctx.wf_logger.info(
+                f" [{ctx.workflow_name_upper}] Emitted AG2 decomposition checkpoint for {sender_name}"
+            )
+            return
+
+        if not ctx.dispatcher:
+            return
+
+        domain_event = DomainEvent(
+            kind=RUNTIME_DECOMPOSITION_PLANNED,
+            payload=payload,
+            chat_id=ctx.chat_id,
+            source="runtime",
+        )
+        ctx.wf_logger.info(
+            f" [{ctx.workflow_name_upper}] Dispatching fallback {RUNTIME_DECOMPOSITION_PLANNED} "
+            f"for {sender_name}"
+        )
+        await ctx.dispatcher.emit_domain_event(domain_event)
+
+    def _should_emit_decomposition_event(
+        self,
+        sender_name: str,
+        normalized_structured: Dict[str, Any],
+        ctx: "StreamContext",
+    ) -> bool:
+        """Return True when the workflow declares sender_name as an MFJ planner."""
+        if not isinstance(normalized_structured.get("workflows"), list):
+            return False
+
+        try:
+            from mozaiksai.core.workflow.pack.config import load_workflow_pack_graph
+
+            graph = load_workflow_pack_graph(ctx.workflow_name)
+        except Exception:
+            return False
+
+        if graph is None:
+            return False
+
+        for entry in graph.mid_flight_journeys:
+            if entry.trigger_on != "decomposition_event":
+                continue
+            if entry.decomposition_agent == sender_name:
+                return True
+        return False
 
     def _build_auto_tool_context_payload(
         self,
@@ -423,44 +556,76 @@ class TextEventHandler(BaseEventHandler):
         state: "StreamState",
     ) -> Dict[str, Any]:
         """Build context payload for auto-tool events."""
-        payload: Dict[str, Any] = {
-            "chat_id": ctx.chat_id,
-            "app_id": ctx.app_id,
-            "workflow_name": ctx.workflow_name,
-            "turn_sequence": state.sequence_counter,
-        }
-
         try:
-            ctx_vars = ctx.context_variables
-            if ctx_vars is not None:
-                raw_ctx: Optional[Dict[str, Any]] = None
-
-                if hasattr(ctx_vars, "data") and isinstance(getattr(ctx_vars, "data"), dict):
-                    raw_ctx = dict(getattr(ctx_vars, "data"))
-                elif hasattr(ctx_vars, "to_dict") and callable(getattr(ctx_vars, "to_dict")):
-                    raw_ctx = dict(ctx_vars.to_dict())
-                elif isinstance(ctx_vars, dict):
-                    raw_ctx = dict(ctx_vars)
-
-                if raw_ctx:
-                    sanitized: Dict[str, Any] = {}
-                    for key, value in raw_ctx.items():
-                        try:
-                            sanitized[key] = serialize_event_content(value)
-                        except Exception:
-                            sanitized[key] = str(value)
-                    payload["context_variables"] = sanitized
+            return build_runtime_context_payload(
+                chat_id=ctx.chat_id,
+                app_id=ctx.app_id,
+                workflow_name=ctx.workflow_name,
+                user_id=ctx.user_id,
+                turn_sequence=state.sequence_counter,
+                context_variables=ctx.context_variables,
+            )
         except Exception as ctx_err:
             ctx.wf_logger.debug(
                 f" [{ctx.workflow_name_upper}] Auto-tool context snapshot failed: {ctx_err}"
             )
+            return {
+                "chat_id": ctx.chat_id,
+                "app_id": ctx.app_id,
+                "workflow_name": ctx.workflow_name,
+                "turn_sequence": state.sequence_counter,
+            }
 
-        return payload
+    def _resolve_validated_output_sender(
+        self,
+        sender_name: str,
+        ctx: "StreamContext",
+        state: "StreamState",
+    ) -> Optional[str]:
+        normalized_sender = str(sender_name or "").strip()
+        if normalized_sender in ctx.validated_output_agents:
+            return normalized_sender
+
+        candidates: list[str] = []
+        preferred_resume_target: Optional[str] = None
+
+        if isinstance(state.turn_agent, str) and state.turn_agent in ctx.validated_output_agents:
+            candidates.append(state.turn_agent)
+
+        ctx_vars = ctx.context_variables
+        if ctx_vars is not None:
+            resume_target = None
+            try:
+                if hasattr(ctx_vars, "get"):
+                    resume_target = ctx_vars.get("_mfj_resume_target_agent")
+            except Exception:
+                resume_target = None
+            if isinstance(resume_target, str) and resume_target in ctx.validated_output_agents:
+                preferred_resume_target = resume_target
+                candidates.append(resume_target)
+
+        try:
+            from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+            workflow_cfg = workflow_manager.get_config(ctx.workflow_name) or {}
+            initial_agent = workflow_cfg.get("initial_agent")
+            if isinstance(initial_agent, str) and initial_agent in ctx.validated_output_agents:
+                candidates.append(initial_agent)
+        except Exception:
+            pass
+
+        deduped = []
+        for candidate in candidates:
+            if candidate not in deduped:
+                deduped.append(candidate)
+
+        if preferred_resume_target and preferred_resume_target in deduped:
+            return preferred_resume_target
+
+        if len(deduped) == 1:
+            return deduped[0]
+        return None
 
     def should_break(self, event: Any, state: "StreamState") -> bool:
         """TextEvent does not terminate the stream."""
         return False
-
-    def priority(self) -> int:
-        """Standard priority."""
-        return 50

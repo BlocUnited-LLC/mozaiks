@@ -31,7 +31,7 @@ Owns:
 
 Current implementation zone:
 
-- `mozaikscore/`
+- external app backend connected through `AppBackendPort`
 
 ### Process 3: Automation ingress boundary
 
@@ -39,7 +39,7 @@ Owns transport for domain facts between the app backend and AI runtime.
 
 Current transport:
 
-- in-process ingress in unified deployment
+- deployment-specific ingress in unified deployments
 - HTTP ingress to the AI runtime in split local development
 
 ### Process 4: AI runtime
@@ -127,6 +127,20 @@ workflow
 
 Artifacts are one of the clean bridges between the two halves of the system.
 
+## Flow E: Refinement Re-Entry
+
+```text
+user adjustment request
+  -> current artifact version loaded
+  -> control-plane classifier
+  -> targeted refinement or upstream re-entry
+  -> E2B validation and preview
+  -> new artifact version persisted
+```
+
+This is the production path for post-generation change handling. It should not
+default to restarting the entire build pipeline for minor or scoped changes.
+
 ## Guardrails
 
 Do not:
@@ -139,7 +153,6 @@ The architecture only stays modular if those paths remain optional and explicit.
 
 ## Cross References
 
-- [event-system-architecture.md](event-system-architecture.md)
 - [workflow-architecture.md](workflow-architecture.md)
 - [ui-surface-and-layout-architecture.md](ui-surface-and-layout-architecture.md)
-
+- [../specs/REFINEMENT_CONTROL_PLANE_SPEC.md](../specs/REFINEMENT_CONTROL_PLANE_SPEC.md)

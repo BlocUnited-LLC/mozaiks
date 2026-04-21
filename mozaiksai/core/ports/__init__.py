@@ -1,4 +1,4 @@
-# === MOZAIKS-CORE-HEADER ===
+
 # FILE: mozaiksai/core/ports/__init__.py
 # DESCRIPTION: Port protocols — engine-agnostic contracts for the runtime layer.
 # ==============================================================================
@@ -17,6 +17,11 @@ from .app_backend import (
     BackendResponse,
     BackendHealth,
 )
+from .sandbox import (
+    SandboxPort,
+    SandboxRunResult,
+    SandboxSessionInfo,
+)
 
 __all__ = [
     # Orchestration
@@ -30,4 +35,8 @@ __all__ = [
     "AppBackendPort",
     "BackendResponse",
     "BackendHealth",
+    # Sandbox
+    "SandboxPort",
+    "SandboxRunResult",
+    "SandboxSessionInfo",
 ]

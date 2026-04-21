@@ -50,7 +50,7 @@ class StreamContext:
     # Workflow configuration
     agents: Dict[str, "ConversableAgent"]
     structured_registry: Dict[str, Any]
-    structured_agents: Set[str]
+    validated_output_agents: Set[str]
     auto_tool_agents: Set[str]
     max_turns: int
 
@@ -120,14 +120,16 @@ class StreamState:
     prev_ctx_snapshot: Dict[str, Any] = field(default_factory=dict)
     verbose_ctx: bool = False
 
+    # Streaming chunk attribution
+    stream_sequence: int = 0
+    stream_id: Optional[str] = None
+
     # Seed message deduplication
     # Tracks initial user messages to avoid echoing them back
     seed_user_messages: Counter = field(default_factory=Counter)
 
     # Completion state
     run_completed: bool = False
-    completion_event: Any = None
-    handoff_to_user: bool = False
 
     # AG2 response object (set during stream initialization)
     response: Any = None
@@ -196,11 +198,6 @@ class StreamState:
         """Convert final state to result dict for orchestration layer."""
         return {
             "response": self.response,
-            "turn_agent": self.turn_agent,
-            "turn_started": self.turn_started,
             "sequence_counter": self.sequence_counter,
             "run_completed": self.run_completed,
-            "completion_event": self.completion_event,
-            "handoff_to_user": self.handoff_to_user,
-            "executed_agents": self.executed_agents,
         }

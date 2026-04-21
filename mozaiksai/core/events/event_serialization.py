@@ -3,7 +3,7 @@
 # DESCRIPTION: Serializes AG2 runtime events into normalized WebSocket payloads for the UI.
 # ==============================================================================
 
-# === MOZAIKS-CORE-HEADER ===
+
 
 """AG2 Runtime Event Serialization - Third Event Type Handler
 
@@ -29,8 +29,9 @@ Public entry point: build_ui_event_payload(...)
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
 from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Dict, Optional
 
 from mozaiksai.core.workflow.validation.tools import (
 	SENTINEL_AGENT_KEY,
@@ -84,6 +85,8 @@ def serialize_event_content(raw: Any) -> Any:
 	"""Best-effort JSON-serializable form of an AG2 event content object."""
 	if raw is None or isinstance(raw, (str, int, float, bool)):
 		return raw
+	if isinstance(raw, Enum):
+		return serialize_event_content(raw.value)
 	try:
 		if hasattr(raw, 'model_dump') and callable(getattr(raw, 'model_dump')):
 			return serialize_event_content(raw.model_dump())  # type: ignore[attr-defined]
@@ -452,16 +455,43 @@ def build_agent_output_validated_event(
 	auto_tool_mode: bool,
 	context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-	"""Build normalized payload for chat.agent_output_validated events."""
-	return {
-		"kind": "agent_output_validated",
-		"agent": agent,
-		"agent_name": agent,
-		"model_name": model_name,
-		"structured_data": serialize_event_content(structured_data),
-		"auto_tool_mode": bool(auto_tool_mode),
-		"context": context or {},
-	}
+	"""Build normalized payload for runtime.agent_output_validated events.
+
+	This event means: an agent output has been validated against its declared
+	Pydantic model. Runtime features like auto-tools and MFJ may consume it,
+	but they are downstream concerns rather than part of structured-output
+	validation itself.
+	"""
+	from mozaiksai.core.events.runtime_events import build_runtime_agent_output_validated_event
+
+	return build_runtime_agent_output_validated_event(
+		agent=agent,
+		model_name=model_name,
+		structured_data=structured_data,
+		auto_tool_mode=auto_tool_mode,
+		context=context,
+	)
+
+
+def build_decomposition_planned_payload(
+	agent: str,
+	model_name: str,
+	structured_data: Any,
+	context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+	"""Build payload for explicit decomposition planning events.
+
+	This is the runtime boundary between a decomposition agent's validated plan
+	and the MFJ coordinator that turns that plan into child workflow runs.
+	"""
+	from mozaiksai.core.events.runtime_events import build_runtime_decomposition_planned_event
+
+	return build_runtime_decomposition_planned_event(
+		agent=agent,
+		model_name=model_name,
+		structured_data=structured_data,
+		context=context,
+	)
 
 
 __all__ = [
@@ -471,4 +501,5 @@ __all__ = [
 	"extract_agent_name",
 	"build_ui_event_payload",
 	"build_agent_output_validated_event",
+	"build_decomposition_planned_payload",
 ]

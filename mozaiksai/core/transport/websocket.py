@@ -3,7 +3,7 @@
 # DESCRIPTION: WebSocket protocol helpers for runtime event delivery, heartbeats, and connection state.
 # ==============================================================================
 
-# === MOZAIKS-CORE-HEADER ===
+
 
 from __future__ import annotations
 

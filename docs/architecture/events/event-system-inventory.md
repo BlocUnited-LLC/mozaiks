@@ -1,7 +1,7 @@
 # Event System Inventory
 
 **Status:** Informational snapshot  
-**Last updated:** 2026-03-12
+**Last updated:** 2026-04-03
 
 This file is a current-state inventory of the event-related modules that exist
 in this repo.
@@ -10,8 +10,7 @@ This file is **not** the normative contract.
 
 Authoritative docs:
 
-- [event-taxonomy.md](../foundations/event-taxonomy.md)
-- [event-system-architecture.md](../foundations/event-system-architecture.md)
+- [event-system.md](../foundations/event-system.md)
 - [process-and-event-map.md](../foundations/process-and-event-map.md)
 
 ---
@@ -95,9 +94,8 @@ This inventory also highlights current architectural gaps:
 1. There are still two event idioms in the repo:
   - typed runtime `DomainEvent` / normalized runtime events
   - backend-specific business event shapes behind `AppBackendPort`
-2. Some older docs still describe retired components and old repo paths.
-3. Business/app backend events are not yet aligned to the canonical dot-taxonomy.
-4. A small event inventory is still useful, but it must track real code, not
+2. Business/app backend events are not yet aligned to the canonical dot-taxonomy.
+3. A small event inventory is still useful, but it must track real code, not
    retired architecture notes.
 
 ---

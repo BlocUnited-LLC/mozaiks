@@ -42,11 +42,12 @@ export const fonts = {
  */
 const createVarClass = (type, varName, brandHex = '') => {
   const expr = brandHex ? `var(--${varName},${brandHex})` : `var(--${varName})`;
+  const arbitrary = (utility, value) => `${utility}-[` + value + ']';
   const map = {
-    bg:     `bg-[${expr}]`,
-    border: `border-[${expr}]`,
-    text:   `text-[${expr}]`,
-    ring:   `ring-[${expr}]`,
+    bg:     arbitrary('bg', expr),
+    border: arbitrary('border', expr),
+    text:   arbitrary('text', expr),
+    ring:   arbitrary('ring', expr),
   };
   return map[type] || '';
 };
@@ -73,7 +74,7 @@ const createShadowVarClass = (varName, brandShadow = '0_0_0_rgba(0,0,0,0)') => {
  */
 const createGradientStopVar = (stop, varName, brandHex = '') => {
   const expr = brandHex ? `var(--${varName},${brandHex})` : `var(--${varName})`;
-  return `${stop}-[${expr}]`;
+  return `${stop}-[` + expr + ']';
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -10,18 +10,18 @@ import traceback
 import os
 from typing import Dict, Any, Optional, Union, Tuple, List
 from fastapi import WebSocket
+from pymongo import ReturnDocument
+from starlette.websockets import WebSocketDisconnect
 from datetime import datetime, timezone
-try:  # pymongo optional in some test environments
-    from pymongo import ReturnDocument  # type: ignore
-except Exception:  # pragma: no cover
-    class ReturnDocument:  # minimal fallback so attribute exists
-        AFTER = 1
+from websockets.exceptions import ConnectionClosed
 
 # AG2 imports for event type checking
 from autogen.events import BaseEvent
 
 # Import workflow configuration for agent visibility filtering
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
+from mozaiksai.core.workflow.runtime_signals import SYSTEM_RESUME_SIGNAL
+from mozaiksai.core.events.runtime_events import RUNTIME_PROCESS_COMPLETED
 
 # Enhanced logging setup
 from logs.logging_config import get_core_logger
@@ -314,13 +314,34 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         Note: This is an internal coordination signal for AG2 continuation. It should never
         be persisted to the database or shown in the UI as it has no semantic meaning to users.
         """
-        return "[SYSTEM_RESUME_SIGNAL] Continue workflow execution after UI tool response."
+        return SYSTEM_RESUME_SIGNAL
+
+    def get_background_run_summary(self) -> Dict[str, Any]:
+        """Return the current in-memory background workflow task snapshot."""
+        runs: List[Dict[str, Any]] = []
+        for chat_id, task in sorted(self._background_tasks.items()):
+            conn = self.connections.get(chat_id) or {}
+            task_name = task.get_name() if hasattr(task, "get_name") else None
+            runs.append(
+                {
+                    "chat_id": chat_id,
+                    "workflow_name": conn.get("workflow_name"),
+                    "user_id": conn.get("user_id"),
+                    "has_connection": bool(conn),
+                    "task_name": task_name,
+                }
+            )
+        return {"active_count": len(runs), "runs": runs}
     
     
     def should_show_to_user(self, agent_name: Optional[str], chat_id: Optional[str] = None) -> bool:
         """Check if a message should be shown to the user interface"""
         if not agent_name:
             return True  # Show system messages
+
+        normalized_name = str(agent_name).strip().lower()
+        if normalized_name in {"user", "system"}:
+            return True
         
         # Get the workflow type and ws_id for this chat session
         workflow_name = None
@@ -339,6 +360,12 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             try:
                 config = workflow_manager.get_config(workflow_name)
                 visual_agents = config.get("visual_agents")
+                has_visual_agents_key = "visual_agents" in config
+
+                # Explicit null is an authoring signal to hide all agent text for this workflow.
+                if has_visual_agents_key and visual_agents is None:
+                    logger.debug(f"🔍 visual_agents=null for {workflow_name}; hiding message from {agent_name}")
+                    return False
                 
                 # If visual_agents is defined, only show messages from those agents
                 if isinstance(visual_agents, list):
@@ -736,7 +763,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                                         dispatch_payload[k] = v
                         except Exception:
                             pass
-                        asyncio.create_task(dispatcher.emit('chat.run_complete', dispatch_payload))
+                        asyncio.create_task(dispatcher.emit(RUNTIME_PROCESS_COMPLETED, dispatch_payload))
             except Exception:
                 pass
         except Exception as e:
@@ -1028,38 +1055,39 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             
             logger.info(f"🚀 Launching workflow {target_workflow} from chat {chat_id}")
             
-        # Validate pack prerequisites before launching
-            from mozaiksai.core.workflow.pack.gating import validate_pack_prereqs
+        # Route workflow start through SessionRouter so dependency reroutes are consistent
+            from mozaiksai.core.session import TriggerInput, get_session_router
 
-            pm = self._get_or_create_persistence_manager()
-            is_valid, error_msg = await validate_pack_prereqs(
-                app_id=str(app_id),
-                user_id=str(user_id),
-                workflow_name=str(target_workflow),
-                persistence=pm,
+            session_router = get_session_router()
+            route_decision = await session_router.route_trigger(
+                TriggerInput(
+                    app_id=str(app_id),
+                    user_id=str(user_id),
+                    trigger_source="action",
+                    workflow_id=str(target_workflow),
+                )
             )
-            
-            if not is_valid:
-                logger.warning(f"⚠️ Prerequisite validation failed for {target_workflow}: {error_msg}")
+            resolved_workflow = route_decision.workflow_id
+            if route_decision.rerouted_by_dependency and route_decision.unmet_dependency is not None:
                 await websocket.send_json({
-                    "type": "chat.prereq_blocked",
+                    "type": "chat.workflow_rerouted",
                     "data": {
-                        "workflow_name": target_workflow,
-                        "message": error_msg or "Prerequisites not met",
-                        "error_code": "WORKFLOW_PREREQS_NOT_MET"
+                        "requested_workflow_name": str(target_workflow),
+                        "resolved_workflow_name": resolved_workflow,
+                        "reason": route_decision.unmet_dependency.reason,
+                        "blocked_workflow_name": route_decision.unmet_dependency.blocked_workflow_id,
                     },
                     "chat_id": chat_id,
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 })
-                return
             
             # Create new session and artifact (old session stays IN_PROGRESS)
             new_session = await session_manager.create_workflow_session(
-                app_id, user_id, target_workflow
+                app_id, user_id, resolved_workflow
             )
             artifact = await session_manager.create_artifact_instance(
                 app_id,
-                target_workflow,
+                resolved_workflow,
                 payload.get("artifact_type", "ActionPlan")
             )
             await session_manager.attach_artifact_to_session(
@@ -1073,7 +1101,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 "type": "chat.navigate",
                 "data": {
                     "chat_id": new_session["_id"],
-                    "workflow_name": target_workflow,
+                    "workflow_name": resolved_workflow,
+                    "requested_workflow_name": str(target_workflow),
                     "artifact_instance_id": artifact["_id"],
                     "app_id": app_id
                 },
@@ -1355,7 +1384,13 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                         await self._send_ws_error(websocket, f"{mtype} failed: {str(handler_err)}", error_code)
                 # Unknown message type -> handler is None, ignore silently
         except Exception as e:
-            logger.warning(f"WebSocket error for chat {chat_id}: {e}")
+            close_code = getattr(e, "code", None)
+            if isinstance(e, WebSocketDisconnect) and close_code == 1000:
+                logger.info(f"WebSocket closed normally for chat {chat_id}: {e}")
+            elif ConnectionClosed and isinstance(e, ConnectionClosed) and close_code == 1000:
+                logger.info(f"WebSocket closed normally for chat {chat_id}: {e}")
+            else:
+                logger.warning(f"WebSocket error for chat {chat_id}: {e}")
         finally:
             # H1-H2: Clean up connection resources (heartbeat, message queues, etc.)
             await self._cleanup_connection(chat_id)

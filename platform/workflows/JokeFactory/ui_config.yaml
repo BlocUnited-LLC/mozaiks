@@ -5,9 +5,3 @@ visual_agents:
   - JokeWriterAgent
   - JokeCriticAgent
   - user
-
-# Chat pane customization
-chat_pane_agents:
-  - JokeHostAgent
-  - JokeWriterAgent
-  - JokeCriticAgent

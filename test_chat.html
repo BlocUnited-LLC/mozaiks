@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mozaiks JokeFactory Test</title>
+    <title>Mozaiks WebSocket Test</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -122,13 +122,13 @@
 </head>
 <body>
     <header>
-        <h1>Mozaiks JokeFactory Test</h1>
-        <div class="subtitle">Testing WebSocket connection to the JokeFactory workflow</div>
+        <h1>Mozaiks WebSocket Test</h1>
+        <div class="subtitle">Testing WebSocket connection to a workflow runtime</div>
     </header>
     <main>
         <div id="connect-area">
             <input type="text" id="ws-url" placeholder="WebSocket URL"
-                   value="ws://localhost:8000/ai/ws/JokeFactory/test-app/test-chat-1/user-1">
+                   value="ws://localhost:8000/ai/ws/RuntimeSmoke/test-app/test-chat-1/user-1">
             <button id="connect-btn" onclick="connect()">Connect</button>
             <button id="disconnect-btn" onclick="disconnect()" disabled>Disconnect</button>
         </div>
@@ -171,7 +171,7 @@
 
             ws.onopen = () => {
                 setStatus('Connected', 'connected');
-                addMessage('Connected to JokeFactory workflow');
+                addMessage('Connected to workflow runtime');
                 document.getElementById('message-input').disabled = false;
                 document.getElementById('send-btn').disabled = false;
                 document.getElementById('connect-btn').disabled = true;

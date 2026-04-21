@@ -18,7 +18,7 @@ Responsibilities:
 
 This adapter does NOT own fan-out/fan-in logic.  That belongs to
 WorkflowPackCoordinator, which reacts to events emitted by the adapter
-(chat.agent_output_validated, chat.run_complete) through the
+(runtime.agent_output_validated, runtime.process_completed) through the
 UnifiedEventDispatcher.
 
 Architecture (Layer 1.5):
@@ -67,11 +67,9 @@ logger = get_core_logger("ag2_orchestration_adapter")
 
 def _ag2_version() -> str:
     """Return the installed AG2 version string."""
-    try:
-        import autogen
-        return str(getattr(autogen, "__version__", "unknown"))
-    except ImportError:
-        return "not_installed"
+    import autogen
+
+    return str(getattr(autogen, "__version__", "unknown"))
 
 
 class AG2OrchestrationAdapter:
@@ -250,7 +248,6 @@ class AG2OrchestrationAdapter:
             "supports_cancel": True,
             "supports_bidirectional_stream": False,  # ← flips when AG2 ships it
             "supports_structured_outputs": True,
-            "supports_handoff_to_user": True,
         }
 
     # ------------------------------------------------------------------
@@ -268,12 +265,9 @@ class AG2OrchestrationAdapter:
                 workflow_name=request.workflow_name,
             )
 
-        handoff = bool(raw.get("handoff_to_user", False))
         run_completed = bool(raw.get("run_completed", False))
 
-        if handoff:
-            status = RunStatus.HANDOFF_TO_USER
-        elif run_completed:
+        if run_completed:
             status = RunStatus.COMPLETED
         else:
             # AG2 finished (generator exhausted) but no explicit run_complete event.
@@ -284,7 +278,6 @@ class AG2OrchestrationAdapter:
             status=status,
             chat_id=request.chat_id,
             workflow_name=request.workflow_name,
-            handoff_to_user=handoff,
             usage=raw.get("usage"),
         )
 

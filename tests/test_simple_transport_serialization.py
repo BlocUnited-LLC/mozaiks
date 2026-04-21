@@ -24,3 +24,36 @@ def test_serialize_ag2_events_handles_circular_refs():
     assert "self" in serialized
     assert isinstance(serialized["self"], str)
     assert "circular_ref" in serialized["self"]
+
+
+def test_background_run_summary_reports_active_tasks():
+    transport = SimpleTransport()
+
+    class _FakeTask:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        def get_name(self) -> str:
+            return self._name
+
+    transport._background_tasks = {
+        "chat-1": _FakeTask("workflow:RuntimeSmoke:chat-1")
+    }
+    transport.connections = {
+        "chat-1": {"workflow_name": "RuntimeSmoke", "user_id": "user-1"}
+    }
+
+    summary = transport.get_background_run_summary()
+
+    assert summary == {
+        "active_count": 1,
+        "runs": [
+            {
+                "chat_id": "chat-1",
+                "workflow_name": "RuntimeSmoke",
+                "user_id": "user-1",
+                "has_connection": True,
+                "task_name": "workflow:RuntimeSmoke:chat-1",
+            }
+        ],
+    }

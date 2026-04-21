@@ -14,15 +14,16 @@
 ## 🎯 What is This?
 
 ### **mozaiksai Runtime**
-Production-ready declarative orchestration engine for AG2 (Microsoft Autogen):
+Production-ready declarative orchestration engine for AG2 (formerly Microsoft Autogen):
 
 - ✅ **Event-Driven Architecture** — Every action flows through unified event pipeline
-- ✅ **Real-Time WebSocket Transport** — Live streaming to React frontends
-- ✅ **Persistent State Management** — Resume conversations exactly where they left off
-- ✅ **Multi-Tenant Isolation** — App-scoped data and execution contexts
+- ✅ **Mid-Flight Journeys (MFJ)** — Run parallel workflows by fork/join with deterministic parent resume
+- ✅ **Real-Time WebSocket Transport** — Live agent streaming to React frontends
 - ✅ **Dynamic UI Integration** — Agents can invoke React components during workflows
+- ✅ **Multi-Tenant Isolation** — App-scoped data and execution contexts
 - ✅ **Declarative Workflows** — YAML manifests, no code changes needed
 - ✅ **Comprehensive Observability** — Built-in metrics, logging, and token tracking
+- ✅ **Persistent State Management** — Resume conversations exactly where they left off
 
 **Soon:** `pip install mozaiksai`
 
@@ -55,6 +56,7 @@ Production-ready declarative orchestration engine for AG2 (Microsoft Autogen):
 - [Architecture Overview](ARCHITECTURE.md) — System design and component model
 - [Separation Plan](SEPARATION_PLAN.md) — How we're splitting runtime from template
 - [Getting Started](docs/getting-started.md) — Full setup guide
+- [Mid-Flight Journeys](docs/reference/deep-dives/mid-flight-journeys.md) — Flagship orchestration capability and runtime semantics
 - [Workflow Authoring Contracts](docs/architecture/foundations/workflow-authoring-contracts.md) — Canonical strict YAML contract
 - [Contributing](CONTRIBUTING.md) — Development workflow
 

@@ -10,8 +10,6 @@ Helper functions for workflow orchestration, extracted to reduce the size
 of orchestration_patterns.py and improve maintainability.
 
 Functions:
-    - get_run_registry_summary: Health endpoint support
-    - _cancel_ag2_task: Cancel zombie AG2 tasks
     - _normalize_human_in_the_loop: Normalize HIL config values
     - _load_workflow_config: Load workflow configuration
     - _safe_float_value: Convert AG2 values to float
@@ -23,43 +21,6 @@ from datetime import datetime, UTC
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-# ===================================================================
-# HEALTH ENDPOINT SUPPORT
-# ===================================================================
-
-def get_run_registry_summary() -> Dict[str, Any]:
-    """Simple health endpoint response - no actual registry tracking."""
-    return {
-        'active_count': 0,
-        'total_runs': 0,
-        'runs': [],
-        'note': 'Registry tracking disabled for simplicity'
-    }
-
-
-# ===================================================================
-# AG2 TASK MANAGEMENT
-# ===================================================================
-
-def _cancel_ag2_task(response: Any, *, logger: Any = None, label: str = "") -> None:
-    """Cancel classic AG2 run tasks that may block waiting for user input.
-
-    Iterator-based AG2 runs clean themselves up when the event loop breaks.
-    Resume responses still use the classic async run response shape, which may
-    leave an internal task blocked on IOStream.input() after handoff-to-user.
-    """
-    import logging as _logging
-    _log = logger or _logging.getLogger(__name__)
-    task = getattr(response, "_task", None)
-    if task is None:
-        task = getattr(response, "task", None)
-    if task is not None and hasattr(task, "cancel"):
-        task.cancel()
-        _log.info(f" [{label}] Cancelled zombie AG2 task after handoff_to_user")
-    else:
-        _log.debug(f" [{label}] No AG2 task to cancel (response type: {type(response).__name__})")
 
 
 # ===================================================================

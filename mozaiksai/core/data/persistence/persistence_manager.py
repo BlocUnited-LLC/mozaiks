@@ -25,16 +25,9 @@ from uuid import uuid4
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id, dual_write_app_scope
+from autogen.events.agent_events import TextEvent
+from autogen.events.base_event import BaseEvent
 from ..models import WorkflowStatus
-try:
-    from autogen.events.base_event import BaseEvent
-    from autogen.events.agent_events import TextEvent
-except ImportError:
-    # autogen < 1.0 — events submodule not available; minimal stubs
-    class BaseEvent:  # type: ignore[no-redef]
-        pass
-    class TextEvent:  # type: ignore[no-redef]
-        pass
 # Lazy import to avoid circular dependency - see _format_message_for_storage
 
 logger = get_workflow_logger("persistence")
@@ -429,6 +422,58 @@ class AG2PersistenceManager:
         except Exception as e:  # pragma: no cover
             logger.debug(f"[FETCH_EXTRA_CONTEXT] Failed chat_id={chat_id}: {e}")
             return {}
+
+    async def persist_context_variables(
+        self,
+        *,
+        chat_id: str,
+        app_id: Optional[str] = None,
+        variables: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Persist runtime context variables as chat-session extra fields.
+
+        Only non-canonical session fields are written so runtime metadata such as
+        MFJ resume flags and workflow-specific summaries survive across turns.
+        """
+        resolved_app_id = coalesce_app_id(app_id=app_id)
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+
+        if not isinstance(variables, dict) or not variables:
+            return
+
+        protected = {
+            "_id",
+            "chat_id",
+            "app_id",
+            "workflow_name",
+            "user_id",
+            "status",
+            "created_at",
+            "last_updated_at",
+            "last_sequence",
+            "messages",
+            "last_artifact",
+        }
+        safe_updates: Dict[str, Any] = {}
+        for key, value in variables.items():
+            if not isinstance(key, str) or not key.strip() or key in protected:
+                continue
+            safe_updates[key] = deepcopy(value)
+
+        if not safe_updates:
+            return
+
+        safe_updates["last_updated_at"] = datetime.now(UTC)
+
+        try:
+            coll = await self._coll()
+            await coll.update_one(
+                {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
+                {"$set": safe_updates},
+            )
+        except Exception as e:  # pragma: no cover
+            logger.debug(f"[PERSIST_CONTEXT_VARIABLES] Failed chat_id={chat_id}: {e}")
 
     async def create_general_chat_session(
         self,
@@ -1476,6 +1521,10 @@ class AG2PersistenceManager:
             # CLEANING STEP 4: Remove trailing commas before closing brackets (invalid JSON)
             import re
             s_strip = re.sub(r',\s*([\]}])', r'\1', s_strip)
+
+            # CLEANING STEP 5: AG2 sometimes escapes apostrophes inside JSON
+            # string values (e.g. Here\'s), which is invalid JSON.
+            s_strip = s_strip.replace("\\'", "'")
             
             # Now try to parse the cleaned JSON
             decoder = json.JSONDecoder()
@@ -1517,23 +1566,7 @@ class AG2PersistenceManager:
 
         try:
             if agent_name == "ToolsManagerAgent":
-                tools = adjusted.get("tools")
-                if isinstance(tools, list):
-                    mutated = False
-                    for entry in tools:
-                        if not isinstance(entry, dict):
-                            continue
-                        ui_meta = entry.get("ui")
-                        tool_type = entry.get("tool_type")
-                        has_ui_component = isinstance(ui_meta, dict) and ui_meta.get("component")
-                        if has_ui_component and tool_type != "UI_Tool":
-                            entry["tool_type"] = "UI_Tool"
-                            mutated = True
-                        if not has_ui_component and tool_type == "UI_Tool":
-                            entry["tool_type"] = "Agent_Tool"
-                            mutated = True
-                    if mutated:
-                        logger.warning("[SAVE_EVENT] Coerced tool_type values for ToolsManagerAgent manifest")
+                return adjusted
         except Exception as normalize_err:
             logger.debug(f"[SAVE_EVENT] Structured output normalization skipped agent={agent_name}: {normalize_err}")
 
@@ -1555,8 +1588,20 @@ class AG2PersistenceManager:
             logger.info(f"[GATHER_AGENT_JSONS] chat_id={chat_id} app_id={resolved_app_id} msgs_count={len(msgs) if msgs else 0}")
             
             if not msgs:
-                logger.warning(f"[GATHER_AGENT_JSONS] resume_chat returned empty/None for chat_id={chat_id}")
-                return result
+                coll = await self._coll()
+                doc = await coll.find_one(
+                    {"_id": chat_id, **build_app_scope_filter(resolved_app_id)},
+                    {"messages": 1, "status": 1},
+                )
+                fallback_msgs = doc.get("messages", []) if isinstance(doc, dict) else []
+                if not isinstance(fallback_msgs, list) or not fallback_msgs:
+                    logger.debug(f"[GATHER_AGENT_JSONS] No resumable or persisted messages for chat_id={chat_id}")
+                    return result
+                msgs = fallback_msgs
+                logger.debug(
+                    f"[GATHER_AGENT_JSONS] Falling back to persisted messages for chat_id={chat_id} "
+                    f"status={doc.get('status') if isinstance(doc, dict) else 'unknown'} msgs_count={len(msgs)}"
+                )
             
             def agent_name_from(m: Dict[str, Any]) -> str:
                 if m.get("role") == "assistant":
@@ -1594,12 +1639,14 @@ class AG2PersistenceManager:
             for m in reversed(msgs):
                 if not isinstance(m, dict):
                     continue
+                role = m.get("role")
+                if role != "assistant":
+                    continue
                 nm = agent_name_from(m)
                 if not nm or nm in seen:
                     continue
                 
                 # Log each agent message we encounter
-                role = m.get("role")
                 content_preview = str(m.get("content", ""))[:100] if m.get("content") else "(empty)"
                 logger.debug(f"[GATHER_AGENT_JSONS] Processing message: role={role} agent={nm} content_preview={content_preview}")
                 
@@ -1623,7 +1670,7 @@ class AG2PersistenceManager:
                     # Log first 500 chars of content for failed extractions
                     content = m.get("content", "")
                     content_sample = str(content)[:500] if content else "(empty)"
-                    logger.warning(f"[GATHER_AGENT_JSONS] ✗ No JSON found in {nm} message (role={role})")
+                    logger.debug(f"[GATHER_AGENT_JSONS] ✗ No JSON found in {nm} message (role={role})")
                     logger.debug(f"[GATHER_AGENT_JSONS]    Content sample: {content_sample}")
             
             logger.info(f"[GATHER_AGENT_JSONS] Completed: found {len(result)} agents with valid JSON: {agents_found}")

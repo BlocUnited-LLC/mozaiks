@@ -1,8 +1,12 @@
 # Entitlement System
 
-**Status:** Implemented
+**Status:** Historical reference pending rewrite
 **Owner:** Platform Team
 **Last Updated:** 2026-03-19
+
+This page describes a retired in-repo entitlement implementation built around
+`mozaikscore`. It is not canonical for the current backend-agnostic runtime
+architecture and should not be used as the source of truth for new work.
 
 ## Overview
 

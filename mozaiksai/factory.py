@@ -21,7 +21,7 @@ import logging
 from typing import Optional, Dict, Any
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, Depends
+from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -103,6 +103,9 @@ def create_mozaiks_app(
     # Initialize persistence
     persistence_manager = AG2PersistenceManager()
     transport = SimpleTransport()
+    # Ensure orchestration paths that call SimpleTransport.get_instance() use the
+    # same transport object as the mounted app websocket endpoint.
+    SimpleTransport._instance = transport
 
     # Store references on app state
     mozaiks_app.state.persistence = persistence_manager
@@ -195,6 +198,61 @@ def create_mozaiks_app(
         if not result.get("success"):
             raise HTTPException(status_code=500, detail=result.get("error"))
 
+        return result
+
+    # ----- Internal trigger endpoint -----
+    # Called by mozaiks-core-public event_bridge when a domain event fires.
+    # Payload shape matches what _trigger_workflow() in event_bridge.py sends.
+    # Protected by X-Internal-Api-Key header (set INTERNAL_API_KEY env var).
+    class InternalTriggerRequest(BaseModel):
+        workflow_name: str
+        user_id: str
+        app_id: Optional[str] = None
+        context: Optional[Dict[str, Any]] = None
+
+    def _validate_internal_key(key: Optional[str]) -> bool:
+        expected = os.getenv("INTERNAL_API_KEY", "").strip()
+        if not expected:
+            # No key configured — allow in dev, but warn
+            logger.warning(
+                "INTERNAL_API_KEY not set; /internal/trigger is open. "
+                "Set INTERNAL_API_KEY in production."
+            )
+            return True
+        import hmac
+        return bool(key) and hmac.compare_digest(expected.encode(), key.encode())
+
+    @mozaiks_app.post("/internal/trigger")
+    async def internal_trigger(
+        body: InternalTriggerRequest,
+        x_internal_api_key: Optional[str] = Header(None, alias="X-Internal-Api-Key"),
+    ):
+        """
+        Internal endpoint for the mozaiks-core-public event bridge.
+
+        Called by event_bridge._trigger_workflow() when a plugin domain event
+        (e.g. task_created) should start a workflow (e.g. TaskCreated).
+
+        Authentication: X-Internal-Api-Key header must match INTERNAL_API_KEY env var.
+        If INTERNAL_API_KEY is unset the endpoint is open (development mode).
+        """
+        if not _validate_internal_key(x_internal_api_key):
+            raise HTTPException(status_code=401, detail="Invalid internal API key")
+
+        result = await trigger_workflow(
+            workflow_name=body.workflow_name,
+            user_id=body.user_id,
+            context=body.context,
+            app_id=body.app_id,
+        )
+
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error"))
+
+        logger.info(
+            "Internal trigger: workflow=%s user=%s app=%s",
+            body.workflow_name, body.user_id, body.app_id,
+        )
         return result
 
     # ----- WebSocket endpoint -----

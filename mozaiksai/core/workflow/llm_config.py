@@ -17,7 +17,7 @@ OPENAI_MODEL_FALLBACK  Comma-separated list of fallback model names
 
 Public API
 ----------
-async get_llm_config(response_format=None, stream=False, extra_config=None, cache=True)
+async get_llm_config(response_format=None, extra_config=None, cache=True)
 """
 from __future__ import annotations
 
@@ -32,13 +32,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type, Set
 from pydantic import BaseModel
 
-
-# Reuse existing secret + Mongo helpers (keeps KeyVault logic centralized)
-try:  # pragma: no cover - defensive import
-    from mozaiksai.core.core_config import get_secret, get_mongo_client  # type: ignore
-except Exception:  # pragma: no cover
-    get_secret = None  # type: ignore
-    get_mongo_client = None  # type: ignore
+from mozaiksai.core.core_config import get_secret, get_mongo_client
 
 logger = logging.getLogger(__name__)
 
@@ -154,12 +148,11 @@ async def _load_raw_config_list(force: bool = False) -> List[ProviderConfig]:
 
         # Attempt DB fetch
         db_doc = None
-        if get_mongo_client:
-            try:
-                db = get_mongo_client().autogen_ai_agents  # type: ignore[attr-defined]
-                db_doc = await db.LLMConfig.find_one()
-            except Exception as e:  # pragma: no cover
-                logger.debug(f"[LLM_CONFIG] Mongo fetch failed, will fallback: {e}")
+        try:
+            db = get_mongo_client().autogen_ai_agents  # type: ignore[attr-defined]
+            db_doc = await db.LLMConfig.find_one()
+        except Exception as e:  # pragma: no cover
+            logger.debug(f"[LLM_CONFIG] Mongo fetch failed, will fallback: {e}")
 
         if db_doc and isinstance(db_doc, dict):
             # Avoid dumping raw secrets from the DB document
@@ -213,7 +206,7 @@ async def _load_raw_config_list(force: bool = False) -> List[ProviderConfig]:
                 if not api_key:
                     # Fallback to secret/env
                     try:
-                        api_key = get_secret("OpenAIApiKey") if get_secret else os.getenv("OPENAI_API_KEY", "")
+                        api_key = get_secret("OpenAIApiKey")
                     except Exception:
                         api_key = os.getenv("OPENAI_API_KEY", "")
                 entry = {"model": model_name, "api_key": api_key}
@@ -229,7 +222,7 @@ async def _load_raw_config_list(force: bool = False) -> List[ProviderConfig]:
         # Fallback if empty
         if not config_list:
             try:
-                api_key = get_secret("OpenAIApiKey") if get_secret else os.getenv("OPENAI_API_KEY", "")
+                api_key = get_secret("OpenAIApiKey")
             except Exception:
                 api_key = os.getenv("OPENAI_API_KEY", "")
             fallback_models: List[str] = []
@@ -290,8 +283,8 @@ async def _load_raw_config_list(force: bool = False) -> List[ProviderConfig]:
 # ---------------------------------------------------------------------------
 # Key construction & Cache helpers
 # ---------------------------------------------------------------------------
-def _build_llm_cache_key(*, response_format: Optional[Type[BaseModel]], stream: bool, extra_config: Optional[Dict[str, Any]]) -> str:
-    parts = ["stream" if stream else "no-stream"]
+def _build_llm_cache_key(*, response_format: Optional[Type[BaseModel]], extra_config: Optional[Dict[str, Any]]) -> str:
+    parts = ["base"]
     if response_format:
         # Include schema hash so structural changes to model invalidate cache automatically
         try:
@@ -318,7 +311,6 @@ def _build_llm_cache_key(*, response_format: Optional[Type[BaseModel]], stream: 
 async def get_llm_config(
     *,
     response_format: Optional[Type[BaseModel]] = None,
-    stream: bool = False,
     extra_config: Optional[Dict[str, Any]] = None,
     cache: bool = True,
 ) -> Tuple[Optional[Any], Dict[str, Any]]:
@@ -329,7 +321,7 @@ async def get_llm_config(
     ConversableAgent.
     """
     cache_key = _build_llm_cache_key(
-        response_format=response_format, stream=stream, extra_config=extra_config
+        response_format=response_format, extra_config=extra_config
     )
     if cache and cache_key in _LLM_CONFIG_CACHE:
         import copy
@@ -368,11 +360,6 @@ async def get_llm_config(
     }
     if response_format is not None:
         llm_config["response_format"] = response_format
-    if stream:
-        # AG2 0.11+ supports streaming via ModelClientStreamingChunkEvent
-        # Enable stream=True so OpenAI returns tokens incrementally
-        llm_config["stream"] = True
-        logger.debug("[LLM_CONFIG] Stream mode enabled (stream=True added to llm_config)")
     if extra_config:
         # Merge remaining extras without overwriting core entries already set unless user explicitly wants it
         for k, v in extra_config.items():
@@ -385,7 +372,7 @@ async def get_llm_config(
             _LLM_CONFIG_CACHE[cache_key] = copy.deepcopy(llm_config)
 
     logger.debug(
-        f"[LLM_CONFIG] Built config (rf={'yes' if response_format else 'no'}, stream={stream}, extras={bool(extra_config)}, cache_key={cache_key})"
+        f"[LLM_CONFIG] Built config (rf={'yes' if response_format else 'no'}, extras={bool(extra_config)}, cache_key={cache_key})"
     )
     logger.debug(f"[LLM_CONFIG] Final llm_config before return: {llm_config}")
     

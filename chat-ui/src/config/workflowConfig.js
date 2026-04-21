@@ -14,6 +14,52 @@ function getAccessToken() {
   return platform.getAccessToken();
 }
 
+function normalizeWorkflowRecord(record, fallbackName = null) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) {
+    return null;
+  }
+
+  const workflowName = String(record.workflow_name || record.name || fallbackName || '').trim();
+  if (!workflowName) {
+    return null;
+  }
+
+  return {
+    ...record,
+    workflow_name: workflowName,
+    name: workflowName,
+    display_name: record.display_name || workflowName,
+  };
+}
+
+function extractWorkflowRecords(payload) {
+  if (Array.isArray(payload)) {
+    return payload
+      .map((record) => normalizeWorkflowRecord(record))
+      .filter(Boolean);
+  }
+
+  if (Array.isArray(payload?.workflows)) {
+    return payload.workflows
+      .map((record) => normalizeWorkflowRecord(record))
+      .filter(Boolean);
+  }
+
+  if (payload?.workflows && typeof payload.workflows === 'object') {
+    return Object.entries(payload.workflows)
+      .map(([key, record]) => normalizeWorkflowRecord(record, key))
+      .filter(Boolean);
+  }
+
+  if (payload && typeof payload === 'object') {
+    return Object.entries(payload)
+      .map(([key, record]) => normalizeWorkflowRecord(record, key))
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
 class WorkflowConfig {
   constructor() {
     this.configs = new Map();
@@ -62,10 +108,14 @@ class WorkflowConfig {
           }
           const data = await response.json();
           console.log('🔍 Raw workflow data from backend:', data);
-          const workflows = [];
-          for (const [workflowName, wfCfg] of Object.entries(data)) {
-            workflows.push({ workflow_name: workflowName, ...wfCfg });
-          }
+          const workflows = extractWorkflowRecords(data);
+
+          console.log('🔍 Normalized workflow configs:', workflows.map((workflow) => ({
+            workflow_name: workflow.workflow_name,
+            display_name: workflow.display_name,
+            entry_point: workflow.entry_point === true,
+          })));
+
           this.configs.clear();
           for (const workflow of workflows) {
             this.configs.set(workflow.workflow_name, workflow);
@@ -107,7 +157,13 @@ class WorkflowConfig {
    * Get available workflow types
    */
   getAvailableWorkflows() {
-    return Array.from(this.configs.keys());
+    const workflows = [];
+    for (const [key, workflow] of this.configs.entries()) {
+      if (!workflow?.workflow_name) continue;
+      if (key !== workflow.workflow_name) continue;
+      workflows.push(workflow.workflow_name);
+    }
+    return workflows;
   }
 
   /**

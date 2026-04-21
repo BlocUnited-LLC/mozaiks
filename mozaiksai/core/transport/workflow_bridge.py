@@ -23,7 +23,7 @@ import traceback
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-from mozaiksai.core.runtime.extensions import get_workflow_lifecycle_hooks
+from mozaiksai.core.runtime.composition.extensions import get_workflow_lifecycle_hooks
 from mozaiksai.core.transport.session_registry import session_registry
 
 if TYPE_CHECKING:
@@ -125,7 +125,7 @@ class WorkflowBridgeMixin:
             starting_new_workflow = True
 
             from mozaiksai.core.adapters.ag2_orchestration import get_ag2_adapter
-            from mozaiksai.core.ports.orchestration import RunRequest
+            from mozaiksai.core.ports.orchestration import ResumeRequest, RunRequest
 
             # Only persist and echo user message when starting NEW workflows
             # For existing sessions, the message goes directly to AG2 via callback
@@ -155,16 +155,32 @@ class WorkflowBridgeMixin:
                 except Exception:
                     pass
 
-            # Launch orchestration via OrchestrationPort (engine-agnostic)
+            # Launch orchestration via OrchestrationPort (engine-agnostic).
+            # A missing message plus an explicit initial-agent override means the
+            # caller is resuming an existing chat, not starting a fresh run.
             adapter = get_ag2_adapter()
-            await adapter.run(RunRequest(
-                workflow_name=workflow_name,
-                app_id=app_id,
-                chat_id=chat_id,
-                user_id=user_id,
-                initial_message=None,  # already persisted & sent upstream
-                initial_agent_name_override=initial_agent_name_override,
-            ))
+            is_resume_request = bool(
+                isinstance(initial_agent_name_override, str)
+                and initial_agent_name_override.strip()
+                and not (isinstance(message, str) and message.strip())
+            )
+            if is_resume_request:
+                await adapter.resume(ResumeRequest(
+                    workflow_name=workflow_name,
+                    app_id=app_id,
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    resume_agent=initial_agent_name_override,
+                ))
+            else:
+                await adapter.run(RunRequest(
+                    workflow_name=workflow_name,
+                    app_id=app_id,
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    initial_message=None,  # already persisted & sent upstream
+                    initial_agent_name_override=initial_agent_name_override,
+                ))
 
             if _emit_execution_completed is not None:
                 try:
@@ -180,7 +196,9 @@ class WorkflowBridgeMixin:
                 except Exception:
                     pass
 
-            return {"status": "success", "chat_id": chat_id, "message": "Workflow started successfully.", "route": "new_workflow"}
+            route = "workflow_resume" if is_resume_request else "new_workflow"
+            message_text = "Workflow resumed successfully." if is_resume_request else "Workflow started successfully."
+            return {"status": "success", "chat_id": chat_id, "message": message_text, "route": route}
 
         except Exception as e:
             logger.error(f"User input handling failed for chat {chat_id}: {e}\n{traceback.format_exc()}")
@@ -245,7 +263,7 @@ class WorkflowBridgeMixin:
                         dispatcher = get_event_dispatcher()
                         asyncio.create_task(
                             dispatcher.emit(
-                                "chat.run_complete",
+                                "runtime.process_completed",
                                 {
                                     "chat_id": chat_id,
                                     "workflow_name": workflow_name,
@@ -265,7 +283,7 @@ class WorkflowBridgeMixin:
                         dispatcher = get_event_dispatcher()
                         asyncio.create_task(
                             dispatcher.emit(
-                                "chat.run_complete",
+                                "runtime.process_completed",
                                 {
                                     "chat_id": chat_id,
                                     "workflow_name": workflow_name,

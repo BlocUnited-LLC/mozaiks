@@ -4,7 +4,7 @@
 
 AG2 resume is history-driven. Even if runtime requests a specific resume agent, speaker selection can continue from the previous execution frontier.
 
-To make MFJ fan-in deterministic, the runtime now enforces a strict two-agent contract:
+To keep MFJ fan-in deterministic in production-style flows, use a strict two-agent resume profile:
 
 1. Resume at a dedicated `resume_entry_agent` (router).
 2. Router hands off to the final presenter (`resume_agent`) using runtime-injected context keys.
@@ -13,28 +13,46 @@ This keeps orchestration logic in runtime and routing logic in declarative hando
 
 ---
 
-## Runtime Contract (Required)
+## Baseline Runtime Contract (Current Defaults)
 
 For every `mid_flight_journeys[].fan_in` block:
 
 - `resume_agent` is required (final presenter after fan-in).
-- `resume_entry_agent` is required (first agent after parent resume).
-- `inject_as` is required and must start with `mfj_`.
+- `resume_entry_agent` is optional and defaults to `resume_agent`.
+- `inject_as` is optional. If omitted, runtime derives a stable `mfj_*` key from the journey/stage id.
+- `aggregation_strategy` is optional and defaults to `collect_all`.
 
-Canonical fan-in template:
+Baseline minimal fan-in:
+
+```json
+{
+  "fan_in": {
+    "resume_agent": "HostAgent"
+  }
+}
+```
+
+---
+
+## Strict Resume Profile (Recommended)
+
+When the workflow has staged MFJs, human checkpoints, or multiple resume targets, set resume routing explicitly:
 
 ```json
 {
   "fan_in": {
     "resume_agent": "HostAgent",
     "resume_entry_agent": "ResumeRouterAgent",
-    "aggregation_strategy": "collect_all",
-    "inject_as": "mfj_roast_outputs",
-    "on_partial_failure": "resume_with_available",
-    "timeout_seconds": 60
+    "inject_as": "mfj_roast_outputs"
   }
 }
 ```
+
+Strict-profile guidance:
+
+- Treat `resume_entry_agent` as a router-only role.
+- Keep `inject_as` explicit and stable so downstream prompts can reference it.
+- Keep advanced knobs (`on_partial_failure`, timeout, contracts) out of baseline authoring and track them in the roadmap profile: [MFJ Authoring Roadmap](../../../roadmap/mfj-authoring-roadmap.md).
 
 ---
 
@@ -97,11 +115,10 @@ Bind this as an agent tool and call it before the presenter hands off to user or
 
 ---
 
-## Non-Negotiable Checklist
+## Strict-Profile Checklist
 
-- Every MFJ has `resume_entry_agent`.
-- Every MFJ `inject_as` starts with `mfj_`.
+- Every strict-profile MFJ has an explicit `resume_entry_agent`.
+- Every strict-profile MFJ has an explicit `inject_as` starting with `mfj_`.
 - Workflow has a router agent with expression handoffs using `_mfj_*` keys.
 - Presenter calls `mark_resume_consumed` (or equivalent) exactly once per nonce.
 - Router includes fallback `after_work -> user` to avoid dead-end loops.
-

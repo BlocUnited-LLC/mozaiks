@@ -18,7 +18,7 @@ def test_platform_runtime_families_exist() -> None:
     assert (PLATFORM / "app.json").exists()
     assert (PLATFORM / "brand").is_dir()
     assert (PLATFORM / "config").is_dir()
-    assert (PLATFORM / "modules").is_dir()
+    assert (PLATFORM / "operations").is_dir()
     assert (PLATFORM / "pages").is_dir()
     assert (PLATFORM / "workflows").is_dir()
 

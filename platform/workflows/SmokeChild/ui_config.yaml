@@ -1,7 +1,0 @@
-visual_agents:
-  - ChildWorkerAgent
-
-chat_pane_agents:
-  - ChildWorkerAgent
-
-artifact_agents: []

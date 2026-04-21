@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from mozaiksai.core.workflow.validation.llm_config import get_llm_config
+from mozaiksai.core.workflow.llm_config import get_llm_config
 from logs.logging_config import get_workflow_logger
 
 logger = get_workflow_logger("capabilities.simple_llm")
@@ -77,7 +77,7 @@ class SimpleLLMCapabilityService:
 
     async def _select_provider(self) -> Dict[str, Any]:
         """Select a provider entry with a usable API key."""
-        _, llm_config = await get_llm_config(stream=False, cache=True)
+        _, llm_config = await get_llm_config(cache=True)
         config_list = llm_config.get("config_list", [])
         for entry in config_list:
             if entry.get("api_key") and entry.get("model"):

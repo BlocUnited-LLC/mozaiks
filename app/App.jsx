@@ -1,37 +1,38 @@
 import {
   MozaiksApp,
   WebSocketApiAdapter,
+  componentRegistry,
 } from '@mozaiks/chat-ui';
-import appConfig from '../platform/app.json';
 
-// Simple API adapter connecting to the backend
+// Platform extension — registered via @platform/extensions alias in vite.config.js.
+// Resolved at build time from PLATFORM_PATH to the active platform's ui/index.js.
+// Default OSS apps use platform/extensions.js (a no-op stub).
+// Users never touch this file — switch platforms by changing PLATFORM_PATH in .env.
+import { register } from '@platform/extensions';
+
+// Register all platform pages and components into the shell's component registry.
+// Routes are composed by the backend and served by /api/shell-config.
+register(componentRegistry.registerComponent.bind(componentRegistry));
+
+// ── API adapter ────────────────────────────────────────────────────────────
+// apiUrl and wsUrl come from the platform's app.json or env vars.
+// Vite proxies /api and /ws to apiUrl during dev (see vite.config.js).
 const apiAdapter = new WebSocketApiAdapter({
-  baseUrl: appConfig.apiUrl || 'http://localhost:8000',
-  wsUrl: appConfig.wsUrl || 'ws://localhost:8000',
+  baseUrl: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+  wsUrl:   import.meta.env.VITE_WS_URL  || 'ws://localhost:8000',
 });
 
-// Simple mock auth adapter (no real auth required for demo)
+// ── Auth adapter ───────────────────────────────────────────────────────────
+// Development mock — replaced by Keycloak adapter in production.
+// Auth configuration is declared in platform/app.json (authRequired, auth.provider).
 const mockAuthAdapter = {
-  isAuthenticated: () => true,
-  // getCurrentUser is called by ChatUIContext during initialization
-  getCurrentUser: () => Promise.resolve({
-    id: 'demo-user',
-    firstName: 'Demo',
-    lastName: 'User',
-    email: 'demo@example.com',
-  }),
-  getToken: () => Promise.resolve('demo-token'),
-  login: () => Promise.resolve(),
-  logout: () => Promise.resolve(),
-  onAuthStateChange: (callback) => {
-    // Immediately notify with the demo user
-    callback({
-      id: 'demo-user',
-      firstName: 'Demo',
-      lastName: 'User',
-      email: 'demo@example.com',
-    });
-    // Return unsubscribe function
+  isAuthenticated:    () => true,
+  getCurrentUser:     () => Promise.resolve({ id: 'demo-user', firstName: 'Demo', lastName: 'User', email: 'demo@example.com' }),
+  getToken:           () => Promise.resolve('demo-token'),
+  login:              () => Promise.resolve(),
+  logout:             () => Promise.resolve(),
+  onAuthStateChange:  (callback) => {
+    callback({ id: 'demo-user', firstName: 'Demo', lastName: 'User', email: 'demo@example.com' });
     return () => {};
   },
 };
@@ -39,8 +40,6 @@ const mockAuthAdapter = {
 export default function App() {
   return (
     <MozaiksApp
-      appName={appConfig.appName || 'Mozaiks'}
-      defaultAppId={appConfig.appId || 'demo'}
       apiAdapter={apiAdapter}
       authAdapter={mockAuthAdapter}
     />

@@ -13,6 +13,7 @@ The transport layer will use the registered callback to inject user
 responses back into the AG2 conversation.
 """
 
+import re
 import uuid
 from typing import TYPE_CHECKING, Any, Dict, Optional, Set, Type
 
@@ -22,6 +23,19 @@ if TYPE_CHECKING:
     from ..context import StreamContext, StreamState
 
 from autogen.events.agent_events import InputRequestEvent
+
+
+_GENERIC_GROUP_FEEDBACK_PROMPT_RE = re.compile(
+    r"^Please give feedback to [A-Za-z0-9_-]+\. Press enter to skip and use auto-reply, or type 'exit' to stop the conversation:\s*$",
+    re.IGNORECASE,
+)
+
+
+def _normalize_prompt_hint(prompt_hint: Any) -> tuple[str, str, bool]:
+    prompt_text = str(prompt_hint or "").strip()
+    if _GENERIC_GROUP_FEEDBACK_PROMPT_RE.match(prompt_text):
+        return "", "ag2_group_feedback_compat", True
+    return prompt_text, "input_request_event", False
 
 
 class InputRequestHandler(BaseEventHandler):
@@ -120,8 +134,17 @@ class InputRequestHandler(BaseEventHandler):
                 getattr(request_obj, "prompt", None)
                 or getattr(request_obj, "message", None)
             )
+        metadata_source = "input_request_event"
+        suppressed_generic_prompt = False
         if prompt_hint is not None:
+            normalized_prompt, metadata_source, suppressed_generic_prompt = _normalize_prompt_hint(prompt_hint)
+            prompt_hint = normalized_prompt
             setattr(event, "_mozaiks_prompt", prompt_hint)
+            if suppressed_generic_prompt:
+                ctx.wf_logger.info(
+                    f" [{ctx.workflow_name_upper}] Suppressing generic AG2 group feedback prompt "
+                    f"for input request {request_id}"
+                )
 
         # Persist pending input request for resume support
         try:
@@ -143,15 +166,12 @@ class InputRequestHandler(BaseEventHandler):
             "prompt": prompt_hint or "",
             "chat_id": ctx.chat_id,
             "metadata": {
-                "source": "input_request_event",
+                "source": metadata_source,
                 "has_respond_callback": callable(respond_cb),
+                "generic_feedback_prompt_suppressed": suppressed_generic_prompt,
             },
         }
 
     def should_break(self, event: Any, state: "StreamState") -> bool:
         """InputRequestEvent does not terminate the stream."""
         return False
-
-    def priority(self) -> int:
-        """Standard priority."""
-        return 50

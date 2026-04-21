@@ -19,11 +19,13 @@ npm run dev
 
 | File | Role |
 |------|------|
-| `app.json` | Single config file — `appName`, `appId`, `apiUrl`, `wsUrl` |
+| `app.json` | App identity, targets, auth intent, startup landing spot |
 | `App.jsx` | Root component — reads `app.json`, renders `<MozaiksApp>` |
 | `brand/public/brand.json` | Colors, fonts, shadows, asset filenames |
 | `brand/public/ui.json` | Header, profile menu, notifications, footer |
-| `brand/public/navigation.json` | Extra routes and nav definitions (core routes are built-in) |
+| `platform/ui/extension.json` | React page route ownership |
+| `platform/workflows/*/extended_orchestration/extension_registry.json` | Workflow entrypoints and transitions |
+| `platform/config/shell.json` | Header actions, notifications, profile, footer |
 | `brand/public/auth.json` | Auth provider config (Keycloak), roles, admin emails |
 | `brand/public/assets/` | SVG icons and images |
 | `brand/public/fonts/` | Self-hosted font files |
@@ -32,10 +34,12 @@ npm run dev
 ## Files you edit
 
 ```
-app.json                      ← start here: appName, appId, apiUrl, wsUrl
+app.json                      ← start here: appName, targets, startup landing spot
 brand/public/brand.json       ← colors, fonts, shadows, asset filenames
 brand/public/ui.json          ← header actions, profile menu, notifications, footer
-brand/public/navigation.json  ← extra pages beyond ChatPage and Admin Portal
+platform/ui/extension.json    ← React page routes
+platform/workflows/.../extension_registry.json ← workflow entrypoints and transitions
+platform/config/shell.json    ← header/profile/notification/footer chrome
 brand/public/auth.json        ← auth provider, roles, admin emails
 brand/public/assets/          ← drop SVG icons and images here
 workflows/hello_world/        ← copy this folder to add a new workflow

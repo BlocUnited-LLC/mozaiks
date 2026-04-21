@@ -6,7 +6,6 @@
 
 import React from 'react';
 import { getComponent } from '../registry/componentRegistry';
-import platform from '../platform/index.js';
 
 /**
  * 🎯 WORKFLOW UI ROUTER - TRULY MODULAR
@@ -16,16 +15,12 @@ import platform from '../platform/index.js';
  * 
  * DYNAMIC ARCHITECTURE:
  * 1. Receives UI tool event with workflow_name and component_type
- * 2. Dynamically imports the workflow's components  
+ * 2. Resolves a registered component from the workflow registry
  * 3. Renders the specific component for that workflow
  * 4. Handles responses back to the agent
  * 
  * NO HARDCODED WORKFLOWS - Completely modular and discoverable!
  */
-
-// Cache for loaded workflow component modules
-const componentCache = new Map();
-
 const WorkflowUIRouter = ({ 
   payload, 
   onResponse, 
@@ -49,103 +44,67 @@ const WorkflowUIRouter = ({
   const componentType = payload?.component_type || 'UnknownComponent';
   
   /**
-   * Dynamically load workflow component - NO HARDCODING
+   * Resolve workflow component deterministically from the registry.
    */
   const loadWorkflowComponent = React.useCallback(async (workflow, component) => {
+    setIsLoading(true);
+    setError(null);
+    console.log('🛰️ WorkflowUIRouter: Loading component', { workflow, component, ui_tool_id, eventId });
+
     try {
-      setIsLoading(true);
-      setError(null);
-      console.log('🛰️ WorkflowUIRouter: Loading component', { workflow, component });
-      if (workflow === 'core' || workflow === 'shell') {
-        const registryComponent = getComponent(component) || getComponent(ui_tool_id);
-        if (registryComponent) {
-          console.log(`✅ WorkflowUIRouter: Using registered component ${component || ui_tool_id}`);
-          setComponent(() => registryComponent);
-          setIsLoading(false);
+      // Deterministic resolution order:
+      // 1. workflow-scoped component name
+      // 2. workflow-scoped ui_tool_id (legacy payload fallback)
+      // 3. plain component name
+      // 4. plain ui_tool_id
+      const candidates = [
+        workflow && component ? `${workflow}:${component}` : null,
+        workflow && ui_tool_id ? `${workflow}:${ui_tool_id}` : null,
+        component || null,
+        ui_tool_id || null,
+      ].filter(Boolean);
+
+      for (const candidate of candidates) {
+        const matched = getComponent(candidate);
+        if (matched) {
+          console.log('✅ WorkflowUIRouter: Using registered component', {
+            resolved: candidate,
+            requested_component: component,
+            requested_tool: ui_tool_id,
+            workflow,
+          });
+          setComponent(() => matched);
           return;
         }
       }
-      // Derive chat-specific cache key (include cache_seed AND eventId to prevent collision on revisions)
-      let chatId = null;
-      try { chatId = platform.storage.getItem('mozaiks.current_chat_id'); } catch {}
-      let cacheSeed = null;
-      if (chatId) {
-        try { const storedSeed = platform.storage.getItem(`mozaiks.current_chat_id.cache_seed.${chatId}`); if (storedSeed) cacheSeed = storedSeed; } catch {}
-      }
-      // CRITICAL: Include eventId in cache key to prevent collision when revisions arrive with new eventId
-      const cacheKey = `${chatId || 'nochat'}:${cacheSeed || 'noseed'}:${workflow}:${component}:${eventId || 'no-event'}`;
-      
-      // Check cache first
-      if (componentCache.has(cacheKey)) {
-        console.log('🛰️ WorkflowUIRouter: Cache hit', { cacheKey });
-        setComponent(() => componentCache.get(cacheKey));
-        setIsLoading(false);
-        return;
-      }
 
-      // Dynamically import the workflow's component index
-      // Uses @chat-workflows alias (resolves to MOZAIKS_FRONTEND_WORKFLOWS_PATH or local stub)
-      const workflowModule = await import(`@chat-workflows/${workflow}/components/index.js`);
-      
-      // Get the specific component from the workflow module
-      const WorkflowComponent = workflowModule.default[component] || workflowModule[component];
-      
-      if (!WorkflowComponent) {
-        throw new Error(`Component '${component}' not found in workflow '${workflow}'`);
-      }
-      
-      // Cache the component
-  componentCache.set(cacheKey, WorkflowComponent);
-      setComponent(() => WorkflowComponent);
-      
-      console.log(`✅ WorkflowUIRouter: Loaded ${workflow}:${component}`);
-      
-    } catch (loadError) {
-      console.warn(`⚠️ WorkflowUIRouter: Failed to load ${workflow}:${component}, trying core components`, loadError);
-      
-      // Fallback to core components (F5: UserInputRequest support)
+      // Fallback to core components (UserInputRequest support)
       try {
         const coreModule = await import('./ui/index.js');
         const coreComponents = {
-          'UserInputRequest': coreModule.UserInputRequest,
-          'user_input': coreModule.UserInputRequest, // Map user_input to UserInputRequest
+          UserInputRequest: coreModule.UserInputRequest,
+          user_input: coreModule.UserInputRequest,
         };
-        
         const coreComponent = coreComponents[component] || coreComponents[ui_tool_id];
         if (coreComponent) {
           console.log(`✅ WorkflowUIRouter: Using core component ${component || ui_tool_id}`);
           setComponent(() => coreComponent);
-          setIsLoading(false);
           return;
         }
       } catch (coreError) {
-        console.warn(`⚠️ WorkflowUIRouter: Failed to load core components`, coreError);
+        console.warn('⚠️ WorkflowUIRouter: Failed to load core fallback components', coreError);
       }
 
-      // Final fallback: registered core chat-ui components
-      try {
-        const registryComponent = getComponent(component) || getComponent(ui_tool_id);
-        if (registryComponent) {
-          console.log(`✅ WorkflowUIRouter: Using registered component ${component || ui_tool_id}`);
-          setComponent(() => registryComponent);
-          setIsLoading(false);
-          return;
-        }
-      } catch (registryError) {
-        console.warn(`⚠️ WorkflowUIRouter: Failed to load registered components`, registryError);
-      }
-      
-      // No fallback found
       setError({
         type: 'component_not_found',
         workflow,
         component,
-        message: loadError.message
+        message: `No registered component matched ${workflow}:${component || ui_tool_id}`,
       });
     } finally {
       setIsLoading(false);
     }
-  }, [eventId, ui_tool_id]); // Include both eventId and ui_tool_id in dependencies to trigger reload on new artifact events
+  }, [eventId, ui_tool_id]);
 
   React.useEffect(() => {
     loadWorkflowComponent(sourceWorkflowName, componentType);
@@ -199,8 +158,8 @@ const WorkflowUIRouter = ({
   <div className="text-[var(--color-warning)] text-slate-200 text-xs mb-3">
           <p><strong>Expected structure:</strong></p>
           <code className="block bg-gray-800 p-2 rounded text-xs">
-            workflows/{error.workflow}/components/index.js<br/>
-            ↳ export {'{'}  {error.component} {'}'};
+            workflows/{error.workflow}/ui/index.js<br/>
+            ↳ export {'{'} {error.component} {'}'}; (auto-registered as {error.workflow}:{error.component})
           </code>
         </div>
         
@@ -277,18 +236,18 @@ const WorkflowUIRouter = ({
 export default WorkflowUIRouter;
 
 /**
- * 🎯 WORKFLOW INTEGRATION GUIDE - NEW DYNAMIC SYSTEM
+ * 🎯 WORKFLOW INTEGRATION GUIDE - DETERMINISTIC SYSTEM
  * 
  * To add UI components for a new workflow (NO HARDCODING NEEDED):
  * 
- * 1. CREATE WORKFLOW COMPONENTS DIRECTORY:
- *    workflows/YourWorkflow/components/
+ * 1. CREATE WORKFLOW UI DIRECTORY:
+ *    workflows/YourWorkflow/ui/
  *    ├── YourComponent.js
  *    ├── AnotherComponent.js
  *    └── index.js
  * 
- * 2. CREATE COMPONENTS INDEX FILE:
- *    // workflows/YourWorkflow/components/index.js
+ * 2. CREATE UI INDEX FILE:
+ *    // workflows/YourWorkflow/ui/index.js
  *    import YourComponent from './YourComponent';
  *    import AnotherComponent from './AnotherComponent';
  *    
@@ -297,18 +256,17 @@ export default WorkflowUIRouter;
  *      AnotherComponent
  *    };
  * 
- * 3. CREATE WORKFLOW UI TOOL (Backend):
- *    // workflows/YourWorkflow/tools/your_tool.py
- *    class YourUITool(WorkflowUITool):
- *      def __init__(self):
- *        super().__init__("YourWorkflow", "your_tool", "YourComponent")
+ * 3. DECLARE UI TOOL/SURFACE IN tools.yaml:
+ *    ui:
+ *      component: YourComponent
+ *      mode: inline|artifact
  * 
  * 4. COMPONENT RECEIVES STANDARD PROPS:
  *    const YourComponent = ({ payload, onResponse, onCancel, ui_tool_id, eventId }) => {
  *      // Your component logic
  *    };
  * 
- * ✨ MAGIC: The router automatically discovers and loads your components!
- * ✨ NO REGISTRATION: No need to modify any core files!
- * ✨ FULLY MODULAR: Each workflow is completely self-contained!
+ * ✨ Deterministic resolution: workflow-scoped key first (`Workflow:Component`)
+ * ✨ No legacy per-workflow dynamic import paths required.
+ * ✨ Fully modular: each workflow is self-contained behind `ui/index.js`.
  */

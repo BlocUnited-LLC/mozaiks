@@ -9,8 +9,6 @@ from dotenv import load_dotenv
 from typing import Optional, Dict, Any
 from logs.logging_config import get_core_logger
 
-# Azure SDK imports are kept, but we won't construct credentials at import time
-from azure.identity import DefaultAzureCredential
 from motor.motor_asyncio import AsyncIOMotorClient
 
 load_dotenv()
@@ -35,6 +33,7 @@ def _build_secret_client() -> Optional[Any]:
     if not kv_uri:
         return None
     try:
+        from azure.identity import DefaultAzureCredential  # type: ignore
         from azure.keyvault.secrets import SecretClient  # type: ignore
     except Exception:
         return None

@@ -45,7 +45,7 @@ async def test_process_stream_accepts_direct_async_iterator_response() -> None:
         dispatcher=None,
         agents={},
         structured_registry={},
-        structured_agents=set(),
+        validated_output_agents=set(),
         auto_tool_agents=set(),
         max_turns=5,
         wf_logger=logger,

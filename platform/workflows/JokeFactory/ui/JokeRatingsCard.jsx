@@ -71,8 +71,8 @@ const styles = {
   },
 };
 
-export default function JokeRatingsCard({ data }) {
-  const { ratings = [], average_rating = 0, total_jokes = 0, verdict = '' } = data || {};
+export default function JokeRatingsCard({ payload = {} }) {
+  const { ratings = [], average_rating = 0, total_jokes = 0, verdict = '' } = payload;
 
   return (
     <div style={styles.card}>

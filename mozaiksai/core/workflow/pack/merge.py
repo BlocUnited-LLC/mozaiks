@@ -1,4 +1,4 @@
-# === MOZAIKS-CORE-HEADER ===
+
 # FILE: mozaiksai/core/workflow/pack/merge.py
 # DESCRIPTION: Pluggable merge strategies for fan-in result aggregation.
 #

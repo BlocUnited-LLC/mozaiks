@@ -25,7 +25,12 @@ concerns, not bespoke application logic.
 
 Current implementation zone:
 
-- `mozaikscore/`
+- app backend deployable outside this repo
+
+Current framework contract in this repo:
+
+- `mozaiksai/core/ports/app_backend.py`
+- `mozaiksai/core/adapters/http_app_backend.py`
 
 ### 2. AI runtime core
 
@@ -69,12 +74,26 @@ Owns product-specific behavior such as:
 
 The first-party builder is a consumer of the platform, not the platform.
 
+People build app bundles on Mozaiks.
+
+They do not build app logic inside the hosted control plane.
+
 Its main job is to turn intent into:
 
-- a concept the user can approve
-- platform provision choices
-- app-specific declaratives
-- thin stubs on top of core
+- a `ProductSpec` the user can approve
+- an `ExistingProductSpec` when the request starts from a live host product
+- `CapabilitySpec[]` describing deterministic product capabilities
+- an `ExperienceSpec` for persistent app UI
+- an `AgentAugmentationPlan` for AI behavior
+- a `BuildGraph` for concrete compilation and validation
+- thin stubs on top of core where core coverage already exists
+
+Hosted product responsibilities also include:
+
+- hosted control plane and tenant operations
+- environment provisioning
+- domains, TLS, secrets, and monitoring
+- billing and monetized platform operations
 
 ### 5. App bundle
 
@@ -90,9 +109,9 @@ The app bundle is input to the runtime. It is not runtime internals.
 
 ## The Boundary Rule That Matters Most
 
-`mozaikscore` may emit domain events.
+The app backend may emit domain events.
 
-`mozaikscore` must not emit workflow names or directly encode AG2 or groupchat
+The app backend must not emit workflow names or directly encode AG2 or groupchat
 meaning.
 
 `mozaiksai` owns:
@@ -105,7 +124,7 @@ meaning.
 This is the boundary that prevents the non-AI runtime from becoming a hidden
 workflow engine.
 
-## What Belongs in the App App backend
+## What Belongs in the App Backend
 
 A feature belongs in the app backend if it is primarily about:
 
@@ -157,7 +176,7 @@ A feature belongs in the first-party product if it is about:
 
 - helping users describe an app
 - decomposing intent
-- generating bundles
+- generating bundles from typed planning artifacts
 - provisioning hosted apps
 - billing and SaaS operations
 
@@ -194,4 +213,3 @@ Keep it in AG2 if:
 - [workflow-architecture.md](workflow-architecture.md)
 - [event-system-architecture.md](event-system-architecture.md)
 - [app-bundle-declaratives.md](app-bundle-declaratives.md)
-

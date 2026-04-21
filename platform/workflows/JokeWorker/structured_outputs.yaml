@@ -1,0 +1,19 @@
+models:
+  JokeResult:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: A casual 1-sentence intro line shown to the user.
+      joke_text:
+        type: str
+        description: The complete joke — setup and punchline.
+      joke_angle:
+        type: str
+        description: Short label for the angle this joke took (2-5 words).
+      joke_style:
+        type: str
+        description: The style of joke written (pun, dad joke, one-liner, etc.).
+
+registry:
+  JokeWriterAgent: JokeResult

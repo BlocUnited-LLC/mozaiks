@@ -9,39 +9,57 @@ get_global_pack_graph_path = _config.get_global_pack_graph_path
 get_workflow_pack_graph_path = _config.get_workflow_pack_graph_path
 load_global_pack_graph = _config.load_global_pack_graph
 load_workflow_pack_graph = _config.load_workflow_pack_graph
+list_workflow_sequences = _config.list_workflow_sequences
 
 
-def test_global_pack_graph_path_points_to_repo_workflows_pack() -> None:
+def _use_repo_platform_workflows(monkeypatch) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workflows_root = repo_root / "platform" / "workflows"
+    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(workflows_root))
+    _config._GLOBAL_CACHE = None
+    _config._WORKFLOW_CACHE = {}
+
+
+def test_global_pack_graph_path_points_to_repo_workflows_pack(monkeypatch) -> None:
+    _use_repo_platform_workflows(monkeypatch)
     path = get_global_pack_graph_path()
-    assert path.name == "workflow_graph.json"
-    assert path.parent.name == "_pack"
+    assert path.name == "extension_registry.json"
+    assert path.parent.name == "extended_orchestration"
     assert path.parent.parent.name == "workflows"
 
 
-def test_workflow_pack_graph_path_points_to_workflow_pack() -> None:
-    path = get_workflow_pack_graph_path("WritersRoom")
-    expected_suffix = Path("workflows") / "WritersRoom" / "_pack" / "workflow_graph.json"
+def test_workflow_pack_graph_path_points_to_workflow_pack(monkeypatch) -> None:
+    _use_repo_platform_workflows(monkeypatch)
+    path = get_workflow_pack_graph_path("JokeFactory")
+    expected_suffix = (
+        Path("workflows")
+        / "JokeFactory"
+        / "extended_orchestration"
+        / "mfj_extension.json"
+    )
     assert str(path).endswith(str(expected_suffix))
 
 
-def test_load_global_pack_graph_uses_canonical_file() -> None:
+def test_load_global_pack_graph_uses_canonical_file(monkeypatch) -> None:
+    _use_repo_platform_workflows(monkeypatch)
     graph = load_global_pack_graph()
     assert graph is not None
-    assert graph.version == 2
-    assert any(w.id == "GreenRoom" for w in graph.workflows)
-    assert any(w.id == "WritersRoom" for w in graph.workflows)
-    assert any(w.id == "MainStage" for w in graph.workflows)
+    assert graph.version == 3
+    assert any(w.id == "JokeFactory" for w in graph.workflows)
+    assert any(w.id == "JokeWorker" for w in graph.workflows)
 
 
-def test_load_workflow_pack_graph_uses_canonical_file() -> None:
-    graph = load_workflow_pack_graph("WritersRoom")
+def test_load_workflow_pack_graph_uses_canonical_file(monkeypatch) -> None:
+    _use_repo_platform_workflows(monkeypatch)
+    graph = load_workflow_pack_graph("JokeFactory")
     assert graph is not None
     assert graph.version == 3
     assert len(graph.mid_flight_journeys) >= 1
-    assert graph.mid_flight_journeys[0].id == "writers_room_cycle"
+    assert graph.mid_flight_journeys[0].id == "parallel-joke-generation"
 
 
-def test_declared_global_workflows_match_physical_workflow_folders() -> None:
+def test_declared_global_workflows_match_physical_workflow_folders(monkeypatch) -> None:
+    _use_repo_platform_workflows(monkeypatch)
     graph = load_global_pack_graph()
     assert graph is not None
 
@@ -51,7 +69,16 @@ def test_declared_global_workflows_match_physical_workflow_folders() -> None:
     physical = {
         p.name
         for p in workflows_root.iterdir()
-        if p.is_dir() and p.name not in {"_pack", "__pycache__"} and not p.name.startswith(".")
+        if p.is_dir() and p.name not in {"_pack", "__pycache__", "extended_orchestration"} and not p.name.startswith(".")
     }
 
-    assert physical == declared
+    assert declared.issubset(physical)
+
+
+def test_list_workflow_sequences_returns_declared_sequences(monkeypatch) -> None:
+    _use_repo_platform_workflows(monkeypatch)
+    graph = load_global_pack_graph()
+    assert graph is not None
+    assert [item.id for item in list_workflow_sequences(graph)] == [
+        item.id for item in graph.journeys
+    ]

@@ -133,11 +133,11 @@ const styles = {
   },
 };
 
-export default function JokeGallery({ data }) {
+export default function JokeGallery({ payload = {} }) {
   const [hoveredIndex, setHoveredIndex] = useState(null);
   const [copiedIndex, setCopiedIndex] = useState(null);
 
-  const { jokes = [], ratings = [], session_stats = {} } = data || {};
+  const { jokes = [], ratings = [], session_stats = {} } = payload;
 
   const copyToClipboard = (text, index) => {
     navigator.clipboard.writeText(text);

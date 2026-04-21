@@ -73,7 +73,7 @@ platform/
 - `automations/` — Triggers now declared in `orchestrator.yaml`
 - `adapters/` — Admin dashboard is a first-class page, not an adapter
 - `subscription_config.json` — Belongs in greenfield app backend
-- `navigation_config.json` — Shell config derived from ai.json
+- `navigation_config.json` — Routes are composed from page/module/workflow owners
 - `admin.json`, `module_registry.json`, `settings_config.json`, `notifications_config.json` — App backend concerns
 
 ## What Each Family Means
@@ -86,6 +86,7 @@ It should answer:
 
 - what is this app called
 - what targets are enabled
+- where should the app land when opened
 - should people sign in
 - who are the default admins
 

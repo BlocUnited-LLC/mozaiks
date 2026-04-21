@@ -26,14 +26,6 @@ if TYPE_CHECKING:
 
 from autogen.events.agent_events import SelectSpeakerEvent
 
-# Lifecycle trigger enum
-try:
-    from mozaiksai.core.workflow.execution.lifecycle import LifecycleTrigger
-    HAS_LIFECYCLE = True
-except ImportError:
-    HAS_LIFECYCLE = False
-    LifecycleTrigger = None  # type: ignore
-
 
 class SelectSpeakerHandler(BaseEventHandler):
     """
@@ -78,7 +70,7 @@ class SelectSpeakerHandler(BaseEventHandler):
             await self._complete_previous_turn(ctx, state)
 
         # Execute before_agent lifecycle for new agent
-        if new_agent_name and ctx.lifecycle_manager and HAS_LIFECYCLE:
+        if new_agent_name and ctx.lifecycle_manager:
             await self._trigger_before_agent(new_agent_name, ctx)
 
         # Update turn state
@@ -141,7 +133,7 @@ class SelectSpeakerHandler(BaseEventHandler):
             )
 
         # Execute after_agent lifecycle
-        if ctx.lifecycle_manager and HAS_LIFECYCLE:
+        if ctx.lifecycle_manager:
             try:
                 await ctx.lifecycle_manager.trigger_after_agent(
                     agent_name=str(state.turn_agent),
@@ -193,7 +185,3 @@ class SelectSpeakerHandler(BaseEventHandler):
     def should_break(self, event: Any, state: "StreamState") -> bool:
         """SelectSpeakerEvent does not terminate the stream."""
         return False
-
-    def priority(self) -> int:
-        """Standard priority."""
-        return 50

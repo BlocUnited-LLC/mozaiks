@@ -76,7 +76,6 @@ class TestRunResult:
             workflow_name="W",
         )
         assert r.status == RunStatus.COMPLETED
-        assert r.handoff_to_user is False
         assert r.error is None
 
     def test_failed(self):
@@ -93,7 +92,6 @@ class TestRunResult:
 class TestRunStatus:
     def test_all_values(self):
         assert RunStatus.COMPLETED.value == "completed"
-        assert RunStatus.HANDOFF_TO_USER.value == "handoff_to_user"
         assert RunStatus.PAUSED.value == "paused"
         assert RunStatus.FAILED.value == "failed"
         assert RunStatus.CANCELLED.value == "cancelled"
@@ -140,16 +138,6 @@ class TestOrchestrationPortProtocol:
         req = RunRequest(workflow_name="W", app_id="a", chat_id="c", user_id="u")
         r = adapter._interpret_result(req, {"run_completed": True})
         assert r.status == RunStatus.COMPLETED
-        assert r.handoff_to_user is False
-
-    def test_interpret_result_handoff(self):
-        from mozaiksai.core.adapters.ag2_orchestration import AG2OrchestrationAdapter
-
-        adapter = AG2OrchestrationAdapter()
-        req = RunRequest(workflow_name="W", app_id="a", chat_id="c", user_id="u")
-        r = adapter._interpret_result(req, {"handoff_to_user": True})
-        assert r.status == RunStatus.HANDOFF_TO_USER
-        assert r.handoff_to_user is True
 
     def test_interpret_result_none(self):
         from mozaiksai.core.adapters.ag2_orchestration import AG2OrchestrationAdapter

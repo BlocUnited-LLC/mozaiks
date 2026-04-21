@@ -96,7 +96,7 @@ class BaseEventHandler(ABC):
         Determine if the event stream should terminate after this event.
 
         Override this method in handlers that can terminate the stream
-        (e.g., RunCompletionEvent, handoff_to_user).
+        (e.g., RunCompletionEvent).
 
         Args:
             event: The AG2 event that was just processed
@@ -106,18 +106,6 @@ class BaseEventHandler(ABC):
             True to break out of event loop, False to continue
         """
         return False
-
-    def priority(self) -> int:
-        """
-        Return handler priority for ordering when multiple handlers match.
-
-        Lower values = higher priority. Default is 100.
-        Override in subclasses that need specific ordering.
-
-        Returns:
-            Integer priority value
-        """
-        return 100
 
 
 class DefaultEventHandler(BaseEventHandler):

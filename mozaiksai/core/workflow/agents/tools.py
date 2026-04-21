@@ -34,6 +34,17 @@ from ..declarative import parse_tools_config
 logger = logging.getLogger(__name__)
 
 
+def _ensure_workflow_import_paths(*, base_dir: Path, file_path: Path) -> None:
+    """Expose workflow package and sibling tool modules during dynamic imports."""
+    for candidate in (base_dir.parent.parent, base_dir.parent, base_dir, file_path.parent):
+        try:
+            value = str(candidate.resolve())
+        except Exception:
+            value = str(candidate)
+        if value and value not in sys.path:
+            sys.path.insert(0, value)
+
+
 def _wrap_with_validation(
     *,
     workflow_name: str,
@@ -286,7 +297,9 @@ def load_agent_tool_functions(workflow_name: str) -> Dict[str, List[Callable]]:
         # Always load a fresh module instance under an ephemeral name (no sys.modules caching)
         module = None
         try:
-            spec = importlib.util.spec_from_file_location(f"mozaiks_{workflow_name}_{file_path.stem}_ephemeral", file_path)
+            _ensure_workflow_import_paths(base_dir=base_dir, file_path=file_path)
+            module_name = f"workflows.{workflow_name}.tools.{file_path.stem}"
+            spec = importlib.util.spec_from_file_location(module_name, file_path)
             if spec and spec.loader:
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)  # type: ignore[attr-defined]
@@ -317,16 +330,16 @@ def load_agent_tool_functions(workflow_name: str) -> Dict[str, List[Callable]]:
         )
         tool_identifier = tool.get('name') or func_name
         tool_type = tool.get('tool_type') or tool.get('type')
-        is_ui_tool = tool_type and str(tool_type).upper() == "UI_TOOL"
-        auto_invoke_raw = tool.get("auto_invoke")
-        if auto_invoke_raw is None:
-            # Match auto_tool_handler's default: UI tools auto-invoke by default, agent tools do not.
-            should_auto_invoke = bool(is_ui_tool)
+        is_ui_tool = tool_type and str(tool_type).upper() in {"UI_TOOL", "UI_SURFACE"}
+        auto_tool_call_raw = tool.get("auto_tool_call")
+        if auto_tool_call_raw is None:
+            # Match auto_tool_handler's default: explicit UI surfaces auto-call by default, agent tools do not.
+            should_auto_tool_call = bool(is_ui_tool)
         else:
             try:
-                should_auto_invoke = bool(auto_invoke_raw)
+                should_auto_tool_call = bool(auto_tool_call_raw)
             except Exception:
-                should_auto_invoke = False
+                should_auto_tool_call = False
         
         for ag in agent_targets:
             # UI_Tools are validated by auto_tool_handler at the model level (before invocation)
@@ -334,10 +347,10 @@ def load_agent_tool_functions(workflow_name: str) -> Dict[str, List[Callable]]:
             # receives decomposed kwargs that don't match the structured output schema.
             # Example: mermaid_sequence_diagram receives {MermaidSequenceDiagram: dict, agent_name: str}
             # but the model is MermaidSequenceDiagramCall with nested structure.
-            # For agent tools that are manually invoked (auto_invoke=false), validating kwargs against the
+            # For agent tools that are manually invoked (auto_tool_call=false), validating kwargs against the
             # agent's structured output model will reject legitimate tool payloads. Only enforce schema
             # for auto-invoked tools where kwargs are expected to match the agent's structured output.
-            enforce_schema = ag in structured_registry and should_auto_invoke and not is_ui_tool
+            enforce_schema = ag in structured_registry and should_auto_tool_call and not is_ui_tool
             wrapped_func = _wrap_with_validation(
                 workflow_name=workflow_name,
                 agent_name=ag,

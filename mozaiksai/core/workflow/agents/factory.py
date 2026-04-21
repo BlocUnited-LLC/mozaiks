@@ -116,10 +116,10 @@ async def create_agents(
     base_llm_config: Dict[str, Any] = {}
     if local_agent_names:
         try:
-            from ..validation.llm_config import get_llm_config as _get_base_llm_config
+            from ..llm_config import get_llm_config as _get_base_lllm_config
 
             extra = {"cache_seed": cache_seed} if cache_seed is not None else None
-            _, base_llm_config = await _get_base_llm_config(stream=True, extra_config=extra)
+            _, base_llm_config = await _get_base_lllm_config(extra_config=extra)
         except Exception as err:
             logger.error(f"[AGENTS] Failed to load base LLM config: {err}")
             return {}
@@ -136,6 +136,9 @@ async def create_agents(
     except Exception as tool_err:
         logger.warning(f"[AGENTS] Failed loading agent tool functions: {tool_err}")
         agent_tool_functions = {}
+
+    # Derive auto-tool agents from tools.yaml (agents with auto_tool_call: true)
+    auto_tool_agent_names = workflow_manager.get_auto_tool_agents(workflow_name)
 
     try:
         structured_registry = get_structured_outputs_for_workflow(workflow_name)
@@ -198,11 +201,12 @@ async def create_agents(
         except Exception:
             llm_config = base_llm_config
 
-        auto_tool_mode = bool(agent_config.get("auto_tool_mode"))
+        # Derive auto_tool_mode from tools.yaml (has auto_tool_call: true tool)
+        auto_tool_mode = agent_name in auto_tool_agent_names
         structured_model_cls = structured_registry.get(agent_name) if structured_registry else None
         if auto_tool_mode and structured_model_cls is None:
             raise ValueError(
-                f"[AGENTS] auto_tool_mode enabled for '{agent_name}' but no structured output model is registered"
+                f"[AGENTS] Agent '{agent_name}' has auto_tool_call tool but no structured output model is registered"
             )
 
         agent_functions = [] if auto_tool_mode else agent_tool_functions.get(agent_name, [])
@@ -328,7 +332,7 @@ async def create_agents(
                 logger.debug(f"[AGENTS][CAPABILITY] Imported AG2 generate_images module for {agent_name}")
                 
                 # Load DALL-E specific config
-                from ..validation.llm_config import get_dalle_llm_config
+                from ..llm_config import get_dalle_llm_config
                 dalle_config = await get_dalle_llm_config(cache_seed=cache_seed)
                 
                 logger.info(

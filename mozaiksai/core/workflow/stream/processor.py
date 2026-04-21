@@ -27,6 +27,8 @@ import os
 import time
 from typing import Any, Dict, Optional
 
+from mozaiksai.core.workflow.execution.lifecycle import LifecycleTrigger
+
 from .context import StreamContext, StreamState
 from .registry import EventHandlerRegistry
 from .handlers import (
@@ -41,19 +43,11 @@ from .handlers import (
     GroupChatRunHandler,
     GroupChatResumeHandler,
     ErrorHandler,
-    DefaultEventHandler,
     StreamingEventHandler,
+    MozaiksaiEventHandler,
 )
 
 logger = logging.getLogger(__name__)
-
-# Lifecycle trigger enum
-try:
-    from mozaiksai.core.workflow.execution.lifecycle import LifecycleTrigger
-    HAS_LIFECYCLE = True
-except ImportError:
-    HAS_LIFECYCLE = False
-    LifecycleTrigger = None  # type: ignore
 
 
 class EventStreamProcessor:
@@ -90,22 +84,19 @@ class EventStreamProcessor:
         """Create registry with all standard handlers."""
         registry = EventHandlerRegistry()
 
-        # Register handlers in priority order
-        registry.register(StreamingEventHandler())  # Priority 10 - token streaming (highest)
-        registry.register(TransitionHandler())      # Priority 10 - handoff detection
-        registry.register(ErrorHandler())           # Priority 20 - error handling
-        registry.register(CompletionHandler())      # Priority 50 - completion
-        registry.register(UsageSummaryHandler())    # Priority 100 - usage tracking
-        registry.register(InputRequestHandler())    # Priority 50 - input prompts
-        registry.register(SelectSpeakerHandler())   # Priority 50 - turn transitions
-        registry.register(ToolCallHandler())        # Priority 50 - tool calls
-        registry.register(ToolResponseHandler())    # Priority 50 - tool responses
-        registry.register(GroupChatRunHandler())    # Priority 100 - group chat init
-        registry.register(GroupChatResumeHandler()) # Priority 100 - resume boundary
-        registry.register(TextEventHandler())       # Priority 50 - messages
-
-        # Default handler for unknown events
-        registry.set_default_handler(DefaultEventHandler())
+        registry.register(StreamingEventHandler())
+        registry.register(TransitionHandler())
+        registry.register(ErrorHandler())
+        registry.register(MozaiksaiEventHandler())
+        registry.register(CompletionHandler())
+        registry.register(UsageSummaryHandler())
+        registry.register(InputRequestHandler())
+        registry.register(SelectSpeakerHandler())
+        registry.register(ToolCallHandler())
+        registry.register(ToolResponseHandler())
+        registry.register(GroupChatRunHandler())
+        registry.register(GroupChatResumeHandler())
+        registry.register(TextEventHandler())
 
         return registry
 
@@ -219,10 +210,6 @@ class EventStreamProcessor:
             # Lifecycle: after_chat trigger
             await self._trigger_after_chat(ctx, state)
 
-            # Cancel zombie AG2 task if handoff_to_user
-            if state.handoff_to_user:
-                self._cancel_ag2_task(response, ctx)
-
         return state.to_result_dict()
 
     def _log_event_trace(self, event: Any, ctx: StreamContext) -> None:
@@ -273,7 +260,7 @@ class EventStreamProcessor:
             ]
 
             # Trigger on_context_change lifecycle for changed variables
-            if changed and ctx.lifecycle_manager and HAS_LIFECYCLE:
+            if changed and ctx.lifecycle_manager:
                 for context_key in changed:
                     try:
                         old_value = state.prev_ctx_snapshot.get(context_key)
@@ -329,7 +316,7 @@ class EventStreamProcessor:
             )
 
         # Execute after_agent lifecycle
-        if ctx.lifecycle_manager and HAS_LIFECYCLE:
+        if ctx.lifecycle_manager:
             try:
                 await ctx.lifecycle_manager.trigger_after_agent(
                     agent_name=str(state.turn_agent),
@@ -346,7 +333,7 @@ class EventStreamProcessor:
         state: StreamState,
     ) -> None:
         """Execute after_chat lifecycle tools."""
-        if not ctx.lifecycle_manager or not HAS_LIFECYCLE:
+        if not ctx.lifecycle_manager:
             return
 
         try:
@@ -360,21 +347,4 @@ class EventStreamProcessor:
         except Exception as e:
             ctx.wf_logger.warning(
                 f" [{ctx.workflow_name_upper}] after_chat lifecycle failed: {e}"
-            )
-
-    def _cancel_ag2_task(self, response: Any, ctx: StreamContext) -> None:
-        """Cancel the internal AG2 task that may block on IOStream.input()."""
-        task = getattr(response, "_task", None)
-        if task is None:
-            task = getattr(response, "task", None)
-
-        if task is not None and hasattr(task, "cancel"):
-            task.cancel()
-            ctx.wf_logger.info(
-                f" [{ctx.workflow_name_upper}] Cancelled zombie AG2 task after handoff_to_user"
-            )
-        else:
-            ctx.wf_logger.debug(
-                f" [{ctx.workflow_name_upper}] No AG2 task to cancel "
-                f"(response type: {type(response).__name__})"
             )

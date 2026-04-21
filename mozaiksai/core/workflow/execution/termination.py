@@ -123,7 +123,7 @@ class AG2TerminationHandler:
                 return self._last_result
                 
             if not self.conversation_active and not self._ended:
-                wf_logger.warning("⚠️ Termination handler called but conversation not active")
+                wf_logger.debug("Termination handler called after conversation already became inactive")
                 return TerminationResult(
                     terminated=False,
                     status=0,

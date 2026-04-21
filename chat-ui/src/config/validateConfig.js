@@ -1,7 +1,7 @@
 /**
  * Config Validator
  *
- * Validates the declarative config file (theme_config.json)
+ * Validates the declarative config files (theme_config.json and shell.json)
  * fetched from the backend API at startup and surfaces human-readable errors.
  * Designed for non-technical founders — messages explain WHAT is wrong and HOW to fix it.
  *
@@ -72,59 +72,89 @@ function validateThemeConfig(config) {
     issues.push({ level: 'info', file, message: 'No "fonts" block. System fonts will be used.' });
   }
 
-  // UI chrome
+  // Chat UI hints
   const ui = config.ui;
-  if (ui) {
-    // Header
-    if (ui.header) {
-      const logo = ui.header.logo;
-      if (logo) {
-        if (logo.src && !ICON_FILE_RE.test(logo.src) && !URL_RE.test(logo.src)) {
-          issues.push({ level: 'error', file, message: `ui.header.logo.src="${logo.src}" is not a valid asset filename. Use a filename like "logo.svg" or a full URL.` });
+  if (ui?.chat?.modes && typeof ui.chat.modes !== 'object') {
+    issues.push({ level: 'error', file, message: '"ui.chat.modes" must be an object keyed by chat mode.' });
+  }
+
+  return issues;
+}
+
+function validateShellConfig(config) {
+  const issues = [];
+  const file = 'shell.json';
+
+  if (!config || typeof config !== 'object') {
+    issues.push({ level: 'error', file, message: 'Shell config is empty or not valid JSON.' });
+    return issues;
+  }
+
+  if (config.header) {
+    const logo = config.header.logo;
+    if (logo?.src && !ICON_FILE_RE.test(logo.src) && !URL_RE.test(logo.src)) {
+      issues.push({ level: 'error', file, message: `header.logo.src="${logo.src}" is not a valid asset filename. Use a filename like "logo.svg" or a full URL.` });
+    }
+    if (config.header.pages && !Array.isArray(config.header.pages)) {
+      issues.push({ level: 'error', file, message: 'header.pages must be an array of { label, path } items.' });
+    } else if (Array.isArray(config.header.pages)) {
+      config.header.pages.forEach((page, i) => {
+        if (!page?.path || typeof page.path !== 'string' || !page.path.startsWith('/')) {
+          issues.push({ level: 'error', file, message: `header.pages[${i}].path must start with "/" so the shell can navigate to it.` });
         }
-      }
-
-      if (Array.isArray(ui.header.actions)) {
-        ui.header.actions.forEach((action, i) => {
-          if (action.icon && !ICON_FILE_RE.test(action.icon) && !URL_RE.test(action.icon)) {
-            issues.push({ level: 'error', file, message: `ui.header.actions[${i}].icon="${action.icon}" is not a valid asset filename. Use "sparkle.svg" not "sparkle".` });
-          }
-        });
-      }
-    }
-
-    // Profile
-    if (ui.profile) {
-      if (ui.profile.show !== false && ui.profile.icon) {
-        if (!ICON_FILE_RE.test(ui.profile.icon) && !URL_RE.test(ui.profile.icon)) {
-          issues.push({ level: 'error', file, message: `ui.profile.icon="${ui.profile.icon}" is not a valid asset filename. Use "profile.svg" (placed in platform/brand/assets/).` });
+        if (!page?.label || typeof page.label !== 'string') {
+          issues.push({ level: 'warn', file, message: `header.pages[${i}] is missing a human-readable "label".` });
         }
-      }
-      if (Array.isArray(ui.profile.menu)) {
-        ui.profile.menu.forEach((item, i) => {
-          if (item.type === 'divider') return;
-          if (!item.id) {
-            issues.push({ level: 'warn', file, message: `ui.profile.menu[${i}] is missing an "id" field. Each menu item needs a unique id.` });
-          }
-          if (!item.label) {
-            issues.push({ level: 'warn', file, message: `ui.profile.menu[${i}] is missing a "label". The menu item won't have visible text.` });
-          }
-          if (item.icon && !ICON_FILE_RE.test(item.icon) && !URL_RE.test(item.icon)) {
-            issues.push({ level: 'error', file, message: `ui.profile.menu[${i}].icon="${item.icon}" is not a valid filename. Use "settings.svg" not "settings".` });
-          }
-          if (item.action === 'navigate' && !item.href && !item.path) {
-            issues.push({ level: 'error', file, message: `ui.profile.menu[${i}] has action="navigate" but no "href". Where should it navigate to?` });
-          }
-        });
-      }
+      });
     }
+    if (Array.isArray(config.header.actions)) {
+      config.header.actions.forEach((action, i) => {
+        if (action.icon && !ICON_FILE_RE.test(action.icon) && !URL_RE.test(action.icon)) {
+          issues.push({ level: 'error', file, message: `header.actions[${i}].icon="${action.icon}" is not a valid asset filename. Use "sparkle.svg" not "sparkle".` });
+        }
+      });
+    }
+  }
 
-    // Notifications
-    if (ui.notifications?.show !== false && ui.notifications?.icon) {
-      if (!ICON_FILE_RE.test(ui.notifications.icon) && !URL_RE.test(ui.notifications.icon)) {
-        issues.push({ level: 'error', file, message: `ui.notifications.icon="${ui.notifications.icon}" is not a valid asset filename. Use "notifications.svg".` });
+  if (config.landing_spot !== undefined) {
+    if (typeof config.landing_spot !== 'string' || !config.landing_spot.startsWith('/')) {
+      issues.push({ level: 'error', file, message: 'landing_spot must be a route path like "/dashboard".' });
+    }
+  }
+
+  if (config.profile) {
+    if (config.profile.show !== false && config.profile.icon) {
+      if (!ICON_FILE_RE.test(config.profile.icon) && !URL_RE.test(config.profile.icon)) {
+        issues.push({ level: 'error', file, message: `profile.icon="${config.profile.icon}" is not a valid asset filename. Use "profile.svg".` });
       }
     }
+    if (Array.isArray(config.profile.menu)) {
+      config.profile.menu.forEach((item, i) => {
+        if (item.type === 'divider') return;
+        if (!item.id) {
+          issues.push({ level: 'warn', file, message: `profile.menu[${i}] is missing an "id" field. Each menu item needs a unique id.` });
+        }
+        if (!item.label) {
+          issues.push({ level: 'warn', file, message: `profile.menu[${i}] is missing a "label". The menu item won't have visible text.` });
+        }
+        if (item.icon && !ICON_FILE_RE.test(item.icon) && !URL_RE.test(item.icon)) {
+          issues.push({ level: 'error', file, message: `profile.menu[${i}].icon="${item.icon}" is not a valid filename. Use "settings.svg" not "settings".` });
+        }
+        if (item.action === 'navigate' && !item.href && !item.path) {
+          issues.push({ level: 'error', file, message: `profile.menu[${i}] has action="navigate" but no "href" or "path". Where should it navigate to?` });
+        }
+      });
+    }
+  }
+
+  if (config.notifications?.show !== false && config.notifications?.icon) {
+    if (!ICON_FILE_RE.test(config.notifications.icon) && !URL_RE.test(config.notifications.icon)) {
+      issues.push({ level: 'error', file, message: `notifications.icon="${config.notifications.icon}" is not a valid asset filename. Use "notifications.svg".` });
+    }
+  }
+
+  if (config.footer?.links && !Array.isArray(config.footer.links)) {
+    issues.push({ level: 'error', file, message: '"footer.links" must be an array of { label, href } items.' });
   }
 
   return issues;
@@ -231,8 +261,13 @@ export async function validateAllConfigs() {
   if (themeResult.data) results.push(...validateThemeConfig(themeResult.data));
   else if (themeResult.missing) results.push({ level: 'error', file: 'theme_config.json', message: 'Not found. This is the core visual identity config — your app needs it. Create platform/config/theme_config.json.' });
 
-  // Auth is now validated as part of app.json (no separate auth.json)
-  // validateAppConfig handles the auth sub-section internally.
+  const shellResult = await safeLoad(
+    baseUrl ? `${baseUrl}/api/shell-config` : '/api/shell-config',
+    'shell.json',
+  );
+
+  if (shellResult.data) results.push(...validateShellConfig(shellResult.data));
+  else if (shellResult.missing) results.push({ level: 'info', file: 'shell.json', message: 'Not found. The app will fall back to the default shell chrome.' });
 
   return results;
 }

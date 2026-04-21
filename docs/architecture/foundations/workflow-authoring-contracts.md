@@ -18,6 +18,8 @@ At minimum, a workflow should include:
 - `ui_config.yaml`
 - `hooks.yaml`
 
+`extended_orchestration/mfj_extension.json` is required when the workflow uses mid-flight journeys (MFJ).
+
 `a2a.yaml` is optional.
 
 ## Canonical Directory
@@ -32,11 +34,50 @@ platform/workflows/{workflow_name}/
   tools.yaml
   ui_config.yaml
   hooks.yaml
+  extended_orchestration/
+    mfj_extension.json    # MFJ config (only when needed)
   tools/
     *.py
   ui/
     *.js
 ```
+
+There is no canonical `workflows/_shared` folder. Generated tools are owned by
+one workflow and live under that workflow's `tools/` directory. If multiple
+workflows need the same capability, either generate explicit workflow-local
+tools for each workflow or promote the reusable behavior into a framework-owned
+`mozaiksai.core.*` API with a documented contract.
+
+## Generation vs Refinement
+
+Workflow authors must treat initial generation and post-generation refinement as
+separate authoring modes.
+
+Initial generation workflows:
+
+- create canonical state or the first canonical artifact set
+- define ownership boundaries that later refinement can reuse
+- stay focused on first-pass compilation, not universal revision handling
+
+Refinement workflows:
+
+- start from a persisted artifact version
+- consume a classified change request
+- operate on explicit scoped units
+- widen scope only when the router decides the current unit boundary is insufficient
+
+For builder workflows such as `ValueEngine`, `DesignDocs`, `AgentGenerator`, and
+`AppGenerator`, prompt design should stay clean:
+
+- do not route delivered-bundle adjustments back through intake by default
+- do not assume every change means "start over"
+- do emit structured ownership metadata that later refinement can consume
+
+`AppGenerator`'s `build_tasks` with `owned_paths`, `depends_on`, and
+`acceptance_criteria` are the current canonical example of refinement-ready
+metadata.
+
+See [Refinement Control Plane](../specs/REFINEMENT_CONTROL_PLANE_SPEC.md).
 
 ## Canonical File Shapes
 
@@ -73,7 +114,6 @@ agents:
         heading: "[ROLE]"
         content: "You are a host."
     max_consecutive_auto_reply: 5
-    auto_tool_mode: false
     structured_outputs_required: false
 ```
 
@@ -82,6 +122,7 @@ Rules:
 - Each agent must provide either:
   - `prompt_sections` or `prompt_sections_custom`, or
   - `system_message`.
+- `auto_tool_mode` is derived from tools.yaml (agents with `auto_tool_call: true` tools).
 
 ### `handoffs.yaml`
 
@@ -171,16 +212,25 @@ tools:
     file: save_jokes.py
     function: save_jokes
     tool_type: Agent_Tool
-    auto_invoke: true
+    auto_tool_call: true
 
   - agent: JokeCriticAgent
     file: display_ratings.py
     function: display_ratings
-    tool_type: UI_Tool
-    auto_invoke: true
+    tool_type: UI_Surface
+    auto_tool_call: true
     ui:
       component: JokeRatingsCard
       mode: inline
+
+  - agent: ReviewerAgent
+    file: request_revision.py
+    function: request_revision
+    tool_type: UI_Tool
+    auto_tool_call: false
+    ui:
+      component: RevisionRequestCard
+      mode: artifact
 
 lifecycle_tools:
   - trigger: after_chat
@@ -189,19 +239,94 @@ lifecycle_tools:
 ```
 
 Rules:
-- `tools[].tool_type` must be `Agent_Tool` or `UI_Tool`.
-- `UI_Tool` requires `ui.component` and `ui.mode`.
+- `tools[].tool_type` must be one of:
+  - `Agent_Tool`
+  - `UI_Tool`
+  - `UI_Surface`
+- `Agent_Tool` is backend-only and must not declare `ui`.
+- `UI_Tool` is interactive and requires `ui.component` and `ui.mode`.
+- `UI_Surface` is one-way and requires `ui.component` and `ui.mode`.
+- `ui_contract` belongs only on `UI_Tool`.
 - Tool references use `file` and `function`.
+
+### `extended_orchestration/mfj_extension.json`
+
+Only add this file if the workflow uses mid-flight journeys.
+
+**Minimal single-phase form:**
+
+```json
+{
+  "version": 3,
+  "mid_flight_journeys": [
+    {
+      "id": "my_journey",
+      "description": "Brief human-readable summary of the fan-out purpose.",
+      "decomposition_agent": "DecompositionAgent",
+      "fan_out": {
+        "spawn_mode": "workflow",
+        "max_children": 5
+      },
+      "fan_in": {
+        "resume_agent": "SummaryAgent",
+        "inject_as": "mfj_my_results"
+      }
+    }
+  ]
+}
+```
+
+**Multi-phase form (stages):**
+
+Use `stages` when one trigger agent powers multiple sequential fan-out → fan-in
+phases with a mid-flight user gate between them:
+
+```json
+{
+  "version": 3,
+  "mid_flight_journeys": [
+    {
+      "id": "my_journey",
+      "description": "Stage 1 plans, user approves, stage 2 implements.",
+      "decomposition_agent": "DecompositionAgent",
+      "fan_out": { "spawn_mode": "workflow", "max_children": 10 },
+      "stages": [
+        {
+          "id": "plan",
+          "child_initial_agent": "PlanningAgent",
+          "resume_agent": "ReviewAgent",
+          "inject_as": "mfj_plan_results"
+        },
+        {
+          "id": "implement",
+          "gate_agent": "ApprovalAgent",
+          "child_initial_agent": "ImplementationAgent",
+          "resume_agent": "PackagingAgent",
+          "inject_as": "mfj_impl_results"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Rules:
+- `inject_as` values must start with `mfj_`.
+- `gate_agent` is required for every stage after the first.
+- `stages` and `fan_in` are mutually exclusive on the same journey.
+- The runtime auto-synthesizes context variable declarations for every `inject_as`
+  key and the five `_mfj_resume_*` handshake fields. Do not manually declare
+  these in `context_variables.yaml`.
+- The `resume_agent` for each stage must reference the `inject_as` key by name
+  in its `[CONTEXT]` prompt section — the runtime injects the value but the agent
+  must be authored to know what to do with it.
 
 ### `ui_config.yaml`
 
 ```yaml
 visual_agents:
   - JokeHostAgent
-chat_pane_agents:
-  - JokeHostAgent
-artifact_agents:
-  - JokeCriticAgent
+  - user
 ```
 
 ### `hooks.yaml`
@@ -225,4 +350,6 @@ Rules:
 
 - Author YAML files directly; do not use `.json` declarative files for workflows.
 - Keep tool implementations in `tools/*.py`; declaratives only reference them.
+- Do not create or reference global shared workflow tool folders such as
+  `workflows/_shared` or `app.workflows._shared`.
 - Keep app-backend CRUD policy outside workflow declaratives.

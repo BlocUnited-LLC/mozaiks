@@ -84,6 +84,9 @@ Expected default shape:
     "web": true,
     "mobile": false
   },
+  "startup": {
+    "landing_spot": "/dashboard"
+  },
   "authRequired": true,
   "admins": [
     "owner@example.com"
@@ -93,7 +96,7 @@ Expected default shape:
 
 The generator should not author low-level runtime plumbing here unless the user explicitly requests advanced overrides.
 
-`platform/app.json` is for app identity and product auth intent.
+`platform/app.json` is for app identity, startup route, and product auth intent.
 
 It is not the place for shell colors, login theme files, footer links, or header chrome.
 
@@ -130,11 +133,11 @@ Optional but common:
 - `tools/*.py`
 - `ui/index.js`
 - `ui/*.{js,jsx}`
-- `_pack/workflow_graph.json`
+- `extended_orchestration/mfj_extension.json`
 
 Event routing and workflow triggers are configured via:
-- `platform/automations/event_catalog.json` - maps app events to workflow events
-- Cross-substrate bridge relays events between mozaikscore and mozaiksai
+- `platform/workflows/{workflow}/orchestrator.yaml` - `triggers` declare which app events start or resume a workflow
+- app backends emit domain events through the runtime ingress boundary; there is no separate `platform/automations/event_catalog.json`
 
 ### `platform/modules/{module}/`
 

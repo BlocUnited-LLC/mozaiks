@@ -27,7 +27,7 @@ The repo uses these declarative families under `platform/`:
 - `platform/config/ai.json`
 - `platform/config/theme_config.json`
 - `platform/pages/{page}/page.json`
-- `platform/workflows/_pack/workflow_graph.json`
+- `platform/workflows/extended_orchestration/mfj_extension.json`
 - `platform/workflows/{workflow}/**`
 - `platform/modules/{module}/module.json`
 
@@ -61,7 +61,7 @@ Workflow declaratives are loaded from:
 - `tools.yaml`
 - `ui_config.yaml`
 - `hooks.yaml`
-- workflow-local `_pack/workflow_graph.json`
+- workflow-local `extended_orchestration/mfj_extension.json`
 
 Primary loader:
 

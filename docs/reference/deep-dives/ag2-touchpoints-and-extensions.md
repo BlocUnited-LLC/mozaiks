@@ -255,7 +255,7 @@ User message → [MOZAIKS] simple_transport.handle_user_input_from_api()
 | Resume call (`a_resume`) | `mozaiksai/core/workflow/orchestration_patterns.py:646` |
 | Background task spawn + pause | `mozaiksai/core/transport/simple_transport.py` |
 | Persistence (serialize ContextVariables) | `mozaiksai/core/data/persistence/persistence_manager.py` |
-| Fan-out topology config | `workflows/<name>/_pack/workflow_graph.json` (`journeys` array) |
+| Fan-out topology config | `workflows/<name>/extended_orchestration/mfj_extension.json` (`journeys` array) |
 | AG2 pattern factory | `mozaiksai/core/workflow/execution/patterns.py` |
 
 ---
@@ -308,7 +308,7 @@ resume) becomes a single `async with` block with an `await gather()` and a `.sen
 Even with native bidirectional streaming, the following remain mozaiks responsibilities
 (they are not AG2 concerns):
 
-- **N-child topology config** — reading `workflow_graph.json`, determining *which* workflows
+- **N-child topology config** — reading `mfj_extension.json`, determining *which* workflows
   to spawn, what context to seed them with. This is domain/product logic, not framework logic.
 - **Aggregation strategy** — `collect_all`, `merge_keys`, `first_wins`, etc. are business rules.
 - **UI progress events** — `chat.workflow_batch_started`, per-child progress, completion tiles.

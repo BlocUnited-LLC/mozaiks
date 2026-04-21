@@ -21,20 +21,7 @@ from .base import BaseEventHandler
 if TYPE_CHECKING:
     from ..context import StreamContext, StreamState
 
-# Import AG2 group chat events
-try:
-    from autogen.events.agent_events import GroupChatRunChatEvent
-    HAS_RUN_CHAT_EVENT = True
-except ImportError:
-    HAS_RUN_CHAT_EVENT = False
-    GroupChatRunChatEvent = type(None)  # type: ignore
-
-try:
-    from autogen.events.agent_events import GroupChatResumeEvent
-    HAS_RESUME_EVENT = True
-except ImportError:
-    HAS_RESUME_EVENT = False
-    GroupChatResumeEvent = type(None)  # type: ignore
+from autogen.events.agent_events import GroupChatRunChatEvent, GroupChatResumeEvent
 
 
 class GroupChatRunHandler(BaseEventHandler):
@@ -45,10 +32,8 @@ class GroupChatRunHandler(BaseEventHandler):
     """
 
     def event_types(self) -> Set[Type]:
-        """Handle GroupChatRunChatEvent if available."""
-        if HAS_RUN_CHAT_EVENT:
-            return {GroupChatRunChatEvent}
-        return set()
+        """Handle GroupChatRunChatEvent."""
+        return {GroupChatRunChatEvent}
 
     async def handle(
         self,
@@ -78,9 +63,6 @@ class GroupChatRunHandler(BaseEventHandler):
     def should_break(self, event: Any, state: "StreamState") -> bool:
         return False
 
-    def priority(self) -> int:
-        return 100
-
 
 class GroupChatResumeHandler(BaseEventHandler):
     """
@@ -91,10 +73,8 @@ class GroupChatResumeHandler(BaseEventHandler):
     """
 
     def event_types(self) -> Set[Type]:
-        """Handle GroupChatResumeEvent if available."""
-        if HAS_RESUME_EVENT:
-            return {GroupChatResumeEvent}
-        return set()
+        """Handle GroupChatResumeEvent."""
+        return {GroupChatResumeEvent}
 
     async def handle(
         self,
@@ -132,6 +112,3 @@ class GroupChatResumeHandler(BaseEventHandler):
 
     def should_break(self, event: Any, state: "StreamState") -> bool:
         return False
-
-    def priority(self) -> int:
-        return 100

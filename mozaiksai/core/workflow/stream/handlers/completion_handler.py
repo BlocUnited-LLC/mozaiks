@@ -10,10 +10,14 @@ Handles workflow completion and usage summary events:
 - RunCompletionEvent: Signals end of AG2 workflow execution
 - UsageSummaryEvent: Reports token usage and costs
 
-RunCompletionEvent terminates the event stream and captures completion metadata.
+RunCompletionEvent terminates the event stream and marks the run complete.
 UsageSummaryEvent logs usage statistics but doesn't terminate.
+
+Also dispatches webhook callbacks for backend-to-backend integrations when
+the chat session has a webhook_url configured.
 """
 
+import asyncio
 from typing import TYPE_CHECKING, Any, Dict, Optional, Set, Type
 
 from .base import BaseEventHandler
@@ -23,13 +27,7 @@ if TYPE_CHECKING:
 
 # Import AG2 event types
 from autogen.events.agent_events import RunCompletionEvent
-
-try:
-    from autogen.events.client_events import UsageSummaryEvent
-    HAS_USAGE_SUMMARY = True
-except ImportError:
-    HAS_USAGE_SUMMARY = False
-    UsageSummaryEvent = type(None)  # type: ignore
+from autogen.events.client_events import UsageSummaryEvent
 
 
 class CompletionHandler(BaseEventHandler):
@@ -102,7 +100,8 @@ class CompletionHandler(BaseEventHandler):
 
         # Mark stream state
         state.run_completed = True
-        state.completion_event = event
+        # Dispatch webhook callback if configured (fire-and-forget)
+        asyncio.create_task(self._dispatch_webhook(ctx, state))
 
         # Build run_complete payload
         return {
@@ -113,13 +112,34 @@ class CompletionHandler(BaseEventHandler):
             "executed_agents": list(state.executed_agents),
         }
 
+    async def _dispatch_webhook(
+        self,
+        ctx: "StreamContext",
+        state: "StreamState",
+    ) -> None:
+        """Dispatch webhook callback if chat session has webhook_url configured."""
+        try:
+            from mozaiksai.core.transport.webhook_dispatcher import dispatch_completion_webhook
+
+            # Get app_id and user_id from context
+            app_id = getattr(ctx, "app_id", None) or ctx.context_variables.get("app_id", "unknown")
+            user_id = getattr(ctx, "user_id", None) or ctx.context_variables.get("user_id", "unknown")
+
+            await dispatch_completion_webhook(
+                chat_id=ctx.chat_id,
+                workflow_name=ctx.workflow_name,
+                app_id=app_id,
+                user_id=user_id,
+                status="completed",
+                executed_agents=list(state.executed_agents),
+                final_context=dict(ctx.context_variables) if ctx.context_variables else None,
+            )
+        except Exception as webhook_err:
+            ctx.wf_logger.debug(f"Webhook dispatch failed (non-blocking): {webhook_err}")
+
     def should_break(self, event: Any, state: "StreamState") -> bool:
         """Break on RunCompletionEvent."""
         return True
-
-    def priority(self) -> int:
-        """Standard priority."""
-        return 50
 
 
 class UsageSummaryHandler(BaseEventHandler):
@@ -130,10 +150,8 @@ class UsageSummaryHandler(BaseEventHandler):
     """
 
     def event_types(self) -> Set[Type]:
-        """Handle UsageSummaryEvent if available."""
-        if HAS_USAGE_SUMMARY:
-            return {UsageSummaryEvent}
-        return set()
+        """Handle UsageSummaryEvent."""
+        return {UsageSummaryEvent}
 
     async def handle(
         self,
@@ -177,7 +195,3 @@ class UsageSummaryHandler(BaseEventHandler):
     def should_break(self, event: Any, state: "StreamState") -> bool:
         """UsageSummaryEvent does not terminate the stream."""
         return False
-
-    def priority(self) -> int:
-        """Standard priority."""
-        return 100

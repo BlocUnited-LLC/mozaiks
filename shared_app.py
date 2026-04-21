@@ -12,6 +12,7 @@ from pathlib import Path
 # Ensure project root is on Python path for workflow imports
 sys.path.insert(0, str(Path(__file__).parent))
 import json
+import yaml
 import asyncio
 import importlib
 from fastapi import FastAPI, HTTPException, Request, WebSocket, UploadFile, File, Form, Depends
@@ -25,18 +26,19 @@ from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.transport.simple_transport import SimpleTransport
 from mozaiksai.core.workflow.workflow_manager import workflow_status_summary, get_workflow_transport, get_workflow_tools
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
-from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id
-from mozaiksai.core.artifacts.attachments import handle_chat_upload
-from mozaiksai.core.runtime.extensions import mount_declared_routers, start_declared_services, stop_services
-from mozaiksai.core.runtime.platform_hooks import get_platform_hooks
+from mozaiksai.core.multitenant import build_app_scope_filter
+from mozaiksai.core.chat_attachments.attachments import handle_chat_upload
+from mozaiksai.core.runtime.composition.extensions import mount_declared_routers, start_declared_services, stop_services
+from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry, ExecutorType
+from mozaiksai.core.runtime.composition.module_executor import OperationExecutor, OperationRequest
+from mozaiksai.core.runtime.app.loader import AppLoader, AppLoadError
 
 # JWT Authentication dependencies
 from mozaiksai.core.auth import (
     UserPrincipal,
-    ServicePrincipal,
     require_user_scope,
     require_any_auth,
-    require_internal,
     optional_user,
     authenticate_websocket_with_path_user,
     authenticate_websocket_with_path_binding,
@@ -47,13 +49,15 @@ from mozaiksai.core.auth import (
 from mozaiksai.core.auth.dependencies import (
     validate_path_app_id,
     validate_path_chat_id,
-    require_execution_token,
     validate_user_id_against_principal as _validate_user_id_against_principal,
 )
 
 # Initialize persistence manager (handles lean chat session storage internally)
 persistence_manager = AG2PersistenceManager()
 _runtime_services = []
+
+# Executor registry — populated during startup from discovered operations/*/operation.yaml
+executor_registry = ExecutorRegistry()
 
 
 
@@ -173,7 +177,6 @@ event_dispatcher = get_event_dispatcher()
 wf_logger.info("🎯 Unified Event Dispatcher initialized")
 
 from mozaiksai.core.observability.performance_manager import get_performance_manager
-from mozaiksai.core.workflow.orchestration_patterns import get_run_registry_summary
 
 # FastAPI app
 app = FastAPI(
@@ -346,6 +349,10 @@ try:
 except Exception as _ext_err:  # pragma: no cover
     wf_logger.debug(f"RUNTIME_EXTENSIONS_MOUNT_FAILED: {_ext_err}")
 
+# Mount first-class admin router
+from mozaiksai.core.admin import router as admin_router
+app.include_router(admin_router)
+
 
 mongo_client = None  # delay until startup so logging is definitely initialized
 simple_transport: Optional[SimpleTransport] = None
@@ -364,9 +371,10 @@ def _validate_internal_api_key(request: Request) -> None:
 async def health_active_runs(
     principal: UserPrincipal = Depends(require_any_auth),
 ):
-    """Return summary of active runs (in-memory registry)."""
+    """Return the current in-memory background workflow task snapshot."""
     try:
-        return get_run_registry_summary()
+        transport = await SimpleTransport.get_instance()
+        return transport.get_background_run_summary()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -666,6 +674,24 @@ async def startup():
         except Exception as _svc_err:
             wf_logger.debug(f"RUNTIME_EXTENSIONS_SERVICES_NOT_STARTED: {_svc_err}")
 
+        # Load discovered operations (if present)
+        _platform_path = os.environ.get("PLATFORM_PATH", "platform")
+        try:
+            _app_result = await AppLoader.load(_platform_path)
+            if _app_result.operations:
+                _mod_executor = OperationExecutor()
+                for _loaded_op in _app_result.operations:
+                    _mod_executor.register(_loaded_op.name, _loaded_op.handler)
+                executor_registry.register(_mod_executor)
+                wf_logger.info(
+                    f"OPERATION_EXECUTOR_READY: {len(_app_result.operations)} operation(s) registered "
+                    f"({[op.name for op in _app_result.operations]})"
+                )
+        except AppLoadError:
+            pass  # No app manifest — ai_only mode, operations not applicable
+        except Exception as _mod_err:
+            wf_logger.warning(f"MODULE_LOAD_FAILED: {_mod_err}")
+
         # Run platform extension startup hooks (mounts platform routes, inits managers)
         try:
             await get_platform_hooks().run_startup(app)
@@ -856,7 +882,11 @@ async def health_check(
             },
         )
         health_data = {
-            "status": "healthy",
+            # SDK-expected fields (primary)
+            "status": "ok",  # SDK expects "ok" not "healthy"
+            "version": os.getenv("MOZAIKS_VERSION", "5.0.0"),
+            "workflows_loaded": len(registered_workflows),
+            # Extended fields (for detailed health)
             "mongodb": "connected",
             "mongodb_ping_ms": round(mongo_ping_time, 2),
             "simple_transport": "initialized" if simple_transport else "not_initialized",
@@ -876,41 +906,6 @@ async def health_check(
 # ============================================================================
 # Chat Management Endpoints
 # ============================================================================
-
-def _maybe_enforce_principal_headers(*, app_id: str, user_id: Optional[str], headers: Any) -> None:
-    """Defense-in-depth: if a gateway supplies principal headers, enforce they match path/body values.
-
-    This keeps the runtime compatible with local/dev usage (headers absent) while allowing
-    an upstream gateway to pass trusted IDs derived from auth context and have the runtime verify them.
-    """
-    try:
-        expected_app_id = coalesce_app_id(app_id=app_id)
-        if not expected_app_id:
-            return
-
-        hdr_app = None
-        hdr_user = None
-        try:
-            hdr_app = headers.get("x-app-id") or headers.get("x-mozaiks-app-id")
-            hdr_user = headers.get("x-user-id") or headers.get("x-mozaiks-user-id")
-        except Exception:
-            hdr_app = None
-            hdr_user = None
-
-        if hdr_app:
-            resolved_hdr_app = coalesce_app_id(app_id=hdr_app)
-            if resolved_hdr_app and resolved_hdr_app != expected_app_id:
-                raise HTTPException(status_code=403, detail="app_id mismatch")
-
-        if hdr_user and user_id:
-            resolved_hdr_user = str(hdr_user).strip()
-            if resolved_hdr_user and resolved_hdr_user != str(user_id).strip():
-                raise HTTPException(status_code=403, detail="user_id mismatch")
-    except HTTPException:
-        raise
-    except Exception:
-        # Never hard-fail on header parsing; this is an optional check.
-        return
 
 
 @app.post("/api/chats/{app_id}/{workflow_name}/start")
@@ -940,11 +935,16 @@ async def start_chat(
             body_user_id = data.get("user_id")
             client_request_id = data.get("client_request_id")
             force_new = str(data.get("force_new", "false")).lower() in ("1", "true", "yes")
+            # Transition-seeded initial context: dict of key/value pairs merged into workflow context_variables at start.
+            transition_context: Dict[str, Any] = data.get("context_variables") or {}
+            # Trigger metadata: source, action_id, change_class, artifact_version_id
+            # Stored on session doc for observability/audit — not merged into context_variables.
+            trigger_meta: Dict[str, Any] = data.get("trigger_meta") or {}
             
             # Validate and get canonical user_id from JWT
             user_id = _validate_user_id_against_principal(principal, body_user_id=body_user_id)
 
-            # Platform hook: prerequisite gate check (no-op when no platform registered).
+            # Platform hook: prerequisite dependency check (no-op when no platform registered).
             ok, prereq_error = await get_platform_hooks().call_chat_prereqs(
                 app_id=app_id,
                 user_id=user_id,
@@ -979,6 +979,17 @@ async def start_chat(
 
             if reused_doc:
                 chat_id = reused_doc["chat_id"]
+                try:
+                    from mozaiksai.core.session import get_session_router
+
+                    await get_session_router().bind_workflow_session(
+                        app_id=app_id,
+                        user_id=user_id,
+                        workflow_id=workflow_name,
+                        chat_id=chat_id,
+                    )
+                except Exception as bind_err:
+                    logger.debug(f"session router bind skipped for reused chat {chat_id}: {bind_err}")
                 get_workflow_logger("shared_app").info(
                     "CHAT_SESSION_REUSED: Existing recent chat reused",
                     app_id=app_id,
@@ -1014,6 +1025,35 @@ async def start_chat(
                 extra_fields: Dict[str, Any] = {}
                 if client_request_id:
                     extra_fields["client_request_id"] = client_request_id
+                # Store trigger metadata for observability — not merged into context_variables
+                if trigger_meta and isinstance(trigger_meta, dict):
+                    allowed_trigger_keys = {"trigger_source", "action_id", "change_class", "artifact_version_id"}
+                    extra_fields["trigger_meta"] = {k: v for k, v in trigger_meta.items() if k in allowed_trigger_keys}
+                # Store transition-seeded context keys directly so fetch_chat_session_extra_context
+                # returns them and orchestration_patterns merges them into context_variables.
+                # SECURITY: only allow keys that are declared in the workflow's
+                # context_variables.yaml — prevents arbitrary key injection via URL ?context=.
+                if transition_context and isinstance(transition_context, dict):
+                    try:
+                        from mozaiksai.core.workflow.workflow_manager import workflow_manager
+                        wf_cfg = workflow_manager.get_config(workflow_name) or {}
+                        declared_keys: set = set(
+                            (wf_cfg.get("context_variables") or {}).get("definitions", {}).keys()
+                        )
+                    except Exception:
+                        declared_keys = set()
+                    for ctx_key, ctx_val in transition_context.items():
+                        if not isinstance(ctx_key, str) or not ctx_key.strip():
+                            continue
+                        # Allow key if workflow declares it, OR if no declarations found
+                        # (graceful degradation when context_variables.yaml is absent).
+                        if declared_keys and ctx_key not in declared_keys:
+                            wf_logger.warning(
+                                "TRANSITION_CONTEXT_KEY_REJECTED: undeclared key stripped from transition context",
+                                extra={"key": ctx_key, "workflow": workflow_name, "chat_id": chat_id},
+                            )
+                            continue
+                        extra_fields[ctx_key] = ctx_val
 
                 # Platform hook: inject extra session fields (journey metadata, etc.).
                 try:
@@ -1036,6 +1076,17 @@ async def start_chat(
                     user_id=user_id,
                     extra_fields=extra_fields or None,
                 )
+                try:
+                    from mozaiksai.core.session import get_session_router
+
+                    await get_session_router().bind_workflow_session(
+                        app_id=app_id,
+                        user_id=user_id,
+                        workflow_id=workflow_name,
+                        chat_id=chat_id,
+                    )
+                except Exception as bind_err:
+                    logger.debug(f"session router bind skipped for {chat_id}: {bind_err}")
             except Exception as ce:
                 logger.debug(f"chat_session pre-create skipped {chat_id}: {ce}")
 
@@ -1438,11 +1489,12 @@ async def delete_general_chats(
         raise HTTPException(status_code=500, detail=f"Failed to delete general chats: {e}")
 
 
-# NOTE: /api/general_chats/* routes are mounted by mozaiksai.platform
-# (Ask Mode / dual-mode UX) when RUNTIME_PLATFORM_EXTENSIONS is set.
-#
-# Fallback behavior below keeps frontend polling noise-free when those optional
-# extension routes are not mounted in the current runtime profile.
+# NOTE:
+# - These REST routes are optional platform enrichments for list/transcript UX.
+#   When platform routers are mounted via RUNTIME_PLATFORM_EXTENSIONS they may
+#   override these fallbacks.
+# - Fallback behavior below keeps frontend polling noise-free when optional
+#   platform routes are not present.
 
 
 @app.get("/api/notifications/count")
@@ -1676,31 +1728,52 @@ async def websocket_endpoint(
 
     wf_logger.info(f"🔌 New WebSocket connection for workflow '{workflow_name}' (incoming chat_id={chat_id}, ws_id={ws_id})")
 
-    # Auto resume vs new session selection
+    # SessionRouter-owned resume target resolution
     active_chat_id = chat_id
+    session_state_payload: Optional[Dict[str, Any]] = None
     try:
+        from mozaiksai.core.session import get_session_router
+
+        session_router = get_session_router()
+        resume_resolution = await session_router.resolve_resume(
+            app_id=app_id,
+            user_id=user_id,
+            requested_workflow_id=workflow_name,
+            requested_chat_id=chat_id,
+        )
+        resolved_chat_id = str(resume_resolution.get("chat_id") or "").strip()
+        if resolved_chat_id:
+            active_chat_id = resolved_chat_id
+        session_state_payload = resume_resolution.get("session_state") or None
+
         coll = await _chat_coll()
-        latest = await coll.find({
-            "workflow_name": workflow_name,
-            "user_id": user_id,
-            **build_app_scope_filter(app_id),
-        }).sort("created_at", -1).limit(1).to_list(length=1)
-        if latest:
-            latest_doc = latest[0]
-            latest_status = int(latest_doc.get("status", -1))
-            latest_id = latest_doc.get("_id")
-            if latest_status == 0:
-                active_chat_id = latest_id
-                wf_logger.info("WS_AUTO_RESUME", extra={"chat_id": active_chat_id, "incoming_chat_id": chat_id})
-            else:
-                # Ensure provided chat id exists (create minimal doc if missing)
-                if not await coll.find_one({"_id": chat_id, "user_id": user_id, **build_app_scope_filter(app_id)}):
-                    await persistence_manager.create_chat_session(chat_id, app_id, workflow_name, user_id)
-                    wf_logger.info("WS_NEW_SESSION_CREATED", extra={"chat_id": chat_id})
+        existing_doc = await coll.find_one(
+            {"_id": active_chat_id, "user_id": user_id, **build_app_scope_filter(app_id)},
+            {"_id": 1},
+        )
+        if not existing_doc:
+            await persistence_manager.create_chat_session(active_chat_id, app_id, workflow_name, user_id)
+            await session_router.bind_workflow_session(
+                app_id=app_id,
+                user_id=user_id,
+                workflow_id=workflow_name,
+                chat_id=active_chat_id,
+            )
+            session_state_payload = await session_router.get_session_snapshot(app_id=app_id, user_id=user_id)
+            wf_logger.info(
+                "WS_SESSION_CREATED",
+                extra={"chat_id": active_chat_id, "workflow_name": workflow_name, "resolved_from": resume_resolution.get("resolved_from")},
+            )
         else:
-            if not await coll.find_one({"_id": chat_id, "user_id": user_id, **build_app_scope_filter(app_id)}):
-                await persistence_manager.create_chat_session(chat_id, app_id, workflow_name, user_id)
-                wf_logger.info("WS_FIRST_SESSION_CREATED", extra={"chat_id": chat_id})
+            wf_logger.info(
+                "WS_AUTO_RESUME",
+                extra={
+                    "chat_id": active_chat_id,
+                    "incoming_chat_id": chat_id,
+                    "workflow_name": workflow_name,
+                    "resolved_from": resume_resolution.get("resolved_from"),
+                },
+            )
     except Exception as pre_err:
         wf_logger.error(f"WS_SESSION_DETERMINATION_FAILED: {pre_err}")
 
@@ -1708,7 +1781,7 @@ async def websocket_endpoint(
     async def _auto_start_if_needed():
         try:
             from mozaiksai.core.workflow.workflow_manager import workflow_manager
-            # In development, pick up YAML edits (startup_mode, initial_message, etc.)
+            # In development, pick up YAML edits (workflow_startup_mode, initial_message, etc.)
             # without requiring a Python process restart.
             try:
                 if os.getenv("ENVIRONMENT", "development").lower() != "production":
@@ -1717,14 +1790,14 @@ async def websocket_endpoint(
                 wf_logger.debug(f"Workflow hot-reload skipped for {workflow_name}: {reload_err}")
 
             cfg = workflow_manager.get_config(workflow_name) or {}
-            startup_mode = str(cfg.get("startup_mode", "AgentDriven"))
+            startup_mode = str(cfg.get("workflow_startup_mode") or "").strip() or "AgentDriven"
             if startup_mode != "AgentDriven":
                 wf_logger.debug(
                     "WS_AUTO_START_SKIPPED",
                     extra={
                         "workflow_name": workflow_name,
                         "chat_id": active_chat_id,
-                        "reason": f"startup_mode={startup_mode}",
+                        "reason": f"workflow_startup_mode={startup_mode}",
                     },
                 )
                 return
@@ -1817,6 +1890,17 @@ async def websocket_endpoint(
         if not chat_exists:
             try:
                 await persistence_manager.create_chat_session(active_chat_id, app_id, workflow_name, user_id)
+                try:
+                    from mozaiksai.core.session import get_session_router
+
+                    await get_session_router().bind_workflow_session(
+                        app_id=app_id,
+                        user_id=user_id,
+                        workflow_id=workflow_name,
+                        chat_id=active_chat_id,
+                    )
+                except Exception as bind_err:
+                    wf_logger.debug(f"WS backfill bind skipped for {active_chat_id}: {bind_err}")
                 chat_exists = True
                 wf_logger.info("WS_BACKFILL_SESSION_CREATED", extra={"chat_id": active_chat_id})
             except Exception as ce:
@@ -1827,6 +1911,17 @@ async def websocket_endpoint(
         except Exception as ce:
             cache_seed = None
             wf_logger.debug(f"cache_seed retrieval failed for WS {active_chat_id}: {ce}")
+
+        if session_state_payload is None:
+            try:
+                from mozaiksai.core.session import get_session_router
+
+                session_state_payload = await get_session_router().get_session_snapshot(
+                    app_id=app_id,
+                    user_id=user_id,
+                )
+            except Exception as session_err:
+                wf_logger.debug(f"session snapshot unavailable for {active_chat_id}: {session_err}")
 
         if simple_transport:
             # Attempt to include last_artifact for immediate restore (avoid separate HTTP roundtrip)
@@ -1864,6 +1959,7 @@ async def websocket_endpoint(
                 'status': doc.get("status") if doc else None,
                 'last_sequence': doc.get("last_sequence") if doc else None,
                 'created_at': created_at_iso,
+                'session_state': session_state_payload,
             }, active_chat_id)
             wf_logger.info(
                 "CHAT_META_EMITTED",
@@ -2081,32 +2177,398 @@ async def get_workflow_ui_tools_manifest(
 
 
 # ==============================================================================
+# BACKEND-TO-BACKEND WORKFLOW TRIGGER
+# ==============================================================================
+
+class TriggerWorkflowRequest(BaseModel):
+    """Request body for programmatic workflow trigger."""
+    user_id: str = Field(..., description="User ID to run workflow as")
+    app_id: Optional[str] = Field(None, description="Application ID (optional)")
+    context: Optional[Dict[str, Any]] = Field(None, description="Initial context variables")
+    webhook_url: Optional[str] = Field(None, description="URL to POST completion notification")
+
+
+@app.post("/api/workflows/{workflow_name}/trigger")
+async def trigger_workflow(
+    workflow_name: str,
+    request: TriggerWorkflowRequest,
+    principal: UserPrincipal = Depends(require_any_auth),
+):
+    """Trigger a workflow programmatically (backend-to-backend).
+
+    This endpoint creates a new chat session and optionally registers a webhook
+    for completion notification. Use this for automated workflows, scheduled tasks,
+    or child workflow spawning.
+
+    Returns:
+        - chat_id: The created chat session ID
+        - run_id: Alias for chat_id (for tracking)
+        - success: Whether the trigger was successful
+    """
+    try:
+        from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+        # Validate workflow exists
+        if workflow_name not in workflow_manager.get_all_workflow_names():
+            raise HTTPException(status_code=404, detail=f"Workflow '{workflow_name}' not found")
+
+        # Use provided app_id or generate one for headless runs
+        app_id = request.app_id or f"trigger-{workflow_name}"
+        user_id = request.user_id
+
+        # Generate chat ID (this is also the run_id)
+        chat_id = str(uuid4())
+        run_id = chat_id  # run_id is an alias for tracking
+
+        # Prepare extra fields for the session
+        extra_fields: Dict[str, Any] = {
+            "trigger_mode": "api",  # Mark as API-triggered
+        }
+
+        # Store webhook URL if provided (for completion notification)
+        if request.webhook_url:
+            extra_fields["webhook_url"] = request.webhook_url
+
+        # Store initial context if provided
+        if request.context:
+            extra_fields["initial_context"] = request.context
+
+        # Create the chat session
+        await persistence_manager.create_chat_session(
+            chat_id=chat_id,
+            app_id=app_id,
+            workflow_name=workflow_name,
+            user_id=user_id,
+            extra_fields=extra_fields,
+        )
+
+        # Initialize performance tracking
+        try:
+            perf_mgr = await get_performance_manager()
+            await perf_mgr.record_workflow_start(chat_id, app_id, workflow_name, user_id)
+        except Exception as perf_e:
+            logger.debug(f"perf_start skipped for trigger {chat_id}: {perf_e}")
+
+        get_workflow_logger("shared_app").info(
+            "WORKFLOW_TRIGGERED: Workflow triggered via API",
+            app_id=app_id,
+            workflow_name=workflow_name,
+            user_id=user_id,
+            chat_id=chat_id,
+            run_id=run_id,
+            has_webhook=bool(request.webhook_url),
+            has_context=bool(request.context),
+        )
+
+        return {
+            "success": True,
+            "chat_id": chat_id,
+            "run_id": run_id,
+            "workflow_name": workflow_name,
+            "app_id": app_id,
+            "user_id": user_id,
+            "websocket_url": f"/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}",
+            "message": "Workflow triggered. Connect via WebSocket or poll for completion.",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Failed to trigger workflow {workflow_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to trigger workflow: {e}")
+
+
+# ==============================================================================
 # PLATFORM CONFIG ENDPOINTS
 # ==============================================================================
 
+def _resolve_platform_path() -> Path:
+    """Resolve the active platform root directory."""
+    platform_path = os.environ.get("PLATFORM_PATH", "")
+    if platform_path:
+        candidate = Path(platform_path)
+        if candidate.is_absolute():
+            return candidate
+        return (Path(__file__).parent / candidate).resolve()
+    # Monorepo local dev default
+    monorepo = Path(__file__).parent / "mozaiks-platform" / "app"
+    if monorepo.is_dir():
+        return monorepo
+    return Path(__file__).parent / "platform"
+
+
 @app.get("/api/shell-config")
 async def get_shell_config():
-    """Return shell config derived from ai.json for frontend startup."""
-    config_dir = Path(__file__).parent / "platform" / "config"
-    ai_path = config_dir / "ai.json"
+    """Return app-shell config composed from app, AI, shell, page, UI, and workflow owners."""
+    platform_root = _resolve_platform_path()
+    ai_path = platform_root / "config" / "ai.json"
     if not ai_path.exists():
-        return {"chat_startup_mode": "ask"}
+        # Legacy fallback for repos still using ./platform/config as the active shell config.
+        ai_path = Path(__file__).parent / "platform" / "config" / "ai.json"
+
+    result: dict = {"chat_startup_mode": "ask", "landing_spot": "/"}
+
+    # 0a. App startup metadata belongs to app.json, not shell chrome.
     try:
-        ai = json.loads(ai_path.read_text(encoding="utf-8"))
-        chat = ai.get("chat") or {}
-        workflows = ai.get("workflows") or {}
-        return {
-            "chat_startup_mode": chat.get("chat_startup_mode") or chat.get("startup_mode") or "ask",
-            "entry_point": workflows.get("entry_point"),
-            "resume_policy": workflows.get("resume_policy"),
-        }
+        app_manifest_path = _resolve_app_manifest_path()
+        if app_manifest_path.exists():
+            app_manifest = json.loads(app_manifest_path.read_text(encoding="utf-8"))
+            startup = app_manifest.get("startup") if isinstance(app_manifest.get("startup"), dict) else {}
+            landing_spot = startup.get("landing_spot")
+            if isinstance(landing_spot, str) and landing_spot.startswith("/"):
+                result["landing_spot"] = landing_spot
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to read shell config: {e}")
+        logger.warning(f"[shell-config] Could not read app startup config: {e}")
+
+    if ai_path.exists():
+        try:
+            ai = json.loads(ai_path.read_text(encoding="utf-8"))
+            chat = ai.get("chat") or {}
+            workflows = ai.get("workflows") or {}
+            result["chat_startup_mode"] = chat.get("chat_startup_mode") or chat.get("startup_mode") or "ask"
+            result["entry_point"] = workflows.get("entry_point")
+            result["resume_policy"] = workflows.get("resume_policy")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to read shell config: {e}")
+
+    # 0b. Seed app-shell UI chrome from shell.json when available.
+    try:
+        shell_config_path = _resolve_shell_config_path()
+        if shell_config_path.exists():
+            shell_config = json.loads(shell_config_path.read_text(encoding="utf-8"))
+            for key in ("header", "profile", "notifications", "footer"):
+                value = shell_config.get(key)
+                if value is not None:
+                    result[key] = value
+    except Exception as e:
+        logger.warning(f"[shell-config] Could not read shell config: {e}")
+
+    # 1. Compose routes from owners. No central route manifest.
+    pages: List[dict] = []
+    try:
+        pages.extend(_load_ui_extension_pages(platform_root))
+    except Exception as e:
+        logger.warning(f"[shell-config] Could not read UI extension routes: {e}")
+    try:
+        pages.extend(_load_page_schema_routes(platform_root))
+    except Exception as e:
+        logger.warning(f"[shell-config] Could not read page schema routes: {e}")
+    try:
+        pages.extend(_load_workflow_entrypoint_pages(platform_root))
+    except Exception as e:
+        logger.warning(f"[shell-config] Could not read workflow entrypoint routes: {e}")
+
+    if pages:
+        result["pages"] = _dedupe_and_sort_pages(pages)
+
+    # 2. Auto-inject admin page when admin.json is present and enabled.
+    #    The generator writes admin.json; the runtime wires the route automatically.
+    admin_config_path = platform_root / "config" / "admin.json"
+    if admin_config_path.exists():
+        try:
+            admin_cfg = json.loads(admin_config_path.read_text(encoding="utf-8"))
+            if admin_cfg.get("enabled", True):
+                pages = result.get("pages", [])
+                if not any(p.get("path") == "/admin" for p in pages):
+                    pages.append({
+                        "path": "/admin",
+                        "component": "AdminPortal",
+                        "label": "Admin Portal",
+                        "order": 999,
+                        "meta": {
+                            "requiresAuth": True,
+                            "requiresRole": "admin",
+                            "title": "Admin Portal",
+                            "appShell": True,
+                        },
+                    })
+                    result["pages"] = pages
+        except Exception as e:
+            logger.warning(f"[shell-config] Could not read admin.json: {e}")
+
+    return result
+
+
+def _normalize_shell_page_entry(entry: dict, *, order_fallback: int) -> Optional[dict]:
+    if not isinstance(entry, dict):
+        return None
+    path = entry.get("path")
+    if not isinstance(path, str) or not path.startswith("/"):
+        return None
+    component = entry.get("component")
+    transition = entry.get("transition")
+    workflow = entry.get("workflow")
+    if not any(isinstance(value, str) and value.strip() for value in (component, transition, workflow)):
+        return None
+
+    meta = entry.get("meta") if isinstance(entry.get("meta"), dict) else {}
+    page: dict = {
+        "path": path,
+        "label": entry.get("label", ""),
+        "order": entry.get("order", order_fallback),
+        "meta": {
+            **meta,
+            "requiresAuth": entry.get("requiresAuth", True),
+        },
+    }
+    if isinstance(component, str) and component.strip():
+        page["component"] = component.strip()
+    if isinstance(transition, str) and transition.strip():
+        page["transition"] = transition.strip()
+    if isinstance(workflow, str) and workflow.strip():
+        page["workflow"] = workflow.strip()
+    if isinstance(entry.get("schema"), str) and entry["schema"].strip():
+        page["schema"] = entry["schema"].strip()
+    return page
+
+
+def _load_ui_extension_pages(platform_root: Path) -> List[dict]:
+    """Load persistent React page routes from UI extension owner manifests."""
+    candidates = [
+        (platform_root / ".." / "ui" / "extension.json").resolve(),
+        (platform_root / "ui" / "extension.json").resolve(),
+        (Path(__file__).parent / "platform" / "ui" / "extension.json").resolve(),
+    ]
+    manifest_path = next((candidate for candidate in candidates if candidate.exists()), None)
+    if manifest_path is None:
+        return []
+    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entries = raw.get("pages") if isinstance(raw, dict) else []
+    if not isinstance(entries, list):
+        return []
+    pages: List[dict] = []
+    for index, entry in enumerate(entries):
+        page = _normalize_shell_page_entry(entry, order_fallback=index)
+        if page:
+            pages.append(page)
+    return pages
+
+
+def _load_page_schema_routes(platform_root: Path) -> List[dict]:
+    """Derive SchemaPage routes directly from pages/*.yaml owner files."""
+    pages_dir = platform_root / "pages"
+    if not pages_dir.exists():
+        return []
+
+    candidates: List[Path] = []
+    for child in sorted(pages_dir.iterdir(), key=lambda item: item.name.lower()):
+        if child.is_file() and child.suffix.lower() in {".yaml", ".yml"}:
+            candidates.append(child)
+        elif child.is_dir() and (child / "page.yaml").exists():
+            candidates.append(child / "page.yaml")
+
+    pages: List[dict] = []
+    for index, page_path in enumerate(candidates):
+        raw = yaml.safe_load(page_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(raw, dict):
+            continue
+        route = raw.get("route")
+        if not isinstance(route, str) or not route.startswith("/"):
+            continue
+        name = str(raw.get("name") or page_path.stem).strip() or page_path.stem
+        title = str(raw.get("title") or name).strip()
+        roles = raw.get("roles")
+        meta: dict = {"title": title, "appShell": True}
+        if isinstance(roles, list) and roles:
+            meta["roles"] = roles
+        page = {
+            "path": route,
+            "label": title,
+            "component": "SchemaPage",
+            "schema": name,
+            "order": 100 + index,
+            "meta": meta,
+        }
+        page["meta"]["requiresAuth"] = True
+        pages.append(page)
+    return pages
+
+
+def _load_workflow_entrypoint_pages(platform_root: Path) -> List[dict]:
+    """Derive transition/workflow routes from extension_registry entrypoints."""
+    from mozaiksai.core.workflow.pack.config import list_entrypoints
+    from mozaiksai.core.workflow.pack.schema import parse_global_pack_graph
+
+    registry_path = platform_root / "workflows" / "extended_orchestration" / "extension_registry.json"
+    if not registry_path.exists():
+        return []
+    raw = json.loads(registry_path.read_text(encoding="utf-8"))
+    pack = parse_global_pack_graph(raw)
+
+    pages: List[dict] = []
+    for index, entry in enumerate(list_entrypoints(pack)):
+        raw = entry.model_dump(exclude_none=True)
+        page = _normalize_shell_page_entry(raw, order_fallback=200 + index)
+        if page:
+            pages.append(page)
+    return pages
+
+
+def _dedupe_and_sort_pages(pages: List[dict]) -> List[dict]:
+    by_path: Dict[str, dict] = {}
+    for page in pages:
+        path = page.get("path")
+        if isinstance(path, str) and path not in by_path:
+            by_path[path] = page
+    return sorted(
+        by_path.values(),
+        key=lambda page: (page.get("order", 0), str(page.get("label") or page.get("path") or "")),
+    )
+
+def _resolve_theme_config_path() -> Path:
+    """
+    Resolve the active theme config path from the current platform layout.
+
+    Supported layouts:
+      - product app bundle: <platform>/app + sibling <platform>/brand/theme_config.json
+      - legacy app bundle: <platform>/brand/theme_config.json
+      - OSS fallback: platform/config/theme_config.json
+    """
+    platform_root = _resolve_platform_path()
+    candidates = [
+        platform_root / ".." / "brand" / "theme_config.json",
+        platform_root / "brand" / "theme_config.json",
+        Path(__file__).parent / "platform" / "config" / "theme_config.json",
+    ]
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.exists():
+            return resolved
+    return candidates[-1].resolve()
+
+
+def _resolve_shell_config_path() -> Path:
+    """Resolve the active shell config path from the current platform layout."""
+    platform_root = _resolve_platform_path()
+    candidates = [
+        platform_root / "config" / "shell.json",
+        Path(__file__).parent / "platform" / "config" / "shell.json",
+    ]
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.exists():
+            return resolved
+    return candidates[-1].resolve()
+
+
+def _resolve_app_manifest_path() -> Path:
+    """Resolve the active app manifest path from the current platform layout."""
+    platform_root = _resolve_platform_path()
+    candidates = [
+        platform_root / "app.json",
+        Path(__file__).parent / "platform" / "app.json",
+    ]
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.exists():
+            return resolved
+    return candidates[-1].resolve()
+
 
 @app.get("/api/theme-config")
 async def get_theme_config():
     """Return theme config for frontend (no auth required for config)."""
-    config_path = Path(__file__).parent / "platform" / "config" / "theme_config.json"
+    config_path = _resolve_theme_config_path()
     if not config_path.exists():
         raise HTTPException(status_code=404, detail="Theme config not found")
     try:
@@ -2116,9 +2578,8 @@ async def get_theme_config():
 
 @app.get("/api/themes/{app_id}")
 async def get_app_theme(app_id: str):
-    """Return theme config for a specific app (falls back to default theme)."""
-    # For now, all apps use the same theme config
-    config_path = Path(__file__).parent / "platform" / "config" / "theme_config.json"
+    """Return theme config for a specific app (falls back to platform theme)."""
+    config_path = _resolve_theme_config_path()
     if not config_path.exists():
         raise HTTPException(status_code=404, detail="Theme config not found")
     try:
@@ -2127,30 +2588,684 @@ async def get_app_theme(app_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to read theme config: {e}")
 
 
+def _resolve_pages_dir() -> Path:
+    """Resolve the generated pages directory.
+
+    Preference order:
+      1. $PLATFORM_PATH/pages/          (production / container deploy)
+      2. mozaiks-platform/app/pages/    (local dev monorepo)
+      3. platform/pages/                (fallback)
+    """
+    platform_path = os.getenv("PLATFORM_PATH")
+    if platform_path:
+        candidate = Path(platform_path) / "pages"
+        if candidate.is_dir():
+            return candidate
+    # Monorepo local dev path
+    monorepo = Path(__file__).parent / "mozaiks-platform" / "app" / "pages"
+    if monorepo.is_dir():
+        return monorepo
+    return Path(__file__).parent / "platform" / "pages"
+
+
+@app.get("/api/pages/{name}")
+async def get_page_schema(name: str):
+    """Return a parsed AppPageSchema for the given page name.
+
+    Reads pages/{name}.yaml from the platform pages directory and returns it
+    as JSON. SchemaPage (frontend) calls this on mount to hydrate the page renderer.
+
+    No auth required — page schemas are static declarative config, not user data.
+    """
+    import re
+    # Sanitize: allow only alphanumeric, dash, underscore
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', name):
+        raise HTTPException(status_code=400, detail="Invalid page name")
+
+    pages_dir = _resolve_pages_dir()
+    page_path = pages_dir / f"{name}.yaml"
+
+    if not page_path.exists():
+        raise HTTPException(status_code=404, detail=f"Page '{name}' not found")
+
+    try:
+        content = page_path.read_text(encoding="utf-8")
+        schema = yaml.safe_load(content)
+        if not isinstance(schema, dict):
+            raise ValueError("Page schema must be a YAML mapping")
+        return JSONResponse(content=schema)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read page schema: {e}")
+
+
+# ==============================================================================
+# ROUTING TRANSITION ENDPOINTS
+# ==============================================================================
+
+def _load_pack_graph_or_404():
+    """Load the global pack graph or raise 404 if not found."""
+    from mozaiksai.core.workflow.pack.config import load_global_pack_graph
+    pack = load_global_pack_graph()
+    if pack is None:
+        raise HTTPException(status_code=404, detail="No extension registry found")
+    return pack
+
+
+def _validate_context_for_workflow(workflow_id: str, merged_context: Dict[str, Any]) -> Dict[str, Any]:
+    """Filter trigger context to keys declared in context_variables.yaml."""
+    validated_context: Dict[str, Any] = {}
+    if not merged_context:
+        return validated_context
+
+    try:
+        from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+        wf_cfg = workflow_manager.get_config(workflow_id) or {}
+        declared_keys = set((wf_cfg.get("context_variables") or {}).get("definitions", {}).keys())
+    except Exception:
+        declared_keys = set()
+
+    for key, value in merged_context.items():
+        if declared_keys and key not in declared_keys:
+            wf_logger.warning(
+                "TRIGGER_CONTEXT_KEY_REJECTED",
+                extra={"key": key, "workflow": workflow_id},
+            )
+            continue
+        validated_context[key] = value
+    return validated_context
+
+
+async def _create_routed_chat_session(
+    *,
+    workflow_id: str,
+    app_id: str,
+    user_id: str,
+    context_variables: Dict[str, Any],
+    trigger_meta: Dict[str, Any],
+    session_router: Optional[Any] = None,
+    journey_id: Optional[str] = None,
+) -> str:
+    """Create a workflow chat session and bind it to SessionRouter state."""
+    chat_id = str(uuid4())
+    extra_fields: Dict[str, Any] = {"trigger_meta": trigger_meta}
+    for key, value in context_variables.items():
+        extra_fields[key] = value
+
+    await persistence_manager.create_chat_session(
+        chat_id=chat_id,
+        app_id=app_id,
+        workflow_name=workflow_id,
+        user_id=user_id,
+        extra_fields=extra_fields or None,
+    )
+
+    if session_router is not None:
+        try:
+            await session_router.bind_workflow_session(
+                app_id=app_id,
+                user_id=user_id,
+                workflow_id=workflow_id,
+                chat_id=chat_id,
+                journey_id=journey_id,
+            )
+        except Exception as bind_err:
+            wf_logger.warning("Failed to bind SessionRouter chat session: %s", bind_err)
+
+    return chat_id
+
+
+def _extract_bearer_token(request: Request) -> Optional[str]:
+    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+    if not auth_header:
+        return None
+    if auth_header.lower().startswith("bearer "):
+        return auth_header[7:].strip() or None
+    return auth_header.strip() or None
+
+
+async def _execute_operation_action(
+    *,
+    operation_name: str,
+    action_name: str,
+    request: Request,
+    principal: Optional[UserPrincipal],
+    params: Dict[str, Any],
+    context_overrides: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """Dispatch an operation action through the registered OperationExecutor."""
+    module_executor = executor_registry.operation_executor
+    if module_executor is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Operation runtime is not available. Verify operations/*/operation.yaml handlers are loaded.",
+        )
+
+    context_overrides = context_overrides or {}
+    request_app_id = request.query_params.get("app_id")
+    request_tenant_id = request.query_params.get("tenant_id")
+    request_correlation_id = request.query_params.get("correlation_id")
+    app_id = (
+        context_overrides.get("app_id")
+        or request_app_id
+        or (principal.app_id if principal else None)
+        or "default"
+    )
+    tenant_id = (
+        context_overrides.get("tenant_id")
+        or request_tenant_id
+        or (principal.tenant_id if principal else None)
+    )
+    correlation_id = (
+        context_overrides.get("correlation_id")
+        or request_correlation_id
+        or str(uuid4())
+    )
+    auth_token = context_overrides.get("auth_token") or _extract_bearer_token(request)
+    context_user_id = context_overrides.get("user_id")
+    user_id = context_user_id or (principal.user_id if principal else None)
+
+    operation_request = OperationRequest(
+        operation=operation_name,
+        action=action_name,
+        params=params,
+        app_id=str(app_id),
+        user_id=str(user_id) if user_id else None,
+        tenant_id=str(tenant_id) if tenant_id else None,
+        auth_token=str(auth_token) if auth_token else None,
+        correlation_id=str(correlation_id) if correlation_id else None,
+    )
+
+    result = await module_executor.execute(operation_request, context=None)
+    if result.success:
+        return result.data if result.data is not None else {}
+
+    if result.error_code in {"OPERATION_NOT_FOUND", "ACTION_NOT_FOUND"}:
+        status_code = 404
+    elif result.error_code == "INVALID_PARAMS":
+        status_code = 400
+    else:
+        status_code = 500
+
+    raise HTTPException(
+        status_code=status_code,
+        detail={
+            "error": result.error or "Operation action failed",
+            "error_code": result.error_code or "EXECUTION_ERROR",
+            "operation": operation_name,
+            "action": action_name,
+        },
+    )
+
+
+@app.get("/api/operations/{operation_name}/{action_name}")
+async def execute_operation_action_get(
+    operation_name: str,
+    action_name: str,
+    request: Request,
+    principal: Optional[UserPrincipal] = Depends(optional_user),
+):
+    """Execute an operation action using query params as action params."""
+    reserved_keys = {"app_id", "tenant_id", "correlation_id", "auth_token"}
+    params = {
+        key: value
+        for key, value in request.query_params.items()
+        if key not in reserved_keys
+    }
+    return await _execute_operation_action(
+        operation_name=operation_name,
+        action_name=action_name,
+        request=request,
+        principal=principal,
+        params=params,
+    )
+
+
+@app.post("/api/operations/{operation_name}/{action_name}")
+async def execute_operation_action_post(
+    operation_name: str,
+    action_name: str,
+    request: Request,
+    principal: Optional[UserPrincipal] = Depends(optional_user),
+):
+    """Execute an operation action with JSON payload.
+
+    Supported payload shapes:
+    - `{...action_params}`
+    - `{"params": {...action_params}, "context": {"app_id": "...", "tenant_id": "..."}}`
+    """
+    body: Dict[str, Any] = {}
+    if request.headers.get("content-type", "").lower().startswith("application/json"):
+        try:
+            parsed = await request.json()
+            if isinstance(parsed, dict):
+                body = parsed
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid JSON payload.")
+
+    if isinstance(body.get("params"), dict):
+        params = dict(body.get("params") or {})
+    else:
+        params = dict(body)
+    context_overrides = body.get("context") if isinstance(body.get("context"), dict) else {}
+    params.pop("context", None)
+    params.pop("params", None)
+
+    return await _execute_operation_action(
+        operation_name=operation_name,
+        action_name=action_name,
+        request=request,
+        principal=principal,
+        params=params,
+        context_overrides=context_overrides,
+    )
+
+
+@app.get("/api/transitions/{transition_id}")
+async def get_transition_by_id(transition_id: str):
+    """Return a WorkflowTransition by id from the global extension registry.
+
+    The shell fetches this when it needs to mount a transition component.
+    No auth required — transition configs are static declarative config.
+    """
+    import re
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', transition_id):
+        raise HTTPException(status_code=400, detail="Invalid transition id")
+
+    pack = _load_pack_graph_or_404()
+    from mozaiksai.core.workflow.pack.config import get_transition
+    transition = get_transition(pack, transition_id)
+    if transition is None:
+        raise HTTPException(status_code=404, detail=f"Transition '{transition_id}' not found")
+
+    return transition.model_dump(exclude_none=True)
+
+
+class TransitionResolveRequest(BaseModel):
+    transition_id: str
+    option_id: Optional[str] = None
+    context_variables: Dict[str, Any] = Field(default_factory=dict)
+    app_id: Optional[str] = None
+    user_id: Optional[str] = None
+
+
+def _resolve_scope_from_principal(
+    principal: UserPrincipal,
+    *,
+    app_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    default_app_id: str = "default",
+) -> Tuple[str, str]:
+    """Resolve the effective app/user scope for HTTP workflow/session APIs.
+
+    Production stays principal-first. Local auth-disabled flows may provide
+    explicit caller scope in the request body so the shell can still create
+    deterministic transition and workflow sessions.
+    """
+    resolved_user_id = _validate_user_id_against_principal(principal, body_user_id=user_id)
+
+    provided_app_id = str(app_id or "").strip() or None
+    principal_app_id = str(principal.app_id or "").strip() or None
+
+    if principal_app_id and provided_app_id and provided_app_id != principal_app_id:
+        raise HTTPException(
+            status_code=403,
+            detail="app_id in request body does not match authenticated app scope",
+        )
+
+    resolved_app_id = principal_app_id or provided_app_id or default_app_id
+    if not resolved_app_id:
+        raise HTTPException(status_code=400, detail="app_id is required")
+
+    return resolved_app_id, resolved_user_id
+
+
+@app.post("/api/transitions/resolve")
+async def resolve_transition_route(
+    body: TransitionResolveRequest,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """Resolve a transition server-side and return the next transition or workflow session."""
+    try:
+        from mozaiksai.core.session import get_session_router
+
+        session_router = get_session_router()
+        app_id, user_id = _resolve_scope_from_principal(
+            principal,
+            app_id=body.app_id,
+            user_id=body.user_id,
+        )
+        resolution = await session_router.resolve_transition(
+            app_id=app_id,
+            user_id=user_id,
+            transition_id=body.transition_id,
+            option_id=body.option_id,
+            context_seed=body.context_variables or {},
+        )
+    except ValueError as route_err:
+        raise HTTPException(status_code=400, detail=str(route_err))
+    except Exception as route_err:
+        wf_logger.error("Transition resolution failed: %s", route_err, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to resolve transition: {route_err}")
+
+    pack = _load_pack_graph_or_404()
+
+    if resolution.resolution_type == "transition":
+        from mozaiksai.core.workflow.pack.config import get_transition
+
+        next_transition = get_transition(pack, resolution.target_id)
+        if next_transition is None:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Transition '{resolution.target_id}' could not be loaded after resolution",
+            )
+
+        return {
+            "resolution_type": "transition",
+            "transition_id": body.transition_id,
+            "option_id": resolution.option_id,
+            "next_transition_id": resolution.target_id,
+            "transition": next_transition.model_dump(exclude_none=True),
+            "context_variables": resolution.context_seed,
+        }
+
+    route_decision = resolution.routing_decision
+    if route_decision is None:
+        raise HTTPException(status_code=500, detail="Workflow transition resolution is missing routing decision")
+
+    resolved_workflow_id = route_decision.workflow_id
+    validated_context = _validate_context_for_workflow(
+        resolved_workflow_id,
+        resolution.context_seed,
+    )
+    trigger_meta = {
+        "trigger_source": "transition",
+        "transition_id": body.transition_id,
+        "option_id": body.option_id,
+        "requested_workflow_id": route_decision.requested_workflow_id,
+        "resolved_workflow_id": resolved_workflow_id,
+        "rerouted_by_dependency": bool(route_decision.rerouted_by_dependency),
+    }
+    try:
+        chat_id = await _create_routed_chat_session(
+            workflow_id=resolved_workflow_id,
+            app_id=app_id,
+            user_id=user_id,
+            context_variables=validated_context,
+            trigger_meta=trigger_meta,
+            session_router=session_router,
+        )
+    except Exception as session_err:
+        raise HTTPException(status_code=500, detail=f"Failed to create session: {session_err}")
+
+    return {
+        "resolution_type": "workflow",
+        "chat_id": chat_id,
+        "workflow_id": resolved_workflow_id,
+        "option_id": resolution.option_id,
+        "requested_workflow_id": route_decision.requested_workflow_id,
+        "websocket_url": f"/ws/{resolved_workflow_id}/{app_id}/{chat_id}/{user_id}",
+        "routing_explanation": route_decision.explanation,
+        "rerouted_by_dependency": bool(route_decision.rerouted_by_dependency),
+    }
+
+
+@app.get("/api/session/state")
+async def get_session_state(
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """Return the canonical SessionRouter state for the authenticated user/app scope."""
+    from mozaiksai.core.session import get_session_router
+
+    snapshot = await get_session_router().get_session_snapshot(
+        app_id=principal.app_id,
+        user_id=principal.user_id,
+    )
+    return {"session_state": snapshot}
+
+
+class SessionApprovalAwaitRequest(BaseModel):
+    approval_id: str
+    workflow_id: Optional[str] = None
+    chat_id: Optional[str] = None
+
+
+@app.post("/api/session/approvals/await")
+async def mark_session_awaiting_approval(
+    body: SessionApprovalAwaitRequest,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """Mark the current session as awaiting explicit human approval."""
+    from mozaiksai.core.session import get_session_router
+
+    snapshot = await get_session_router().mark_awaiting_approval(
+        app_id=principal.app_id,
+        user_id=principal.user_id,
+        approval_id=body.approval_id,
+        workflow_id=body.workflow_id,
+        chat_id=body.chat_id,
+    )
+    return {"session_state": snapshot}
+
+
+class SessionApprovalResolveRequest(BaseModel):
+    approval_id: str
+    approved: bool = True
+
+
+@app.post("/api/session/approvals/resolve")
+async def resolve_session_approval(
+    body: SessionApprovalResolveRequest,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """Resolve an explicit human approval checkpoint on the current session."""
+    from mozaiksai.core.session import get_session_router
+
+    snapshot = await get_session_router().resolve_approval(
+        app_id=principal.app_id,
+        user_id=principal.user_id,
+        approval_id=body.approval_id,
+        approved=body.approved,
+    )
+    return {"session_state": snapshot}
+
+
+# ==============================================================================
+# UNIFIED WORKFLOW TRIGGER ENDPOINT
+# ==============================================================================
+
+class WorkflowTriggerRequest(BaseModel):
+    """Unified trigger intake for all non-chat trigger sources.
+
+    trigger_source: one of transition | action | event | schedule | refinement | chat
+    workflow_id:    workflow to start — for refinement triggers, omit to let the
+                    router resolve the correct re-entry point automatically.
+    context_variables: keys merged into workflow context at start (validated against declared keys)
+    action_id:      for action triggers — which page action fired it
+    change_class:   for refinement — patch | design | feature | core
+    artifact_version_id: for refinement — which artifact is being refined
+    artifact_kind:  for refinement routing — app_bundle | workflow_bundle | design_docs | concept
+    raw_user_request: for refinement — natural-language change description (stored on ChangeRequest)
+    """
+    workflow_id: Optional[str] = None
+    trigger_source: str = "chat"
+    context_variables: Dict[str, Any] = Field(default_factory=dict)
+    action_id: Optional[str] = None
+    change_class: Optional[str] = None
+    artifact_version_id: Optional[str] = None
+    artifact_kind: Optional[str] = None
+    raw_user_request: Optional[str] = None
+    app_id: Optional[str] = None
+    user_id: Optional[str] = None
+
+
+@app.post("/api/workflows/trigger")
+async def trigger_workflow(
+    body: WorkflowTriggerRequest,
+    request: Request,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """Unified trigger endpoint for workflow starts from non-chat sources.
+
+    SessionRouter owns trigger routing:
+      - refinement re-entry workflow resolution
+      - hard dependency enforcement and prerequisite reroute
+      - session-level lifecycle state persistence
+    """
+    app_id, user_id = _resolve_scope_from_principal(
+        principal,
+        app_id=body.app_id,
+        user_id=body.user_id,
+    )
+
+    valid_change_classes = {"patch", "design", "feature", "core"}
+    if body.change_class and body.change_class not in valid_change_classes:
+        raise HTTPException(status_code=400, detail=f"Invalid change_class. Must be one of: {valid_change_classes}")
+
+    try:
+        from mozaiksai.core.session import TriggerInput, get_session_router
+
+        session_router = get_session_router()
+        routing_decision = await session_router.route_trigger(
+            TriggerInput(
+                app_id=app_id,
+                user_id=user_id,
+                trigger_source=body.trigger_source,
+                workflow_id=body.workflow_id,
+                change_class=body.change_class,
+                artifact_kind=body.artifact_kind,
+                artifact_version_id=body.artifact_version_id,
+                raw_user_request=body.raw_user_request,
+                context_variables=body.context_variables or {},
+            )
+        )
+    except ValueError as route_err:
+        raise HTTPException(status_code=400, detail=str(route_err))
+    except HTTPException:
+        raise
+    except Exception as route_err:
+        wf_logger.error("SessionRouter routing failed: %s", route_err, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to route workflow trigger: {route_err}")
+
+    resolved_workflow_id = routing_decision.workflow_id
+    context_from_router: Dict[str, Any] = dict(routing_decision.context_seed)
+
+    # ── Context validation ────────────────────────────────────────────────────
+    # Merge router seed + caller context; validate against declared keys.
+    merged_context = {**context_from_router, **body.context_variables}
+    validated_context = _validate_context_for_workflow(resolved_workflow_id, merged_context)
+
+    # ── Persist ChangeRequest for refinement observability ───────────────────
+    if body.trigger_source == "refinement" and body.change_class:
+        try:
+            _coll = await persistence_manager._coll()
+            change_request_doc = {
+                "kind": "change_request",
+                "app_id": app_id,
+                "user_id": user_id,
+                "artifact_kind": body.artifact_kind or "app_bundle",
+                "artifact_version_id": body.artifact_version_id,
+                "raw_user_request": body.raw_user_request,
+                "classification": body.change_class,
+                "router_decision": {
+                    "workflow_id": resolved_workflow_id,
+                    "explanation": routing_decision.explanation,
+                    "is_full_restart": routing_decision.is_full_restart,
+                    "rerouted_by_dependency": routing_decision.rerouted_by_dependency,
+                },
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+            await _coll.insert_one(change_request_doc)
+        except Exception as persist_err:
+            wf_logger.warning("Failed to persist ChangeRequest: %s", persist_err)
+
+    # ── Create chat session ───────────────────────────────────────────────────
+    try:
+        trigger_meta: Dict[str, Any] = {
+            "trigger_source": body.trigger_source,
+            **({"action_id": body.action_id} if body.action_id else {}),
+            **({"change_class": body.change_class} if body.change_class else {}),
+            **({"artifact_version_id": body.artifact_version_id} if body.artifact_version_id else {}),
+            **({"artifact_kind": body.artifact_kind} if body.artifact_kind else {}),
+            "requested_workflow_id": routing_decision.requested_workflow_id,
+            "resolved_workflow_id": resolved_workflow_id,
+            "rerouted_by_dependency": bool(routing_decision.rerouted_by_dependency),
+        }
+        chat_id = await _create_routed_chat_session(
+            workflow_id=resolved_workflow_id,
+            app_id=app_id,
+            user_id=user_id,
+            context_variables=validated_context,
+            trigger_meta=trigger_meta,
+            session_router=session_router,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create session: {e}")
+
+    wf_logger.info(
+        "WORKFLOW_TRIGGERED",
+        extra={
+            "workflow_id": resolved_workflow_id,
+            "requested_workflow_id": routing_decision.requested_workflow_id,
+            "trigger_source": body.trigger_source,
+            "change_class": body.change_class,
+            "routing_explanation": routing_decision.explanation,
+            "rerouted_by_dependency": bool(routing_decision.rerouted_by_dependency),
+            "chat_id": chat_id,
+            "app_id": app_id,
+            "user_id": user_id,
+        },
+    )
+
+    return {
+        "chat_id": chat_id,
+        "workflow_id": resolved_workflow_id,
+        "requested_workflow_id": routing_decision.requested_workflow_id,
+        "websocket_url": f"/ws/{resolved_workflow_id}/{app_id}/{chat_id}/{user_id}",
+        "trigger_source": body.trigger_source,
+        "routing_explanation": routing_decision.explanation,
+        "rerouted_by_dependency": bool(routing_decision.rerouted_by_dependency),
+    }
+
+
 @app.get("/api/workflows")
 async def get_workflows(
     principal: UserPrincipal = Depends(require_any_auth),
 ):
-    """Get all workflows for frontend (alias for /api/workflows/config)"""
+    """Get all workflows in SDK-friendly format.
+
+    Returns a list of workflow info objects suitable for SDK consumption.
+    For the raw config dict format, use /api/workflows/config instead.
+    """
     try:
         from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
         workflow_names = sorted(workflow_manager.get_all_workflow_names())
-        # Platform hook: reorder by journey step sequence when pack config present.
+        # Platform hook: reorder by workflow sequence when pack config present.
         ordered_names = get_platform_hooks().call_workflow_ordering(workflow_names)
 
-        configs: dict = {}
+        workflows_list = []
         for workflow_name in ordered_names:
-            configs[workflow_name] = workflow_manager.get_config(workflow_name)
+            config = workflow_manager.get_config(workflow_name)
+            # Build SDK-friendly workflow info
+            workflows_list.append({
+                "name": workflow_name,
+                "display_name": config.get("display_name") or config.get("name") or workflow_name,
+                "initial_agent": config.get("initial_agent"),
+                "visual_agents": config.get("visual_agents") or [],
+                "status": "ready",
+            })
 
         get_workflow_logger("shared_app").info(
-            "WORKFLOWS_REQUESTED: Workflows requested by frontend",
-            workflow_count=len(configs),
+            "WORKFLOWS_REQUESTED: Workflows requested (SDK format)",
+            workflow_count=len(workflows_list),
         )
-        return configs
+        return {"workflows": workflows_list}
 
     except Exception as e:
-        logger.error(f"? Failed to get workflows: {e}")
+        logger.error(f"❌ Failed to get workflows: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve workflows")
 
 @app.get("/api/workflows/config")
@@ -2179,7 +3294,7 @@ async def get_workflow_configs(
         raise HTTPException(status_code=500, detail="Failed to retrieve workflow configurations")
 
 # NOTE: /api/workflows/{app_id}/available is mounted by mozaiksai.platform
-# (pack-gated workflow availability) when RUNTIME_PLATFORM_EXTENSIONS is set.
+# (pack dependency-aware workflow availability) when RUNTIME_PLATFORM_EXTENSIONS is set.
 
 @app.post("/chat/{app_id}/{chat_id}/component_action")
 async def handle_component_action(
@@ -2304,7 +3419,7 @@ async def submit_ui_tool_response(
 @app.get("/api/download/workflow-file")
 async def download_workflow_file(
     file_path: str,
-    service: ServicePrincipal = Depends(require_internal),
+    principal: Optional[UserPrincipal] = Depends(optional_user),
 ):
     """
     Download a single workflow file.

@@ -15,6 +15,7 @@ Each handler processes a specific set of AG2 event types:
     - CompletionHandler: RunCompletionEvent
     - UsageSummaryHandler: UsageSummaryEvent
     - TransitionHandler: AfterWorksTransitionEvent
+    - MozaiksaiEventHandler: custom mozaiksai AG2 events
     - GroupChatRunHandler: GroupChatRunChatEvent
     - GroupChatResumeHandler: GroupChatResumeEvent
     - ErrorHandler: ErrorEvent
@@ -28,6 +29,7 @@ from .speaker_handler import SelectSpeakerHandler
 from .tool_handler import ToolCallHandler, ToolResponseHandler
 from .completion_handler import CompletionHandler, UsageSummaryHandler
 from .transition_handler import TransitionHandler
+from .mozaiks_event_handler import MozaiksaiEventHandler
 from .group_chat_handler import GroupChatRunHandler, GroupChatResumeHandler
 from .error_handler import ErrorHandler
 from .streaming_handler import StreamingEventHandler
@@ -52,6 +54,7 @@ __all__ = [
     "UsageSummaryHandler",
     # Transition handlers
     "TransitionHandler",
+    "MozaiksaiEventHandler",
     # Group chat handlers
     "GroupChatRunHandler",
     "GroupChatResumeHandler",

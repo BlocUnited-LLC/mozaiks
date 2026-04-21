@@ -1,55 +1,41 @@
 # ==============================================================================
 # FILE: mozaiksai/core/workflow/stream/handlers/transition_handler.py
-# DESCRIPTION: Handler for AfterWorksTransitionEvent (handoff_to_user)
+# DESCRIPTION: Handler for AG2 transition events
 # ==============================================================================
 
 """
 Transition Event Handler
 
-Handles AG2 group transition events, particularly detecting when the workflow
-hands off to the user via RevertToUserTarget.
+Handles AG2 group transition events, particularly when the workflow resolves
+an after-work transition to RevertToUserTarget.
 
-When handoff_to_user is detected:
-1. Emits input_request event to UI
-2. Sets stream state to completed
-3. Signals event loop to break
+These events are informational. The live pause/resume path is AG2's native
+InputRequestEvent, which carries the respond callback used by the runtime to
+continue execution. Mozaiks UI tools remain a separate custom wait path.
 """
 
 from typing import TYPE_CHECKING, Any, Dict, Optional, Set, Type
+
+from autogen.agentchat.group.events.transition_events import AfterWorksTransitionEvent
+from autogen.agentchat.group.targets.transition_target import RevertToUserTarget
 
 from .base import BaseEventHandler
 
 if TYPE_CHECKING:
     from ..context import StreamContext, StreamState
 
-# Import AG2 transition types conditionally.
-try:
-    from autogen.agentchat.group import RevertToUserTarget
-    from autogen.agentchat.group.events import AfterWorksTransitionEvent
-    HAS_HANDOFF_EVENTS = True
-except ImportError:
-    HAS_HANDOFF_EVENTS = False
-    AfterWorksTransitionEvent = type(None)  # type: ignore
-    RevertToUserTarget = type(None)  # type: ignore
-
 
 class TransitionHandler(BaseEventHandler):
     """
     Handler for AfterWorksTransitionEvent.
 
-    Detects handoff_to_user transitions (RevertToUserTarget) and emits
-    input_request events to the UI. Terminates the event stream when
-    handoff is detected.
-
-    This handler is critical for group-chat patterns where agents can hand off
-    control back to the user mid-conversation.
+    Detects native AG2 transitions to RevertToUserTarget and records them in
+    logs only. The actual user-input handoff remains driven by InputRequestEvent.
     """
 
     def event_types(self) -> Set[Type]:
-        """Return AfterWorksTransitionEvent if available."""
-        if HAS_HANDOFF_EVENTS:
-            return {AfterWorksTransitionEvent}
-        return set()
+        """Return the AG2 transition event type handled by this class."""
+        return {AfterWorksTransitionEvent}
 
     async def handle(
         self,
@@ -58,80 +44,43 @@ class TransitionHandler(BaseEventHandler):
         state: "StreamState",
     ) -> Optional[Dict[str, Any]]:
         """
-        Handle AfterWorksTransitionEvent, detecting handoff_to_user.
+        Handle AfterWorksTransitionEvent.
 
-        When RevertToUserTarget is detected:
-        1. Extract source agent name
-        2. Log the handoff
-        3. Mark stream state as completed
-        4. Return input_request payload for UI
+        A user-target transition is native AG2 metadata. It must not synthesize
+        an extra input request or terminate the event loop because AG2's
+        InputRequestEvent is the canonical live input channel.
 
         Args:
             event: AfterWorksTransitionEvent instance
             ctx: Stream context
-            state: Stream state (will be modified)
+            state: Stream state
 
         Returns:
-            input_request payload if handoff_to_user, None otherwise
+            None. Transition metadata is not forwarded to the UI as a second
+            pause mechanism.
         """
-        if not HAS_HANDOFF_EVENTS:
-            return None
-
-        # Check if this is a handoff to user
-        target = getattr(event, "target", None)
+        target = getattr(event, "transition_target", None)
         if not isinstance(target, RevertToUserTarget):
-            # Not a user handoff - could be agent-to-agent transition
             ctx.wf_logger.debug(
                 f" [{ctx.workflow_name_upper}] Transition event to non-user target: "
                 f"{type(target).__name__ if target else 'None'}"
             )
             return None
 
-        # Extract source agent information
-        source_agent = getattr(event, "source", None)
+        source_agent = getattr(event, "source_agent", None)
         if source_agent:
             source_name = getattr(source_agent, "name", None) or str(source_agent)
         else:
             source_name = "Agent"
 
         ctx.wf_logger.info(
-            f" [{ctx.workflow_name_upper}] Handoff to user detected from {source_name}. "
-            f"Emitting input_request and ending stream."
+            f" [{ctx.workflow_name_upper}] Observed native AG2 handoff to user from "
+            f"{source_name}. Waiting for InputRequestEvent to drive live resume."
         )
-
-        # Mark stream state for termination
-        state.run_completed = True
-        state.handoff_to_user = True
-
-        # Build input_request payload for UI
-        return {
-            "kind": "input_request",
-            "agent": source_name,
-            "prompt": "",
-            "chat_id": ctx.chat_id,
-            "metadata": {
-                "source": "handoff_to_user",
-                "transition_target": "RevertToUserTarget",
-            },
-        }
+        return None
 
     def should_break(self, event: Any, state: "StreamState") -> bool:
         """
-        Break out of event loop on handoff_to_user.
-
-        The stream should terminate when control is handed to the user,
-        as the AG2 task will be waiting for input that won't come through
-        the event stream.
-
-        Args:
-            event: The transition event
-            state: Current stream state
-
-        Returns:
-            True if handoff_to_user was detected
+        Transition metadata must not terminate the event loop.
         """
-        return state.handoff_to_user
-
-    def priority(self) -> int:
-        """High priority to ensure handoff detection happens first."""
-        return 10
+        return False

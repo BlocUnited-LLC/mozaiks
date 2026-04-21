@@ -186,9 +186,7 @@ def test_workflow_manager_accepts_valid_declarative_bundle(tmp_path: Path) -> No
         "\n".join(
             [
                 "visual_agents:",
-                "  - Planner",
-                "chat_pane_agents:",
-                "  - Planner",
+                "  - Planner"
             ]
         ),
     )
@@ -219,3 +217,184 @@ def test_workflow_manager_accepts_valid_declarative_bundle(tmp_path: Path) -> No
     assert isinstance((config.get("agents") or {}).get("agents"), dict)
     assert isinstance(config.get("tools"), list)
     assert isinstance(config.get("handoffs", {}).get("handoff_rules"), list)
+
+
+def test_workflow_manager_normalizes_ui_tool_contract_defaults(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "FlowUiContractDefaults"
+    wf_dir.mkdir(parents=True)
+    _write_minimal_orchestrator_and_agents(wf_dir, "FlowUiContractDefaults")
+    _write_yaml(
+        wf_dir / "tools.yaml",
+        "\n".join(
+            [
+                "tools:",
+                "  - agent: Planner",
+                "    file: render_panel.py",
+                "    function: render_panel",
+                "    tool_type: UI_Tool",
+                "    ui:",
+                "      component: PlanPanel",
+                "      mode: artifact",
+            ]
+        ),
+    )
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    manager = _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(tmp_path))
+    info = manager.get_workflow_info("FlowUiContractDefaults")
+    config = manager.get_config("FlowUiContractDefaults")
+
+    assert info is not None
+    assert info.get("status") == "loaded"
+    tool = (config.get("tools") or [])[0]
+    ui_contract = tool.get("ui_contract") or {}
+    assert ui_contract.get("surface_kind") == "agent_tool"
+    assert (ui_contract.get("payload_schema") or {}).get("type") == "object"
+    assert ui_contract.get("actions_schema") == []
+
+
+def test_workflow_manager_rejects_agent_tool_with_ui_contract(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "FlowInvalidAgentUiContract"
+    wf_dir.mkdir(parents=True)
+    _write_minimal_orchestrator_and_agents(wf_dir, "FlowInvalidAgentUiContract")
+    _write_yaml(
+        wf_dir / "tools.yaml",
+        "\n".join(
+            [
+                "tools:",
+                "  - agent: Planner",
+                "    file: execute.py",
+                "    function: execute",
+                "    tool_type: Agent_Tool",
+                "    ui_contract:",
+                "      surface_kind: agent_tool",
+                "      payload_schema:",
+                "        type: object",
+                "      actions_schema: []",
+            ]
+        ),
+    )
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    manager = _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(tmp_path))
+    info = manager.get_workflow_info("FlowInvalidAgentUiContract")
+
+    assert info is not None
+    assert info.get("status") == "error"
+    assert "tools.yaml" in str(info.get("error") or "")
+
+
+def test_workflow_manager_rejects_agent_tool_with_ui_block(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "FlowInvalidAgentUi"
+    wf_dir.mkdir(parents=True)
+    _write_minimal_orchestrator_and_agents(wf_dir, "FlowInvalidAgentUi")
+    _write_yaml(
+        wf_dir / "tools.yaml",
+        "\n".join(
+            [
+                "tools:",
+                "  - agent: Planner",
+                "    file: execute.py",
+                "    function: execute",
+                "    tool_type: Agent_Tool",
+                "    ui:",
+                "      component: PlanPanel",
+                "      mode: inline",
+            ]
+        ),
+    )
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    manager = _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(tmp_path))
+    info = manager.get_workflow_info("FlowInvalidAgentUi")
+
+    assert info is not None
+    assert info.get("status") == "error"
+    assert "tools.yaml" in str(info.get("error") or "")
+
+
+def test_workflow_manager_accepts_ui_surface_without_ui_contract(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "FlowUiSurface"
+    wf_dir.mkdir(parents=True)
+    _write_minimal_orchestrator_and_agents(wf_dir, "FlowUiSurface")
+    _write_yaml(
+        wf_dir / "tools.yaml",
+        "\n".join(
+            [
+                "tools:",
+                "  - agent: Planner",
+                "    file: render_panel.py",
+                "    function: render_panel",
+                "    tool_type: UI_Surface",
+                "    ui:",
+                "      component: PlanPanel",
+                "      mode: artifact",
+            ]
+        ),
+    )
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    manager = _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(tmp_path))
+    info = manager.get_workflow_info("FlowUiSurface")
+    config = manager.get_config("FlowUiSurface")
+
+    assert info is not None
+    assert info.get("status") == "loaded"
+    tool = (config.get("tools") or [])[0]
+    assert tool["tool_type"] == "UI_Surface"
+    assert tool.get("ui", {}).get("component") == "PlanPanel"
+    assert tool.get("ui_contract") is None
+
+
+def test_workflow_manager_rejects_manifest_tool_integration_metadata(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "FlowInvalidToolIntegration"
+    wf_dir.mkdir(parents=True)
+    _write_minimal_orchestrator_and_agents(wf_dir, "FlowInvalidToolIntegration")
+    _write_yaml(
+        wf_dir / "tools.yaml",
+        "\n".join(
+            [
+                "tools:",
+                "  - agent: Planner",
+                "    file: execute.py",
+                "    function: execute",
+                "    tool_type: Agent_Tool",
+                "    integration: Slack",
+            ]
+        ),
+    )
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    manager = _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(tmp_path))
+    info = manager.get_workflow_info("FlowInvalidToolIntegration")
+
+    assert info is not None
+    assert info.get("status") == "error"
+    assert "tools.yaml" in str(info.get("error") or "")
+
+
+def test_build_workflows_load_from_workspace_bundle() -> None:
+    workflows_root = Path(__file__).resolve().parents[1] / "platform" / "workflows"
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    manager = _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(workflows_root))
+
+    discovery_info = manager.get_workflow_info("ExistingAppDiscovery")
+    joke_factory_info = manager.get_workflow_info("JokeFactory")
+    joke_worker_info = manager.get_workflow_info("JokeWorker")
+    discovery_config = manager.get_config("ExistingAppDiscovery")
+    joke_factory_config = manager.get_config("JokeFactory")
+    joke_worker_config = manager.get_config("JokeWorker")
+
+    assert discovery_info is not None
+    assert discovery_info.get("status") == "loaded"
+    assert joke_factory_info is not None
+    assert joke_factory_info.get("status") == "loaded"
+    assert joke_worker_info is not None
+    assert joke_worker_info.get("status") == "loaded"
+    assert discovery_config.get("workflow_name") == "ExistingAppDiscovery"
+    assert joke_factory_config.get("workflow_name") == "JokeFactory"
+    assert joke_worker_config.get("workflow_name") == "JokeWorker"
+    assert discovery_config.get("tools")
+    assert joke_factory_config.get("tools")
+    assert (joke_worker_config.get("structured_outputs") or {}).get("registry")

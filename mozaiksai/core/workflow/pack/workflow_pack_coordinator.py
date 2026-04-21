@@ -1,4 +1,4 @@
-# === MOZAIKS-CORE-HEADER ===
+
 # FILE: mozaiksai/core/workflow/pack/workflow_pack_coordinator.py
 # DESCRIPTION: Runtime fan-out/fan-in coordinator for per-workflow mid-flight journeys.
 # ==============================================================================
@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id
+from mozaiksai.core.data.models import WorkflowStatus
 from mozaiksai.core.workflow.pack.config import load_workflow_pack_graph
 from mozaiksai.core.workflow.pack.mfj_observability import (
     MFJObservationContext,
@@ -32,6 +33,7 @@ from mozaiksai.core.workflow.pack.resume_contract import (
     build_resume_context_payload,
 )
 from mozaiksai.core.workflow.pack.schema import MFJContract, MidFlightJourney
+from mozaiksai.core.workflow.runtime_signals import SYSTEM_RESUME_SIGNAL
 
 logger = get_core_logger("workflow_pack_coordinator")
 
@@ -56,7 +58,7 @@ class _ActivePackRun:
     user_id: str
     ws_id: Optional[int]
     trigger: MidFlightJourney
-    trigger_agent: str
+    decomposition_agent: str
     merge_strategy: MergeStrategy
     on_partial_failure: str
     max_retry_rounds: int
@@ -127,9 +129,10 @@ class WorkflowPackCoordinator:
 
     async def handle_journey_triggered(self, event: Dict[str, Any]) -> None:
         try:
-            agent_name = str(event.get("agent_name") or event.get("agent") or "").strip()
-            structured_data = event.get("structured_data")
-            context = event.get("context") if isinstance(event.get("context"), dict) else {}
+            event_payload = self._unwrap_trigger_event(event)
+            agent_name = str(event_payload.get("agent_name") or event_payload.get("agent") or "").strip()
+            structured_data = event_payload.get("structured_data")
+            context = event_payload.get("context") if isinstance(event_payload.get("context"), dict) else {}
             parent_chat_id = str(context.get("chat_id") or "").strip()
             parent_workflow = str(context.get("workflow_name") or "").strip()
         except Exception:
@@ -189,7 +192,6 @@ class WorkflowPackCoordinator:
                 sorted(self._completed_mfjs.get(parent_chat_id, set())),
             )
             return
-
         missing = self._validate_input_contract(parent_ctx, trigger.fan_out.input_contract)
         if missing:
             self._observer.on_contract_violation(
@@ -225,6 +227,23 @@ class WorkflowPackCoordinator:
         user_id = str(parent_conn.get("user_id") or context.get("user_id") or "").strip()
         ws_id_raw = parent_conn.get("ws_id")
         ws_id = int(ws_id_raw) if isinstance(ws_id_raw, int) else None
+        if not user_id:
+            try:
+                pm = transport._get_or_create_persistence_manager()
+                coll = await pm._coll()
+                parent_doc = await coll.find_one(
+                    {"_id": parent_chat_id, **build_app_scope_filter(app_id)},
+                    projection={"user_id": 1},
+                )
+                if isinstance(parent_doc, dict):
+                    user_id = str(parent_doc.get("user_id") or "").strip()
+            except Exception as exc:
+                logger.warning(
+                    "[PACK] Failed to resolve persisted user_id for parent=%s trigger=%s: %s",
+                    parent_chat_id,
+                    trigger.id,
+                    exc,
+                )
         if not user_id:
             logger.warning("[PACK] Missing user_id for parent=%s trigger=%s", parent_chat_id, trigger.id)
             return
@@ -267,7 +286,7 @@ class WorkflowPackCoordinator:
             user_id=user_id,
             ws_id=ws_id,
             trigger=trigger,
-            trigger_agent=agent_name,
+            decomposition_agent=agent_name,
             merge_strategy=merge_strategy,
             on_partial_failure=trigger.fan_in.on_partial_failure,
             max_retry_rounds=self._max_retry_rounds,
@@ -399,11 +418,18 @@ class WorkflowPackCoordinator:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _unwrap_trigger_event(event: Dict[str, Any]) -> Dict[str, Any]:
+        payload = event.get("payload")
+        if isinstance(payload, dict):
+            return payload
+        return event
+
+    @staticmethod
     def _find_trigger(mfjs: Sequence[MidFlightJourney], agent_name: str) -> Optional[MidFlightJourney]:
         for entry in mfjs:
-            if entry.trigger_on != "agent_output":
+            if entry.trigger_on != "decomposition_event":
                 continue
-            if entry.trigger_agent == agent_name:
+            if entry.decomposition_agent == agent_name:
                 return entry
         return None
 
@@ -472,6 +498,9 @@ class WorkflowPackCoordinator:
                 "initial_agent": raw.get("initial_agent"),
                 "task_index": idx,
             }
+            context_variables = raw.get("context_variables")
+            if isinstance(context_variables, dict):
+                spec["context_variables"] = dict(context_variables)
             specs.append(spec)
         return specs
 
@@ -608,13 +637,24 @@ class WorkflowPackCoordinator:
             "mfj_child_spec": child_spec,
         }
 
+        child_context_variables = child_spec.get("context_variables")
+        if isinstance(child_context_variables, dict):
+            for key, value in child_context_variables.items():
+                extra[str(key)] = value
+
         for key, value in trigger.fan_out.child_context_seed.items():
             extra[key] = value
 
         include_keys = list(trigger.fan_out.input_contract.required) + list(trigger.fan_out.input_contract.optional)
-        for key in include_keys:
-            if key in active.parent_context_snapshot:
-                extra[key] = active.parent_context_snapshot[key]
+        if include_keys:
+            for key in include_keys:
+                if key in active.parent_context_snapshot:
+                    extra[key] = active.parent_context_snapshot[key]
+        else:
+            # Simpler authoring default: if no input contract is declared, pass through
+            # the full parent context snapshot to each child.
+            for key, value in active.parent_context_snapshot.items():
+                extra.setdefault(key, value)
         return extra
 
     @staticmethod
@@ -947,12 +987,16 @@ class WorkflowPackCoordinator:
             return
         pm = transport._get_or_create_persistence_manager()
         coll = await pm._coll()
-        updates: Dict[str, Any] = {key: merged, "last_updated_at": datetime.now(timezone.utc)}
+        updates: Dict[str, Any] = {
+            key: merged,
+            "status": int(WorkflowStatus.IN_PROGRESS),
+            "last_updated_at": datetime.now(timezone.utc),
+        }
         for r_key, r_value in (resume_context or {}).items():
             updates[str(r_key)] = r_value
         await coll.update_one(
             {"_id": parent_chat_id, **build_app_scope_filter(app_id)},
-            {"$set": updates},
+            {"$set": updates, "$unset": {"completed_at": ""}},
         )
 
     async def _resume_parent(
@@ -967,17 +1011,47 @@ class WorkflowPackCoordinator:
     ) -> None:
         existing = transport._background_tasks.get(active.parent_chat_id)
         if existing and not existing.done():
-            return
+            logger.info(
+                "[PACK] Waiting for parent task to settle before resume parent=%s trigger=%s",
+                active.parent_chat_id,
+                active.trigger_id,
+            )
+            try:
+                await existing
+            except Exception as exc:
+                logger.debug(
+                    "[PACK] Parent task ended with error before resume parent=%s trigger=%s: %s",
+                    active.parent_chat_id,
+                    active.trigger_id,
+                    exc,
+                )
 
+        pm = transport._get_or_create_persistence_manager()
+        await pm.persist_initial_messages(
+            chat_id=active.parent_chat_id,
+            app_id=active.app_id,
+            messages=[
+                {
+                    "role": "assistant",
+                    "name": active.resume_entry_agent,
+                    "content": SYSTEM_RESUME_SIGNAL,
+                }
+            ],
+        )
+
+        from mozaiksai.core.adapters.ag2_orchestration import get_ag2_adapter
+        from mozaiksai.core.ports.orchestration import ResumeRequest
+
+        adapter = get_ag2_adapter()
         transport._background_tasks[active.parent_chat_id] = asyncio.create_task(
-            transport._run_workflow_background(
-                chat_id=active.parent_chat_id,
-                workflow_name=active.parent_workflow_name,
-                app_id=active.app_id,
-                user_id=active.user_id,
-                ws_id=active.ws_id,
-                initial_message=None,
-                initial_agent_name_override=active.resume_entry_agent,
+            adapter.resume(
+                ResumeRequest(
+                    workflow_name=active.parent_workflow_name,
+                    app_id=active.app_id,
+                    chat_id=active.parent_chat_id,
+                    user_id=active.user_id,
+                    resume_agent=active.resume_agent,
+                )
             )
         )
 

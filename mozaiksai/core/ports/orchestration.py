@@ -1,4 +1,4 @@
-# === MOZAIKS-CORE-HEADER ===
+
 # FILE: mozaiksai/core/ports/orchestration.py
 # DESCRIPTION: OrchestrationPort — the engine-agnostic contract surface for all
 #              workflow execution in mozaiksai.
@@ -43,7 +43,6 @@ class RunStatus(Enum):
     """Outcome of a single run/resume invocation."""
 
     COMPLETED = "completed"
-    HANDOFF_TO_USER = "handoff_to_user"
     PAUSED = "paused"          # explicit pause (fan-out, budget, etc.)
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -106,7 +105,6 @@ class RunResult:
     status: RunStatus
     chat_id: str
     workflow_name: str
-    handoff_to_user: bool = False
     # Merged child outputs (populated after fan-in).
     merged_context: Optional[Dict[str, Any]] = None
     # Token / cost accounting.
@@ -149,7 +147,6 @@ class OrchestrationPort(Protocol):
         """Resume a paused workflow.
 
         Typical triggers:
-        - User submitted input after handoff-to-user
         - Fan-in complete — parent resumes with merged child context
         - User clicked "continue" after a checkpoint
         """

@@ -1,5 +1,0 @@
-definitions: {}
-
-agents:
-  ChildWorkerAgent:
-    variables: []

@@ -71,8 +71,13 @@ def run(args):
     print(f"Preset: {preset}")
     print(f"Target: {target_dir}\n")
 
+    # Collect admin email when the preset includes admin portal
+    admin_email = None
+    if TIER_PRESETS[preset].get("admin"):
+        admin_email = _prompt_admin_email()
+
     # Create platform structure
-    _create_platform_structure(platform_dir, preset, app_name)
+    _create_platform_structure(platform_dir, preset, app_name, admin_email)
 
     # Create minimal workflow example
     _create_minimal_workflow(platform_dir, preset)
@@ -82,15 +87,36 @@ def run(args):
     if features.get("chat_ui"):
         _create_minimal_page(platform_dir)
 
+    features = TIER_PRESETS[preset]
     print("\nProject initialized successfully.")
     print("\nNext Steps:")
     print(f"  1. cd {target_dir}")
     print("  2. Set up environment variables (.env)")
     print("  3. Run: python run_server.py")
+    if features.get("admin"):
+        print(f"\n  Admin portal: http://localhost:8000/admin")
+        print(f"  Log in with the email you configured in platform/config/admin.json")
     print(f"\nTo add more features: mozaiks add <feature>")
 
 
-def _create_platform_structure(platform_dir: Path, preset: str, app_name: str):
+def _prompt_admin_email() -> str:
+    """Prompt for the admin email address. Falls back to a placeholder if skipped."""
+    print("Admin portal is included in this preset.")
+    print("Enter the email address for the admin account.")
+    print("This is the email you will use to log in to the /admin portal.")
+    print("(Press Enter to skip and set it later in platform/config/admin.json)\n")
+    try:
+        email = input("Admin email: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        email = ""
+    if not email:
+        print("Skipped — update admin_emails in platform/config/admin.json before deploying.\n")
+        return "admin@example.com"
+    print(f"Admin email set to: {email}\n")
+    return email
+
+
+def _create_platform_structure(platform_dir: Path, preset: str, app_name: str, admin_email: str = None):
     """Create basic platform/ directory structure."""
     # Create directories
     platform_dir.mkdir(parents=True, exist_ok=True)
@@ -109,7 +135,6 @@ def _create_platform_structure(platform_dir: Path, preset: str, app_name: str):
             "mobile": False,
         },
         "authRequired": features.get("auth", False),
-        "admins": ["admin@example.com"] if features.get("admin") else [],
     }
 
     app_json_path = platform_dir / "app.json"
@@ -118,6 +143,27 @@ def _create_platform_structure(platform_dir: Path, preset: str, app_name: str):
         f.write("\n")
 
     print(f"Created platform/app.json (preset={preset})")
+
+    # Create platform/config/admin.json when preset includes admin portal
+    if features.get("admin"):
+        resolved_email = admin_email or "admin@example.com"
+        admin_config = {
+            "_comment": "Admin portal config. Set admin_emails to the email(s) that should have admin access.",
+            "enabled": True,
+            "admin_emails": [resolved_email],
+            "panels": ["stats", "runs", "sessions"],
+            "roles": ["admin"],
+            "features": {
+                "user_management": False,
+                "billing": False,
+                "audit_log": False,
+            },
+        }
+        admin_json_path = platform_dir / "config" / "admin.json"
+        with open(admin_json_path, "w", encoding="utf-8") as f:
+            json.dump(admin_config, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        print(f"Created platform/config/admin.json (admin: {resolved_email})")
 
 
 def _create_minimal_workflow(platform_dir: Path, preset: str):
@@ -156,7 +202,6 @@ triggers:
           Greet the user warmly.
           Ask one clarifying question before giving suggestions.
     max_consecutive_auto_reply: 5
-    auto_tool_mode: false
     structured_outputs_required: false
 """
 

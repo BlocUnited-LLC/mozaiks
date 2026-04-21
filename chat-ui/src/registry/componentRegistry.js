@@ -1,7 +1,7 @@
 /**
  * Component Registry
  *
- * Central registry for mapping component names (from navigation.json) to React components.
+ * Central registry for mapping component names from backend-composed navigation to React components.
  * Platform and workflow UI packages can register additional components at runtime.
  *
  * @module @mozaiks/chat-ui/registry
@@ -11,7 +11,7 @@ const registry = new Map();
 
 /**
  * Register a component in the registry
- * @param {string} name - Component name (used in navigation.json)
+ * @param {string} name - Component name used in backend-composed navigation
  * @param {React.ComponentType} component - React component
  * @param {Object} options - Optional metadata
  * @param {boolean} options.core - Whether this is a core component

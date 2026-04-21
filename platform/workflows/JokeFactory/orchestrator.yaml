@@ -1,14 +1,14 @@
 # JokeFactory Workflow Orchestrator
-# A fun, interactive joke generation workflow
+# MFJ-enabled: decomposer fans out to 3 parallel JokeWorker chats,
+# presenter collects fan-in results.
 
 workflow_name: JokeFactory
-max_turns: 20
+max_turns: 30
 human_in_the_loop: true
 workflow_startup_mode: AgentDriven
 orchestration_pattern: DefaultPattern
 initial_message_to_user: null
-initial_message: >
-  You are part of a collaborative comedy team. JokeHostAgent, welcome the user
-  and ask them what kind of jokes they'd like to hear today.
+initial_message:
+  You are part of a collaborative comedy production. JokeHostAgent, welcome the
+  user and find out what kind of jokes they want today.
 initial_agent: JokeHostAgent
-

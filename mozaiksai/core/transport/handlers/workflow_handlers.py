@@ -128,7 +128,8 @@ async def handle_switch_workflow(
                             user_id=str(active_context.user_id),
                             ws_id=ws_id,
                             initial_message=None,
-                        )
+                        ),
+                        name=f"workflow:{active_context.workflow_name}:{target_chat_id_str}",
                     )
     except Exception as native_start_err:
         logger.warning(
@@ -229,35 +230,53 @@ async def handle_start_workflow(
     if not ws_id or not ent_id or not usr_id:
         raise ValueError("Missing connection metadata")
 
-    # Validate pack prerequisites
-    from mozaiksai.core.workflow.pack.gating import validate_pack_prereqs
+    from mozaiksai.core.session import TriggerInput, get_session_router
+
     pm = transport._get_or_create_persistence_manager()
-    ok, prereq_error = await validate_pack_prereqs(
-        app_id=str(ent_id),
-        user_id=str(usr_id),
-        workflow_name=str(target_workflow),
-        persistence=pm,
+    session_router = get_session_router()
+    route_decision = await session_router.route_trigger(
+        TriggerInput(
+            app_id=str(ent_id),
+            user_id=str(usr_id),
+            trigger_source="chat",
+            workflow_id=str(target_workflow),
+        )
     )
-    if not ok:
+    resolved_workflow = route_decision.workflow_id
+    if route_decision.rerouted_by_dependency and route_decision.unmet_dependency is not None:
         await websocket.send_json({
-            "type": "chat.prereq_blocked",
+            "type": "chat.workflow_rerouted",
             "data": {
-                "workflow_name": str(target_workflow),
-                "message": prereq_error or "Prerequisites not met",
-                "error_code": "WORKFLOW_PREREQS_NOT_MET",
+                "requested_workflow_name": str(target_workflow),
+                "resolved_workflow_name": resolved_workflow,
+                "reason": route_decision.unmet_dependency.reason,
+                "blocked_workflow_name": route_decision.unmet_dependency.blocked_workflow_id,
             },
             "chat_id": chat_id,
             "timestamp": utc_timestamp(),
         })
-        return
 
     # Create new chat session
-    new_chat_id = f"chat_{target_workflow}_{uuid.uuid4().hex[:8]}"
+    new_chat_id = f"chat_{resolved_workflow}_{uuid.uuid4().hex[:8]}"
     await pm.create_chat_session(
         chat_id=new_chat_id,
         app_id=str(ent_id),
-        workflow_name=str(target_workflow),
+        workflow_name=str(resolved_workflow),
         user_id=str(usr_id),
+        extra_fields={
+            "trigger_meta": {
+                "trigger_source": "chat",
+                "requested_workflow_id": str(target_workflow),
+                "resolved_workflow_id": str(resolved_workflow),
+                "rerouted_by_dependency": bool(route_decision.rerouted_by_dependency),
+            }
+        },
+    )
+    await session_router.bind_workflow_session(
+        app_id=str(ent_id),
+        user_id=str(usr_id),
+        workflow_id=str(resolved_workflow),
+        chat_id=new_chat_id,
     )
 
     # Store frontend context
@@ -271,19 +290,20 @@ async def handle_start_workflow(
     session_registry.add_workflow(
         ws_id=ws_id,
         chat_id=new_chat_id,
-        workflow_name=target_workflow,
+        workflow_name=resolved_workflow,
         app_id=ent_id,
         user_id=usr_id,
         auto_activate=True
     )
 
-    logger.info(f"Started new workflow {target_workflow} (chat_id={new_chat_id}, ws_id={ws_id})")
+    logger.info(f"Started new workflow {resolved_workflow} (chat_id={new_chat_id}, ws_id={ws_id})")
 
     await websocket.send_json({
         "type": "chat.workflow_started",
         "data": {
             "chat_id": new_chat_id,
-            "workflow_name": target_workflow,
+            "workflow_name": resolved_workflow,
+            "requested_workflow_name": str(target_workflow),
             "app_id": ent_id,
             "user_id": usr_id
         },
@@ -295,13 +315,14 @@ async def handle_start_workflow(
         transport._background_tasks[new_chat_id] = asyncio.create_task(
             transport._run_workflow_background(
                 chat_id=new_chat_id,
-                workflow_name=str(target_workflow),
+                workflow_name=str(resolved_workflow),
                 app_id=str(ent_id),
                 user_id=str(usr_id),
                 ws_id=ws_id,
                 initial_message=str(initial_message) if isinstance(initial_message, str) and initial_message.strip() else None,
                 initial_agent_name_override=str(initial_agent_name_override) if isinstance(initial_agent_name_override, str) and initial_agent_name_override.strip() else None,
-            )
+            ),
+            name=f"workflow:{resolved_workflow}:{new_chat_id}",
         )
 
 
@@ -327,7 +348,8 @@ async def handle_start_workflow_batch(
         raise ValueError("runs must be a non-empty list")
 
     pm = transport._get_or_create_persistence_manager()
-    from mozaiksai.core.workflow.pack.gating import validate_pack_prereqs
+    from mozaiksai.core.session import TriggerInput, get_session_router
+    session_router = get_session_router()
 
     started: List[Dict[str, Any]] = []
     blocked: List[Dict[str, Any]] = []
@@ -343,41 +365,49 @@ async def handle_start_workflow_batch(
         initial_agent_name_override = run.get("initial_agent") or run.get("initial_agent_name")
         label = run.get("label")
 
-        ok, prereq_error = await validate_pack_prereqs(
-            app_id=str(ent_id),
-            user_id=str(usr_id),
-            workflow_name=str(target_workflow),
-            persistence=pm,
+        route_decision = await session_router.route_trigger(
+            TriggerInput(
+                app_id=str(ent_id),
+                user_id=str(usr_id),
+                trigger_source="chat",
+                workflow_id=str(target_workflow),
+            )
         )
-        if not ok:
+        resolved_workflow = route_decision.workflow_id
+
+        if route_decision.rerouted_by_dependency and route_decision.unmet_dependency is not None:
             blocked.append({
                 "workflow_name": str(target_workflow),
-                "reason": prereq_error or "Prerequisites not met",
+                "reason": route_decision.unmet_dependency.reason,
+                "rerouted_to": resolved_workflow,
             })
-            await websocket.send_json({
-                "type": "chat.prereq_blocked",
-                "data": {
-                    "workflow_name": str(target_workflow),
-                    "message": prereq_error or "Prerequisites not met",
-                    "error_code": "WORKFLOW_PREREQS_NOT_MET",
-                },
-                "chat_id": chat_id,
-                "timestamp": utc_timestamp(),
-            })
-            continue
 
-        new_chat_id = f"chat_{target_workflow}_{uuid.uuid4().hex[:8]}"
+        new_chat_id = f"chat_{resolved_workflow}_{uuid.uuid4().hex[:8]}"
         await pm.create_chat_session(
             chat_id=new_chat_id,
             app_id=str(ent_id),
-            workflow_name=str(target_workflow),
+            workflow_name=str(resolved_workflow),
             user_id=str(usr_id),
+            extra_fields={
+                "trigger_meta": {
+                    "trigger_source": "chat",
+                    "requested_workflow_id": str(target_workflow),
+                    "resolved_workflow_id": str(resolved_workflow),
+                    "rerouted_by_dependency": bool(route_decision.rerouted_by_dependency),
+                }
+            },
+        )
+        await session_router.bind_workflow_session(
+            app_id=str(ent_id),
+            user_id=str(usr_id),
+            workflow_id=str(resolved_workflow),
+            chat_id=new_chat_id,
         )
 
         session_registry.add_workflow(
             ws_id=ws_id,
             chat_id=new_chat_id,
-            workflow_name=str(target_workflow),
+            workflow_name=str(resolved_workflow),
             app_id=str(ent_id),
             user_id=str(usr_id),
             auto_activate=bool(activate_first and i == 0),
@@ -385,17 +415,32 @@ async def handle_start_workflow_batch(
 
         started.append({
             "chat_id": new_chat_id,
-            "workflow_name": str(target_workflow),
+            "workflow_name": str(resolved_workflow),
+            "requested_workflow_name": str(target_workflow),
             "app_id": str(ent_id),
             "user_id": str(usr_id),
             "label": str(label) if label else None,
         })
 
+        if route_decision.rerouted_by_dependency and route_decision.unmet_dependency is not None:
+            await websocket.send_json({
+                "type": "chat.workflow_rerouted",
+                "data": {
+                    "requested_workflow_name": str(target_workflow),
+                    "resolved_workflow_name": str(resolved_workflow),
+                    "reason": route_decision.unmet_dependency.reason,
+                    "blocked_workflow_name": route_decision.unmet_dependency.blocked_workflow_id,
+                },
+                "chat_id": chat_id,
+                "timestamp": utc_timestamp(),
+            })
+
         await websocket.send_json({
             "type": "chat.workflow_started",
             "data": {
                 "chat_id": new_chat_id,
-                "workflow_name": str(target_workflow),
+                "workflow_name": str(resolved_workflow),
+                "requested_workflow_name": str(target_workflow),
                 "app_id": str(ent_id),
                 "user_id": str(usr_id),
                 "label": str(label) if label else None,
@@ -407,13 +452,14 @@ async def handle_start_workflow_batch(
             transport._background_tasks[new_chat_id] = asyncio.create_task(
                 transport._run_workflow_background(
                     chat_id=new_chat_id,
-                    workflow_name=str(target_workflow),
+                    workflow_name=str(resolved_workflow),
                     app_id=str(ent_id),
                     user_id=str(usr_id),
                     ws_id=ws_id,
                     initial_message=str(initial_message) if isinstance(initial_message, str) and initial_message.strip() else None,
                     initial_agent_name_override=str(initial_agent_name_override) if isinstance(initial_agent_name_override, str) and initial_agent_name_override.strip() else None,
-                )
+                ),
+                name=f"workflow:{resolved_workflow}:{new_chat_id}",
             )
 
     # Summary ack

@@ -2,7 +2,7 @@
 
 Tests verify:
 1. Config files exist in platform/config/
-2. theme_config.json has merged brand + ui data
+2. theme_config.json owns brand/theme tokens and shell.json owns shell chrome
 3. ai.json has workflow entry point and startup mode
 4. Old brand/public config files are removed
 5. config_loader.py resolves to platform/config/
@@ -35,6 +35,7 @@ def load_json(relpath):
 CONFIG_FILES = [
     "platform/config/ai.json",
     "platform/config/theme_config.json",
+    "platform/config/shell.json",
 ]
 
 
@@ -55,17 +56,18 @@ class TestAIConfig:
     def ai(self):
         return load_json("platform/config/ai.json")
 
-    def test_has_engine_framework(self, ai):
-        assert ai["engine"]["framework"] == "ag2"
+    def test_has_no_legacy_engine_block(self, ai):
+        assert "engine" not in ai
 
     def test_has_workflow_entry_point(self, ai):
-        assert ai["workflows"]["entry_point"] == "GreenRoom"
+        assert isinstance(ai["workflows"]["entry_point"], str)
+        assert ai["workflows"]["entry_point"]
 
     def test_has_chat_startup_mode(self, ai):
         assert ai["chat"]["chat_startup_mode"] == "ask"
 
 
-# ── 2. theme_config.json — merged brand + ui ────────────────────────────────
+# ── 2. theme_config.json — brand + theme tokens ─────────────────────────────
 
 class TestThemeConfigMerged:
     @pytest.fixture
@@ -74,7 +76,7 @@ class TestThemeConfigMerged:
 
     def test_has_identity(self, theme):
         assert "identity" in theme
-        assert theme["identity"]["name"] == "mozaiksai"
+        assert theme["identity"]["name"].lower() == "mozaiksai"
 
     def test_has_tagline(self, theme):
         assert theme["identity"]["tagline"] == "AI-Powered Workflows"
@@ -122,37 +124,18 @@ class TestThemeConfigMerged:
         for name in ("primary", "secondary", "elevated", "focus"):
             assert name in theme["shadows"]
 
-    def test_has_ui_section(self, theme):
-        assert "ui" in theme
-
     def test_ui_has_chat(self, theme):
         chat = theme["ui"]["chat"]
         assert "modes" in chat
         assert "ask" in chat["modes"]
         assert "workflow" in chat["modes"]
 
-    def test_ui_has_header(self, theme):
-        header = theme["ui"]["header"]
-        assert "logo" in header
-        assert header["logo"]["src"] == "mozaik_logo.svg"
-
-    def test_ui_has_profile(self, theme):
-        profile = theme["ui"]["profile"]
-        assert profile["icon"] == "profile.svg"
-        assert profile["defaultLabel"] == "Commander"
-        menu_ids = [m.get("id") for m in profile["menu"]]
-        assert "admin-portal" in menu_ids
-        assert "signout" in menu_ids
-
-    def test_ui_has_notifications(self, theme):
-        notif = theme["ui"]["notifications"]
-        assert notif["icon"] == "notifications.svg"
-        assert notif["show"] is True
-
-    def test_ui_has_footer(self, theme):
-        footer = theme["ui"]["footer"]
-        assert len(footer["links"]) >= 3
-        assert footer["visible"] is True
+    def test_theme_does_not_own_shell_ui(self, theme):
+        ui = theme["ui"]
+        assert "header" not in ui
+        assert "profile" not in ui
+        assert "notifications" not in ui
+        assert "footer" not in ui
 
     def test_has_available_themes(self, theme):
         assert "available_themes" in theme
@@ -168,13 +151,37 @@ class TestThemeConfigMerged:
         assert "Rajdhani" in theme["typography"]["font_family"]
 
 
+class TestShellConfig:
+    @pytest.fixture
+    def shell(self):
+        return load_json("platform/config/shell.json")
+
+    def test_has_header(self, shell):
+        assert shell["header"]["logo"]["src"] == "mozaik_logo.svg"
+        assert len(shell["header"]["actions"]) >= 1
+
+    def test_has_profile(self, shell):
+        assert shell["profile"]["icon"] == "profile.svg"
+        assert shell["profile"]["defaultLabel"] == "Commander"
+        menu_ids = [m.get("id") for m in shell["profile"]["menu"] if isinstance(m, dict)]
+        assert "admin-portal" in menu_ids
+        assert "signout" in menu_ids
+
+    def test_has_notifications(self, shell):
+        assert shell["notifications"]["icon"] == "notifications.svg"
+        assert shell["notifications"]["show"] is True
+
+    def test_has_footer(self, shell):
+        assert len(shell["footer"]["links"]) >= 3
+        assert shell["footer"]["visible"] is True
+
+
 # ── 3. Deprecated config files removed ───────────────────────────────────────
 
 REMOVED_CONFIG_FILES = [
     "platform/config/navigation_config.json",
     "platform/config/settings_config.json",
     "platform/config/notifications_config.json",
-    "platform/config/admin.json",
     "platform/config/module_registry.json",
     "platform/config/subscription_config.json",
 ]
@@ -255,8 +262,14 @@ class TestValidateConfigUpdated:
     def test_validates_theme_config(self, source):
         assert "validateThemeConfig" in source
 
+    def test_validates_shell_config(self, source):
+        assert "validateShellConfig" in source
+
     def test_fetches_from_api(self, source):
         assert "/api/theme-config" in source
+
+    def test_fetches_shell_config_api(self, source):
+        assert "/api/shell-config" in source
 
 
 class TestNavigationProviderUpdated:

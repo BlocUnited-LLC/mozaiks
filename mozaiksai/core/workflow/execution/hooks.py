@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional, Callable
 import importlib
 import inspect
 import logging
+import sys
 import time
 from functools import wraps
 import yaml
@@ -54,6 +55,17 @@ class RegisteredHook:
     agent: str
     hook_type: str
     function_qualname: str
+
+
+def _ensure_workflow_import_paths(workflow_path: Path) -> None:
+    """Expose the active workflows package before importing hook modules."""
+    for candidate in (workflow_path.parent.parent, workflow_path.parent, workflow_path, workflow_path / "tools"):
+        try:
+            value = str(candidate.resolve())
+        except Exception:
+            value = str(candidate)
+        if value and value not in sys.path:
+            sys.path.insert(0, value)
 
 
 def _resolve_import(workflow_name: str, file_value: Optional[str], function_value: str, workflow_path: Path) -> tuple[Optional[Callable], str]:
@@ -95,6 +107,7 @@ def _resolve_import(workflow_name: str, file_value: Optional[str], function_valu
             fn_name = function_value.split('.')[-1]
 
     try:
+        _ensure_workflow_import_paths(workflow_path)
         mod = importlib.import_module(module_name)  # type: ignore[arg-type]
     except Exception as e:  # pragma: no cover
         logger.warning(f"Hook import failed: {module_name}: {e}")

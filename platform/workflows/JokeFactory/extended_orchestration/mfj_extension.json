@@ -1,0 +1,19 @@
+{
+  "version": 3,
+  "mid_flight_journeys": [
+    {
+      "id": "parallel-joke-generation",
+      "description": "Decompose topic into 3 angles, spawn 3 parallel JokeWorker chats, fan-in and present them together",
+      "decomposition_agent": "JokeDecomposerAgent",
+      "fan_out": {
+        "spawn_mode": "workflow",
+        "max_children": 3
+      },
+      "fan_in": {
+        "resume_agent": "JokePresenterAgent",
+        "resume_entry_agent": "ResumeRouterAgent",
+        "inject_as": "mfj_joke_results"
+      }
+    }
+  ]
+}

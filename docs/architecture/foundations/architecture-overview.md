@@ -6,7 +6,8 @@ This is the authoritative architecture reference for Mozaiks. **For the detailed
 
 Mozaiks should be understood like this:
 
-- one backend
+- one AI runtime
+- one app backend boundary
 - app events
 - workflow triggers
 - pages on top
@@ -15,13 +16,16 @@ That is the main architecture.
 
 If a concept does not help explain one of those four lines, it should not be part of the main reading path.
 
-## What The Backend Does
+## What The System Does
 
-Mozaiks runs as one backend application.
+Mozaiks is organized around one AI runtime plus one app-backend boundary.
 
-Internally, the repo has two main implementation areas:
+In some deployments those may run together. In others they are split services.
+App authors should still experience them as one product surface.
 
-### Normal app behavior (`mozaikscore/`)
+Internally, the repo centers the runtime and the app contract:
+
+### Deterministic app behavior (app backend)
 
 This includes:
 
@@ -30,6 +34,9 @@ This includes:
 - module execution
 - admin APIs
 - page backing logic
+
+This backend is external to the framework repo and connects through the runtime
+adapter boundary.
 
 ### Workflow behavior (`mozaiksai/`)
 
@@ -42,7 +49,8 @@ This includes:
 - artifacts
 - workflow resume and completion
 
-Users should not need to think of these as different backend products. They are parts of one backend.
+Users should not need to think of these as different products. They are parts
+of one application surface.
 
 ## The Event Model
 

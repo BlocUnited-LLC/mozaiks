@@ -17,17 +17,16 @@ This folder closes that gap by defining:
 - how CRUD and page logic are planned
 - how domain events are emitted from app actions
 - how event routes trigger workflows without leaking workflow names into
-  `mozaikscore`
+  the app backend
 - which stubs are generated and what strict signatures they must follow
 
 ## Source Inputs
 
 These development specs were derived from:
 
-- current typed contracts in `mozaiksai/core/orchestration/planning_contracts.py`
+- planning models in `platform/workflows/BuildParent/structured_outputs.yaml`
 - current bundle shape under `platform/`
 - archived planning logic:
-  - `ARCHIVED_mozaiks-core/docs/archive/architecture-specs/agent-dependency-matrix.md`
   - `ARCHIVED_mozaiks-core/docs/archive/architecture-specs/ai-agent-codebase-8-part-audit.md`
 
 The archived docs are used as derivation style input, not as canonical runtime

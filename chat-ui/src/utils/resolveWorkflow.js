@@ -20,7 +20,16 @@ import { getLoadedWorkflows } from '@chat-workflows/index';
  */
 export default function resolveWorkflow(explicit = null) {
   // 1. Explicit override always wins
-  if (explicit) return explicit;
+  const canonicalExplicit = workflowConfig.resolveKnownWorkflowName(explicit);
+  if (canonicalExplicit) return canonicalExplicit;
+
+  if (explicit) {
+    const trimmed = String(explicit).trim();
+    const lowered = trimmed.toLowerCase();
+    if (trimmed && lowered !== 'workflow' && lowered !== 'workflows') {
+      return trimmed;
+    }
+  }
 
   // 2. Backend-declared entry point
   const entryPoint = workflowConfig.getEntryPointWorkflow();
@@ -35,9 +44,7 @@ export default function resolveWorkflow(explicit = null) {
 
   // Also check backend-fetched configs as a fallback for the singleton case
   const available = workflowConfig.getAvailableWorkflows();
-  // Filter out lowercase duplicates (workflowConfig stores both cased + lower aliases)
-  const unique = [...new Set(available)];
-  if (unique.length === 1) return unique[0];
+  if (available.length === 1) return available[0];
 
   // 4. No resolution — caller decides (ask-mode, picker, etc.)
   return null;

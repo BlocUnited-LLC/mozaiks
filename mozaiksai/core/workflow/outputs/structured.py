@@ -6,7 +6,7 @@
 from pydantic import BaseModel, Field, create_model
 from typing import List, Dict, Any, Optional, Union, Tuple, Set
 from enum import Enum
-from ..validation.llm_config import get_llm_config
+from ..llm_config import get_llm_config
 from ..workflow_manager import workflow_manager
 
 # Workflow-specific model cache
@@ -113,7 +113,10 @@ def resolve_field_type(field_def: Dict[str, Any], available_models: Dict[str, ty
         else:
             raise ValueError("Unsupported list items spec")
         if field_type_str == 'optional_list':
-            return Optional[base], Field(default=None, **field_kwargs)  # type: ignore[return-value]
+            # Don't pass default=None if field_kwargs already has a default
+            if 'default' not in field_kwargs:
+                field_kwargs['default'] = None
+            return Optional[base], Field(**field_kwargs)  # type: ignore[return-value]
         return base, Field(**field_kwargs)  # type: ignore[return-value]
     if field_type_str in TYPE_MAP:
         return TYPE_MAP[field_type_str], Field(**field_kwargs)
@@ -405,7 +408,6 @@ async def get_llm_for_workflow(
     extra_config: Optional[dict] = None,
 ) -> tuple:
     """Create LLM config for an agent with optional structured response model."""
-    should_stream = (flow == "base")
     
     try:
         structured_registry = get_structured_outputs_for_workflow(workflow_name)
@@ -413,9 +415,9 @@ async def get_llm_for_workflow(
         
         if lookup_key in structured_registry:
             model_cls = structured_registry[lookup_key]
-            return await get_llm_config(response_format=model_cls, stream=should_stream, extra_config=extra_config)
+            return await get_llm_config(response_format=model_cls, extra_config=extra_config)
     except (ValueError, FileNotFoundError):
         pass
     
     # Fallback to plain LLM config
-    return await get_llm_config(stream=should_stream, extra_config=extra_config)
+    return await get_llm_config(extra_config=extra_config)

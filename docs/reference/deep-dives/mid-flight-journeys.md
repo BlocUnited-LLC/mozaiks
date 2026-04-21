@@ -1,7 +1,7 @@
 # Mid-Flight Journeys
 
 **Status:** Current reference  
-**Last updated:** 2026-03-12  
+**Last updated:** 2026-04-12
 **Depends on:** [Orchestration and Decomposition](../../architecture/orchestration-and-decomposition.md), [Workflow Architecture](../../architecture/foundations/workflow-architecture.md), [MFJ Strict Resume Contract](mfj-strict-resume-contract.md)
 
 **Validation status:** MFJ runtime semantics are implemented in the current codepath, but end-to-end confidence should come from the live smoke harness at `scripts/run_live_mfj_smoke.py` and `tests/test_mfj_live_smoke.py`, not from contract or mock coverage alone. That harness requires `OPENAI_API_KEY`, `MONGO_URI`, and a reachable MongoDB instance.
@@ -22,7 +22,7 @@ An MFJ is a workflow-local fork/join cycle:
 
 MFJ is not a global workflow journey.
 It is not a vague planning concept.
-It is executable runtime config under a workflow's own `_pack/workflow_graph.json`.
+It is executable runtime config under a workflow's own `extended_orchestration/mfj_extension.json`.
 
 ---
 
@@ -34,7 +34,7 @@ Mozaiks has two separate graph layers.
 
 Path:
 
-- `platform/workflows/_pack/workflow_graph.json`
+- `platform/workflows/extended_orchestration/mfj_extension.json`
 
 Owns:
 
@@ -50,11 +50,11 @@ Does not own:
 
 Path:
 
-- `platform/workflows/{workflow_name}/_pack/workflow_graph.json`
+- `platform/workflows/{workflow_name}/extended_orchestration/mfj_extension.json`
 
 Owns:
 
-- which agent triggers an MFJ
+- which `decomposition_agent` triggers an MFJ
 - how child runs are spawned
 - how child results are aggregated
 - where the merged payload is injected
@@ -75,7 +75,7 @@ An MFJ should be understood as:
 
 The runtime does not read prose from the graph to decide what to do.
 Reasoning belongs in workflow agents and structured outputs.
-`workflow_graph.json` remains a compiled execution artifact.
+`mfj_extension.json` remains a compiled execution artifact.
 
 ---
 
@@ -98,7 +98,7 @@ resumed host agent.
 At a high level:
 
 ```text
-platform/workflows/{workflow}/_pack/workflow_graph.json
+platform/workflows/{workflow}/extended_orchestration/mfj_extension.json
   -> workflow loaders
   -> runtime orchestration support
   -> child runs + aggregation
@@ -125,15 +125,13 @@ Canonical minimal example:
   "mid_flight_journeys": [
     {
       "id": "writers_room_cycle",
-      "trigger_agent": "DecompositionAgent",
+      "decomposition_agent": "DecompositionAgent",
       "fan_out": {
-        "spawn_mode": "workflow"
+        "spawn_mode": "workflow",
+        "child_initial_agent": "LaneWorkerAgent"
       },
       "fan_in": {
-        "resume_agent": "HostAgent",
-        "resume_entry_agent": "ResumeRouterAgent",
-        "aggregation_strategy": "collect_all",
-        "inject_as": "mfj_writers_room_results"
+        "resume_agent": "HostAgent"
       }
     }
   ]
@@ -142,15 +140,15 @@ Canonical minimal example:
 
 This is also the live pattern used in:
 
-- `platform/workflows/WritersRoom/_pack/workflow_graph.json`
+- `platform/workflows/WritersRoom/extended_orchestration/mfj_extension.json`
 
 Meaning:
 
-- `DecompositionAgent` emits the child work description in structured output
+- `decomposition_agent` emits the child work description in structured output
 - runtime fans out deterministically
-- runtime aggregates child results under `mfj_writers_room_results`
-- runtime resumes through `ResumeRouterAgent`
-- workflow handoffs route from that router to the final presenter
+- runtime aggregates child results with `collect_all` by default
+- runtime injects merged results under an auto key: `mfj_<journey_id>_results` (unless `inject_as` is explicitly set)
+- runtime resumes at `resume_agent` by default (or `resume_entry_agent` if explicitly set)
 
 ---
 
@@ -161,12 +159,11 @@ Meaning:
 | Field | Required | Meaning |
 |---|---|---|
 | `id` | Yes | Unique MFJ identifier within the workflow |
-| `trigger_agent` | Yes | Agent whose structured output activates the MFJ |
+| `decomposition_agent` | Yes | Agent whose structured output activates the MFJ |
 | `fan_out` | Yes | Child spawn configuration |
 | `fan_in` | Yes | Aggregation and resume configuration |
-| `trigger_on` | No | Override event type when needed; default runtime path is `agent_output` |
 | `requires` | No | Dependency on earlier MFJ cycles within the same workflow |
-| `output_contract` | No | Optional validation contract for child outputs |
+| `stages` | No | Optional staged MFJ authoring (compiled to flat journeys at load time) |
 
 ### `fan_out`
 
@@ -174,43 +171,54 @@ Meaning:
 |---|---|---|
 | `spawn_mode` | Yes | Child spawn strategy; `workflow` is the common current authored path |
 | `child_initial_agent` | No | Override initial child agent |
-| `input_contract` | No | Required or optional parent context keys before fan-out |
-| `child_context_seed` | No | Extra context injected into every child |
-| `timeout_seconds` | No | Runtime wait bound |
+| `max_children` | No | Concurrency cap for child runs |
 
 ### `fan_in`
 
 | Field | Required | Meaning |
 |---|---|---|
 | `resume_agent` | Yes | Final presenter/target agent after fan-in |
-| `resume_entry_agent` | Yes | First agent after resume; usually a router |
-| `aggregation_strategy` | Yes | How child results are merged |
-| `inject_as` | Yes | Parent context key for merged output; must start with `mfj_` |
-| `on_partial_failure` | No | Partial failure behavior |
-| `timeout_seconds` | No | Grace period before forced aggregation |
+| `resume_entry_agent` | No | First agent after resume; defaults to `resume_agent` |
+| `aggregation_strategy` | No | Merge mode; defaults to `collect_all` |
+| `inject_as` | No | Parent context key for merged output; defaults to `mfj_<journey_id>_results` |
 
 Important:
 
-- `resume_entry_agent` is required in the current runtime contract
-- `inject_as` must start with `mfj_`
-- any strict resume workflow should follow [MFJ Strict Resume Contract](mfj-strict-resume-contract.md)
+- if you set `inject_as`, it is normalized to `mfj_*`
+- keep authored MFJ config minimal; defaults are the baseline path
+
+### Deferred Advanced Fields (Roadmap)
+
+To keep authoring simple, these fields are intentionally not part of the baseline authored shape:
+
+- `fan_out.input_contract`
+- `fan_out.child_context_seed`
+- `fan_out.timeout_seconds`
+- `output_contract`
+- `fan_in.on_partial_failure`
+- `fan_in.timeout_seconds`
+
+These remain runtime-capable internals and can be surfaced later as an advanced profile.
+
+Roadmap home for advanced authoring/integration rollout:
+
+- [MFJ Authoring Roadmap](../../../roadmap/mfj-authoring-roadmap.md)
 
 ---
 
 ## Resume Semantics
 
-The most important behavior is that fan-in resume is router-first, not
-presenter-first.
+The most important behavior is that fan-in resume is entry-agent-first.
 
-Runtime does not simply jump back to the final host agent and assume AG2 will
-route correctly.
+If `resume_entry_agent` is set, runtime resumes there first (router-first pattern).
+If omitted, runtime defaults `resume_entry_agent` to `resume_agent`.
 
 Instead it:
 
 1. injects the aggregated payload into parent context under `inject_as`
 2. writes runtime `_mfj_*` resume keys into parent session state
 3. resumes the parent at `resume_entry_agent`
-4. expects declarative handoff rules to move from router to presenter
+4. continues through normal declarative handoff rules
 
 This is what makes fan-in deterministic.
 
@@ -244,9 +252,8 @@ For the full handoff and nonce-consumption contract, see:
 
 At fan-out, runtime may seed child context from:
 
-- the trigger agent's structured output
-- parent fields named in `input_contract`
-- any `child_context_seed` entries
+- the decomposition agent's structured output
+- parent context snapshot (default path)
 - runtime metadata such as parent chat identity and MFJ identifiers
 
 The exact reasoning about what children should do belongs in the decomposition
@@ -257,29 +264,116 @@ agent, not in the graph itself.
 At fan-in, runtime:
 
 1. collects child outputs
-2. validates them when an `output_contract` exists
-3. aggregates them using the configured strategy
-4. injects the merged result into the parent under `inject_as`
-5. resumes through `resume_entry_agent`
+2. aggregates them using the configured strategy (default `collect_all`)
+3. injects the merged result into the parent under `inject_as`
+4. resumes through `resume_entry_agent` (default `resume_agent`)
 
 This means later agents in the same parent workflow can read the merged result
 from a stable `mfj_*` context key.
 
 ---
 
-## Aggregation Guidance
+## Aggregation Strategies
 
-Common strategies include:
+Set via `fan_in.aggregation_strategy` in `mfj_extension.json`. The strategy runs once after all children complete, before the merged result is injected into the parent.
 
-- `collect_all` when child results should stay distinct
-- `merge_bundles` when child outputs should become one combined artifact or bundle
-- stricter or custom strategies only when the workflow genuinely needs them
+### `collect_all`
 
-Default guidance:
+Each child's final context is kept under its own workflow name key.
 
-- start with `collect_all`
-- only add validation contracts, custom aggregation, or timeout overrides when a
-  concrete workflow requires them
+```json
+{
+  "BillingWorkflow":  { ...child A context... },
+  "AuthWorkflow":     { ...child B context... },
+  "_failed":          ["SomeWorkflow"]
+}
+```
+
+**Best for:** planning phases where each child's output is reviewed independently — the parent can read `mfj_results["BillingWorkflow"]` and `mfj_results["AuthWorkflow"]` separately.
+
+---
+
+### `concatenate`
+
+All child contexts are flat-merged into one dict. On key collisions, last-write-wins (sorted by workflow name for determinism).
+
+```json
+{
+  "shared_key": "value from last child alphabetically",
+  "child_a_key": "...",
+  "child_b_key": "..."
+}
+```
+
+**Best for:** children that produce disjoint keys — e.g. each child adds its own unique field to a shared result dict.
+
+**Watch out for:** key collisions. If two children write the same key, only one survives.
+
+---
+
+### `merge_bundles`
+
+Deep recursive merge — nested dicts are merged, lists are concatenated, scalars follow last-write-wins (sorted by workflow name).
+
+```json
+{
+  "files": ["fileA.py", "fileB.py", "fileC.py"],  // lists concatenated
+  "config": {
+    "sectionA": { ... },   // merged from child A
+    "sectionB": { ... }    // merged from child B
+  }
+}
+```
+
+**Best for:** file generation or bundle assembly where children each contribute a piece of the same output structure. The AgentGenerator pack generation loop uses this pattern.
+
+---
+
+### `first_success`
+
+Returns the first child that completed successfully and discards the rest.
+
+**Best for:** redundant parallel execution — spawn multiple children doing the same task, accept the fastest result. Useful for latency-sensitive operations or unreliable external APIs.
+
+---
+
+### `majority_vote`
+
+Serializes each successful child's context to JSON, counts identical outputs, and returns the most common one.
+
+**Best for:** evaluation or consensus workflows where multiple independent agents analyse the same problem — e.g. three analyst agents independently score a company acquisition, and the majority verdict wins.
+
+---
+
+### Custom strategies
+
+Register a custom strategy at runtime with `register_merge_strategy()` and reference it in config as `custom:<name>`.
+
+---
+
+### Guidance
+
+- Start with `collect_all` — it is the safest default and gives the resume agent full visibility into each child's work.
+- Use `merge_bundles` when children each contribute a piece of one output artifact.
+- Use `concatenate` only when you are certain children produce disjoint keys.
+- Use `first_success` or `majority_vote` only for explicitly redundant or consensus patterns.
+
+---
+
+## Child-to-Child Context Sharing
+
+Children cannot share context with each other while running. Each child is a fully isolated workflow run with its own `chat_id` and `context_variables`. They execute concurrently with no shared memory channel between them.
+
+**What children do receive** is a snapshot of the parent's context at the moment of fan-out — every child starts with the same read-only copy of whatever the parent had.
+
+**What gets shared via MongoDB at runtime** is technically possible — a child could write a value to the database and another child could read it. But this creates the coordination problems you'd expect:
+
+- Race conditions: you cannot guarantee which child writes first
+- Ordering assumptions: a child that reads a peer's value may execute before that peer has written it
+- Non-determinism: the fan-in result depends on external timing, not the declared merge strategy
+- Debugging difficulty: failures are invisible to the coordinator and to the merge step
+
+The cleaner model is: children operate independently on their own slice of the problem, the merge strategy combines results at fan-in, and the resume agent reasons over the combined output. If one child's output genuinely needs to influence another child's work, that is a signal to use sequential MFJ cycles (`requires` gating) rather than concurrent fan-out — complete the first batch, resume the parent, let an agent process the intermediate results, then trigger a second fan-out with the enriched context.
 
 ---
 
@@ -311,15 +405,13 @@ Minimal runtime graph:
   "mid_flight_journeys": [
     {
       "id": "writers_room_cycle",
-      "trigger_agent": "DecompositionAgent",
+      "decomposition_agent": "DecompositionAgent",
       "fan_out": {
-        "spawn_mode": "workflow"
+        "spawn_mode": "workflow",
+        "child_initial_agent": "LaneWorkerAgent"
       },
       "fan_in": {
-        "resume_agent": "HostAgent",
-        "resume_entry_agent": "ResumeRouterAgent",
-        "aggregation_strategy": "collect_all",
-        "inject_as": "mfj_writers_room_results"
+        "resume_agent": "HostAgent"
       }
     }
   ]
@@ -333,7 +425,7 @@ in a live workflow.
 
 ## Authoring Guardrails
 
-1. Do not put prose reasoning or freeform logic into `workflow_graph.json`.
+1. Do not put prose reasoning or freeform logic into `mfj_extension.json`.
 2. Do not confuse global workflow journeys with workflow-local MFJ cycles.
 3. Do not resume directly to the presenter when the strict resume contract
    expects a router agent first.
@@ -438,7 +530,7 @@ Do not use MFJ when the workflow only needs:
 
 ## Human Checkpoints
 
-Human checkpoints between MFJs are not a separate feature — they're the natural result of the handoff chain between the `resume_agent` of one MFJ and the `trigger_agent` of the next.
+Human checkpoints between MFJs are not a separate feature — they're the natural result of the handoff chain between the `resume_agent` of one MFJ and the `decomposition_agent` of the next.
 
 ```yaml
 # handoffs.yaml — the handoff chain between MFJ-1 and MFJ-2
@@ -470,7 +562,7 @@ This means:
 - Human approval is enforced by AG2's native handoff conditions — no custom orchestration logic
 - Rejection routing is configurable per workflow — "loop back to decomposer" is just one option
 - Additional checkpoint agents (APIKeyRequestAgent, FeedbackClassifierAgent) can be inserted between MFJs by adding them to the handoff chain
-- The coordinator doesn't need to know about human checkpoints — it only knows about trigger agents and resume agents
+- The coordinator doesn't need to know about human checkpoints — it only knows about decomposition agents and resume agents
 
 ---
 
@@ -487,8 +579,8 @@ This means:
 | **Human in the loop** | Native handoff conditions gate progression | None — pipeline runs to completion |
 | **Parallel execution** | Pack coordinator spawns asyncio tasks per child GroupChat | DAGExecutor semaphore-bounded asyncio.gather |
 | **Memory** | AG2 context_variables + update_agent_state hooks | None — agents are stateless |
-| **Failure handling** | Configurable per-MFJ (retry_failed, prompt_user, resume_with_available) | Retry with backoff per task, deadlock detection |
-| **Reusability** | Any workflow can declare MFJs in its workflow_graph.json | Tightly coupled to the build pipeline |
+| **Failure handling** | Runtime-capable per MFJ; baseline authoring keeps defaults and moves advanced knobs to roadmap profiles | Retry with backoff per task, deadlock detection |
+| **Reusability** | Any workflow can declare MFJs in its mfj_extension.json | Tightly coupled to the build pipeline |
 
 ### vs. LangGraph / CrewAI
 
@@ -517,8 +609,8 @@ The current MFJ runtime includes these capability groups.
 
 ### Typed Config and Pack Loading
 
-- Pack graphs support both `journeys` and `mid_flight_journeys` forms.
-- Typed schema models cover fan-out, fan-in, trigger metadata, contracts, and partial-failure behavior.
+- Workflow-local MFJ graphs use `version: 3` with `mid_flight_journeys`.
+- Typed schema models cover fan-out, fan-in, trigger metadata, and staged expansion.
 - Pack config loading is consolidated through the shared pack config path rather than ad hoc loaders.
 - Unknown keys are rejected by schema validation.
 
@@ -533,9 +625,9 @@ The current MFJ runtime includes these capability groups.
 
 - Built-in strategies cover `collect_all`, concatenation, deep merge, first success, and majority vote.
 - Custom aggregation strategies can be registered and referenced from config.
-- Input and output contracts validate required parent context and merged child outputs.
-- Partial failure behavior supports `resume_with_available`, `fail_all`, `retry_failed`, and `prompt_user` modes.
-- Timeout handling can cancel hanging children and continue according to the configured partial-failure behavior.
+- Input and output contracts can validate required parent context and merged child outputs when enabled.
+- Partial failure and timeout behavior are runtime-capable (`resume_with_available`, `fail_all`, `retry_failed`, `prompt_user`) but intentionally deferred from baseline authoring.
+- Advanced overrides are tracked in the roadmap profile: [MFJ Authoring Roadmap](../../../roadmap/mfj-authoring-roadmap.md).
 
 ### Events and UI Feedback
 
@@ -573,7 +665,7 @@ MFJ behavior is covered by several layers of tests.
 ### Unit Coverage
 
 - Coordinator behavior covers fan-out, fan-in, merge resolution, sequencing, contracts, duplicate suppression, and partial-failure handling.
-- Schema coverage validates both flat `journeys` input and typed `mid_flight_journeys` input.
+- Schema coverage validates typed `mid_flight_journeys` input and staged-to-flat expansion behavior.
 - Persistence coverage validates write-through, read-through, recovery, TTL/index behavior, and graceful degradation.
 - Observability coverage validates structured logging, tracing fallbacks, metrics fallbacks, and coordinator wiring.
 - Merge-strategy coverage validates built-in strategies plus registry-based custom lookup.
@@ -588,23 +680,23 @@ MFJ behavior is covered by several layers of tests.
 
 ### Representative Test Files
 
-- `tests/test_workflow_pack_coordinator.py`
-- `tests/test_pack_schema.py`
-- `tests/test_mfj_persistence.py`
+- `tests/test_workflow_pack_coordinator_mfj.py`
+- `tests/test_pack_schema_models.py`
+- `tests/test_mfj_persistence_recovery.py`
 - `tests/test_mfj_observability.py`
 - `tests/test_merge_strategies.py`
-- `tests/test_integration_mfj.py`
+- `tests/test_mfj_resume_contract.py`
+- `tests/test_mfj_live_smoke.py`
 
 ---
 
 ## Pack Graph Keys
 
-The `journeys` key is the primary field in `workflow_graph.json`:
+Workflow-local MFJ files use:
 
-- **Version 2** (`journeys`): Flat form. PackCoordinator reads `journeys` entries.
-- **Version 3** (`mid_flight_journeys`): Expanded typed form. PackCoordinator reads `mid_flight_journeys` with full FanOut/FanIn config.
+- **Version 3** (`mid_flight_journeys`): typed MFJ config for fan-out/fan-in inside one workflow.
 
-Both schemas use `extra="forbid"` — unknown keys are rejected at parse time.
+Global cross-workflow journeys are a separate config (`extension_registry.json`), not workflow-local MFJ.
 
 ---
 
@@ -621,4 +713,3 @@ Both schemas use `extra="forbid"` — unknown keys are rejected at parse time.
 5. **Failure is a first-class concept**: Not all children will succeed. The system has explicit strategies for partial failure rather than silently dropping results or crashing.
 
 6. **Composable**: MFJs are building blocks. A simple workflow might have zero MFJs. A complex build pipeline might have three. The same primitives work for both.
-

@@ -7,7 +7,7 @@ dependencies between validation tools and structured output helpers.
 from importlib import import_module
 from typing import TYPE_CHECKING
 
-from .llm_config import PRICE_MAP, clear_llm_caches, get_llm_config
+from ..llm_config import PRICE_MAP, clear_llm_caches, get_llm_config
 
 __all__ = [
     "get_llm_config",

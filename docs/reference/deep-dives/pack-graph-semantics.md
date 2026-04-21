@@ -1,11 +1,12 @@
-# Pack Graph Semantics (v2 — Journeys + Gates)
+# Pack Graph Semantics (v3 - Workflow Routing)
 
-This document defines the runtime meaning ("semantics") and taxonomy of `workflows/_pack/workflow_graph.json`.
+This document defines the runtime meaning ("semantics") and taxonomy of
+`workflows/extended_orchestration/extension_registry.json`.
 
-`workflow_graph.json` is **app-agnostic**: it describes relationships between **workflow types** (templates).  
+`extension_registry.json` is **app-agnostic**: it describes relationships between **workflow types** (templates).
 At runtime, those rules are evaluated inside a **scope** (this runtime calls the scope key `app_id`, but integrators can treat it as any stable isolation id).
 
-This is a **v2 schema**: there are no `nodes`/`edges` and no alternate historical fields.
+This is a **v3 schema**: there are no `nodes`/`edges` and no alternate historical fields.
 
 ---
 
@@ -27,40 +28,44 @@ This is a **v2 schema**: there are no `nodes`/`edges` and no alternate historica
   - Others: `app_id` could be workspace id, repo id, project id, ticket id, etc.
 - Used to prevent cross-scope state bleed and answer questions like: “Has workflow X completed for this scope?”
 
-### Journey (wizard chain)
-- An ordered sequence of workflows meant to feel seamless to the user.
-- Journeys can enforce step order (gating) and can auto-advance on completion.
+### Workflow Sequence
+- An ordered sequence of workflow phases meant to auto-advance after completion.
+- JSON field: `workflow_sequences[]`.
+- This is not workflow-local MFJ.
 
-### Gate (prerequisite rule)
+### Dependency (prerequisite rule)
 - A directed prerequisite relationship between two workflow types.
-- Gates can be `required` (enforced) or `optional` (informational).
+- Dependencies can be `required` (enforced) or `optional` (informational).
 
 ---
 
-## 2) Schema (workflows/_pack/workflow_graph.json)
+## 2) Schema (workflows/extended_orchestration/extension_registry.json)
 
 Top-level shape:
 
 ```json
 {
   "pack_name": "DefaultPack",
-  "version": 2,
-  "workflows": [{ "id": "ValueEngine", "type": "primary", "description": "..." }],
-  "journeys": [{
+  "version": 3,
+  "workflows": [
+    { "id": "ValueEngine", "description": "..." },
+    { "id": "AppGenerator", "dependencies": ["ValueEngine"] }
+  ],
+  "workflow_sequences": [{
     "id": "build",
-    "label": "Build App",
-    "scope": "app",
-    "enforce_step_gating": true,
-    "auto_attach_on_start": true,
-    "auto_advance": true,
-    "steps": ["ValueEngine", "AgentGenerator", "AppGenerator"]
+    "description": "Build App",
+    "steps": [
+      { "workflows": ["ValueEngine"] },
+      { "workflows": ["AppGenerator"] }
+    ]
   }],
-  "gates": [{
-    "from": "AppGenerator",
-    "to": "ValidationEngine",
-    "gating": "required",
-    "scope": "app",
-    "reason": "ValidationEngine requires the app to be built first."
+  "transitions": [{
+    "id": "choose_path",
+    "transition_type": "user_choice",
+    "ui": { "component": "LauncherScreen", "mode": "screen" },
+    "options": [
+      { "id": "build", "route_to": "ValueEngine" }
+    ]
   }]
 }
 ```
@@ -70,24 +75,41 @@ Informational registry of workflow types for UI/docs:
 - `id` (string, required): workflow type id; must match workflow folder name.
 - `type` (string, optional): informational taxonomy for UI/docs (e.g. `primary`, `dependent`, `independent`).
 - `description` (string, optional): human-readable.
+- `dependencies` (string[] or object[], optional): hard prerequisites enforced before workflow start.
 
-### 2.2 `journeys[]`
-Defines wizard chains:
-- `id` (string, required): journey key (stable id, referenced in persisted sessions).
-- `label` (string, optional): display label.
-- `steps` (string[], required): ordered workflow ids.
-- `scope` (string, optional): scope for implicit step prerequisites (`user` default, or `app`).
-- `enforce_step_gating` (bool, optional): if true, the runtime creates **implicit required gates** between consecutive steps.
-- `auto_attach_on_start` (bool, optional): if true, starting `steps[0]` attaches a new journey instance to the chat session.
-- `auto_advance` (bool, optional): if true, completing a step will seamlessly start the next step.
+### 2.2 `workflow_sequences[]`
+Defines runtime auto-advance sequences:
+- `id` (string, required): sequence key (stored in persisted session metadata).
+- `description` (string, optional): human-readable.
+- `steps` (list, required): ordered groups shaped as `{ "workflows": ["WorkflowId"] }`.
 
-### 2.3 `gates[]`
-Defines cross-workflow prerequisites:
-- `from` (string, required): upstream workflow id.
-- `to` (string, required): downstream workflow id.
-- `gating` (string, required): `required` | `optional`.
-- `scope` (string, optional): `user` (default) or `app`.
-- `reason` (string, optional): user-facing message when blocked.
+Workflow sequence declarations should be authored as sequence metadata only.
+Entry UI belongs to `entrypoints[]` routes that reference `transition: <id>` directly.
+
+Required dependencies must be serial in a sequence. If `B` depends on `A`,
+`A` must appear in an earlier step than `B`. Same-step groups are reserved for
+parallel phases with no required dependency edge between siblings.
+Each workflow may appear at most once in a sequence.
+
+### 2.3 `entrypoints[]`
+Defines workflow-owned shell routes:
+- `id` (string, required): stable route id.
+- `path` (string, required): browser route such as `/create`.
+- `label` (string, optional): user-facing route label.
+- exactly one of `transition` or `workflow`.
+- `sequence` (string, optional): sequence this entrypoint starts.
+
+Use entrypoints only for routes that enter workflows or transition screens.
+Persistent product pages are discovered from page/UI owner manifests.
+
+### 2.4 `transitions[]`
+Defines router decision points:
+- `id` (string, required): transition id.
+- `transition_type` (string, required): `user_choice`, `user_choice_context`, `user_choice_route`, `condition`, `confirm`, `silent`, `progress_view`, or `prerequisite_redirect`.
+- `ui` (object, required for `user_choice` and `confirm`): registered shell component binding, never a file path.
+- `options` (list, optional): selectable targets for `user_choice`; the UI emits option id, and the router resolves the target.
+- `route_to` (string, optional): direct target for single-route transitions.
+- `options[].context_variables` (object, optional): deterministic context seeds merged when the option is selected. The target workflow receives only keys declared in its `context_variables.yaml`.
 
 ---
 
@@ -95,10 +117,9 @@ Defines cross-workflow prerequisites:
 
 ### 3.1 Required gating (“can I start this workflow?”)
 
-For any `gates[]` entry where:
-- `gating: "required"`
-
-the runtime blocks starting/resuming `to` until `from` has at least one **COMPLETED** chat session inside the same scope.
+For any required `workflows[].dependencies` entry, the runtime blocks
+starting/resuming the dependent workflow until the upstream workflow has at
+least one **COMPLETED** chat session inside the same scope.
 
 `scope` controls *who* must have completed the prerequisite:
 - `scope:"user"`: prerequisite must be completed by the same `user_id` in this `app_id`.
@@ -112,49 +133,47 @@ Enforcement is defense-in-depth:
 - WebSocket connect: `/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}` (sends `chat.error` then closes)
 - In-WS workflow start commands (e.g., `chat.start_workflow`, artifact “launch_workflow”) are also gated
 
-### 3.2 Journey step gating
+### 3.2 Workflow sequence auto-advance
 
-If a journey sets:
-- `enforce_step_gating: true`
+When a workflow in a sequence step completes, the runtime checks whether the
+whole step group is complete. If so, it starts the next step group.
 
-the runtime treats each consecutive pair as an implicit `required` gate:
-- `steps[i-1] -> steps[i]`
-
-### 3.3 Auto-advance (“seamless wizard”)
-
-If a journey sets:
-- `auto_advance: true`
-
-then when a chat session for `steps[i]` completes, the runtime:
-- creates (or reuses) a `ChatSession` for `steps[i+1]` in the same scope
+- It creates or reuses a `ChatSession` for the next step group.
 - switches the UI to the new `chat_id` (`chat.context_switched`)
-- auto-starts the next workflow if its `workflow_startup_mode` is `AgentDriven`
+- auto-starts the next workflow through the same transport connection
+- if the next sequence step is `{ "transition": "<id>" }`, emits
+  `chat.transition_requested`; the shell mounts the registered transition React
+  component and resumes routing through `/api/transitions/resolve`.
 
-### 3.4 Persisted journey fields
+### 3.3 Persisted sequence fields
 
-The runtime stores journey metadata on chat sessions:
-- `journey_id`: journey instance id (opaque uuid)
-- `journey_key`: journey definition id (e.g. `build`)
-- `journey_step_index`: 0-based index into `steps[]`
-- `journey_total_steps`: optional total for display/debug
+The runtime stores sequence metadata on chat sessions using the current
+`journey_*` field names:
+
+- `journey_instance_id`: sequence instance id (opaque uuid)
+- `journey_key`: sequence definition id (e.g. `build`)
+- `journey_position`: 0-based index into `steps[]`
+- `journey_total_steps`: total step count
 
 ---
 
-## 4) Mozaiks Example (Build Journey + ValidationEngine Gate)
+## 4) Mozaiks Example
 
 Configuration intent:
-- Build journey: `ValueEngine -> AgentGenerator -> AppGenerator` (auto-advance, app-scoped)
-- Gate: `AppGenerator` required before `ValidationEngine` can start (app-scoped)
+- Build sequence: `ValueEngine -> DesignDocs -> AgentGenerator -> AppGenerator`
+- Dependencies: `DesignDocs` requires `ValueEngine`; generators require `DesignDocs`
+- Entry transition: `/create` points directly at `coding_journey_selector`
 
 UX outcome:
-- The build feels like one continuous wizard.
-- ValidationEngine can’t start until the app is built.
+- The user picks a route before any workflow starts.
+- The runtime enforces prerequisites before each workflow start.
+- Completion of one build phase can auto-advance to the next phase.
 - Multiple apps (different `app_id`) remain isolated; no cross-app state bleed.
 
 ---
 
 ## 5) Notes (avoid confusion)
 
-- `workflows/_pack/workflow_graph.json` is the **macro** config (journeys + gates).
-- Per-workflow decomposition (nested child chats) may use `workflows/<WorkflowName>/_pack/workflow_graph.json` and is a separate contract.
-
+- `workflows/extended_orchestration/extension_registry.json` is the global config.
+- Per-workflow decomposition uses `workflows/<WorkflowName>/extended_orchestration/mfj_extension.json`.
+- Do not confuse global workflow sequences with workflow-local MFJ graphs.

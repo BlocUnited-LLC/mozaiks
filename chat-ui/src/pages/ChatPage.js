@@ -6,6 +6,7 @@ import ArtifactPanel from '../components/chat/ArtifactPanel';
 import WorkflowCompletion from '../components/chat/WorkflowCompletion';
 import FluidChatLayout from '../components/chat/FluidChatLayout';
 import MobileArtifactDrawer from '../components/chat/MobileArtifactDrawer';
+import { TransitionScreen } from '../ui/screens/TransitionScreen';
 import { applyArtifactUpdate, applyJsonPatch, applyOptimisticUpdate, deriveArtifactId, interpolateParams } from '../core/actions/actionUtils';
 import { useNavigate, useLocation } from "react-router-dom";
 import { useContext } from "react";
@@ -481,6 +482,7 @@ const ChatPage = () => {
   const setMessagesWithLogging = useCallback(updater => setMessages(prev => typeof updater==='function'?updater(prev):updater), []);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [transportType, setTransportType] = useState(null);
+  const [modeChangePending, setModeChangePending] = useState(false);
   const [currentChatId, setCurrentChatId] = useState(null); // set via start/resume flow below
   useEffect(() => { messagesSnapshotAppliedRef.current = false; }, [currentChatId]);
   const LOCAL_STORAGE_KEY = 'mozaiks.current_chat_id';
@@ -492,6 +494,7 @@ const ChatPage = () => {
   // Guard to prevent overlapping start logic (used by preflight existence effect)
   const pendingStartRef = useRef(false);
   const conversationBootstrapRef = useRef(false);
+  const modeChangeInProgressRef = useRef(false);
   const pathSegments = location.pathname.split('/').filter(Boolean);
   let pathAppId = null;
   let pathWorkflowName = null;
@@ -513,6 +516,17 @@ const ChatPage = () => {
   const queryMode = searchParams.get('mode'); // 'ask' or 'workflow'
   const queryDiscover = searchParams.get('discover');
   const queryResume = searchParams.get('resume');
+  // Gate / action / refinement context — set by useWorkflowStart
+  // e.g. /chat?workflow=AppGenerator&context={"app_type":"new"}&trigger_source=gate
+  const queryContextRaw = searchParams.get('context');
+  const queryContext = (() => {
+    if (!queryContextRaw) return null;
+    try { return JSON.parse(queryContextRaw); } catch { return null; }
+  })();
+  const queryTriggerSource = searchParams.get('trigger_source') || 'chat';
+  const queryActionId = searchParams.get('action_id') || null;
+  const queryChangeClass = searchParams.get('change_class') || null;
+  const queryArtifactVersionId = searchParams.get('artifact_version_id') || null;
 
   const appId = pathAppId || queryAppId;
   const urlWorkflowName = pathWorkflowName || queryWorkflowName;
@@ -565,6 +579,8 @@ const ChatPage = () => {
   const [forceOverlay, setForceOverlay] = useState(false);
   const [discoveryChatMinimized, setDiscoveryChatMinimized] = useState(false);
   const [isAskHistoryDrawerOpen, setIsAskHistoryDrawerOpen] = useState(false);
+  const [pendingTransitionId, setPendingTransitionId] = useState(null);
+  const [pendingTransitionContext, setPendingTransitionContext] = useState({});
   
   // Mobile-specific state
   const [isMobileView, setIsMobileView] = useState(false);
@@ -812,6 +828,27 @@ const ChatPage = () => {
   const brandLogoSrc = getBrandLogoSrc(chatTheme);
   const chatBackgroundSrc = getChatBackgroundSrc(chatTheme);
   const currentUserId = user?.id || user?.user_id || user?.sub || getUserIdFromToken() || 'anonymous';
+  const consumeNavigationQueryParams = useCallback((keys = []) => {
+    if (!Array.isArray(keys) || keys.length === 0) {
+      return;
+    }
+
+    const params = new URLSearchParams(location.search || '');
+    let changed = false;
+    for (const key of keys) {
+      if (params.has(key)) {
+        params.delete(key);
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      return;
+    }
+
+    const nextSearch = params.toString();
+    navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : ''}`, { replace: true });
+  }, [location.pathname, location.search, navigate]);
   const [generalSessionsLoading, setGeneralSessionsLoading] = useState(false);
   const [workflowSessionsLoading, setWorkflowSessionsLoading] = useState(false);
   // Workflow completion state
@@ -1026,6 +1063,42 @@ const ChatPage = () => {
     }
   }, []);
 
+  const shouldSuppressConsecutiveAssistantDuplicate = useCallback((messageList, { agentName, content, source } = {}) => {
+    if (source !== 'general_agent') {
+      return false;
+    }
+
+    const normalizedContent = String(content || '').trim();
+    if (!normalizedContent || !Array.isArray(messageList) || messageList.length === 0) {
+      return false;
+    }
+
+    for (let i = messageList.length - 1; i >= 0; i -= 1) {
+      const candidate = messageList[i];
+      if (!candidate || candidate.isThinking) {
+        continue;
+      }
+      if (candidate.sender === 'system') {
+        continue;
+      }
+      if (candidate.sender === 'user') {
+        return false;
+      }
+      if (candidate.__streaming) {
+        return false;
+      }
+
+      const candidateContent = String(candidate.content || '').trim();
+      const candidateSource = candidate.metadata?.source || null;
+      return candidate.sender === 'agent'
+        && candidate.agentName === agentName
+        && candidateContent === normalizedContent
+        && candidateSource === source;
+    }
+
+    return false;
+  }, []);
+
   const refreshGeneralSessions = useCallback(async () => {
     if (!api || !currentAppId || !currentUserId) {
       return [];
@@ -1165,6 +1238,7 @@ const ChatPage = () => {
     if (queryMode === 'ask') {
       console.log('🧭 [BOOTSTRAP] Explicit ask mode requested via URL param');
       setConversationMode('ask');
+      consumeNavigationQueryParams(['mode', 'resume', 'chat_id']);
       // Restore shared ask-mode messages if available (widget uses askMessages)
       if (askMessages && askMessages.length > 0) {
         setMessagesWithLogging(askMessages);
@@ -1187,6 +1261,7 @@ const ChatPage = () => {
     if (queryMode === 'workflow') {
       console.log('🧭 [BOOTSTRAP] Explicit workflow mode requested via URL param');
       setConversationMode('workflow');
+      consumeNavigationQueryParams(['mode', 'resume']);
       if (!queryChatId && queryResume === 'oldest') {
         resumeOldestFromWidgetRef.current = true;
       }
@@ -1228,7 +1303,7 @@ const ChatPage = () => {
     } else if (conversationMode !== 'workflow') {
       setConversationMode('workflow');
     }
-  }, [conversationMode, setConversationMode, queryMode, queryChatId, queryResume, urlWorkflowName, setLayoutMode, askMessages, setMessagesWithLogging, configuredStartupMode, navigationLoading]);
+  }, [conversationMode, setConversationMode, queryMode, queryChatId, queryResume, urlWorkflowName, setLayoutMode, askMessages, setMessagesWithLogging, configuredStartupMode, navigationLoading, consumeNavigationQueryParams]);
 
   // Keep backend/session mode aligned when startup lands directly in Ask mode.
   // Without this, the UI can show Ask while backend remains in workflow context.
@@ -1608,6 +1683,9 @@ const ChatPage = () => {
           if (innerData.trace_reason !== undefined) data.trace_reason = innerData.trace_reason;
           if (innerData.trace_agent !== undefined) data.trace_agent = innerData.trace_agent;
           if (innerData.sequence !== undefined) data.sequence = innerData.sequence;
+          if (innerData.stream_id !== undefined) data.stream_id = innerData.stream_id;
+          if (innerData.full_content !== undefined) data.full_content = innerData.full_content;
+          if (innerData.metadata !== undefined) data.metadata = innerData.metadata;
           // Preserve structured output payloads if present
           if (innerData.structured_output !== undefined) data.structured_output = innerData.structured_output;
           if (innerData.structured_schema !== undefined) data.structured_schema = innerData.structured_schema;
@@ -1655,7 +1733,7 @@ const ChatPage = () => {
         if (inner.structured_output !== undefined && data.structured_output === undefined) data.structured_output = inner.structured_output;
         if (inner.structured_schema !== undefined && data.structured_schema === undefined) data.structured_schema = inner.structured_schema;
         // UI tool / component hints (input_request etc.) + error messages
-        ['component_type','ui_tool_id','tool_name','tool_call_id','request_id','progress_percent','prompt','success','interaction_type','status','corr','call_id','payload','message','error_code','ui_visibility','trace_reason','trace_agent','sequence'].forEach(f => {
+        ['component_type','ui_tool_id','tool_name','tool_call_id','request_id','progress_percent','prompt','success','interaction_type','status','corr','call_id','payload','message','error_code','ui_visibility','trace_reason','trace_agent','sequence','stream_id','full_content','metadata'].forEach(f => {
           if (inner[f] !== undefined && data[f] === undefined) data[f] = inner[f];
         });
       }
@@ -1750,6 +1828,14 @@ const ChatPage = () => {
         refreshGeneralSessions();
         return;
       }
+      case 'transition_requested': {
+        const payload = data.data || {};
+        if (payload.transition_id) {
+          setPendingTransitionId(payload.transition_id);
+          setPendingTransitionContext(payload.context_variables || {});
+        }
+        return;
+      }
       case 'context_switched': {
         const payload = data.data || {};
         const targetChatId = payload.to_chat_id || payload.chat_id;
@@ -1763,6 +1849,29 @@ const ChatPage = () => {
           setActiveWorkflowName(payload.workflow_name);
         }
         setConversationMode('workflow');
+        setWorkflowCompleted(false);
+        setCompletionData(null);
+        if (String(payload.workflow_name || '').toLowerCase() === 'designdocs') {
+          setMessagesWithLogging((prev) => {
+            const statusKey = 'designdocs-generating';
+            const last = prev.length ? prev[prev.length - 1] : null;
+            if (last?.metadata?.status_key === statusKey) return prev;
+            return [
+              ...prev,
+              {
+                id: `designdocs-status-${Date.now()}`,
+                sender: 'system',
+                agentName: 'System',
+                content: 'Generating design...',
+                isStreaming: false,
+                metadata: {
+                  event_type: 'workflow_status',
+                  status_key: statusKey,
+                },
+              },
+            ];
+          });
+        }
         if (payload.message && showSystemMessages) {
           setMessagesWithLogging((prev) => ([
             ...prev,
@@ -1782,6 +1891,7 @@ const ChatPage = () => {
         // Each chunk is one word (or small slice) of the agent response.
         const agentNameChunk = extractAgentName(data);
         const chunkContent = data.content || '';
+        const streamId = data.stream_id || null;
         if (!chunkContent) return;
         // Hide init spinner on first streaming token
         if (showInitSpinner) setShowInitSpinner(false);
@@ -1793,8 +1903,13 @@ const ChatPage = () => {
           // Append to an existing in-progress streaming message for this agent
           for (let i = updated.length - 1; i >= 0; i--) {
             const m = updated[i];
-            if (m.__streaming && m.agentName === agentNameChunk) {
-              m.content += chunkContent;
+            const sameStream = streamId && m.__streamId && m.__streamId === streamId;
+            const sameAgentFallback = !streamId && !m.__streamId && m.agentName === agentNameChunk;
+            if (m.__streaming && (sameStream || sameAgentFallback)) {
+              updated[i] = {
+                ...m,
+                content: `${m.content || ''}${chunkContent}`,
+              };
               return updated;
             }
           }
@@ -1806,7 +1921,7 @@ const ChatPage = () => {
             content: chunkContent,
             isStreaming: true,
             __streaming: true,
-            __streamId: data.stream_id || null,
+            __streamId: streamId,
             isStructuredCapable: !!(data.is_structured_capable),
             isVisual: data.is_visual !== undefined ? !!data.is_visual : true,
             isToolAgent: !!(data.is_tool_agent),
@@ -1821,27 +1936,42 @@ const ChatPage = () => {
         // metadata (is_visual, structured_output, etc.) that were on chat.text.
         const agentNameEnd = extractAgentName(data);
         const finalContent = data.full_content || data.content || '';
+        const streamEndMetadata = data.metadata || data.data?.metadata || {};
+        const streamId = data.stream_id || data.data?.stream_id || null;
         setMessagesWithLogging(prev => {
           const updated = [...prev];
           for (let i = updated.length - 1; i >= 0; i--) {
             const m = updated[i];
-            if (m.__streaming && m.agentName === agentNameEnd) {
-              m.content = finalContent || m.content;
-              m.isStreaming = false;
-              delete m.__streaming;
-              delete m.__streamId;
+            const sameStream = streamId && m.__streamId && m.__streamId === streamId;
+            const sameAgentFallback = !streamId && !m.__streamId && m.agentName === agentNameEnd;
+            if (m.__streaming && (sameStream || sameAgentFallback)) {
+              const finalized = {
+                ...m,
+                content: finalContent || m.content,
+                isStreaming: false,
+                metadata: streamEndMetadata || m.metadata || null,
+              };
+              delete finalized.__streaming;
+              delete finalized.__streamId;
               // Apply capability flags forwarded from the original chat.text data
-              if (data.is_structured_capable !== undefined) m.isStructuredCapable = !!data.is_structured_capable;
-              if (data.is_visual !== undefined) m.isVisual = !!data.is_visual;
-              if (data.is_tool_agent !== undefined) m.isToolAgent = !!data.is_tool_agent;
-              if (data.structured_output) m.structuredOutput = data.structured_output;
-              if (data.structured_schema) m.structuredSchema = data.structured_schema;
-              if (data.metadata) m.metadata = data.metadata;
+              if (data.is_structured_capable !== undefined) finalized.isStructuredCapable = !!data.is_structured_capable;
+              if (data.is_visual !== undefined) finalized.isVisual = !!data.is_visual;
+              if (data.is_tool_agent !== undefined) finalized.isToolAgent = !!data.is_tool_agent;
+              if (data.structured_output) finalized.structuredOutput = data.structured_output;
+              if (data.structured_schema) finalized.structuredSchema = data.structured_schema;
+              updated[i] = finalized;
               return updated;
             }
           }
           // No in-progress streaming message found — add a finished message directly
           if (finalContent) {
+            if (shouldSuppressConsecutiveAssistantDuplicate(updated, {
+              agentName: agentNameEnd,
+              content: finalContent,
+              source: streamEndMetadata?.source || null,
+            })) {
+              return updated;
+            }
             updated.push({
               id: `stream-end-${Date.now()}`,
               sender: 'agent',
@@ -1853,7 +1983,7 @@ const ChatPage = () => {
               isToolAgent: !!(data.is_tool_agent),
               structuredOutput: data.structured_output || null,
               structuredSchema: data.structured_schema || null,
-              metadata: data.metadata || null,
+              metadata: streamEndMetadata || null,
             });
           }
           return updated;
@@ -2092,6 +2222,13 @@ const ChatPage = () => {
           const structuredSchema = data.structured_schema || null; // schema describing structuredOutput
           const isVisual = !!data.is_visual;
           const isToolAgent = !!data.is_tool_agent;
+          if (computedSender === 'agent' && shouldSuppressConsecutiveAssistantDuplicate(updated, {
+            agentName,
+            content,
+            source: metadataSource?.source || null,
+          })) {
+            return updated;
+          }
           updated.push({
             id:`text-${Date.now()}`,
             sender: computedSender,
@@ -2387,6 +2524,106 @@ const ChatPage = () => {
         if (showSystemMessages) {
           setMessagesWithLogging(prev => [...prev, { id:`usage-${Date.now()}`, sender:'system', agentName:'System', content:`📊 Usage: tokens=${data.total_tokens} prompt=${data.prompt_tokens} completion=${data.completion_tokens}${data.cost?` cost=$${data.cost}`:''}`, isStreaming:false }]);
         }
+        return;
+      }
+      case 'workflow_batch_started': {
+        const payload = data.data || {};
+        const count = Number(data.count ?? payload.count ?? 0);
+        const label = count > 0 ? `Running ${count} parallel workflow task${count === 1 ? '' : 's'}...` : 'Running parallel workflow tasks...';
+        setMessagesWithLogging(prev => [...prev, {
+          id: `mfj-batch-${Date.now()}`,
+          sender: 'system',
+          agentName: 'System',
+          content: `⚙️ ${label}`,
+          isStreaming: false,
+          metadata: {
+            event_type: 'workflow_batch_started',
+            trigger_id: data.trigger_id || payload.trigger_id || null,
+            mfj_cycle: data.mfj_cycle || payload.mfj_cycle || null,
+            count: count || null,
+          },
+        }]);
+        return;
+      }
+      case 'workflow_child_completed': {
+        if (!showSystemMessages) {
+          return;
+        }
+        const payload = data.data || {};
+        const idx = Number(data.child_index ?? payload.child_index ?? 0);
+        const total = Number(data.child_total ?? payload.child_total ?? 0);
+        const ok = data.success ?? payload.success;
+        const status = String(data.status || payload.status || (ok ? 'completed' : 'failed'));
+        const progressText = idx > 0 && total > 0 ? ` (${idx}/${total})` : '';
+        const icon = ok ? '✅' : '⚠️';
+        setMessagesWithLogging(prev => [...prev, {
+          id: `mfj-child-${Date.now()}`,
+          sender: 'system',
+          agentName: 'System',
+          content: `${icon} Parallel child${progressText}: ${status}`,
+          isStreaming: false,
+          metadata: {
+            event_type: 'workflow_child_completed',
+            child_chat_id: data.child_chat_id || payload.child_chat_id || null,
+            trigger_id: data.trigger_id || payload.trigger_id || null,
+            mfj_cycle: data.mfj_cycle || payload.mfj_cycle || null,
+          },
+        }]);
+        return;
+      }
+      case 'mfj_fan_in_started': {
+        const payload = data.data || {};
+        setMessagesWithLogging(prev => [...prev, {
+          id: `mfj-fanin-${Date.now()}`,
+          sender: 'system',
+          agentName: 'System',
+          content: `🧩 Merging parallel results...`,
+          isStreaming: false,
+          metadata: {
+            event_type: 'mfj_fan_in_started',
+            trigger_id: data.trigger_id || payload.trigger_id || null,
+            mfj_cycle: data.mfj_cycle || payload.mfj_cycle || null,
+          },
+        }]);
+        return;
+      }
+      case 'mfj_timeout_prompt': {
+        const payload = data.data || {};
+        const failed = Number(data.failed_count ?? payload.failed_count ?? 0);
+        const total = Number(data.total_count ?? payload.total_count ?? 0);
+        const detail = failed > 0 && total > 0 ? ` (${failed}/${total} failed)` : '';
+        setMessagesWithLogging(prev => [...prev, {
+          id: `mfj-timeout-${Date.now()}`,
+          sender: 'system',
+          agentName: 'System',
+          content: `⏱️ Parallel tasks timed out${detail}. Continuing with available results.`,
+          isStreaming: false,
+          metadata: {
+            event_type: 'mfj_timeout_prompt',
+            trigger_id: data.trigger_id || payload.trigger_id || null,
+            mfj_cycle: data.mfj_cycle || payload.mfj_cycle || null,
+          },
+        }]);
+        return;
+      }
+      case 'workflow_resumed': {
+        const payload = data.data || {};
+        const resumeAgent = data.resume_agent || payload.resume_agent || 'resume agent';
+        setMessagesWithLogging(prev => [...prev, {
+          id: `mfj-resume-${Date.now()}`,
+          sender: 'system',
+          agentName: 'System',
+          content: `↩️ Parallel phase complete. Resuming at ${resumeAgent}.`,
+          isStreaming: false,
+          metadata: {
+            event_type: 'workflow_resumed',
+            trigger_id: data.trigger_id || payload.trigger_id || null,
+            mfj_cycle: data.mfj_cycle || payload.mfj_cycle || null,
+            inject_as: data.inject_as || payload.inject_as || null,
+            succeeded_count: data.succeeded_count ?? payload.succeeded_count ?? null,
+            failed_count: data.failed_count ?? payload.failed_count ?? null,
+          },
+        }]);
         return;
       }
       case 'select_speaker': {
@@ -2700,6 +2937,11 @@ useEffect(() => {
             }
             console.log('[EXISTS] Chat does NOT exist; clearing any cached artifacts for that id');
             clearStoredArtifactState(reuseChatId);
+            clearStoredChatCacheSeed(reuseChatId);
+            if (getStoredActiveChatId() === reuseChatId) {
+              setStoredActiveChatId(null);
+            }
+            consumeNavigationQueryParams(['chat_id']);
           } else {
             console.warn('[EXISTS] Backend returned non-OK; falling back to reuse chat_id');
             setCurrentChatId(reuseChatId);
@@ -2723,13 +2965,27 @@ useEffect(() => {
       }
 
       console.log('[INIT] Creating new chat via startChat');
-      const result = await api.startChat(currentAppId, currentWorkflowName, currentUserId);
+      const triggerMeta = {
+        trigger_source: queryTriggerSource,
+        ...(queryActionId ? { action_id: queryActionId } : {}),
+        ...(queryChangeClass ? { change_class: queryChangeClass } : {}),
+        ...(queryArtifactVersionId ? { artifact_version_id: queryArtifactVersionId } : {}),
+      };
+      const result = await api.startChat(currentAppId, currentWorkflowName, currentUserId, {}, queryContext, triggerMeta);
       if (result && (result.chat_id || result.id)) {
         const newId = result.chat_id || result.id;
         const reused = !!result.reused;
         setCurrentChatId(newId);
         setChatExists(reused);
-        
+
+        // Remove ?context= param after seeding — prevent re-injection on refresh
+        if (queryContextRaw) {
+          const cleanParams = new URLSearchParams(location.search || '');
+          cleanParams.delete('context');
+          const nextSearch = cleanParams.toString();
+          navigate(location.pathname + (nextSearch ? `?${nextSearch}` : ''), { replace: true });
+        }
+
         // Update global chat context for persistent bubble
         setActiveChatId(newId);
         setActiveWorkflowName(currentWorkflowName);
@@ -2738,7 +2994,7 @@ useEffect(() => {
         if (!reused) {
           clearStoredArtifactState(newId);
         }
-        console.log('[INIT] startChat complete', { newId, reused });
+        console.log('[INIT] startChat complete', { newId, reused, contextSeeded: !!queryContext });
       }
     } catch (e) {
       console.error('[INIT] Failed to initialize chat:', e);
@@ -2747,7 +3003,7 @@ useEffect(() => {
     }
   })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [api, workflowConfigLoaded, currentChatId, currentWorkflowName, currentAppId, currentUserId, resolveKnownWorkflowName]);
+}, [api, workflowConfigLoaded, currentChatId, currentWorkflowName, currentAppId, currentUserId, resolveKnownWorkflowName, consumeNavigationQueryParams]);
 
   // Guard against stale chat IDs restored from local storage (e.g. after cleanse).
   // If the chat does not exist anymore, clear it so preflight can create a new one.
@@ -2894,7 +3150,7 @@ useEffect(() => {
     setConnectionInitialized(true);
     
     // Define connection functions inside useEffect to avoid dependency issues
-    const connectWebSocket = () => {
+    const connectWebSocket = (resolvedWorkflowName = null) => {
       // WebSocket connection for chat communication
       if (!currentChatId) {
         console.error('WebSocket requires existing chat ID');
@@ -2904,9 +3160,14 @@ useEffect(() => {
       setConnectionStatus('connecting');
       setTransportType('websocket');
 
-      const workflowName = resolveWorkflow(urlWorkflowName);
+      const workflowName = resolveKnownWorkflowName(resolvedWorkflowName)
+        || resolveKnownWorkflowName(urlWorkflowName)
+        || resolveKnownWorkflowName(currentWorkflowName)
+        || resolveWorkflow(resolvedWorkflowName || urlWorkflowName || currentWorkflowName);
       if (!workflowName) {
         console.warn('⚠️ No workflow available to connect');
+        setConnectionInitialized(false);
+        connectionInProgressRef.current = false;
         return () => {};
       }
 
@@ -2979,6 +3240,8 @@ useEffect(() => {
       if (!connection) {
         setConnectionStatus('error');
         setLoading(false);
+        setConnectionInitialized(false);
+        connectionInProgressRef.current = false;
         return () => {};
       }
       connection.chatId = currentChatId;
@@ -3001,7 +3264,10 @@ useEffect(() => {
     const connectWithCorrectTransport = async () => {
       try {
         // Unified workflow resolution: URL explicit → backend entry_point → singleton → null
-        const workflowName = resolveKnownWorkflowName(urlWorkflowName) || resolveKnownWorkflowName(currentWorkflowName);
+        const workflowName = resolveKnownWorkflowName(urlWorkflowName)
+          || resolveKnownWorkflowName(currentWorkflowName)
+          || resolveWorkflow(urlWorkflowName)
+          || resolveWorkflow(currentWorkflowName);
         if (!workflowName) {
           throw new Error('No workflow available');
         }
@@ -3020,18 +3286,23 @@ useEffect(() => {
           console.debug('Transport indicates resume is disabled for', workflowName);
         }
         setCurrentWorkflowName(workflowName);
-        return connectWebSocket();
+        return connectWebSocket(workflowName);
       } catch (error) {
         console.error('Error querying workflow transport:', error);
         // Fallback to WebSocket
-        const fallbackWf = resolveKnownWorkflowName(currentWorkflowName) || resolveWorkflow();
+        const fallbackWf = resolveKnownWorkflowName(currentWorkflowName)
+          || resolveKnownWorkflowName(urlWorkflowName)
+          || resolveWorkflow(currentWorkflowName)
+          || resolveWorkflow(urlWorkflowName);
         if (!fallbackWf) {
           console.warn('⚠️ No workflow available for fallback');
+          setConnectionInitialized(false);
+          connectionInProgressRef.current = false;
           return () => {};
         }
         setTransportType('websocket');
         setCurrentWorkflowName(fallbackWf);
-        return connectWebSocket();
+        return connectWebSocket(fallbackWf);
       }
     };
     
@@ -3058,7 +3329,7 @@ useEffect(() => {
       // Reset the in-progress flag when component unmounts
       connectionInProgressRef.current = false;
     };
-  }, [api, currentAppId, currentUserId, workflowConfigLoaded, currentChatId, urlWorkflowName, resolveKnownWorkflowName]);
+  }, [api, currentAppId, currentUserId, workflowConfigLoaded, currentChatId, urlWorkflowName, currentWorkflowName, resolveKnownWorkflowName]);
 
   // Retry connection function
   const retryConnection = useCallback(() => {
@@ -3565,15 +3836,16 @@ useEffect(() => {
     setMessagesWithLogging,
   ]);
 
-  const ensureWorkflowMode = useCallback(() => {
-    if (conversationMode === 'workflow') {
+  const ensureWorkflowMode = useCallback((options = {}) => {
+    const { sendSwitch = true, forceRestore = false } = options;
+    if (conversationMode === 'workflow' && !forceRestore) {
       return true;
     }
     if (!currentChatId) {
       console.warn('⚠️ Cannot resume workflow mode without chat id, switching mode anyway');
     }
-    console.log('🤖 [MODE_TOGGLE] Switching to workflow mode (sending chat.switch_workflow)');
-    const sent = currentChatId
+    console.log(`🤖 [MODE_TOGGLE] Switching to workflow mode (${sendSwitch ? 'sending chat.switch_workflow' : 'local shell only'})`);
+    const sent = sendSwitch && currentChatId
       ? sendWsMessage({ type: 'chat.switch_workflow', chat_id: currentChatId })
       : false;
     
@@ -3661,7 +3933,7 @@ useEffect(() => {
       }
     }, 100);
     
-    return sent;
+    return sendSwitch ? sent : true;
   }, [conversationMode, currentChatId, sendWsMessage, setConversationMode, setMessagesWithLogging, setLayoutMode, workflowMessages]);
 
   const resumeWorkflowSession = useCallback((targetChatId, targetWorkflow = null) => {
@@ -3793,6 +4065,12 @@ useEffect(() => {
     return policyMap[policy] || ['last_active', 'oldest', 'entry_point'];
   }, [configuredResumePolicy]);
 
+  const describeApiError = useCallback((error) => ({
+    status: error?.status || null,
+    message: error?.message || String(error),
+    body: error?.body || null,
+  }), []);
+
   const resolveWorkflowSessionByStrategy = useCallback(async (strategy) => {
     const normalized = String(strategy || '').toLowerCase();
     const fallbackWorkflowName =
@@ -3822,7 +4100,7 @@ useEffect(() => {
             return null;
           }
         } catch (err) {
-          console.warn('Failed to validate last_active workflow session:', err);
+          console.warn('Failed to validate last_active workflow session:', describeApiError(err));
           return null;
         }
       }
@@ -3848,7 +4126,7 @@ useEffect(() => {
           };
         }
       } catch (err) {
-        console.warn('Failed to resolve recent workflow session:', err);
+        console.warn('Failed to resolve recent workflow session:', describeApiError(err));
       }
       return null;
     }
@@ -3865,7 +4143,7 @@ useEffect(() => {
         }
       } catch (err) {
         if (err?.status !== 404) {
-          console.warn('Failed to resolve oldest workflow session:', err);
+          console.warn('Failed to resolve oldest workflow session:', describeApiError(err));
           return null;
         }
         // Backward fallback for runtimes without /sessions/oldest.
@@ -3889,7 +4167,7 @@ useEffect(() => {
             };
           }
         } catch (fallbackErr) {
-          console.warn('Failed to resolve oldest session from list fallback:', fallbackErr);
+          console.warn('Failed to resolve oldest session from list fallback:', describeApiError(fallbackErr));
         }
       }
       return null;
@@ -3901,6 +4179,7 @@ useEffect(() => {
     currentChatId,
     activeWorkflowName,
     currentWorkflowName,
+    describeApiError,
     resolveKnownWorkflowName,
     configuredEntryWorkflow,
     api,
@@ -3910,165 +4189,175 @@ useEffect(() => {
   ]);
 
   const handleConversationModeChange = useCallback(async (mode) => {
+    if (modeChangeInProgressRef.current) {
+      console.log('⏳ [MODE_CHANGE] Ignoring duplicate mode toggle while a transition is already in progress');
+      return;
+    }
+
+    modeChangeInProgressRef.current = true;
+    setModeChangePending(true);
+
     console.log('🔄 [MODE_CHANGE] handleConversationModeChange called with mode:', mode);
     console.log('🔄 [MODE_CHANGE] Current conversationMode:', conversationMode);
     console.log('🔄 [MODE_CHANGE] Current activeChatId (from context):', activeChatId);
     console.log('🔄 [MODE_CHANGE] Current activeWorkflowName (from context):', activeWorkflowName);
     console.log('🔄 [MODE_CHANGE] Current currentChatId (local state):', currentChatId);
-    
-    if (mode === 'ask') {
-      // ensureGeneralMode will cache artifact state and close panel
-      console.log('🧠 [MODE_CHANGE] Switching to Ask mode');
-      ensureGeneralMode();
-      // Ensure layout is reset to full (no artifact panel)
-      if (setLayoutMode) setLayoutMode('full');
-      // Reset mobile drawer to peek state (no artifacts in Ask mode)
-      if (isMobileView) setMobileDrawerState('peek');
-    } else {
-      // Switching from Ask -> Workflow follows the framework default resume order.
-      console.log('🤖 [MODE_CHANGE] Switching to workflow mode, resolving session with resume policy');
-      console.log('🤖 [MODE_CHANGE] isInWidgetMode:', isInWidgetMode);
-      console.log('🤖 [MODE_CHANGE] API available?', !!api);
-      console.log('🤖 [MODE_CHANGE] App ID:', currentAppId);
-      console.log('🤖 [MODE_CHANGE] User ID:', currentUserId);
-      if (!workflowConfigLoaded) {
-        console.log('🤖 [MODE_CHANGE] Workflow registry not ready yet, waiting for fetch');
-        await workflowConfig.fetchWorkflowConfigs();
-        setWorkflowConfigLoaded(true);
-      }
 
-      const canonicalWorkflowName =
-        resolveKnownWorkflowName(urlWorkflowName)
-        || resolveKnownWorkflowName(configuredEntryWorkflow)
-        || resolveKnownWorkflowName(currentWorkflowName)
-        || resolveKnownWorkflowName(activeWorkflowName)
-        || resolveKnownWorkflowName(getStoredActiveWorkflowName())
-        || resolveWorkflow()
-        || workflowConfig.getDefaultWorkflow();
+    try {
+      if (mode === 'ask') {
+        console.log('🧠 [MODE_CHANGE] Switching to Ask mode');
+        resumeOldestFromWidgetRef.current = false;
+        queryResumeHandledRef.current = null;
+        consumeNavigationQueryParams(['mode', 'resume', 'chat_id']);
+        ensureGeneralMode();
+        if (setLayoutMode) setLayoutMode('full');
+        if (isMobileView) setMobileDrawerState('peek');
+      } else {
+        console.log('🤖 [MODE_CHANGE] Switching to workflow mode, resolving session with resume policy');
+        console.log('🤖 [MODE_CHANGE] isInWidgetMode:', isInWidgetMode);
+        console.log('🤖 [MODE_CHANGE] API available?', !!api);
+        console.log('🤖 [MODE_CHANGE] App ID:', currentAppId);
+        console.log('🤖 [MODE_CHANGE] User ID:', currentUserId);
 
-      if (canonicalWorkflowName && canonicalWorkflowName !== currentWorkflowName) {
-        setCurrentWorkflowName(canonicalWorkflowName);
-      }
-      if (canonicalWorkflowName && canonicalWorkflowName !== activeWorkflowName) {
-        setActiveWorkflowName(canonicalWorkflowName);
-      }
+        // Flip the shell immediately so the UI responds on click even if backend session APIs are slow.
+        ensureWorkflowMode({ sendSwitch: false, forceRestore: true });
 
-      if (layoutMode === 'view') {
-        console.log('🧭 [MODE_CHANGE] Leaving view mode -> restoring workflow surface');
-        const restored = restoreViewSnapshot();
-        if (!restored) {
-          clearViewArtifacts();
-        }
-      }
-
-      // If API/app/user is unavailable, fall back to persisted workflow state without crashing.
-      if (!api || typeof api.get !== 'function' || !currentAppId || !currentUserId) {
-        const storedChatId = activeChatId || currentChatId || getStoredActiveChatId();
-        const storedWorkflowName = canonicalWorkflowName || resolveKnownWorkflowName(getStoredActiveWorkflowName());
-
-        if (storedChatId) {
-          setCurrentChatId(storedChatId);
-          setActiveChatId(storedChatId);
-        }
-        if (storedWorkflowName) {
-          setActiveWorkflowName(storedWorkflowName);
-          setCurrentWorkflowName(storedWorkflowName);
+        if (!workflowConfigLoaded) {
+          console.log('🤖 [MODE_CHANGE] Workflow registry not ready yet, waiting for fetch');
+          await workflowConfig.fetchWorkflowConfigs();
+          setWorkflowConfigLoaded(true);
         }
 
-        ensureWorkflowMode();
-        return;
-      }
-
-      // If in widget mode, navigate to /chat first
-      if (isInWidgetMode) {
-        console.log('🚀 [MODE_CHANGE] In widget mode - navigating to /chat');
-        navigate('/chat');
-        // Exit widget mode
-        setIsInWidgetMode(false);
-      }
-      
-      const startEntryWorkflowSession = async () => {
-        console.log('📭 [MODE_CHANGE] No resumable workflow session — starting entry_point workflow');
-        const entryWorkflow =
-          canonicalWorkflowName
+        const canonicalWorkflowName =
+          resolveKnownWorkflowName(urlWorkflowName)
           || resolveKnownWorkflowName(configuredEntryWorkflow)
-          || resolveWorkflow()
+          || resolveKnownWorkflowName(currentWorkflowName)
+          || resolveKnownWorkflowName(activeWorkflowName)
+          || resolveKnownWorkflowName(getStoredActiveWorkflowName())
+          || resolveWorkflow(currentWorkflowName)
+          || resolveWorkflow(urlWorkflowName)
           || workflowConfig.getDefaultWorkflow();
-        if (!entryWorkflow) {
-          console.warn('⚠️ [MODE_CHANGE] No entry_point workflow available to start');
-          return false;
+
+        if (canonicalWorkflowName && canonicalWorkflowName !== currentWorkflowName) {
+          setCurrentWorkflowName(canonicalWorkflowName);
         }
+        if (canonicalWorkflowName && canonicalWorkflowName !== activeWorkflowName) {
+          setActiveWorkflowName(canonicalWorkflowName);
+        }
+
+        if (layoutMode === 'view') {
+          console.log('🧭 [MODE_CHANGE] Leaving view mode -> restoring workflow surface');
+          const restored = restoreViewSnapshot();
+          if (!restored) {
+            clearViewArtifacts();
+          }
+        }
+
+        if (!api || typeof api.get !== 'function' || !currentAppId || !currentUserId) {
+          const storedChatId = activeChatId || currentChatId || getStoredActiveChatId();
+          const storedWorkflowName = canonicalWorkflowName || resolveKnownWorkflowName(getStoredActiveWorkflowName());
+
+          if (storedChatId) {
+            setCurrentChatId(storedChatId);
+            setActiveChatId(storedChatId);
+          }
+          if (storedWorkflowName) {
+            setActiveWorkflowName(storedWorkflowName);
+            setCurrentWorkflowName(storedWorkflowName);
+          }
+
+          return;
+        }
+
+        if (isInWidgetMode) {
+          console.log('🚀 [MODE_CHANGE] In widget mode - navigating to /chat');
+          navigate('/chat');
+          setIsInWidgetMode(false);
+        }
+
+        const startEntryWorkflowSession = async () => {
+          console.log('📭 [MODE_CHANGE] No resumable workflow session — starting entry_point workflow');
+          const entryWorkflow =
+            canonicalWorkflowName
+            || resolveKnownWorkflowName(configuredEntryWorkflow)
+            || resolveWorkflow(currentWorkflowName)
+            || resolveWorkflow(urlWorkflowName)
+            || workflowConfig.getDefaultWorkflow();
+          if (!entryWorkflow) {
+            console.warn('⚠️ [MODE_CHANGE] No entry_point workflow available to start');
+            return false;
+          }
+
+          try {
+            const result = await api.startChat(currentAppId, entryWorkflow, currentUserId);
+            if (result && (result.chat_id || result.id)) {
+              const newChatId = result.chat_id || result.id;
+              console.log(`🚀 [MODE_CHANGE] Created new session for ${entryWorkflow}: ${newChatId}`);
+              setCurrentChatId(newChatId);
+              setActiveChatId(newChatId);
+              setActiveWorkflowName(entryWorkflow);
+              setCurrentWorkflowName(entryWorkflow);
+              setStoredActiveChatId(newChatId);
+
+              setConnectionInitialized(false);
+              connectionInProgressRef.current = false;
+
+              setConversationMode('workflow');
+              generalMessagesCacheRef.current = messagesRef.current;
+              refreshWorkflowSessions();
+              console.log('✅ [MODE_CHANGE] Entry_point workflow session started, WS will connect on re-render');
+              return true;
+            }
+
+            console.error('❌ [MODE_CHANGE] startChat returned no chat_id:', result);
+            return false;
+          } catch (startErr) {
+            console.error('❌ [MODE_CHANGE] Failed to start entry_point workflow session:', describeApiError(startErr));
+            return false;
+          }
+        };
 
         try {
-          const result = await api.startChat(currentAppId, entryWorkflow, currentUserId);
-          if (result && (result.chat_id || result.id)) {
-            const newChatId = result.chat_id || result.id;
-            console.log(`🚀 [MODE_CHANGE] Created new session for ${entryWorkflow}: ${newChatId}`);
-            setCurrentChatId(newChatId);
-            setActiveChatId(newChatId);
-            setActiveWorkflowName(entryWorkflow);
-            setCurrentWorkflowName(entryWorkflow);
-            setStoredActiveChatId(newChatId);
+          const policyOrder = resolveResumePolicyOrder();
+          console.log('🧭 [MODE_CHANGE] Resume policy order:', policyOrder.join(' -> '));
 
-            // Reset connection so the WS effect re-fires with the new chatId
-            setConnectionInitialized(false);
-            connectionInProgressRef.current = false;
-
-            setConversationMode('workflow');
-            generalMessagesCacheRef.current = messagesRef.current;
-            refreshWorkflowSessions();
-            console.log('✅ [MODE_CHANGE] Entry_point workflow session started, WS will connect on re-render');
-            return true;
+          let resumed = false;
+          for (const strategy of policyOrder) {
+            if (strategy === 'entry_point') {
+              continue;
+            }
+            const target = await resolveWorkflowSessionByStrategy(strategy);
+            if (!target?.chat_id) {
+              continue;
+            }
+            const targetWorkflowName = resolveKnownWorkflowName(target.workflow_name)
+              || canonicalWorkflowName
+              || resolveWorkflow(currentWorkflowName)
+              || resolveWorkflow(urlWorkflowName);
+            console.log(`🎯 [MODE_CHANGE] Resuming workflow via ${strategy}: ${targetWorkflowName} (${target.chat_id})`);
+            resumed = resumeWorkflowSession(target.chat_id, targetWorkflowName);
+            if (resumed) {
+              generalMessagesCacheRef.current = messagesRef.current;
+              refreshWorkflowSessions();
+              break;
+            }
+            console.warn(`⚠️ [MODE_CHANGE] Resume send failed for strategy ${strategy}; trying next option`);
           }
 
-          console.error('❌ [MODE_CHANGE] startChat returned no chat_id:', result);
-          return false;
-        } catch (startErr) {
-          console.error('❌ [MODE_CHANGE] Failed to start entry_point workflow session:', startErr);
-          return false;
+          if (!resumed) {
+            await startEntryWorkflowSession();
+          }
+        } catch (err) {
+          console.error('❌ [MODE_CHANGE] Error resolving workflow session:', describeApiError(err));
+          console.log('🔄 [MODE_CHANGE] Staying in local workflow shell while backend is unavailable');
         }
-      };
-
-      try {
-        const policyOrder = resolveResumePolicyOrder();
-        console.log('🧭 [MODE_CHANGE] Resume policy order:', policyOrder.join(' -> '));
-
-        let resumed = false;
-        for (const strategy of policyOrder) {
-          if (strategy === 'entry_point') {
-            continue;
-          }
-          const target = await resolveWorkflowSessionByStrategy(strategy);
-          if (!target?.chat_id) {
-            continue;
-          }
-          const targetWorkflowName = resolveKnownWorkflowName(target.workflow_name)
-            || canonicalWorkflowName
-            || resolveWorkflow();
-          console.log(`🎯 [MODE_CHANGE] Resuming workflow via ${strategy}: ${targetWorkflowName} (${target.chat_id})`);
-          resumed = resumeWorkflowSession(target.chat_id, targetWorkflowName);
-          if (resumed) {
-            generalMessagesCacheRef.current = messagesRef.current;
-            refreshWorkflowSessions();
-            break;
-          }
-          console.warn(`⚠️ [MODE_CHANGE] Resume send failed for strategy ${strategy}; trying next option`);
-        }
-
-        if (!resumed) {
-          const started = await startEntryWorkflowSession();
-          if (!started) {
-            ensureWorkflowMode();
-          }
-        }
-      } catch (err) {
-        console.error('❌ [MODE_CHANGE] Error resolving workflow session:', err);
-        console.log('🔄 [MODE_CHANGE] Falling back to ensureWorkflowMode (backend unavailable)');
-        // Fallback: switch to workflow mode locally even if backend is down
-        ensureWorkflowMode();
       }
+
+      console.log('✅ [MODE_CHANGE] handleConversationModeChange completed');
+    } finally {
+      modeChangeInProgressRef.current = false;
+      setModeChangePending(false);
     }
-    console.log('✅ [MODE_CHANGE] handleConversationModeChange completed');
   }, [
     ensureGeneralMode,
     ensureWorkflowMode,
@@ -4101,6 +4390,9 @@ useEffect(() => {
     resolveResumePolicyOrder,
     resolveWorkflowSessionByStrategy,
     resumeWorkflowSession,
+    describeApiError,
+    modeChangePending,
+    consumeNavigationQueryParams,
   ]);
 
   useEffect(() => {
@@ -4146,6 +4438,9 @@ useEffect(() => {
     if (!queryChatId) {
       return;
     }
+    if (queryMode === 'ask') {
+      return;
+    }
     if (!isPrimaryChatRoute) {
       return;
     }
@@ -4155,21 +4450,72 @@ useEffect(() => {
 
     const workflowFromQuery = urlWorkflowName || currentWorkflowName;
     const cacheKey = `${queryChatId}:${workflowFromQuery || ''}`;
-    if (conversationMode === 'workflow' && queryResumeHandledRef.current === cacheKey) {
+    if (queryResumeHandledRef.current === cacheKey) {
       return;
     }
 
-    console.log('🧭 [ROUTE_RESUME] Detected chat_id in URL, attempting resume:', { queryChatId, workflowFromQuery });
-    if (isInWidgetMode) {
-      console.log('🧭 [ROUTE_RESUME] Exiting widget mode for direct resume');
-      setIsInWidgetMode(false);
-    }
+    let cancelled = false;
 
-    const success = resumeWorkflowSession(queryChatId, workflowFromQuery);
-    if (success) {
-      queryResumeHandledRef.current = cacheKey;
-    }
-  }, [queryChatId, urlWorkflowName, currentWorkflowName, resumeWorkflowSession, conversationMode, connectionStatus, isInWidgetMode, setIsInWidgetMode, isPrimaryChatRoute]);
+    const attemptRouteResume = async () => {
+      const workflowForCheck =
+        resolveKnownWorkflowName(workflowFromQuery)
+        || resolveKnownWorkflowName(currentWorkflowName)
+        || workflowConfig.getDefaultWorkflow()
+        || workflowFromQuery;
+
+      if (api && typeof api.getHttpBaseUrl === 'function' && currentAppId && workflowForCheck) {
+        try {
+          const response = await fetch(
+            `${api.getHttpBaseUrl()}/api/chats/exists/${currentAppId}/${workflowForCheck}/${queryChatId}`
+          );
+          if (cancelled) {
+            return;
+          }
+
+          if (response.ok) {
+            const result = await response.json();
+            if (cancelled) {
+              return;
+            }
+            if (result?.exists === false) {
+              console.warn('🧹 [ROUTE_RESUME] Ignoring stale query chat_id after backend reset:', queryChatId);
+              clearStoredArtifactState(queryChatId);
+              clearStoredChatCacheSeed(queryChatId);
+              if (getStoredActiveChatId() === queryChatId) {
+                setStoredActiveChatId(null);
+              }
+              if (activeChatId === queryChatId) {
+                setActiveChatId(null);
+              }
+              queryResumeHandledRef.current = cacheKey;
+              consumeNavigationQueryParams(['chat_id']);
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn('⚠️ [ROUTE_RESUME] Could not validate query chat_id, attempting resume anyway:', err);
+        }
+      }
+
+      console.log('🧭 [ROUTE_RESUME] Detected chat_id in URL, attempting resume:', { queryChatId, workflowFromQuery });
+      if (isInWidgetMode) {
+        console.log('🧭 [ROUTE_RESUME] Exiting widget mode for direct resume');
+        setIsInWidgetMode(false);
+      }
+
+      const success = resumeWorkflowSession(queryChatId, workflowFromQuery);
+      if (success) {
+        queryResumeHandledRef.current = cacheKey;
+        consumeNavigationQueryParams(['chat_id']);
+      }
+    };
+
+    attemptRouteResume();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [queryChatId, queryMode, urlWorkflowName, currentWorkflowName, resumeWorkflowSession, conversationMode, connectionStatus, isInWidgetMode, setIsInWidgetMode, isPrimaryChatRoute, resolveKnownWorkflowName, api, currentAppId, activeChatId, setActiveChatId, consumeNavigationQueryParams]);
 
   const handleStartGeneralChat = useCallback(() => {
     startNewGeneralSession();
@@ -4819,6 +5165,80 @@ useEffect(() => {
       ? null
       : currentWorkflowConfig?.initial_message_to_user;
 
+  const handlePendingTransitionNavigate = useCallback(
+    async (option_id = null, contextVariables = {}) => {
+      if (!pendingTransitionId) return;
+      const mergedContext = {
+        ...(pendingTransitionContext || {}),
+        ...(contextVariables || {}),
+      };
+      const resolvedAppId = (
+        appId ||
+        user?.app_id ||
+        config?.chat?.defaultAppId ||
+        config?.appId ||
+        config?.app_id ||
+        'default'
+      );
+      const resolvedUserId = user?.id || user?.user_id || user?.email || null;
+
+      try {
+        const res = await fetch('/api/transitions/resolve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            transition_id: pendingTransitionId,
+            option_id,
+            context_variables: mergedContext,
+            app_id: resolvedAppId,
+            user_id: resolvedUserId,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(err.detail || 'Failed to resolve transition');
+        }
+
+        const data = await res.json();
+        if (data.resolution_type === 'transition' && data.transition?.id) {
+          setPendingTransitionContext(data.context_variables ?? mergedContext);
+          setPendingTransitionId(data.transition.id);
+          return;
+        }
+
+        if (data.resolution_type === 'workflow' && data.chat_id && data.workflow_id) {
+          setPendingTransitionId(null);
+          setPendingTransitionContext({});
+          setCurrentChatId(data.chat_id);
+          setActiveChatId(data.chat_id);
+          setCurrentWorkflowName(data.workflow_id);
+          setActiveWorkflowName(data.workflow_id);
+          setConversationMode('workflow');
+          navigate(
+            `/chat?workflow=${encodeURIComponent(data.workflow_id)}&chat_id=${encodeURIComponent(data.chat_id)}`
+          );
+          return;
+        }
+
+        throw new Error('Transition resolution returned an unsupported response');
+      } catch (err) {
+        console.error('[ChatPage] transition resolution failed:', err);
+      }
+    },
+    [
+      appId,
+      config,
+      navigate,
+      pendingTransitionContext,
+      pendingTransitionId,
+      setActiveChatId,
+      setActiveWorkflowName,
+      setConversationMode,
+      user,
+    ]
+  );
+
   const chatInterface = (
     <ErrorBoundary fallback={<ChatInterfaceErrorFallback onRetry={() => window.location.reload()} />}>
       <ChatInterface
@@ -4839,6 +5259,7 @@ useEffect(() => {
         onBrandClick={undefined}
         conversationMode={conversationMode}
         onConversationModeChange={handleConversationModeChange}
+        modeTogglePending={modeChangePending}
         onStartGeneralChat={handleStartGeneralChat}
         generalChatSummary={generalChatSummary}
         isOnChatPage={isChatPageSurface}
@@ -4915,6 +5336,14 @@ useEffect(() => {
           <div className="pointer-events-auto">
             <LoadingSpinner />
           </div>
+        </div>
+      )}
+      {pendingTransitionId && (
+        <div className="fixed inset-0 z-[70] bg-background">
+          <TransitionScreen
+            transitionId={pendingTransitionId}
+            onNavigate={handlePendingTransitionNavigate}
+          />
         </div>
       )}
       <img

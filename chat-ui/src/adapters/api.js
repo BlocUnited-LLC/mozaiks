@@ -9,7 +9,18 @@ import platform from '../platform/index.js';
  * In production, this should be provided by the auth adapter.
  * Falls back to localStorage for development/standalone mode.
  */
-function getAccessToken() {
+function getAccessToken(adapterConfig = null) {
+  try {
+    if (typeof adapterConfig?.getAccessToken === 'function') {
+      return adapterConfig.getAccessToken();
+    }
+    if (typeof adapterConfig?.auth?.getAccessToken === 'function') {
+      return adapterConfig.auth.getAccessToken();
+    }
+  } catch {
+    // Fall through to platform-backed token lookup.
+  }
+
   return platform.getAccessToken();
 }
 
@@ -17,14 +28,14 @@ function getAccessToken() {
  * Build headers with Authorization if token available.
  * Always includes Content-Type for JSON requests.
  */
-function buildAuthHeaders(contentType = 'application/json') {
+function buildAuthHeaders(contentType = 'application/json', adapterConfig = null) {
   const headers = {};
   
   if (contentType) {
     headers['Content-Type'] = contentType;
   }
   
-  const token = getAccessToken();
+  const token = getAccessToken(adapterConfig);
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
@@ -35,8 +46,8 @@ function buildAuthHeaders(contentType = 'application/json') {
 /**
  * Wrapper for fetch with automatic auth header injection.
  */
-async function authFetch(url, options = {}) {
-  const token = getAccessToken();
+async function authFetch(url, options = {}, adapterConfig = null) {
+  const token = getAccessToken(adapterConfig);
   
   const headers = {
     ...options.headers,
@@ -58,6 +69,30 @@ export class ApiAdapter {
     this.config = adapterConfig || {};
     this._generalChatsApiUnavailable = false;
     this._generalChatsTranscriptUnavailable = false;
+    this._startChatInFlight = new Map();
+  }
+
+  _getStartChatKey(appId, workflowname, userId) {
+    return `${String(appId || '')}::${String(workflowname || '')}::${String(userId || '')}`;
+  }
+
+  _runStartChatRequest(key, requestFactory) {
+    const existing = this._startChatInFlight.get(key);
+    if (existing) {
+      console.log(`↺ startChat deduped for ${key}`);
+      return existing;
+    }
+
+    const request = (async () => {
+      try {
+        return await requestFactory();
+      } finally {
+        this._startChatInFlight.delete(key);
+      }
+    })();
+
+    this._startChatInFlight.set(key, request);
+    return request;
   }
 
   async get(path, options = {}) {
@@ -69,7 +104,7 @@ export class ApiAdapter {
     const response = await authFetch(normalizedPath, {
       method: 'GET',
       ...(options || {}),
-    });
+    }, this.config);
 
     if (!response.ok) {
       const err = new Error(`HTTP ${response.status}`);
@@ -157,7 +192,7 @@ export class ApiAdapter {
     const url = `${baseUrl}/api/general_chats/list/${encodeURIComponent(appId)}/${encodeURIComponent(userId)}?${searchParams.toString()}`;
 
     try {
-      const response = await authFetch(url);
+      const response = await authFetch(url, {}, this.config);
       if (response.status === 404) {
         // Optional feature: treat missing endpoint as "no conversations yet".
         this._generalChatsApiUnavailable = true;
@@ -191,7 +226,7 @@ export class ApiAdapter {
     const response = await authFetch(normalizedPath, {
       method: 'DELETE',
       ...(options || {}),
-    });
+    }, this.config);
 
     if (!response.ok) {
       const err = new Error(`HTTP ${response.status}`);
@@ -235,7 +270,7 @@ export class ApiAdapter {
     const url = `${baseUrl}/api/general_chats/transcript/${encodeURIComponent(appId)}/${encodeURIComponent(generalChatId)}?${searchParams.toString()}`;
 
     try {
-      const response = await authFetch(url);
+      const response = await authFetch(url, {}, this.config);
       if (response.status === 404) {
         this._generalChatsTranscriptUnavailable = true;
         return null;
@@ -327,7 +362,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
       const baseUrl = this.getHttpBaseUrl();
       const response = await authFetch(`${baseUrl}/chat/${appId}/${chatId}/${userId}/input`, {
         method: 'POST',
-        headers: buildAuthHeaders(),
+        headers: buildAuthHeaders(undefined, this.config),
         body: JSON.stringify({ 
           message, 
           workflow_name: actualworkflowname,
@@ -335,7 +370,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
           user_id: userId,
           context: context || undefined,
         })
-      });
+      }, this.config);
 
       if (response.ok) {
         const result = await response.json();
@@ -370,7 +405,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
     
     // Build WebSocket URL with access_token query param for authentication
     let wsUrl = `${wsBase}/ws/${actualworkflowname}/${appId}/${chatId}/${userId}`;
-    const token = getAccessToken();
+    const token = getAccessToken(this.config);
     if (token) {
       wsUrl += `?access_token=${encodeURIComponent(token)}`;
       console.log(`🔗 Connecting to WebSocket with auth token: ${wsUrl.split('?')[0]}?access_token=***`);
@@ -487,7 +522,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
       const baseUrl = this.getHttpBaseUrl();
       const response = await authFetch(
         `${baseUrl}/api/chat/history/${encodeURIComponent(appId)}/${encodeURIComponent(userId)}`
-      );
+      , {}, this.config);
       if (response.ok) {
         return await response.json();
       }
@@ -505,7 +540,6 @@ export class WebSocketApiAdapter extends ApiAdapter {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('appId', appId);
-    formData.append('appId', appId);
     formData.append('userId', userId);
     formData.append('chatId', chatId);
     if (intent) formData.append('intent', intent);
@@ -517,7 +551,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
       const response = await authFetch(`${baseUrl}/api/chat/upload`, {
         method: 'POST',
         body: formData
-      });
+      }, this.config);
 
       if (response.ok) {
         return await response.json();
@@ -532,7 +566,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
   async getWorkflowTransport(workflowname) {
     try {
       const baseUrl = this.getHttpBaseUrl();
-      const response = await authFetch(`${baseUrl}/api/workflows/${encodeURIComponent(workflowname)}/transport`);
+      const response = await authFetch(`${baseUrl}/api/workflows/${encodeURIComponent(workflowname)}/transport`, {}, this.config);
       if (response.ok) {
         return await response.json();
       }
@@ -542,58 +576,60 @@ export class WebSocketApiAdapter extends ApiAdapter {
     return null;
   }
 
-  async startChat(appId, workflowname, userId, fetchOpts = {}) {
+  async startChat(appId, workflowname, userId, fetchOpts = {}, contextVariables = null, triggerMeta = null) {
     const actualworkflowname = resolveWorkflow(workflowname);
     const clientRequestId = crypto?.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random().toString(36).slice(2));
-    
+    const requestKey = this._getStartChatKey(appId, actualworkflowname, userId);
+
     console.log('🛠️ [WS-API] startChat workflow resolution:', {
       provided: workflowname,
       resolved: actualworkflowname,
       entryPoint: workflowConfig.getEntryPointWorkflow(),
       availableConfigs: workflowConfig.getAvailableWorkflows(),
     });
-    
-    try {
-      if (this._startingChat) {
-        console.log('🛑 startChat skipped (already in progress)');
-        return { success: false, error: 'in_progress' };
-      }
-      this._startingChat = true;
-      const baseUrl = this.getHttpBaseUrl();
-      const response = await authFetch(`${baseUrl}/api/chats/${encodeURIComponent(appId)}/${encodeURIComponent(actualworkflowname)}/start`, {
-        method: 'POST',
-        headers: buildAuthHeaders(),
-        body: JSON.stringify({ user_id: userId, client_request_id: clientRequestId }),
-        ...fetchOpts
-      });
 
-      if (response.ok) {
-        const result = await response.json();
-        console.log('✅ Chat started:', result);
-        this._startingChat = false;
-        return result;
-      } else {
-        let detail = null;
-        try {
-          const errJson = await response.json();
-          detail = errJson?.detail ?? errJson;
-        } catch (_e) {
-          try {
-            detail = await response.text();
-          } catch (_e2) {
-            detail = null;
-          }
+    return this._runStartChatRequest(requestKey, async () => {
+      try {
+        const baseUrl = this.getHttpBaseUrl();
+        const body = { user_id: userId, client_request_id: clientRequestId };
+        if (contextVariables && typeof contextVariables === 'object' && Object.keys(contextVariables).length > 0) {
+          body.context_variables = contextVariables;
         }
+        if (triggerMeta && typeof triggerMeta === 'object') {
+          body.trigger_meta = triggerMeta;
+        }
+        const response = await authFetch(`${baseUrl}/api/chats/${encodeURIComponent(appId)}/${encodeURIComponent(actualworkflowname)}/start`, {
+          method: 'POST',
+          headers: buildAuthHeaders(undefined, this.config),
+          body: JSON.stringify(body),
+          ...fetchOpts
+        }, this.config);
 
-        console.error('Failed to start chat:', response.status, response.statusText, detail);
-        this._startingChat = false;
-        return { success: false, error: `HTTP ${response.status}`, status: response.status, detail };
+        if (response.ok) {
+          const result = await response.json();
+          console.log('✅ Chat started:', result);
+          return result;
+        } else {
+          let detail = null;
+          try {
+            const errJson = await response.json();
+            detail = errJson?.detail ?? errJson;
+          } catch (_e) {
+            try {
+              detail = await response.text();
+            } catch (_e2) {
+              detail = null;
+            }
+          }
+
+          console.error('Failed to start chat:', response.status, response.statusText, detail);
+          return { success: false, error: `HTTP ${response.status}`, status: response.status, detail };
+        }
+      } catch (error) {
+        console.error('Failed to start chat:', error);
+        return { success: false, error: error.message };
       }
-    } catch (error) {
-      console.error('Failed to start chat:', error);
-      this._startingChat = false;
-      return { success: false, error: error.message };
-    }
+    });
   }
 }
 
@@ -610,9 +646,9 @@ export class RestApiAdapter extends ApiAdapter {
       const baseUrl = this.getHttpBaseUrl();
       const response = await authFetch(`${baseUrl}/api/chat/send`, {
         method: 'POST',
-        headers: buildAuthHeaders(),
+        headers: buildAuthHeaders(undefined, this.config),
         body: JSON.stringify({ message, appId, userId })
-      });
+      }, this.config);
 
       if (response.ok) {
         return await response.json();
@@ -636,7 +672,7 @@ export class RestApiAdapter extends ApiAdapter {
       const baseUrl = this.getHttpBaseUrl();
       const response = await authFetch(`${baseUrl}/chat/${appId}/${chatId}/${userId}/input`, {
         method: 'POST',
-        headers: buildAuthHeaders(),
+        headers: buildAuthHeaders(undefined, this.config),
         body: JSON.stringify({ 
           message, 
           workflow_name: actualworkflowname,
@@ -644,7 +680,7 @@ export class RestApiAdapter extends ApiAdapter {
           user_id: userId,
           context: context || undefined,
         })
-      });
+      }, this.config);
 
       if (response.ok) {
         const result = await response.json();
@@ -671,7 +707,7 @@ export class RestApiAdapter extends ApiAdapter {
       const baseUrl = this.getHttpBaseUrl();
       const response = await authFetch(
         `${baseUrl}/api/chat/messages/${encodeURIComponent(appId)}/${encodeURIComponent(userId)}`
-      );
+      , {}, this.config);
       if (response.ok) {
         return await response.json();
       }
@@ -700,7 +736,8 @@ export class RestApiAdapter extends ApiAdapter {
         {
           method: 'POST',
           body: formData
-        }
+        },
+        this.config
       );
 
       if (response.ok) {
@@ -716,7 +753,7 @@ export class RestApiAdapter extends ApiAdapter {
   async getWorkflowTransport(workflowname) {
     try {
       const baseUrl = this.getHttpBaseUrl();
-      const response = await authFetch(`${baseUrl}/api/workflows/${encodeURIComponent(workflowname)}/transport`);
+      const response = await authFetch(`${baseUrl}/api/workflows/${encodeURIComponent(workflowname)}/transport`, {}, this.config);
       if (response.ok) {
         return await response.json();
       }
@@ -726,39 +763,41 @@ export class RestApiAdapter extends ApiAdapter {
     return null;
   }
 
-  async startChat(appId, workflowname, userId, fetchOpts = {}) {
+  async startChat(appId, workflowname, userId, fetchOpts = {}, contextVariables = null, triggerMeta = null) {
     const actualworkflowname = resolveWorkflow(workflowname);
     const clientRequestId = crypto?.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random().toString(36).slice(2));
-    
-    try {
-      if (this._startingChat) {
-        console.log('🛑 startChat skipped (already in progress)');
-        return { success: false, error: 'in_progress' };
-      }
-      this._startingChat = true;
-      const baseUrl = this.getHttpBaseUrl();
-      const response = await authFetch(`${baseUrl}/api/chats/${encodeURIComponent(appId)}/${encodeURIComponent(actualworkflowname)}/start`, {
-        method: 'POST',
-        headers: buildAuthHeaders(),
-        body: JSON.stringify({ user_id: userId, client_request_id: clientRequestId }),
-        ...fetchOpts
-      });
+    const requestKey = this._getStartChatKey(appId, actualworkflowname, userId);
 
-      if (response.ok) {
-        const result = await response.json();
-        console.log('✅ Chat started:', result);
-        this._startingChat = false;
-        return result;
-      } else {
-        console.error('Failed to start chat:', response.status, response.statusText);
-        this._startingChat = false;
-        return { success: false, error: `HTTP ${response.status}` };
+    return this._runStartChatRequest(requestKey, async () => {
+      try {
+        const baseUrl = this.getHttpBaseUrl();
+        const body = { user_id: userId, client_request_id: clientRequestId };
+        if (contextVariables && typeof contextVariables === 'object' && Object.keys(contextVariables).length > 0) {
+          body.context_variables = contextVariables;
+        }
+        if (triggerMeta && typeof triggerMeta === 'object') {
+          body.trigger_meta = triggerMeta;
+        }
+        const response = await authFetch(`${baseUrl}/api/chats/${encodeURIComponent(appId)}/${encodeURIComponent(actualworkflowname)}/start`, {
+          method: 'POST',
+          headers: buildAuthHeaders(undefined, this.config),
+          body: JSON.stringify(body),
+          ...fetchOpts
+        }, this.config);
+
+        if (response.ok) {
+          const result = await response.json();
+          console.log('✅ Chat started:', result);
+          return result;
+        } else {
+          console.error('Failed to start chat:', response.status, response.statusText);
+          return { success: false, error: `HTTP ${response.status}` };
+        }
+      } catch (error) {
+        console.error('Failed to start chat:', error);
+        return { success: false, error: error.message };
       }
-    } catch (error) {
-      console.error('Failed to start chat:', error);
-      this._startingChat = false;
-      return { success: false, error: error.message };
-    }
+    });
   }
 }
 

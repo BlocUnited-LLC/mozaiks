@@ -1,11 +1,47 @@
 # JokeFactory Structured Outputs
-# Runtime uses these typed models for deterministic validation.
+# Decomposer fans out 3 angles; each JokeWorker emits a JokeResult;
+# Presenter collects fan-in and renders the full show.
 
 registry:
-  JokeWriterAgent: JokeCollection
-  JokeCriticAgent: JokeRating
+  JokeDecomposerAgent: JokeDecomposition
+  JokePresenterAgent: JokePresentation
 
 models:
+  JokeAngleSpec:
+    type: model
+    fields:
+      name:
+        type: literal
+        values:
+          - JokeWorker
+        description: Fixed child workflow name — always "JokeWorker".
+      description:
+        type: str
+        description: The angle label in 3-5 words (e.g. "morning coffee addiction").
+      initial_message:
+        type: str
+        description: Full prompt for the JokeWorker writer — angle, style, and one-joke constraint.
+
+  JokeDecomposition:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: Status message shown to the user while the 3 workers run in parallel.
+      workflows:
+        type: list
+        items: JokeAngleSpec
+        description: Exactly 3 joke angles to spawn as parallel JokeWorker chats.
+
+  JokePresentation:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: The full formatted presentation of all 3 jokes with ratings and closing line.
+      jokes_presented:
+        type: int
+        description: Number of jokes shown (should be 3, or fewer on partial failure).
   JokeItem:
     type: model
     fields:

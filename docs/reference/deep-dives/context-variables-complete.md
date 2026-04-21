@@ -128,7 +128,7 @@ Source file analyzed:
 | `pack_name` | `string` | `computed` | Starts `null`; populated by pattern-selection logic |
 | `current_workflow_index` | `integer` | `state` | Initialized to `0`; updated by pack iteration/runtime loop |
 | `workflows_spec` | `array` | `computed` | Starts `[]`; populated from pattern-selection output |
-| `macro_workflow_graph` | `object` | `file` | Loads JSON from `workflows/_pack/workflow_graph.json`, fallback `null` |
+| `macro_workflow_graph` | `object` | `file` | Loads JSON from `workflows/extended_orchestration/mfj_extension.json`, fallback `null` |
 | `generated_workflows` | `array` | `state` | Initialized to `[]`; appended during pack generation |
 | `pack_generation_complete` | `boolean` | `state` | Initialized to `false`; set by pack loop lifecycle path (for example `pack_loop_check`) |
 

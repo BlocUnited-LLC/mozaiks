@@ -3,7 +3,7 @@
 # DESCRIPTION: Controls AG2 runtime logging and forwards usage and event data into Mozaiks observability.
 # ==============================================================================
 
-# === MOZAIKS-CORE-HEADER ===
+
 
 from __future__ import annotations
 

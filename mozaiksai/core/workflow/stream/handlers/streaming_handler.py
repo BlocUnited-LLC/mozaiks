@@ -9,9 +9,8 @@ Streaming Event Handler
 Handles StreamEvent for real-time token streaming from AG2's LLM client.
 Enables typewriter effect in the frontend.
 
-When stream=True is set in llm_config, AG2 emits StreamEvent for each
-token/chunk from the LLM response. This handler forwards these chunks
-to the frontend via stream_chunk events.
+AG2 emits StreamEvent when the active model client streams token chunks.
+This handler forwards those chunks to the frontend via stream_chunk events.
 """
 
 from typing import TYPE_CHECKING, Any, Dict, Optional, Set, Type
@@ -21,13 +20,7 @@ from .base import BaseEventHandler
 if TYPE_CHECKING:
     from ..context import StreamContext, StreamState
 
-# Import AG2 StreamEvent
-try:
-    from autogen.events.client_events import StreamEvent
-    HAS_STREAM_EVENT = True
-except ImportError:
-    HAS_STREAM_EVENT = False
-    StreamEvent = type(None)  # type: ignore
+from autogen.events.client_events import StreamEvent
 
 
 class StreamingEventHandler(BaseEventHandler):
@@ -39,10 +32,8 @@ class StreamingEventHandler(BaseEventHandler):
     """
 
     def event_types(self) -> Set[Type]:
-        """Handle StreamEvent if available."""
-        if HAS_STREAM_EVENT:
-            return {StreamEvent}
-        return set()
+        """Handle StreamEvent."""
+        return {StreamEvent}
 
     async def handle(
         self,
@@ -70,16 +61,14 @@ class StreamingEventHandler(BaseEventHandler):
         agent_name = state.turn_agent or "Agent"
 
         # Track streaming state
-        if not hasattr(state, '_stream_sequence'):
-            state._stream_sequence = 0
-        state._stream_sequence += 1
+        state.stream_sequence += 1
 
-        if not hasattr(state, '_stream_id'):
-            state._stream_id = f"{ctx.chat_id}:{agent_name}:{state.sequence_counter}"
+        if state.stream_id is None:
+            state.stream_id = f"{ctx.chat_id}:{agent_name}:{state.sequence_counter}"
 
         ctx.wf_logger.debug(
             f" [{ctx.workflow_name_upper}] StreamEvent chunk: "
-            f"seq={state._stream_sequence} len={len(content)}"
+            f"seq={state.stream_sequence} len={len(content)}"
         )
 
         # Build stream_chunk payload
@@ -87,14 +76,10 @@ class StreamingEventHandler(BaseEventHandler):
             "kind": "stream_chunk",
             "agent": agent_name,
             "content": content,
-            "chunk_seq": state._stream_sequence,
-            "stream_id": state._stream_id,
+            "chunk_seq": state.stream_sequence,
+            "stream_id": state.stream_id,
         }
 
     def should_break(self, event: Any, state: "StreamState") -> bool:
         """StreamEvent does not terminate the stream."""
         return False
-
-    def priority(self) -> int:
-        """High priority to process chunks quickly."""
-        return 10  # Higher priority than text (50)

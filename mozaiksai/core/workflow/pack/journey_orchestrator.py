@@ -7,16 +7,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from logs.logging_config import get_core_logger
 
-from mozaiksai.core.data.models import WorkflowStatus
 from mozaiksai.core.multitenant import build_app_scope_filter
+from mozaiksai.core.session.model import TriggerInput
+from mozaiksai.core.session.persistence import SessionStateStore
+from mozaiksai.core.session.router import get_session_router
 from mozaiksai.core.transport.session_registry import session_registry
-from mozaiksai.core.workflow.pack.config import (
-    get_journey,
-    infer_auto_journey_for_start,
-    load_global_pack_graph,
-)
-from mozaiksai.core.workflow.pack.gating import validate_pack_prereqs
-from mozaiksai.core.workflow.pack.schema import GlobalJourney, GlobalPackGraph, normalize_step_groups
 
 logger = get_core_logger("journey_orchestrator")
 
@@ -54,10 +49,6 @@ class JourneyOrchestrator:
                 logger.error("[JOURNEY] handle_run_complete failed: %s", exc, exc_info=True)
 
     async def _handle_run_complete_inner(self, payload: Dict[str, Any], chat_id: str) -> None:
-        pack = load_global_pack_graph()
-        if pack is None:
-            return
-
         workflow_name = str(payload.get("workflow_name") or payload.get("workflow") or "").strip()
         app_id = str(payload.get("app_id") or payload.get("app") or "").strip()
         user_id = str(payload.get("user_id") or payload.get("user") or "").strip()
@@ -81,77 +72,35 @@ class JourneyOrchestrator:
 
         pm = transport._get_or_create_persistence_manager()
         coll = await pm._coll()
-        doc = await coll.find_one(
-            {"_id": chat_id, **build_app_scope_filter(app_id)},
-            projection={
-                "_id": 1,
-                "workflow_name": 1,
-                "status": 1,
-                "journey_id": 1,
-                "journey_key": 1,
-                "journey_step_index": 1,
-            },
+        session_router = get_session_router()
+        advance = await session_router.advance_journey_after_run_complete(
+            app_id=app_id,
+            user_id=user_id,
+            workflow_id=workflow_name,
+            chat_id=chat_id,
         )
-
-        journey_key = str((doc or {}).get("journey_key") or "").strip()
-        journey_id = str((doc or {}).get("journey_id") or "").strip()
-
-        journey = get_journey(pack, journey_key) if journey_key else None
-        if journey is None and not journey_key:
-            journey = self._infer_auto_journey(pack, workflow_name)
-            if journey is not None:
-                journey_key = journey.id
-        if journey is None:
+        if advance is None or advance.completed:
             return
 
-        groups = normalize_step_groups(journey.steps)
-        if not groups:
-            return
-
-        current_group_index: Optional[int] = None
-        for idx, group in enumerate(groups):
-            if workflow_name in group:
-                current_group_index = idx
-                break
-        if current_group_index is None:
-            return
-        if current_group_index >= len(groups) - 1:
-            return
-
-        if not journey_id:
-            journey_id = str(uuid.uuid4())
-            await coll.update_one(
-                {"_id": chat_id, **build_app_scope_filter(app_id)},
+        if advance.next_transition_id:
+            await transport.send_event_to_ui(
                 {
-                    "$set": {
-                        "journey_id": journey_id,
-                        "journey_key": journey_key or journey.id,
-                        "journey_step_index": int(current_group_index),
-                        "journey_total_steps": len(groups),
-                    }
+                    "type": "chat.transition_requested",
+                    "data": {
+                        "transition_id": advance.next_transition_id,
+                        "from_chat_id": chat_id,
+                        "app_id": app_id,
+                        "journey_id": advance.journey_instance_id,
+                        "journey_key": advance.journey_key,
+                        "journey_position": advance.next_group_index,
+                    },
+                    "timestamp": datetime.now(UTC).isoformat(),
                 },
+                chat_id,
             )
+            return
 
-        # For parallel groups, advance only when all siblings completed.
-        current_group = groups[current_group_index]
-        for wf in current_group:
-            doc_done = await coll.find_one(
-                {
-                    "journey_id": journey_id,
-                    "journey_step_index": int(current_group_index),
-                    "workflow_name": wf,
-                    "status": int(WorkflowStatus.COMPLETED),
-                    **build_app_scope_filter(app_id),
-                },
-                projection={"_id": 1},
-                sort=[("completed_at", -1), ("created_at", -1)],
-            )
-            if not doc_done:
-                return
-
-        next_group_index = current_group_index + 1
-        next_group = groups[next_group_index]
-        if not next_group:
+        if not advance.next_workflows:
             return
 
         try:
@@ -160,19 +109,28 @@ class JourneyOrchestrator:
             pass
 
         spawned: List[Tuple[str, str, bool]] = []  # (workflow_name, chat_id, created_new)
-        for wf in next_group:
-            ok, prereq_error = await validate_pack_prereqs(
-                app_id=app_id,
-                user_id=user_id,
-                workflow_name=wf,
-                persistence=pm,
+        session_scope_id = SessionStateStore.session_id_for_scope(app_id, user_id)
+        next_group_index = int(advance.next_group_index or 0)
+        for wf in advance.next_workflows:
+            route_decision = await session_router.route_trigger(
+                TriggerInput(
+                    app_id=app_id,
+                    user_id=user_id,
+                    trigger_source="run_complete",
+                    workflow_id=wf,
+                )
             )
-            if not ok:
+            if route_decision.workflow_id != wf:
+                reason = (
+                    route_decision.unmet_dependency.reason
+                    if route_decision.unmet_dependency is not None
+                    else f"Journey step '{wf}' cannot start because prerequisites are not met."
+                )
                 await transport.send_event_to_ui(
                     {
                         "type": "chat.error",
                         "data": {
-                            "message": prereq_error or "Prerequisites not met",
+                            "message": reason,
                             "error_code": "WORKFLOW_PREREQS_NOT_MET",
                             "workflow_name": wf,
                             "chat_id": chat_id,
@@ -185,8 +143,9 @@ class JourneyOrchestrator:
 
             existing_next = await coll.find_one(
                 {
-                    "journey_id": journey_id,
-                    "journey_step_index": int(next_group_index),
+                    "session_router_session_id": session_scope_id,
+                    "journey_instance_id": advance.journey_instance_id,
+                    "journey_position": next_group_index,
                     "workflow_name": wf,
                     **build_app_scope_filter(app_id),
                 },
@@ -207,13 +166,22 @@ class JourneyOrchestrator:
                     workflow_name=wf,
                     user_id=user_id,
                     extra_fields={
-                        "journey_id": journey_id,
-                        "journey_key": journey_key or journey.id,
-                        "journey_step_index": int(next_group_index),
-                        "journey_total_steps": len(groups),
+                        "session_router_session_id": session_scope_id,
+                        "journey_instance_id": advance.journey_instance_id,
+                        "journey_key": advance.journey_key,
+                        "journey_position": next_group_index,
+                        "journey_total_steps": int(advance.journey_total_steps),
                     },
                 )
                 created_new = True
+            await session_router.annotate_workflow_chat(
+                app_id=app_id,
+                user_id=user_id,
+                workflow_id=wf,
+                chat_id=next_chat_id,
+                journey_id=advance.journey_key,
+                journey_position=next_group_index,
+            )
             spawned.append((wf, next_chat_id, created_new))
 
             self._ensure_connection_alias(
@@ -227,6 +195,14 @@ class JourneyOrchestrator:
             await self._flush_pre_connection_buffers(transport=transport, chat_id=next_chat_id)
 
         primary_workflow, primary_chat_id, _ = spawned[-1]
+        await session_router.bind_workflow_session(
+            app_id=app_id,
+            user_id=user_id,
+            workflow_id=primary_workflow,
+            chat_id=primary_chat_id,
+            journey_id=advance.journey_key,
+            journey_position=next_group_index,
+        )
         session_registry.add_workflow(
             ws_id=int(ws_id),
             chat_id=primary_chat_id,
@@ -255,8 +231,8 @@ class JourneyOrchestrator:
                     "to_chat_id": primary_chat_id,
                     "workflow_name": primary_workflow,
                     "app_id": app_id,
-                    "journey_id": journey_id,
-                    "journey_key": journey_key,
+                    "journey_id": advance.journey_instance_id,
+                    "journey_key": advance.journey_key,
                 },
                 "timestamp": datetime.now(UTC).isoformat(),
             },
@@ -287,10 +263,6 @@ class JourneyOrchestrator:
             return (conn if isinstance(conn, dict) and conn else None), transport
         except Exception:
             return None, None
-
-    @staticmethod
-    def _infer_auto_journey(pack: GlobalPackGraph, workflow_name: str) -> Optional[GlobalJourney]:
-        return infer_auto_journey_for_start(pack, workflow_name)
 
     def _ensure_connection_alias(
         self,
@@ -348,4 +320,3 @@ class JourneyOrchestrator:
 
 
 __all__ = ["JourneyOrchestrator"]
-

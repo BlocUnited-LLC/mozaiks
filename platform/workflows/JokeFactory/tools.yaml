@@ -1,49 +1,14 @@
-# JokeFactory Tools
-# Tools for joke generation and rating
-
 tools:
-- agent: JokeWriterAgent
-  file: save_jokes.py
-  function: save_jokes
-  description: >
-    Persist the generated jokes to context variables and optionally to the database.
+- agent: JokeHostAgent
+  file: joke_host_tools.py
+  function: joke_host_tool
+  description: A tool for JokeHostAgent to gather information from the user about their joke preferences, such as joke style and topic.
   tool_type: Agent_Tool
-  auto_invoke: true
-  ui:
-    component: null
-    mode: null
-
-- agent: JokeCriticAgent
-  file: rate_joke.py
-  function: rate_joke
-  description: >
-    Save joke ratings and feedback for analytics and improvement.
+  auto_tool_call: true
+- agent: InterviewAgent
+  file: interview_tools.py
+  function: interview_tool
+  description: A tool for InterviewAgent to conduct the initial interview with the user and gather necessary information to kick off the workflow.
   tool_type: Agent_Tool
-  auto_invoke: true
-  ui:
-    component: null
-    mode: null
-
-- agent: JokeCriticAgent
-  file: display_ratings.py
-  function: display_ratings
-  description: >
-    Display joke ratings in a fun visual format in the chat (inline).
-  tool_type: UI_Tool
-  auto_invoke: true
-  ui:
-    component: JokeRatingsCard
-    mode: inline
-
-- agent: JokeWriterAgent
-  file: update_gallery.py
-  function: update_gallery
-  description: >
-    Update the Joke Gallery artifact panel with all generated jokes.
-  tool_type: UI_Tool
-  auto_invoke: true
-  ui:
-    component: JokeGallery
-    mode: artifact
-
+  auto_tool_call: true
 lifecycle_tools: []

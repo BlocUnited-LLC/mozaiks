@@ -30,7 +30,7 @@ Those are Mozaiks layers that exist before a workflow starts.
 | `hooks.yaml` | lifecycle and hook registration | AG2-native hooks plus Mozaiks convenience |
 | `structured_outputs.yaml` | typed runtime validation | Mozaiks layer |
 | `ui_config.yaml` | frontend exposure metadata | frontend-only |
-| `_pack/workflow_graph.json` | MFJ or journey graph input | Mozaiks orchestration layer |
+| `extended_orchestration/mfj_extension.json` | MFJ or journey graph input | Mozaiks orchestration layer |
 
 ## Native or Near-Native Mappings
 
@@ -88,6 +88,13 @@ tools:
     file: tool_file.py
     function: run_tool
     tool_type: Agent_Tool
+  - agent: AgentName
+    file: render_status.py
+    function: render_status
+    tool_type: UI_Surface
+    ui:
+      component: StatusPanel
+      mode: artifact
 lifecycle_tools: []
 ```
 
@@ -135,15 +142,45 @@ Used for:
 - frontend rendering metadata
 - agent visibility rules
 
-### `_pack/workflow_graph.json`
+### `extended_orchestration/mfj_extension.json`
 
 Used for:
 
-- MFJ structure
-- child workflow coordination
-- journey-level graph execution
+- MFJ: declaring which agent triggers fan-out, the spawn mode, and where the
+  parent resumes after fan-in completes
+- multi-stage MFJ via `stages` — one `decomposition_agent`, multiple sequential
+  fan-out → fan-in phases separated by an in-flight `gate_agent`
+- `inject_as` — the context variable key under which the runtime writes merged
+  child outputs before resuming the parent
+- journey-level graph execution across workflows (global pack graph)
 
 These are workflow-runtime features around AG2, not AG2-native concepts.
+
+**Minimal MFJ authored form:**
+
+```json
+{
+  "version": 3,
+  "mid_flight_journeys": [{
+    "id": "my_journey",
+    "decomposition_agent": "DecompositionAgent",
+    "fan_out": { "spawn_mode": "workflow", "max_children": 5 },
+    "fan_in": {
+      "resume_agent": "SummaryAgent",
+      "inject_as": "mfj_my_results"
+    }
+  }]
+}
+```
+
+Schema defaults that do not need to be authored:
+- `aggregation_strategy` defaults to `collect_all`
+- `resume_entry_agent` defaults to `resume_agent` when omitted
+
+Context variable auto-synthesis: the runtime reads `extended_orchestration/mfj_extension.json`
+at plan-load time and registers `inject_as` keys plus the five `_mfj_resume_*`
+handshake fields as context variables automatically. Manual declarations in
+`context_variables.yaml` are not required.
 
 ## What Sits Before AG2
 

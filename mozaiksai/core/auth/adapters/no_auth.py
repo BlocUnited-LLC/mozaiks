@@ -42,7 +42,11 @@ class NoAuthAdapter(BaseAuthAdapter):
         super().__init__()
         self._default_user_id = default_user_id or os.getenv("AUTH_ANON_USER_ID", "anonymous")
         self._default_email = default_email or os.getenv("AUTH_ANON_EMAIL")
-        self._default_roles = default_roles or []
+        # AUTH_ANON_ROLES: comma-separated list of roles for the anonymous dev user
+        # e.g. AUTH_ANON_ROLES=admin,user  — enables admin portal in no-auth dev mode
+        env_roles_raw = os.getenv("AUTH_ANON_ROLES", "")
+        env_roles = [r.strip() for r in env_roles_raw.split(",") if r.strip()] if env_roles_raw else []
+        self._default_roles = default_roles or env_roles
 
     async def validate_token(self, token: str) -> UserClaims:
         """

@@ -54,8 +54,10 @@ export function useMozaiks() {
       // Start the chat session via API
       const result = await appApi.startChat(
         resolvedAppId,
+        workflowName,
         resolvedUserId,
-        workflowName
+        {},
+        context || null
       );
 
       if (result.chat_id) {

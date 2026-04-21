@@ -8,6 +8,7 @@ import pytest
 from tests.import_utils import import_module_directly
 
 _coord_mod = import_module_directly("mozaiksai.core.workflow.pack.workflow_pack_coordinator")
+_ag2_orch_mod = import_module_directly("mozaiksai.core.adapters.ag2_orchestration")
 _merge_mod = import_module_directly("mozaiksai.core.workflow.pack.merge")
 _schema_mod = import_module_directly("mozaiksai.core.workflow.pack.schema")
 _obs_mod = import_module_directly("mozaiksai.core.workflow.pack.mfj_observability")
@@ -126,7 +127,9 @@ class TestExtractChildSpecs:
 
 class TestWorkflowExists:
     def test_writers_room_exists_under_platform_workflows(self):
-        assert WorkflowPackCoordinator._workflow_exists("WritersRoom") is True
+        # JokeFactory is a real workflow under platform/workflows/ — verifies
+        # that _workflow_exists resolves against the repo tree.
+        assert WorkflowPackCoordinator._workflow_exists("JokeFactory") is True
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +243,7 @@ class TestValidateOutputContract:
 
 
 class TestFindTrigger:
-    def _make_mfj(self, trigger_agent, trigger_id="t1", trigger_on="agent_output"):
+    def _make_mfj(self, decomposition_agent, trigger_id="t1", trigger_on="decomposition_event"):
         class _FanOut:
             spawn_mode = "workflow"
             max_children = 10
@@ -257,7 +260,7 @@ class TestFindTrigger:
             fan_in = _FanIn()
 
         m = _MFJ()
-        m.trigger_agent = trigger_agent
+        m.decomposition_agent = decomposition_agent
         m.trigger_on = trigger_on
         return m
 
@@ -274,7 +277,7 @@ class TestFindTrigger:
 
     def test_wrong_trigger_on_returns_none(self):
         mfj = self._make_mfj("PlannerAgent")
-        mfj.trigger_on = "message"  # not agent_output
+        mfj.trigger_on = "message"  # not decomposition_event
         result = WorkflowPackCoordinator._find_trigger([mfj], "PlannerAgent")
         assert result is None
 
@@ -318,25 +321,125 @@ class TestCheckRequires:
         result = await coord._check_requires("app1", "parent1", ["trigger_a", "trigger_b"])
         assert result is False
 
+
+class TestResumeParent:
     @pytest.mark.asyncio
-    async def test_no_cache_entry_falls_back_to_store(self, mocker):
-        # Patch completion_store.load_completed_trigger_ids to return a known set
+    async def test_resume_parent_runs_background_with_resume_agent(self, monkeypatch):
         coord = _make_coordinator()
-        mocker.patch.object(
+
+        class _FanOut:
+            timeout_seconds = 30
+
+        class _FanIn:
+            timeout_seconds = 30
+            resume_agent = "PresenterAgent"
+            resume_entry_agent = "ResumeRouterAgent"
+            inject_as = "mfj_results"
+
+        class _Contract:
+            required = []
+            optional = []
+
+        class _Trigger:
+            id = "trigger-1"
+            fan_out = _FanOut()
+            fan_in = _FanIn()
+            output_contract = _Contract()
+
+        active = _ActivePackRun(
+            parent_chat_id="parent-chat",
+            parent_workflow_name="SmokeParent",
+            app_id="app-1",
+            user_id="user-1",
+            ws_id=None,
+            trigger=_Trigger(),
+            decomposition_agent="PlannerAgent",
+            merge_strategy=CollectAllMerge(),
+            on_partial_failure="continue",
+            max_retry_rounds=0,
+            mfj_cycle=1,
+            parent_context_snapshot={},
+            structured_data_snapshot={},
+        )
+
+        persisted_messages = []
+        background_call = {}
+
+        class _PM:
+            async def persist_initial_messages(self, **kwargs):
+                persisted_messages.append(kwargs)
+
+        class _Transport:
+            def __init__(self):
+                self._background_tasks = {}
+                self.pm = _PM()
+
+            def _get_or_create_persistence_manager(self):
+                return self.pm
+
+            async def _run_workflow_background(self, **kwargs):
+                background_call.update(kwargs)
+
+            async def send_event_to_ui(self, event, chat_id):
+                return None
+
+        transport = _Transport()
+
+        class _Adapter:
+            async def resume(self, request):
+                background_call.update(
+                    {
+                        "workflow_name": request.workflow_name,
+                        "app_id": request.app_id,
+                        "chat_id": request.chat_id,
+                        "user_id": request.user_id,
+                        "resume_agent": request.resume_agent,
+                    }
+                )
+
+        monkeypatch.setattr(_ag2_orch_mod, "get_ag2_adapter", lambda: _Adapter())
+
+        await coord._resume_parent(
+            transport=transport,
+            active=active,
+            merged_payload={"result": "ok"},
+            succeeded_count=1,
+            failed_count=0,
+            resume_nonce="nonce-1",
+        )
+        await _coord_mod.asyncio.sleep(0)
+
+        assert persisted_messages[0]["messages"][0]["name"] == "ResumeRouterAgent"
+        assert background_call["resume_agent"] == "PresenterAgent"
+
+    @pytest.mark.asyncio
+    async def test_no_cache_entry_falls_back_to_store(self, monkeypatch):
+        # Patch completion_store.load_completed_trigger_ids to return a known set.
+        # Must be an async coroutine because _check_requires awaits the call.
+        coord = _make_coordinator()
+
+        async def _stub_store(app_id, parent_chat_id):
+            return {"trigger_x"}
+
+        monkeypatch.setattr(
             coord._completion_store,
             "load_completed_trigger_ids",
-            return_value={"trigger_x"},
+            _stub_store,
         )
         result = await coord._check_requires("app1", "parent_new", ["trigger_x"])
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_store_miss_returns_false(self, mocker):
+    async def test_store_miss_returns_false(self, monkeypatch):
         coord = _make_coordinator()
-        mocker.patch.object(
+
+        async def _stub_store(app_id, parent_chat_id):
+            return set()
+
+        monkeypatch.setattr(
             coord._completion_store,
             "load_completed_trigger_ids",
-            return_value=set(),
+            _stub_store,
         )
         result = await coord._check_requires("app1", "parent_new", ["trigger_x"])
         assert result is False

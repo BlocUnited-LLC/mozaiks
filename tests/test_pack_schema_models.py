@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+import yaml
 
 from tests.import_utils import import_module_directly
 
@@ -11,28 +14,387 @@ parse_global_pack_graph = _schema.parse_global_pack_graph
 parse_workflow_pack_graph = _schema.parse_workflow_pack_graph
 
 
+def test_pack_metadata_structured_output_transition_options_match_runtime_contract() -> None:
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "mozaiks-platform"
+        / "app"
+        / "workflows"
+        / "AgentGenerator"
+        / "structured_outputs.yaml"
+    )
+    spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+    fields = spec["models"]["PackGraphTransitionOption"]["fields"]
+    assert set(fields.keys()) == {"id", "route_to", "context_variables"}
+
+
+def test_pack_metadata_structured_output_entrypoints_match_runtime_contract() -> None:
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "mozaiks-platform"
+        / "app"
+        / "workflows"
+        / "AgentGenerator"
+        / "structured_outputs.yaml"
+    )
+    spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+    fields = spec["models"]["PackGraphEntrypoint"]["fields"]
+    assert set(fields.keys()) == {
+        "id",
+        "path",
+        "label",
+        "transition",
+        "workflow",
+        "sequence",
+        "requiresAuth",
+        "order",
+        "meta",
+    }
+
+
 def test_parse_global_pack_graph_valid() -> None:
     graph = parse_global_pack_graph(
         {
-            "version": 2,
+            "version": 3,
             "workflows": [{"id": "A"}, {"id": "B"}],
-            "journeys": [{"id": "build", "steps": ["A", ["B"]]}],
+            "transitions": [],
+            "workflow_sequences": [
+                {"id": "build", "steps": [{"workflows": ["A"]}, {"workflows": ["B"]}]}
+            ],
         }
     )
     assert isinstance(graph, GlobalPackGraph)
-    assert graph.version == 2
+    assert graph.version == 3
     assert [w.id for w in graph.workflows] == ["A", "B"]
+
+
+def test_parse_global_pack_graph_allows_workflow_entrypoints() -> None:
+    graph = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [{"id": "ValueEngine"}],
+            "entrypoints": [
+                {
+                    "id": "create_app",
+                    "path": "/create",
+                    "label": "Create App",
+                    "transition": "app_type_selector",
+                    "sequence": "build",
+                    "requiresAuth": False,
+                    "order": 2,
+                    "meta": {"title": "Create App"},
+                }
+            ],
+            "workflow_sequences": [
+                {
+                    "id": "build",
+                    "steps": [
+                        {"transition": "app_type_selector"},
+                        {"workflows": ["ValueEngine"]},
+                    ],
+                }
+            ],
+            "transitions": [
+                {
+                    "id": "app_type_selector",
+                    "transition_type": "user_choice_context",
+                    "ui": {"component": "AppTypeSelector", "mode": "screen"},
+                    "route_to": "ValueEngine",
+                    "options": [{"id": "new_app", "context_variables": {"app_type": "new"}}],
+                }
+            ],
+        }
+    )
+
+    assert graph.entrypoints[0].path == "/create"
+    assert graph.entrypoints[0].transition == "app_type_selector"
+
+
+def test_parse_global_pack_graph_rejects_entrypoint_unknown_transition() -> None:
+    with pytest.raises(ValueError):
+        parse_global_pack_graph(
+            {
+                "version": 3,
+                "workflows": [{"id": "ValueEngine"}],
+                "entrypoints": [
+                    {"id": "create_app", "path": "/create", "transition": "missing"}
+                ],
+                "workflow_sequences": [],
+                "transitions": [],
+            }
+        )
+
+
+def test_parse_global_pack_graph_accepts_workflow_sequences() -> None:
+    graph = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [{"id": "A"}, {"id": "B"}],
+            "transitions": [],
+            "workflow_sequences": [
+                {"id": "build", "steps": [{"workflows": ["A"]}, {"workflows": ["B"]}]}
+            ],
+        }
+    )
+    assert isinstance(graph, GlobalPackGraph)
+    assert graph.journeys[0].id == "build"
+
+
+def test_parse_global_pack_graph_rejects_legacy_journeys_key() -> None:
+    with pytest.raises(ValueError):
+        parse_global_pack_graph(
+            {
+                "version": 3,
+                "workflows": [{"id": "A"}, {"id": "B"}],
+                "transitions": [],
+                "journeys": [{"id": "build", "steps": [{"workflows": ["A"]}, {"workflows": ["B"]}]}],
+            }
+        )
 
 
 def test_parse_global_pack_graph_duplicate_workflow_ids_fails() -> None:
     with pytest.raises(ValueError):
         parse_global_pack_graph(
             {
-                "version": 2,
+                "version": 3,
                 "workflows": [{"id": "A"}, {"id": "A"}],
-                "journeys": [],
+                "transitions": [],
+                "workflow_sequences": [],
             }
         )
+
+
+def test_parse_global_pack_graph_rejects_unknown_dependency() -> None:
+    with pytest.raises(ValueError):
+        parse_global_pack_graph(
+            {
+                "version": 3,
+                "workflows": [{"id": "AppGenerator", "dependencies": ["MissingWorkflow"]}],
+                "transitions": [],
+                "workflow_sequences": [],
+            }
+        )
+
+
+def test_parse_global_pack_graph_rejects_duplicate_workflow_in_journey() -> None:
+    with pytest.raises(ValueError):
+        parse_global_pack_graph(
+            {
+                "version": 3,
+                "workflows": [{"id": "ValueEngine"}, {"id": "DesignDocs"}],
+                "transitions": [],
+                "workflow_sequences": [
+                    {
+                        "id": "build",
+                        "steps": [
+                            {"workflows": ["ValueEngine"]},
+                            {"workflows": ["DesignDocs", "ValueEngine"]},
+                        ],
+                    }
+                ],
+            }
+        )
+
+
+def test_parse_global_pack_graph_rejects_transition_ui_component_file_path() -> None:
+    with pytest.raises(ValueError):
+        parse_global_pack_graph(
+            {
+                "version": 3,
+                "workflows": [{"id": "A"}, {"id": "B"}],
+                "transitions": [
+                    {
+                        "id": "choose_path",
+                        "transition_type": "user_choice",
+                        "ui": {"component": "ui/screens/ChoosePath.jsx", "mode": "screen"},
+                        "options": [{"id": "to_b", "route_to": "B"}],
+                    }
+                ],
+                "workflow_sequences": [
+                    {"id": "build", "steps": [{"workflows": ["A"]}, {"workflows": ["B"]}]}
+                ],
+            }
+        )
+
+
+def test_parse_global_pack_graph_rejects_transition_presentation_fields() -> None:
+    with pytest.raises(ValueError):
+        parse_global_pack_graph(
+            {
+                "version": 3,
+                "workflows": [{"id": "A"}, {"id": "B"}],
+                "transitions": [
+                    {
+                        "id": "choose_path",
+                        "transition_type": "user_choice",
+                        "ui": {"component": "LauncherScreen", "mode": "screen"},
+                        "config": {"title": "Choose"},
+                        "options": [{"id": "to_b", "label": "Go", "route_to": "B"}],
+                    }
+                ],
+                "workflow_sequences": [],
+            }
+        )
+
+
+def test_parse_global_pack_graph_allows_transition_ui_props() -> None:
+    graph = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [{"id": "ValueEngine"}, {"id": "AgentGenerator"}],
+            "transitions": [
+                {
+                    "id": "entry",
+                    "transition_type": "user_choice",
+                    "ui": {
+                        "component": "LauncherScreen",
+                        "mode": "screen",
+                        "props": {
+                            "title": "Choose Path",
+                            "options": {
+                                "new_app": {
+                                    "label": "New App",
+                                    "description": "Start from scratch",
+                                }
+                            },
+                        },
+                    },
+                    "options": [{"id": "new_app", "route_to": "ValueEngine"}],
+                }
+            ],
+            "workflow_sequences": [],
+        }
+    )
+
+    assert graph.transitions[0].ui is not None
+    assert graph.transitions[0].ui.props["title"] == "Choose Path"
+
+
+def test_parse_global_pack_graph_allows_transition_context_variables() -> None:
+    graph = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [{"id": "ValueEngine"}],
+            "workflow_sequences": [],
+            "transitions": [
+                {
+                    "id": "entry",
+                    "transition_type": "user_choice_context",
+                    "ui": {"component": "LauncherScreen", "mode": "screen"},
+                    "route_to": "ValueEngine",
+                    "options": [
+                        {
+                            "id": "new_app",
+                            "context_variables": {"app_type": "new"},
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    option = graph.transitions[0].options[0]
+    assert option.context_variables == {"app_type": "new"}
+    assert option.route_to is None
+
+
+def test_parse_global_pack_graph_allows_transition_steps_in_workflow_sequences() -> None:
+    graph = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [{"id": "ValueEngine"}, {"id": "DesignDocs"}],
+            "workflow_sequences": [
+                {
+                    "id": "build",
+                    "steps": [
+                        {"workflows": ["ValueEngine"]},
+                        {"transition": "coding_journey_selector"},
+                        {"workflows": ["DesignDocs"]},
+                    ],
+                }
+            ],
+            "transitions": [
+                {
+                    "id": "coding_journey_selector",
+                    "transition_type": "user_choice_context",
+                    "ui": {"component": "CodingJourneySelector", "mode": "screen"},
+                    "route_to": "DesignDocs",
+                    "options": [{"id": "guided", "context_variables": {"design_docs_hitl": True}}],
+                }
+            ],
+        }
+    )
+
+    assert graph.journeys[0].steps[1].transition == "coding_journey_selector"
+
+
+def test_parse_global_pack_graph_rejects_same_phase_required_dependency() -> None:
+    with pytest.raises(ValueError):
+        parse_global_pack_graph(
+            {
+                "version": 3,
+                "workflows": [
+                    {"id": "AgentGenerator"},
+                    {"id": "AppGenerator", "dependencies": ["AgentGenerator"]},
+                ],
+                "transitions": [],
+                "workflow_sequences": [
+                    {
+                        "id": "build",
+                        "steps": [{"workflows": ["AgentGenerator", "AppGenerator"]}],
+                    }
+                ],
+            }
+        )
+
+
+def test_parse_global_pack_graph_allows_serial_required_dependency() -> None:
+    graph = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [
+                {"id": "AgentGenerator"},
+                {"id": "AppGenerator", "dependencies": ["AgentGenerator"]},
+            ],
+            "transitions": [],
+            "workflow_sequences": [
+                {
+                    "id": "build",
+                    "steps": [
+                        {"workflows": ["AgentGenerator"]},
+                        {"workflows": ["AppGenerator"]},
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert graph.journeys[0].steps[0].workflows == ["AgentGenerator"]
+    assert graph.journeys[0].steps[1].workflows == ["AppGenerator"]
+
+
+def test_parse_global_pack_graph_allows_same_phase_optional_dependency() -> None:
+    graph = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [
+                {"id": "ThemeCapture"},
+                {
+                    "id": "ExistingAppDiscovery",
+                    "dependencies": [{"id": "ThemeCapture", "gating": "optional"}],
+                },
+            ],
+            "transitions": [],
+            "workflow_sequences": [
+                {
+                    "id": "existing_app_onboarding",
+                    "steps": [{"workflows": ["ThemeCapture", "ExistingAppDiscovery"]}],
+                }
+            ],
+        }
+    )
+
+    assert graph.journeys[0].steps[0].workflows == ["ThemeCapture", "ExistingAppDiscovery"]
 
 
 def test_parse_workflow_pack_graph_rejects_legacy_keys() -> None:
@@ -53,90 +415,74 @@ def test_parse_workflow_pack_graph_accepts_custom_strategy_name() -> None:
             "mid_flight_journeys": [
                 {
                     "id": "mfj",
-                    "trigger_agent": "Planner",
-                    "trigger_on": "agent_output",
+                    "decomposition_agent": "Planner",
+                    "trigger_on": "decomposition_event",
                     "fan_out": {
                         "spawn_mode": "workflow",
                         "max_children": 3,
-                        "timeout_seconds": 10,
-                        "input_contract": {"required": [], "optional": []},
                     },
                     "fan_in": {
                         "resume_agent": "ResumeAgent",
-                        "resume_entry_agent": "ResumeRouterAgent",
                         "aggregation_strategy": "custom:merge_vote",
-                        "inject_as": "mfj_outputs",
-                        "on_partial_failure": "resume_with_available",
-                        "timeout_seconds": 10,
+                        "inject_as": "outputs",
                     },
-                    "output_contract": {"required": [], "optional": []},
                 }
             ],
         }
     )
     assert isinstance(graph, WorkflowPackGraph)
     assert graph.mid_flight_journeys[0].fan_in.aggregation_strategy == "custom:merge_vote"
+    assert graph.mid_flight_journeys[0].fan_in.inject_as == "mfj_outputs"
 
 
-def test_parse_workflow_pack_graph_requires_resume_entry_agent() -> None:
-    with pytest.raises(ValueError):
-        parse_workflow_pack_graph(
-            {
-                "version": 3,
-                "mid_flight_journeys": [
-                    {
-                        "id": "mfj",
-                        "trigger_agent": "Planner",
-                        "trigger_on": "agent_output",
-                        "fan_out": {
-                            "spawn_mode": "workflow",
-                            "max_children": 3,
-                            "timeout_seconds": 10,
-                            "input_contract": {"required": [], "optional": []},
-                        },
-                        "fan_in": {
-                            "resume_agent": "HostAgent",
-                            "aggregation_strategy": "collect_all",
-                            "inject_as": "mfj_outputs",
-                            "on_partial_failure": "resume_with_available",
-                            "timeout_seconds": 10,
-                        },
-                        "output_contract": {"required": [], "optional": []},
-                    }
-                ],
-            }
-        )
+def test_parse_workflow_pack_graph_resume_entry_agent_defaults_to_resume_agent() -> None:
+    graph = parse_workflow_pack_graph(
+        {
+            "version": 3,
+            "mid_flight_journeys": [
+                {
+                    "id": "mfj",
+                    "decomposition_agent": "Planner",
+                    "trigger_on": "decomposition_event",
+                    "fan_out": {
+                        "spawn_mode": "workflow",
+                        "max_children": 3,
+                    },
+                    "fan_in": {
+                        "resume_agent": "HostAgent",
+                    },
+                }
+            ],
+        }
+    )
+    journey = graph.mid_flight_journeys[0]
+    assert journey.fan_in.resume_entry_agent == "HostAgent"  # defaults to resume_agent
+    assert journey.fan_in.aggregation_strategy == "collect_all"
+    assert journey.fan_in.inject_as == "mfj_results"
 
 
-def test_parse_workflow_pack_graph_rejects_non_mfj_inject_key() -> None:
-    with pytest.raises(ValueError):
-        parse_workflow_pack_graph(
-            {
-                "version": 3,
-                "mid_flight_journeys": [
-                    {
-                        "id": "mfj",
-                        "trigger_agent": "Planner",
-                        "trigger_on": "agent_output",
-                        "fan_out": {
-                            "spawn_mode": "workflow",
-                            "max_children": 3,
-                            "timeout_seconds": 10,
-                            "input_contract": {"required": [], "optional": []},
-                        },
-                        "fan_in": {
-                            "resume_agent": "HostAgent",
-                            "resume_entry_agent": "ResumeRouterAgent",
-                            "aggregation_strategy": "collect_all",
-                            "inject_as": "planning_outputs",
-                            "on_partial_failure": "resume_with_available",
-                            "timeout_seconds": 10,
-                        },
-                        "output_contract": {"required": [], "optional": []},
-                    }
-                ],
-            }
-        )
+def test_parse_workflow_pack_graph_autoprefixes_non_mfj_inject_key() -> None:
+    graph = parse_workflow_pack_graph(
+        {
+            "version": 3,
+            "mid_flight_journeys": [
+                {
+                    "id": "mfj",
+                    "decomposition_agent": "Planner",
+                    "trigger_on": "decomposition_event",
+                    "fan_out": {
+                        "spawn_mode": "workflow",
+                        "max_children": 3,
+                    },
+                    "fan_in": {
+                        "resume_agent": "HostAgent",
+                        "inject_as": "planning_outputs",
+                    },
+                }
+            ],
+        }
+    )
+    assert graph.mid_flight_journeys[0].fan_in.inject_as == "mfj_planning_outputs"
 
 
 def test_parse_workflow_pack_graph_requires_authoring_workflow_for_authoring_subrun() -> None:
@@ -147,24 +493,52 @@ def test_parse_workflow_pack_graph_requires_authoring_workflow_for_authoring_sub
                 "mid_flight_journeys": [
                     {
                         "id": "mfj",
-                        "trigger_agent": "Planner",
-                        "trigger_on": "agent_output",
+                        "decomposition_agent": "Planner",
+                        "trigger_on": "decomposition_event",
                         "fan_out": {
                             "spawn_mode": "workflow_authoring_subrun",
                             "max_children": 3,
-                            "timeout_seconds": 10,
-                            "input_contract": {"required": [], "optional": []},
                         },
                         "fan_in": {
                             "resume_agent": "HostAgent",
-                            "resume_entry_agent": "ResumeRouterAgent",
-                            "aggregation_strategy": "collect_all",
                             "inject_as": "mfj_outputs",
-                            "on_partial_failure": "resume_with_available",
-                            "timeout_seconds": 10,
                         },
-                        "output_contract": {"required": [], "optional": []},
                     }
                 ],
             }
         )
+
+
+def test_parse_workflow_pack_graph_stages_default_inject_keys() -> None:
+    graph = parse_workflow_pack_graph(
+        {
+            "version": 3,
+            "mid_flight_journeys": [
+                {
+                    "id": "workflow_generation",
+                    "decomposition_agent": "PatternAgent",
+                    "fan_out": {
+                        "spawn_mode": "workflow",
+                        "max_children": 10,
+                    },
+                    "stages": [
+                        {
+                            "id": "plan",
+                            "child_initial_agent": "WorkflowStrategyAgent",
+                            "resume_agent": "ProjectOverviewAgent",
+                        },
+                        {
+                            "id": "implement",
+                            "gate_agent": "ContextVariablesAgent",
+                            "child_initial_agent": "ToolsManagerAgent",
+                            "resume_agent": "PackMetadataAgent",
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+    ids = [j.id for j in graph.mid_flight_journeys]
+    assert ids == ["workflow_generation.plan", "workflow_generation.implement"]
+    assert graph.mid_flight_journeys[0].fan_in.inject_as == "mfj_workflow_generation_plan_results"
+    assert graph.mid_flight_journeys[1].fan_in.inject_as == "mfj_workflow_generation_implement_results"

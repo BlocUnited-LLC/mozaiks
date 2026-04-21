@@ -21,7 +21,6 @@ import os
 import uuid
 from datetime import datetime, UTC
 import logging
-import time
 from time import perf_counter
 import asyncio
 import inspect  # used in _build_context_blocking
@@ -32,33 +31,12 @@ from collections import Counter
 from pydantic import ValidationError
 
 from autogen import ConversableAgent, UserProxyAgent
-try:
-    from autogen.events.agent_events import (
-        TextEvent,
-        InputRequestEvent,
-        SelectSpeakerEvent,
-        RunCompletionEvent,
-    )
-    _HAS_AG2_NATIVE_EVENTS = True
-except ImportError:
-    # autogen < 1.0 — events submodule not available; minimal stubs
-    _HAS_AG2_NATIVE_EVENTS = False
-    class TextEvent:  # type: ignore[no-redef]
-        pass
-    class InputRequestEvent:  # type: ignore[no-redef]
-        pass
-    class SelectSpeakerEvent:  # type: ignore[no-redef]
-        pass
-    class RunCompletionEvent:  # type: ignore[no-redef]
-        pass
-# Handoff-to-user detection: unified AG2 group chats emit this when transitioning
-# to RevertToUserTarget.
-try:
-    from autogen.agentchat.group import RevertToUserTarget
-    from autogen.agentchat.group.events import AfterWorksTransitionEvent
-    _HAS_HANDOFF_EVENTS = True
-except ImportError:
-    _HAS_HANDOFF_EVENTS = False
+from autogen.events.agent_events import (
+    TextEvent,
+    InputRequestEvent,
+    SelectSpeakerEvent,
+    RunCompletionEvent,
+)
 from mozaiksai.core.workflow.outputs import get_structured_outputs_for_workflow
 from mozaiksai.core.data.persistence import AG2PersistenceManager as _PM
 from mozaiksai.core.events.event_serialization import (
@@ -68,7 +46,7 @@ from mozaiksai.core.events.event_serialization import (
 )
 
 from ..data.persistence import AG2PersistenceManager
-from .execution import create_termination_handler, LifecycleTrigger
+from .execution import create_termination_handler
 from .context import DerivedContextManager
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.observability.ag2_runtime_logger import ag2_logging_session
@@ -85,8 +63,6 @@ from .messages import (
 )
 from .execution import create_ag2_pattern
 from .orchestration_utils import (
-    get_run_registry_summary,
-    _cancel_ag2_task,
     _normalize_human_in_the_loop,
     _load_workflow_config,
     _safe_float_value,
@@ -100,10 +76,6 @@ logger = logging.getLogger(__name__)
 chat_logger = get_workflow_logger("orchestration")
 workflow_logger = get_workflow_logger("orchestration")
 performance_logger = get_workflow_logger("performance.orchestration")
-
-
-# Known internal system coordination markers to ensure consistent UI labeling.
-_SYSTEM_SIGNAL_MARKERS: tuple[str, ...] = ("[SYSTEM_RESUME_SIGNAL]",)
 
 
 __all__ = [
@@ -157,6 +129,18 @@ async def _resume_or_initialize_chat(
     initial_agent_name: Optional[str],
     wf_logger,
 ):
+    async def _persist_seed_messages(seed_messages: List[Dict[str, Any]], *, reason: str) -> None:
+        if not seed_messages:
+            return
+        try:
+            await persistence_manager.persist_initial_messages(
+                chat_id=chat_id,
+                app_id=app_id,
+                messages=seed_messages,
+            )
+        except Exception as persist_err:  # pragma: no cover
+            wf_logger.debug(f" Failed to persist {reason} for {chat_id}: {persist_err}")
+
     resumed_messages = await persistence_manager.resume_chat(chat_id, app_id) or []
     resume_raw_count = len(resumed_messages)
     initial_messages: List[Dict[str, Any]] = []
@@ -199,14 +183,14 @@ async def _resume_or_initialize_chat(
         )
         initial_messages = list(resumed_messages)
         if initial_message:
-            initial_messages.append(
-                {
-                    "role": "user",
-                    "name": "user",
-                    "content": initial_message,
-                    "_mozaiks_seed_kind": "initial_message",
-                }
-            )
+            seed_message = {
+                "role": "user",
+                "name": "user",
+                "content": initial_message,
+                "_mozaiks_seed_kind": "initial_message",
+            }
+            initial_messages.append(seed_message)
+            await _persist_seed_messages([seed_message], reason="resume seed message")
     else:
         if resume_raw_count > 0:
             wf_logger.info(
@@ -246,16 +230,7 @@ async def _resume_or_initialize_chat(
         except Exception as start_err:
             logger.error(f" Termination handler start failed: {start_err}")
 
-        if os.getenv("ENABLE_MANUAL_INITIAL_PERSIST") == "1":
-            try:
-                if initial_messages:
-                    await persistence_manager.persist_initial_messages(
-                        chat_id=chat_id,
-                        app_id=app_id,
-                        messages=initial_messages,
-                    )
-            except Exception as init_persist_err:  # pragma: no cover
-                wf_logger.debug(f" Failed to persist initial messages for {chat_id}: {init_persist_err}")
+        await _persist_seed_messages(initial_messages, reason="initial seed messages")
 
     if not initial_messages:
         # UserDriven greeting is handled by register_reply on the initial
@@ -267,17 +242,7 @@ async def _resume_or_initialize_chat(
             initial_messages = [
                 {"role": "user", "name": "user", "content": seed, "_mozaiks_seed_kind": "initial_message"}
             ]
-
-            if os.getenv("ENABLE_MANUAL_INITIAL_PERSIST") == "1":
-                # Persist config-seeded initial message too (optional)
-                try:
-                    await persistence_manager.persist_initial_messages(
-                        chat_id=chat_id,
-                        app_id=app_id,
-                        messages=initial_messages,
-                    )
-                except Exception as seed_persist_err:  # pragma: no cover
-                    wf_logger.debug(f" Failed to persist config seed message for {chat_id}: {seed_persist_err}")
+            await _persist_seed_messages(initial_messages, reason="config seed message")
         elif config.get("workflow_startup_mode", "").strip().lower() == "userdriven":
             # UserDriven needs a synthetic trigger so AG2 can start the group
             # chat loop.  The register_reply on the initial agent intercepts
@@ -296,7 +261,7 @@ async def _load_llm_config(workflow_name: str, wf_logger, workflow_name_upper: s
         _, llm_config = await get_llm_for_workflow(workflow_name, "base", extra_config=extra)
         wf_logger.info(f" [{workflow_name_upper}] Using workflow-specific LLM config")
     except (ValueError, FileNotFoundError):
-        from .validation.llm_config import get_llm_config
+        from .llm_config import get_llm_config
         extra = {"cache_seed": cache_seed} if cache_seed is not None else None
         _, llm_config = await get_llm_config(extra_config=extra)
         wf_logger.info(f" [{workflow_name_upper}] Using default LLM config")
@@ -378,7 +343,7 @@ def _ensure_user_proxy(
         # ChatUI (and the HTTP transport) provide real user input and should never trigger
         # AG2's terminal/CLI-style feedback prompts ("Please give feedback to chat_manager...").
         # Keep the auto-created user proxy non-interactive.
-        if workflow_startup_mode in {"BackendOnly"}:
+        if workflow_startup_mode in {"BackendOnly"} or not human_in_loop_flag:
             human_input_mode = "NEVER"
         else:
             # AgentDriven and UserDriven both need InputRequestEvent so the
@@ -574,6 +539,7 @@ async def _stream_events(
     """
     from .stream import EventStreamProcessor, StreamContext, StreamState
     from .outputs import get_structured_outputs_for_workflow
+    from .workflow_manager import workflow_manager
     from collections import Counter
     from autogen.agentchat import a_run_group_chat_iter
     import inspect as _inspect
@@ -596,13 +562,14 @@ async def _stream_events(
         structured_registry = {}
         wf_logger.debug(f"[{workflow_name_upper}] Structured outputs unavailable: {so_err}")
 
-    # Identify agents with structured outputs and agents that additionally
-    # require auto-tool execution.
-    structured_agents = set(structured_registry.keys())
-    auto_tool_agents = {
-        name for name, agent in agents.items()
-        if getattr(agent, '_mozaiks_auto_tool_mode', False)
-    }
+    # Pydantic-backed validated outputs are a separate concern from the
+    # downstream consumers that react to them. MFJ and auto-tools both
+    # subscribe to the validated-output event, but neither defines what a
+    # validated-output agent is.
+    validated_output_agents = set(structured_registry.keys())
+
+    # Derive auto-tool agents from tools.yaml (agents with auto_tool_call: true tools)
+    auto_tool_agents = workflow_manager.get_auto_tool_agents(workflow_name)
 
     # Get event dispatcher
     from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
@@ -612,50 +579,17 @@ async def _stream_events(
     # Determine resume mode
     resumed_mode = bool(resumed_messages)
 
-    # Initialize AG2 response
-    if resumed_mode:
-        wf_logger.info(f" [AG2_RESUME] Resuming chat {chat_id}")
-        _pgc = getattr(pattern, "prepare_group_chat", None)
-        if callable(_pgc):
-            _sig = _inspect.signature(_pgc)
-            if "max_rounds" in _sig.parameters:
-                prep_res = _pgc(messages=initial_messages, max_rounds=max_turns)
-            else:
-                prep_res = _pgc(messages=initial_messages)
-        else:
-            raise RuntimeError("Pattern missing prepare_group_chat callable")
-        if asyncio.iscoroutine(prep_res):
-            prep_res = await prep_res
-        if isinstance(prep_res, (list, tuple)) and len(prep_res) == 2:
-            group_manager = prep_res[1]
-        else:
-            group_manager = getattr(pattern, "group_manager", None)
-        if group_manager and hasattr(group_manager, "a_resume"):
-            response = await _resolve_run_iter_response(
-                group_manager.a_resume(messages=initial_messages, max_rounds=max_turns)
-            )
-        else:
-            # AG2 >=0.11 may expose iterator execution without group_manager.a_resume.
-            # Fall back to native run_iter resume semantics using persisted messages.
-            wf_logger.warning(
-                " [AG2_RESUME] Pattern lacks a_resume; falling back to a_run_group_chat_iter for resume"
-            )
-            response = await _resolve_run_iter_response(
-                a_run_group_chat_iter(
-                    pattern=pattern,
-                    messages=initial_messages,
-                    max_rounds=max_turns,
-                )
-            )
-    else:
-        wf_logger.info(f" [AG2_RUN] Starting NEW chat {chat_id}")
-        response = await _resolve_run_iter_response(
-            a_run_group_chat_iter(
-                pattern=pattern,
-                messages=initial_messages,
-                max_rounds=max_turns,
-            )
+    wf_logger.info(
+        f" [{'AG2_RESUME' if resumed_mode else 'AG2_RUN'}] "
+        f"{'Resuming' if resumed_mode else 'Starting NEW'} chat {chat_id}"
+    )
+    response = await _resolve_run_iter_response(
+        a_run_group_chat_iter(
+            pattern=pattern,
+            messages=initial_messages,
+            max_rounds=max_turns,
         )
+    )
 
     # Build StreamContext
     ctx = StreamContext(
@@ -672,7 +606,7 @@ async def _stream_events(
         dispatcher=dispatcher,
         agents=agents,
         structured_registry=structured_registry,
-        structured_agents=structured_agents,
+        validated_output_agents=validated_output_agents,
         auto_tool_agents=auto_tool_agents,
         max_turns=max_turns,
         wf_logger=wf_logger,
@@ -1292,46 +1226,6 @@ async def run_workflow_orchestration(
                 lifecycle_manager=lifecycle_manager,
             )
             response = stream_state["response"]
-            turn_agent = stream_state["turn_agent"]
-            turn_started = stream_state["turn_started"]
-
-            if turn_agent and turn_started is not None:
-                duration = max(0.0, time.perf_counter() - turn_started)
-                # Record final agent turn performance
-                try:
-                    await perf_mgr.record_agent_turn(
-                        chat_id=chat_id,
-                        agent_name=turn_agent,
-                        duration_sec=duration,
-                        model=None,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to record final turn for {turn_agent}: {e}")
-
-            # ---------------------------------------------------------
-            # HANDOFF_TO_USER early-return: the conversation is paused,
-            # not complete.  Skip termination / cleanup so that the
-            # session stays alive for the next user message.
-            # ---------------------------------------------------------
-            if stream_state.get("handoff_to_user"):
-                duration_sec = perf_counter() - start_time
-                wf_logger.info(
-                    f" [{workflow_name_upper}] Handoff to user — orchestration "
-                    f"paused after {duration_sec:.2f}s. Session stays ACTIVE."
-                )
-                result_payload = {
-                    "workflow_name": workflow_name,
-                    "chat_id": chat_id,
-                    "app_id": app_id,
-                    "user_id": user_id,
-                    "messages": None,
-                    "max_turns_reached": False,
-                    "response": response,
-                    "handoff_to_user": True,
-                }
-                # jump to finally — which will see handoff_to_user and
-                # keep the workflow IN_PROGRESS instead of COMPLETED.
-                return result_payload
 
             # Final usage reconciliation
             await _reconcile_final_usage(
@@ -1375,17 +1269,6 @@ async def run_workflow_orchestration(
             duration_sec = perf_counter() - start_time
             wf_logger.info(f" [EXECUTION_COMPLETE] Duration: {duration_sec:.2f}s")
 
-            # -----------------------------------------------------------------
-            # 12) Lifecycle Tools: after_chat trigger
-            # -----------------------------------------------------------------
-            try:
-                from mozaiksai.core.workflow.execution.lifecycle import get_lifecycle_manager
-                lifecycle_manager = get_lifecycle_manager(workflow_name)
-                await lifecycle_manager.trigger_after_chat(context_variables=ag2_context)
-                wf_logger.info(f" [{workflow_name_upper}] Lifecycle after_chat triggers completed")
-            except Exception as lc_err:
-                wf_logger.debug(f" [{workflow_name_upper}] Lifecycle after_chat failed: {lc_err}")
-
             result_payload = {
                 "workflow_name": workflow_name,
                 "chat_id": chat_id,
@@ -1406,11 +1289,9 @@ async def run_workflow_orchestration(
             raise
         finally:
             from mozaiksai.core.data.models import WorkflowStatus
-            is_handoff = stream_state.get("handoff_to_user", False) if isinstance(stream_state, dict) else False
-            status = WorkflowStatus.IN_PROGRESS if is_handoff else WorkflowStatus.COMPLETED
+            status = WorkflowStatus.COMPLETED
             try:
-                if not is_handoff:
-                    await perf_mgr.record_workflow_end(chat_id, int(status))
+                await perf_mgr.record_workflow_end(chat_id, int(status))
                 await perf_mgr.flush(chat_id)
             except Exception as e:
                 logger.debug(f"perf finalize failed: {e}")

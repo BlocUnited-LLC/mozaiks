@@ -4,12 +4,14 @@ These docs are advanced reference notes.
 
 They are useful when you need implementation detail, but they are not the best place to start if you are new to Mozaiks.
 
+If you are evaluating Mozaiks differentiators first, start with [Mid-Flight Journeys](mid-flight-journeys.md).
+
 ## Workflow and Orchestration
 
-- [Universal Orchestrator](universal-orchestrator.md)
 - [Mid-Flight Journeys](mid-flight-journeys.md)
-- [Pack Graph Semantics](pack-graph-semantics.md)
 - [MFJ Strict Resume Contract](mfj-strict-resume-contract.md)
+- [Universal Orchestrator](universal-orchestrator.md)
+- [Pack Graph Semantics](pack-graph-semantics.md)
 - [Parallel Fan-Out Fan-In](parallel-fan-out-fan-in.md)
 - [AG2 Touchpoints and Extensions](ag2-touchpoints-and-extensions.md)
 - [Handoff Condition Scope](handoff-condition-scope.md)
@@ -28,7 +30,6 @@ They are useful when you need implementation detail, but they are not the best p
 
 ## Agent and Contract Notes
 
-- [Agent Dependency Matrix](agent-dependency-matrix.md)
 - [Context Variables Complete](context-variables-complete.md)
 - [Auto Tool Execution](auto-tool-execution.md)
 

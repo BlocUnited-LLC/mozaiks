@@ -2,13 +2,13 @@
 Phase 4 — Dynamic Architecture: validation tests.
 
 Tests verify:
-1. Generic module routing is removed
+1. Generic capability routing is removed
 2. useCoreNotifications hook exists with correct API
 3. Header.js uses real notification hook
 4. RouteRenderer keeps only shell-owned core routes
-5. coreComponents.js does not register generic module routes
-6. coreBridge.js exports module/theme/profile APIs
-7. NavigationProvider discovers pages and only route-enabled modules
+5. coreComponents.js does not register generic capability routes
+6. coreBridge.js exports capability/theme/profile APIs
+7. NavigationProvider discovers pages and only route-enabled capabilities
 """
 
 import os
@@ -26,10 +26,10 @@ def read_file(relpath):
         return f.read()
 
 
-# ── 1. Module architecture ────────────────────────────────────────────────────
+# ── 1. Capability architecture ────────────────────────────────────────────────
 
-class TestModulePage:
-    """ModulePage.jsx removed — modules now navigate to dedicated paths."""
+class TestCapabilityPage:
+    """ModulePage.jsx removed — capabilities now navigate to dedicated paths."""
 
     def test_module_page_file_deleted(self):
         full = os.path.join(ROOT, "chat-ui", "src", "pages", "ModulePage.jsx")
@@ -124,14 +124,14 @@ class TestCoreComponentsDynamic:
         # ModulePage removed — modules use dedicated routes
         assert not re.search(r"registerComponent\(\s*['\"]ModulePage['\"]" , source)
 
-    def test_module_catalog_still_scans_platform_modules(self):
-        # Durable first-class modules remain under platform/modules/*
-        modules_index = os.path.join(ROOT, "chat-ui", "src", "@modules", "index.js")
-        assert os.path.isfile(modules_index), "@modules/index.js should exist"
-        with open(modules_index, "r", encoding="utf-8") as f:
+    def test_capability_catalog_still_scans_platform_capabilities(self):
+        # Durable first-class capabilities remain under platform/operations/*
+        capabilities_index = os.path.join(ROOT, "chat-ui", "src", "@operations", "index.js")
+        assert os.path.isfile(capabilities_index), "@operations/index.js should exist"
+        with open(capabilities_index, "r", encoding="utf-8") as f:
             content = f.read()
-        assert "platform/modules" in content, "@modules index should scan platform/modules"
-        assert "initializeModules" in content
+        assert "platform/operations" in content, "@operations index should scan platform/operations"
+        assert "initializeOperations" in content
 
     def test_page_catalog_still_scans_platform_pages(self):
         pages_index = os.path.join(ROOT, "chat-ui", "src", "@pages", "index.js")
@@ -145,29 +145,29 @@ class TestCoreComponentsDynamic:
         assert "'ModulePage'" not in source and '"ModulePage"' not in source
 
 
-# ── 6. coreBridge.js — module/theme/profile APIs ────────────────────────────
+# ── 6. coreBridge.js — capability/theme/profile APIs ────────────────────────
 
 class TestCoreBridgeDynamic:
     @pytest.fixture
     def source(self):
         return read_file("chat-ui/src/coreBridge.js")
 
-    # Module APIs
-    def test_fetch_available_modules(self, source):
-        assert "fetchAvailableModules" in source
+    # Capability APIs
+    def test_fetch_available_capabilities(self, source):
+        assert "fetchAvailableCapabilities" in source
 
-    def test_execute_module(self, source):
-        assert "executeModule" in source
+    def test_execute_capability(self, source):
+        assert "executeCapability" in source
         assert "/api/execute/" in source
 
-    def test_check_module_access(self, source):
-        assert "checkModuleAccess" in source
+    def test_check_capability_access(self, source):
+        assert "checkCapabilityAccess" in source
 
-    def test_fetch_module_settings(self, source):
-        assert "fetchModuleSettings" in source
+    def test_fetch_capability_settings(self, source):
+        assert "fetchCapabilitySettings" in source
 
-    def test_save_module_settings(self, source):
-        assert "saveModuleSettings" in source
+    def test_save_capability_settings(self, source):
+        assert "saveCapabilitySettings" in source
 
     # Theme APIs
     def test_fetch_theme_config(self, source):
@@ -181,8 +181,8 @@ class TestCoreBridgeDynamic:
         assert "updateUserProfile" in source
 
     # Default export completeness
-    def test_default_export_modules(self, source):
-        for fn in ["fetchAvailableModules", "executeModule", "changeTheme", "updateUserProfile"]:
+    def test_default_export_capabilities(self, source):
+        for fn in ["fetchAvailableCapabilities", "executeCapability", "changeTheme", "updateUserProfile"]:
             assert fn in source, f"Missing from default export: {fn}"
 
 

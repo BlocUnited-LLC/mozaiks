@@ -35,7 +35,7 @@ Examples:
 Examples:
 
 - an app event happens
-- `routes.json` matches it
+- a workflow `triggers:` rule matches it
 - the workflow runs or resumes
 
 ## What Workflows Produce
@@ -47,6 +47,25 @@ Workflows can produce:
 - artifacts
 - saved results for pages
 - follow-up app events
+
+## Initial Generation vs Refinement
+
+Workflows may be entered in two very different ways:
+
+- initial generation that creates the first canonical artifact set
+- refinement re-entry that modifies an existing artifact version
+
+Those are not the same responsibility.
+
+Post-generation changes should not automatically route back through intake or
+planning agents. A control plane should first classify whether the request is a
+`patch`, `design`, `feature`, or `core` change, then choose the smallest valid
+re-entry point.
+
+Journey sequencing and ordinary AG2 handoffs are downstream consumers of that
+decision. They are not the classifier.
+
+See [Refinement Control Plane](../specs/REFINEMENT_CONTROL_PLANE_SPEC.md).
 
 ## What Workflows Should Not Own
 
@@ -65,11 +84,12 @@ If something is mostly optional operator tooling, make it an adapter.
 
 ## Workflow Files
 
-Workflow files still live under:
+Workflow files live under:
 
-- `platform/workflows/*`
+- `platform/workflows/*` — product and showcase workflows
+- `mozaiks-platform/app/workflows/*` — platform-builder workflows (AgentGenerator etc.)
 
-The current file contract remains:
+The current file contract:
 
 - `orchestrator.yaml`
 - `agents.yaml`
@@ -79,8 +99,23 @@ The current file contract remains:
 - `tools.yaml`
 - `ui_config.yaml`
 - `hooks.yaml`
+- `extended_orchestration/mfj_extension.json` — required when the workflow uses mid-flight journeys (MFJ)
 - `tools/*.py`
 - `ui/*`
+
+## Mid-Flight Journeys
+
+When a workflow needs to decompose work into parallel child runs and then
+fan-in, it declares a mid-flight journey in `extended_orchestration/mfj_extension.json`.
+
+The runtime handles:
+
+- fan-out: spawning N child workflow runs from the trigger agent's output
+- fan-in: waiting for all children, merging results, resuming the parent
+- resume override: forcing the parent back to the declared `resume_agent`
+- context injection: writing merged child results under the `inject_as` key
+- auto-synthesis: registering context variables for MFJ keys so agents can
+  read them without manual declarations in `context_variables.yaml`
 
 ## Practical Rule
 
@@ -93,5 +128,5 @@ Mozaiks should feel like:
 ## Cross References
 
 - [overview.md](overview.md)
-- [event-system-architecture.md](event-system-architecture.md)
-- [surface-taxonomy.md](surface-taxonomy.md)
+- [event-system.md](event-system.md)
+- [surface-model.md](surface-model.md)

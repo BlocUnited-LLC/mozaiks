@@ -149,6 +149,7 @@ const ModernChatInterface = ({
   workflowHasChildren = false,
   conversationMode = 'workflow',
   onConversationModeChange,
+  modeTogglePending = false,
   onStartGeneralChat,
   generalChatSummary,
   generalSessionsLoading = false,
@@ -193,6 +194,7 @@ const ModernChatInterface = ({
     : (typeof onAskHistoryToggle === 'function' ? onAskHistoryToggle : null);
   const showAskHistoryToggle = (showHistoryMenu || showAskHistoryMenu) && typeof historyToggleHandler === 'function';
   const avatarIcon = conversationMode === 'ask' ? '🧠' : '🤖';
+  const shellTitle = chatTheme?.branding?.name || 'MozaiksAI';
   const brandLogoSrc = getBrandLogoSrc(chatTheme);
   // const renderCountRef = useRef(0); // For debugging renders if needed
 
@@ -304,6 +306,10 @@ const ModernChatInterface = ({
 
   const handleModeToggle = () => {
     if (!onConversationModeChange) {
+      return;
+    }
+    if (modeTogglePending) {
+      console.log('⏳ [CHAT_INTERFACE] Mode toggle ignored because a transition is already in progress');
       return;
     }
     console.log('🔘 [CHAT_INTERFACE] Mode toggle clicked, current mode:', conversationMode);
@@ -471,15 +477,16 @@ const ModernChatInterface = ({
               <button
                 type="button"
                 onClick={handleAvatarClick}
-                className="flex items-center gap-2 sm:gap-3 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-light)]/60 rounded-xl min-w-0"
-                title="Switch to Ask Mode"
+                disabled={modeTogglePending}
+                className={`flex items-center gap-2 sm:gap-3 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-light)]/60 rounded-xl min-w-0 ${modeTogglePending ? 'opacity-60 cursor-not-allowed' : ''}`}
+                title={modeTogglePending ? 'Switching modes…' : 'Switch to Ask Mode'}
               >
                 <span className="w-9 h-9 sm:w-10 sm:h-10 md:w-12 md:h-12 rounded-lg sm:rounded-xl flex items-center justify-center shadow-lg transition-all duration-300 flex-shrink-0 bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-secondary)]">
                   <span className="text-xl sm:text-2xl" role="img" aria-hidden="true">🤖</span>
                 </span>
                 <span className="text-left min-w-0 flex-1">
-                  <span className="block text-sm sm:text-lg md:text-xl font-bold text-white tracking-tight truncate">mozaiksai</span>
-                  <span className="block text-[10px] sm:text-xs text-gray-400 truncate">{conversationSubtitle}</span>
+                    <span className="block text-sm sm:text-lg md:text-xl font-bold text-white tracking-tight truncate heading-font">{shellTitle}</span>
+                    <span className="block text-[10px] sm:text-xs text-gray-400 truncate transmission-typing-font">{conversationSubtitle}</span>
                 </span>
               </button>
             ) : (
@@ -491,8 +498,8 @@ const ModernChatInterface = ({
                   <span className="text-xl sm:text-2xl" role="img" aria-hidden="true">{avatarIcon}</span>
                 </span>
                 <span className="text-left min-w-0 flex-1">
-                  <span className="block text-sm sm:text-lg md:text-xl font-bold text-white tracking-tight truncate">mozaiksai</span>
-                  <span className="block text-[10px] sm:text-xs text-gray-400 truncate">{conversationSubtitle}</span>
+                    <span className="block text-sm sm:text-lg md:text-xl font-bold text-white tracking-tight truncate heading-font">{shellTitle}</span>
+                    <span className="block text-[10px] sm:text-xs text-gray-400 truncate transmission-typing-font">{conversationSubtitle}</span>
                 </span>
               </div>
             )}
@@ -515,6 +522,9 @@ const ModernChatInterface = ({
             <>
               <button
                 onClick={() => {
+                  if (modeTogglePending) {
+                    return;
+                  }
                   if (conversationMode === 'workflow' && onArtifactToggle) {
                     // In workflow mode, toggle the artifact panel
                     onArtifactToggle();
@@ -526,8 +536,9 @@ const ModernChatInterface = ({
                     onArtifactToggle();
                   }
                 }}
-                className="hidden md:block group relative p-2 md:p-3 rounded-lg bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.1)] to-[rgba(var(--color-secondary-rgb),0.1)] border border-[rgba(var(--color-primary-light-rgb),0.3)] hover:border-[rgba(var(--color-primary-light-rgb),0.6)] transition-all duration-300 backdrop-blur-sm artifact-hover-glow flex-shrink-0"
-                title={conversationMode === 'ask' ? 'Switch to Workflow Mode' : (artifactToggleLabel || 'Toggle Artifact Canvas')}
+                disabled={modeTogglePending}
+                className={`hidden md:block group relative p-2 md:p-3 rounded-lg bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.1)] to-[rgba(var(--color-secondary-rgb),0.1)] border border-[rgba(var(--color-primary-light-rgb),0.3)] hover:border-[rgba(var(--color-primary-light-rgb),0.6)] transition-all duration-300 backdrop-blur-sm artifact-hover-glow flex-shrink-0 ${modeTogglePending ? 'opacity-60 cursor-not-allowed pointer-events-none' : ''}`}
+                title={modeTogglePending ? 'Switching modes…' : (conversationMode === 'ask' ? 'Switch to Workflow Mode' : (artifactToggleLabel || 'Toggle Artifact Canvas'))}
               >
                 <img
                   src={brandLogoSrc}
@@ -539,6 +550,9 @@ const ModernChatInterface = ({
               </button>
               <button
                 onClick={() => {
+                  if (modeTogglePending) {
+                    return;
+                  }
                   if (conversationMode === 'workflow' && onArtifactToggle) {
                     onArtifactToggle();
                   } else if (conversationMode === 'ask') {
@@ -547,8 +561,9 @@ const ModernChatInterface = ({
                     onArtifactToggle();
                   }
                 }}
-                className="md:hidden group relative p-2 rounded-lg bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.15)] to-[rgba(var(--color-secondary-rgb),0.15)] border border-[rgba(var(--color-primary-light-rgb),0.35)] hover:border-[rgba(var(--color-primary-light-rgb),0.7)] transition-all duration-300 backdrop-blur-sm flex-shrink-0"
-                title={conversationMode === 'ask' ? 'Switch to Workflow Mode' : (artifactToggleLabel || 'Toggle Artifact Canvas')}
+                disabled={modeTogglePending}
+                className={`md:hidden group relative p-2 rounded-lg bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.15)] to-[rgba(var(--color-secondary-rgb),0.15)] border border-[rgba(var(--color-primary-light-rgb),0.35)] hover:border-[rgba(var(--color-primary-light-rgb),0.7)] transition-all duration-300 backdrop-blur-sm flex-shrink-0 ${modeTogglePending ? 'opacity-60 cursor-not-allowed pointer-events-none' : ''}`}
+                title={modeTogglePending ? 'Switching modes…' : (conversationMode === 'ask' ? 'Switch to Workflow Mode' : (artifactToggleLabel || 'Toggle Artifact Canvas'))}
               >
                 <img
                   src={brandLogoSrc}
@@ -583,7 +598,7 @@ const ModernChatInterface = ({
           <div className="pb-2 sm:pb-3 px-3 sm:px-4 md:px-6 flex justify-center">
             <div className="relative px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-[rgba(var(--color-secondary-rgb),0.15)] border border-[rgba(var(--color-secondary-rgb),0.3)] flex items-center justify-center space-x-1.5 sm:space-x-2 backdrop-blur-sm max-w-full sm:max-w-md">
               <div className="relative w-1.5 h-1.5 sm:w-2 sm:h-2 bg-[var(--color-secondary)] rounded-full animate-pulse flex-shrink-0"></div>
-              <span className="relative text-[var(--color-secondary-light)] text-[10px] sm:text-xs font-semibold tracking-wide oxanium text-center truncate">
+              <span className="relative text-[var(--color-secondary-light)] text-[10px] sm:text-xs font-semibold tracking-wide heading-font text-center truncate">
                 {initialMessageToUser}
               </span>
             </div>
@@ -599,7 +614,7 @@ const ModernChatInterface = ({
           className={`absolute inset-0 overflow-y-auto my-scroll1 z-10 ${isOnChatPage ? '' : 'px-2 py-2 md:p-6'}`}
         >
           {isOnChatPage ? (
-            <div className="chat-feed-shell chat-feed-shell-ask">
+            <div className={`chat-feed-shell ${conversationMode === 'ask' ? 'chat-feed-shell-ask' : ''}`}>
               {messageStack}
             </div>
           ) : disableMobileShellChrome ? (

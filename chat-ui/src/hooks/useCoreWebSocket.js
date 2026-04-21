@@ -17,6 +17,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import platform from '../platform/index.js';
+import { ingestEvent } from '../ui/hooks/useAppEventBus.js';
 
 const RECONNECT_BASE_DELAY = 1000;
 const RECONNECT_MAX_DELAY = 30000;
@@ -139,6 +140,8 @@ export function useCoreWebSocket(userId, { enabled = true } = {}) {
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === 'ack') return; // Ping response
+        // Route ui.* events to the app primitive event bus (no extra listener needed)
+        ingestEvent(msg);
         dispatch(msg);
       } catch {
         // Non-JSON message — ignore

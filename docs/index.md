@@ -13,7 +13,7 @@
 
 > **Note**: This is the unified Mozaiks stack. BlocUnited offers a managed platform with app generation tools at [mozaiks.ai](https://mozaiks.ai), but you're welcome to self-host and build everything yourself.
 
-> **Zero-Code Setup**: New to development? No problem! Copy the [AI Setup Prompt](setup-prompt.md) into your AI coding agent (Claude Code, Cursor, Copilot, etc.) and let AI guide you through the entire setup.
+> **Zero-Code Setup**: New to development? No problem! Start with the [Getting Started guide](getting-started.md) for the Claude Code setup path and let your AI coding agent guide you through the full setup.
 
 ---
 
@@ -27,6 +27,7 @@
 - ✅ **Multi-Tenant Isolation** -> app-scoped data and execution contexts
 - ✅ **Dynamic UI Integration** -> Agents can invoke React components during workflows
 - ✅ **Declarative Workflows** -> JSON manifests, no code changes needed
+- ✅ **Mid-Flight Journeys (MFJ)** -> Workflow-local fork/join with deterministic parent resume beyond base AG2 handoffs
 - ✅ **Comprehensive Observability** -> Built-in metrics, logging, and token tracking
 
 **mozaiksai = AG2 + Production Infrastructure + Event-Driven Core**

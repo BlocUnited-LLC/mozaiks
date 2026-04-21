@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+"""Executor protocol and registry.
+
+Executors are the active handlers for a given runtime surface:
+  - WorkflowExecutor   — handles AI workflow execution (AG2 runtime, already exists)
+  - OperationExecutor  — handles CRUD operation execution (Phase 2)
+
+The ExecutorRegistry is the runtime's single source of truth for which
+executors are available. Phase 1 only registers WorkflowExecutor.
+Phase 2 adds OperationExecutor when operations are discovered from
+operations/*/operation.yaml.
+
+The Executor protocol defines the minimal interface both implementations
+must satisfy so the runtime's request dispatcher can treat them uniformly.
+"""
+
+from enum import Enum
+from typing import Any, Dict, Optional, Protocol, runtime_checkable
+
+from logs.logging_config import get_workflow_logger
+
+logger = get_workflow_logger("executor_registry")
+
+
+class ExecutorType(str, Enum):
+    """Identifies which kind of executor is registered."""
+    WORKFLOW = "workflow"    # AI workflow execution
+    OPERATION = "operation"  # CRUD operation execution (Phase 2)
+
+
+@runtime_checkable
+class Executor(Protocol):
+    """Minimal interface all executors must implement.
+
+    The runtime dispatcher calls `execute()` after resolving which executor
+    owns the incoming request. Each executor handles its own request format.
+    """
+
+    executor_type: ExecutorType
+
+    async def execute(self, request: Any, context: Any) -> Any:
+        """Execute a request within the given context.
+
+        Args:
+            request: Executor-specific request object.
+            context: Runtime context (app_id, user_id, correlation_id, etc.)
+
+        Returns:
+            Executor-specific response.
+        """
+        ...
+
+    async def health(self) -> Dict[str, Any]:
+        """Return health status dict. Used by /health endpoint."""
+        ...
+
+
+class ExecutorRegistry:
+    """Registry mapping ExecutorType → Executor instance.
+
+    Phase 1: only WorkflowExecutor is registered (done in shared_app.py).
+    Phase 2: OperationExecutor is registered when app declares operations.
+
+    Example (Phase 2 usage in shared_app.py):
+        registry = ExecutorRegistry()
+        registry.register(workflow_executor)
+        registry.register(operation_executor)
+
+        # Dispatcher resolves type from request and calls:
+        executor = registry.get(ExecutorType.WORKFLOW)
+        result = await executor.execute(request, ctx)
+    """
+
+    def __init__(self) -> None:
+        self._executors: Dict[ExecutorType, Executor] = {}
+
+    def register(self, executor: Executor) -> None:
+        """Register an executor. Overwrites any existing entry for the same type."""
+        self._executors[executor.executor_type] = executor
+        logger.debug(f"EXECUTOR_REGISTERED: type={executor.executor_type.value}")
+
+    def get(self, executor_type: ExecutorType) -> Optional[Executor]:
+        """Return executor for the given type, or None if not registered."""
+        return self._executors.get(executor_type)
+
+    def has(self, executor_type: ExecutorType) -> bool:
+        return executor_type in self._executors
+
+    @property
+    def workflow_executor(self) -> Optional[Executor]:
+        return self._executors.get(ExecutorType.WORKFLOW)
+
+    @property
+    def operation_executor(self) -> Optional[Executor]:
+        return self._executors.get(ExecutorType.OPERATION)
+
+    def registered_types(self) -> list[ExecutorType]:
+        return list(self._executors.keys())
+
+    def summary(self) -> Dict[str, Any]:
+        return {t.value: type(e).__name__ for t, e in self._executors.items()}

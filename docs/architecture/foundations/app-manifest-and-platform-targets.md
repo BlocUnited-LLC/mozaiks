@@ -17,6 +17,7 @@ Most users should only need to answer questions like:
 - what is my app called
 - should it run on web
 - should it run on mobile
+- where should the app land when opened
 - should people sign in
 - who should get admin access by default
 
@@ -33,6 +34,9 @@ Target direction:
     "web": true,
     "mobile": false
   },
+  "startup": {
+    "landing_spot": "/dashboard"
+  },
   "authRequired": true,
   "admins": [
     "owner@example.com"
@@ -48,6 +52,7 @@ Keep only fields that most users actually understand:
 
 - `appName`
 - target enablement such as `web` and `mobile`
+- app startup route such as `startup.landing_spot`
 - simple auth requirement
 - a short list of admin emails
 

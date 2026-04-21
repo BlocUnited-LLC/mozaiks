@@ -2,6 +2,9 @@
 
 This document defines the event model and taxonomy for Mozaiks.
 
+The critical distinction is that multiple event families may share transport,
+logging, or envelope conventions without becoming the same abstraction.
+
 ## Core Rule
 
 The event system should be simple:
@@ -12,6 +15,24 @@ The event system should be simple:
 4. pages reflect the result
 
 That is the event story.
+
+## Same Substrate, Different Contracts
+
+Mozaiks can use one underlying event substrate while still keeping different
+contracts separate.
+
+That means these statements can both be true:
+
+- the system uses one event transport or envelope model
+- app events and workflow runtime events are not the same thing
+
+The separation is by owner and purpose, not only by wire format.
+
+Use this test:
+
+- if the event describes a business fact after a deterministic mutation, it is an app event
+- if the event describes runtime session posture, it is a control event
+- if the event describes what is happening inside a live run right now, it is a workflow runtime event
 
 ## Design Principles
 
@@ -62,7 +83,7 @@ page or backend action
 
 Simple rule:
 
-- runtime events say what facts exist
+- app events say what facts exist
 - workflow `triggers:` say what workflow behavior those facts can trigger
 
 ## Event Families
@@ -165,6 +186,12 @@ All durable events should use this envelope.
 }
 ```
 
+This envelope is appropriate for durable app domain events and durable runtime
+control events.
+
+Live workflow stream events may use a different transport-oriented shape because
+they serve interactive UX rather than durable automation policy.
+
 ## Naming Rules
 
 ### Lowercase dot notation
@@ -226,6 +253,73 @@ This is the rule the generator and runtime must both honor:
 - workflows execute the resulting effect
 
 Event taxonomies should never encode all three in one artifact.
+
+## How This Feeds App Generation
+
+The generator should build event systems into app logic in a very specific way.
+
+### 1. Generate events from mutation boundaries
+
+When app logic changes durable state, emit a post-commit fact if that fact has
+downstream value.
+
+Good examples:
+
+- `booking.request.approved`
+- `invoice.sent`
+- `crm.lead.created`
+
+Bad examples:
+
+- `run_booking_workflow`
+- `open_review_agent`
+
+### 2. Keep trigger policy out of the app event type
+
+The app event says what happened.
+
+The workflow decides whether to react through `triggers:` in
+`platform/workflows/{workflow}/orchestrator.yaml`.
+
+That is where automation policy belongs.
+
+### 3. Keep live run updates out of app backend logic
+
+Do not model chat tokens, artifact streaming, or UI tool requests as your app's
+business event system.
+
+Those belong to the runtime stream.
+
+### 4. Persist workflow outcomes back into app state deliberately
+
+If a workflow result should affect the product, save it through the app backend
+or emit a new app fact after the save.
+
+That keeps the app model deterministic.
+
+## Concrete Build Pattern
+
+```text
+user action
+  -> app backend validates and saves
+  -> app backend emits domain fact
+  -> runtime ingress receives event
+  -> workflow trigger matches
+  -> workflow runs
+  -> workflow saves result through app backend
+  -> app backend emits follow-up fact if needed
+  -> pages read the updated state
+```
+
+The event system in app logic is therefore not "add a generic event bus to
+everything".
+
+It is:
+
+- choose the important business facts
+- emit them after commit
+- let triggers translate facts into automation
+- let workflows push outcomes back into deterministic app state
 
 ## What Not To Do
 

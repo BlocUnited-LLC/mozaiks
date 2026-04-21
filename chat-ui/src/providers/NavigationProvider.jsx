@@ -1,7 +1,7 @@
 /**
  * Navigation Provider
  *
- * Loads shell config from the backend /api/shell-config endpoint.
+ * Loads app-shell config from the backend /api/shell-config endpoint.
  *
  * Navigation is event-driven. The mozaiks-header provides persistent UI
  * (user menu, notifications, admin). Routes are discovered from pages,
@@ -20,11 +20,14 @@ const DEFAULT_NAVIGATION = {
   version: '1.0.0',
   landing_spot: '/',
   pages: [],
-  header_controls: [],
-  header: { logo: { src: null, wordmark: null, alt: 'App', href: '/' }, actions: [] },
+  header: { logo: { src: null, wordmark: null, alt: 'App', href: '/' }, pages: [], actions: [] },
   profile: { icon: null, show: true, defaultLabel: 'User', sublabel: null, menu: [] },
   notifications: { icon: null, show: true, emptyText: 'No notifications' },
-  footer: { links: [], visible: true, poweredBy: null },
+  footer: { links: [], visible: true },
+};
+
+const sortNavigationItems = (items = []) => {
+  return [...items].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 };
 
 /**
@@ -80,8 +83,7 @@ export const NavigationProvider = ({
       const coreUrl = coreApiUrl || (typeof import.meta !== 'undefined' && import.meta.env?.VITE_CORE_URL);
       const baseUrl = coreUrl ? coreUrl.replace(/\/+$/, '') : '';
 
-      // 0. Load declarative navigation config (landing_spot, header_controls, shell chrome)
-      // Load shell config from backend API (ai.json fields)
+      // 0. Load declarative app-shell config (landing spot, shell UI, route projection).
       try {
         const configUrl = baseUrl ? `${baseUrl}/api/shell-config` : '/api/shell-config';
         const response = await fetch(configUrl);
@@ -93,6 +95,12 @@ export const NavigationProvider = ({
             entry_point: shellConfig.entry_point,
             chat_startup_mode: shellConfig.chat_startup_mode || 'ask',
             resume_policy: shellConfig.resume_policy,
+            ...(shellConfig.pages?.length ? { pages: shellConfig.pages } : {}),
+            ...(shellConfig.landing_spot ? { landing_spot: shellConfig.landing_spot } : {}),
+            ...(shellConfig.header ? { header: shellConfig.header } : {}),
+            ...(shellConfig.profile ? { profile: shellConfig.profile } : {}),
+            ...(shellConfig.notifications ? { notifications: shellConfig.notifications } : {}),
+            ...(shellConfig.footer ? { footer: shellConfig.footer } : {}),
           };
         } else if (response.status !== 404) {
           throw new Error(`Failed to load shell config: ${response.status}`);
@@ -115,19 +123,13 @@ export const NavigationProvider = ({
 
   // Sorted pages array
   const pages = useMemo(() => {
-    const raw = navigation.pages || [];
-    return [...raw].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    return sortNavigationItems(navigation.pages || []);
   }, [navigation.pages]);
 
-  // Pages flagged to show as header pills on wider screens
+  // Header pills are shell-owned; route pages stay independent.
   const headerPages = useMemo(() => {
-    return pages.filter((p) => p.showInHeader === true);
-  }, [pages]);
-
-  const headerControls = useMemo(() => {
-    const controls = Array.isArray(navigation.header_controls) ? navigation.header_controls : [];
-    return [...controls].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  }, [navigation.header_controls]);
+    return sortNavigationItems(navigation.header?.pages || []);
+  }, [navigation.header?.pages]);
 
   const findPage = (path) => pages.find((p) => p.path === path) || null;
 
@@ -146,7 +148,6 @@ export const NavigationProvider = ({
     entry_point: navigation.entry_point || null,
     pages,
     headerPages,
-    headerControls,
     header: navigation.header || DEFAULT_NAVIGATION.header,
     profile: navigation.profile || DEFAULT_NAVIGATION.profile,
     notifications: navigation.notifications || DEFAULT_NAVIGATION.notifications,

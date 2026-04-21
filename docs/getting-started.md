@@ -64,9 +64,10 @@ This is the best path for first-time developers because it walks you through con
 mozaiks/
 ├── platform/                   # Declarative app bundle consumed by the runtime
 │   ├── app.json                # App identity, auth requirement, admin emails
-│   ├── config/                 # AI, modules, navigation, subscriptions
+│   ├── config/                 # Runtime and app bundle config
 │   ├── workflows/              # Workflow definitions and UI tools
-│   └── modules/                # Persistent modules/pages
+│   ├── modules/                # App capability contracts
+│   └── pages/                  # Multi-module UI pages
 │
 ├── app/                        # Web shell entrypoint and Vite config
 │   ├── App.jsx
@@ -74,13 +75,10 @@ mozaiks/
 │   └── vite.config.js
 │
 ├── platform/brand/             # Public shell assets, fonts, and login-theme files
-
-├── clients/
-│   └── mobile/                 # Native client implementation
-│
 ├── chat-ui/                    # Shared web UI shell
 ├── mozaiksai/                  # AI runtime, orchestration, transport
-├── mozaikscore/                # Shared platform services
+├── mozaiks_cli/                # CLI for local initialization and tooling
+├── docs/                       # Architecture and usage documentation
 ├── shared_app.py               # FastAPI server entry
 ├── run_server.py               # Start the server
 ├── requirements.txt            # Python dependencies
@@ -93,6 +91,9 @@ mozaiks/
     └── keycloak/
         └── realm-export.json   # Auto-imported Keycloak realm config
 ```
+
+    Your deterministic app backend is external to this repo and connects to the AI
+    runtime through `AppBackendPort`.
 
 ---
 

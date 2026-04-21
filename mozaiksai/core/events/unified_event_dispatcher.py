@@ -27,20 +27,21 @@ from abc import ABC, abstractmethod
 
 from mozaiksai.core.ports.orchestration import DomainEvent
 from mozaiksai.core.events.auto_tool_handler import AutoToolEventHandler
+from mozaiksai.core.events.runtime_events import (
+    RUNTIME_AGENT_OUTPUT_VALIDATED,
+    RUNTIME_DECOMPOSITION_PLANNED,
+    RUNTIME_PROCESS_COMPLETED,
+)
 from mozaiksai.core.events.usage_ingest import get_usage_ingest_client
-from mozaiksai.core.orchestration import get_universal_orchestrator
 from mozaiksai.core.workflow.pack.workflow_pack_coordinator import WorkflowPackCoordinator
 from mozaiksai.core.workflow.pack.journey_orchestrator import JourneyOrchestrator
+from mozaiksai.core.workflow.runtime_signals import SYSTEM_RESUME_SIGNAL
+from mozaiksai.core.workflow.workflow_manager import workflow_manager
 from logs.logging_config import get_core_logger, get_workflow_logger
 from mozaiksai.core.events.event_serialization import serialize_event_content
 
 logger = get_core_logger("unified_event_dispatcher")
 wf_logger = get_workflow_logger("event_dispatcher")
-
-try:  # workflow config (optional in some minimal test contexts)
-    from mozaiksai.core.workflow.workflow_manager import workflow_manager  # type: ignore
-except Exception:  # pragma: no cover
-    workflow_manager = None  # type: ignore
 
 class EventCategory(Enum):
     """
@@ -97,17 +98,7 @@ class UIToolEvent:
     event_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     category: str = field(default="ui_tool")
 
-
-@dataclass
-class SessionPausedEvent:
-    chat_id: str
-    reason: str
-    required_tokens: Optional[int] = None
-    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
-    category: str = field(default="runtime")
-
-
-EventType = Union[BusinessLogEvent, UIToolEvent, SessionPausedEvent, DomainEvent]
+EventType = Union[BusinessLogEvent, UIToolEvent, DomainEvent]
 
 class EventHandler(ABC):
     @abstractmethod
@@ -185,20 +176,19 @@ class UnifiedEventDispatcher:
         self._auto_tool_handler = AutoToolEventHandler()
         self._pack_coordinator = WorkflowPackCoordinator()
         self._journey_orchestrator = JourneyOrchestrator()
-        self._universal_orchestrator = get_universal_orchestrator()
         # Advisory-only usage ingest (measurement signals only; no billing mutations).
         self._usage_ingest = get_usage_ingest_client()
         self._setup_default_handlers()
-        self.register_handler("chat.agent_output_validated", self._auto_tool_handler.handle_tool_dispatch)
-        self.register_handler("chat.agent_output_validated", self._pack_coordinator.handle_journey_triggered)
-        self.register_handler("chat.run_complete", self._pack_coordinator.handle_run_complete)
+        # Multiple runtime features consume validated agent outputs. Auto-tools
+        # stay coupled to validated outputs, while MFJ now listens to a more
+        # explicit decomposition event emitted by the runtime.
+        self.register_runtime_handler(RUNTIME_AGENT_OUTPUT_VALIDATED, self._auto_tool_handler.handle_tool_dispatch)
+        self.register_runtime_handler(RUNTIME_DECOMPOSITION_PLANNED, self._pack_coordinator.handle_journey_triggered)
+        self.register_runtime_handler(RUNTIME_PROCESS_COMPLETED, self._pack_coordinator.handle_run_complete)
         # Journey auto-advance (pack v2)
-        self.register_handler("chat.run_complete", self._journey_orchestrator.handle_run_complete)
+        self.register_runtime_handler(RUNTIME_PROCESS_COMPLETED, self._journey_orchestrator.handle_run_complete)
         # Best-effort control-plane notification; must never block execution.
         self.register_handler("chat.usage_summary", self._usage_ingest.handle_usage_summary)
-        # Universal routing entrypoints.
-        self.register_handler("runtime.universal_event", self._handle_universal_structured)
-        self.register_handler("runtime.universal_text", self._handle_universal_text)
 
     def _setup_default_handlers(self):
         self.register_handler(BusinessLogHandler())
@@ -220,6 +210,14 @@ class UnifiedEventDispatcher:
             return
         raise TypeError("Unsupported handler registration signature")
 
+    def register_runtime_handler(
+        self,
+        canonical_event_type: str,
+        handler: Callable[[Dict[str, Any]], Awaitable[Any] | Any],
+    ) -> None:
+        """Register a handler for a canonical runtime event."""
+        self.register_handler(canonical_event_type, handler)
+
     async def emit(self, event_type: str, payload: Dict[str, Any]) -> None:
         listeners = list(self._event_handlers.get(event_type, []))
         if not listeners:
@@ -232,39 +230,30 @@ class UnifiedEventDispatcher:
         else:
             logger.info("[DISPATCH] Emitting event %s to %s listener(s) payload=%s", event_type, len(listeners), payload)
 
-        def _log_task_completion(task: asyncio.Future, evt: str) -> None:
-            try:
-                task.result()
-            except Exception as exc:  # pragma: no cover - logged for observability
-                logger.error("Async event handler failure for %s: %s", evt, exc, exc_info=True)
-
+        pending_results: list[Awaitable[Any]] = []
         for listener in listeners:
             try:
                 result = listener(payload)
                 if inspect.isawaitable(result):
-                    task = asyncio.create_task(result)
-                    task.add_done_callback(lambda t, evt=event_type: _log_task_completion(t, evt))
+                    pending_results.append(result)
             except Exception as exc:
                 logger.error("Event handler raised for %s: %s", event_type, exc, exc_info=True)
+
+        if pending_results:
+            settled = await asyncio.gather(*pending_results, return_exceptions=True)
+            for outcome in settled:
+                if isinstance(outcome, Exception):
+                    logger.error(
+                        "Async event handler failure for %s: %s",
+                        event_type,
+                        outcome,
+                        exc_info=True,
+                    )
 
         self.metrics.setdefault("custom_events_emitted", 0)
         self.metrics["custom_events_emitted"] += 1
         emitted_by_type = self.metrics.setdefault("custom_events_by_type", {})
         emitted_by_type[event_type] = emitted_by_type.get(event_type, 0) + 1
-
-    async def _handle_universal_structured(self, payload: Dict[str, Any]) -> None:
-        try:
-            result = await self._universal_orchestrator.handle_structured_event(payload)
-            logger.info("[UNIVERSAL_ROUTE] structured status=%s route=%s", result.status, result.route)
-        except Exception as exc:
-            logger.warning("[UNIVERSAL_ROUTE] structured dispatch failed: %s", exc)
-
-    async def _handle_universal_text(self, payload: Dict[str, Any]) -> None:
-        try:
-            result = await self._universal_orchestrator.handle_free_text_event(payload)
-            logger.info("[UNIVERSAL_ROUTE] text status=%s route=%s", result.status, result.route)
-        except Exception as exc:
-            logger.warning("[UNIVERSAL_ROUTE] text dispatch failed: %s", exc)
 
     async def dispatch(self, event: EventType) -> bool:
         start_time = datetime.now(UTC)
@@ -396,12 +385,12 @@ class UnifiedEventDispatcher:
                 }
 
         # SUPPRESSION CHECKS (must happen BEFORE other flags)
-        if base_kind in ('text', 'print') and workflow_manager and workflow_name:
+        if base_kind in ('text', 'print') and workflow_name:
             agent_name = event_dict.get('agent') or event_dict.get('sender')
             content = event_dict.get('content', '')
             
             # Check 0: System resume signals (always suppress)
-            if isinstance(content, str) and '[SYSTEM_RESUME_SIGNAL]' in content:
+            if isinstance(content, str) and SYSTEM_RESUME_SIGNAL in content:
                 event_dict['_mozaiks_hide'] = True
                 logger.info(f"🚫 [SYSTEM_SIGNAL] Suppressing internal resume signal from {agent_name}")
                 return {
@@ -416,7 +405,7 @@ class UnifiedEventDispatcher:
             if isinstance(content, str) and content.strip() == ".":
                 # Check if this is a userdriven workflow
                 try:
-                    wf_config = workflow_manager.get_config(workflow_name)  # type: ignore
+                    wf_config = workflow_manager.get_config(workflow_name)
                     workflow_startup_mode = str(wf_config.get("workflow_startup_mode", "")).strip().lower() if wf_config else ""
                     sender_lower = str(agent_name or "").lower()
                     # Suppress if userdriven mode AND sender looks like a user proxy
@@ -435,7 +424,7 @@ class UnifiedEventDispatcher:
             if agent_name and isinstance(content, str):
                 # Check 1: UI_HIDDEN triggers (exact match suppression)
                 try:
-                    hidden_triggers = workflow_manager.get_ui_hidden_triggers(workflow_name)  # type: ignore
+                    hidden_triggers = workflow_manager.get_ui_hidden_triggers(workflow_name)
                     logger.info(f"🔍 [UI_HIDDEN_DEBUG] Got hidden triggers: {hidden_triggers}")
                     
                     if agent_name in hidden_triggers and content.strip() in hidden_triggers[agent_name]:
@@ -455,7 +444,7 @@ class UnifiedEventDispatcher:
                 # Suppress the text message to avoid duplication in UI
                 logger.info(f"🔍 [AUTO_TOOL_DEBUG] About to check auto_tool agents for agent={agent_name}, workflow_name={workflow_name}")
                 try:
-                    auto_tool_agents = workflow_manager.get_auto_tool_agents(workflow_name)  # type: ignore
+                    auto_tool_agents = workflow_manager.get_auto_tool_agents(workflow_name)
                     logger.info(f"🔍 [AUTO_TOOL_DEBUG] Got auto_tool agents: {auto_tool_agents}, checking if {agent_name} in set")
                     if agent_name in auto_tool_agents:
                         event_dict['_mozaiks_hide'] = True
@@ -475,17 +464,17 @@ class UnifiedEventDispatcher:
             tool_agent_flag = False
             if agent_name:
                 try:
-                    cfg = workflow_manager.get_agent_structured_outputs_config(workflow_name)  # type: ignore
+                    cfg = workflow_manager.get_agent_structured_outputs_config(workflow_name)
                     structured_flag = cfg.get(agent_name, False)
                 except Exception:
                     pass
                 try:
-                    visual_agents = workflow_manager.get_visual_agents(workflow_name)  # type: ignore
+                    visual_agents = workflow_manager.get_visual_agents(workflow_name)
                     visual_flag = agent_name in visual_agents
                 except Exception:
                     pass
                 try:
-                    ui_tools = workflow_manager.get_ui_tools(workflow_name)  # type: ignore
+                    ui_tools = workflow_manager.get_ui_tools(workflow_name)
                     tool_agent_flag = any(
                         tool.get('agent') == agent_name or tool.get('caller') == agent_name
                         for tool in ui_tools.values()

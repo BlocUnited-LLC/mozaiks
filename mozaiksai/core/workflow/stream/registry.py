@@ -7,11 +7,11 @@
 Event Handler Registry
 
 Maps AG2 event types to their handlers and provides dispatch functionality.
-Supports handler registration, priority ordering, and fallback handling.
+Duplicate event registrations fail fast so the dispatch contract stays explicit.
 """
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
+from typing import TYPE_CHECKING, Any, Dict, Optional, Type
 
 from .handlers.base import BaseEventHandler, DefaultEventHandler
 
@@ -27,7 +27,6 @@ class EventHandlerRegistry:
 
     Provides:
         - Handler registration by event type
-        - Priority-based handler selection
         - Fallback handler for unknown events
         - Event dispatch with payload collection
 
@@ -46,8 +45,6 @@ class EventHandlerRegistry:
         self._handlers: Dict[Type, BaseEventHandler] = {}
         # Fallback for unregistered event types
         self._default_handler: Optional[BaseEventHandler] = DefaultEventHandler()
-        # All registered handlers for iteration
-        self._all_handlers: List[BaseEventHandler] = []
 
     def register(self, handler: BaseEventHandler) -> "EventHandlerRegistry":
         """
@@ -61,33 +58,23 @@ class EventHandlerRegistry:
         """
         event_types = handler.event_types()
         if not event_types:
-            logger.warning(
-                f"Handler {handler.__class__.__name__} has no event types; "
-                "it will only be used as default handler if set"
+            raise ValueError(
+                f"Handler {handler.__class__.__name__} must declare at least one event type"
             )
+
         for event_type in event_types:
             existing = self._handlers.get(event_type)
             if existing:
-                # Use priority to resolve conflicts
-                if handler.priority() < existing.priority():
-                    logger.debug(
-                        f"Replacing handler for {event_type.__name__}: "
-                        f"{existing.__class__.__name__} -> {handler.__class__.__name__}"
-                    )
-                    self._handlers[event_type] = handler
-                else:
-                    logger.debug(
-                        f"Keeping existing handler for {event_type.__name__}: "
-                        f"{existing.__class__.__name__} (priority {existing.priority()}) "
-                        f"over {handler.__class__.__name__} (priority {handler.priority()})"
-                    )
-            else:
-                self._handlers[event_type] = handler
-                logger.debug(
-                    f"Registered {handler.__class__.__name__} for {event_type.__name__}"
+                raise ValueError(
+                    f"Duplicate handler registration for {event_type.__name__}: "
+                    f"{existing.__class__.__name__} and {handler.__class__.__name__}"
                 )
 
-        self._all_handlers.append(handler)
+            self._handlers[event_type] = handler
+            logger.debug(
+                f"Registered {handler.__class__.__name__} for {event_type.__name__}"
+            )
+
         return self
 
     def set_default_handler(self, handler: BaseEventHandler) -> "EventHandlerRegistry":
@@ -153,8 +140,16 @@ class EventHandlerRegistry:
             except Exception as e:
                 logger.error(
                     f"Handler {handler.__class__.__name__} failed for "
-                    f"{event.__class__.__name__}: {e}"
+                    f"{event.__class__.__name__}: {e}",
+                    exc_info=True,
                 )
+                try:
+                    ctx.wf_logger.warning(
+                        f" [{ctx.workflow_name_upper}] Handler {handler.__class__.__name__} failed "
+                        f"for {event.__class__.__name__}: {e}"
+                    )
+                except Exception:
+                    pass
                 # Don't crash the stream - return None and continue
                 return None
         return None
@@ -175,16 +170,7 @@ class EventHandlerRegistry:
             return handler.should_break(event, state)
         return False
 
-    def get_registered_types(self) -> List[Type]:
-        """Get list of all registered event types."""
-        return list(self._handlers.keys())
-
-    def get_all_handlers(self) -> List[BaseEventHandler]:
-        """Get list of all registered handlers."""
-        return list(self._all_handlers)
-
     def clear(self) -> None:
         """Clear all registered handlers."""
         self._handlers.clear()
-        self._all_handlers.clear()
         self._default_handler = DefaultEventHandler()

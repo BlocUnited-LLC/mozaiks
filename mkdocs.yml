@@ -95,7 +95,6 @@ nav:
           - UI Surface and Layout: architecture/foundations/ui-surface-and-layout-architecture.md
           - Core vs Product vs App Bundle: architecture/foundations/core-product-app-bundle-boundary.md
           - Runtime State and Control Events: architecture/foundations/runtime-state-and-control-events.md
-          - Graph Injection Contract: architecture/foundations/graph-injection-contract.md
           - Learning Loop Architecture: architecture/foundations/learning-loop-architecture.md
           - Event Taxonomy: architecture/foundations/event-taxonomy.md
           - Event System Architecture: architecture/foundations/event-system-architecture.md
@@ -105,6 +104,12 @@ nav:
       - Keycloak Auth: architecture/keycloak-auth.md
       - Mobile Client Contract: architecture/mobile-client-contract.md
       - Orchestration and Decomposition: architecture/orchestration-and-decomposition.md
+      - Refinement Control Plane: architecture/specs/REFINEMENT_CONTROL_PLANE_SPEC.md
+      - Roadmaps:
+          - Next-Gen App Platform: architecture/specs/next-gen-app-platform-roadmap.md
+          - UI System: architecture/specs/UI_SYSTEM_SPEC.md
+          - Design System: architecture/specs/DESIGN_SYSTEM_SPEC.md
+          - Platform Frontend Strategy: architecture/specs/PLATFORM_FRONTEND_STRATEGY.md
       - Frontend UI:
           - Overview: architecture/frontend/index.md
           - UI Surface Model: architecture/frontend/ui-surface-model.md
@@ -121,11 +126,13 @@ nav:
       - Deep Dives:
           - Overview: reference/deep-dives/index.md
           - Workflow and Orchestration:
-              - Universal Orchestrator: reference/deep-dives/universal-orchestrator.md
               - Mid-Flight Journeys: reference/deep-dives/mid-flight-journeys.md
-              - Pack Graph Semantics: reference/deep-dives/pack-graph-semantics.md
               - MFJ Strict Resume Contract: reference/deep-dives/mfj-strict-resume-contract.md
+              - Universal Orchestrator: reference/deep-dives/universal-orchestrator.md
+              - Pack Graph Semantics: reference/deep-dives/pack-graph-semantics.md
               - Parallel Fan-Out Fan-In: reference/deep-dives/parallel-fan-out-fan-in.md
+              - AG2 Beta & GroupChat Strategy: reference/deep-dives/ag2-beta-groupchat-strategy.md
+              - AG2 Beta Preperation Plan: reference/deep-dives/ag2-beta-preperation-plan.md
               - AG2 Touchpoints and Extensions: reference/deep-dives/ag2-touchpoints-and-extensions.md
               - Handoff Condition Scope: reference/deep-dives/handoff-condition-scope.md
           - UI and Interaction:
@@ -137,7 +144,6 @@ nav:
               - Hook System Deep Dive: reference/deep-dives/hook-system-deep-dive.md
               - API Reference Notes: reference/deep-dives/api-reference.md
           - Agent and Contracts:
-              - Agent Dependency Matrix: reference/deep-dives/agent-dependency-matrix.md
               - Context Variables Complete: reference/deep-dives/context-variables-complete.md
               - Auto Tool Execution: reference/deep-dives/auto-tool-execution.md
           - Tokens and Cost Control:

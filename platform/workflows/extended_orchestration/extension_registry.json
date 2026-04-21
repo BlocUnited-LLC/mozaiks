@@ -1,0 +1,17 @@
+{
+  "pack_name": "DefaultPack",
+  "version": 3,
+  "description": "Default sample pack graph for local workflow routing.",
+  "workflows": [
+    {
+      "id": "JokeFactory",
+      "description": "Interactive joke generation workflow with MFJ parallel joke writing"
+    },
+    {
+      "id": "JokeWorker",
+      "description": "Single-joke writer child workflow spawned in parallel by JokeFactory"
+    }
+  ],
+  "transitions": [],
+  "workflow_sequences": []
+}

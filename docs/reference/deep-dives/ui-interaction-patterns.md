@@ -155,7 +155,7 @@ tools:
     file: render_action_plan.py
     function: render_action_plan
     tool_type: UI_Tool
-    auto_invoke: true
+    auto_tool_call: true
     ui:
       component: ActionPlan
       mode: artifact
@@ -163,12 +163,17 @@ tools:
     file: open_download_center.py
     function: open_download_center
     tool_type: UI_Tool
-    auto_invoke: true
+    auto_tool_call: true
     ui:
       component: FileDownloadCenter
       mode: inline
 lifecycle_tools: []
 ```
+
+**Declarative type rules**:
+- `UI_Tool` = interactive surface that waits for a user response via `use_ui_tool(...)`
+- `UI_Surface` = one-way artifact/status surface emitted via `emit_ui_surface(...)`
+- `Agent_Tool` = backend-only logic; omit the `ui` block entirely
 
 ---
 
@@ -300,11 +305,10 @@ function MyComponent({ payload }) {
        file: my_tool.py
        function: my_tool
        tool_type: UI_Tool
-       auto_invoke: true
+       auto_tool_call: true
        description: "If confirmation_only=true, do a two-step UI flow."
        ui:
          component: MyComponent
          mode: inline
    lifecycle_tools: []
    ```
-

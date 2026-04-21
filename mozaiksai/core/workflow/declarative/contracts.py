@@ -71,6 +71,7 @@ class OrchestratorConfig(DeclarativeModel):
     initial_message: Optional[str] = None
     initial_agent: Optional[str] = None
     triggers: List[OrchestratorTriggerSpec] = Field(default_factory=list)
+    runtime_extensions: Optional[List[Dict[str, Any]]] = Field(default=None)
 
     @field_validator("workflow_name", "orchestration_pattern")
     @classmethod
@@ -116,7 +117,7 @@ class AgentSpec(DeclarativeModel):
     description: Optional[str] = None
     human_input_mode: Optional[str] = None
     max_consecutive_auto_reply: int = 2
-    auto_tool_mode: bool = False
+    auto_tool_mode: bool = False  # Deprecated: now derived from tools.yaml (auto_tool_call)
     structured_outputs_required: bool = False
     image_generation_enabled: bool = False
 
@@ -329,14 +330,55 @@ class ToolUIConfig(DeclarativeModel):
         return _optional_text(value)
 
 
+def _default_ui_payload_schema() -> Dict[str, Any]:
+    return {"type": "object", "properties": {}, "additionalProperties": True}
+
+
+class UIToolActionSpec(DeclarativeModel):
+    id: str
+    description: Optional[str] = None
+    payload_schema: Dict[str, Any] = Field(default_factory=_default_ui_payload_schema)
+
+    @field_validator("id")
+    @classmethod
+    def _validate_action_id(cls, value: Any) -> str:
+        return _required_text(value, field_name="id")
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _normalize_description(cls, value: Any) -> Optional[str]:
+        return _optional_text(value)
+
+    @field_validator("payload_schema", mode="before")
+    @classmethod
+    def _normalize_payload_schema(cls, value: Any) -> Dict[str, Any]:
+        if not isinstance(value, dict) or not value:
+            return _default_ui_payload_schema()
+        return value
+
+
+class UIToolContractSpec(DeclarativeModel):
+    surface_kind: Literal["agent_tool"] = "agent_tool"
+    payload_schema: Dict[str, Any] = Field(default_factory=_default_ui_payload_schema)
+    actions_schema: List[UIToolActionSpec] = Field(default_factory=list)
+
+    @field_validator("payload_schema", mode="before")
+    @classmethod
+    def _normalize_payload_schema(cls, value: Any) -> Dict[str, Any]:
+        if not isinstance(value, dict) or not value:
+            return _default_ui_payload_schema()
+        return value
+
+
 class ToolSpec(DeclarativeModel):
     agent: str | List[str]
     file: str
     function: str
     description: Optional[str] = None
-    tool_type: Literal["Agent_Tool", "UI_Tool"]
-    auto_invoke: bool = False
+    tool_type: Literal["Agent_Tool", "UI_Tool", "UI_Surface"]
+    auto_tool_call: bool = False
     ui: Optional[ToolUIConfig] = None
+    ui_contract: Optional[UIToolContractSpec] = None
 
     @field_validator("agent", mode="before")
     @classmethod
@@ -369,18 +411,35 @@ class ToolSpec(DeclarativeModel):
             return "Agent_Tool"
         if normalized == "ui_tool":
             return "UI_Tool"
-        raise ValueError("tool_type must be 'Agent_Tool' or 'UI_Tool'")
+        if normalized == "ui_surface":
+            return "UI_Surface"
+        raise ValueError("tool_type must be 'Agent_Tool', 'UI_Tool', or 'UI_Surface'")
 
     @model_validator(mode="after")
     def _validate_ui_requirements(self) -> "ToolSpec":
-        if self.tool_type == "UI_Tool":
+        if self.tool_type in {"UI_Tool", "UI_Surface"}:
             if not self.ui:
                 raise ValueError(
-                    f"UI_Tool '{self.function}' must declare a non-empty ui block with component and mode"
+                    f"{self.tool_type} '{self.function}' must declare a non-empty ui block with component and mode"
                 )
             if not self.ui.component or not self.ui.mode:
                 raise ValueError(
-                    f"UI_Tool '{self.function}' must declare ui.component and ui.mode"
+                    f"{self.tool_type} '{self.function}' must declare ui.component and ui.mode"
+                )
+            if self.tool_type == "UI_Tool" and self.ui_contract is None:
+                self.ui_contract = UIToolContractSpec()
+            if self.tool_type == "UI_Surface" and self.ui_contract is not None:
+                raise ValueError(
+                    f"UI_Surface '{self.function}' must not declare ui_contract"
+                )
+        else:
+            if self.ui is not None:
+                raise ValueError(
+                    f"Agent_Tool '{self.function}' must not declare ui"
+                )
+            if self.ui_contract is not None:
+                raise ValueError(
+                    f"Agent_Tool '{self.function}' must not declare ui_contract"
                 )
         return self
 
@@ -391,6 +450,7 @@ class LifecycleToolSpec(DeclarativeModel):
     file: str
     function: str
     description: Optional[str] = None
+    tool_type: Literal["Agent_Tool", "UI_Tool", "UI_Surface"] = "Agent_Tool"
     ui: Optional[ToolUIConfig] = None
 
     @field_validator("agent", "description", mode="before")
@@ -402,6 +462,38 @@ class LifecycleToolSpec(DeclarativeModel):
     @classmethod
     def _required_fields(cls, value: Any, info):  # type: ignore[no-untyped-def]
         return _required_text(value, field_name=info.field_name)
+
+    @field_validator("tool_type", mode="before")
+    @classmethod
+    def _normalize_lifecycle_tool_type(cls, value: Any) -> str:
+        if value is None:
+            return "Agent_Tool"
+        text = _required_text(value, field_name="tool_type")
+        normalized = text.lower().replace("-", "_")
+        if normalized == "agent_tool":
+            return "Agent_Tool"
+        if normalized == "ui_tool":
+            return "UI_Tool"
+        if normalized == "ui_surface":
+            return "UI_Surface"
+        raise ValueError("tool_type must be 'Agent_Tool', 'UI_Tool', or 'UI_Surface'")
+
+    @model_validator(mode="after")
+    def _validate_lifecycle_ui_requirements(self) -> "LifecycleToolSpec":
+        if self.tool_type in {"UI_Tool", "UI_Surface"}:
+            if not self.ui:
+                raise ValueError(
+                    f"{self.tool_type} lifecycle tool '{self.function}' must declare a non-empty ui block with component and mode"
+                )
+            if not self.ui.component or not self.ui.mode:
+                raise ValueError(
+                    f"{self.tool_type} lifecycle tool '{self.function}' must declare ui.component and ui.mode"
+                )
+        elif self.ui is not None:
+            raise ValueError(
+                f"Agent_Tool lifecycle tool '{self.function}' must not declare ui"
+            )
+        return self
 
 
 class ToolsConfig(DeclarativeModel):
@@ -431,13 +523,14 @@ class HooksConfig(DeclarativeModel):
 
 
 class UIConfig(DeclarativeModel):
-    visual_agents: List[str] = Field(default_factory=list)
-    chat_pane_agents: List[str] = Field(default_factory=list)
-    artifact_agents: List[str] = Field(default_factory=list)
+    # null means "hide all agents"; [] keeps legacy "no filtering" behavior.
+    visual_agents: Optional[List[str]] = None
 
-    @field_validator("visual_agents", "chat_pane_agents", "artifact_agents")
+    @field_validator("visual_agents")
     @classmethod
-    def _normalize_lists(cls, value: List[str]) -> List[str]:
+    def _normalize_lists(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return None
         return _normalize_string_list(value)
 
 
@@ -536,7 +629,13 @@ class StructuredOutputFieldSpec(DeclarativeModel):
 
 class StructuredOutputModelSpec(DeclarativeModel):
     type: Literal["model"]
+    description: Optional[str] = None
     fields: Dict[str, StructuredOutputFieldSpec] = Field(default_factory=dict)
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _normalize_description(cls, value: Any) -> Optional[str]:
+        return _optional_text(value)
 
     @field_validator("fields")
     @classmethod

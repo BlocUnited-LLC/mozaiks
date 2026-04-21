@@ -17,13 +17,7 @@ from .base import BaseEventHandler
 if TYPE_CHECKING:
     from ..context import StreamContext, StreamState
 
-# Import AG2 ErrorEvent
-try:
-    from autogen.events.agent_events import ErrorEvent
-    HAS_ERROR_EVENT = True
-except ImportError:
-    HAS_ERROR_EVENT = False
-    ErrorEvent = type(None)  # type: ignore
+from autogen.events.agent_events import ErrorEvent
 
 from mozaiksai.core.events.event_serialization import (
     serialize_event_content,
@@ -39,10 +33,8 @@ class ErrorHandler(BaseEventHandler):
     """
 
     def event_types(self) -> Set[Type]:
-        """Handle ErrorEvent if available."""
-        if HAS_ERROR_EVENT:
-            return {ErrorEvent}
-        return set()
+        """Handle ErrorEvent."""
+        return {ErrorEvent}
 
     async def handle(
         self,
@@ -93,7 +85,3 @@ class ErrorHandler(BaseEventHandler):
     def should_break(self, event: Any, state: "StreamState") -> bool:
         """ErrorEvent does not terminate the stream by default."""
         return False
-
-    def priority(self) -> int:
-        """High priority for error handling."""
-        return 20

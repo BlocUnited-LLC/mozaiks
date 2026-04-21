@@ -63,7 +63,8 @@ async def _emit_ui_tool_event_core(
     display: str = "inline",
     chat_id: Optional[str] = None,
     workflow_name: str = "unknown",
-    agent_name: Optional[str] = None
+    agent_name: Optional[str] = None,
+    awaiting_response: bool = True,
 ) -> str:
     """
     Core function to emit a UI tool event to the frontend.
@@ -110,6 +111,7 @@ async def _emit_ui_tool_event_core(
             display_type=display,
             payload=payload_to_send,
             agent_name=agent_name,
+            awaiting_response=awaiting_response,
         )
         wf_logger.info(f"✅ [UI_TOOLS] Emitted UI tool event: {event_id}")
         return event_id
@@ -131,6 +133,46 @@ async def _wait_for_ui_tool_response_internal(event_id: str, timeout: Optional[f
     except Exception as e:  # pragma: no cover
         raise UIToolError(f"UI tool response failure for {event_id}: {e}")
 
+
+def _resolve_ui_tool_owner(
+    tool_id: str,
+    payload: Dict[str, Any],
+    wf_logger,
+) -> Optional[str]:
+    agent_name = None
+    try:
+        tool_record = workflow_manager.get_ui_tool_record(tool_id)
+        if tool_record:
+            agent_name = tool_record.get("agent")
+            wf_logger.debug(f"🔍 Tool '{tool_id}' owned by agent: {agent_name}")
+    except Exception as e:
+        wf_logger.warning(f"⚠️ Failed to resolve tool owner for '{tool_id}': {e}")
+
+    if not agent_name and isinstance(payload, dict):
+        agent_name = payload.get("agent_name")
+    return agent_name
+
+
+def _resolve_ui_display(
+    tool_id: str,
+    display: Optional[str],
+    wf_logger,
+) -> str:
+    resolved_display = display
+    if resolved_display is None:
+        try:
+            tool_record = workflow_manager.get_ui_tool_record(tool_id)
+            if tool_record:
+                resolved_display = tool_record.get('mode', 'inline')
+                wf_logger.debug(f"🔍 Auto-resolved display mode for '{tool_id}': {resolved_display}")
+            else:
+                resolved_display = 'inline'
+                wf_logger.debug(f"⚠️ No tool record found for '{tool_id}', using default display: inline")
+        except Exception as e:
+            resolved_display = 'inline'
+            wf_logger.warning(f"⚠️ Failed to resolve display mode for '{tool_id}': {e}, using default: inline")
+    return str(resolved_display or "inline")
+
 async def use_ui_tool(
     tool_id: str,
     payload: Dict[str, Any],
@@ -143,41 +185,15 @@ async def use_ui_tool(
     """Single-call convenience: emit then wait for a UI tool response.
 
     Returns the UI response dict augmented with ui_event_id.
-    
+
     The `display` parameter is now optional and will be auto-resolved from tool
     configuration if not provided. This eliminates redundancy between tool declarations
     and tool function implementations.
     """
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id)
     start = _dt.datetime.now(_dt.timezone.utc)
-    
-    # Resolve the actual tool owner from registry first; payload is only a fallback.
-    agent_name = None
-    try:
-        tool_record = workflow_manager.get_ui_tool_record(tool_id)
-        if tool_record:
-            agent_name = tool_record.get("agent")
-            wf_logger.debug(f"🔍 Tool '{tool_id}' owned by agent: {agent_name}")
-    except Exception as e:
-        wf_logger.warning(f"⚠️ Failed to resolve tool owner for '{tool_id}': {e}")
-
-    if not agent_name and isinstance(payload, dict):
-        agent_name = payload.get("agent_name")
-    
-    # Auto-resolve display mode from workflow_manager if not explicitly provided
-    resolved_display = display
-    if resolved_display is None:
-        try:
-            tool_record = workflow_manager.get_ui_tool_record(tool_id)
-            if tool_record:
-                resolved_display = tool_record.get('mode', 'inline')
-                wf_logger.debug(f"🔍 Auto-resolved display mode for '{tool_id}': {resolved_display}")
-            else:
-                resolved_display = 'inline'  # fallback default
-                wf_logger.debug(f"⚠️ No tool record found for '{tool_id}', using default display: inline")
-        except Exception as e:
-            resolved_display = 'inline'  # fallback on error
-            wf_logger.warning(f"⚠️ Failed to resolve display mode for '{tool_id}': {e}, using default: inline")
+    agent_name = _resolve_ui_tool_owner(tool_id, payload, wf_logger)
+    resolved_display = _resolve_ui_display(tool_id, display, wf_logger)
     
     event_id = await _emit_ui_tool_event_core(
         tool_id=tool_id,
@@ -186,6 +202,7 @@ async def use_ui_tool(
         chat_id=chat_id,
         workflow_name=workflow_name,
         agent_name=agent_name,
+        awaiting_response=True,
     )
 
     # Persist UI tool metadata to enable restoration after reconnect/resume.
@@ -304,6 +321,56 @@ async def use_ui_tool(
         )
         wf_logger.error(fail_msg)
         raise
+
+
+async def emit_ui_surface(
+    tool_id: str,
+    payload: Dict[str, Any],
+    *,
+    chat_id: Optional[str],
+    workflow_name: str,
+    display: Optional[str] = None,
+    agent_name: Optional[str] = None,
+) -> str:
+    """Emit a one-way UI surface without awaiting a response.
+
+    Use this for read-only artifacts or status surfaces where the frontend should
+    render the component but no user response is required.
+    """
+    wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id)
+    resolved_agent_name = agent_name or _resolve_ui_tool_owner(tool_id, payload, wf_logger)
+    resolved_display = _resolve_ui_display(tool_id, display, wf_logger)
+
+    event_id = await _emit_ui_tool_event_core(
+        tool_id=tool_id,
+        payload=payload,
+        display=resolved_display,
+        chat_id=chat_id,
+        workflow_name=workflow_name,
+        agent_name=resolved_agent_name,
+        awaiting_response=False,
+    )
+
+    try:
+        from logs.tools_logs import get_tool_logger as _get_tool_logger, log_tool_event as _log_tool_event  # type: ignore
+
+        _tlog = _get_tool_logger(
+            tool_name=tool_id,
+            chat_id=chat_id,
+            workflow_name=workflow_name,
+            ui_event_id=event_id,
+        )
+        _log_tool_event(
+            _tlog,
+            action="emit_ui_surface",
+            status="done",
+            event_id=event_id,
+            display=resolved_display,
+        )
+    except Exception:
+        pass
+
+    return event_id
 
 async def emit_tool_progress_event(
     tool_name: str,
@@ -439,6 +506,7 @@ async def handle_tool_call_for_ui_interaction(tool_call_event: Any, chat_id: str
         raise UIToolError(f"UI interaction failed: {str(e)}")
     
 __all__ = [
+    "emit_ui_surface",
     "use_ui_tool",
     "handle_tool_call_for_ui_interaction",
     "emit_tool_progress_event",

@@ -14,6 +14,7 @@ Use it when you already understand the main platform model and need:
 ### Deep Dives
 
 Advanced workflow, handoff, transport, and runtime notes live here.
+If you read one deep dive first, start with [Mid-Flight Journeys](deep-dives/mid-flight-journeys.md).
 
 - [Deep Dives Index](deep-dives/index.md)
 

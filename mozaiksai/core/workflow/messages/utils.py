@@ -46,7 +46,7 @@ def normalize_to_strict_ag2(
             continue
 
         role = m.get("role")
-        name = m.get("name")
+        name = m.get("name") or m.get("agent_name")
         content = m.get("content")
 
         # Accept strict messages as-is

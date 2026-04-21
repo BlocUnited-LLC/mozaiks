@@ -3,21 +3,26 @@
  *
  * ChatPage is the only hardcoded core route — it is the agentic shell.
  * Platform modules/adapters are loaded via auto-discovery and routed through
- * backend navigation entries derived from metadata.
- * navigation.json defines EXTRA routes beyond the core shell.
- * `landing_spot` (from navigation config) controls the default redirect.
+ * backend navigation entries composed from page/UI/workflow owner manifests.
+ * app.json controls `landing_spot`; shell.json controls header chrome.
  * All routes require auth unless explicitly opted out via meta.requiresAuth: false.
  *
  * @module @mozaiks/chat-ui/components/RouteRenderer
  */
 
-import React, { Suspense, useMemo } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Suspense, useMemo, useEffect, useState, useCallback } from 'react';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useNavigation } from '../providers/NavigationProvider';
 import { getComponent, hasComponent } from '../registry/componentRegistry';
+import { TransitionScreen } from '../ui/screens/TransitionScreen';
+import { useChatUI } from '../context/ChatUIContext';
+import Header from './layout/Header';
+import Footer from './layout/Footer';
+import { useTheme } from '../styles/useTheme';
+import { getChatBackgroundSrc } from '../styles/brandAssets';
 
 /**
- * Core routes that are ALWAYS mounted — not driven by navigation.json.
+ * Core routes that are ALWAYS mounted — not driven by owner manifests.
  * Only ChatPage is a true core route. All platform modules/adapters
  * (including AdminPortal) are registered via auto-discovery and routed
  * through navigation entries.
@@ -41,14 +46,33 @@ const CORE_ROUTES = [
   },
 ];
 
+const resolveRouteAppId = (config, user) => {
+  return (
+    user?.app_id ||
+    config?.chat?.defaultAppId ||
+    config?.appId ||
+    config?.app_id ||
+    'default'
+  );
+};
+
+const resolveRouteUserId = (user) => {
+  return (
+    user?.id ||
+    user?.user_id ||
+    user?.email ||
+    null
+  );
+};
+
 /**
  * Default loading component for lazy-loaded routes
  */
 const DefaultLoadingFallback = () => (
-  <div className="flex items-center justify-center min-h-screen">
-    <div className="text-center">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4"></div>
-      <p className="text-gray-500">Loading...</p>
+  <div className="flex items-center justify-center min-h-screen bg-background">
+    <div className="flex flex-col items-center gap-3">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      <p className="text-sm text-muted-foreground">Loading…</p>
     </div>
   </div>
 );
@@ -57,10 +81,10 @@ const DefaultLoadingFallback = () => (
  * Component for rendering 404 / not found pages
  */
 const NotFoundPage = () => (
-  <div className="flex items-center justify-center min-h-screen">
+  <div className="flex items-center justify-center min-h-screen bg-background">
     <div className="text-center">
-      <h1 className="text-4xl font-bold text-gray-800 dark:text-gray-200 mb-4">404</h1>
-      <p className="text-gray-600 dark:text-gray-400">Page not found</p>
+      <h1 className="text-4xl font-black text-foreground mb-4">404</h1>
+      <p className="text-muted-foreground">Page not found</p>
     </div>
   </div>
 );
@@ -69,18 +93,171 @@ const NotFoundPage = () => (
  * Component for rendering when a registered component is not found
  */
 const ComponentNotFound = ({ componentName }) => (
-  <div className="flex items-center justify-center min-h-screen">
-    <div className="text-center">
-      <h1 className="text-2xl font-bold text-red-600 mb-4">Component Not Registered</h1>
-      <p className="text-gray-600 dark:text-gray-400">
-        The component "{componentName}" is referenced in navigation.json but not registered.
+  <div className="flex items-center justify-center min-h-screen bg-background">
+    <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-8 text-center max-w-md">
+      <h1 className="text-lg font-black text-destructive mb-3">Component Not Registered</h1>
+      <p className="text-sm text-muted-foreground mb-2">
+        <code className="font-mono text-foreground">{componentName}</code> is referenced in navigation but not registered.
       </p>
-      <p className="text-sm text-gray-500 mt-2">
-        Register it using: registerComponent('{componentName}', YourComponent)
+      <p className="text-xs text-muted-foreground">
+        Register it using: <code className="font-mono">registerComponent('{componentName}', YourComponent)</code>
       </p>
     </div>
   </div>
 );
+
+/**
+ * TransitionRoute — mounts a shell transition directly.
+ *
+ * When the user resolves:
+ *   - backend resolves the transition against SessionRouter
+ *   - next transition -> mount it
+ *   - workflow target -> backend creates the chat session and returns chat_id
+ *
+ * Shell entry points use route.transition. Workflow sequencing metadata stays
+ * runtime-only and does not drive route UI.
+ */
+function TransitionRoute({ route }) {
+  const navigate = useNavigate();
+  const { user, config } = useChatUI();
+  const [currentTransitionId, setCurrentTransitionId] = useState(null);
+  const [accumulatedContext, setAccumulatedContext] = useState({});
+  const entryTransitionId = route.transition || null;
+  const resolvedAppId = resolveRouteAppId(config, user);
+  const resolvedUserId = resolveRouteUserId(user);
+
+  useEffect(() => {
+    if (entryTransitionId) {
+      setCurrentTransitionId(entryTransitionId);
+    }
+  }, [entryTransitionId]);
+
+  const handleNavigate = useCallback(
+    async (option_id = null, contextVariables = {}) => {
+      const mergedContext = { ...accumulatedContext, ...contextVariables };
+
+      try {
+        const res = await fetch('/api/transitions/resolve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            transition_id: currentTransitionId,
+            option_id,
+            context_variables: mergedContext,
+            app_id: resolvedAppId,
+            user_id: resolvedUserId,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(err.detail || 'Failed to resolve transition');
+        }
+
+        const data = await res.json();
+        if (data.resolution_type === 'transition' && data.transition?.id) {
+          setAccumulatedContext(data.context_variables ?? mergedContext);
+          setCurrentTransitionId(data.transition.id);
+          return;
+        }
+
+        if (data.resolution_type === 'workflow' && data.chat_id && data.workflow_id) {
+          setAccumulatedContext({});
+          navigate(
+            `/chat?workflow=${encodeURIComponent(data.workflow_id)}&chat_id=${encodeURIComponent(data.chat_id)}`
+          );
+          return;
+        }
+
+        throw new Error('Transition resolution returned an unsupported response');
+      } catch (err) {
+        console.error('[TransitionRoute] transition resolution failed:', err);
+      }
+    },
+    [accumulatedContext, currentTransitionId, navigate, resolvedAppId, resolvedUserId]
+  );
+
+  if (!currentTransitionId) return null;
+
+  return <TransitionScreen transitionId={currentTransitionId} onNavigate={handleNavigate} />;
+}
+
+function WorkflowEntryRoute({ route }) {
+  const navigate = useNavigate();
+  const { user, config } = useChatUI();
+  const [error, setError] = useState(null);
+  const workflowId = route.workflow || null;
+  const resolvedAppId = resolveRouteAppId(config, user);
+  const resolvedUserId = resolveRouteUserId(user);
+
+  useEffect(() => {
+    if (!workflowId) return undefined;
+    let cancelled = false;
+
+    async function startWorkflow() {
+      try {
+        const res = await fetch('/api/workflows/trigger', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workflow_id: workflowId,
+            trigger_source: 'route',
+            context_variables: route.context_variables || {},
+            app_id: resolvedAppId,
+            user_id: resolvedUserId,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(err.detail || 'Failed to start workflow');
+        }
+
+        const data = await res.json();
+        if (!cancelled && data.chat_id && data.workflow_id) {
+          navigate(
+            `/chat?workflow=${encodeURIComponent(data.workflow_id)}&chat_id=${encodeURIComponent(data.chat_id)}`,
+            { replace: true }
+          );
+        }
+      } catch (err) {
+        if (!cancelled) setError(err);
+      }
+    }
+
+    startWorkflow();
+    return () => {
+      cancelled = true;
+    };
+  }, [workflowId, route.context_variables, navigate, resolvedAppId, resolvedUserId]);
+
+  if (error) {
+    return <ComponentNotFound componentName={`Workflow route ${workflowId}: ${error.message}`} />;
+  }
+  return <DefaultLoadingFallback />;
+}
+
+function ShellChromeLayout({ children }) {
+  const { user, config } = useChatUI();
+  const defaultAppId = config?.chat?.defaultAppId || null;
+  const { theme: chatTheme, loading: themeLoading } = useTheme(defaultAppId);
+  const chatBackgroundSrc = getChatBackgroundSrc(chatTheme);
+
+  return (
+    <div className="relative min-h-screen overflow-hidden bg-[var(--color-background)] text-[var(--color-text-primary)]">
+      <img
+        src={chatBackgroundSrc}
+        alt=""
+        className="fixed inset-0 -z-10 h-full w-full object-cover"
+      />
+      <Header user={user} chatTheme={chatTheme} themeLoading={themeLoading} />
+      <div className="relative z-0 flex min-h-screen flex-col pt-14 md:pt-16">
+        <main className="flex min-h-0 flex-1 flex-col">{children}</main>
+        <Footer />
+      </div>
+    </div>
+  );
+}
 
 /**
  * RouteWrapper - Handles auth checks and meta for individual routes
@@ -89,7 +266,8 @@ const RouteWrapper = ({
   route,
   component: Component,
   isAuthenticated,
-  onAuthRequired
+  onAuthRequired,
+  wrapInAppShell = false,
 }) => {
   const { meta = {} } = route;
 
@@ -102,14 +280,18 @@ const RouteWrapper = ({
   }
 
   // Update document title if specified
-  React.useEffect(() => {
+  useEffect(() => {
     if (meta.title) {
       const appName = document.title.split(' - ')[0] || 'Mozaiks';
       document.title = `${meta.title} - ${appName}`;
     }
   }, [meta.title]);
 
-  return <Component route={route} />;
+  const content = <Component route={route} />;
+  if (wrapInAppShell) {
+    return <ShellChromeLayout>{content}</ShellChromeLayout>;
+  }
+  return content;
 };
 
 /**
@@ -117,9 +299,9 @@ const RouteWrapper = ({
  *
  * Always mounts core shell routes (ChatPage).
  * Module/adapter routes (AdminPortal etc.) come from backend navigation.
- * Extra routes from navigation.json are appended after.
+ * Extra routes from backend-composed navigation are appended after.
  * All routes require auth by default; opt out with meta.requiresAuth: false.
- * Supports landing_spot from navigation config for default redirect.
+ * Supports landing_spot from app-shell config for default redirect.
  *
  * @param {Object} props
  * @param {React.ComponentType} props.LoadingFallback - Component to show while loading
@@ -164,10 +346,10 @@ const RouteRenderer = ({
     }).filter(Boolean);
   }, [isAuthenticated, onAuthRequired, LoadingFallback]);
 
-  // Build extra route elements from navigation.json pages[] (beyond core shell)
+  // Build extra route elements from backend-composed navigation (beyond core shell)
   const extraRouteElements = useMemo(() => {
-    // Only pages that define both path + component can be SPA routes
-    const routablePages = (pages || []).filter(p => p.path && p.component);
+    // Pages need at least a path; transition/workflow routes don't require a component.
+    const routablePages = (pages || []).filter(p => p.path && (p.component || p.transition || p.workflow));
     if (routablePages.length === 0) return [];
 
     // Filter out any pages that overlap with core paths (safety net)
@@ -175,7 +357,62 @@ const RouteRenderer = ({
     const extraRoutes = routablePages.filter(r => !corePaths.has(r.path));
 
     return extraRoutes.map((route, index) => {
-      const { path, component: componentName } = route;
+      const { path, component: componentName, transition, workflow } = route;
+
+      // Transition routes — no registered component needed; TransitionScreen handles rendering.
+      if (transition) {
+        const routeWithAuthDefault = {
+          ...route,
+          meta: {
+            ...route.meta,
+            requiresAuth: route.meta?.requiresAuth !== false,
+          },
+        };
+        return (
+          <Route
+            key={`transition-${index}-${path}`}
+            path={path}
+            element={
+              <Suspense fallback={<LoadingFallback />}>
+                <RouteWrapper
+                  route={routeWithAuthDefault}
+                  component={TransitionRoute}
+                  isAuthenticated={isAuthenticated}
+                  onAuthRequired={onAuthRequired}
+                  wrapInAppShell={route.meta?.appShell !== false}
+                />
+              </Suspense>
+            }
+          />
+        );
+      }
+
+      if (workflow) {
+        const routeWithAuthDefault = {
+          ...route,
+          meta: {
+            ...route.meta,
+            requiresAuth: route.meta?.requiresAuth !== false,
+          },
+        };
+        return (
+          <Route
+            key={`workflow-entry-${index}-${path}`}
+            path={path}
+            element={
+              <Suspense fallback={<LoadingFallback />}>
+                <RouteWrapper
+                  route={routeWithAuthDefault}
+                  component={WorkflowEntryRoute}
+                  isAuthenticated={isAuthenticated}
+                  onAuthRequired={onAuthRequired}
+                  wrapInAppShell={route.meta?.appShell !== false}
+                />
+              </Suspense>
+            }
+          />
+        );
+      }
 
       if (!hasComponent(componentName)) {
         console.warn(`[RouteRenderer] Component "${componentName}" not found in registry for route "${path}"`);
@@ -205,15 +442,16 @@ const RouteRenderer = ({
           path={path}
           element={
             <Suspense fallback={<LoadingFallback />}>
-              <RouteWrapper
-                route={routeWithAuthDefault}
-                component={Component}
-                isAuthenticated={isAuthenticated}
-                onAuthRequired={onAuthRequired}
-              />
-            </Suspense>
-          }
-        />
+                <RouteWrapper
+                  route={routeWithAuthDefault}
+                  component={Component}
+                  isAuthenticated={isAuthenticated}
+                  onAuthRequired={onAuthRequired}
+                  wrapInAppShell={route.meta?.appShell !== false}
+                />
+              </Suspense>
+            }
+          />
       );
     });
   }, [pages, isAuthenticated, onAuthRequired, LoadingFallback]);
@@ -225,6 +463,10 @@ const RouteRenderer = ({
 
   return (
     <Routes>
+      {/* When a non-root landing_spot is declared (platform mode), redirect / there */}
+      {landingSpot !== '/' && (
+        <Route path="/" element={<Navigate to={landingSpot} replace />} />
+      )}
       {coreRouteElements}
       {extraRouteElements}
       {/* Catch-all: redirect to landing_spot or show 404 */}

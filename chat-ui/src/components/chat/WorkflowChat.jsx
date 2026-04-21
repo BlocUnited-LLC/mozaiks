@@ -1,69 +1,147 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { appApi } from '../../adapters/api';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { WebSocketApiAdapter } from '../../adapters/api';
 import config from '../../config';
 import { useChatWebSocket } from '../../pages/hooks';
 
-/**
- * Standalone workflow chat component for route-based triggers.
- *
- * Usage:
- * ```jsx
- * import { WorkflowChat } from '@mozaiks/chat-ui';
- *
- * // Dedicated support page
- * function SupportPage() {
- *   return (
- *     <WorkflowChat
- *       workflow="CustomerSupport"
- *       userId={user.id}
- *     />
- *   );
- * }
- *
- * // With initial context and branding
- * function OrderHelpPage({ params }) {
- *   return (
- *     <WorkflowChat
- *       workflow="CustomerSupport"
- *       userId={user.id}
- *       initialContext={{ order_id: params.id }}
- *       brandName="Acme Support"
- *       logo="/logo.svg"
- *     />
- *   );
- * }
- * ```
- *
- * ## Theming
- *
- * Colors and fonts are controlled via CSS variables. Set these in your app:
- * ```css
- * :root {
- *   --mozaiks-primary: #6366f1;
- *   --mozaiks-primary-hover: #4f46e5;
- *   --mozaiks-bg: #ffffff;
- *   --mozaiks-bg-secondary: #f9fafb;
- *   --mozaiks-text: #111827;
- *   --mozaiks-text-secondary: #6b7280;
- *   --mozaiks-border: #e5e7eb;
- *   --mozaiks-font: system-ui, sans-serif;
- * }
- * ```
- *
- * @param {Object} props
- * @param {string} props.workflow - Workflow name to start
- * @param {string} props.userId - User ID for the session
- * @param {string} [props.appId] - App ID (defaults to config)
- * @param {Object} [props.initialContext] - Initial context variables
- * @param {Function} [props.onMessage] - Callback for incoming messages
- * @param {Function} [props.onComplete] - Callback when workflow completes
- * @param {Function} [props.onClose] - Callback when user closes the chat
- * @param {string} [props.className] - Additional CSS classes
- * @param {boolean} [props.showHeader] - Show header with close button (default: true)
- * @param {string} [props.brandName] - Brand name to display in header (defaults to workflow name)
- * @param {string} [props.logo] - Logo URL to display in header
- * @param {string} [props.backgroundImage] - Background image URL for chat area
- */
+function normalizeWorkflowEvent(event) {
+  if (!event || typeof event !== 'object') {
+    return null;
+  }
+
+  let normalized = { ...event };
+
+  if (
+    typeof normalized.content === 'string'
+    && !String(normalized.type || '').startsWith('chat.')
+  ) {
+    const trimmed = normalized.content.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === 'object' && parsed.type) {
+          normalized = { ...parsed };
+        }
+      } catch {
+        // Ignore double-serialized content we cannot parse.
+      }
+    }
+  }
+
+  if (normalized.data && typeof normalized.data === 'object') {
+    normalized = { ...normalized.data, ...normalized };
+  }
+
+  if (normalized.content && typeof normalized.content === 'object') {
+    normalized.content = normalized.content.content
+      || normalized.content.text
+      || normalized.content.message
+      || '';
+  }
+
+  return normalized;
+}
+
+function getWorkflowEventType(event) {
+  const rawType = String(event?.type || '');
+  return rawType.startsWith('chat.') ? rawType.slice(5) : rawType;
+}
+
+function getWorkflowEventContent(event) {
+  return String(event?.content || event?.message || '');
+}
+
+function getWorkflowAgentName(event) {
+  return event?.agent || event?.agent_name || event?.sender || 'assistant';
+}
+
+function appendAssistantMessage(setMessages, event, onMessage) {
+  const content = getWorkflowEventContent(event);
+  if (!content.trim()) {
+    return;
+  }
+
+  const newMessage = {
+    id: event.id || `assistant-${Date.now()}`,
+    sender: 'assistant',
+    content,
+    agentName: getWorkflowAgentName(event),
+    timestamp: new Date().toISOString(),
+  };
+
+  setMessages((prev) => [...prev, newMessage]);
+  onMessage?.(newMessage);
+}
+
+function appendStreamChunk(setMessages, event) {
+  const content = getWorkflowEventContent(event);
+  if (!content) {
+    return;
+  }
+
+  const agentName = getWorkflowAgentName(event);
+
+  setMessages((prev) => {
+    const updated = [...prev];
+    for (let i = updated.length - 1; i >= 0; i -= 1) {
+      const message = updated[i];
+      if (message.__streaming && message.agentName === agentName) {
+        updated[i] = { ...message, content: `${message.content}${content}` };
+        return updated;
+      }
+    }
+
+    updated.push({
+      id: `stream-${Date.now()}`,
+      sender: 'assistant',
+      content,
+      agentName,
+      timestamp: new Date().toISOString(),
+      isStreaming: true,
+      __streaming: true,
+    });
+    return updated;
+  });
+}
+
+function finalizeStream(setMessages, event, onMessage) {
+  const content = getWorkflowEventContent(event);
+  const agentName = getWorkflowAgentName(event);
+
+  setMessages((prev) => {
+    const updated = [...prev];
+    for (let i = updated.length - 1; i >= 0; i -= 1) {
+      const message = updated[i];
+      if (message.__streaming && message.agentName === agentName) {
+        const finalized = {
+          ...message,
+          content: content || message.content,
+          isStreaming: false,
+        };
+        delete finalized.__streaming;
+        updated[i] = finalized;
+        onMessage?.(finalized);
+        return updated;
+      }
+    }
+
+    if (!content.trim()) {
+      return updated;
+    }
+
+    const newMessage = {
+      id: `stream-end-${Date.now()}`,
+      sender: 'assistant',
+      content,
+      agentName,
+      timestamp: new Date().toISOString(),
+      isStreaming: false,
+    };
+    updated.push(newMessage);
+    onMessage?.(newMessage);
+    return updated;
+  });
+}
+
 function WorkflowChat({
   workflow,
   userId,
@@ -83,71 +161,87 @@ function WorkflowChat({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [inputValue, setInputValue] = useState('');
+  const [isSending, setIsSending] = useState(false);
 
   const resolvedAppId = appId || config.get('chat.defaultAppId') || 'default';
+  const workflowApi = useMemo(
+    () => new WebSocketApiAdapter(config.get ? config.get('api') : null),
+    []
+  );
 
-  // Handle incoming WebSocket messages
-  const handleMessage = useCallback((data) => {
-    if (data.type === 'message' || data.type === 'agent_message') {
-      const newMessage = {
-        id: data.id || Date.now(),
-        sender: data.sender || 'assistant',
-        content: data.content || data.message,
-        agentName: data.agent_name,
-        timestamp: new Date().toISOString(),
-      };
-      setMessages(prev => [...prev, newMessage]);
-      if (onMessage) onMessage(newMessage);
+  const handleRuntimeEvent = useCallback((rawEvent) => {
+    const event = normalizeWorkflowEvent(rawEvent);
+    if (!event) {
+      return;
     }
 
-    if (data.type === 'workflow_complete') {
-      if (onComplete) onComplete(data);
+    const eventType = getWorkflowEventType(event);
+    switch (eventType) {
+      case 'text':
+      case 'print':
+      case 'message':
+      case 'agent_message':
+        appendAssistantMessage(setMessages, event, onMessage);
+        return;
+      case 'stream_chunk':
+        appendStreamChunk(setMessages, event);
+        return;
+      case 'stream_end':
+        finalizeStream(setMessages, event, onMessage);
+        return;
+      case 'run_complete':
+      case 'workflow_complete':
+        onComplete?.(event);
+        return;
+      case 'error':
+        setError(event.message || 'Workflow error');
+        return;
+      default:
+        return;
     }
-  }, [onMessage, onComplete]);
+  }, [onComplete, onMessage]);
 
-  // WebSocket connection
-  const {
-    connectionStatus,
-    sendMessage: wsSendMessage,
-  } = useChatWebSocket({
-    api: appApi,
+  const { connectionStatus } = useChatWebSocket({
+    api: workflowApi,
     appId: resolvedAppId,
     userId,
     chatId,
     workflowName: workflow,
     workflowConfigLoaded: true,
-    onMessage: handleMessage,
+    onMessage: handleRuntimeEvent,
   });
 
-  // Start the workflow on mount
   useEffect(() => {
     let mounted = true;
+    setMessages([]);
+    setChatId(null);
 
     const startWorkflow = async () => {
       try {
         setLoading(true);
         setError(null);
 
-        const result = await appApi.startChat(
+        const result = await workflowApi.startChat(
           resolvedAppId,
+          workflow,
           userId,
-          workflow
+          {},
+          initialContext || null
         );
 
-        if (!mounted) return;
-
-        if (result.chat_id) {
-          setChatId(result.chat_id);
-
-          // If there's initial context, we might want to send it
-          // This depends on how the backend handles context
-          if (initialContext) {
-            // Context is typically passed in the first message or via API
-            console.log('[WorkflowChat] Initial context:', initialContext);
-          }
-        } else {
-          setError(result.error || 'Failed to start workflow');
+        if (!mounted) {
+          return;
         }
+
+        if (result?.chat_id) {
+          setChatId(result.chat_id);
+          return;
+        }
+
+        const detail = typeof result?.detail === 'string'
+          ? result.detail
+          : result?.detail?.message || result?.detail?.error;
+        setError(detail || result?.error || 'Failed to start workflow');
       } catch (err) {
         if (mounted) {
           setError(err.message);
@@ -166,26 +260,41 @@ function WorkflowChat({
     return () => {
       mounted = false;
     };
-  }, [workflow, userId, resolvedAppId, initialContext]);
+  }, [workflowApi, workflow, userId, resolvedAppId, initialContext]);
 
-  // Send a message
-  const handleSendMessage = useCallback((e) => {
+  const handleSendMessage = useCallback(async (e) => {
     e?.preventDefault();
-    if (!inputValue.trim() || !chatId) return;
+    const trimmed = inputValue.trim();
+    if (!trimmed || !chatId || connectionStatus !== 'connected' || isSending) {
+      return;
+    }
 
     const userMessage = {
-      id: Date.now(),
+      id: `user-${Date.now()}`,
       sender: 'user',
-      content: inputValue.trim(),
+      content: trimmed,
       timestamp: new Date().toISOString(),
     };
 
-    setMessages(prev => [...prev, userMessage]);
-    wsSendMessage({ type: 'message', content: inputValue.trim() });
+    setMessages((prev) => [...prev, userMessage]);
     setInputValue('');
-  }, [inputValue, chatId, wsSendMessage]);
+    setIsSending(true);
 
-  // Handle enter key
+    const result = await workflowApi.sendMessageToWorkflow(
+      trimmed,
+      resolvedAppId,
+      userId,
+      workflow,
+      chatId
+    );
+
+    if (result === false || result?.success === false) {
+      setError(result?.error || 'Failed to send message');
+    }
+
+    setIsSending(false);
+  }, [chatId, connectionStatus, inputValue, isSending, resolvedAppId, userId, workflowApi, workflow]);
+
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -197,7 +306,7 @@ function WorkflowChat({
     return (
       <div
         className={`flex items-center justify-center h-full ${className}`}
-        style={{ backgroundColor: 'var(--mozaiks-bg, #ffffff)', fontFamily: 'var(--mozaiks-font, system-ui, sans-serif)' }}
+        style={{ backgroundColor: 'var(--color-background, var(--mozaiks-bg, #0f172a))', fontFamily: 'var(--mozaiks-font, system-ui, sans-serif)' }}
       >
         <div className="text-center">
           <div
@@ -216,7 +325,7 @@ function WorkflowChat({
     return (
       <div
         className={`flex items-center justify-center h-full ${className}`}
-        style={{ backgroundColor: 'var(--mozaiks-bg, #ffffff)', fontFamily: 'var(--mozaiks-font, system-ui, sans-serif)' }}
+        style={{ backgroundColor: 'var(--color-background, var(--mozaiks-bg, #0f172a))', fontFamily: 'var(--mozaiks-font, system-ui, sans-serif)' }}
       >
         <div className="text-center text-red-500">
           <p className="font-semibold">Failed to start workflow</p>
@@ -226,16 +335,15 @@ function WorkflowChat({
     );
   }
 
-  // Build inline styles for CSS variable theming
   const containerStyle = {
     fontFamily: 'var(--mozaiks-font, system-ui, sans-serif)',
-    backgroundColor: 'var(--mozaiks-bg, #ffffff)',
-    color: 'var(--mozaiks-text, #111827)',
+    backgroundColor: 'var(--color-background, var(--mozaiks-bg, #0f172a))',
+    color: 'var(--color-text-primary, var(--mozaiks-text, #f8fafc))',
   };
 
   const headerStyle = {
-    backgroundColor: 'var(--mozaiks-bg-secondary, #f9fafb)',
-    borderColor: 'var(--mozaiks-border, #e5e7eb)',
+    backgroundColor: 'var(--color-surface, var(--mozaiks-bg-secondary, #1e293b))',
+    borderColor: 'var(--color-border-subtle, var(--mozaiks-border, #334155))',
   };
 
   const messagesStyle = backgroundImage
@@ -244,7 +352,6 @@ function WorkflowChat({
 
   return (
     <div className={`flex flex-col h-full ${className}`} style={containerStyle}>
-      {/* Header */}
       {showHeader && (
         <div className="flex-shrink-0 p-4 border-b" style={headerStyle}>
           <div className="flex items-center justify-between">
@@ -279,58 +386,69 @@ function WorkflowChat({
         </div>
       )}
 
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4" style={messagesStyle}>
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div
-              className="max-w-[80%] rounded-lg px-4 py-2"
-              style={
-                msg.sender === 'user'
-                  ? { backgroundColor: 'var(--mozaiks-primary, #3b82f6)', color: '#ffffff' }
-                  : { backgroundColor: 'var(--mozaiks-bg-secondary, #f3f4f6)', color: 'var(--mozaiks-text, #111827)' }
-              }
-            >
-              {msg.agentName && (
-                <p className="text-xs font-semibold mb-1 opacity-70">{msg.agentName}</p>
-              )}
-              <p className="whitespace-pre-wrap">{msg.content}</p>
-            </div>
+        {messages.length === 0 ? (
+          <div className="text-center py-8" style={{ color: 'var(--mozaiks-text-secondary, #6b7280)' }}>
+            <p className="text-sm">This workflow is ready when you are.</p>
           </div>
-        ))}
+        ) : (
+          messages.map((message) => (
+            <div
+              key={message.id}
+              className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+                message.sender === 'user' ? 'ml-auto' : 'mr-auto'
+              }`}
+              style={{
+                backgroundColor: message.sender === 'user'
+                  ? 'var(--mozaiks-primary, #3b82f6)'
+                  : 'var(--color-surface, var(--mozaiks-bg-secondary, #1e293b))',
+                color: message.sender === 'user'
+                  ? 'var(--color-text-on-accent, #ffffff)'
+                  : 'var(--color-text-primary, #f8fafc)',
+                border: message.sender === 'user'
+                  ? 'none'
+                  : '1px solid var(--color-border-subtle, var(--mozaiks-border, #334155))',
+              }}
+            >
+              <div className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</div>
+              {message.agentName && message.sender !== 'user' && (
+                <div className="mt-2 text-[11px] uppercase tracking-[0.18em]" style={{ color: 'var(--mozaiks-text-secondary, #6b7280)' }}>
+                  {message.agentName}
+                </div>
+              )}
+            </div>
+          ))
+        )}
       </div>
 
-      {/* Input */}
       <form
         onSubmit={handleSendMessage}
         className="flex-shrink-0 p-4 border-t"
-        style={{ borderColor: 'var(--mozaiks-border, #e5e7eb)' }}
+        style={{
+          borderColor: 'var(--color-border-subtle, var(--mozaiks-border, #334155))',
+          backgroundColor: 'var(--color-surface, var(--mozaiks-bg-secondary, #1e293b))',
+        }}
       >
-        <div className="flex gap-2">
-          <input
-            type="text"
+        <div className="flex gap-3">
+          <textarea
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Type a message..."
-            className="flex-1 px-4 py-2 rounded-lg focus:outline-none focus:ring-2"
+            onKeyDown={handleKeyPress}
+            placeholder="Type your message..."
+            className="flex-1 min-h-[48px] max-h-40 px-4 py-3 rounded-2xl resize-none"
             style={{
-              border: '1px solid var(--mozaiks-border, #d1d5db)',
-              backgroundColor: 'var(--mozaiks-bg, #ffffff)',
-              color: 'var(--mozaiks-text, #111827)',
+              backgroundColor: 'var(--color-background, var(--mozaiks-bg, #0f172a))',
+              color: 'var(--color-text-primary, var(--mozaiks-text, #f8fafc))',
+              border: '1px solid var(--color-border-subtle, var(--mozaiks-border, #334155))',
             }}
           />
           <button
             type="submit"
-            disabled={!inputValue.trim()}
-            className="px-4 py-2 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            disabled={!inputValue.trim() || connectionStatus !== 'connected' || isSending}
+            className="px-5 py-3 rounded-2xl font-semibold transition-opacity disabled:opacity-50"
             style={{
-              backgroundColor: inputValue.trim()
-                ? 'var(--mozaiks-primary, #3b82f6)'
-                : 'var(--mozaiks-primary, #3b82f6)',
+              backgroundColor: 'var(--mozaiks-primary, #3b82f6)',
+              color: 'var(--color-text-on-accent, #ffffff)',
             }}
           >
             Send

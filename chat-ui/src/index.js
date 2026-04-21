@@ -7,6 +7,8 @@
 //
 // =============================================================================
 
+import './styles/chatShell.css';
+
 // -----------------------------------------------------------------------------
 // CORE COMPONENTS
 // -----------------------------------------------------------------------------
@@ -91,3 +93,16 @@ export { loadBrand } from './theme/loadBrand';
 
 // CSS Variables (import in your app)
 // import '@mozaiks/chat-ui/styles/mozaiks-variables.css';
+
+// -----------------------------------------------------------------------------
+// EMBEDDABLE WIDGET
+// -----------------------------------------------------------------------------
+
+// MozaiksEmbed: Standalone widget for embedding into existing apps
+export { MozaiksEmbed, applyThemeToContainer } from './embed/index.js';
+
+// ---------------------------------------------------------------------------
+// APP UI RENDERER
+// ---------------------------------------------------------------------------
+
+export { PageRenderer, PageFrame } from './ui/page-renderer/index.js';

@@ -1,0 +1,23 @@
+{
+  "_comment": "Declarative admin config. The generator writes this file — the runtime reads it.",
+
+  "enabled": true,
+
+  "admin_emails": [
+    "admin@example.com"
+  ],
+
+  "panels": [
+    "stats",
+    "runs",
+    "sessions"
+  ],
+
+  "roles": ["admin"],
+
+  "features": {
+    "user_management": false,
+    "billing": false,
+    "audit_log": false
+  }
+}

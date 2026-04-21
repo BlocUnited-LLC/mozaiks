@@ -9,9 +9,11 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from .schema import (
     GlobalJourney,
     GlobalPackGraph,
-    JourneyStep,
+    JourneyStepGroup,
+    WorkflowTransition,
     WorkflowDependency,
     WorkflowEntry,
+    WorkflowEntrypoint,
     WorkflowPackGraph,
     normalize_step_groups,
     parse_global_pack_graph,
@@ -59,22 +61,22 @@ def _workflows_root() -> Path:
 
 
 def get_global_pack_graph_path() -> Path:
-    """Resolve global pack graph path.
+    """Resolve global extension registry path.
 
-    Canonical default: <workflows_root>/_pack/workflow_graph.json
+    Canonical default: <workflows_root>/extended_orchestration/extension_registry.json
     """
-    return (_workflows_root() / "_pack" / "workflow_graph.json").resolve()
+    return (_workflows_root() / "extended_orchestration" / "extension_registry.json").resolve()
 
 
 def get_workflow_pack_graph_path(workflow_name: str) -> Path:
-    """Resolve per-workflow pack graph path.
+    """Resolve per-workflow MFJ extension path.
 
-    Canonical path: <workflows_root>/<workflow_name>/_pack/workflow_graph.json
+    Canonical path: <workflows_root>/<workflow_name>/extended_orchestration/mfj_extension.json
     """
     wf = str(workflow_name or "").strip()
     if not wf:
         raise ValueError("workflow_name is required")
-    return (_workflows_root() / wf / "_pack" / "workflow_graph.json").resolve()
+    return (_workflows_root() / wf / "extended_orchestration" / "mfj_extension.json").resolve()
 
 
 def _load_json_file(path: Path) -> Optional[Dict[str, Any]]:
@@ -151,29 +153,56 @@ def get_workflow_entry(pack: GlobalPackGraph, workflow_id: str) -> Optional[Work
     return None
 
 
-def list_journeys(pack: GlobalPackGraph) -> List[GlobalJourney]:
+def list_workflow_sequences(pack: GlobalPackGraph) -> List[GlobalJourney]:
     return list(pack.journeys)
 
 
-def get_journey(pack: GlobalPackGraph, journey_id: str) -> Optional[GlobalJourney]:
-    jid = str(journey_id or "").strip()
-    if not jid:
+def get_workflow_sequence(pack: GlobalPackGraph, sequence_id: str) -> Optional[GlobalJourney]:
+    sid = str(sequence_id or "").strip()
+    if not sid:
         return None
-    for journey in pack.journeys:
-        if journey.id == jid:
-            return journey
+    for sequence in pack.journeys:
+        if sequence.id == sid:
+            return sequence
     return None
 
 
-def infer_auto_journey_for_start(pack: GlobalPackGraph, workflow_name: str) -> Optional[GlobalJourney]:
-    """Infer journey whose first step contains the requested workflow."""
+def list_entrypoints(pack: GlobalPackGraph) -> List[WorkflowEntrypoint]:
+    """Return workflow-owned shell entrypoints."""
+    return list(pack.entrypoints)
+
+
+def list_transitions(pack: GlobalPackGraph) -> List[WorkflowTransition]:
+    """Return all transitions registered in the global pack graph."""
+    return list(pack.transitions)
+
+
+def get_transition(pack: GlobalPackGraph, transition_id: str) -> Optional[WorkflowTransition]:
+    """Look up a transition by id. Returns None if not found."""
+    tid = str(transition_id or "").strip()
+    if not tid:
+        return None
+    for transition in pack.transitions:
+        if transition.id == tid:
+            return transition
+    return None
+
+
+def infer_auto_workflow_sequence_for_start(
+    pack: GlobalPackGraph, workflow_name: str
+) -> Optional[GlobalJourney]:
+    """Infer sequence whose first workflow step contains the requested workflow."""
     wf = str(workflow_name or "").strip()
     if not wf:
         return None
-    for journey in pack.journeys:
-        groups = normalize_step_groups(journey.steps)
-        if groups and wf in groups[0]:
-            return journey
+    for sequence in pack.journeys:
+        groups = normalize_step_groups(sequence.steps)
+        for group in groups:
+            if not group:
+                continue
+            if wf in group:
+                return sequence
+            break
     return None
 
 
@@ -188,8 +217,8 @@ def _normalize_dependency_spec(value: Union[str, WorkflowDependency]) -> Optiona
     return None
 
 
-def compute_required_gates(pack: GlobalPackGraph, workflow_name: str) -> List[Dict[str, Any]]:
-    """Build required prerequisite gates from canonical global graph data."""
+def compute_required_dependencies(pack: GlobalPackGraph, workflow_name: str) -> List[Dict[str, Any]]:
+    """Build required prerequisite dependencies from explicit workflow declarations."""
     target = str(workflow_name or "").strip()
     if not target:
         return []
@@ -216,40 +245,19 @@ def compute_required_gates(pack: GlobalPackGraph, workflow_name: str) -> List[Di
                 }
             )
 
-    for journey in pack.journeys:
-        groups = normalize_step_groups(journey.steps)
-        if len(groups) < 2:
-            continue
-
-        for group_idx in range(1, len(groups)):
-            if target not in groups[group_idx]:
-                continue
-            for prev_idx in range(0, group_idx):
-                for parent in groups[prev_idx]:
-                    required.append(
-                        {
-                            "from": parent,
-                            "to": target,
-                            "gating": "required",
-                            "scope": "app",
-                            "reason": f"Journey '{journey.id}' step order",
-                            "_source": "journey.steps",
-                        }
-                    )
-
     seen: set[Tuple[str, str, str]] = set()
     deduped: List[Dict[str, Any]] = []
-    for gate in required:
-        parent = str(gate.get("from") or "").strip()
-        child = str(gate.get("to") or "").strip()
-        scope = str(gate.get("scope") or "app").strip().lower() or "app"
+    for dependency in required:
+        parent = str(dependency.get("from") or "").strip()
+        child = str(dependency.get("to") or "").strip()
+        scope = str(dependency.get("scope") or "app").strip().lower() or "app"
         if not parent or not child:
             continue
         key = (parent, child, scope)
         if key in seen:
             continue
         seen.add(key)
-        deduped.append(gate)
+        deduped.append(dependency)
     return deduped
 
 
@@ -278,11 +286,16 @@ __all__ = [
     "load_workflow_pack_graph",
     "list_workflow_ids",
     "get_workflow_entry",
-    "list_journeys",
-    "get_journey",
-    "infer_auto_journey_for_start",
-    "compute_required_gates",
+    "list_workflow_sequences",
+    "get_workflow_sequence",
+    "list_entrypoints",
+    # Routing transitions
+    "list_transitions",
+    "get_transition",
+    # Journey helpers
+    "infer_auto_workflow_sequence_for_start",
+    "compute_required_dependencies",
     "journey_next_step",
     "normalize_step_groups",
-    "JourneyStep",
+    "JourneyStepGroup",
 ]

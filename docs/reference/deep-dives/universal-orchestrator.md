@@ -114,6 +114,11 @@ ChangeType definitions are **process-specific** — the build pipeline's FOUNDAT
 means something different from a marketing plan's FOUNDATIONAL. Each process registers
 its own ChangeType definitions and classifier prompt. The routing infrastructure is shared.
 
+For app-build refinement, this generic classifier layer should feed a stricter
+control-plane taxonomy (`patch`, `design`, `feature`, `core`) before choosing a
+re-entry point. That specialization is defined in
+[Refinement Control Plane](../../architecture/specs/REFINEMENT_CONTROL_PLANE_SPEC.md).
+
 ---
 
 ## The ChangeClassifier

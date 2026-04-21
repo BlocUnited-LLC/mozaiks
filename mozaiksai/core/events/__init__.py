@@ -49,7 +49,6 @@ from .unified_event_dispatcher import (
     EventType,
     BusinessLogEvent,
     UIToolEvent,
-    SessionPausedEvent,
     
     # Event handlers
     EventHandler,
@@ -64,6 +63,37 @@ from .unified_event_dispatcher import (
 
 from .handoff_events import emit_handoff_event, HANDOFF_EVENT_TYPE
 
+# AG2-native custom events (forward-compatible with AG2 beta streams)
+from .ag2_events import (
+    # Control events
+    WorkflowTriggeredEvent,
+    HandoffRequestedEvent,
+    PlanCreatedEvent,
+    PrerequisitesRequiredEvent,
+    # Runtime events
+    AgentThinkingEvent,
+    StructuredOutputEvent,
+    ArtifactUpdatedEvent,
+    ArtifactReadyEvent,
+    UIToolRequestedEvent,
+    ContextUpdatedEvent,
+    # Journey events
+    JourneyStartedEvent,
+    JourneyCompletedEvent,
+    # Helpers
+    emit_ag2_event,
+    emit_handoff_requested,
+    emit_structured_output,
+    emit_artifact_ready,
+    emit_artifact_updated,
+    emit_ui_tool_requested,
+    # Event registries
+    MOZAIKSAI_CONTROL_EVENTS,
+    MOZAIKSAI_RUNTIME_EVENTS,
+    MOZAIKSAI_JOURNEY_EVENTS,
+    ALL_MOZAIKSAI_EVENTS,
+)
+
 __all__ = [
     # Core dispatcher
     "UnifiedEventDispatcher",
@@ -74,7 +104,6 @@ __all__ = [
     "EventType",
     "BusinessLogEvent",
     "UIToolEvent",
-    "SessionPausedEvent",
     
     # Handlers
     "EventHandler",
@@ -86,5 +115,33 @@ __all__ = [
     "emit_ui_tool_event",
     "emit_handoff_event",
     "HANDOFF_EVENT_TYPE",
+
+    # AG2-native custom events
+    "WorkflowTriggeredEvent",
+    "HandoffRequestedEvent",
+    "PlanCreatedEvent",
+    "PrerequisitesRequiredEvent",
+    "AgentThinkingEvent",
+    "StructuredOutputEvent",
+    "ArtifactUpdatedEvent",
+    "ArtifactReadyEvent",
+    "UIToolRequestedEvent",
+    "ContextUpdatedEvent",
+    "JourneyStartedEvent",
+    "JourneyCompletedEvent",
+
+    # AG2 event helpers
+    "emit_ag2_event",
+    "emit_handoff_requested",
+    "emit_structured_output",
+    "emit_artifact_ready",
+    "emit_artifact_updated",
+    "emit_ui_tool_requested",
+
+    # Event registries (for yield_on)
+    "MOZAIKSAI_CONTROL_EVENTS",
+    "MOZAIKSAI_RUNTIME_EVENTS",
+    "MOZAIKSAI_JOURNEY_EVENTS",
+    "ALL_MOZAIKSAI_EVENTS",
 ]
 

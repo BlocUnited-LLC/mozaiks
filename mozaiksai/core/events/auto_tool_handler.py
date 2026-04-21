@@ -3,7 +3,7 @@
 # DESCRIPTION: Handles structured output events by auto-invoking mapped UI tools with agent context.
 # ==============================================================================
 
-# === MOZAIKS-CORE-HEADER ===
+
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ import yaml
 
 from mozaiksai.core.workflow.agents.tools import load_agent_tool_functions
 from mozaiksai.core.workflow.declarative import parse_tools_config
+from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.workflow.outputs.structured import get_structured_outputs_for_workflow
 from mozaiksai.core.events.event_serialization import serialize_event_content
 from mozaiksai.core.workflow.context.adapter import create_context_container
@@ -52,7 +53,7 @@ class AutoToolBinding:
 
 
 class AutoToolEventHandler:
-    """Handle chat.agent_output_validated events by running the mapped UI tool."""
+    """Handle runtime.agent_output_validated events by running the mapped UI tool."""
 
     _CACHE_LIMIT = 512
 
@@ -161,6 +162,12 @@ class AutoToolEventHandler:
                 logger.debug("[AUTO_TOOL] Wrote back %d context keys to pattern context after %s execution", len(getattr(container, "data")), binding.tool_name)
             except Exception as wb_err:
                 logger.debug("[AUTO_TOOL] Failed to write back context changes to pattern: %s", wb_err)
+
+        await self._persist_context_variables(
+            chat_id=chat_id,
+            app_id=context.get("app_id"),
+            context_variables=container,
+        )
         
         await self._emit_tool_result(binding, agent_name, chat_id, result_payload, status, turn_key)
         await self._register_turn(cache_key)
@@ -240,16 +247,16 @@ class AutoToolEventHandler:
                 continue
             tool_type_raw = entry.get("tool_type") or entry.get("type")
             tool_type = str(tool_type_raw).upper() if tool_type_raw else ""
-            auto_invoke_flag = entry.get("auto_invoke")
-            if auto_invoke_flag is None:
-                should_auto_invoke = tool_type == "UI_TOOL"
+            auto_tool_call_flag = entry.get("auto_tool_call")
+            if auto_tool_call_flag is None:
+                should_auto_tool_call = tool_type in {"UI_TOOL", "UI_SURFACE"}
             else:
                 try:
-                    should_auto_invoke = bool(auto_invoke_flag)
+                    should_auto_tool_call = bool(auto_tool_call_flag)
                 except Exception:
-                    should_auto_invoke = False
-            if not should_auto_invoke:
-                logger.debug("[AUTO_TOOL] Skipping entry (auto_invoke=False): function=%s agent=%s", entry.get("function"), entry.get("agent"))
+                    should_auto_tool_call = False
+            if not should_auto_tool_call:
+                logger.debug("[AUTO_TOOL] Skipping entry (auto_tool_call=False): function=%s agent=%s", entry.get("function"), entry.get("agent"))
                 continue
             function_name = entry.get("function")
             if not isinstance(function_name, str) or not function_name:
@@ -261,7 +268,7 @@ class AutoToolEventHandler:
                 agents = [agent_field]
             else:
                 agents = []
-            logger.debug("[AUTO_TOOL] Processing auto_invoke tool: function=%s agents=%s", function_name, agents)
+            logger.debug("[AUTO_TOOL] Processing auto_tool_call tool: function=%s agents=%s", function_name, agents)
             for agent_name in agents:
                 model_cls = registry.get(agent_name)
                 if model_cls is None:
@@ -350,7 +357,11 @@ class AutoToolEventHandler:
             else:
                 # Fallback: create ephemeral container from snapshot
                 snapshot = context.get("context_variables") if isinstance(context.get("context_variables"), dict) else None
-                container = create_context_container(snapshot)
+                container = create_context_container(
+                    snapshot,
+                    chat_id=context.get("chat_id"),
+                    app_id=context.get("app_id"),
+                )
                 for key in ("chat_id", "app_id", "workflow_name", "turn_idempotency_key", "agent_name"):
                     value = context.get(key)
                     if value is not None:
@@ -376,6 +387,37 @@ class AutoToolEventHandler:
                 binding.tool_name,
             )
             return {"status": "error", "message": str(exc)}, "error"
+
+    async def _persist_context_variables(
+        self,
+        *,
+        chat_id: Optional[str],
+        app_id: Optional[str],
+        context_variables: Any,
+    ) -> None:
+        if not chat_id or not app_id or context_variables is None:
+            return
+
+        snapshot: Optional[Dict[str, Any]] = None
+        if isinstance(context_variables, dict):
+            snapshot = context_variables
+        else:
+            data = getattr(context_variables, "data", None)
+            if isinstance(data, dict):
+                snapshot = data
+
+        if not isinstance(snapshot, dict) or not snapshot:
+            return
+
+        try:
+            pm = AG2PersistenceManager()
+            await pm.persist_context_variables(
+                chat_id=chat_id,
+                app_id=app_id,
+                variables=snapshot,
+            )
+        except Exception as exc:
+            logger.debug("[AUTO_TOOL] Failed to persist context variables for chat=%s: %s", chat_id, exc)
 
     async def _emit_tool_call(
         self,
@@ -495,4 +537,3 @@ class AutoToolEventHandler:
 
 
 __all__ = ["AutoToolEventHandler", "AutoToolBinding"]
-

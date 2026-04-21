@@ -6,7 +6,7 @@ from mozaiksai.core.data.models import WorkflowStatus
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.workflow.pack.config import (
-    compute_required_gates,
+    compute_required_dependencies,
     get_workflow_entry,
     list_workflow_ids,
     load_global_pack_graph,
@@ -36,22 +36,22 @@ async def validate_pack_prereqs(
         if pack is None:
             return True, None
 
-        required_gates = compute_required_gates(pack, wf)
-        if not required_gates:
+        required_dependencies = compute_required_dependencies(pack, wf)
+        if not required_dependencies:
             return True, None
 
         pm = persistence or AG2PersistenceManager()
         coll = await pm._coll()
 
         missing_msgs: List[str] = []
-        for gate in required_gates:
-            if not isinstance(gate, dict):
+        for dependency in required_dependencies:
+            if not isinstance(dependency, dict):
                 continue
-            parent = str(gate.get("from") or "").strip()
+            parent = str(dependency.get("from") or "").strip()
             if not parent:
                 continue
-            reason = str(gate.get("reason") or "").strip()
-            scope = str(gate.get("scope") or "app").strip().lower()
+            reason = str(dependency.get("reason") or "").strip()
+            scope = str(dependency.get("scope") or "app").strip().lower()
 
             query: Dict[str, Any] = {
                 "workflow_name": parent,
@@ -115,7 +115,7 @@ async def list_workflow_availability(
                 "available": bool(ok),
                 "reason": reason or "All prerequisites met",
                 "description": entry.description if entry else None,
-                "required_gates": compute_required_gates(pack, wf),
+                "required_dependencies": compute_required_dependencies(pack, wf),
             }
         )
 
@@ -123,4 +123,3 @@ async def list_workflow_availability(
 
 
 __all__ = ["validate_pack_prereqs", "list_workflow_availability"]
-

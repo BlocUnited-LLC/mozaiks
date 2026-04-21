@@ -27,17 +27,11 @@ if TYPE_CHECKING:
 
 # Import AG2 event types
 from autogen.events.agent_events import (
+    FunctionCallEvent,
+    FunctionResponseEvent,
     ToolCallEvent,
     ToolResponseEvent,
 )
-
-try:
-    from autogen.events.agent_events import FunctionCallEvent, FunctionResponseEvent
-    HAS_FUNCTION_EVENTS = True
-except ImportError:
-    HAS_FUNCTION_EVENTS = False
-    FunctionCallEvent = type(None)  # type: ignore
-    FunctionResponseEvent = type(None)  # type: ignore
 
 # Import serialization utilities
 from mozaiksai.core.events.event_serialization import (
@@ -45,11 +39,7 @@ from mozaiksai.core.events.event_serialization import (
     extract_agent_name,
 )
 
-# Schema validation sentinel
-try:
-    from mozaiksai.core.workflow.validation import SENTINEL_STATUS
-except ImportError:
-    SENTINEL_STATUS = "__MOZAIKS_SCHEMA_VALIDATION_FAILED__"
+from mozaiksai.core.workflow.validation import SENTINEL_STATUS
 
 
 class ToolCallHandler(BaseEventHandler):
@@ -62,10 +52,7 @@ class ToolCallHandler(BaseEventHandler):
 
     def event_types(self) -> Set[Type]:
         """Handle ToolCallEvent and FunctionCallEvent."""
-        types: Set[Type] = {ToolCallEvent}
-        if HAS_FUNCTION_EVENTS:
-            types.add(FunctionCallEvent)
-        return types
+        return {ToolCallEvent, FunctionCallEvent}
 
     async def handle(
         self,
@@ -151,9 +138,6 @@ class ToolCallHandler(BaseEventHandler):
     def should_break(self, event: Any, state: "StreamState") -> bool:
         return False
 
-    def priority(self) -> int:
-        return 50
-
 
 class ToolResponseHandler(BaseEventHandler):
     """
@@ -165,10 +149,7 @@ class ToolResponseHandler(BaseEventHandler):
 
     def event_types(self) -> Set[Type]:
         """Handle ToolResponseEvent and FunctionResponseEvent."""
-        types: Set[Type] = {ToolResponseEvent}
-        if HAS_FUNCTION_EVENTS:
-            types.add(FunctionResponseEvent)
-        return types
+        return {ToolResponseEvent, FunctionResponseEvent}
 
     async def handle(
         self,
@@ -344,6 +325,3 @@ class ToolResponseHandler(BaseEventHandler):
 
     def should_break(self, event: Any, state: "StreamState") -> bool:
         return False
-
-    def priority(self) -> int:
-        return 50

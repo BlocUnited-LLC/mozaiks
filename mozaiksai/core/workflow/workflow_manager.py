@@ -151,10 +151,10 @@ class UnifiedWorkflowManager:
                 # UI detection
                 ui_block = entry.get('ui') if isinstance(entry.get('ui'), dict) else None
                 tool_type = entry.get('tool_type')
-                has_meaningful_ui = bool(ui_block and (ui_block.get('component') or ui_block.get('mode')))
+                is_ui_surface = tool_type in {'UI_Tool', 'UI_Surface'}
 
                 # inside _load_workflow_tools(), in the for-entry loop:
-                if has_meaningful_ui or tool_type == 'UI_Tool':
+                if is_ui_surface:
                     ui_ct += 1
                     component = ui_block.get('component') if ui_block else None
                     mode = ui_block.get('mode') if ui_block else None
@@ -213,9 +213,9 @@ class UnifiedWorkflowManager:
                     # UI detection for lifecycle tools
                     ui_block = entry.get('ui') if isinstance(entry.get('ui'), dict) else None
                     tool_type = entry.get('tool_type')
-                    has_meaningful_ui = bool(ui_block and (ui_block.get('component') or ui_block.get('mode')))
+                    is_ui_surface = tool_type in {'UI_Tool', 'UI_Surface'}
                     
-                    if has_meaningful_ui or tool_type == 'UI_Tool':
+                    if is_ui_surface:
                         ui_ct += 1
                         component = ui_block.get('component') if ui_block else None
                         mode = ui_block.get('mode') if ui_block else None
@@ -391,16 +391,6 @@ class UnifiedWorkflowManager:
                 return False
         return False
     
-    def get_inline_agents(self, workflow_name: str) -> List[str]:
-        """Get list of agents that should appear in chat pane"""
-        config = self.get_config(workflow_name)
-        return config.get("chat_pane_agents", [])
-    
-    def get_artifact_agents(self, workflow_name: str) -> List[str]:
-        """Get list of agents that produce artifacts"""
-        config = self.get_config(workflow_name)
-        return config.get("artifact_agents", [])
-    
     def get_initial_message(self, workflow_name: str) -> Optional[str]:
         """Get initial message for workflow"""
         config = self.get_config(workflow_name)
@@ -420,31 +410,45 @@ class UnifiedWorkflowManager:
         return [str(agent) for agent in visual_agents if isinstance(agent, str)]
 
     def get_auto_tool_agents(self, workflow_name: str) -> Set[str]:
-        """Return set of agent names with auto_tool_mode enabled.
-        
-        Auto-tool agents emit structured outputs that are automatically converted to tool calls.
-        Their text messages (containing agent_message) should be suppressed to avoid duplication
-        since the agent_message also appears in the tool_call payload.
-        
+        """Return set of agent names that have auto-invoke tools.
+
+        Derives auto-tool agents from tools.yaml - any agent with a tool marked
+        `auto_tool_call: true` is considered an auto-tool agent. This replaces the
+        previous `auto_tool_mode` flag in agents.yaml.
+
+        Auto-tool agents emit structured outputs that trigger automatic tool calls.
+        Their text messages (containing agent_message) should be suppressed to avoid
+        duplication since the agent_message also appears in the tool_call payload.
+
         Returns:
-            Set of agent names with auto_tool_mode=true (e.g., {"ContextAgent", "APIKeyAgent"})
+            Set of agent names with auto_tool_call tools (e.g., {"GapAnalysisAgent"})
         """
         config = self.get_config(workflow_name)
-        agents_section = config.get("agents", {})
-        agents_dict = agents_section.get("agents", {}) if isinstance(agents_section, dict) else {}
-        if not isinstance(agents_dict, dict):
+        tools_list = config.get("tools", [])
+
+        if not isinstance(tools_list, list):
             return set()
-        
+
         auto_tool_agents: Set[str] = set()
-        
-        # Iterate over agent_name -> agent_config mapping
-        for agent_name, agent_config in agents_dict.items():
-            if not isinstance(agent_config, dict):
+
+        for entry in tools_list:
+            if not isinstance(entry, dict):
                 continue
-            auto_tool_mode = agent_config.get('auto_tool_mode', False)
-            if auto_tool_mode is True:
-                auto_tool_agents.add(agent_name)
-        
+
+            # Check auto_tool_call flag
+            auto_tool_call = entry.get("auto_tool_call", False)
+            if not auto_tool_call:
+                continue
+
+            # Extract agent name(s)
+            agent_field = entry.get("agent") or entry.get("caller")
+            if isinstance(agent_field, str):
+                auto_tool_agents.add(agent_field)
+            elif isinstance(agent_field, (list, tuple)):
+                for agent in agent_field:
+                    if isinstance(agent, str):
+                        auto_tool_agents.add(agent)
+
         return auto_tool_agents
 
     def get_ui_hidden_triggers(self, workflow_name: str) -> Dict[str, Set[str]]:
@@ -733,7 +737,14 @@ class UnifiedWorkflowManager:
         raw = (os.getenv("MOZAIKS_AI_CONFIG_PATH") or "").strip()
         if raw:
             return Path(raw).resolve()
-        return self.workflows_base_path.resolve().parent / "config" / "ai.json"
+        platform_scoped = self.workflows_base_path.resolve().parent / "config" / "ai.json"
+        if platform_scoped.exists():
+            return platform_scoped
+
+        # Legacy fallback for repos where workflows may live under a product path
+        # but ai.json still exists under ./platform/config.
+        legacy_fallback = Path(__file__).resolve().parents[3] / "platform" / "config" / "ai.json"
+        return legacy_fallback
 
     def _load_ai_config(self) -> Dict[str, Any]:
         path = self._resolve_ai_config_path()
@@ -1012,9 +1023,22 @@ def initialize_workflows(base_path: str = "workflows") -> Dict[str, Dict[str, An
     """Initialize workflows with custom base path"""
     global _unified_workflow_manager, workflow_manager
 
-    # Reset singleton so all runtime caches are correctly reinitialized.
+    # Preserve object identity so modules that imported `workflow_manager`
+    # by value don't retain stale references after reinitialization.
+    previous_manager = _unified_workflow_manager
+
+    # Reset singleton so all runtime caches are correctly rebuilt from base_path.
     UnifiedWorkflowManager._instance = None
-    _unified_workflow_manager = UnifiedWorkflowManager(workflows_base_path=base_path)
+    rebuilt_manager = UnifiedWorkflowManager(workflows_base_path=base_path)
+
+    if previous_manager is not None and previous_manager is not rebuilt_manager:
+        previous_manager.__dict__.clear()
+        previous_manager.__dict__.update(rebuilt_manager.__dict__)
+        _unified_workflow_manager = previous_manager
+        UnifiedWorkflowManager._instance = previous_manager
+    else:
+        _unified_workflow_manager = rebuilt_manager
+
     workflow_manager = _unified_workflow_manager
 
     return {
@@ -1054,4 +1078,3 @@ __all__ = [
     "workflow_status_summary",
     "get_workflow_tools",
 ]
-

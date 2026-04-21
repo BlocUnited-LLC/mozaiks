@@ -1,15 +1,2 @@
 # JokeFactory Hooks
-# Lifecycle hooks for the workflow
-
-hooks:
-# Inject joke preferences into JokeWriterAgent context
-- hook_type: update_agent_state
-  hook_agent: JokeWriterAgent
-  filename: hook_inject_preferences.py
-  function: inject_joke_preferences
-
-# Track joke statistics
-- hook_type: process_message_before_send
-  hook_agent: JokeCriticAgent
-  filename: hook_joke_stats.py
-  function: update_joke_statistics
+hooks: []
