@@ -63,9 +63,9 @@ planning agents. A control plane should first classify whether the request is a
 re-entry point.
 
 Journey sequencing and ordinary AG2 handoffs are downstream consumers of that
-decision. They are not the classifier.
-
-See [Refinement Control Plane](../specs/REFINEMENT_CONTROL_PLANE_SPEC.md).
+decision. They are not the classifier. The detailed refinement-routing plan is
+internal; the public contract is that refinement uses a classifier before
+choosing a workflow re-entry point.
 
 ## What Workflows Should Not Own
 

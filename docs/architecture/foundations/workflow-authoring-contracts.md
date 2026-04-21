@@ -77,7 +77,9 @@ For builder workflows such as `ValueEngine`, `DesignDocs`, `AgentGenerator`, and
 `acceptance_criteria` are the current canonical example of refinement-ready
 metadata.
 
-See [Refinement Control Plane](../specs/REFINEMENT_CONTROL_PLANE_SPEC.md).
+Detailed refinement-routing plans are internal. The public authoring contract is
+that workflows should emit scoped ownership metadata so later refinement can
+choose the smallest valid re-entry point.
 
 ## Canonical File Shapes
 

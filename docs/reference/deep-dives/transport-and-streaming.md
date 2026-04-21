@@ -33,4 +33,3 @@ Supporting modules include:
 
 - [Workflow Architecture](../../architecture/foundations/workflow-architecture.md)
 - [UI Surface and Layout Architecture](../../architecture/foundations/ui-surface-and-layout-architecture.md)
-- [AG2 Touchpoints and Extensions](ag2-touchpoints-and-extensions.md)

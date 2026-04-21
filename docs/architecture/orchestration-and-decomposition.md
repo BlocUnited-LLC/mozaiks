@@ -182,7 +182,7 @@ Advanced fields like `trigger_on`, `input_contract`, `output_contract`,
 exist for stricter validation or special cases, but they should not be the
 default authored experience. Keep those advanced knobs in roadmap profiles
 until the baseline authoring flow needs them:
-[MFJ Authoring Roadmap](../../roadmap/mfj-authoring-roadmap.md).
+internal MFJ authoring roadmap notes.
 
 ## Decomposition Contract
 

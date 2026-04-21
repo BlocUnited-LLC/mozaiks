@@ -7,6 +7,17 @@ edit_uri: ""
 
 docs_dir: docs
 
+# Internal planning, roadmap, and migration notes stay in the repo but are not
+# published to docs.mozaiks.ai.
+exclude_docs: |
+  architecture/development/**
+  architecture/pipeline-refactor-plan.md
+  architecture/roadmap/**
+  architecture/specs/**
+  reference/deep-dives/ag2-beta-groupchat-strategy.md
+  reference/deep-dives/ag2-beta-preperation-plan.md
+  reference/deep-dives/ag2-touchpoints-and-extensions.md
+
 extra:
   generator: false
 
@@ -99,17 +110,9 @@ nav:
           - Event Taxonomy: architecture/foundations/event-taxonomy.md
           - Event System Architecture: architecture/foundations/event-system-architecture.md
           - Process and Event Map: architecture/foundations/process-and-event-map.md
-      - Development:
-          - Overview: architecture/development/overview.md
       - Keycloak Auth: architecture/keycloak-auth.md
       - Mobile Client Contract: architecture/mobile-client-contract.md
       - Orchestration and Decomposition: architecture/orchestration-and-decomposition.md
-      - Refinement Control Plane: architecture/specs/REFINEMENT_CONTROL_PLANE_SPEC.md
-      - Roadmaps:
-          - Next-Gen App Platform: architecture/specs/next-gen-app-platform-roadmap.md
-          - UI System: architecture/specs/UI_SYSTEM_SPEC.md
-          - Design System: architecture/specs/DESIGN_SYSTEM_SPEC.md
-          - Platform Frontend Strategy: architecture/specs/PLATFORM_FRONTEND_STRATEGY.md
       - Frontend UI:
           - Overview: architecture/frontend/index.md
           - UI Surface Model: architecture/frontend/ui-surface-model.md
@@ -131,9 +134,6 @@ nav:
               - Universal Orchestrator: reference/deep-dives/universal-orchestrator.md
               - Pack Graph Semantics: reference/deep-dives/pack-graph-semantics.md
               - Parallel Fan-Out Fan-In: reference/deep-dives/parallel-fan-out-fan-in.md
-              - AG2 Beta & GroupChat Strategy: reference/deep-dives/ag2-beta-groupchat-strategy.md
-              - AG2 Beta Preperation Plan: reference/deep-dives/ag2-beta-preperation-plan.md
-              - AG2 Touchpoints and Extensions: reference/deep-dives/ag2-touchpoints-and-extensions.md
               - Handoff Condition Scope: reference/deep-dives/handoff-condition-scope.md
           - UI and Interaction:
               - UI Interaction Patterns: reference/deep-dives/ui-interaction-patterns.md

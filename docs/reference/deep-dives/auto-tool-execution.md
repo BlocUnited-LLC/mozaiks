@@ -58,5 +58,4 @@ The runtime derives auto-tool agents from tools.yaml via `workflow_manager.get_a
 ## Related Docs
 
 - [Workflow Authoring Contracts](../../architecture/foundations/workflow-authoring-contracts.md)
-- [AG2 Touchpoints and Extensions](ag2-touchpoints-and-extensions.md)
 - [UI Interaction Patterns](ui-interaction-patterns.md)

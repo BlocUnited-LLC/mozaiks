@@ -26,9 +26,15 @@ Use this docs section as the web navigation layer for that architecture.
 - [Runtime State and Control Events](foundations/runtime-state-and-control-events.md)
 - [Learning Loop Architecture](foundations/learning-loop-architecture.md)
 
+## Publishing Boundary
+
+The public docs focus on stable user-facing setup, authoring, runtime, and
+architecture contracts. Internal planning specs, roadmaps, AG2 migration notes,
+dogfooding strategy, and implementation checklists remain in the repo source but
+are excluded from the published docs site.
+
 ## Related Sections
 
-- [Development Notes](development/overview.md)
 - [Event Notes](events/overview.md)
 - [Frontend UI](frontend/index.md)
 - [Reference Deep Dives](../reference/deep-dives/index.md)

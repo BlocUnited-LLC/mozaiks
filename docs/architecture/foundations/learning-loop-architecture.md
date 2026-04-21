@@ -41,4 +41,3 @@ Learning-loop outputs should improve the authoring and operating experience:
 - [Runtime State and Control Events](runtime-state-and-control-events.md)
 - [Event System Architecture](event-system-architecture.md)
 - [Workflow Authoring Contracts](workflow-authoring-contracts.md)
-- [Refinement Control Plane](../specs/REFINEMENT_CONTROL_PLANE_SPEC.md)

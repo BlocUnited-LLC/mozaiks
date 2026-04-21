@@ -13,7 +13,6 @@ If you are evaluating Mozaiks differentiators first, start with [Mid-Flight Jour
 - [Universal Orchestrator](universal-orchestrator.md)
 - [Pack Graph Semantics](pack-graph-semantics.md)
 - [Parallel Fan-Out Fan-In](parallel-fan-out-fan-in.md)
-- [AG2 Touchpoints and Extensions](ag2-touchpoints-and-extensions.md)
 - [Handoff Condition Scope](handoff-condition-scope.md)
 
 ## UI and Interaction
@@ -44,4 +43,4 @@ Use these docs to answer precise questions after you already know the high-level
 
 - [Architecture Overview](../../architecture/index.md)
 - [Architecture Foundations](../../architecture/foundations/overview.md)
-- [Workflow Guide](../../guides/adding-workflows/01-overview.md)
+- [Workflow Architecture](../../architecture/foundations/workflow-architecture.md)

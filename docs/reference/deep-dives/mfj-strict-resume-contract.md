@@ -52,7 +52,7 @@ Strict-profile guidance:
 
 - Treat `resume_entry_agent` as a router-only role.
 - Keep `inject_as` explicit and stable so downstream prompts can reference it.
-- Keep advanced knobs (`on_partial_failure`, timeout, contracts) out of baseline authoring and track them in the roadmap profile: [MFJ Authoring Roadmap](../../../roadmap/mfj-authoring-roadmap.md).
+- Keep advanced knobs (`on_partial_failure`, timeout, contracts) out of baseline authoring and track them in internal roadmap notes.
 
 ---
 

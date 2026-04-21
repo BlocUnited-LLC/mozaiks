@@ -202,7 +202,7 @@ These remain runtime-capable internals and can be surfaced later as an advanced 
 
 Roadmap home for advanced authoring/integration rollout:
 
-- [MFJ Authoring Roadmap](../../../roadmap/mfj-authoring-roadmap.md)
+- Internal MFJ authoring roadmap notes
 
 ---
 
@@ -627,7 +627,7 @@ The current MFJ runtime includes these capability groups.
 - Custom aggregation strategies can be registered and referenced from config.
 - Input and output contracts can validate required parent context and merged child outputs when enabled.
 - Partial failure and timeout behavior are runtime-capable (`resume_with_available`, `fail_all`, `retry_failed`, `prompt_user`) but intentionally deferred from baseline authoring.
-- Advanced overrides are tracked in the roadmap profile: [MFJ Authoring Roadmap](../../../roadmap/mfj-authoring-roadmap.md).
+- Advanced overrides are tracked in internal roadmap notes.
 
 ### Events and UI Feedback
 

@@ -116,8 +116,8 @@ its own ChangeType definitions and classifier prompt. The routing infrastructure
 
 For app-build refinement, this generic classifier layer should feed a stricter
 control-plane taxonomy (`patch`, `design`, `feature`, `core`) before choosing a
-re-entry point. That specialization is defined in
-[Refinement Control Plane](../../architecture/specs/REFINEMENT_CONTROL_PLANE_SPEC.md).
+re-entry point. The detailed refinement-routing plan is internal; the public
+contract is that refinement classification happens before workflow re-entry.
 
 ---
 

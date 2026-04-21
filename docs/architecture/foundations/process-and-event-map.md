@@ -155,4 +155,3 @@ The architecture only stays modular if those paths remain optional and explicit.
 
 - [workflow-architecture.md](workflow-architecture.md)
 - [ui-surface-and-layout-architecture.md](ui-surface-and-layout-architecture.md)
-- [../specs/REFINEMENT_CONTROL_PLANE_SPEC.md](../specs/REFINEMENT_CONTROL_PLANE_SPEC.md)
