@@ -320,6 +320,11 @@ export const ChatUIProvider = ({
     uiToolRenderer: (typeof uiToolRenderer === 'function') ? uiToolRenderer : null,
 
     // Actions
+    login: async () => {
+      if (authAdapterInstance) {
+        await authAdapterInstance.login?.();
+      }
+    },
     logout: async () => {
       if (authAdapterInstance) {
         await authAdapterInstance.logout();

@@ -1,45 +1,27 @@
 // ==============================================================================
 // FILE: chat-ui/src/@chat-workflows/index.js
-// DESCRIPTION: Auto-discovers workflow UI components from any platform layer.
+// DESCRIPTION: Registers workflow UI components from a host-injected root.
 //
-//   Two platform roots are scanned:
-//     platform/workflows/*/ui/index.js             — OSS example platform (JokeFactory etc.)
-//     mozaiks-platform/app/workflows/*/ui/index.js — generated/product workflow UI
+//   The consuming host owns the active workflow bundle and injects that root as
+//   the @chat-workflows-root alias at build time.
 //
-//   Drop a ui/index.js barrel into any supported workflow folder and all named
-//   exports are automatically registered in the component registry.
-//   No changes to coreComponents.js or any other file needed.
+//   chat-ui stays workflow-agnostic: it only knows how to read
+//   <workflow>/ui/index.{js,jsx} barrels from the injected root and register
+//   their exports in the component registry.
 // ==============================================================================
 
-// OSS example platform — platform/workflows/<WorkflowName>/ui/index.js
-const ossModules = import.meta.glob(
-  '../../../platform/workflows/*/ui/index.{js,jsx}',
+const workflowModules = import.meta.glob(
+  '@chat-workflows-root/*/ui/index.{js,jsx}',
   { eager: true }
 );
 
-// mozaiks-platform — per-workflow ui/index.js barrels for generated/product workflows
-const mozaiksPlatformWorkflowModules = import.meta.glob(
-  '../../../mozaiks-platform/app/workflows/*/ui/index.{js,jsx}',
-  { eager: true }
-);
-
-// Build WORKFLOW_REGISTRY from all discovered modules.
-// Key  → source label (workflow name)
-// Value → { components } map from the index.js exports
+// Build WORKFLOW_REGISTRY from the injected workflow root.
+// Key   -> workflow folder name
+// Value -> { components } map from the ui/index exports
 const WORKFLOW_REGISTRY = {};
 
-for (const [modulePath, mod] of Object.entries(ossModules)) {
-  const match = modulePath.match(/platform[\\/]workflows[\\/]([^/\\]+)[\\/]ui[\\/]index/);
-  if (!match) continue;
-  const workflowName = match[1];
-  const components = mod.default ?? mod;
-  if (components && typeof components === 'object') {
-    WORKFLOW_REGISTRY[workflowName] = { components };
-  }
-}
-
-for (const [modulePath, mod] of Object.entries(mozaiksPlatformWorkflowModules)) {
-  const match = modulePath.match(/mozaiks-platform[\\/]app[\\/]workflows[\\/]([^/\\]+)[\\/]ui[\\/]index/);
+for (const [modulePath, mod] of Object.entries(workflowModules)) {
+  const match = modulePath.match(/[\\/]([^/\\]+)[\\/]ui[\\/]index(?:\.[^.]+)?$/);
   if (!match) continue;
   const workflowName = match[1];
   const components = mod.default ?? mod;

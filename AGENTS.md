@@ -4,6 +4,17 @@ Repository-level guidance for coding agents working in this repo.
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md) and [CLAUDE.md](CLAUDE.md) first.
 
+Read `ARCHITECTURE_BOUNDARIES.md` before making structural changes.
+
+This repo uses layered FastAPI hosts as the canonical server composition:
+- `runtime_app.py`
+- `platform_app.py`
+- `studio_app.py`
+- `mozaiks_app.py`
+
+`studio_app.py` is the local/private builder host and the default local run target. `mozaiks_app.py` is the hosted Mozaiks product host.
+
+
 ## Repo Status
 
 This codebase is **not in production**.
@@ -58,16 +69,16 @@ This repo (`mozaiks`) and `mozaiks-core-public` are separate deployables. Do not
 |-----------------------|----------------------|
 | AI runtime (`mozaiksai`) | App backend runtime |
 | chat-ui components | No UI — backend only |
-| AppBackendPort contract | Plugin manifests + routes |
-| Platform operations (`platform/operations/`) | Plugins (`platform/plugins/`) |
+| AppBackendPort contract | Module manifests + routes |
+| Platform modules (`platform/modules/`) | Modules (`platform/modules/`) |
 | Workflow authoring | Event bus, notifications, subscriptions |
 
 **Naming:**
-- "operation" belongs to the mozaiksai platform layer (`platform/operations/`). Declared via `operation.yaml` + `handler.py`. These are deterministic CRUD/action surfaces with no AI. They support workflows by providing the CRUD actions that AI agents call.
-- "plugin" belongs to mozaiks-core-public (`platform/plugins/`). Declared via 6 YAML manifests + `backend/logic.py` + `backend/routes.py`. These are full app feature packs with event bus integration.
-- `module.yaml` is a file name inside a mozaiks-core-public plugin — it declares the REST endpoint surface that AI agents call. It is unrelated to the mozaiksai operation system.
+- "module" in the mozaiksai platform layer (`platform/modules/`) — declared via `module.yaml` + `handler.py`. Deterministic CRUD/action surfaces with no AI. Support workflows by providing the CRUD actions that AI agents call.
+- "module" in mozaiks-core-public (`platform/modules/`) — declared via 6 YAML manifests + `backend/logic.py` + `backend/routes.py`. Full app feature packs with event bus integration.
+- Both repos use "modules" but the file shapes differ. The mozaiksai `module.yaml` is a simple handler manifest (name, version, actions, events). The mozaiks-core-public `module.yaml` (one of six files) declares the REST endpoint surface that AI agents call.
 
-Do not conflate these. Do not rename one to match the other.
+Do not conflate these shapes — they differ by file structure and purpose even though both use the word "module".
 
 ## UI System Rule
 
@@ -80,14 +91,14 @@ Treat the UI system as three separate surface contracts sharing one primitive/de
 
 Do not collapse these into one generic contract.
 
-## Plugin Manifest Rule (mozaiks-core-public)
+## Operation Manifest Rule (mozaiks-core-public)
 
 When working in or generating for `mozaiks-core-public`:
 
 - Every capability pack needs all 6 YAML files — no partial manifests
 - Event names in `events.yaml` must match `notifications.yaml` and `logic.py` exactly
 - Endpoint paths in `module.yaml` must match `routes.py` exactly
-- `plugin_manager` discovers everything automatically — no edits to `director.py` needed for new plugins
+- `operation_manager` discovers everything automatically — no edits to `director.py` needed for new operations
 - AppGenerator produces these files via `ConfigMiddlewareAgent` in `platform_config` task mode
 
 ## Validation Rule

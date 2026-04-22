@@ -26,7 +26,7 @@ There are multiple event surfaces in the repo.
 | Low-level event helpers | payload serialization and handler utilities | `mozaiksai/core/events/event_serialization.py`, `mozaiksai/core/events/auto_tool_handler.py`, `mozaiksai/core/events/handoff_events.py` |
 | Workflow orchestration listeners | MFJ and journey consumers of runtime events | `mozaiksai/core/workflow/pack/workflow_pack_coordinator.py`, `mozaiksai/core/workflow/pack/journey_orchestrator.py` |
 | Universal routing listener | typed reroute/change handling | `mozaiksai/core/orchestration/universal_orchestrator.py` |
-| Transport bridge | forwards runtime events to connected clients | `mozaiksai/core/transport/simple_transport.py`, `shared_app.py` |
+| Transport bridge | forwards runtime events to connected clients | `mozaiksai/core/transport/simple_transport.py`, `runtime_app.py`, `platform_app.py` |
 | External app backend adapter | generic boundary to backend-owned event systems | `mozaiksai/core/ports/app_backend.py`, `mozaiksai/core/adapters/http_app_backend.py`, `mozaiksai/core/workflow/app_backend_tools.py` |
 
 ---
@@ -58,7 +58,7 @@ runtime boundary through `AppBackendPort` and backend-facing workflow tools.
 
 Representative publishers in the live repo:
 
-- `shared_app.py`
+- `platform_app.py`
   - chat/session/workflow API lifecycle
   - websocket workflow connections
 - `SimpleTransport`
@@ -112,5 +112,4 @@ It is a set of cooperating layers:
 - external app backend integration through `AppBackendPort`
 
 That is the live system this repo actually has.
-
 

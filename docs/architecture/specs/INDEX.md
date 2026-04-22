@@ -40,7 +40,7 @@ Different contexts use different naming conventions for the same packages:
 
 | Term | Definition |
 |------|------------|
-| **Module** | Data operation unit (CRUD, domain events). Replaces "plugins" from V1. |
+| **Module** | Data operation unit (CRUD, domain events).|
 | **Workflow** | AI-orchestrated multi-step process using AG2. |
 | **Primitive** | UI building block (DataTable, Form, Card, etc.). |
 | **Runtime** | The composition layer that orchestrates ai + modules + ui. |
@@ -67,6 +67,7 @@ Different contexts use different naming conventions for the same packages:
 | **Understand the App UI system (primitives, pages, schemas)** | [UI_SYSTEM_SPEC.md](./UI_SYSTEM_SPEC.md) ⭐ |
 | **Understand the canonical app-generation model** | [agentic-app-generation-strategy.md](./agentic-app-generation-strategy.md) ⭐⭐⭐ |
 | **Track the app-generation implementation plan** | [agentic-app-generation-checklist.md](./agentic-app-generation-checklist.md) ⭐⭐⭐ |
+| **Define the onboarding wizard and Studio product flow** | [onboarding-and-studio-product-spec.md](./onboarding-and-studio-product-spec.md) ⭐⭐⭐ |
 | **Understand how AppGenerator assembles app bundles** | [appgenerator-output-assembly-contract.md](./appgenerator-output-assembly-contract.md) ⭐⭐ |
 | **Understand the existing-app adoption path** | [existing-app-augmentation-strategy.md](./existing-app-augmentation-strategy.md) ⭐⭐⭐ |
 | **Understand the design system & theming** | [DESIGN_SYSTEM_SPEC.md](./DESIGN_SYSTEM_SPEC.md) ⭐ |
@@ -294,6 +295,19 @@ Platform and frontend strategy for OSS vs hosted:
   - Platform = better intelligence + managed experience
   - Fonts/themes are tokens resolved at runtime
 
+### ⭐⭐⭐ [onboarding-and-studio-product-spec.md](./onboarding-and-studio-product-spec.md)
+
+Product blueprint for the missing layer between blank scaffolding and productive app-building:
+
+- **Three-layer journey:** `mozaiks init` for blank scaffold, `mozaiks onboard` for guided setup, `mozaiks studio` for the local/private control plane
+- **OpenClaw lessons translated to Mozaiks:** copy the wizard and dashboard pattern, reject vague skill magic and unclear trust/cost boundaries
+- **Studio information architecture:** Home, Build, Capability Library, Pages and Shell, Workflows, Runtime, Admin
+- **Command boundaries:** keep `init` structure-first, move product questions into onboarding, keep generation and installation explicit
+- **Capability model:** operations, pages, workflows, and capability packs instead of one generic plugin bucket
+- **Guardrails:** cost visibility, trust metadata, no dead-end post-setup state, no public admin by default
+
+**Use this document when shaping the next CLI and Studio product surface.**
+
 ### ⭐⭐ [PLATFORM_DOGFOODING_SPEC.md](./PLATFORM_DOGFOODING_SPEC.md) (CRITICAL)
 
 Blueprint for building the platform admin dashboard using mozaiks:
@@ -349,7 +363,7 @@ Python SDK for .NET services:
 
 Built-in admin dashboard:
 
-- Dashboard sections (Users, Plugins, Events, etc.)
+- Dashboard sections (Users, modules, Events, etc.)
 - API endpoints
 - Data collection hooks
 
@@ -362,7 +376,7 @@ Built-in admin dashboard:
 The original master architecture document covering:
 
 - Repository structure (merged mozaiks + mozaiks-core-public)
-- Package architecture (core, plugins, ai, bundle)
+- Package architecture (core, modules, ai, bundle)
 - Dependency graph and boundary rules
 - Event system architecture
 - Authentication architecture
@@ -374,9 +388,9 @@ The original master architecture document covering:
 **Key Decisions:**
 - One repo, multiple packages
 - Hard package boundaries enforced by pyproject.toml
-- Events as the communication mechanism between plugins and AI
+- Events as the communication mechanism between modules and AI
 - Platform events for data collection
-- Admin dashboard built into mozaiks-plugins
+- Admin dashboard built into mozaiks-modules
 
 ### 2. [IMPLEMENTATION_PHASES.md](../IMPLEMENTATION_PHASES.md)
 
@@ -404,7 +418,7 @@ Template for `.claude/AGENTS.md` to guide AI coding agents:
 
 - Package boundary rules (what can import what)
 - Red flags to watch for
-- How plugins and AI communicate
+- How modules and AI communicate
 - Decision tree for placing new code
 - Common tasks and their locations
 - Testing requirements
@@ -457,7 +471,7 @@ Built-in admin dashboard specification:
 - Dashboard sections:
   - Overview
   - Users
-  - Plugins
+  - Modules
   - Workflows
   - Events
   - Settings
@@ -560,7 +574,7 @@ FORBIDDEN:
 │                                                                  │
 │  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐           │
 │  │   App A     │   │   App B     │   │   App C     │           │
-│  │ (mozaiks)   │   │(mozaiks-ai) │   │(plugins)    │           │
+│  │ (mozaiks)   │   │(mozaiks-ai) │   │(modules)    │           │
 │  └──────┬──────┘   └──────┬──────┘   └──────┬──────┘           │
 │         │                 │                 │                   │
 │         └─────────────────┴─────────────────┘                   │

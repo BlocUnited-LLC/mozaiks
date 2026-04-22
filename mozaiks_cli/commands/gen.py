@@ -411,77 +411,6 @@ def _stage_workflow(source_dir: Path, staging_root: Path, workflow_name: str) ->
     return dst
 
 
-def _create_stub_modules(staging_root: Path):
-    """Create stub modules for platform-specific dependencies.
-
-    The AgentGenerator workflow has tools that import from app.plugins
-    and app.workflows which don't exist in standalone CLI mode.
-    """
-    import types
-
-    # Create a stub directory structure for __path__ to point to
-    stub_dir = staging_root / '_stubs'
-    stub_dir.mkdir(exist_ok=True)
-    (stub_dir / 'app').mkdir(exist_ok=True)
-    (stub_dir / 'app' / 'plugins').mkdir(exist_ok=True)
-    (stub_dir / 'app' / 'workflows').mkdir(exist_ok=True)
-    (stub_dir / 'app' / 'workflows' / '_shared').mkdir(exist_ok=True)
-
-    # Create stub 'app' package with plugins and workflows submodules
-    app_module = types.ModuleType('app')
-    app_module.__path__ = [str(stub_dir / 'app')]
-    app_module.__file__ = str(stub_dir / 'app' / '__init__.py')
-
-    plugins_module = types.ModuleType('app.plugins')
-    plugins_module.__path__ = [str(stub_dir / 'app' / 'plugins')]
-    plugins_module.__file__ = str(stub_dir / 'app' / 'plugins' / '__init__.py')
-    plugins_module.get_all_plugins = lambda: []
-    plugins_module.get_plugin = lambda name: None
-
-    workflows_module = types.ModuleType('app.workflows')
-    workflows_module.__path__ = [str(stub_dir / 'app' / 'workflows')]
-    workflows_module.__file__ = str(stub_dir / 'app' / 'workflows' / '__init__.py')
-    workflows_module.get_workflow = lambda name: None
-    workflows_module.list_workflows = lambda: []
-
-    # Stub app.workflows._shared
-    workflows_shared = types.ModuleType('app.workflows._shared')
-    workflows_shared.__path__ = [str(stub_dir / 'app' / 'workflows' / '_shared')]
-    workflows_shared.__file__ = str(stub_dir / 'app' / 'workflows' / '_shared' / '__init__.py')
-
-    # Stub app.plugins.workflow_tools
-    workflow_tools = types.ModuleType('app.plugins.workflow_tools')
-    workflow_tools.__file__ = str(stub_dir / 'app' / 'plugins' / 'workflow_tools.py')
-    workflow_tools.WorkflowTools = type('WorkflowTools', (), {})
-
-    # Stub app.plugins.ui_tools
-    ui_tools = types.ModuleType('app.plugins.ui_tools')
-    ui_tools.__file__ = str(stub_dir / 'app' / 'plugins' / 'ui_tools.py')
-
-    # Stub app.plugins.persistence
-    persistence = types.ModuleType('app.plugins.persistence')
-    persistence.__file__ = str(stub_dir / 'app' / 'plugins' / 'persistence.py')
-    # Add common persistence functions as stubs
-    persistence.save_to_db = lambda *args, **kwargs: None
-    persistence.load_from_db = lambda *args, **kwargs: None
-    persistence.get_attachment = lambda *args, **kwargs: None
-    persistence.save_attachment = lambda *args, **kwargs: None
-
-    # Stub app.plugins.transport
-    transport = types.ModuleType('app.plugins.transport')
-    transport.__file__ = str(stub_dir / 'app' / 'plugins' / 'transport.py')
-    transport.send_message = lambda *args, **kwargs: None
-    transport.get_transport = lambda *args, **kwargs: None
-
-    sys.modules['app'] = app_module
-    sys.modules['app.plugins'] = plugins_module
-    sys.modules['app.workflows'] = workflows_module
-    sys.modules['app.workflows._shared'] = workflows_shared
-    sys.modules['app.plugins.workflow_tools'] = workflow_tools
-    sys.modules['app.plugins.ui_tools'] = ui_tools
-    sys.modules['app.plugins.persistence'] = persistence
-    sys.modules['app.plugins.transport'] = transport
-
 
 def _setup_environment(repo_root: Path, staging_workflows: Path):
     """Configure sys.path and env vars for workflow execution."""
@@ -491,9 +420,6 @@ def _setup_environment(repo_root: Path, staging_workflows: Path):
 
     # Point the workflow manager at our staging directory
     os.environ["MOZAIKS_WORKFLOWS_PATH"] = str(staging_workflows)
-
-    # Create stub modules for platform-specific dependencies
-    _create_stub_modules(staging_workflows)
 
 
 # ── Runner ─────────────────────────────────────────────────────────
@@ -552,7 +478,7 @@ def _create_output_structure(output_dir: Path, mode: str):
     (output_dir / "workflows").mkdir(exist_ok=True)
 
     if mode == "app":
-        (output_dir / "plugins").mkdir(exist_ok=True)
+        (output_dir / "modules").mkdir(exist_ok=True)
         (output_dir / "config").mkdir(exist_ok=True)
         (output_dir / "frontend").mkdir(exist_ok=True)
 

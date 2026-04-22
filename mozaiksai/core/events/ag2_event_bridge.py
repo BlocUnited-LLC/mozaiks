@@ -215,7 +215,7 @@ class AG2EventBridge:
             agent=agent_name or "unknown_agent",
             model_name=model_name,
             structured_data=output_data if isinstance(output_data, dict) else {"value": output_data},
-            auto_tool_mode=False,
+            auto_tool_call=False,
             context=context_payload,
             source="ag2_custom_event",
             turn_idempotency_key=turn_key,

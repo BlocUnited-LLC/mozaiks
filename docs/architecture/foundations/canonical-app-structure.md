@@ -53,9 +53,9 @@ platform/
 │       └── ui/                 # optional, main user-facing UI
 │           ├── index.js
 │           └── *.{js,jsx}
-├── modules/
-│   └── {module_name}/
-│       ├── module.json         # includes events.emits, events.handles
+├── operations/
+│   └── {operations_name}/
+│       ├── operations.json         # includes events.emits, events.handles
 │       ├── admin.yaml          # optional, admin dashboard declarations
 │       ├── subscription.yaml   # optional, entitlement requirements
 │       ├── handler.py
@@ -68,14 +68,6 @@ platform/
     ├── ai.json                 # LLM provider, model, temperature
     └── theme_config.json       # Color schemes, fonts, shell chrome
 ```
-
-**REMOVED (no longer exists):**
-- `automations/` — Triggers now declared in `orchestrator.yaml`
-- `adapters/` — Admin dashboard is a first-class page, not an adapter
-- `subscription_config.json` — Belongs in greenfield app backend
-- `navigation_config.json` — Routes are composed from page/module/workflow owners
-- `admin.json`, `module_registry.json`, `settings_config.json`, `notifications_config.json` — App backend concerns
-
 ## What Each Family Means
 
 ### `app.json`

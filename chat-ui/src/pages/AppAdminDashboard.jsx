@@ -1,9 +1,8 @@
 /**
- * AppAdminDashboard — First-class app admin dashboard.
+ * AppAdminDashboard — app-owner admin panel group.
  *
- * Registered in coreComponents.js. Always available — every generated app
- * gets admin tooling regardless of whether it is SaaS or not.
- * Access is gated by the "admin" role (client-side guard + backend enforcement).
+ * The canonical visible admin route is /admin via AdminPortal. This module
+ * provides the app-owner panels embedded inside that unified admin shell.
  *
  * ## How panels work
  *
@@ -17,16 +16,16 @@
  *
  * ## Adding a custom panel
  *
- * Backend: declare in plugin.yaml
- *   admin_panels:
- *     - id: my_plugin_stats
- *       label: My Plugin Stats
+ * Backend/module: declare in modules/{module}/admin.yaml
+ *   panels:
+ *     - id: my_module.stats
+ *       label: My Module Stats
  *       order: 20
  *
  * Frontend: register in platform/extensions.js (or your app's index.js)
  *   import { registerComponent } from '@mozaiks/chat-ui/registry';
- *   import MyPluginStatsPanel from './MyPluginStatsPanel';
- *   registerComponent('my_plugin_stats', MyPluginStatsPanel);
+ *   import MyModuleStatsPanel from './MyModuleStatsPanel';
+ *   registerComponent('my_plugin_stats', MyModuleStatsPanel);
  *
  * Custom panels receive: { backendUrl, auth } props.
  *
@@ -382,11 +381,27 @@ const BUILT_IN_PANELS = {
   subscriptions: { component: SubscriptionsPanel },
 };
 
+function normalizeAppAdminPanels(configPanels) {
+  if (Array.isArray(configPanels)) {
+    return configPanels;
+  }
+  if (configPanels && typeof configPanels === 'object') {
+    const appPanels = Array.isArray(configPanels.app) ? configPanels.app : [];
+    const modulePanels = Array.isArray(configPanels.modules) ? configPanels.modules : [];
+    const normalized = [...appPanels, ...modulePanels];
+    if (normalized.length > 0) return normalized;
+  }
+  return [
+    { id: 'stats', label: 'Overview' },
+    { id: 'users', label: 'Users' },
+  ];
+}
+
 // ---------------------------------------------------------------------------
 // Root
 // ---------------------------------------------------------------------------
 
-export default function AppAdminDashboard() {
+export function AppAdminPanels({ embedded = false } = {}) {
   const { user, config, auth } = useChatUI();
   const backendUrl = getAppBackendUrl(config);
 
@@ -424,15 +439,11 @@ export default function AppAdminDashboard() {
   }
 
   // Default panel list while config is loading — prevents flash of empty dashboard
-  const activePanels = adminConfig?.panels ?? [
-    { id: 'stats', label: 'Overview' },
-    { id: 'users', label: 'Users' },
-  ];
+  const activePanels = normalizeAppAdminPanels(adminConfig?.panels);
 
-  return (
-    <div className="min-h-screen bg-background px-4 py-8 sm:px-8">
-      <div className="mx-auto max-w-6xl">
-
+  const content = (
+    <>
+      {!embedded && (
         <div className="mb-8 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-foreground">App Admin</h1>
@@ -442,43 +453,58 @@ export default function AppAdminDashboard() {
           </div>
           <AdminBadge variant="warning">admin</AdminBadge>
         </div>
+      )}
 
-        {activePanels.map((panelConfig) => {
-          const id = typeof panelConfig === 'string' ? panelConfig : panelConfig.id;
-          const label = typeof panelConfig === 'object' ? panelConfig.label : id;
+      {activePanels.map((panelConfig) => {
+        const id = typeof panelConfig === 'string' ? panelConfig : panelConfig.id;
+        const label = typeof panelConfig === 'object' ? panelConfig.label : id;
 
-          // 1. Built-in panel
-          const built = BUILT_IN_PANELS[id];
-          if (built) {
-            const Panel = built.component;
-            return (
-              <div key={id}>
-                <AdminSectionHeading>{label}</AdminSectionHeading>
-                <Panel backendUrl={backendUrl} auth={auth} />
-              </div>
-            );
-          }
+        // 1. Built-in panel
+        const built = BUILT_IN_PANELS[id];
+        if (built) {
+          const Panel = built.component;
+          return (
+            <div key={id}>
+              <AdminSectionHeading>{label}</AdminSectionHeading>
+              <Panel backendUrl={backendUrl} auth={auth} />
+            </div>
+          );
+        }
 
-          // 2. Custom panel — resolved from componentRegistry
-          //    Register via: registerComponent('my_panel_id', MyPanelComponent)
-          const Custom = getComponent(id);
-          if (Custom) {
-            return (
-              <div key={id}>
-                <AdminSectionHeading>{label}</AdminSectionHeading>
-                <Custom backendUrl={backendUrl} auth={auth} />
-              </div>
-            );
-          }
+        // 2. Custom panel — resolved from componentRegistry
+        //    Register via: registerComponent('my_panel_id', MyPanelComponent)
+        const Custom = getComponent(id);
+        if (Custom) {
+          return (
+            <div key={id}>
+              <AdminSectionHeading>{label}</AdminSectionHeading>
+              <Custom backendUrl={backendUrl} auth={auth} />
+            </div>
+          );
+        }
 
-          // 3. Unknown panel id — skip silently in production, warn in dev
-          if (process.env.NODE_ENV === 'development') {
-            console.warn(`[AppAdminDashboard] Unknown panel id "${id}" — register a component with this name to render it.`);
-          }
-          return null;
-        })}
+        // 3. Unknown panel id — skip silently in production, warn in dev
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(`[AppAdminDashboard] Unknown panel id "${id}" — register a component with this name to render it.`);
+        }
+        return null;
+      })}
+    </>
+  );
 
+  if (embedded) {
+    return <div>{content}</div>;
+  }
+
+  return (
+    <div className="min-h-screen bg-background px-4 py-8 sm:px-8">
+      <div className="mx-auto max-w-6xl">
+        {content}
       </div>
     </div>
   );
+}
+
+export default function AppAdminDashboard() {
+  return <AppAdminPanels />;
 }

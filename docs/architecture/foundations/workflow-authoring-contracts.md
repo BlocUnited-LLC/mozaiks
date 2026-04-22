@@ -124,7 +124,7 @@ Rules:
 - Each agent must provide either:
   - `prompt_sections` or `prompt_sections_custom`, or
   - `system_message`.
-- `auto_tool_mode` is derived from tools.yaml (agents with `auto_tool_call: true` tools).
+- Auto-tool execution is derived from tools.yaml (agents with `auto_tool_call: true` tools); agents.yaml does not define a matching field.
 
 ### `handoffs.yaml`
 

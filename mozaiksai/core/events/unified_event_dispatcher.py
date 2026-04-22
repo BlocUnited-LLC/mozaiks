@@ -493,8 +493,8 @@ class UnifiedEventDispatcher:
         if kind == 'agent_output_validated' and isinstance(event_dict, dict):
             if 'structured_data' in event_dict:
                 event_dict['structured_data'] = serialize_event_content(event_dict['structured_data'])
-            if 'auto_tool_mode' in event_dict:
-                event_dict['auto_tool_mode'] = bool(event_dict['auto_tool_mode'])
+            if 'auto_tool_call' in event_dict:
+                event_dict['auto_tool_call'] = bool(event_dict['auto_tool_call'])
 
         ns_map = {
             'print': 'chat.print', 'text': 'chat.text', 'input_request': 'chat.input_request', 'input_ack': 'chat.input_ack',

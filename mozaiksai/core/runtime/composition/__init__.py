@@ -9,8 +9,8 @@ from .extensions import (
 )
 from .platform_hooks import get_platform_hooks, PlatformHookRegistry
 from .executor_registry import Executor, ExecutorRegistry, ExecutorType
-from .module_context import OperationContext
-from .module_executor import OperationExecutor, OperationRequest, OperationResult
+from .module_context import ModuleContext
+from .module_executor import ModuleExecutor, ModuleRequest, ModuleResult
 
 __all__ = [
     "mount_declared_routers",
@@ -23,8 +23,8 @@ __all__ = [
     "Executor",
     "ExecutorRegistry",
     "ExecutorType",
-    "OperationContext",
-    "OperationExecutor",
-    "OperationRequest",
-    "OperationResult",
+    "ModuleContext",
+    "ModuleExecutor",
+    "ModuleRequest",
+    "ModuleResult",
 ]

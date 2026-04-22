@@ -142,7 +142,7 @@ mozaiks-ai serve --workflows ./workflows --port 8001
 
 #### `@mozaiks/modules`
 
-**Purpose:** Execute modules (plugins). This is the current `mozaiks-core-public` backend, repackaged.
+**Purpose:** Execute modules. This is the current `mozaiks-core-public` backend, repackaged.
 
 **Responsibilities:**
 - Load module definitions
@@ -838,7 +838,7 @@ class AppDefinition(BaseModel):
 my-app/
 ├── app.yaml                     # App definition (REQUIRED)
 ├── .env                         # Environment variables
-├── modules/                     # Module implementations
+├── operations/                  # Operations implementations
 │   ├── notes/
 │   │   ├── module.yaml          # Module config
 │   │   ├── logic.py             # Backend logic
@@ -1581,12 +1581,15 @@ CURRENT:
 ├── mozaiks/                      # AI runtime (working)
 │   ├── mozaiksai/               # Main package
 │   ├── mozaiks_cli/             # CLI
-│   ├── platform/                # Example workflows
-│   └── shared_app.py            # Server
+│   ├── platform/                # Example/template bundle
+│   ├── runtime_app.py           # Runtime host
+│   ├── platform_app.py          # Platform shell host
+│   ├── studio_app.py            # Local/private Studio builder host
+│   └── mozaiks_app.py           # Default Mozaiks product host
 │
 └── mozaiks-core-public/          # Plugin runtime (working)
     ├── backend/                  # FastAPI server
-    ├── platform/plugins/         # Example plugins
+    ├── platform/modules/      # Example operations
     └── src/                      # React frontend
 ```
 

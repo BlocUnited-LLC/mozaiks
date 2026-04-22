@@ -28,7 +28,7 @@ TARGET STATE:
 │   └── packages/
 │       ├── core/            # Shared interfaces
 │       ├── ai/              # AI workflows (from mozaiksai/)
-│       ├── modules/         # NEW: replaces plugins
+│       ├── modules/         # Non-AI Function
 │       ├── runtime/         # NEW: app composition
 │       ├── ui/              # From chat-ui/
 │       └── cli/             # From mozaiks_cli/
@@ -83,10 +83,11 @@ TARGET STATE:
 - JokeWorker (fan-out pattern)
 - YAML-first declarative structure
 
-### shared_app.py
-**Status:** REFACTOR - 99KB monolith needs to be split
+### Layered FastAPI Hosts
+**Status:** Canonical
 
-This file contains FastAPI routes, auth middleware, WebSocket handlers. It should be decomposed into packages/runtime/.
+The active hosts are `runtime_app.py`, `platform_app.py`, `studio_app.py`, and `mozaiks_app.py`.
+Keep new server behavior in the lowest correct layer.
 
 ---
 
@@ -120,7 +121,7 @@ packages/core/
 | `context.py` | Request/Tenant context | RUNTIME_SPEC.md |
 
 ### packages/modules/ - NEW
-**Purpose:** Module execution (replaces mozaiks-core-public plugins)
+**Purpose:** Module execution (replaces mozaiks-core-public module)
 
 ```
 packages/modules/
@@ -140,7 +141,7 @@ packages/modules/
 | `events.py` | Domain event emission | EVENT_CONTRACTS.md |
 
 ### packages/runtime/ - NEW
-**Purpose:** App composition layer (replaces shared_app.py + director)
+**Purpose:** App composition layer on top of the layered host contracts
 
 ```
 packages/runtime/
@@ -431,7 +432,7 @@ access:
 - [ ] Implement executor registry
 - [ ] Implement request router
 - [ ] Implement event bus with routing rules
-- [ ] Decompose shared_app.py into modular components
+- [ ] Keep runtime/platform/Studio/Mozaiks host responsibilities separated
 - [ ] Context injection middleware
 - [ ] Mode detection (ai-only, modules-only, full)
 - [ ] Create `pyproject.toml` for mozaiks-runtime package
@@ -525,15 +526,15 @@ modules:
 | `registry.py` | P1 | Module discovery |
 | `events.py` | P1 | Domain event emission |
 
-### packages/runtime/ (Create All + Decompose shared_app.py)
+### packages/runtime/ (Create All + Preserve Layered Hosts)
 | File | Priority | Source |
 |------|----------|--------|
 | `app.py` | P0 | NEW |
-| `router.py` | P0 | From shared_app.py |
+| `router.py` | P0 | From platform/runtime route contracts |
 | `executors.py` | P0 | NEW |
 | `events/bus.py` | P0 | From mozaiksai/core/events/ |
-| `middleware.py` | P1 | From shared_app.py |
-| `server.py` | P1 | From shared_app.py |
+| `middleware.py` | P1 | From runtime auth/transport contracts |
+| `server.py` | P1 | From layered host entrypoints |
 
 ---
 
@@ -542,7 +543,7 @@ modules:
 ### Do NOT Migrate (Build Fresh Instead)
 | Component | Reason |
 |-----------|--------|
-| `plugin_manager.py` | New module system is simpler |
+| `plugin_manager.py` | Renamed to `operation_manager.py` |
 | `director.py` | Runtime package replaces this |
 | `ai_bridge.py` | Runtime handles AI ↔ modules |
 | `subscription_manager.py` | Platform handles entitlements |

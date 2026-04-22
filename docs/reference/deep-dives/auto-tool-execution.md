@@ -4,7 +4,7 @@ This note explains auto-tool execution in Mozaiks.
 
 ## How It Works
 
-Auto-tool mode is **derived from tools.yaml**, not agents.yaml. Any agent with a tool marked `auto_tool_call: true` is considered an auto-tool agent.
+Auto-tool execution is **derived from tools.yaml**, not agents.yaml. Any agent with a tool marked `auto_tool_call: true` is considered an auto-tool agent.
 
 When an auto-tool agent outputs structured JSON:
 1. Runtime validates output against the registered Pydantic model
@@ -39,7 +39,7 @@ registry:
 ```yaml
 - name: OutputAgent
   structured_outputs_required: true
-  # Note: auto_tool_mode is derived from tools.yaml, not set here
+  # No auto-tool field lives in agents.yaml; auto-tool execution is derived from tools.yaml.
 ```
 
 ## When to Use
@@ -53,7 +53,7 @@ Do not use it just because an agent has structured outputs. Some agents output s
 
 ## Implementation Note
 
-The runtime derives auto-tool agents from tools.yaml via `workflow_manager.get_auto_tool_agents()`. This replaced the previous `auto_tool_mode` flag in agents.yaml.
+The runtime derives auto-tool agents from tools.yaml via `workflow_manager.get_auto_tool_agents()`. agents.yaml no longer carries a matching auto-tool field.
 
 ## Related Docs
 

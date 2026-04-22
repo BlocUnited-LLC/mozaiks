@@ -29,10 +29,34 @@ def _write_minimal_orchestrator_and_agents(wf_dir: Path, workflow_name: str) -> 
                 "agents:",
                 "  - name: Planner",
                 "    system_message: \"You are a planner.\"",
+            ]
+        ),
+    )
+
+
+def test_workflow_manager_rejects_legacy_agent_auto_tool_field(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "FlowLegacyAutoToolField"
+    wf_dir.mkdir(parents=True)
+    _write_minimal_orchestrator_and_agents(wf_dir, "FlowLegacyAutoToolField")
+    _write_yaml(
+        wf_dir / "agents.yaml",
+        "\n".join(
+            [
+                "agents:",
+                "  - name: Planner",
+                "    system_message: \"You are a planner.\"",
                 "    auto_tool_mode: false",
             ]
         ),
     )
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    manager = _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(tmp_path))
+    info = manager.get_workflow_info("FlowLegacyAutoToolField")
+
+    assert info is not None
+    assert info.get("status") == "error"
+    assert "auto_tool_mode" in str(info.get("error") or "")
 
 
 def test_workflow_manager_rejects_invalid_tools_contract(tmp_path: Path) -> None:
@@ -374,27 +398,27 @@ def test_workflow_manager_rejects_manifest_tool_integration_metadata(tmp_path: P
 
 
 def test_build_workflows_load_from_workspace_bundle() -> None:
-    workflows_root = Path(__file__).resolve().parents[1] / "platform" / "workflows"
+    workflows_root = Path(__file__).resolve().parents[1] / "mozaiks-platform" / "app" / "workflows"
 
     _workflow_manager_mod.UnifiedWorkflowManager._instance = None
     manager = _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(workflows_root))
 
     discovery_info = manager.get_workflow_info("ExistingAppDiscovery")
-    joke_factory_info = manager.get_workflow_info("JokeFactory")
-    joke_worker_info = manager.get_workflow_info("JokeWorker")
+    app_generator_info = manager.get_workflow_info("AppGenerator")
+    agent_generator_info = manager.get_workflow_info("AgentGenerator")
     discovery_config = manager.get_config("ExistingAppDiscovery")
-    joke_factory_config = manager.get_config("JokeFactory")
-    joke_worker_config = manager.get_config("JokeWorker")
+    app_generator_config = manager.get_config("AppGenerator")
+    agent_generator_config = manager.get_config("AgentGenerator")
 
     assert discovery_info is not None
     assert discovery_info.get("status") == "loaded"
-    assert joke_factory_info is not None
-    assert joke_factory_info.get("status") == "loaded"
-    assert joke_worker_info is not None
-    assert joke_worker_info.get("status") == "loaded"
+    assert app_generator_info is not None
+    assert app_generator_info.get("status") == "loaded"
+    assert agent_generator_info is not None
+    assert agent_generator_info.get("status") == "loaded"
     assert discovery_config.get("workflow_name") == "ExistingAppDiscovery"
-    assert joke_factory_config.get("workflow_name") == "JokeFactory"
-    assert joke_worker_config.get("workflow_name") == "JokeWorker"
+    assert app_generator_config.get("workflow_name") == "AppGenerator"
+    assert agent_generator_config.get("workflow_name") == "AgentGenerator"
     assert discovery_config.get("tools")
-    assert joke_factory_config.get("tools")
-    assert (joke_worker_config.get("structured_outputs") or {}).get("registry")
+    assert app_generator_config.get("tools")
+    assert (agent_generator_config.get("structured_outputs") or {}).get("registry")

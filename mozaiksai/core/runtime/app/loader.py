@@ -5,16 +5,16 @@ from __future__ import annotations
 The app manifest owns product intent and startup metadata. Runtime composition
 is discovered from owner manifests:
   - workflows/* directories
-  - operations/*/operation.yaml
+  - modules/*/module.yaml
   - pages/*.yaml or pages/*/page.yaml
 
 Workflow loading is handled by the existing WorkflowManager (unchanged).
 
 Usage:
     result = await AppLoader.load("/path/to/platform")
-    app_def    = result.definition          # AppDefinition
-    operations = result.operations          # List[LoadedOperation]
-    mode       = app_def.execution_mode     # ExecutionMode.AI_ONLY / FULL / etc.
+    app_def = result.definition          # AppDefinition
+    modules  = result.modules            # List[LoadedModule]
+    mode     = app_def.execution_mode    # ExecutionMode.AI_ONLY / FULL / etc.
 """
 
 import json
@@ -27,7 +27,7 @@ from typing import Any, Dict, List
 from pydantic import ValidationError
 
 from mozaiksai.core.runtime.app.definition import AppDefinition
-from mozaiksai.core.runtime.app.module_loader import LoadedOperation, OperationLoader
+from mozaiksai.core.runtime.app.module_loader import LoadedModule, ModuleLoader
 from logs.logging_config import get_workflow_logger
 
 logger = get_workflow_logger("app_loader")
@@ -43,16 +43,16 @@ class AppLoadResult:
 
     Attributes:
         definition: Parsed AppDefinition from app.json and discovered owners
-        operations: Loaded operation handlers
+        modules:    Loaded module handlers
     """
     definition: AppDefinition
-    operations: List[LoadedOperation] = field(default_factory=list)
+    modules: List[LoadedModule] = field(default_factory=list)
 
 
 class AppLoader:
-    """Loads app-level metadata and discovers operations/pages/workflows.
+    """Loads app-level metadata and discovers modules/pages/workflows.
 
-    Also loads operation handlers when operations are present.
+    Also loads module handlers when modules are present.
     Workflow loading remains handled by WorkflowManager.
     """
 
@@ -60,13 +60,13 @@ class AppLoader:
 
     @classmethod
     async def load(cls, path: str = ".") -> AppLoadResult:
-        """Load app metadata and any discovered operations from a bundle directory.
+        """Load app metadata and any discovered modules from a bundle directory.
 
         Args:
             path: Root directory of the platform bundle.
 
         Returns:
-            AppLoadResult with parsed definition and loaded operations.
+            AppLoadResult with parsed definition and loaded modules.
 
         Raises:
             AppLoadError: If app.json is missing, unparseable, or invalid.
@@ -86,8 +86,8 @@ class AppLoader:
             raise AppLoadError("app.json must be a JSON object")
 
         raw = cls._resolve_env_vars(raw)
-        operation_loader = OperationLoader(base_path=str(base_path))
-        operation_names = operation_loader.discover_operation_names()
+        module_loader = ModuleLoader(base_path=str(base_path))
+        module_names = module_loader.discover_module_names()
         workflow_names = cls._discover_workflow_names(base_path)
         page_names = cls._discover_page_names(base_path)
 
@@ -96,7 +96,7 @@ class AppLoader:
             "version": raw.get("version") or "1.0",
             "description": raw.get("description"),
             "workflows": [{"name": name} for name in workflow_names],
-            "operations": [{"name": name} for name in operation_names],
+            "modules": [{"name": name} for name in module_names],
             "pages": [{"name": name} for name in page_names],
             "config": raw,
         }
@@ -109,18 +109,18 @@ class AppLoader:
         logger.info(
             f"APP_LOADED: name={app_def.name!r} version={app_def.version!r} "
             f"mode={app_def.execution_mode.value} "
-            f"workflows={len(app_def.workflows)} operations={len(app_def.operations)}"
+            f"workflows={len(app_def.workflows)} modules={len(app_def.modules)}"
         )
 
-        loaded_operations: List[LoadedOperation] = []
-        if operation_names:
-            loaded_operations = await operation_loader.load_all(operation_names)
+        loaded_modules: List[LoadedModule] = []
+        if module_names:
+            loaded_modules = await module_loader.load_all(module_names)
             logger.info(
-                f"OPERATIONS_LOADED: {len(loaded_operations)}/{len(operation_names)} "
-                f"({[op.name for op in loaded_operations]})"
+                f"MODULES_LOADED: {len(loaded_modules)}/{len(module_names)} "
+                f"({[m.name for m in loaded_modules]})"
             )
 
-        return AppLoadResult(definition=app_def, operations=loaded_operations)
+        return AppLoadResult(definition=app_def, modules=loaded_modules)
 
     @classmethod
     def _discover_workflow_names(cls, base_path: Path) -> List[str]:

@@ -146,7 +146,7 @@ Separate app-level boot example:
     "chat_startup_mode": "ask"
   },
   "workflows": {
-    "entry_point": "GreenRoom"
+    "entry_point": "AppGenerator"
   }
 }
 ```

@@ -215,7 +215,6 @@ agents:
         heading: string
         content: string
     max_consecutive_auto_reply: integer
-    auto_tool_mode: boolean
     structured_outputs_required: boolean
 ```
 

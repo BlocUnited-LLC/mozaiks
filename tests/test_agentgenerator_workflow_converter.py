@@ -18,6 +18,14 @@ class _Logger:
         return None
 
 
+class _Context:
+    def __init__(self, initial=None) -> None:
+        self.data = dict(initial or {})
+
+    def get(self, key, default=None):
+        return self.data.get(key, default)
+
+
 def _load_workflow_converter_module():
     workspace = Path(__file__).resolve().parents[1]
     file_path = workspace / "mozaiks-platform" / "app" / "workflows" / "AgentGenerator" / "tools" / "workflow_converter.py"
@@ -106,6 +114,35 @@ def test_generated_extra_file_paths_stay_workflow_local() -> None:
     assert normalize("tools/../outside.py") is None
     assert normalize("_shared/helper.py") is None
     assert normalize("workflows/_shared/helper.py") is None
+
+
+def test_workflow_output_dir_uses_generated_artifact_root(monkeypatch, tmp_path: Path) -> None:
+    generated_root = tmp_path / "generated"
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
+    context = _Context({"app_id": "app/one", "chat_id": "chat one"})
+
+    output_dir = workflow_converter._resolve_workflow_output_dir(
+        "Review Workflow",
+        context_variables=context,
+    )
+
+    assert output_dir == generated_root / "workflows" / "app-one" / "chat-one" / "Review-Workflow"
+
+
+def test_promote_generated_workflow_copies_to_active_workflows_root(tmp_path: Path) -> None:
+    source = tmp_path / "generated" / "workflows" / "app-1" / "build-1" / "ReviewWorkflow"
+    target_root = tmp_path / "active" / "workflows"
+    (source / "tools").mkdir(parents=True)
+    (source / "orchestrator.yaml").write_text("workflow_name: ReviewWorkflow\n", encoding="utf-8")
+    (source / "tools" / "review.py").write_text("def review():\n    return None\n", encoding="utf-8")
+
+    result = workflow_converter.promote_generated_workflow(source, target_root)
+
+    target = target_root / "ReviewWorkflow"
+    assert result["status"] == "success"
+    assert result["target_dir"] == str(target.resolve())
+    assert (target / "orchestrator.yaml").exists()
+    assert (target / "tools" / "review.py").exists()
 
 
 def test_runtime_extensions_stay_workflow_local() -> None:

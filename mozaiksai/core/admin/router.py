@@ -6,9 +6,12 @@
 from __future__ import annotations
 
 import json
+import os
+from copy import deepcopy
 from pathlib import Path
 from typing import Optional
 
+import yaml
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse
@@ -25,6 +28,24 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
 _bearer = HTTPBearer(auto_error=False)
+
+
+DEFAULT_ADMIN_CONFIG = {
+    "enabled": True,
+    "panels": {
+        "app": [
+            {"id": "stats", "label": "App Overview"},
+            {"id": "users", "label": "Users"},
+        ],
+        "modules": [],
+        "runtime": [
+            {"id": "stats", "label": "Runtime Stats"},
+            {"id": "runs", "label": "Active Runs"},
+            {"id": "sessions", "label": "Recent Sessions"},
+        ],
+    },
+    "features": {},
+}
 
 
 async def _require_admin(
@@ -120,7 +141,7 @@ async def get_admin_sessions(
     """List persisted chat sessions from MongoDB (most recent first)."""
     try:
         from mozaiksai.core.core_config import get_mongo_client
-        client = await get_mongo_client()
+        client = get_mongo_client()
         coll = client["mozaiksai"]["ChatSessions"]
 
         query: dict = {}
@@ -165,15 +186,19 @@ async def get_admin_sessions(
 async def get_admin_config(
     user: UserPrincipal = Depends(_require_admin),
 ):
-    """Return the active admin.json config (what the generator wrote)."""
+    """Return the active admin config, including module admin panel manifests."""
     config_path = _resolve_admin_config_path()
+    platform_root = _resolve_platform_root()
     if not config_path.exists():
-        return {"enabled": True, "panels": ["stats", "runs", "sessions"], "features": {}}
+        return _merge_module_admin_panels(deepcopy(DEFAULT_ADMIN_CONFIG), platform_root)
     try:
-        return json.loads(config_path.read_text(encoding="utf-8"))
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        if not isinstance(config, dict):
+            config = deepcopy(DEFAULT_ADMIN_CONFIG)
+        return _merge_module_admin_panels(config, platform_root)
     except Exception as e:
         logger.warning(f"[admin] failed to read admin.json: {e}")
-        return {"enabled": True, "panels": ["stats", "runs", "sessions"], "features": {}}
+        return _merge_module_admin_panels(deepcopy(DEFAULT_ADMIN_CONFIG), platform_root)
 
 
 # ---------------------------------------------------------------------------
@@ -191,13 +216,97 @@ async def get_admin_health(
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_admin_config_path() -> Path:
-    """Find admin.json relative to the active platform root."""
-    # Prefer mozaiks-platform/app when present (product mode)
+def _resolve_platform_root() -> Path:
+    """Find the active platform root without importing the platform host."""
+    platform_path = os.environ.get("PLATFORM_PATH", "")
+    if platform_path:
+        candidate = Path(platform_path)
+        if candidate.is_absolute():
+            return candidate
+        return (Path(__file__).parents[3] / candidate).resolve()
+
     monorepo = Path(__file__).parents[3] / "mozaiks-platform" / "app"
     if monorepo.is_dir():
-        candidate = monorepo / "config" / "admin.json"
-        if candidate.exists():
-            return candidate
-    # Fall back to OSS platform/
-    return Path(__file__).parents[3] / "platform" / "config" / "admin.json"
+        return monorepo
+
+    return Path(__file__).parents[3] / "platform"
+
+
+def _resolve_admin_config_path() -> Path:
+    """Find admin.json relative to the active platform root."""
+    return _resolve_platform_root() / "config" / "admin.json"
+
+
+def _load_module_admin_panels(platform_root: Path) -> list[dict]:
+    """Load module-owned admin panels declared by modules/{module}/admin.yaml."""
+    modules_dir = platform_root / "modules"
+    if not modules_dir.is_dir():
+        return []
+
+    panels: list[dict] = []
+    for module_dir in sorted(modules_dir.iterdir(), key=lambda item: item.name.lower()):
+        if not module_dir.is_dir():
+            continue
+        admin_path = module_dir / "admin.yaml"
+        if not admin_path.exists():
+            continue
+        try:
+            raw = yaml.safe_load(admin_path.read_text(encoding="utf-8")) or {}
+        except Exception as exc:
+            logger.warning("[admin] failed to read %s: %s", admin_path, exc)
+            continue
+        if not isinstance(raw, dict):
+            continue
+        raw_panels = raw.get("panels")
+        if not isinstance(raw_panels, list):
+            continue
+        for panel in raw_panels:
+            if not isinstance(panel, dict):
+                continue
+            panel_id = panel.get("id")
+            if not isinstance(panel_id, str) or not panel_id.strip():
+                continue
+            normalized = dict(panel)
+            normalized["id"] = panel_id.strip()
+            normalized.setdefault("module_id", module_dir.name)
+            normalized.setdefault("label", normalized["id"])
+            normalized.setdefault("source", "module")
+            panels.append(normalized)
+    return panels
+
+
+def _normalize_panel_groups(config: dict) -> dict:
+    panels = config.get("panels")
+    if isinstance(panels, dict):
+        config["panels"] = {
+            "app": panels.get("app") if isinstance(panels.get("app"), list) else [],
+            "modules": panels.get("modules") if isinstance(panels.get("modules"), list) else [],
+            "runtime": panels.get("runtime") if isinstance(panels.get("runtime"), list) else [],
+        }
+        return config
+
+    if isinstance(panels, list):
+        config["panels"] = {"app": [], "modules": [], "runtime": panels}
+        return config
+
+    config["panels"] = {"app": [], "modules": [], "runtime": []}
+    return config
+
+
+def _merge_module_admin_panels(config: dict, platform_root: Path) -> dict:
+    config = _normalize_panel_groups(config)
+    module_panels = _load_module_admin_panels(platform_root)
+    if not module_panels:
+        return config
+
+    existing = config["panels"]["modules"]
+    seen = {
+        panel.get("id")
+        for panel in existing
+        if isinstance(panel, dict) and isinstance(panel.get("id"), str)
+    }
+    for panel in module_panels:
+        if panel["id"] not in seen:
+            existing.append(panel)
+            seen.add(panel["id"])
+    return config

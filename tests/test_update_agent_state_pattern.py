@@ -14,13 +14,13 @@ def _stub_agent_factory() -> None:
         app_pkg.__path__ = []
         sys.modules["app"] = app_pkg
 
-    plugins_pkg = sys.modules.get("app.plugins")
-    if plugins_pkg is None:
-        plugins_pkg = types.ModuleType("app.plugins")
-        plugins_pkg.__path__ = []
-        sys.modules["app.plugins"] = plugins_pkg
+    modules_pkg = sys.modules.get("app.modules")
+    if modules_pkg is None:
+        modules_pkg = types.ModuleType("app.modules")
+        modules_pkg.__path__ = []
+        sys.modules["app.modules"] = modules_pkg
 
-    agent_factory_mod = types.ModuleType("app.plugins.agent_factory")
+    agent_factory_mod = types.ModuleType("app.modules.agent_factory")
 
     def _compose_prompt_sections(sections):
         rendered = []
@@ -33,9 +33,9 @@ def _stub_agent_factory() -> None:
         return "\n\n".join(part for part in rendered if part)
 
     agent_factory_mod._compose_prompt_sections = _compose_prompt_sections
-    sys.modules["app.plugins.agent_factory"] = agent_factory_mod
-    app_pkg.plugins = plugins_pkg
-    plugins_pkg.agent_factory = agent_factory_mod
+    sys.modules["app.modules.agent_factory"] = agent_factory_mod
+    app_pkg.plugins = modules_pkg
+    modules_pkg.agent_factory = agent_factory_mod
 
 
 def _load_update_agent_state_pattern_module():
@@ -109,7 +109,7 @@ def test_build_ui_file_generator_example_uses_canonical_runtime_contract() -> No
 
     assert python_file["filename"] == "tools/review_context_aware_routing_panel.py"
     assert "from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool" in python_file["content"]
-    assert "app.plugins.ui_tools" not in python_file["content"]
+    assert "app.modules.ui_tools" not in python_file["content"]
 
     assert react_file["filename"] == "ui/ContextAwareRoutingWorkflow/ContextAwareRoutingReviewPanel.jsx"
     assert "WorkflowUIRouter" not in react_file["content"]
@@ -128,7 +128,7 @@ def test_inject_ui_file_generator_guidance_replaces_legacy_examples() -> None:
     assert "[UI FILE GENERATOR CONTRACT]" in injected
     assert "WorkflowUIRouter" in injected
     assert "from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool" in injected
-    assert "app.plugins.ui_tools" in injected  # negative rule only
+    assert "app.modules.ui_tools" in injected  # negative rule only
     assert "artifactDesignSystem" not in injected
     assert "subscribes via `useAppEventBus`" not in injected
 
@@ -152,7 +152,7 @@ def test_ui_file_generator_prompt_uses_runtime_helper_contract() -> None:
     assert "calls `send_ui_tool_event(component_name, display_type, payload)`" not in ui_section
 
 
-def test_agents_agent_guidance_omits_auto_tool_mode_from_examples() -> None:
+def test_agents_agent_guidance_omits_agent_auto_tool_field_from_examples() -> None:
     agent = _Agent()
     agent.name = "AgentsAgent"
 
@@ -161,8 +161,8 @@ def test_agents_agent_guidance_omits_auto_tool_mode_from_examples() -> None:
     injected = agent._mozaiks_prompt_sections[0]["content"]
 
     assert "[RUNTIME AGENT CONTRACT]" in injected
-    assert "Do NOT emit `auto_tool_mode`" in injected
-    assert "\"auto_tool_mode\"" not in injected
+    assert "Do NOT emit any agent-level auto-tool field" in injected
+    assert "auto_tool_mode" not in injected
 
 
 def test_agent_tools_guidance_marks_integration_as_planning_only() -> None:

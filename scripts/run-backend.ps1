@@ -149,6 +149,6 @@ $venvPython = Join-Path $RepoRoot ".venv/Scripts/python.exe"
 $pythonCmd = if (Test-Path $venvPython) { $venvPython } else { "python" }
 
 Write-Host "[backend] Starting uvicorn on port $Port..." -ForegroundColor Cyan
-Write-Host "[backend] Command: $pythonCmd -m uvicorn shared_app:app --host 0.0.0.0 --port $Port" -ForegroundColor DarkGray
+Write-Host "[backend] Command: $pythonCmd -m uvicorn mozaiks_app:app --host 0.0.0.0 --port $Port" -ForegroundColor DarkGray
 
-& $pythonCmd -m uvicorn shared_app:app --host 0.0.0.0 --port $Port
+& $pythonCmd -m uvicorn mozaiks_app:app --host 0.0.0.0 --port $Port

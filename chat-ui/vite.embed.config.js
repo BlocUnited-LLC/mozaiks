@@ -15,7 +15,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@chat-workflows/index': fileURLToPath(new URL('./src/embed/workflowRegistryStub.js', import.meta.url)),
+      '@chat-workflows-root': fileURLToPath(new URL('./src/workflows_stub', import.meta.url)),
     },
   },
   build: {

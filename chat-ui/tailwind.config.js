@@ -3,8 +3,6 @@ export default {
   darkMode: 'class',
   content: [
     './src/**/*.{js,jsx,ts,tsx}',
-    '../mozaiks-platform/ui/**/*.{js,jsx,ts,tsx}',
-    '../mozaiks-platform/app/**/*.{js,jsx,ts,tsx}',
   ],
   theme: {
     extend: {

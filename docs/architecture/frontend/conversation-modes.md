@@ -38,7 +38,7 @@ The bootstrap effect in ChatPage determines the starting mode using this priorit
 2. **`chat_startup_mode` from `platform/config/ai.json`** — `"ask"` or `"workflow"`. This is the app-level default that controls what the user sees when they first open the app
 3. **Fallback** — if `chat_startup_mode` is not set, the app defaults to `workflow`
 
-The current platform example ships with `chat_startup_mode: "ask"` during local testing, so the app opens in ask mode. The user can toggle to workflow mode at any time, and the configured entry-point workflow, currently `GreenRoom`, will start automatically.
+The current Mozaiks workspace ships with `chat_startup_mode: "ask"` during local testing, so the app opens in ask mode. Workflow launches are routed through the active app's transition/workflow configuration rather than a hardcoded entry-point workflow.
 
 ### Mode changes after load
 

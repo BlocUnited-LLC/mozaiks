@@ -170,7 +170,6 @@ async def create_agents(
             try:
                 remote_agent = create_a2a_remote_agent(a2a_spec, context_variables=context_variables)
                 setattr(remote_agent, "_mozaiks_agent_kind", "a2a_remote")
-                setattr(remote_agent, "_mozaiks_auto_tool_mode", False)
                 agents[agent_name] = remote_agent
                 logger.info(
                     "[AGENTS] Created A2A remote agent '%s' for workflow '%s' (url=%s)",
@@ -201,15 +200,15 @@ async def create_agents(
         except Exception:
             llm_config = base_llm_config
 
-        # Derive auto_tool_mode from tools.yaml (has auto_tool_call: true tool)
-        auto_tool_mode = agent_name in auto_tool_agent_names
+        # Derive auto-tool execution from tools.yaml (has auto_tool_call: true tool).
+        auto_tool_call_enabled = agent_name in auto_tool_agent_names
         structured_model_cls = structured_registry.get(agent_name) if structured_registry else None
-        if auto_tool_mode and structured_model_cls is None:
+        if auto_tool_call_enabled and structured_model_cls is None:
             raise ValueError(
                 f"[AGENTS] Agent '{agent_name}' has auto_tool_call tool but no structured output model is registered"
             )
 
-        agent_functions = [] if auto_tool_mode else agent_tool_functions.get(agent_name, [])
+        agent_functions = [] if auto_tool_call_enabled else agent_tool_functions.get(agent_name, [])
         for idx, fn in enumerate(agent_functions):
             if not callable(fn):
                 logger.error(
@@ -219,7 +218,7 @@ async def create_agents(
         if isinstance(llm_config, dict):
             if "tools" not in llm_config:
                 llm_config["tools"] = []
-            elif auto_tool_mode:
+            elif auto_tool_call_enabled:
                 llm_config["tools"] = []
 
         # Try prompt_sections first (fixed structure - enforces standardization)
@@ -383,7 +382,6 @@ async def create_agents(
                 )
                 raise
 
-        setattr(agent, "_mozaiks_auto_tool_mode", auto_tool_mode)
         if structured_model_cls is not None:
             try:
                 model_name = getattr(structured_model_cls, "__name__", None)

@@ -9,7 +9,7 @@ from pathlib import Path
 TIER_PRESETS = {
     "engine": {
         "ai_runtime": True,
-        "operations": False,
+        "modules": False,
         "event_bus": False,
         "auth": False,
         "admin": False,
@@ -17,7 +17,7 @@ TIER_PRESETS = {
     },
     "chat": {
         "ai_runtime": True,
-        "operations": False,
+        "modules": False,
         "event_bus": False,
         "auth": False,
         "admin": False,
@@ -25,7 +25,7 @@ TIER_PRESETS = {
     },
     "integrated": {
         "ai_runtime": True,
-        "capabilities": True,
+        "modules": True,
         "event_bus": True,
         "auth": True,
         "admin": False,
@@ -33,7 +33,7 @@ TIER_PRESETS = {
     },
     "full": {
         "ai_runtime": True,
-        "capabilities": True,
+        "modules": True,
         "event_bus": True,
         "auth": True,
         "admin": True,
@@ -98,9 +98,9 @@ def _show_next_steps(feature_or_preset):
     """Show next steps after adding a feature."""
     print("\nNext Steps:")
 
-    if feature_or_preset == "operations" or feature_or_preset in ["integrated", "full"]:
-        print("  - Create operations in platform/operations/<name>/")
-        print("  - Each operation needs: operation.yaml, handler.py")
+    if feature_or_preset == "modules" or feature_or_preset in ["integrated", "full"]:
+        print("  - Create modules in platform/modules/<name>/")
+        print("  - Each module needs: module.yaml, handler.py")
 
     if feature_or_preset == "event_bus" or feature_or_preset in ["integrated", "full"]:
         print("  - Use event_bus.publish() to emit app events")
@@ -116,6 +116,6 @@ def _show_next_steps(feature_or_preset):
 
     if feature_or_preset == "chat_ui" or feature_or_preset in ["chat", "integrated", "full"]:
         print("  - Chat UI will be available at root path")
-        print("  - Configure branding in platform/brand/")
+        print("  - Configure branding in brand/")
 
     print("\nRestart your dev server to apply changes.")

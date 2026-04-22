@@ -452,7 +452,7 @@ def build_agent_output_validated_event(
 	agent: str,
 	model_name: str,
 	structured_data: Any,
-	auto_tool_mode: bool,
+	auto_tool_call: bool,
 	context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
 	"""Build normalized payload for runtime.agent_output_validated events.
@@ -468,7 +468,7 @@ def build_agent_output_validated_event(
 		agent=agent,
 		model_name=model_name,
 		structured_data=structured_data,
-		auto_tool_mode=auto_tool_mode,
+		auto_tool_call=auto_tool_call,
 		context=context,
 	)
 

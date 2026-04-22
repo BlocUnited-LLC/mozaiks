@@ -76,7 +76,7 @@ async def test_handle_tool_dispatch_persists_updated_context(monkeypatch):
         "_mfj_resume_nonce": "nonce-123",
     })
     event = {
-        "auto_tool_mode": True,
+        "auto_tool_call": True,
         "agent_name": "PresenterAgent",
         "model_name": "SmokePresentation",
         "structured_data": {

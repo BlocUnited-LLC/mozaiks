@@ -31,11 +31,14 @@ save_app_schema_module = _load_save_app_schema_module()
 
 
 class _Context:
-    def __init__(self) -> None:
-        self.data = {}
+    def __init__(self, initial=None) -> None:
+        self.data = dict(initial or {})
 
     def set(self, key, value) -> None:
         self.data[key] = value
+
+    def get(self, key, default=None):
+        return self.data.get(key, default)
 
 
 def _base_manifest():
@@ -155,7 +158,7 @@ def _canonical_page():
 
 
 def test_save_app_schema_rejects_unknown_top_level_primitive(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda: tmp_path)
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     page = _base_page()
     page["sections"] = [{"id": "hero", "primitive": "Wizard", "config": {}}]
 
@@ -168,7 +171,7 @@ def test_save_app_schema_rejects_unknown_top_level_primitive(monkeypatch, tmp_pa
 
 
 def test_save_app_schema_rejects_unknown_nested_grid_child(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda: tmp_path)
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     page = _base_page()
     page["sections"] = [
         {
@@ -193,7 +196,7 @@ def test_save_app_schema_rejects_unknown_nested_grid_child(monkeypatch, tmp_path
 
 
 def test_save_app_schema_accepts_empty_primitive(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda: tmp_path)
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     context = _Context()
     page = _base_page()
     page["sections"] = [{"id": "empty-state", "primitive": "Empty", "config": {}}]
@@ -210,7 +213,7 @@ def test_save_app_schema_accepts_empty_primitive(monkeypatch, tmp_path: Path) ->
 
 
 def test_save_app_schema_accepts_canonical_declarative_config(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda: tmp_path)
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     context = _Context()
 
     result = save_app_schema_module.save_app_schema(
@@ -232,7 +235,7 @@ def test_save_app_schema_accepts_canonical_declarative_config(monkeypatch, tmp_p
 
 
 def test_save_app_schema_rejects_manifest_page_mismatch(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda: tmp_path)
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     manifest = _base_manifest()
     manifest["pages"] = ["Users"]
 
@@ -245,7 +248,7 @@ def test_save_app_schema_rejects_manifest_page_mismatch(monkeypatch, tmp_path: P
 
 
 def test_save_app_schema_rejects_duplicate_section_ids(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda: tmp_path)
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     page = _base_page()
     page["sections"] = [
         {"id": "hero", "primitive": "Card", "config": {}},
@@ -261,7 +264,7 @@ def test_save_app_schema_rejects_duplicate_section_ids(monkeypatch, tmp_path: Pa
 
 
 def test_save_app_schema_rejects_invalid_form_select_options(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda: tmp_path)
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     page = _base_page()
     page["sections"] = [
         {
@@ -289,7 +292,7 @@ def test_save_app_schema_rejects_invalid_form_select_options(monkeypatch, tmp_pa
 
 
 def test_save_app_schema_writes_shell_and_deep_merges_theme_patch(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda: tmp_path)
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     context = _Context()
 
     brand_dir = tmp_path / "brand"
@@ -353,7 +356,7 @@ def test_save_app_schema_writes_shell_and_deep_merges_theme_patch(monkeypatch, t
 
 
 def test_save_app_schema_writes_and_merges_asset_manifest(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda: tmp_path)
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     context = _Context()
 
     config_dir = tmp_path / "config"
@@ -405,7 +408,7 @@ def test_save_app_schema_writes_and_merges_asset_manifest(monkeypatch, tmp_path:
 
 
 def test_save_app_schema_rejects_invalid_asset_manifest(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda: tmp_path)
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
 
     with pytest.raises(ValueError, match="asset_manifest.assets"):
         save_app_schema_module.save_app_schema(
@@ -414,3 +417,40 @@ def test_save_app_schema_rejects_invalid_asset_manifest(monkeypatch, tmp_path: P
             asset_manifest={"version": "1.0", "assets": {}},
             context_variables=_Context(),
         )
+
+
+def test_save_app_schema_writes_to_generated_artifact_root(monkeypatch, tmp_path: Path) -> None:
+    generated_root = tmp_path / "generated"
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
+    monkeypatch.delenv("MOZAIKS_APP_ID", raising=False)
+    context = _Context({"app_id": "app/one", "build_id": "build one"})
+
+    save_app_schema_module.save_app_schema(
+        manifest=_base_manifest(),
+        pages=[_base_page()],
+        context_variables=context,
+    )
+
+    output_dir = generated_root / "apps" / "app-one" / "build-one" / "app"
+    assert (output_dir / "app.json").exists()
+    assert (output_dir / "pages" / "Dashboard.yaml").exists()
+    assert context.data["generated_app_dir"] == str(output_dir)
+
+
+def test_promote_generated_app_copies_allowlisted_artifacts(tmp_path: Path) -> None:
+    source = tmp_path / "generated" / "apps" / "app-1" / "build-1" / "app"
+    target = tmp_path / "active-app"
+    (source / "pages").mkdir(parents=True)
+    (source / "brand").mkdir()
+    (source / "config").mkdir()
+    (source / "app.json").write_text('{"appName": "Demo"}', encoding="utf-8")
+    (source / "pages" / "Dashboard.yaml").write_text("name: Dashboard\n", encoding="utf-8")
+    (source / "brand" / "theme_config.json").write_text("{}", encoding="utf-8")
+    (source / "config" / "shell.json").write_text("{}", encoding="utf-8")
+
+    result = save_app_schema_module.promote_generated_app(source, target)
+
+    assert result["status"] == "success"
+    assert sorted(result["copied"]) == ["app.json", "brand", "config", "pages"]
+    assert (target / "app.json").exists()
+    assert (target / "pages" / "Dashboard.yaml").exists()

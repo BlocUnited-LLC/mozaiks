@@ -160,59 +160,13 @@ class TestShellConfig:
         assert shell["header"]["logo"]["src"] == "mozaik_logo.svg"
         assert len(shell["header"]["actions"]) >= 1
 
-    def test_has_profile(self, shell):
-        assert shell["profile"]["icon"] == "profile.svg"
-        assert shell["profile"]["defaultLabel"] == "Commander"
-        menu_ids = [m.get("id") for m in shell["profile"]["menu"] if isinstance(m, dict)]
-        assert "admin-portal" in menu_ids
-        assert "signout" in menu_ids
-
-    def test_has_notifications(self, shell):
-        assert shell["notifications"]["icon"] == "notifications.svg"
-        assert shell["notifications"]["show"] is True
+    def test_first_class_shell_controls_are_not_app_config(self, shell):
+        assert "profile" not in shell
+        assert "notifications" not in shell
 
     def test_has_footer(self, shell):
         assert len(shell["footer"]["links"]) >= 3
         assert shell["footer"]["visible"] is True
-
-
-# ── 3. Deprecated config files removed ───────────────────────────────────────
-
-REMOVED_CONFIG_FILES = [
-    "platform/config/navigation_config.json",
-    "platform/config/settings_config.json",
-    "platform/config/notifications_config.json",
-    "platform/config/module_registry.json",
-    "platform/config/subscription_config.json",
-]
-
-
-class TestDeprecatedConfigsRemoved:
-    @pytest.mark.parametrize("relpath", REMOVED_CONFIG_FILES)
-    def test_deprecated_config_removed(self, relpath):
-        full = os.path.join(ROOT, relpath.replace("/", os.sep))
-        assert not os.path.exists(full), f"Deprecated config still exists: {relpath}"
-
-
-# ── 4. Old files removed ────────────────────────────────────────────────────
-
-SUNSET_FILES = [
-    "app/brand/public/brand.json",
-    "app/brand/public/ui.json",
-    "app/brand/public/navigation.json",
-]
-
-
-class TestOldFilesRemoved:
-    @pytest.mark.parametrize("relpath", SUNSET_FILES)
-    def test_old_file_gone(self, relpath):
-        full = os.path.join(ROOT, relpath.replace("/", os.sep))
-        assert not os.path.exists(full), f"Sunset file still exists: {relpath}"
-
-    def test_old_config_dir_gone(self):
-        old = os.path.join(ROOT, "config")
-        assert not os.path.isdir(old), "Old config/ directory still exists at repo root"
-
 
 # ── 6. themeProvider.js → API fetch ─────────────────────────────────────────
 

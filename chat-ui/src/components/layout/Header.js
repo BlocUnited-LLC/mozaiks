@@ -41,6 +41,75 @@ const isMenuItemVisible = (item, roles) => {
   return roles.includes(item.requiresRole);
 };
 
+const isAuthenticatedUser = (user) => {
+  const id = String(user?.id || user?.user_id || "").toLowerCase();
+  return Boolean(user) && id !== "anonymous" && id !== "guest";
+};
+
+const getDefaultProfileMenu = (user) => {
+  const authed = isAuthenticatedUser(user);
+  const items = [
+    {
+      id: "profile",
+      label: "Profile",
+      icon: "profile.svg",
+      action: "navigate",
+      href: "/profile",
+    },
+    {
+      id: "admin-portal",
+      label: "Admin Portal",
+      icon: "settings.svg",
+      action: "navigate",
+      href: "/admin",
+      requiresRole: "admin",
+    },
+  ];
+
+  items.push(
+    authed
+      ? {
+          id: "signout",
+          label: "Sign Out",
+          icon: "logout.svg",
+          action: "signout",
+          variant: "danger",
+        }
+      : {
+          id: "signin",
+          label: "Sign In",
+          icon: "profile.svg",
+          action: "signin",
+        },
+  );
+
+  return items;
+};
+
+const mergeProfileMenu = (defaultItems, configuredItems = []) => {
+  if (!Array.isArray(configuredItems) || configuredItems.length === 0) {
+    return defaultItems;
+  }
+
+  const configuredById = new Map(
+    configuredItems
+      .filter((item) => item && item.id && item.type !== "divider")
+      .map((item) => [item.id, item]),
+  );
+  const defaultIds = new Set(defaultItems.map((item) => item.id));
+  const merged = defaultItems.map((item) => ({
+    ...item,
+    ...(configuredById.get(item.id) || {}),
+  }));
+
+  for (const item of configuredItems) {
+    if (!item || item.type === "divider" || defaultIds.has(item.id)) continue;
+    merged.splice(Math.max(merged.length - 1, 0), 0, item);
+  }
+
+  return merged;
+};
+
 const DefaultBellIcon = ({ className = "h-5 w-5" }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
     <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17H9.143m5.714 0a2.857 2.857 0 1 1-5.714 0m5.714 0H18l-1.714-2.143V10.57a4.286 4.286 0 1 0-8.572 0v4.286L6 17h8.857Z" />
@@ -102,7 +171,7 @@ const Header = ({
     notifications: navNotifications,
   } = useNavigation();
   const handleNavigationItem = useNavigationActions();
-  const { logout } = useChatUI();
+  const { login, logout } = useChatUI();
 
   const headerConfig = {
     ...DEFAULT_HEADER_CONFIG,
@@ -124,8 +193,9 @@ const Header = ({
     [headerActions]
   );
   const profileMenu = useMemo(
-    () => (Array.isArray(profileConfig.menu) ? profileConfig.menu.filter((item) => isMenuItemVisible(item, userRoles)) : []),
-    [profileConfig.menu, userRoles]
+    () => mergeProfileMenu(getDefaultProfileMenu(currentUser), profileConfig.menu)
+      .filter((item) => isMenuItemVisible(item, userRoles)),
+    [currentUser, profileConfig.menu, userRoles]
   );
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -206,6 +276,12 @@ const Header = ({
 
     if (action.action === "signout" || action.id === "signout") {
       await logout?.();
+      setIsProfileOpen(false);
+      return;
+    }
+
+    if (action.action === "signin" || action.id === "signin") {
+      await login?.();
       setIsProfileOpen(false);
       return;
     }

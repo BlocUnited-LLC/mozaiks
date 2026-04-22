@@ -7,11 +7,18 @@
     "admin@example.com"
   ],
 
-  "panels": [
-    "stats",
-    "runs",
-    "sessions"
-  ],
+  "panels": {
+    "app": [
+      { "id": "stats", "label": "App Overview" },
+      { "id": "users", "label": "Users" }
+    ],
+    "modules": [],
+    "runtime": [
+      { "id": "stats", "label": "Runtime Stats" },
+      { "id": "runs", "label": "Active Runs" },
+      { "id": "sessions", "label": "Recent Sessions" }
+    ]
+  },
 
   "roles": ["admin"],
 

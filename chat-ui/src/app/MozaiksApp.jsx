@@ -5,7 +5,7 @@ import GlobalChatWidgetWrapper from '../widget/GlobalChatWidgetWrapper';
 import ShellUIToolRenderer from '../core/ui/ShellUIToolRenderer';
 import NavigationProvider from '../providers/NavigationProvider';
 import RouteRenderer from '../components/RouteRenderer';
-import { initializeWorkflows } from '@chat-workflows/index';
+import { initializeWorkflows } from '../@chat-workflows/index.js';
 import ConfigValidationOverlay from '../config/ConfigValidationOverlay';
 
 /**

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
-import shared_app
+import platform_app
 from mozaiksai.core.auth.dependencies import UserPrincipal
 
 
@@ -28,7 +28,7 @@ def test_resolve_scope_from_principal_accepts_dev_body_scope() -> None:
         app_id=None,
     )
 
-    app_id, user_id = shared_app._resolve_scope_from_principal(
+    app_id, user_id = platform_app.resolve_scope_from_principal(
         principal,
         app_id="demo-app",
         user_id="demo-user",
@@ -51,7 +51,7 @@ def test_resolve_scope_from_principal_rejects_mismatched_bound_app_scope() -> No
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        shared_app._resolve_scope_from_principal(
+        platform_app.resolve_scope_from_principal(
             principal,
             app_id="different-app",
             user_id="user-1",

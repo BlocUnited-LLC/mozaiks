@@ -13,7 +13,7 @@ import { useContext } from "react";
 import { useChatUI } from "../context/ChatUIContext";
 import { NavigationContext } from "../providers/NavigationProvider";
 import workflowConfig from '../config/workflowConfig';
-import { getWorkflow } from '@chat-workflows/index';
+import { getWorkflow } from '../@chat-workflows/index.js';
 import resolveWorkflow from '../utils/resolveWorkflow';
 import { dynamicUIHandler } from '../core/dynamicUIHandler';
 import platform from '../platform/index.js';

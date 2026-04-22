@@ -33,7 +33,7 @@ Declarative workflow definitions for agentic execution. A workflow owns its
 orchestrator config, agents, handoffs, tools, structured outputs, context
 variables, hooks, and optional UI artifacts.
 
-### `platform/operations/`
+### `platform/modules/`
 
 Deterministic CRUD or action surfaces that support workflows and app pages.
 Operations are not AI workflows.

@@ -117,7 +117,6 @@ class AgentSpec(DeclarativeModel):
     description: Optional[str] = None
     human_input_mode: Optional[str] = None
     max_consecutive_auto_reply: int = 2
-    auto_tool_mode: bool = False  # Deprecated: now derived from tools.yaml (auto_tool_call)
     structured_outputs_required: bool = False
     image_generation_enabled: bool = False
 

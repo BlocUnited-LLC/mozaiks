@@ -76,7 +76,7 @@ class AG2OrchestrationAdapter:
     """Implements :class:`OrchestrationPort` for the AG2 (autogen ≥0.11) engine.
 
     Lifecycle:
-        1. Singleton per process — shared_app.py creates one instance at startup.
+        1. Singleton per process — the runtime host creates one instance at startup.
         2. Transport calls ``run()`` / ``resume()`` / ``cancel()`` on it.
         3. Events flow to listeners through the UnifiedEventDispatcher, NOT through
            return values.  ``run()`` / ``resume()`` return a summary ``RunResult``.

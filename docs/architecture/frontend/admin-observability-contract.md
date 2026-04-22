@@ -8,9 +8,9 @@ The admin portal is not an optional app-level add-on. It is a permanent platform
 
 Admin is a first-class framework surface (like chat-ui).
 
-The admin section list is derived from the registered admin sections inside
-`chat-ui/src/adminPortalRegistry.js` plus any extra sections registered by
-workflows/modules via their admin.yaml files.
+The admin section list is owned by the layered host and the framework admin
+router. Additional app-owned admin surfaces should be registered through the
+current platform/Studio/Mozaiks composition layer, not through hardcoded shell files.
 
 ## Admin Endpoints
 
@@ -54,12 +54,8 @@ Returns:
 
 ## Frontend Bridge
 
-`chat-ui/src/coreBridge.js` now exports:
-
-- `adminGetObservabilityOverview(path?)`
-- `adminListObservabilityChats({ path, limit, offset, onlyActive })`
-- `adminGetSubscriptionsOverview({ path, historyLimit })`
-
-The AdminPortal sections consume these bridge calls and degrade to local stub payloads when the endpoints are unavailable.
+The current web shell should call the layered host APIs directly or through the
+active runtime bridge module. Do not introduce a separate monolithic bridge file
+for admin behavior.
 
 Treat the contract as framework-owned even when an app overrides paths or registers additional sections.

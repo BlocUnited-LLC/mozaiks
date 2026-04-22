@@ -1,8 +1,15 @@
 from __future__ import annotations
 
-from .definition import AppDefinition, AppFeatureFlags, CapabilityRef, ExecutionMode, WorkflowRef, PageRef
+from .definition import AppDefinition, AppFeatureFlags, ModuleRef, ExecutionMode, WorkflowRef, PageRef
 from .loader import AppLoader, AppLoadError, AppLoadResult
-from .module_loader import CapabilityLoader, CapabilityLoadError, LoadedCapability, CapabilityDefinition, ActionDef
+from .module_loader import ModuleLoader, ModuleLoadError, LoadedModule, ModuleDefinition, ActionDef
+from .studio_home import (
+    build_studio_home_summary,
+    build_studio_build_summary,
+    get_missing_studio_surfaces,
+    load_studio_build_state,
+    save_studio_build_request,
+)
 
 __all__ = [
     "AppDefinition",
@@ -12,11 +19,16 @@ __all__ = [
     "AppLoader",
     "ExecutionMode",
     "WorkflowRef",
-    "CapabilityRef",
+    "ModuleRef",
     "PageRef",
-    "CapabilityLoader",
-    "CapabilityLoadError",
-    "LoadedCapability",
-    "CapabilityDefinition",
+    "ModuleLoader",
+    "ModuleLoadError",
+    "LoadedModule",
+    "ModuleDefinition",
     "ActionDef",
+    "build_studio_home_summary",
+    "build_studio_build_summary",
+    "load_studio_build_state",
+    "save_studio_build_request",
+    "get_missing_studio_surfaces",
 ]

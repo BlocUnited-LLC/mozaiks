@@ -325,7 +325,7 @@ Emitted periodically with health status.
     "checks": {
       "database": {"status": "ok", "latency_ms": 5},
       "event_bus": {"status": "ok"},
-      "plugins": {"status": "ok", "loaded": 5},
+      "modules": {"status": "ok", "loaded": 5},
       "workflows": {"status": "ok", "loaded": 3}
     },
     "uptime_seconds": 86400

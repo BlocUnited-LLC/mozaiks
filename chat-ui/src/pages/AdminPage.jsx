@@ -1,22 +1,26 @@
 /**
- * AdminPage — First-class framework admin dashboard.
+ * AdminPage — unified admin shell.
  *
- * Lives in chat-ui alongside ChatPage. Registered in coreComponents.js so
- * every app gets it automatically — no platform/extensions.js wiring needed.
+ * /admin is the canonical admin route. App-owner panels, module panels, and
+ * runtime/operator panels are composed here while keeping their backend
+ * authorities separate.
  *
  * Access is gated by the "admin" role (client-side guard here + backend
  * enforcement on all /api/admin/* routes).
  *
- * Panels driven by platform/config/admin.json:
- *   { "panels": ["stats", "runs", "sessions"] }
+ * Runtime panels are driven by platform/config/admin.json:
+ *   { "panels": { "runtime": ["stats", "runs", "sessions"] } }
  *
- * Custom panels: add a string to admin.json "panels" and register a React
- * component with that name via platform/extensions.js. The framework renders
- * the slot; the app fills it.
+ * App and module panels come from the connected app backend's /api/admin/config.
+ * Modules contribute panels through their module admin contract.
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useChatUI } from '../context/ChatUIContext';
+import { AppAdminPanels } from './AppAdminDashboard.jsx';
+import { getComponent } from '../registry/componentRegistry';
+import { BuilderWorkspaceLayout } from '../studio/components/BuilderWorkspaceNav.jsx';
 
 const API_BASE =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) ||
@@ -79,6 +83,18 @@ function SectionHeading({ children }) {
   );
 }
 
+function SectionFrame({ title, description, children }) {
+  return (
+    <section className="rounded-xl border border-border bg-card p-5">
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+        {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 function Badge({ children, variant = 'default' }) {
   const styles = {
     default: 'bg-muted text-muted-foreground',
@@ -107,6 +123,40 @@ function Spinner() {
     <div className="flex items-center gap-2 text-muted-foreground text-sm">
       <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
       Loading…
+    </div>
+  );
+}
+
+function BuilderWorkspacePanel() {
+  const navigate = useNavigate();
+  const tools = [
+    {
+      id: 'studio-home',
+      label: 'Studio',
+      description: 'Workspace status, app intent, and build readiness.',
+      path: '/studio',
+    },
+    {
+      id: 'studio-build',
+      label: 'Build',
+      description: 'Draft a build request and route it into the right workflow.',
+      path: '/studio/build',
+    },
+  ];
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {tools.map((tool) => (
+        <button
+          key={tool.id}
+          type="button"
+          onClick={() => navigate(tool.path)}
+          className="rounded-lg border border-border bg-background p-4 text-left transition-colors hover:bg-muted"
+        >
+          <span className="block text-sm font-semibold text-foreground">{tool.label}</span>
+          <span className="mt-1 block text-xs text-muted-foreground">{tool.description}</span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -267,6 +317,85 @@ const BUILT_IN_PANELS = {
   sessions: { label: 'Recent Sessions', component: SessionsPanel },
 };
 
+function normalizeModulePanels(configPanels) {
+  if (configPanels && Array.isArray(configPanels.modules)) {
+    return configPanels.modules;
+  }
+  return [];
+}
+
+function normalizeRuntimePanels(configPanels) {
+  if (Array.isArray(configPanels)) {
+    return configPanels;
+  }
+  if (configPanels && Array.isArray(configPanels.runtime)) {
+    return configPanels.runtime;
+  }
+  return ['stats', 'runs', 'sessions'];
+}
+
+function getPanelId(panelConfig) {
+  return typeof panelConfig === 'string' ? panelConfig : panelConfig?.id;
+}
+
+function DeclarativeModulePanel({ panel }) {
+  const actions = Array.isArray(panel?.actions) ? panel.actions : [];
+  const description = panel?.description || panel?.summary;
+
+  return (
+    <div className="rounded-lg border border-border bg-background p-4">
+      {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
+      <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+        {panel?.module_id ? <Badge>{panel.module_id}</Badge> : null}
+        {panel?.renderer ? <Badge>{panel.renderer}</Badge> : null}
+        {panel?.data_source ? <Badge>{panel.data_source}</Badge> : null}
+      </div>
+      {actions.length > 0 ? (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {actions.map((action) => {
+            const id = typeof action === 'string' ? action : action?.id;
+            const label = typeof action === 'object' ? action?.label || id : id;
+            if (!id) return null;
+            return (
+              <button
+                key={id}
+                type="button"
+                className="rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-muted"
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ModuleAdminPanels({ panels }) {
+  if (!panels.length) return null;
+
+  return (
+    <>
+      {panels.map((panelConfig) => {
+        const panelId = getPanelId(panelConfig);
+        if (!panelId) return null;
+        const label = typeof panelConfig === 'object' && panelConfig?.label ? panelConfig.label : panelId;
+        const componentName =
+          typeof panelConfig === 'object' && panelConfig?.component ? panelConfig.component : panelId;
+        const Custom = getComponent(componentName);
+
+        return (
+          <div key={panelId}>
+            <SectionHeading>{label}</SectionHeading>
+            {Custom ? <Custom panel={panelConfig} /> : <DeclarativeModulePanel panel={panelConfig} />}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Root
 // ---------------------------------------------------------------------------
@@ -288,35 +417,64 @@ export default function AdminPage() {
     );
   }
 
-  const activePanels = config?.panels ?? ['stats', 'runs', 'sessions'];
+  const activeRuntimePanels = normalizeRuntimePanels(config?.panels);
+  const activeModulePanels = normalizeModulePanels(config?.panels);
 
   return (
-    <div className="min-h-screen bg-background px-4 py-8 sm:px-8">
-      <div className="mx-auto max-w-6xl">
-
+    <BuilderWorkspaceLayout>
+      <div className="space-y-6">
         <div className="mb-8 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-foreground">Admin Portal</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Runtime observability for {user?.name || user?.email || 'this app'}
+              App, module, and runtime administration for {user?.name || user?.email || 'this app'}
             </p>
           </div>
           <Badge variant="primary">admin</Badge>
         </div>
 
-        {activePanels.map((panelId) => {
-          const built = BUILT_IN_PANELS[panelId];
-          if (!built) return null; // custom panels rendered by app via extensions.js
-          const Panel = built.component;
-          return (
-            <div key={panelId}>
-              <SectionHeading>{built.label}</SectionHeading>
-              <Panel />
-            </div>
-          );
-        })}
+        <SectionFrame
+          title="App Administration"
+          description="App-owner, user, subscription, settings, and module panels from the connected app backend."
+        >
+          <AppAdminPanels embedded />
+        </SectionFrame>
 
+        <SectionFrame
+          title="Builder Workspace"
+          description="Admin-only app creation and refinement tools."
+        >
+          <BuilderWorkspacePanel />
+        </SectionFrame>
+
+        {activeModulePanels.length > 0 ? (
+          <SectionFrame
+            title="Module Administration"
+            description="Module-level controls and operational panels."
+          >
+            <ModuleAdminPanels panels={activeModulePanels} />
+          </SectionFrame>
+        ) : null}
+
+        <SectionFrame
+          title="Runtime Operations"
+          description="Mozaiks workflow runtime observability. These panels are visible only to runtime/platform operators."
+        >
+          {activeRuntimePanels.map((panelConfig) => {
+            const panelId = getPanelId(panelConfig);
+            const built = BUILT_IN_PANELS[panelId];
+            if (!built) return null;
+            const label = typeof panelConfig === 'object' && panelConfig?.label ? panelConfig.label : built.label;
+            const Panel = built.component;
+            return (
+              <div key={panelId}>
+                <SectionHeading>{label}</SectionHeading>
+                <Panel />
+              </div>
+            );
+          })}
+        </SectionFrame>
       </div>
-    </div>
+    </BuilderWorkspaceLayout>
   );
 }

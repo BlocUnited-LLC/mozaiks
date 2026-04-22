@@ -10,7 +10,7 @@
 // ==============================================================================
 
 import workflowConfig from '../config/workflowConfig';
-import { getLoadedWorkflows } from '@chat-workflows/index';
+import { getLoadedWorkflows } from '../@chat-workflows/index.js';
 
 /**
  * Resolve the active workflow name using a deterministic priority chain.

@@ -223,8 +223,8 @@ class TextEventHandler(BaseEventHandler):
         if sender_name not in ctx.validated_output_agents:
             return content, False
 
-        auto_mode = sender_name in ctx.auto_tool_agents
-        mode_label = "auto-tool" if auto_mode else "structured-output"
+        auto_tool_call_enabled = sender_name in ctx.auto_tool_agents
+        mode_label = "auto-tool" if auto_tool_call_enabled else "structured-output"
         ctx.wf_logger.info(
             f" [{ctx.workflow_name_upper}] {mode_label} intercept for {sender_name} "
             f"(content_len={len(content)})"
@@ -268,7 +268,7 @@ class TextEventHandler(BaseEventHandler):
 
         ctx.wf_logger.info(
             f" [{ctx.workflow_name_upper}] Structured output ready for {sender_name}; "
-            f"emitting dispatcher event (auto_tool_mode={auto_mode})."
+            f"emitting dispatcher event (auto_tool_call={auto_tool_call_enabled})."
         )
 
         # Extract display message
@@ -452,7 +452,7 @@ class TextEventHandler(BaseEventHandler):
             agent=sender_name,
             model_name=model_name,
             structured_data=normalized_structured,
-            auto_tool_mode=auto_mode,
+            auto_tool_call=auto_tool_call_enabled,
             context=context_payload,
             turn_idempotency_key=turn_key,
             pattern_context_ref=ctx.context_variables,

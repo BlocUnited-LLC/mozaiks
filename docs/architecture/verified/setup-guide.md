@@ -165,7 +165,8 @@ A general-purpose agent that lets users ask questions about your app or product.
 ### Workflow Mode
 
 Purpose-built multi-agent workflows for specific tasks. These are the workflows
-you create in `platform/workflows/` (e.g., CustomerSupport, GreenRoom, etc.).
+you create in the active app root, such as `mozaiks-platform/app/workflows/`
+for the local Mozaiks workspace.
 
 - Follows a defined agent orchestration pattern
 - Has specific tools, handoffs, and structured outputs

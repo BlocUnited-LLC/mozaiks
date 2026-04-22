@@ -1,13 +1,14 @@
 ---
 name: add-module
-description: Add a backend module (routes + models) to an existing Mozaiks app.
+description: Add a backend module (deterministic CRUD/action handler) to an existing Mozaiks app.
 argument-hint: "[module name or description]"
 ---
 
 Help the user add a backend **module** to an existing Mozaiks application.
 
-A module is deterministic backend logic: CRUD routes, domain data, business rules.
+A module is deterministic backend logic: CRUD actions, domain data, business rules.
 It runs without AI. For AI-driven behavior, use a workflow instead.
+Modules support workflows — they provide the action surface that AI agents call.
 
 ---
 
@@ -15,13 +16,13 @@ It runs without AI. For AI-driven behavior, use a workflow instead.
 
 ```
 platform/modules/<name>/
-├── module.json       ← metadata (name, category, author, description)
-├── handler.py        ← FastAPI router with HTTP endpoints
-├── models.py         ← Pydantic request/response schemas
-└── service.py        ← business logic (optional, recommended)
+├── module.yaml    ← metadata (name, version, actions, events)
+├── handler.py     ← handler class with action methods
+├── models.py      ← Pydantic request/response schemas (optional)
+└── service.py     ← business logic (optional, recommended for complex cases)
 ```
 
-The runtime auto-discovers and mounts all modules at startup.
+The runtime auto-discovers and registers all modules at startup.
 
 ---
 
@@ -33,24 +34,34 @@ The runtime auto-discovers and mounts all modules at startup.
 mkdir platform/modules/<name>
 ```
 
-### 2. Write `module.json`
+### 2. Write `module.yaml`
 
-```json
-{
-  "name": "<name>",
-  "displayName": "<Human Name>",
-  "category": "data",
-  "author": "you",
-  "description": "What this module does.",
-  "version": "0.1.0"
-}
+```yaml
+name: <name>
+version: "1.0"
+description: What this module does.
+
+actions:
+  - name: list
+    type: query
+    description: List all items
+  - name: create
+    type: mutation
+    description: Create an item
+    emits:
+      - <name>.created
+
+events:
+  - <name>.created
+  - <name>.updated
+  - <name>.deleted
 ```
 
 ### 3. Write `models.py`
 
 ```python
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 
 class CreateItemRequest(BaseModel):
     name: str
@@ -65,20 +76,15 @@ class ItemResponse(BaseModel):
 ### 4. Write `handler.py`
 
 ```python
-from fastapi import APIRouter, HTTPException
-from .models import CreateItemRequest, ItemResponse
+class <Name>Module:
+    async def list(self, ctx, *, limit: int = 20) -> list:
+        # Replace with real data source
+        return []
 
-router = APIRouter(prefix="/api/modules/<name>", tags=["<name>"])
-
-@router.get("/list", response_model=List[ItemResponse])
-async def list_items():
-    # Replace with real data source
-    return []
-
-@router.post("/create", response_model=ItemResponse)
-async def create_item(request: CreateItemRequest):
-    # Replace with real persistence
-    return {"id": "new-id", **request.model_dump()}
+    async def create(self, ctx, *, name: str, description: str = None) -> dict:
+        result = {"id": "new-id", "name": name, "description": description}
+        await ctx.emit("<name>.created", result)
+        return result
 ```
 
 ### 5. Restart the backend
@@ -93,7 +99,7 @@ Modules are loaded at startup. No registration step needed.
 
 ## Connecting a Module to a Page
 
-Once the module exposes routes, reference them in an `AppPageSchema`:
+Once the module is loaded, reference it in an `AppPageSchema`:
 
 ```yaml
 # platform/pages/items.yaml
@@ -111,14 +117,11 @@ sections:
     api_endpoint: /api/modules/<name>/list
 ```
 
-The `SchemaPage` route fetches this YAML and `PageRenderer` wires the `api_endpoint`
-to the `DataTable` automatically.
-
 ---
 
 ## Connecting a Module to a Workflow
 
-Workflows call modules via the `AppBackendPort` adapter — no direct imports:
+Workflows call modules via the AppBackendPort adapter:
 
 ```python
 # In a workflow tool
@@ -137,9 +140,9 @@ result = await backend_request(
 ## Rules
 
 - Modules are **dumb**: data in, data out. No AI calls inside a module.
-- Keep business logic in `service.py`, HTTP wiring in `handler.py`.
+- Keep business logic in `service.py`, action wiring in `handler.py`.
 - Use Pydantic models for all request/response shapes.
-- Module routes must be prefixed `/api/modules/<name>/` to avoid collisions.
+- Module routes are auto-mounted at `/api/modules/<name>/<action>`.
 
 ---
 

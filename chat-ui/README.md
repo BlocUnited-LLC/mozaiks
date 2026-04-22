@@ -34,16 +34,20 @@ template/
 
 ## Workflow UI Components (`@chat-workflows` alias)
 
-`ChatPage.js` and `WorkflowUIRouter.js` import workflow UI components via the `@chat-workflows` alias. This is an **injection seam** — chat-ui ships a no-op stub so it works standalone, but consuming apps override it at build time.
+chat-ui keeps workflow UI registration inside its own package, but the actual workflow root is still a **host-owned injection seam**.
+
+The registry module reads `<workflow>/ui/index.js` barrels from a build-time alias named `@chat-workflows-root`.
+That keeps chat-ui decoupled from repo layout and artifact paths while letting the host decide which app bundle is active.
 
 ### How it works
 
-1. **In chat-ui (this package):** `@chat-workflows` → `workflows_stub/index.js` → returns empty arrays / no-ops.
-2. **In a consuming app:** The bundler alias `@chat-workflows` is configured to point at the app's `frontend/workflows/` directory, which contains real per-workflow UI components.
+1. **In chat-ui (this package):** the internal registry module scans `@chat-workflows-root/*/ui/index.{js,jsx}`.
+2. **In a consuming app:** the bundler alias `@chat-workflows-root` is configured to point at the active app bundle's `workflows/` directory.
+3. **In standalone/embed builds:** `@chat-workflows-root` points at an empty stub directory, so no workflow UI is registered.
 
 ### Consuming app setup (Vite example)
 
-The consuming app must configure its bundler to resolve the alias:
+The consuming app must configure its bundler to resolve the injected workflow root:
 
 ```js
 // vite.config.js
@@ -53,7 +57,7 @@ import path from 'path';
 export default defineConfig({
   resolve: {
     alias: {
-      '@chat-workflows': path.resolve(__dirname, '../workflows'),
+      '@chat-workflows-root': path.resolve(__dirname, '../platform/workflows'),
     },
   },
 });

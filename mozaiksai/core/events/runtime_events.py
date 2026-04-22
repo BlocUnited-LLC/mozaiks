@@ -64,7 +64,7 @@ def build_runtime_agent_output_validated_event(
     agent: str,
     model_name: str,
     structured_data: Any,
-    auto_tool_mode: bool,
+    auto_tool_call: bool,
     context: Optional[Dict[str, Any]] = None,
     source: str = "runtime",
     turn_idempotency_key: Optional[str] = None,
@@ -79,7 +79,7 @@ def build_runtime_agent_output_validated_event(
         "agent_name": agent,
         "model_name": model_name,
         "structured_data": serialize_event_content(structured_data),
-        "auto_tool_mode": bool(auto_tool_mode),
+        "auto_tool_call": bool(auto_tool_call),
         "context": context or {},
         "source": source,
     }

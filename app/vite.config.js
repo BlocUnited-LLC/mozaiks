@@ -34,6 +34,15 @@ function resolveFirstExistingPath(candidates) {
   return candidates[candidates.length - 1];
 }
 
+function resolveWorkflowRoot(platformAppDir, platformInputPath) {
+  return resolveFirstExistingPath([
+    path.resolve(platformAppDir, 'workflows'),
+    path.resolve(platformInputPath, 'workflows'),
+    path.resolve(projectRoot, 'platform/workflows'),
+    path.resolve(projectRoot, 'chat-ui/src/workflows_stub'),
+  ]);
+}
+
 function normalizeFaviconPath(value) {
   if (!value || typeof value !== 'string') return 'favicon.ico';
   let out = value.trim();
@@ -61,6 +70,7 @@ export default defineConfig(({ mode }) => {
     ? path.resolve(projectRoot, platformEnv)
     : path.resolve(projectRoot, 'platform');
   const platformAppDir = resolveAppBundleDir(platformInputPath);
+  const platformWorkflowRoot = resolveWorkflowRoot(platformAppDir, platformInputPath);
 
   // Platform UI extensions:
   // - product platforms: <app>/../ui/index.js
@@ -88,6 +98,7 @@ export default defineConfig(({ mode }) => {
     ? require(appConfigPath)
     : {};
   const apiUrl = process.env.VITE_API_URL || rootEnv.VITE_API_URL || appConfig.apiUrl || 'http://localhost:8000';
+  const hostMode = process.env.VITE_MOZAIKS_HOST || rootEnv.VITE_MOZAIKS_HOST || process.env.MOZAIKS_HOST || rootEnv.MOZAIKS_HOST || 'studio';
   const resolveFavicon = () => {
     const themeConfigPath = path.join(platformBrandDir, 'theme_config.json');
     if (!fs.existsSync(themeConfigPath)) return 'favicon.ico';
@@ -142,7 +153,7 @@ export default defineConfig(({ mode }) => {
     alias: {
       // ── Core aliases (always present) ───────────────────────────────────
       '@mozaiks/chat-ui': path.resolve(__dirname, '../chat-ui/src'),
-      '@chat-workflows':  path.resolve(__dirname, '../chat-ui/src/@chat-workflows'),
+      '@chat-workflows-root': platformWorkflowRoot,
       'react-native':     'react-native-web',
       // Ensure files imported from sibling product/workflow folders resolve to
       // this frontend's dependency tree instead of walking unrelated parents.
@@ -166,6 +177,7 @@ export default defineConfig(({ mode }) => {
   define: {
     // Shim process.env for legacy CRA-style env reads in chat-ui/src.
     'process.env': JSON.stringify({}),
+    'import.meta.env.MOZAIKS_HOST': JSON.stringify(hostMode),
   },
 
   server: {

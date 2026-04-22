@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from .app.definition import AppDefinition, AppFeatureFlags, OperationRef, ExecutionMode, WorkflowRef, PageRef
+from .app.definition import AppDefinition, AppFeatureFlags, ModuleRef, ExecutionMode, WorkflowRef, PageRef
 from .app.loader import AppLoader, AppLoadError, AppLoadResult
-from .app.module_loader import OperationLoader, OperationLoadError, LoadedOperation, OperationDefinition, ActionDef
+from .app.module_loader import ModuleLoader, ModuleLoadError, LoadedModule, ModuleDefinition, ActionDef
 from .composition.extensions import (
     mount_declared_routers,
     start_declared_services,
@@ -12,8 +12,8 @@ from .composition.extensions import (
 )
 from .composition.platform_hooks import get_platform_hooks, PlatformHookRegistry
 from .composition.executor_registry import Executor, ExecutorRegistry, ExecutorType
-from .composition.module_context import OperationContext
-from .composition.module_executor import OperationExecutor, OperationRequest, OperationResult
+from .composition.module_context import ModuleContext
+from .composition.module_executor import ModuleExecutor, ModuleRequest, ModuleResult
 
 __all__ = [
     "AppDefinition",
@@ -23,12 +23,12 @@ __all__ = [
     "AppLoader",
     "ExecutionMode",
     "WorkflowRef",
-    "OperationRef",
+    "ModuleRef",
     "PageRef",
-    "OperationLoader",
-    "OperationLoadError",
-    "LoadedOperation",
-    "OperationDefinition",
+    "ModuleLoader",
+    "ModuleLoadError",
+    "LoadedModule",
+    "ModuleDefinition",
     "ActionDef",
     "mount_declared_routers",
     "start_declared_services",
@@ -40,8 +40,8 @@ __all__ = [
     "Executor",
     "ExecutorRegistry",
     "ExecutorType",
-    "OperationContext",
-    "OperationExecutor",
-    "OperationRequest",
-    "OperationResult",
+    "ModuleContext",
+    "ModuleExecutor",
+    "ModuleRequest",
+    "ModuleResult",
 ]

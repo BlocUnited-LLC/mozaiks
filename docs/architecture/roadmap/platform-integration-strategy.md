@@ -24,7 +24,7 @@ How do different types of users/customers integrate with Mozaiks AI capabilities
 ### 4. OSS Community
 **Who:** Developers exploring, learning, contributing
 **Stack:** Varies
-**Goal:** Try it out, build plugins, contribute workflows
+**Goal:** Try it out, build modules, contribute workflows
 
 ---
 

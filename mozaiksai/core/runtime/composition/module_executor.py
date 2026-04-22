@@ -1,27 +1,27 @@
 from __future__ import annotations
 
-"""OperationExecutor — dispatches operation action requests to loaded operation handlers.
+"""ModuleExecutor — dispatches module action requests to loaded module handlers.
 
 Implements the Executor protocol defined in executor_registry.py.
 
 Request flow:
-    1. Caller builds an OperationRequest(operation="contacts", action="list", params={...}, ctx=...)
-    2. OperationExecutor.execute() resolves the operation by name from the registry
-    3. OperationExecutor looks up the action method on the handler instance
-    4. OperationExecutor calls handler.{action}(ctx, **params)
-    5. Returns OperationResult(success=True, data=result)
+    1. Caller builds a ModuleRequest(module="contacts", action="list", params={...}, ctx=...)
+    2. ModuleExecutor.execute() resolves the module by name from the registry
+    3. ModuleExecutor looks up the action method on the handler instance
+    4. ModuleExecutor calls handler.{action}(ctx, **params)
+    5. Returns ModuleResult(success=True, data=result)
 
-Operation handlers are plain Python classes. Actions are methods named after
-the action string. The class is registered via OperationExecutor.register().
+Module handlers are plain Python classes. Actions are methods named after
+the action string. The class is registered via ModuleExecutor.register().
 
 Example handler:
-    class ContactsOperation:
-        async def list(self, ctx: OperationContext, *, limit: int = 20) -> list:
+    class ContactsModule:
+        async def list(self, ctx: ModuleContext, *, limit: int = 20) -> list:
             ...
-        async def create(self, ctx: OperationContext, *, name: str, email: str) -> dict:
+        async def create(self, ctx: ModuleContext, *, name: str, email: str) -> dict:
             ...
 
-Operation handlers must NOT import from mozaiksai.core.workflow or any AI layer.
+Module handlers must NOT import from mozaiksai.core.workflow or any AI layer.
 """
 
 import inspect
@@ -29,10 +29,10 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from mozaiksai.core.runtime.composition.executor_registry import Executor, ExecutorType
-from mozaiksai.core.runtime.composition.module_context import OperationContext
+from mozaiksai.core.runtime.composition.module_context import ModuleContext
 from logs.logging_config import get_workflow_logger
 
-logger = get_workflow_logger("operation_executor")
+logger = get_workflow_logger("module_executor")
 
 
 # ---------------------------------------------------------------------------
@@ -40,20 +40,20 @@ logger = get_workflow_logger("operation_executor")
 # ---------------------------------------------------------------------------
 
 @dataclass
-class OperationRequest:
-    """A request to execute an operation action.
+class ModuleRequest:
+    """A request to execute a module action.
 
     Fields:
-        operation:  Name of the operation to invoke, e.g. "contacts"
-        action:     Action method name on the handler, e.g. "list", "create"
-        params:     Keyword arguments forwarded to the action method
-        app_id:     Required — scope for multi-tenancy
-        user_id:    Optional authenticated user
-        tenant_id:  Optional tenant override
-        auth_token: Optional JWT forwarded to external API calls
+        module:         Name of the module to invoke, e.g. "contacts"
+        action:         Action method name on the handler, e.g. "list", "create"
+        params:         Keyword arguments forwarded to the action method
+        app_id:         Required — scope for multi-tenancy
+        user_id:        Optional authenticated user
+        tenant_id:      Optional tenant override
+        auth_token:     Optional JWT forwarded to external API calls
         correlation_id: Optional tracing ID
     """
-    operation: str
+    module: str
     action: str
     params: Dict[str, Any] = field(default_factory=dict)
 
@@ -66,8 +66,8 @@ class OperationRequest:
 
 
 @dataclass
-class OperationResult:
-    """Result of an operation action execution."""
+class ModuleResult:
+    """Result of a module action execution."""
     success: bool
     data: Any = None
     error: Optional[str] = None
@@ -75,72 +75,72 @@ class OperationResult:
 
 
 # ---------------------------------------------------------------------------
-# OperationExecutor
+# ModuleExecutor
 # ---------------------------------------------------------------------------
 
-class OperationExecutor:
-    """Dispatches OperationRequests to registered operation handler instances.
+class ModuleExecutor:
+    """Dispatches ModuleRequests to registered module handler instances.
 
     Implements the Executor protocol so it can be registered in ExecutorRegistry.
 
-    Usage (in shared_app.py / AppLoader wiring):
-        executor = OperationExecutor()
-        executor.register("contacts", ContactsOperation())
-        executor.register("tasks", TasksOperation())
+    Usage (in platform_app.py / AppLoader wiring):
+        executor = ModuleExecutor()
+        executor.register("contacts", ContactsModule())
+        executor.register("tasks", TasksModule())
 
         registry = ExecutorRegistry()
         registry.register(executor)
     """
 
-    executor_type: ExecutorType = ExecutorType.OPERATION
+    executor_type: ExecutorType = ExecutorType.MODULE
 
     def __init__(self) -> None:
-        self._operations: Dict[str, Any] = {}
+        self._modules: Dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # Registration
     # ------------------------------------------------------------------
 
     def register(self, name: str, handler: Any) -> None:
-        """Register an operation handler instance under a name.
+        """Register a module handler instance under a name.
 
         Args:
-            name:    Operation name as declared in operation.yaml and OperationRequest.operation
-            handler: Instantiated operation handler object
+            name:    Module name as declared in module.yaml and ModuleRequest.module
+            handler: Instantiated module handler object
         """
-        self._operations[name] = handler
-        logger.info(f"OPERATION_REGISTERED: {name} ({type(handler).__name__})")
+        self._modules[name] = handler
+        logger.info(f"MODULE_REGISTERED: {name} ({type(handler).__name__})")
 
-    def registered_operations(self) -> List[str]:
-        return list(self._operations.keys())
+    def registered_modules(self) -> List[str]:
+        return list(self._modules.keys())
 
     # ------------------------------------------------------------------
     # Executor protocol
     # ------------------------------------------------------------------
 
-    async def execute(self, request: OperationRequest, context: Optional[OperationContext] = None) -> OperationResult:
-        """Dispatch an OperationRequest to the appropriate handler action.
+    async def execute(self, request: ModuleRequest, context: Optional[ModuleContext] = None) -> ModuleResult:
+        """Dispatch a ModuleRequest to the appropriate handler action.
 
-        Builds an OperationContext from the request if one is not supplied.
+        Builds a ModuleContext from the request if one is not supplied.
         """
-        handler = self._operations.get(request.operation)
+        handler = self._modules.get(request.module)
         if handler is None:
-            return OperationResult(
+            return ModuleResult(
                 success=False,
-                error=f"Operation not found: {request.operation!r}",
-                error_code="OPERATION_NOT_FOUND",
+                error=f"Module not found: {request.module!r}",
+                error_code="MODULE_NOT_FOUND",
             )
 
         action_fn = getattr(handler, request.action, None)
         if action_fn is None:
-            return OperationResult(
+            return ModuleResult(
                 success=False,
-                error=f"Action {request.action!r} not found on operation {request.operation!r}",
+                error=f"Action {request.action!r} not found on module {request.module!r}",
                 error_code="ACTION_NOT_FOUND",
             )
 
         if context is None:
-            context = OperationContext(
+            context = ModuleContext(
                 app_id=request.app_id,
                 user_id=request.user_id,
                 tenant_id=request.tenant_id,
@@ -155,26 +155,26 @@ class OperationExecutor:
                 result = action_fn(context, **request.params)
 
             logger.debug(
-                f"OPERATION_ACTION_OK: operation={request.operation} action={request.action} "
+                f"MODULE_ACTION_OK: module={request.module} action={request.action} "
                 f"app_id={request.app_id}"
             )
-            return OperationResult(success=True, data=result)
+            return ModuleResult(success=True, data=result)
 
         except TypeError as exc:
             logger.warning(
-                f"OPERATION_ACTION_BAD_PARAMS: operation={request.operation} action={request.action} error={exc}"
+                f"MODULE_ACTION_BAD_PARAMS: module={request.module} action={request.action} error={exc}"
             )
-            return OperationResult(
+            return ModuleResult(
                 success=False,
-                error=f"Invalid parameters for {request.operation}.{request.action}: {exc}",
+                error=f"Invalid parameters for {request.module}.{request.action}: {exc}",
                 error_code="INVALID_PARAMS",
             )
         except Exception as exc:
             logger.error(
-                f"OPERATION_ACTION_ERROR: operation={request.operation} action={request.action} error={exc}",
+                f"MODULE_ACTION_ERROR: module={request.module} action={request.action} error={exc}",
                 exc_info=True,
             )
-            return OperationResult(
+            return ModuleResult(
                 success=False,
                 error=str(exc),
                 error_code="EXECUTION_ERROR",
@@ -182,16 +182,10 @@ class OperationExecutor:
 
     async def health(self) -> Dict[str, Any]:
         return {
-            "executor": "operation",
-            "operations": self.registered_operations(),
-            "count": len(self._operations),
+            "executor": "module",
+            "modules": self.registered_modules(),
+            "count": len(self._modules),
         }
 
     def can_handle(self, target: str) -> bool:
-        return target in self._operations
-
-
-# Backward-compatible aliases — remove once all call sites are updated
-ModuleRequest = OperationRequest
-ModuleResult = OperationResult
-ModuleExecutor = OperationExecutor
+        return target in self._modules

@@ -21,7 +21,7 @@ mozaiks init engine --name my-api
 
 **What you get:**
 - AI workflow execution via REST API
-- No authentication, no UI, no modules
+- No authentication, no UI, no operations
 - Minimal barrier to entry
 
 ### 2. **chat** - Chatbot Builders
@@ -36,12 +36,12 @@ mozaiks init chat --name my-chatbot
 **What you get:**
 - Everything from engine
 - Chat UI with workflow integration
-- Still no auth, modules, or event bus
+- Still no auth, operations, or event bus
 
 ### 3. **integrated** - SaaS Builders
 **For:** Teams building multi-user SaaS products
-**Includes:** AI + chat + modules + event bus + auth
-**Use when:** You need business logic, user management, and event-driven automation
+**Includes:** AI + chat + operations + event bus + auth
+**Use when:** You need deterministic app actions, user management, and event-driven automation
 
 ```bash
 mozaiks init integrated --name my-saas
@@ -49,7 +49,7 @@ mozaiks init integrated --name my-saas
 
 **What you get:**
 - Everything from chat
-- Business modules (deterministic logic)
+- Operations (deterministic logic)
 - Event bus for workflow triggers
 - Keycloak authentication
 
@@ -84,15 +84,20 @@ When the user wants to create a new project:
    ```
 
 3. **Explain what was created:**
-   - `platform/app.json` with preset
-   - `platform/workflows/` with example workflow
-   - `platform/pages/` with example page (if chat_ui enabled)
-   - Directory structure matching the tier
+   - `platform/app.json` with app identity and startup intent
+   - `platform/config/ai.json` + `platform/config/shell.json`
+   - `brand/theme_config.json` for visual identity
+   - `ui/extension.json` for custom page ownership
+   - Empty `platform/modules/`, `platform/workflows/`, and `platform/pages/` stubs
 
-4. **Guide next steps:**
-   - Set up `.env` with OPENAI_API_KEY
-   - Run backend: `python run_server.py`
-   - If chat_ui: Run frontend: `cd app && npm run dev`
+4. **Explain starter content is opt-in:**
+   - Default `init` creates shape only
+   - Use `--starter` only when the user explicitly wants example workflow content
+
+5. **Guide next steps:**
+   - Point `PLATFORM_PATH` at the generated `platform/` directory
+   - Customize `platform/app.json`, `platform/config/ai.json`, and `brand/theme_config.json`
+   - Add real workflows/operations only after the user has product context
 
 ## Feature Upgrade Path
 
@@ -100,7 +105,7 @@ Users can always add more features later:
 
 ```bash
 # Enable individual features
-mozaiks add modules
+mozaiks add operations
 mozaiks add event_bus
 mozaiks add auth
 mozaiks add admin
@@ -132,7 +137,13 @@ mozaiks init chat --name my-website-bot
 
 This will create:
 - `platform/app.json` (preset: chat)
-- Example workflow in `platform/workflows/HelloWorkflow/`
-- Example page in `platform/pages/home/`
+- `platform/config/ai.json` and `platform/config/shell.json`
+- `brand/theme_config.json`
+- stub folders for workflows, operations, and pages
 
-You can always add auth, modules, or admin features later with `mozaiks add`."
+If you want starter example content too, use:
+```bash
+mozaiks init chat --name my-website-bot --starter
+```
+
+You can always add auth, operations, or admin features later with `mozaiks add`."

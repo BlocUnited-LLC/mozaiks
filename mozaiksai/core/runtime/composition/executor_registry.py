@@ -3,13 +3,13 @@ from __future__ import annotations
 """Executor protocol and registry.
 
 Executors are the active handlers for a given runtime surface:
-  - WorkflowExecutor   — handles AI workflow execution (AG2 runtime, already exists)
-  - OperationExecutor  — handles CRUD operation execution (Phase 2)
+  - WorkflowExecutor — handles AI workflow execution (AG2 runtime, already exists)
+  - ModuleExecutor   — handles CRUD module execution (Phase 2)
 
 The ExecutorRegistry is the runtime's single source of truth for which
 executors are available. Phase 1 only registers WorkflowExecutor.
-Phase 2 adds OperationExecutor when operations are discovered from
-operations/*/operation.yaml.
+Phase 2 adds ModuleExecutor when modules are discovered from
+modules/*/module.yaml.
 
 The Executor protocol defines the minimal interface both implementations
 must satisfy so the runtime's request dispatcher can treat them uniformly.
@@ -25,8 +25,8 @@ logger = get_workflow_logger("executor_registry")
 
 class ExecutorType(str, Enum):
     """Identifies which kind of executor is registered."""
-    WORKFLOW = "workflow"    # AI workflow execution
-    OPERATION = "operation"  # CRUD operation execution (Phase 2)
+    WORKFLOW = "workflow"  # AI workflow execution
+    MODULE = "module"      # CRUD module execution (Phase 2)
 
 
 @runtime_checkable
@@ -59,13 +59,13 @@ class Executor(Protocol):
 class ExecutorRegistry:
     """Registry mapping ExecutorType → Executor instance.
 
-    Phase 1: only WorkflowExecutor is registered (done in shared_app.py).
-    Phase 2: OperationExecutor is registered when app declares operations.
+    Phase 1: only WorkflowExecutor is registered by the runtime host.
+    Phase 2: ModuleExecutor is registered when app declares modules.
 
-    Example (Phase 2 usage in shared_app.py):
+    Example (Phase 2 usage in platform_app.py):
         registry = ExecutorRegistry()
         registry.register(workflow_executor)
-        registry.register(operation_executor)
+        registry.register(module_executor)
 
         # Dispatcher resolves type from request and calls:
         executor = registry.get(ExecutorType.WORKFLOW)
@@ -92,8 +92,8 @@ class ExecutorRegistry:
         return self._executors.get(ExecutorType.WORKFLOW)
 
     @property
-    def operation_executor(self) -> Optional[Executor]:
-        return self._executors.get(ExecutorType.OPERATION)
+    def module_executor(self) -> Optional[Executor]:
+        return self._executors.get(ExecutorType.MODULE)
 
     def registered_types(self) -> list[ExecutorType]:
         return list(self._executors.keys())

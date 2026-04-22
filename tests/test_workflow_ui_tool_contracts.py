@@ -78,7 +78,7 @@ def test_repo_owned_interactive_ui_tools_use_canonical_helper_import() -> None:
     for relative_path in files:
         content = _read(relative_path)
         assert "from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool" in content
-        assert "from app.plugins.ui_tools import use_ui_tool, UIToolError" not in content
+        assert "from app.modules.ui_tools import use_ui_tool, UIToolError" not in content
         assert "from mozaiksai.core.workflow.outputs.ui_tools import UIToolError, use_ui_tool" not in content
 
 
@@ -196,15 +196,22 @@ def test_architecture_index_references_appgenerator_output_contract() -> None:
 
 def test_generated_workflow_ui_contract_is_co_located_with_workflow_pack() -> None:
     converter = _read("mozaiks-platform/app/workflows/AgentGenerator/tools/workflow_converter.py")
-    discovery = _read("chat-ui/src/@chat-workflows/index.js")
+    registry = _read("chat-ui/src/@chat-workflows/index.js")
+    app_vite = _read("app/vite.config.js")
+    embed_vite = _read("chat-ui/vite.embed.config.js")
     router = _read("chat-ui/src/core/WorkflowUIRouter.js")
+    tailwind = _read("chat-ui/tailwind.config.js")
 
     assert "ChatUI/src/workflows" not in converter
     assert "ui/components/" in converter
     assert "'path': \"ui/index.js\"" in converter
 
-    assert "../../../mozaiks-platform/app/workflows/*/ui/index.{js,jsx}" in discovery
-    assert "const namespacedComponentName = `${workflowName}:${componentName}`;" in discovery
+    assert "@chat-workflows-root/*/ui/index.{js,jsx}" in registry
+    assert "mozaiks-platform/app/workflows" not in registry
+    assert "const namespacedComponentName = `${workflowName}:${componentName}`;" in registry
+    assert "'@chat-workflows-root': platformWorkflowRoot" in app_vite
+    assert "'@chat-workflows-root': fileURLToPath(new URL('./src/workflows_stub', import.meta.url))" in embed_vite
+    assert "../mozaiks-platform/" not in tailwind
     assert "`@chat-workflows/${workflow}/components/index.js`" not in router
     assert "workflow && component ? `${workflow}:${component}` : null" in router
     assert "workflow && ui_tool_id ? `${workflow}:${ui_tool_id}` : null" in router

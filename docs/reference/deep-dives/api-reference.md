@@ -16,11 +16,14 @@ The current web shell and platform primarily rely on:
 - `GET /api/workflows`
 - `GET /api/theme-config`
 - `GET /api/shell-config`
-- workflow and chat/session routes exposed by the shared app
+- workflow and chat/session routes exposed by the layered hosts
 
 ## Where To Look In Code
 
-- `shared_app.py`
+- `runtime_app.py`
+- `platform_app.py`
+- `studio_app.py`
+- `mozaiks_app.py`
 - `mozaiksai/core/transport/`
 - `mozaiksai/core/workflow/`
 

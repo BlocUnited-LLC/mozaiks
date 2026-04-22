@@ -3,6 +3,7 @@ import {
   WebSocketApiAdapter,
   componentRegistry,
 } from '@mozaiks/chat-ui';
+import { registerStudioComponents } from '@mozaiks/chat-ui/studio';
 
 // Platform extension — registered via @platform/extensions alias in vite.config.js.
 // Resolved at build time from PLATFORM_PATH to the active platform's ui/index.js.
@@ -13,6 +14,16 @@ import { register } from '@platform/extensions';
 // Register all platform pages and components into the shell's component registry.
 // Routes are composed by the backend and served by /api/shell-config.
 register(componentRegistry.registerComponent.bind(componentRegistry));
+
+const hostMode = (
+  import.meta.env.VITE_MOZAIKS_HOST ||
+  import.meta.env.MOZAIKS_HOST ||
+  ''
+).toLowerCase();
+
+if (hostMode === 'studio' || hostMode === 'mozaiks') {
+  registerStudioComponents(componentRegistry.registerComponent.bind(componentRegistry));
+}
 
 // ── API adapter ────────────────────────────────────────────────────────────
 // apiUrl and wsUrl come from the platform's app.json or env vars.
@@ -27,12 +38,12 @@ const apiAdapter = new WebSocketApiAdapter({
 // Auth configuration is declared in platform/app.json (authRequired, auth.provider).
 const mockAuthAdapter = {
   isAuthenticated:    () => true,
-  getCurrentUser:     () => Promise.resolve({ id: 'demo-user', firstName: 'Demo', lastName: 'User', email: 'demo@example.com' }),
+  getCurrentUser:     () => Promise.resolve({ id: 'demo-user', firstName: 'Demo', lastName: 'User', email: 'demo@example.com', roles: ['admin', 'user'] }),
   getToken:           () => Promise.resolve('demo-token'),
   login:              () => Promise.resolve(),
   logout:             () => Promise.resolve(),
   onAuthStateChange:  (callback) => {
-    callback({ id: 'demo-user', firstName: 'Demo', lastName: 'User', email: 'demo@example.com' });
+    callback({ id: 'demo-user', firstName: 'Demo', lastName: 'User', email: 'demo@example.com', roles: ['admin', 'user'] });
     return () => {};
   },
 };

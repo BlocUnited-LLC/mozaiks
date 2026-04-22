@@ -1,14 +1,25 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from tests.import_utils import import_module_directly
 
 _workflow_manager_mod = import_module_directly("mozaiksai.core.workflow.workflow_manager")
-workflow_manager = _workflow_manager_mod.workflow_manager
 
 
-def test_ai_config_marks_greenroom_as_entry_point() -> None:
-    assert workflow_manager.get_config("GreenRoom").get("entry_point") is True
+def _mozaiks_workflow_manager():
+    workflows_root = Path(__file__).resolve().parents[1] / "mozaiks-platform" / "app" / "workflows"
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    return _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(workflows_root))
 
 
-def test_ai_config_marks_writersroom_as_non_entry_point() -> None:
-    assert workflow_manager.get_config("WritersRoom").get("entry_point") is False
+def test_mozaiks_app_generator_is_agent_driven() -> None:
+    config = _mozaiks_workflow_manager().get_config("AppGenerator")
+    assert config.get("workflow_startup_mode") == "AgentDriven"
+    assert config.get("initial_agent") == "InterviewAgent"
+
+
+def test_existing_app_discovery_is_agent_driven() -> None:
+    config = _mozaiks_workflow_manager().get_config("ExistingAppDiscovery")
+    assert config.get("workflow_startup_mode") == "AgentDriven"
+    assert config.get("initial_agent") == "DiscoveryHostAgent"

@@ -64,7 +64,7 @@ When an agent needs to produce a UI artifact:
 ```yaml
 - name: OutputAgent
   structured_outputs_required: true
-  # auto_tool_mode is derived from tools.yaml (agents with auto_tool_call: true tools)
+  # No auto-tool field lives in agents.yaml; auto-tool execution is derived from tools.yaml.
 ```
 
 ## Tool Configuration

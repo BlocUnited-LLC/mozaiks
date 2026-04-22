@@ -5,8 +5,8 @@
  * the shell needs regardless of which platform is loaded.
  *
  * Platform-specific workflow tools are registered automatically via
- * @chat-workflows/index.js, which discovers any
- * platform/workflows/<name>/ui/index.js barrel at build time.
+ * chat-ui's workflow registry module, which reads ui/index.js barrels from the
+ * host-injected workflow root at build time.
  *
  * Transition UI is shell-owned. Register reusable transition screens here or in
  * a shell component barrel, then reference them with transition.ui.component.
@@ -21,7 +21,6 @@ import ChatPage from '../pages/ChatPage';
 import { SchemaPage } from '../ui/screens/SchemaPage.jsx';
 import AdminPage from '../pages/AdminPage.jsx';
 import ProfilePage from '../pages/ProfilePage.jsx';
-import AppAdminDashboard from '../pages/AppAdminDashboard.jsx';
 
 // Transition renderers — referenced by transition.ui.component
 import { LauncherScreen } from '../ui/screens/LauncherScreen.jsx';
@@ -49,7 +48,7 @@ registerComponent('ConfirmScreen', ConfirmScreen, {
 
 registerComponent('AdminPortal', AdminPage, {
   core: true,
-  description: 'First-class admin dashboard — runtime stats, active runs, session history',
+  description: 'Unified admin shell — app, module, and runtime/operator panels',
 });
 
 registerComponent('ProfilePage', ProfilePage, {
@@ -57,11 +56,6 @@ registerComponent('ProfilePage', ProfilePage, {
   description: 'First-class user profile page — calls app_backend_url/api/me. Show when auth is enabled.',
 });
 
-registerComponent('AppAdminDashboard', AppAdminDashboard, {
-  core: true,
-  description: 'First-class app admin dashboard — manage users and view stats via app_backend_url/api/admin/*. Always available; gated by admin role.',
-});
-
-export const CORE_COMPONENTS = ['ChatPage', 'SchemaPage', 'LauncherScreen', 'ConfirmScreen', 'AdminPortal', 'ProfilePage', 'AppAdminDashboard'];
+export const CORE_COMPONENTS = ['ChatPage', 'SchemaPage', 'LauncherScreen', 'ConfirmScreen', 'AdminPortal', 'ProfilePage'];
 
 console.log('[CoreComponents] Registered core chat-ui components:', CORE_COMPONENTS);

@@ -37,7 +37,7 @@ Create `core/tokens/manager.py` responsible for:
 
 ### 2.2 Lifecycle Hooks
 
-1. **Start Gate** – `shared_app.start_chat()`
+1. **Start Gate** - `platform_app.start_chat()`
    - Call `TokenManager.ensure_can_start_chat` before chat_id creation.
    - If blocked, raise HTTP 402 equivalent with payload for Chat UI to show paywall.
 2. **In-Chat Gate** – `AG2PersistenceManager.update_session_metrics`
@@ -121,7 +121,7 @@ Runtime token counts stay entirely server-side. Generators only need to know whe
    - Add `core/tokens/manager.py` with `ensure_can_start_chat`, `handle_turn_usage`, `handle_auto_reply_limit`, and `resume_after_topup` APIs.
    - Persist pause metadata via `AG2PersistenceManager` and emit `runtime.token.*` events through `unified_event_dispatcher`.
 2. **Runtime wiring**
-   - `shared_app.start_chat` calls `ensure_can_start_chat` when `MONETIZATION_ENABLED=true`.
+   - `platform_app.start_chat` calls `ensure_can_start_chat` when `MONETIZATION_ENABLED=true`.
    - `AG2PersistenceManager.update_session_metrics` invokes `handle_turn_usage` and forwards AG2 usage snapshots.
    - Add `/api/chats/{chat_id}/resume` route that clears pauses once MozaiksPay confirms payment.
 3. **Transport + analytics**

@@ -4,7 +4,7 @@ from __future__ import annotations
 ======================
 Allows proprietary platform layers (Mozaiks, or any deployer) to inject
 behaviour into the core runtime at well-defined callsites WITHOUT modifying
-shared_app.py.
+the runtime host.
 
 Open-source deployments:
     Leave RUNTIME_PLATFORM_EXTENSIONS unset.  All hook callers return safe

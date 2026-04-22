@@ -15,8 +15,8 @@ Mozaiks features are additive. You can enable them individually or upgrade to a 
 | Feature | What It Enables | Requires |
 |---------|----------------|----------|
 | **chat_ui** | Frontend chat interface | - |
-| **operations** | Deterministic CRUD/action operations and operation routes | - |
-| **event_bus** | Domain event bus for operation↔workflow communication | - |
+| **modules** | Deterministic CRUD/action modules and module routes | - |
+| **event_bus** | Domain event bus for module↔workflow communication | - |
 | **auth** | JWT validation, Keycloak integration | Docker services |
 | **admin** | Admin portal with observability, token tracking | auth |
 
@@ -26,7 +26,7 @@ Mozaiks features are additive. You can enable them individually or upgrade to a 
 |--------|-------------------|
 | **engine** | ai_runtime |
 | **chat** | ai_runtime, chat_ui |
-| **integrated** | ai_runtime, chat_ui, operations, event_bus, auth |
+| **integrated** | ai_runtime, chat_ui, modules, event_bus, auth |
 | **full** | All features |
 
 ## Commands
@@ -38,7 +38,7 @@ mozaiks add <feature>
 
 Examples:
 ```bash
-mozaiks add operations    # Add deterministic operation handling
+mozaiks add modules       # Add deterministic module handling
 mozaiks add event_bus     # Add event-driven automation
 mozaiks add auth          # Add Keycloak authentication
 mozaiks add admin         # Add admin portal
@@ -62,7 +62,7 @@ When you add a feature:
 
 1. **Updates platform/app.json:**
    - Adds feature override OR upgrades preset
-   - Example: `{"features": {"operations": true}}`
+   - Example: `{"features": {"modules": true}}`
 
 2. **Shows next steps:**
    - What directories to create
@@ -75,11 +75,11 @@ When you add a feature:
 
 ## Feature-Specific Next Steps
 
-### Adding **operations**
+### Adding **modules**
 ```
 Next steps:
-1. Create platform/operations/<name>/
-2. Add operation.yaml with name, version, actions
+1. Create platform/modules/<name>/
+2. Add module.yaml with name, version, actions
 3. Add handler.py with action class methods
 4. Restart backend
 ```
@@ -120,7 +120,7 @@ Next steps:
 ## When to Use This Skill
 
 - User wants to add a feature to existing project
-- User says "enable operations" or "add auth"
+- User says "enable modules" or "add auth"
 - User wants to upgrade from one tier to another
 - User asks "how do I add [feature]"
 
@@ -134,22 +134,22 @@ mozaiks info
 
 ## Example Interaction
 
-**User:** "I want to add operations to my chatbot"
+**User:** "I want to add modules to my chatbot"
 
-**You:** "You can enable operations with:
+**You:** "You can enable modules with:
 
 ```bash
-mozaiks add operations
+mozaiks add modules
 ```
 
 This will:
-1. Update platform/app.json to enable the `operations` feature
-2. Allow you to create operations in platform/operations/
+1. Update platform/app.json to enable the `modules` feature
+2. Allow you to create modules in platform/modules/
 
 After running this command:
-1. Create an operation directory: `platform/operations/my_operation/`
-2. Add `operation.yaml` with name, version, actions
+1. Create a module directory: `platform/modules/my_module/`
+2. Add `module.yaml` with name, version, actions
 3. Add `handler.py` with action class methods
-4. Restart your backend to load the new operation
+4. Restart your backend to load the new module
 
-Operations are great for deterministic business logic that doesn't need AI. For AI tasks, use workflows instead."
+Modules are great for deterministic business logic that doesn't need AI. For AI tasks, use workflows instead."

@@ -26,16 +26,16 @@ def test_mozaiks_platform_has_platform_scoped_ai_config() -> None:
 
 
 def test_shell_config_uses_active_platform_path_first() -> None:
-    source = _read("shared_app.py")
-    assert 'platform_root = _resolve_platform_path()' in source
+    source = _read("platform_app.py")
+    assert 'platform_root = resolve_platform_path()' in source
     assert 'ai_path = platform_root / "config" / "ai.json"' in source
     assert 'app_manifest_path = _resolve_app_manifest_path()' in source
     assert 'platform_root / "app.json"' in source
     assert 'shell_config_path = _resolve_shell_config_path()' in source
     assert 'platform_root / "config" / "shell.json"' in source
-    assert "_load_ui_extension_pages(platform_root)" in source
-    assert "_load_page_schema_routes(platform_root)" in source
-    assert "_load_workflow_entrypoint_pages(platform_root)" in source
+    assert "_load_ui_extension_pages" in source
+    assert "_load_page_schema_routes" in source
+    assert "_load_workflow_entrypoint_pages" in source
     assert 'platform_root / "app.yaml"' not in source
     assert 'platform_root / "config" / "navigation.json"' not in source
 
@@ -52,7 +52,8 @@ def test_app_loader_discovers_platform_bundle_without_app_yaml() -> None:
     result = asyncio.run(AppLoader.load(str(platform_root)))
 
     assert result.definition.name == "Mozaiks Platform"
-    assert "apps" in [module.name for module in result.modules]
+    assert "platform_apps" in [module.name for module in result.definition.modules]
+    assert "builds" in [module.name for module in result.definition.modules]
     assert "ValueEngine" in [workflow.name for workflow in result.definition.workflows]
 
 
@@ -96,8 +97,8 @@ def test_mozaiks_platform_shell_config_owns_shell_ui() -> None:
     assert "landing_spot" not in data
     assert data["header"]["logo"]["href"] == "/dashboard"
     assert data["header"]["pages"] == []
-    assert data["notifications"]["show"] is True
-    assert data["profile"]["show"] is True
+    assert "notifications" not in data
+    assert "profile" not in data
     assert data["footer"]["visible"] is True
 
 

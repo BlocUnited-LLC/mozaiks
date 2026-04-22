@@ -413,8 +413,8 @@ class UnifiedWorkflowManager:
         """Return set of agent names that have auto-invoke tools.
 
         Derives auto-tool agents from tools.yaml - any agent with a tool marked
-        `auto_tool_call: true` is considered an auto-tool agent. This replaces the
-        previous `auto_tool_mode` flag in agents.yaml.
+        `auto_tool_call: true` is considered an auto-tool agent. agents.yaml does
+        not define a matching auto-tool field.
 
         Auto-tool agents emit structured outputs that trigger automatic tool calls.
         Their text messages (containing agent_message) should be suppressed to avoid

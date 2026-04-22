@@ -85,7 +85,7 @@ agents:
         ```
   max_consecutive_auto_reply: 10
   structured_outputs_required: true  # Enforces JSON output
-  # Note: auto_tool_mode is derived from tools.yaml (agents with auto_tool_call tools)
+  # No auto-tool field belongs in agents.yaml; auto-tool execution is derived from tools.yaml.
 ```
 
 **Child workflow aware agent:**

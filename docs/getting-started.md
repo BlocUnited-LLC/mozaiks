@@ -14,8 +14,8 @@
 
 Everything you need to go from clone to a running local Mozaiks app.
 
-The current sample bundle is `Backstage`, built from `platform/` with the
-seeded workflows `GreenRoom`, `WritersRoom`, and `MainStage`.
+The canonical Mozaiks product host is `mozaiks_app.py`. It serves the active
+Mozaiks workspace from `mozaiks-platform/app` when that workspace is present.
 
 ---
 
@@ -79,8 +79,11 @@ mozaiks/
 ├── mozaiksai/                  # AI runtime, orchestration, transport
 ├── mozaiks_cli/                # CLI for local initialization and tooling
 ├── docs/                       # Architecture and usage documentation
-├── shared_app.py               # FastAPI server entry
-├── run_server.py               # Start the server
+├── runtime_app.py              # Pure runtime FastAPI host
+├── platform_app.py             # Runtime + platform shell host
+├── studio_app.py               # Runtime + platform + local/private Studio host
+├── mozaiks_app.py              # Runtime + platform + Studio + Mozaiks product host
+├── run_server.py               # Start the selected host
 ├── requirements.txt            # Python dependencies
 ├── .env.example                # Secrets & config template (copy to .env)
 │
@@ -222,7 +225,7 @@ From here you can manage users, roles, and login settings. The `mozaiks` realm i
 |---|---|---|
 | Frontend | [http://localhost:3000](http://localhost:3000) | App loads and auto-signs into the seeded dev user by default |
 | Backend health | [http://localhost:8000/api/health](http://localhost:8000/api/health) | Health payload includes `"status": "healthy"` |
-| Loaded workflows | [http://localhost:8000/api/workflows](http://localhost:8000/api/workflows) | Shows `GreenRoom`, `WritersRoom`, and `MainStage` |
+| Loaded workflows | [http://localhost:8000/api/workflows](http://localhost:8000/api/workflows) | Shows the active app workflows such as `AppGenerator`, `AgentGenerator`, and `ValueEngine` |
 | Keycloak admin | [http://localhost:8080/admin](http://localhost:8080/admin) | Admin console (admin/admin) |
 
 ### First login

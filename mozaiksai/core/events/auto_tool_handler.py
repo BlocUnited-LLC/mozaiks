@@ -67,9 +67,9 @@ class AutoToolEventHandler:
 
         try:
             logger.info("[AUTO_TOOL] Received agent_output_validated event: agent=%s turn=%s", event.get('agent_name') or event.get('agent'), event.get('turn_idempotency_key'))
-            auto_mode = bool(event.get("auto_tool_mode"))
-            if not auto_mode:
-                logger.debug("[AUTO_TOOL] Event marked auto_tool_mode=false; ignoring")
+            auto_tool_call_enabled = bool(event.get("auto_tool_call"))
+            if not auto_tool_call_enabled:
+                logger.debug("[AUTO_TOOL] Event marked auto_tool_call=false; ignoring")
                 return
             agent_name = str(event["agent_name"])
             model_name = str(event["model_name"])

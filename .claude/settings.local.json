@@ -28,7 +28,15 @@
       "Bash(python run_test.py:*)",
       "Bash(git ls-tree:*)",
       "Bash(npx kill-port:*)",
-      "Bash(taskkill:*)"
+      "Bash(taskkill:*)",
+      "Bash(python -m mozaiks_cli.main:*)",
+      "Bash(set -a)",
+      "Bash(source:*)",
+      "Bash(set +a)",
+      "Bash(.venv/Scripts/python.exe -c \"from shared_app import app; print\\('OK'\\)\")",
+      "Bash(cp -r \"c:/Users/mbari/OneDrive/Desktop/BlocUnited/BlocUnited Code/mozaiks/platform/brand/assets\" \"c:/Users/mbari/OneDrive/Desktop/BlocUnited/BlocUnited Code/mozaiks/mozaiks-platform/brand/assets\")",
+      "Bash(cp -r \"c:/Users/mbari/OneDrive/Desktop/BlocUnited/BlocUnited Code/mozaiks/platform/brand/fonts\" \"c:/Users/mbari/OneDrive/Desktop/BlocUnited/BlocUnited Code/mozaiks/mozaiks-platform/brand/fonts\")",
+      "Read(//c/Users/mbari/OneDrive/Desktop/BlocUnited/BlocUnited Code/mozaiks-core-public/**)"
     ]
   }
 }

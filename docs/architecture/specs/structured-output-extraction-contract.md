@@ -202,7 +202,7 @@ Located at: `mozaiksai/core/events/auto_tool_handler.py`
 
 The handler:
 1. Listens for `chat.agent_output_validated` events
-2. Checks if `auto_tool_mode: true`
+2. Checks if `auto_tool_call: true`
 3. Resolves tool binding from workflow's tools.yaml
 4. Validates structured_data against the model
 5. Builds kwargs from validated payload + context
@@ -225,7 +225,7 @@ Emits chat.agent_output_validated event:
   "agent_name": "JokeDecomposerAgent",
   "model_name": "JokeDecomposition",
   "structured_data": { ... validated JSON ... },
-  "auto_tool_mode": true,
+  "auto_tool_call": true,
   "context": { "chat_id", "app_id", "workflow_name" }
 }
     │

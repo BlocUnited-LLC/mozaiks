@@ -255,7 +255,7 @@ Already outputs the correct declarative YAML format (orchestrator.yaml, agents.y
 - [ ] `ComponentCompositor` — maps `type: DataTable` → `<MozaiksDataTable />` with resolved props
 - [ ] `PageRenderer` React component — renders a full `PageDefinition` schema
 - [ ] Register `PageRenderer` in `componentRegistry` so navigation can mount it
-- [ ] Add `/api/pages/{name}` endpoint in `shared_app.py` — serves page schemas from `platform/pages/`
+- [ ] Add `/api/pages/{name}` endpoint in `platform_app.py` — serves page schemas from the active app `pages/` directory
 
 ### Layer 4 — Workflow Updates
 
@@ -309,8 +309,8 @@ Already outputs the correct declarative YAML format (orchestrator.yaml, agents.y
 - [x] `LauncherScreen.jsx` + `LauncherCard.jsx` registered as core shell components
 
 **Shell wire-up**
-- [x] `/api/transitions/{id}` endpoint in `shared_app.py`
-- [x] `/api/transitions/resolve` endpoint in `shared_app.py`
+- [x] `/api/transitions/{id}` endpoint in `platform_app.py`
+- [x] `/api/transitions/resolve` endpoint in `platform_app.py`
 - [x] Shell router detects `transition:` nav entries and renders `TransitionScreen`
 - [x] Transition chaining: `route_to` transition id -> render next transition
 - [x] Workflow target resolution creates chat session with validated context variables
@@ -384,7 +384,7 @@ Week 5 — E2B + polish
    - Recommendation: start in `chat-ui/`, extract to package when OSS CLI needs it
 
 2. **Data binding protocol**: does `module:contacts:list` call the Python module directly via API, or go through a GraphQL/REST adapter?
-   - Recommendation: HTTP to `/api/modules/{name}/{action}` — already the pattern in `shared_app.py`
+   - Recommendation: HTTP to `/api/operations/{name}/{action}` — already the pattern in `platform_app.py`
 
 3. **AppGenerator output format**: page schemas as `.yaml` files or inline in `app.yaml`?
    - Recommendation: separate `pages/*.yaml` files per spec — easier for agents to output incrementally

@@ -94,7 +94,7 @@ def test_runtime_event_builder_uses_canonical_names() -> None:
         agent="Planner",
         model_name="BuildPlan",
         structured_data={"workflows": ["A"]},
-        auto_tool_mode=True,
+        auto_tool_call=True,
         context={"workflow_name": "BuildParent", "chat_id": "chat-1"},
         turn_idempotency_key=build_turn_idempotency_key("chat-1", 3),
     )
@@ -102,7 +102,7 @@ def test_runtime_event_builder_uses_canonical_names() -> None:
     assert event["kind"] == RUNTIME_AGENT_OUTPUT_VALIDATED
     assert event["runtime_event_type"] == RUNTIME_AGENT_OUTPUT_VALIDATED
     assert event["context"]["workflow_name"] == "BuildParent"
-    assert event["auto_tool_mode"] is True
+    assert event["auto_tool_call"] is True
 
 
 def test_artifact_lifecycle_builder_uses_canonical_names() -> None:
