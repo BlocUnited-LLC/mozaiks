@@ -25,7 +25,8 @@ concerns, not bespoke application logic.
 
 Current implementation zone:
 
-- app backend deployable outside this repo
+- `platform_app.py` and app bundle modules in this repo
+- optional external/generated app backends connected through `AppBackendPort`
 
 Current framework contract in this repo:
 
@@ -105,7 +106,8 @@ Owns application-specific declaratives:
 - workflows
 - shell composition
 
-The app bundle is input to the runtime. It is not runtime internals.
+The app bundle is input to the platform host and runtime. It is not runtime
+internals.
 
 ## The Boundary Rule That Matters Most
 
@@ -211,5 +213,5 @@ Keep it in AG2 if:
 ## Cross References
 
 - [workflow-architecture.md](workflow-architecture.md)
-- [event-system-architecture.md](event-system-architecture.md)
+- [event-system.md](event-system.md)
 - [app-bundle-declaratives.md](app-bundle-declaratives.md)

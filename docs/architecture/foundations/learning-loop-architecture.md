@@ -38,6 +38,6 @@ Learning-loop outputs should improve the authoring and operating experience:
 
 ## Related Docs
 
-- [Runtime State and Control Events](runtime-state-and-control-events.md)
-- [Event System Architecture](event-system-architecture.md)
+- [Event System](event-system.md)
+- [Event Contracts](event-contracts.md)
 - [Workflow Authoring Contracts](workflow-authoring-contracts.md)

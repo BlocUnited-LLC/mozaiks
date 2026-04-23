@@ -23,7 +23,6 @@ If you are evaluating Mozaiks differentiators first, start with [Mid-Flight Jour
 ## Runtime and Transport
 
 - [Transport and Streaming](transport-and-streaming.md)
-- [Event Pipeline](event-pipeline.md)
 - [Hook System Deep Dive](hook-system-deep-dive.md)
 - [API Reference Notes](api-reference.md)
 

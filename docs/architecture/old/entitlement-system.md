@@ -411,10 +411,10 @@ async def test_denied_event_emitted():
 
 ## Related Systems
 
-- **Event Bus** ([event-system-architecture.md](event-system-architecture.md)): Routes entitlement events
+- **Event Bus** ([event-system.md](../foundations/event-system.md)): Routes entitlement events
 - **Subscription Manager** (`mozaikscore/core/subscription_manager.py`): Provides user subscription data
 - **Admin Dashboard** (`platform/pages/admin/`): Displays entitlement events
-- **Domain Events** ([runtime-state-and-control-events.md](runtime-state-and-control-events.md)): Event taxonomy
+- **Domain Events** ([event-contracts.md](../foundations/event-contracts.md)): Event namespaces and envelope rules
 
 ## Future Enhancements
 
@@ -427,6 +427,6 @@ async def test_denied_event_emitted():
 ## References
 
 - AG2 Custom Events: https://docs.ag2.ai/latest/docs/use-cases/notebooks/notebooks/agentchat_custom_events/
-- Event-Driven Architecture: [event-system-architecture.md](event-system-architecture.md)
+- Event-Driven Architecture: [event-system.md](../foundations/event-system.md)
 - Subscription Config: `platform/config/subscription_config.json`
 - Code: `mozaikscore/core/entitlements/`

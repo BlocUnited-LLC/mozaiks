@@ -79,6 +79,8 @@ def test_onboard_command_updates_scaffold_surfaces_non_interactively(tmp_path) -
     assert theme_json["identity"]["tagline"] == "Private revenue workflows"
     assert theme_json["colors"]["primary"]["main"] == "#1d4ed8"
     assert admin_json["admin_emails"] == ["founder@example.com"]
+    assert admin_json["panels"]["runtime"][0]["section"] == "usage"
+    assert admin_json["panels"]["runtime"][2]["section"] == "activity"
 
 
 def test_onboard_command_prompts_when_values_are_missing(monkeypatch, tmp_path) -> None:
@@ -129,3 +131,5 @@ def test_onboard_command_prompts_when_values_are_missing(monkeypatch, tmp_path) 
     assert theme_json["theme"]["primary"] == "emerald"
     assert theme_json["identity"]["tagline"] == "Operator workspace"
     assert admin_json["admin_emails"] == ["owner@example.com"]
+    assert admin_json["panels"]["app"][0]["section"] == "overview"
+    assert admin_json["panels"]["app"][1]["section"] == "users"

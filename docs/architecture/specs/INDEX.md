@@ -6,21 +6,37 @@
 
 ---
 
-## ⚠️ IMPORTANT: V2 Architecture is Authoritative
+## Current Source of Truth
 
-The **V2 documents** represent the current architectural direction. They are based on the actual system state (two working runtimes) and implement a **modular, composable design** rather than a merged monolith.
+The current canonical architecture is the layered host model documented in
+[`../../../ARCHITECTURE.md`](../../../ARCHITECTURE.md):
+
+- `runtime_app.py` — runtime substrate
+- `platform_app.py` — headless app host
+- `studio_app.py` — local/private builder host
+- `mozaiks_app.py` — hosted Mozaiks product host
+- `platform/` — default OSS/sample active app root
+- `mozaiks-platform/app/` — active App Zero app root
+
+The package-splitting documents are retained as future packaging proposals, not
+as the current source of truth.
 
 **Start here:**
-- [MODULAR_ARCHITECTURE_V2.md](./MODULAR_ARCHITECTURE_V2.md) - The architecture specification
-- [AGENTS_MD_V2.md](./AGENTS_MD_V2.md) - Agent instructions for this architecture
+- [../../../ARCHITECTURE.md](../../../ARCHITECTURE.md) - canonical architecture
+- [../foundations/canonical-app-structure.md](../foundations/canonical-app-structure.md) - active app root and product workspace layout
+- [agentic-app-generation-strategy.md](./agentic-app-generation-strategy.md) - app-generation architecture
+- [appgenerator-output-assembly-contract.md](./appgenerator-output-assembly-contract.md) - AppGenerator bundle output contract
+- [agentgenerator-output-assembly-contract.md](./agentgenerator-output-assembly-contract.md) - AgentGenerator workflow output contract
 
-The original documents (MOZAIKS_UNIFIED_ARCHITECTURE.md, etc.) are retained for historical context but are **superseded** by V2.
+Historical documents and package proposals are useful context, but they are
+superseded wherever they conflict with `ARCHITECTURE.md`.
 
 ---
 
-## Naming Conventions
+## Future Package Naming Conventions
 
-Different contexts use different naming conventions for the same packages:
+If/when the repo is split into publishable packages, different contexts should
+use different naming conventions for the same packages:
 
 | Context | core | ai | modules | runtime | ui | cli |
 |---------|------|----|---------|---------|----|-----|
@@ -57,9 +73,9 @@ Different contexts use different naming conventions for the same packages:
 |--------------|-----------|
 | **Start implementing (coding agents)** | [AGENT_IMPLEMENTATION_PROMPT.md](./AGENT_IMPLEMENTATION_PROMPT.md) ⭐⭐ |
 | **Track implementation progress** | [IMPLEMENTATION_CHECKLIST.md](./IMPLEMENTATION_CHECKLIST.md) ⭐⭐ |
-| **Understand the modular architecture** | [MODULAR_ARCHITECTURE_V2.md](./MODULAR_ARCHITECTURE_V2.md) ⭐ |
-| **Set up AGENTS.md for AI coding agents** | [AGENTS_MD_V2.md](./AGENTS_MD_V2.md) ⭐ |
-| **Understand event-driven execution** | [EVENT_DRIVEN_EXECUTION_SPEC.md](./EVENT_DRIVEN_EXECUTION_SPEC.md) ⭐⭐ |
+| **Review future package-splitting proposal** | [MODULAR_ARCHITECTURE_V2.md](./MODULAR_ARCHITECTURE_V2.md) |
+| **Review historical package-agent guidance** | [AGENTS_MD_V2.md](./AGENTS_MD_V2.md) |
+| **Understand event-driven execution** | [Event System](../foundations/event-system.md) ⭐⭐ |
 | **Understand how workflows are triggered** | [WORKFLOW_TRIGGERS_SPEC.md](./WORKFLOW_TRIGGERS_SPEC.md) ⭐ |
 | **Understand post-generation refinement routing** | [REFINEMENT_CONTROL_PLANE_SPEC.md](./REFINEMENT_CONTROL_PLANE_SPEC.md) ⭐⭐ |
 | **Understand both UI systems (App UI vs Agentic UI)** | [ui-systems.md](./ui-systems.md) ⭐⭐ |
@@ -76,7 +92,7 @@ Different contexts use different naming conventions for the same packages:
 | **Understand OSS vs Platform strategy** | [PLATFORM_FRONTEND_STRATEGY.md](./PLATFORM_FRONTEND_STRATEGY.md) ⭐ |
 | **Build platform admin (dogfooding)** | [PLATFORM_DOGFOODING_SPEC.md](./PLATFORM_DOGFOODING_SPEC.md) ⭐⭐ |
 | **Understand YAML extraction from agents** | [STRUCTURED_OUTPUT_EXTRACTION_SPEC.md](./STRUCTURED_OUTPUT_EXTRACTION_SPEC.md) ⭐ |
-| Understand event contracts | [EVENT_CONTRACTS.md](./EVENT_CONTRACTS.md) |
+| Understand event contracts | [Event Contracts](../foundations/event-contracts.md) |
 | Use the Platform SDK | [PLATFORM_SDK_SPEC.md](../PLATFORM_SDK_SPEC.md) |
 | Implement the admin dashboard | [ADMIN_DASHBOARD_SPEC.md](../ADMIN_DASHBOARD_SPEC.md) |
 | See the original unified architecture (historical) | [MOZAIKS_UNIFIED_ARCHITECTURE.md](../MOZAIKS_UNIFIED_ARCHITECTURE.md) |
@@ -86,7 +102,7 @@ Different contexts use different naming conventions for the same packages:
 
 ## Document Summary
 
-### ⭐ [MODULAR_ARCHITECTURE_V2.md](./MODULAR_ARCHITECTURE_V2.md) (AUTHORITATIVE)
+### [MODULAR_ARCHITECTURE_V2.md](./MODULAR_ARCHITECTURE_V2.md) (Future Packaging Proposal)
 
 The current architecture specification based on the real system state:
 
@@ -108,7 +124,7 @@ The current architecture specification based on the real system state:
 - Events for async communication
 - Context injection for security
 
-### ⭐ [AGENTS_MD_V2.md](./AGENTS_MD_V2.md) (AUTHORITATIVE)
+### [AGENTS_MD_V2.md](./AGENTS_MD_V2.md) (Historical Package-Agent Guidance)
 
 Agent instructions for the modular architecture:
 
@@ -148,7 +164,7 @@ Comprehensive implementation checklist for the modular architecture:
 - **What needs to be created:** packages/core/, packages/modules/, packages/runtime/
 - **Implementation order:** 6 phases (core → ai → modules → runtime → ui → cli)
 - **Key files to create:** Priority-ordered file lists for each package
-- **Deprecation plan:** mozaiks-core-public deprecation steps
+- **Deprecation plan:** legacy donor repo archival steps
 - **Verification checklist:** Acceptance criteria for each phase
 
 **Use this document to track implementation progress and know what to build next.**
@@ -157,7 +173,7 @@ Comprehensive implementation checklist for the modular architecture:
 
 ## Specification Documents
 
-### ⭐⭐ [EVENT_DRIVEN_EXECUTION_SPEC.md](./EVENT_DRIVEN_EXECUTION_SPEC.md) (CRITICAL)
+### ⭐⭐ [Event System](../foundations/event-system.md) (CRITICAL)
 
 Event-first execution model - the foundational orchestration pattern:
 
@@ -341,7 +357,7 @@ Specification for extracting agent outputs into consistent YAML configuration fi
 
 ## Supporting Documents
 
-### [EVENT_CONTRACTS.md](./EVENT_CONTRACTS.md)
+### [Event Contracts](../foundations/event-contracts.md)
 
 Complete event specification:
 
@@ -375,10 +391,10 @@ Built-in admin dashboard:
 
 The original master architecture document covering:
 
-- Repository structure (merged mozaiks + mozaiks-core-public)
+- Repository structure (single canonical mozaiks repo)
 - Package architecture (core, modules, ai, bundle)
 - Dependency graph and boundary rules
-- Event system architecture
+- Event model
 - Authentication architecture
 - Build time vs run time separation
 - Integration with .NET services
@@ -427,7 +443,7 @@ Template for `.claude/AGENTS.md` to guide AI coding agents:
 **Copy this file to:**
 - `mozaiks/.claude/AGENTS.md`
 
-### 4. EVENT_CONTRACTS.md
+### 4. Event Contracts
 
 Complete event specification including:
 
@@ -490,9 +506,13 @@ Built-in admin dashboard specification:
 
 ```
 CURRENT STATE:
-├── mozaiks/                    # AI runtime (working)
-├── mozaiks-core-public/        # Plugin runtime (working)
-└── mozaiks-platform/           # Control plane (.NET)
+├── runtime_app.py              # runtime substrate
+├── platform_app.py             # headless app host
+├── studio_app.py               # local/private builder host
+├── mozaiks_app.py              # hosted product host
+├── platform/                   # default OSS/sample active app root
+└── mozaiks-platform/
+    └── app/                    # active App Zero app root
 
 TARGET STATE (MODULAR):
 ├── mozaiks/                    # Modular packages (NOT merged!)
@@ -505,7 +525,11 @@ TARGET STATE (MODULAR):
 │   │   └── cli/                # CLI tool
 │   ├── templates/              # App templates
 │   └── examples/               # Example apps
-└── mozaiks-platform/           # Control plane (.NET) - UNCHANGED
+└── mozaiks-platform/
+    ├── app/                    # active App Zero app root
+    ├── brand/
+    ├── ui/
+    └── generated/
 ```
 
 ### Package Dependency Graph (V2)
@@ -604,7 +628,7 @@ FORBIDDEN:
 
 1. Read [MODULAR_ARCHITECTURE_V2.md](./MODULAR_ARCHITECTURE_V2.md) for the architecture
 2. Copy [AGENTS_MD_V2.md](./AGENTS_MD_V2.md) to `mozaiks/.claude/AGENTS.md`
-3. Implement events per [EVENT_CONTRACTS.md](./EVENT_CONTRACTS.md)
+3. Implement events per [Event Contracts](../foundations/event-contracts.md)
 4. Build SDK per [PLATFORM_SDK_SPEC.md](./PLATFORM_SDK_SPEC.md)
 5. Build admin per [ADMIN_DASHBOARD_SPEC.md](./ADMIN_DASHBOARD_SPEC.md)
 
@@ -672,7 +696,7 @@ All monetization and analytics data flows to mozaiks-platform via platform-route
 
 ### Phase 3: Modules Package
 - [ ] Create `packages/modules/` structure
-- [ ] Migrate module execution from mozaiks-core-public
+- [ ] Port selected module contract concepts from legacy donor material
 - [ ] Implement ModuleExecutor conforming to Executor protocol
 - [ ] Ensure NO imports from ai
 - [ ] Unit tests passing (modules-only mode)
@@ -690,7 +714,7 @@ All monetization and analytics data flows to mozaiks-platform via platform-route
 - [ ] Create `packages/ui/` structure
 - [ ] Implement page rendering
 - [ ] Implement component registry
-- [ ] React frontend (from mozaiks-core-public)
+- [ ] React frontend surfaces from chat-ui and current app shell
 
 ### Phase 6: CLI Package
 - [ ] Create `packages/cli/` structure

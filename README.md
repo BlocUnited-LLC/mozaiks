@@ -13,10 +13,19 @@
 
 ## 🎯 What is This?
 
+This repo now uses four canonical host entrypoints:
+
+- `runtime_app.py` - reusable runtime substrate
+- `platform_app.py` - headless app host
+- `studio_app.py` - local/private builder host
+- `mozaiks_app.py` - hosted Mozaiks product host
+
+`mozaiksai/` is the runtime layer inside that model. It is not the whole stack by itself.
+
 ### **mozaiksai Runtime**
 Production-ready declarative orchestration engine for AG2 (formerly Microsoft Autogen):
 
-- ✅ **Event-Driven Architecture** — Every action flows through unified event pipeline
+- ✅ **Event-Driven Architecture** — Runtime, app, workflow, UI, and hosted events stay separated by contract
 - ✅ **Mid-Flight Journeys (MFJ)** — Run parallel workflows by fork/join with deterministic parent resume
 - ✅ **Real-Time WebSocket Transport** — Live agent streaming to React frontends
 - ✅ **Dynamic UI Integration** — Agents can invoke React components during workflows

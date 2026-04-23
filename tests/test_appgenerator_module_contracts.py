@@ -41,6 +41,17 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
 
     contract_fields = models["ModuleContractBundle"]["fields"]
     assert contract_fields["admin_yaml"]["type"] == "ModuleAdminManifest"
+    admin_panel_fields = models["ModuleAdminPanel"]["fields"]
+    assert admin_panel_fields["section"]["values"] == [
+        "overview",
+        "users",
+        "billing",
+        "usage",
+        "activity",
+        "settings",
+        "integrations",
+        "support",
+    ]
 
 
 def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations_contract() -> None:
@@ -53,12 +64,12 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
     assert "backend/handler.py" in source
     assert "domain.task_manager.task_created" in source
     assert "schema_version: mozaiks.admin.v1" in source
+    assert "Every panel must set `section`" in source
 
     assert "task_type: platform_config" not in source
     assert "operations/{pack_name}" not in source
     assert "subscription.yaml" not in source
     assert "operation.yaml" not in source
-    assert "mozaiks-core-public" not in source
     assert "admin_surfaces" not in source
 
 

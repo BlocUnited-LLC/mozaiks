@@ -87,8 +87,8 @@ among others.
 Keep the event model defined in:
 
 - `docs/architecture/foundations/event-system.md`
-- `docs/architecture/foundations/runtime-state-and-control-events.md`
-- `docs/architecture/foundations/process-and-event-map.md`
+- `docs/architecture/foundations/event-system.md`
+- `docs/architecture/foundations/event-contracts.md`
 
 Rules:
 
@@ -285,8 +285,8 @@ future-center of the runtime.
 
 ### Decision 3
 
-Preserve control-plane and event-taxonomy docs as the stable architectural
-source of truth.
+Preserve the control-plane docs and canonical event contract docs as the stable
+architectural source of truth.
 
 ### Decision 4
 

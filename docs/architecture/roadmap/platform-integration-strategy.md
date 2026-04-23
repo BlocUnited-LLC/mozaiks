@@ -1,5 +1,13 @@
 # Mozaiks Platform Integration Strategy
 
+**Status:** Historical / superseded.
+
+This document predates the canonical layered host architecture. The current
+source of truth is `ARCHITECTURE.md`: `runtime_app.py`, `platform_app.py`,
+`studio_app.py`, and `mozaiks_app.py`, with App Zero rooted at
+`mozaiks-platform/app/`. Treat references to separate .NET platform services as
+legacy planning context.
+
 ## The Core Question
 
 How do different types of users/customers integrate with Mozaiks AI capabilities?

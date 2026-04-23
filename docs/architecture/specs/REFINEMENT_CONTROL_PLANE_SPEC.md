@@ -2,7 +2,7 @@
 title: Refinement Control Plane
 status: Authoritative - Pre-Production, No Backward Compat
 created: 2026-04-13
-depends_on: workflow-routing-gates.md, WORKFLOW_TRIGGERS_SPEC.md, EVENT_DRIVEN_EXECUTION_SPEC.md, ../../reference/deep-dives/universal-orchestrator.md
+depends_on: workflow-routing-gates.md, WORKFLOW_TRIGGERS_SPEC.md, ../foundations/event-system.md, ../../reference/deep-dives/universal-orchestrator.md
 ---
 
 # Refinement Control Plane

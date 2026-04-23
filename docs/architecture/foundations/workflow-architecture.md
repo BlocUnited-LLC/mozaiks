@@ -89,6 +89,10 @@ Workflow files live under:
 - `platform/workflows/*` — product and showcase workflows
 - `mozaiks-platform/app/workflows/*` — platform-builder workflows (AgentGenerator etc.)
 
+Builder workflows may generate new workflow bundles, but generated output is
+staged under `MOZAIKS_GENERATED_ARTIFACTS_PATH` and is not runtime-loaded until
+explicitly promoted into an active app root's `workflows/` directory.
+
 The current file contract:
 
 - `orchestrator.yaml`

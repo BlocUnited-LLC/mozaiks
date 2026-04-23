@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Run the canonical runtime substrate host directly."""
+
 import uvicorn
 
 from runtime_app import app

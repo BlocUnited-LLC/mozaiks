@@ -2,11 +2,11 @@
 
 **Status:** Specification
 **Created:** 2026-04-06
-**Depends on:** MODULAR_ARCHITECTURE_V2.md, EVENT_DRIVEN_EXECUTION_SPEC.md
+**Depends on:** MODULAR_ARCHITECTURE_V2.md, ../foundations/event-system.md
 
 This document specifies the responsibilities and architecture of the Mozaiks runtime.
 
-> **Critical**: The runtime is **event-first**, not output-first. See [EVENT_DRIVEN_EXECUTION_SPEC.md](./EVENT_DRIVEN_EXECUTION_SPEC.md) for the complete event-driven execution model.
+> **Critical**: The runtime is **event-first**, not output-first. See [Event System](../foundations/event-system.md) for the complete event-driven execution model.
 
 ---
 
@@ -602,9 +602,9 @@ class ContextMiddleware:
 
 ## 6. Event Coordination
 
-> **See also:** [EVENT_DRIVEN_EXECUTION_SPEC.md](./EVENT_DRIVEN_EXECUTION_SPEC.md) for the complete event-first orchestration model, normalized event vocabulary, and event layer separation (domain, runtime, control-plane).
+> **See also:** [Event System](../foundations/event-system.md) for the complete event-first orchestration model, normalized event vocabulary, and event layer separation.
 
-The runtime coordinates events between all subsystems. This section covers the **runtime's responsibilities** for event handling. For the **full event vocabulary and patterns**, see the EVENT_DRIVEN_EXECUTION_SPEC.
+The runtime coordinates events between all subsystems. This section covers the **runtime's responsibilities** for event handling. For the **full event vocabulary and patterns**, see the canonical Event System foundation.
 
 ### Event Bus Integration
 
@@ -936,7 +936,7 @@ async def health_check(request: Request):
 
 > **The runtime reacts to explicit events, not inferred transcript state or post-hoc output inspection.**
 
-This is a non-negotiable architectural requirement. See [EVENT_DRIVEN_EXECUTION_SPEC.md](./EVENT_DRIVEN_EXECUTION_SPEC.md) for full details.
+This is a non-negotiable architectural requirement. See [Event System](../foundations/event-system.md) for full details.
 
 ### What This Means for Runtime
 

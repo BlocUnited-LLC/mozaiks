@@ -94,10 +94,28 @@ async def create_order(order: Order):
 
 ## 4. Webhook/External Trigger
 
-External systems (Stripe, Zapier, etc.) call mozaiksai directly:
+External systems (Stripe, Zapier, etc.) can call either the embedded runtime
+factory or the canonical repo hosts directly.
+
+Embedded runtime mode (`create_mozaiks_app()` mounted at `/ai`):
 
 ```http
-POST /ai/api/workflows/CustomerSupport/trigger
+POST /ai/workflows/CustomerSupport/trigger
+Content-Type: application/json
+
+{
+  "user_id": "user_123",
+  "context": {
+    "order_id": "order_456",
+    "issue": "payment_failed"
+  }
+}
+```
+
+Canonical repo host mode (`runtime_app.py`, `platform_app.py`, `studio_app.py`, or `mozaiks_app.py`):
+
+```http
+POST /api/workflows/CustomerSupport/trigger
 Content-Type: application/json
 
 {
@@ -145,20 +163,25 @@ startWorkflow(workflowName: string, options?: { context?: object })
 ### Backend (`mozaiksai`)
 
 ```python
-from mozaiksai import create_mozaiks_app, trigger_workflow
+from mozaiksai import trigger_workflow
 
 # trigger_workflow signature:
 await trigger_workflow(workflow_name, user_id, context={})
 ```
 
+`create_mozaiks_app()` is the runtime-only convenience factory for external
+embedding. It is not required when you run the canonical repo hosts directly.
+
 ### REST Endpoints
 
 ```
-POST /api/workflows/{name}/trigger
-     Body: { user_id, context }
+Embedded runtime factory:
+POST /workflows/{name}/trigger
+GET /workflows
 
+Canonical repo hosts:
+POST /api/workflows/{name}/trigger
 GET /api/workflows
-     → List available workflows
 
 GET /api/workflows/{name}/runs?user_id=xxx
      → Get user's conversation history

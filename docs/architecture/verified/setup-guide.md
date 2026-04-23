@@ -1,6 +1,7 @@
 # Setting Up mozaiksai
 
-Follow the steps below to integrate mozaiksai workflows into your application.
+Follow the steps below to either run the canonical Mozaiks hosts in this repo
+or embed the runtime substrate into another backend.
 
 ---
 
@@ -25,11 +26,30 @@ npm install @mozaiks/chat-ui
 
 ## 2. Integration Points
 
-Next, integrate mozaiksai into both your backend and frontend.
+There are two valid integration modes.
 
-### Step 2.1 --- Mount mozaiksai in Your Backend
+### Step 2.1 --- Use the canonical repo hosts
 
-Open your backend entry file (e.g., `main.py`). Then mount the mozaiksai application:
+If you are running this repo directly, the canonical entrypoints are the root
+host files:
+
+```bash
+# Defaults to the local/private Studio host
+python run_server.py
+
+# Or target a specific layer directly
+python run_runtime.py
+python run_platform.py
+python run_studio.py
+python run_mozaiks.py
+```
+
+Use this mode when you want the layered repo architecture as-is.
+
+### Step 2.2 --- Embed the runtime substrate into another backend
+
+If you are integrating `mozaiksai` into an external backend, mount the
+runtime-only convenience factory explicitly:
 
 ```python
 # your-app/backend/main.py
@@ -49,7 +69,10 @@ def get_users():
 app.mount("/ai", create_mozaiks_app(workflow_dir="./platform/workflows"))
 ```
 
-### Step 2.2 --- Add the Chat Widget to Your Frontend
+This `/ai` mount pattern is for external embedding mode only. In the canonical
+repo hosts above, `mozaiksai` is already composed into the selected root host.
+
+### Step 2.3 --- Add the Chat Widget to Your Frontend
 
 Open your frontend entry file (e.g., `App.jsx`). Add the ChatWidget as a floating overlay:
 
@@ -74,6 +97,10 @@ function App() {
   );
 }
 ```
+
+Use the `/ai` endpoint only when you mounted the runtime that way. If you are
+running the canonical repo hosts directly, point the widget at that host's base
+URL instead of assuming an `/ai` prefix.
 
 Or embed a specific workflow directly using `WorkflowChat`:
 

@@ -1,348 +1,189 @@
 # Event System
 
-This document defines the event model and taxonomy for Mozaiks.
+Mozaiks is event-driven, but not every event means the same thing.
 
-The critical distinction is that multiple event families may share transport,
-logging, or envelope conventions without becoming the same abstraction.
+The event system exists to let deterministic app behavior, AI workflow
+orchestration, UI reactivity, notifications, and hosted product capabilities
+cooperate without collapsing into one control plane.
 
 ## Core Rule
 
-The event system should be simple:
+Event ownership follows the layer that owns the fact.
 
-1. normal app logic emits app events
-2. workflow triggers decide whether a workflow should run
-3. workflows do the agentic work
-4. pages reflect the result
+| Event family | Owner | Purpose | Kernel concern |
+| --- | --- | --- | --- |
+| `domain.*` | app module / app backend | durable business facts after deterministic mutations | no |
+| `workflow.*` | workflow runtime | workflow lifecycle facts and workflow-level checkpoints | yes, as execution metadata |
+| `runtime.*` | runtime substrate | internal orchestration, validation, fan-out, resume, and control state | yes |
+| `chat.*` | runtime transport | live chat transcript and tool execution stream | yes |
+| `artifact.*` | runtime or generator workflow | artifact lifecycle facts | yes for transport, no for business meaning |
+| `ui.*` | app UI contract | primitive updates and client-side UI reactions | no |
+| `notification.*` | platform host notification service | notification lifecycle | no |
+| `platform.*` | product/platform layer | App Zero or hosted-platform product facts | no |
+| `hosted.*` | hosted-only capability packs | paid hosted product capabilities | no |
 
-That is the event story.
+The runtime may transport many event families. Transport is not ownership.
 
-## Same Substrate, Different Contracts
+## Layer Responsibilities
 
-Mozaiks can use one underlying event substrate while still keeping different
-contracts separate.
+### Runtime App
 
-That means these statements can both be true:
+`runtime_app.py` and `mozaiksai` own execution transport:
 
-- the system uses one event transport or envelope model
-- app events and workflow runtime events are not the same thing
+- WebSocket delivery
+- chat stream events
+- AG2 event stream handling
+- runtime control events
+- workflow execution checkpoints
+- persistence of runtime session state
 
-The separation is by owner and purpose, not only by wire format.
+The runtime must not define app business events such as invoices, bookings,
+campaigns, payments, or app-specific status changes.
 
-Use this test:
+### Platform App
 
-- if the event describes a business fact after a deterministic mutation, it is an app event
-- if the event describes runtime session posture, it is a control event
-- if the event describes what is happening inside a live run right now, it is a workflow runtime event
+`platform_app.py` owns app-host event integration:
 
-## Design Principles
+- module action endpoints
+- module event validation
+- event ingress from app modules or external app backends
+- workflow trigger resolution
+- notification/subscription derivation
+- page and admin surfaces that react to app state
 
-- events are immutable facts
-- event names describe what happened, not what should happen
-- event ownership follows layer boundaries
-- workflow names do not appear inside domain event types
-- tenant scope and causation must be explicit
+The platform host connects app facts to workflow execution. It does not make
+AI workflow stream events into app facts.
 
-## Two Important Event Kinds
+### Studio And Mozaiks Product
 
-### App events
+`studio_app.py` and `mozaiks_app.py` own product-layer events:
 
-These come from normal app behavior.
+- build lifecycle
+- app project lifecycle
+- hosted collaboration
+- marketplace
+- hosted billing and revenue-share capabilities
 
-Examples:
+These are product facts, not universal runtime assumptions.
 
-- `set.brief_confirmed`
-- `set.direction_selected`
-- `set.finalized`
-- `subscription.changed`
+### Modules
 
-App events are facts. They should never encode workflow names.
+Modules own deterministic app facts. A module action may publish `domain.*`
+events only after it commits the corresponding state change.
 
-### Workflow runtime events
-
-These come from live workflow execution.
-
-Examples:
-
-- chat messages
-- progress updates
-- artifact updates
-- UI tool requests
-
-These are for the live experience, not for deciding app automation policy.
-
-## Automation Flow
+Example:
 
 ```text
-page or backend action
-  -> app event emitted
-  -> workflow trigger checked
-  -> workflow runs or resumes
-  -> workflow output is saved or streamed
-  -> pages update
+POST /api/modules/tasks/create
+  -> tasks handler validates and saves task
+  -> emits domain.tasks.task_created
+  -> platform host resolves subscriptions and workflow triggers
 ```
 
-Simple rule:
+### Workflows
 
-- app events say what facts exist
-- workflow `triggers:` say what workflow behavior those facts can trigger
+Workflows own AI orchestration events, not app business facts.
 
-## Event Families
+A workflow may:
 
-| Family | Owner | Purpose |
-| --- | --- | --- |
-| App domain events | app bundle and app backend | business facts such as entity changes |
-| Shared app backend events | app backend core | settings, notifications, subscriptions, module activity |
-| Automation control events | AI runtime | route and session control facts |
-| Workflow runtime events | AI runtime | run, task, chat, artifact, UI tool lifecycle |
-| Telemetry events | platform and observability | monitoring and learning signals |
+- emit `workflow.*` checkpoints
+- emit `runtime.*` events through AG2 custom-event handling
+- emit `ui.*` events to update primitive UI
+- call a module action that then emits `domain.*`
 
-## 1. App Domain Events
+A workflow should not directly invent durable domain facts unless it is calling
+the app/module contract that owns that fact.
 
-These are app-specific business facts.
-
-Examples:
-
-- `crm.lead.created`
-- `booking.request.approved`
-- `writers_room.brief.updated`
-- `catalog.item.archived`
-
-Rules:
-
-- emitted after the mutation commits
-- owned by the app backend
-- never include workflow names
-- safe to route through internal or HTTP ingress
-
-## 2. Shared App Backend Events
-
-These are reusable app-backend facts owned by the platform.
-
-Examples:
-
-- `settings.updated`
-- `notification.created`
-- `notification.read`
-- `subscription.changed`
-- `module.executed`
-
-These are still domain events, but they describe shared platform services rather than app-specific business objects.
-
-## 3. Automation Control Events
-
-These are low-frequency facts about automation and session control.
-
-Examples:
-
-- `control.plan_created`
-- `control.prerequisites_required`
-- `control.execution_batch_started`
-- `control.transfer_requested`
-
-These do not replace domain events. They describe what the AI-side control plane decided after domain events were processed.
-
-## 4. Workflow Runtime Events
-
-These are the live workflow and chat stream families.
-
-Examples:
-
-- `process.started`
-- `process.completed`
-- `task.failed`
-- `chat.message_appended`
-- `artifact.updated`
-- `ui.tool.requested`
-
-These are not the right contract for app backend workflow triggers.
-
-## Canonical Envelope
-
-All durable events should use this envelope.
-
-```json
-{
-  "event_id": "uuid",
-  "event_type": "domain.fact",
-  "timestamp": "ISO8601",
-  "tenant": {
-    "app_id": "app_123",
-    "user_id": "user_123",
-    "chat_id": null,
-    "run_id": null
-  },
-  "actor": {
-    "id": "system|user|agent|integration",
-    "type": "system|user|agent|integration"
-  },
-  "source": {
-    "layer": "app backend|automation|runtime|frontend|integration",
-    "component": "component_name",
-    "transport": "http|ws|internal"
-  },
-  "payload": {},
-  "causation_id": null,
-  "correlation_id": "stable-business-or-run-correlation-key"
-}
-```
-
-This envelope is appropriate for durable app domain events and durable runtime
-control events.
-
-Live workflow stream events may use a different transport-oriented shape because
-they serve interactive UX rather than durable automation policy.
-
-## Naming Rules
-
-### Lowercase dot notation
-
-Use lowercase dot notation only:
-
-- `crm.lead.created`
-- `settings.updated`
-- `process.completed`
-
-### Facts, not commands
-
-Good:
-
-- `booking.request.approved`
-
-Bad:
-
-- `workflow.run.approval_concierge`
-- `start_booking_workflow`
-
-### Domain-first naming
-
-For app backend events, prefer:
-
-- `<bounded_context>.<aggregate>.<fact>`
-
-Examples:
-
-- `crm.lead.created`
-- `writers_room.session.scheduled`
-
-### Shared service naming
-
-For shared platform services, prefer:
-
-- `settings.updated`
-- `notification.created`
-- `subscription.renewed`
-
-## Correlation Rules
-
-Use `correlation_id` to bind related facts.
-
-Examples:
-
-- business object id
-- process id
-- external webhook id
-
-Use `tenant` fields to prevent cross-app or cross-user leakage.
-
-## Cause and Effect Rule
-
-This is the rule the generator and runtime must both honor:
-
-- domain events describe facts
-- workflow triggers describe policy
-- workflows execute the resulting effect
-
-Event taxonomies should never encode all three in one artifact.
-
-## How This Feeds App Generation
-
-The generator should build event systems into app logic in a very specific way.
-
-### 1. Generate events from mutation boundaries
-
-When app logic changes durable state, emit a post-commit fact if that fact has
-downstream value.
-
-Good examples:
-
-- `booking.request.approved`
-- `invoice.sent`
-- `crm.lead.created`
-
-Bad examples:
-
-- `run_booking_workflow`
-- `open_review_agent`
-
-### 2. Keep trigger policy out of the app event type
-
-The app event says what happened.
-
-The workflow decides whether to react through `triggers:` in
-`platform/workflows/{workflow}/orchestrator.yaml`.
-
-That is where automation policy belongs.
-
-### 3. Keep live run updates out of app backend logic
-
-Do not model chat tokens, artifact streaming, or UI tool requests as your app's
-business event system.
-
-Those belong to the runtime stream.
-
-### 4. Persist workflow outcomes back into app state deliberately
-
-If a workflow result should affect the product, save it through the app backend
-or emit a new app fact after the save.
-
-That keeps the app model deterministic.
-
-## Concrete Build Pattern
+## Canonical Event Loop
 
 ```text
-user action
-  -> app backend validates and saves
-  -> app backend emits domain fact
-  -> runtime ingress receives event
-  -> workflow trigger matches
-  -> workflow runs
-  -> workflow saves result through app backend
-  -> app backend emits follow-up fact if needed
-  -> pages read the updated state
+user action or integration
+  -> module action
+  -> deterministic state commit
+  -> domain.* event
+  -> platform host validates event
+  -> subscriptions / notifications / workflow triggers resolve
+  -> workflow starts or resumes when configured
+  -> runtime emits chat.*, runtime.*, workflow.*, artifact.* stream events
+  -> UI renders stream and primitive updates
+  -> workflow saves results through module actions when app state changes
+  -> module emits new domain.* event if another durable fact became true
 ```
 
-The event system in app logic is therefore not "add a generic event bus to
-everything".
+## Where Events Are Declared
 
-It is:
+| Contract | File |
+| --- | --- |
+| Module-published domain events | `modules/{module}/events.yaml` |
+| Module event reactions | `modules/{module}/subscriptions.yaml` |
+| Notification derivation | `modules/{module}/notifications.yaml` |
+| Workflow trigger policy | `workflows/{workflow}/orchestrator.yaml` |
+| Workflow runtime stream and AG2 custom event types | runtime code in `mozaiksai/core/events/` |
+| Page primitive UI reactions | `pages/*.yaml` and primitive component contracts |
+| Hosted-only product events | hosted capability pack contracts |
 
-- choose the important business facts
-- emit them after commit
-- let triggers translate facts into automation
-- let workflows push outcomes back into deterministic app state
+## `orchestrator.yaml`
 
-## What Not To Do
+`orchestrator.yaml` is not the global event catalog.
+
+It may declare:
+
+```yaml
+triggers:
+  - event: domain.tasks.task_created
+    action: run
+```
+
+That means the workflow wants to react to a domain event. The event itself is
+owned by the module that publishes it.
+
+## AG2 Custom Events
+
+AG2 custom events are runtime execution events. Use them for AI/runtime facts:
+
+- agent produced validated structured output
+- decomposition was planned
+- artifact became ready
+- handoff was requested
+- user input is required
+
+Do not use AG2 custom events as app business events. If the AI result changes
+app state, the workflow must call a module action and let the module publish the
+domain event after the state commit.
+
+## UI Events
+
+`ui.*` events are client reaction commands, not durable app facts.
+
+Examples:
+
+- `ui.datatable.refresh`
+- `ui.form.set_field`
+- `ui.stat.update`
+- `ui.modal.open`
+
+These events may be emitted by a workflow or a page action. They update the live
+browser surface and should not be used for business correctness.
+
+## Hosted Capability Events
+
+Hosted-only capabilities such as MozaiksPay use `hosted.*` or product-scoped
+`platform.*` events. They plug into the platform/product layer as capability
+packs. They must not become kernel assumptions.
+
+## Collapse Rules
 
 Do not:
 
-- emit workflow names as app events
-- use frontend UI events as your backend automation model
-- make every CRUD action call a workflow directly
-- treat live chat events as the same thing as app facts
+- encode workflow names into domain event names
+- use `chat.*` messages as durable business facts
+- let modules publish `runtime.*` or `workflow.*`
+- let hosted billing/revenue-share events leak into the runtime kernel
+- let `orchestrator.yaml` become the app event catalog
+- let UI events substitute for committed app state
 
-## Key Files
+## Related Documents
 
-- `platform/workflows/{workflow}/orchestrator.yaml`
-
-## Current Implementation Note
-
-The backend currently uses one app server and handles automation inside that same backend.
-
-That is the right default model for Mozaiks.
-
-## Cross References
-
-- [architecture-overview.md](architecture-overview.md)
+- [event-contracts.md](event-contracts.md)
 - [workflow-architecture.md](workflow-architecture.md)
-- [process-and-event-map.md](process-and-event-map.md)
-- [runtime-state-and-control-events.md](runtime-state-and-control-events.md)
+- [canonical-app-structure.md](canonical-app-structure.md)

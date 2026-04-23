@@ -1,4 +1,10 @@
-# AGENTS.md v2 - Modular Architecture
+# AGENTS.md v2 - Modular Architecture Proposal
+
+**Status:** Historical / future package-splitting reference.
+
+This is not the active repository guidance. The active guidance is the root
+`AGENTS.md`, and the canonical architecture source of truth is
+`ARCHITECTURE.md`.
 
 **For:** `.claude/AGENTS.md` in the mozaiks repository
 **Architecture:** Modular composition (not merged runtimes)

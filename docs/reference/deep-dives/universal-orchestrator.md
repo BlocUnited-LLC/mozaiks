@@ -32,7 +32,7 @@ ALL EVENTS IN THE SYSTEM
 
 ---
 
-## Event Taxonomy
+## Event Namespaces
 
 Every event has a **trigger type** and a **target**. The orchestrator maps one to the other.
 

@@ -17,6 +17,10 @@ async def test_studio_shell_config_injects_studio_routes():
 
     assert "/dashboard" in page_paths
     assert "/create" in page_paths
+    assert "/admin" in page_paths
+    assert "/admin/users" in page_paths
+    assert "/admin/billing" in page_paths
+    assert "/admin/usage" in page_paths
     assert "/studio" in page_paths
     assert "/studio/build" in page_paths
     assert "/studio" not in header_paths

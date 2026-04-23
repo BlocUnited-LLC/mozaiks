@@ -46,7 +46,7 @@ def test_studio_build_page_fetches_endpoint_and_uses_workflow_start() -> None:
     assert "/api/studio/build" in source
     assert "method: 'PUT'" in source
     assert "useWorkflowStart" in source
-    assert "BuilderWorkspaceLayout" in source
+    assert "AdminWorkspaceLayout" in source
     assert "Save Build Draft" in source
     assert "request_kind" in source
     assert "trigger_source: 'refinement'" in source
@@ -58,12 +58,20 @@ def test_studio_home_links_to_build_surface() -> None:
     assert 'to="/studio/build"' in source
 
 
-def test_builder_workspace_nav_links_admin_studio_and_build() -> None:
-    source = _read("chat-ui/src/studio/components/BuilderWorkspaceNav.jsx")
-    assert "Admin Portal" in source
+def test_admin_workspace_layout_links_admin_studio_and_build() -> None:
+    source = _read("chat-ui/src/admin/components/AdminWorkspaceLayout.jsx")
+    assert "Admin Dashboard" in source
+    assert "Mozaiks Admin" in source
+    assert "Users" in source
+    assert "Billing" in source
+    assert "Usage" in source
+    assert "Integrations" in source
     assert "path: '/admin'" in source
+    assert "path: '/admin/users'" in source
+    assert "path: '/admin/usage'" in source
     assert "path: '/studio'" in source
     assert "path: '/studio/build'" in source
-    assert "BuilderWorkspaceLayout" in source
+    assert "AdminWorkspaceLayout" in source
     assert "lg:hidden" in source
     assert "lg:block" in source
+    assert "description:" not in source

@@ -55,20 +55,21 @@ Pages are product surfaces, not infrastructure.
 
 ### Minimal page shape:
 
-```json
-{
-  "name": "archive",
-  "title": "Archive",
-  "path": "/archive",
-  "component": "ArchivePage",
-  "ui": "platform/pages/archive/ui/index.js",
-  "showInNavigation": true,
-  "order": 20,
-  "uses": {
-    "modules": ["show_archive"],
-    "workflows": []
-  }
-}
+```yaml
+name: archive
+title: Archive
+path: /archive
+component: SchemaPage
+showInNavigation: true
+order: 20
+uses:
+  modules:
+    - show_archive
+  workflows: []
+content:
+  - type: Section
+    title: Archive
+    children: []
 ```
 
 That is the right level of declaration for now.

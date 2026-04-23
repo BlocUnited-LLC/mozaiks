@@ -164,6 +164,49 @@ def test_runtime_extensions_stay_workflow_local() -> None:
     ]
 
 
+def test_orchestrator_triggers_are_normalized_to_runtime_schema() -> None:
+    triggers = [
+        {
+            "type": "event",
+            "event": "domain.documents.document_uploaded",
+            "description": "Start after upload commit",
+            "capability_id": "documents.review",
+        },
+        {"type": "unsupported", "event": "domain.bad.event"},
+        {"type": "route", "endpoint": "/api/review", "method": "POST"},
+        {"capability_id": "raw.workflow.name"},
+    ]
+
+    normalized = workflow_converter._normalize_orchestrator_triggers(
+        triggers,
+        wf_logger=_Logger(),
+    )
+
+    assert normalized == [
+        {
+            "type": "event",
+            "event": "domain.documents.document_uploaded",
+            "description": "Start after upload commit",
+        },
+        {"type": "route", "endpoint": "/api/review", "method": "POST"},
+    ]
+
+
+def test_split_config_preserves_orchestrator_triggers() -> None:
+    sections = workflow_converter._split_config_into_sections(
+        {
+            "workflow_name": "ReviewWorkflow",
+            "startup_mode": "BackendOnly",
+            "triggers": [{"type": "event", "event": "domain.documents.document_uploaded"}],
+            "agents": {"ReviewAgent": {}},
+        }
+    )
+
+    assert sections["orchestrator"]["triggers"] == [
+        {"type": "event", "event": "domain.documents.document_uploaded"}
+    ]
+
+
 def test_normalize_visual_agents_backend_only_blank_to_null() -> None:
     assert workflow_converter._normalize_visual_agents(None, startup_mode="BackendOnly") is None
     assert workflow_converter._normalize_visual_agents("  ", startup_mode="BackendOnly") is None

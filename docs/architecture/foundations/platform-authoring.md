@@ -4,7 +4,8 @@ This document defines what should be authored under `platform/` and the key file
 
 ## Core Rule
 
-`platform/` is the app bundle.
+`platform/` is the default active app root. The same app-root shape appears
+inside product workspaces such as `mozaiks-platform/app`.
 
 It should contain declaratives, assets, and explicit logic stubs. It should not contain framework compiler logic.
 
@@ -16,6 +17,23 @@ The bundle should stay focused on the product-facing pieces:
 - modules
 
 Modules exist as support bundles, but they should not dominate the authoring model.
+
+## Active Root vs Workspace Wrapper
+
+The runtime reads an active app root:
+
+- default OSS/sample root: `platform/`
+- App Zero root: `mozaiks-platform/app/`
+- generated app root after promotion: the target app's active root
+
+A workspace may also include sibling product assets:
+
+- `brand/` for theme and visual assets
+- `ui/` for product UI extensions
+- `generated/` for generator output awaiting promotion
+
+Those wrapper folders are not a different app contract. They are product
+workspace support around the same active app-root shape.
 
 ## Primary Families
 
@@ -51,6 +69,17 @@ When the generator needs to add a new capability:
 - shared backend helper -> create a `module`
 - agentic execution -> create a `workflow`
 - event-triggered workflow handoff -> add `triggers` in `orchestrator.yaml`
+
+Generator outputs must not be written directly into the active app root. The
+builder writes to `MOZAIKS_GENERATED_ARTIFACTS_PATH` first:
+
+```text
+mozaiks-platform/generated/
+├── apps/{app_id}/{build_id}/app/
+└── workflows/{app_id}/{build_id}/{workflow_name}/
+```
+
+An explicit promotion step copies validated artifacts into the active root.
 
 ## Framework-Owned vs Generator-Owned
 
@@ -102,16 +131,17 @@ It is not the place for shell colors, login theme files, footer links, or header
 
 It is also not the place for local development shortcuts such as auto-login.
 
-### `platform/pages/{page}/`
+### `platform/pages/{page}.yaml`
 
 Required:
 
-- `page.json`
-- `ui/index.js`
+- a declarative page schema using the App UI primitive contract
 
 Optional:
 
-- additional `ui/*.{js,jsx}`
+- folder form: `platform/pages/{page}/page.yaml`
+- custom UI extension files when a page intentionally leaves the primitive
+  schema path
 
 Shared page-level UI should live under `platform/pages/_shared/`, not inside a module by default.
 
@@ -137,17 +167,26 @@ Optional but common:
 
 Event routing and workflow triggers are configured via:
 - `platform/workflows/{workflow}/orchestrator.yaml` - `triggers` declare which app events start or resume a workflow
-- app backends emit domain events through the runtime ingress boundary; there is no separate `platform/automations/event_catalog.json`
+- app hosts/backends emit domain events through the runtime ingress boundary; there is no separate `platform/automations/event_catalog.json`
 
 ### `platform/modules/{module}/`
 
 Required:
 
-- `module.json`
-- `handler.py`
+- `module.yaml`
+- `events.yaml`
+- `subscriptions.yaml`
+- `notifications.yaml`
+- `settings.yaml`
+- `admin.yaml`
+- `backend/handler.py`
 
 Optional:
 
+- `backend/settings.py`
+- `backend/subscriptions.py`
+- `backend/notifications.py`
+- `backend/admin.py`
 - `ui/index.js`
 - additional `ui/*.{js,jsx}`
 

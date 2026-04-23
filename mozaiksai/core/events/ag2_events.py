@@ -18,9 +18,9 @@ Architecture:
 Forward Compatibility (AG2 Beta):
     - AG2 beta uses similar patterns: BaseEvent + send() + subscribe()
     - When migrating to beta, these events become Stream subscribers
-    - The event taxonomy stays the same; only the transport changes
+    - The event namespace model stays the same; only the transport changes
 
-Event Taxonomy (aligned with docs/architecture/foundations/event-system.md):
+Event Namespaces (aligned with docs/architecture/foundations/event-system.md):
     - App domain events: business facts from app backend
     - Automation control events: AI runtime decisions
     - Workflow runtime events: live execution stream

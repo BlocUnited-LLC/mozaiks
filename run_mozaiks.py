@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Run the canonical hosted Mozaiks product host directly."""
+
 import uvicorn
 
 from mozaiks_app import app

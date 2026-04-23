@@ -2,13 +2,16 @@
 
 **Status:** Design Proposal
 **Created:** 2026-04-06
-**Based on:** Actual system state (two working runtimes)
+**Based on:** Legacy modularization analysis; current canonical hosts are
+`runtime_app.py`, `platform_app.py`, `studio_app.py`, and `mozaiks_app.py`.
 
 ---
 
 ## Design Philosophy
 
-This architecture does NOT merge the AI runtime and module runtime. Instead, it introduces a **composition layer** that can orchestrate both while keeping them fully independent.
+This architecture does NOT collapse AI workflow execution and deterministic
+module execution. Instead, it introduces a **composition layer** that can
+orchestrate both while keeping ownership boundaries explicit.
 
 **Core Principle:** Each layer can run standalone. The App Runtime is an orchestrator, not a bridge.
 
@@ -21,7 +24,7 @@ mozaiks/
 ├── packages/
 │   ├── core/                    # Shared primitives (interfaces, types, utilities)
 │   ├── ai/                      # AI workflow execution (current mozaiks)
-│   ├── modules/                 # Module execution (current mozaiks-core-public backend)
+│   ├── modules/                 # Module execution (canonical in-repo contract)
 │   ├── runtime/                 # NEW: App composition layer
 │   ├── ui/                      # UI rendering system
 │   └── cli/                     # CLI tool
@@ -142,7 +145,7 @@ mozaiks-ai serve --workflows ./workflows --port 8001
 
 #### `@mozaiks/modules`
 
-**Purpose:** Execute modules. This is the current `mozaiks-core-public` backend, repackaged.
+**Purpose:** Execute modules through the canonical in-repo module contract.
 
 **Responsibilities:**
 - Load module definitions
@@ -564,7 +567,7 @@ class UserPrincipal:
 class TenantContext:
     """
     Tenant context for multi-tenancy.
-    Matches the 'tenant' field in EVENT_CONTRACTS.md event envelope.
+    Matches the `tenant` field in the canonical event envelope documented in `../foundations/event-contracts.md`.
     """
     app_id: str                              # Required: which app this belongs to
     user_id: Optional[str] = None            # User who initiated the action
@@ -1587,10 +1590,7 @@ CURRENT:
 │   ├── studio_app.py            # Local/private Studio builder host
 │   └── mozaiks_app.py           # Default Mozaiks product host
 │
-└── mozaiks-core-public/          # Plugin runtime (working)
-    ├── backend/                  # FastAPI server
-    ├── platform/modules/      # Example operations
-    └── src/                      # React frontend
+└── legacy donor material         # Reference-only patterns, not an active runtime
 ```
 
 ### Target State
@@ -1601,8 +1601,8 @@ TARGET:
     ├── packages/
     │   ├── core/                # NEW: extracted shared code
     │   ├── ai/                  # FROM: mozaiks/mozaiksai
-    │   ├── modules/             # FROM: mozaiks-core-public/backend
-    │   ├── ui/                  # FROM: mozaiks-core-public/src + new
+    │   ├── modules/             # FROM: canonical module contracts in this repo
+    │   ├── ui/                  # FROM: chat-ui and app shell surfaces
     │   ├── runtime/             # NEW: composition layer
     │   └── cli/                 # FROM: mozaiks/mozaiks_cli
     ├── templates/               # App templates
@@ -1624,7 +1624,7 @@ Tasks:
   - JWT validation logic
   - MongoDB connection utilities
   - Config loading
-□ Extract from mozaiks-core-public:
+□ Port selected patterns from legacy donor material:
   - Request context
   - User principal
   - Storage abstractions
@@ -1652,7 +1652,7 @@ Tasks:
 ```
 Tasks:
 □ Create packages/modules/ structure
-□ Move mozaiks-core-public/backend → packages/modules/src/mozaiks_modules
+□ Move/refactor in-repo module host code → packages/modules/src/mozaiks_modules
 □ Update imports to use mozaiks_core
 □ Extract server into standalone file
 □ Implement ModuleExecutor interface
@@ -1681,7 +1681,7 @@ Tasks:
 ```
 Tasks:
 □ Create packages/ui/ structure
-□ Move mozaiks-core-public/src → packages/ui/frontend
+□ Move/refactor chat-ui and app shell surfaces → packages/ui/frontend
 □ Create server-side rendering option
 □ Implement page schema
 □ Implement navigation builder

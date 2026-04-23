@@ -1,6 +1,4 @@
-"""
-mozaiks onboard - Guided setup for an existing Mozaiks app bundle scaffold.
-"""
+"""mozaiks onboard - Guided setup from the local Dev/CLI layer."""
 
 from __future__ import annotations
 
@@ -437,7 +435,21 @@ def _apply_admin_config(admin_config: dict, admin_email: str) -> dict:
     if admin_email not in emails:
         emails.append(admin_email)
     admin_config["admin_emails"] = emails
-    admin_config.setdefault("panels", ["stats", "runs", "sessions"])
+    panels = admin_config.get("panels")
+    if not isinstance(panels, dict):
+        panels = {
+            "app": [
+                {"id": "stats", "label": "App Overview", "section": "overview"},
+                {"id": "users", "label": "Users", "section": "users"},
+            ],
+            "modules": [],
+            "runtime": [
+                {"id": "stats", "label": "Usage Stats", "section": "usage"},
+                {"id": "runs", "label": "Active Runs", "section": "usage"},
+                {"id": "sessions", "label": "Recent Sessions", "section": "activity"},
+            ],
+        }
+    admin_config["panels"] = panels
     admin_config.setdefault("roles", ["admin"])
     admin_config.setdefault(
         "features",
@@ -456,9 +468,10 @@ def _show_next_steps(*, workspace_root: Path, journey: str, first_goal: str, adm
     print("  2. Confirm your default AI provider and model in platform/config/ai.json")
     print("  3. Use the first goal below as your next build request:")
     print(f"     {first_goal}")
+    print("  4. Start the local/private builder host with python run_studio.py")
     if journey == "existing_app":
-        print("  4. Bridge the first host-owned surface before attempting broader generation")
+        print("  5. Bridge the first host-owned surface before attempting broader generation")
     else:
-        print("  4. Add the first real workflow or operation only after you confirm the product surface")
+        print("  5. Add the first real workflow or module only after you confirm the product surface")
     if admin_email:
-        print("  5. Verify admin access in platform/config/admin.json")
+        print("  6. Verify admin access in platform/config/admin.json")

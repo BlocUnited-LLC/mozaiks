@@ -17,6 +17,7 @@ import platform_app
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.auth import UserPrincipal, require_any_auth, require_user_scope
 from mozaiksai.core.runtime.app.studio_home import (
+    build_studio_adapters_summary,
     build_studio_build_summary,
     build_studio_home_summary,
     get_missing_studio_surfaces,
@@ -58,6 +59,14 @@ async def get_studio_home(
         return build_studio_home_summary(platform_root, surface="shell-home", local_only=True)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to build Studio Home summary: {exc}") from exc
+
+
+@app.get("/api/studio/adapters")
+async def get_studio_adapters(
+    principal: UserPrincipal = Depends(require_any_auth),
+):
+    _ = principal
+    return await build_studio_adapters_summary()
 
 
 @app.get("/api/studio/build")

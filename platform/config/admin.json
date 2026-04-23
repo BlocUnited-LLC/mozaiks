@@ -1,5 +1,5 @@
 {
-  "_comment": "Declarative admin config. The generator writes this file — the runtime reads it.",
+  "_comment": "Declarative app admin config. The generator writes this file — the runtime reads it.",
 
   "enabled": true,
 
@@ -9,14 +9,14 @@
 
   "panels": {
     "app": [
-      { "id": "stats", "label": "App Overview" },
-      { "id": "users", "label": "Users" }
+      { "id": "stats", "label": "App Overview", "section": "overview" },
+      { "id": "users", "label": "Users", "section": "users" }
     ],
     "modules": [],
     "runtime": [
-      { "id": "stats", "label": "Runtime Stats" },
-      { "id": "runs", "label": "Active Runs" },
-      { "id": "sessions", "label": "Recent Sessions" }
+      { "id": "stats", "label": "Usage Stats", "section": "usage" },
+      { "id": "runs", "label": "Active Runs", "section": "usage" },
+      { "id": "sessions", "label": "Recent Sessions", "section": "activity" }
     ]
   },
 

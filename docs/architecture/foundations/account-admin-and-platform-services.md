@@ -1,0 +1,196 @@
+# Account, Admin, and Platform Services
+
+This document defines the deterministic product services that every Mozaiks app
+can rely on without authoring a workflow or generating a custom shell surface.
+
+These concerns still matter if AI is turned off. That is the classification
+test.
+
+Profile, settings, notifications, subscriptions, and admin are not workflow
+products. They are platform and app-backend responsibilities with explicit UI,
+API, and module-contract boundaries.
+
+## Canonical Rule
+
+- Treat these concerns as first-class platform services.
+- Do not model them as app-specific `capability_packs` in AppGenerator.
+- Do not generate replacement `/profile` or `/admin` shells.
+- Keep deterministic state, policies, and CRUD behind the app backend and
+  module contracts.
+- Add AI only as augmentation on top of these services, never as the source of
+  truth.
+
+AppGenerator already follows this rule. Its planning prompts explicitly mark
+authentication, user profile, settings, notifications, subscriptions, user
+management, and the admin portal as built-in platform features rather than
+things to scaffold as product-specific packs.
+
+## Three Contract Layers
+
+### 1. Framework-Owned Surfaces
+
+Mozaiks ships the visible shell surfaces for account and admin flows.
+
+- `/profile` is rendered by the core `ProfilePage` component.
+- `/admin` and its section routes are rendered by the core `AdminPortal`
+  component.
+- These surfaces are first-class shell components, not app-authored page
+  bundles.
+
+This means app generation should not create replacement profile or admin pages
+under `platform/pages/` just to make these features exist.
+
+### 2. App Backend APIs
+
+The app backend is authoritative for user/account/admin data.
+
+- `GET/PUT {app_backend_url}/api/me` owns the current user's core profile data.
+- `GET {app_backend_url}/api/me/preferences` owns the current user's preference
+  payload.
+- `GET {app_backend_url}/api/admin/config` and related `app_backend_url/api/admin/*`
+  endpoints own app-admin panels and app-admin data.
+
+The shell can render these surfaces only because the deterministic backend
+contracts exist. The shell is not the source of truth.
+
+### 3. Module Declaratives And Hooks
+
+Modules can extend these deterministic systems through explicit contracts.
+
+- `modules/{module}/settings.yaml` declares module-local settings and feature
+  flags.
+- `modules/{module}/subscriptions.yaml` declares entitlement- and subscription-
+  related reactions or gates.
+- `modules/{module}/notifications.yaml` declares notification intents per
+  event.
+- `modules/{module}/admin.yaml` declares feature-owned admin panels rendered
+  inside the unified `/admin` shell.
+
+Optional Python hooks such as `backend/settings.py`,
+`backend/subscriptions.py`, `backend/notifications.py`, and `backend/admin.py`
+implement deterministic behavior behind those manifests.
+
+## Surface Map
+
+| Concern | Primary UX surface | Source of truth | Extension contract | Not owned by |
+|---|---|---|---|---|
+| Profile | `/profile` via `ProfilePage` | `GET/PUT {app_backend_url}/api/me` | none today | workflows, generated page bundles |
+| Preferences | `/profile` preferences section | `GET {app_backend_url}/api/me/preferences` | `modules/{module}/settings.yaml` and optional `backend/settings.py` for module-local settings | workflow prompts |
+| Notifications | shell notification surfaces and backend delivery rules | app backend plus module notification policy | `modules/{module}/notifications.yaml` and optional `backend/notifications.py` | workflows as source of truth |
+| Subscriptions and entitlements | profile badges, billing/admin views, and gated capability behavior | app backend entitlement state | `modules/{module}/subscriptions.yaml` and optional `backend/subscriptions.py` | capability-pack generation |
+| Admin | `/admin` route family via `AdminPortal` | app backend admin APIs plus platform admin config | `platform/config/admin.json`, `modules/{module}/admin.yaml`, optional `backend/admin.py` | custom admin page generation |
+
+## Profile
+
+`ProfilePage` is a framework-owned surface registered in the core component
+registry.
+
+Current behavior:
+
+- it renders the current user's account view at `/profile`
+- it loads and updates profile data from `app_backend_url/api/me`
+- it loads app/user preference data from `app_backend_url/api/me/preferences`
+- it shows a deterministic no-backend state when no app backend is connected
+
+Important boundary:
+
+- `/profile` is not a generated page bundle
+- `/profile` is not a workflow artifact
+- there is no current `profile.yaml` or module-level profile contribution
+  contract
+
+If Mozaiks later supports module-contributed profile sections, that should be a
+new explicit contract. Do not overload `settings.yaml`, `subscriptions.yaml`,
+or `admin.yaml` as a proxy for profile UI composition.
+
+## Settings
+
+"Settings" is not one thing in Mozaiks. Keep the categories separate.
+
+### Account Preferences
+
+User-scoped preferences belong behind the account API surface, currently exposed
+through `/api/me/preferences` and rendered inside `/profile`.
+
+### Module Settings
+
+Feature-specific settings and feature flags belong in
+`modules/{module}/settings.yaml`, with optional deterministic validation or
+change hooks in `backend/settings.py`.
+
+### Shell Configuration
+
+Shell behavior and shell content belong in `platform/config/shell.json`.
+Examples include header actions, profile menu items, notification text, and
+footer links.
+
+Do not collapse these three settings layers into one contract.
+
+## Subscriptions And Notifications
+
+Subscriptions and notifications are platform services with module-level
+extension points, not standalone app packs that every product must reinvent.
+
+### Subscriptions And Entitlements
+
+- entitlement state stays deterministic and backend-owned
+- user-visible tier/status may appear in profile or admin views
+- module contracts use `subscriptions.yaml` to declare feature-level gates or
+  reactions
+- optional Python hooks enforce or react to those rules
+
+AI may inspect entitlement state or react to resulting events, but it does not
+define the canonical subscription model.
+
+### Notifications
+
+- delivery policy and notification intent belong in deterministic contracts
+- module contracts use `notifications.yaml` to declare what should happen when
+  named events occur
+- optional Python hooks determine audiences, rendering, or delivery details
+
+AI can personalize content on top of a notification system. It should not be
+the thing that makes the notification system exist.
+
+## Admin
+
+Mozaiks has one visible admin route family. The framework injects `/admin` and
+its section routes through the `AdminPortal` shell surface when
+`platform/config/admin.json` is enabled.
+
+Authority is separated by panel source:
+
+- app-admin panels come from `app_backend_url/api/admin/config` and related
+  `app_backend_url/api/admin/*` endpoints
+- feature-owned admin panels come from `modules/{module}/admin.yaml`
+- runtime/operator panels come from same-host admin APIs and
+  `platform/config/admin.json`
+
+Important boundaries:
+
+- admin is one unified shell surface, not a generated page family
+- Studio and Build are separate product routes, not admin sections
+- generated apps should produce admin config and module admin manifests, not a
+  separate admin React shell
+
+For the admin-only deep dive, see [Admin System](admin-system.md).
+
+## What This Means For Generation
+
+When AppGenerator is planning an app:
+
+- `profile`, `settings`, `notifications`, `subscriptions`, `auth`, and
+  `user_management` are built-in platform capabilities, not app-specific packs
+- the generated app may wire config and module manifests around these systems
+- the generated app should not scaffold replacement `/profile` or `/admin`
+  surfaces
+
+This keeps the deterministic product foundation stable while still allowing app-
+specific business modules and AI workflows to sit on top.
+
+## Cross References
+
+- [Admin System](admin-system.md)
+- [Core, Product, and App Bundle Boundary](core-product-app-bundle-boundary.md)
+- [UI Surface and Layout](ui-surface-and-layout-architecture.md)
+- [Workflow Architecture](workflow-architecture.md)

@@ -1,14 +1,17 @@
 # Mozaiks Implementation Checklist
 
-**Status:** Active Implementation Guide
+**Status:** Packaging Proposal Checklist
 **Created:** 2026-04-07
-**Goal:** Consolidate to single mozaiks repo, deprecate mozaiks-core-public
+**Goal:** Keep `mozaiks` as the single canonical repo and archive legacy donor material
 
 ---
 
 ## Overview
 
-This checklist guides the implementation of the modular architecture in the mozaiks repo, replacing mozaiks-core-public functionality with a fresh, event-first design.
+This checklist is for future package extraction work. It is not the current
+runtime/source-of-truth architecture. The current canonical architecture is the
+layered host model in `ARCHITECTURE.md`: `runtime_app.py`, `platform_app.py`,
+`studio_app.py`, and `mozaiks_app.py`.
 
 If you are working on **agentic app generation** specifically, this checklist is not sufficient by itself. Also follow:
 
@@ -19,20 +22,28 @@ Those documents define the canonical artifact model for turning user intent into
 
 ```
 CURRENT STATE:
-├── mozaiks/                 # AI runtime (working, needs refactor)
-├── mozaiks-core-public/     # Plugin runtime (DEPRECATE)
-└── mozaiks-platform/        # .NET control plane (unchanged)
+├── runtime_app.py           # runtime substrate
+├── platform_app.py          # headless app host
+├── studio_app.py            # local/private builder host
+├── mozaiks_app.py           # hosted product host
+├── platform/                # default OSS/sample active app root
+└── mozaiks-platform/
+    └── app/                 # active App Zero app root
 
 TARGET STATE:
 ├── mozaiks/
 │   └── packages/
 │       ├── core/            # Shared interfaces
 │       ├── ai/              # AI workflows (from mozaiksai/)
-│       ├── modules/         # Non-AI Function
+│       ├── modules/         # Non-AI module execution
 │       ├── runtime/         # NEW: app composition
 │       ├── ui/              # From chat-ui/
 │       └── cli/             # From mozaiks_cli/
-└── mozaiks-platform/        # Unchanged
+└── mozaiks-platform/
+    ├── app/                 # active App Zero app root
+    ├── brand/
+    ├── ui/
+    └── generated/
 ```
 
 ---
@@ -47,7 +58,7 @@ TARGET STATE:
 | AG2 Orchestration | `core/workflow/` | ✅ | Refactor to use core Event class |
 | WebSocket Transport | `core/transport/` | ✅ | Move streaming to packages/ai |
 | Auth Adapters | `core/auth/` | ✅ | Move to packages/core |
-| Event System | `core/events/` | ⚠️ | Refactor to match EVENT_CONTRACTS.md |
+| Event System | `core/events/` | ⚠️ | Refactor to match `../foundations/event-contracts.md` |
 | MongoDB Persistence | `core/data/` | ✅ | Move to packages/core |
 | Multi-tenant | `core/multitenant/` | ✅ | Move to packages/core |
 | Token Tracking | `core/observability/` | ✅ | Keep in packages/ai |
@@ -99,7 +110,7 @@ Keep new server behavior in the lowest correct layer.
 ```
 packages/core/
 ├── __init__.py
-├── events.py              # Event class per EVENT_CONTRACTS.md
+├── events.py              # Event class per canonical Event Contracts
 ├── interfaces.py          # Protocol classes (Executor, Storage, etc.)
 ├── context.py             # RequestContext, TenantContext
 ├── config.py              # YAML/env config loading
@@ -116,12 +127,12 @@ packages/core/
 
 | File | Purpose | Reference |
 |------|---------|-----------|
-| `events.py` | Event envelope class | EVENT_CONTRACTS.md |
+| `events.py` | Event envelope class | `../foundations/event-contracts.md` |
 | `interfaces.py` | Executor, EventBus protocols | MODULAR_ARCHITECTURE_V2.md |
 | `context.py` | Request/Tenant context | RUNTIME_SPEC.md |
 
 ### packages/modules/ - NEW
-**Purpose:** Module execution (replaces mozaiks-core-public module)
+**Purpose:** Module execution (canonical in-repo module contract)
 
 ```
 packages/modules/
@@ -138,7 +149,7 @@ packages/modules/
 |------|---------|-----------|
 | `loader.py` | Parse module.yaml files | - |
 | `executor.py` | Run CRUD operations | - |
-| `events.py` | Domain event emission | EVENT_CONTRACTS.md |
+| `events.py` | Domain event emission | `../foundations/event-contracts.md` |
 
 ### packages/runtime/ - NEW
 **Purpose:** App composition layer on top of the layered host contracts
@@ -164,7 +175,7 @@ packages/runtime/
 | `app.py` | App definition loading | RUNTIME_SPEC.md |
 | `router.py` | Request dispatch | RUNTIME_SPEC.md |
 | `executors.py` | Register AI/module executors | MODULAR_ARCHITECTURE_V2.md |
-| `events/bus.py` | Pub/sub event bus | EVENT_DRIVEN_EXECUTION_SPEC.md |
+| `events/bus.py` | Pub/sub event bus | `../foundations/event-system.md` |
 
 ---
 
@@ -174,7 +185,7 @@ packages/runtime/
 **Priority:** CRITICAL - All other packages depend on this
 
 - [ ] Create `packages/core/` directory structure
-- [ ] Implement `Event` class per EVENT_CONTRACTS.md envelope
+- [ ] Implement `Event` class per the canonical event envelope
 - [ ] Define `Protocol` interfaces (Executor, EventBus, Storage)
 - [ ] Implement `RequestContext` and `TenantContext`
 - [ ] Move auth utilities from `mozaiksai/core/auth/`
@@ -231,7 +242,7 @@ async def run_workflow(self, workflow_id: str, input_data: dict):
 - No imports from mozaiks_modules
 
 ### Phase 3: packages/modules/ (NEW)
-**Priority:** HIGH - Replaces mozaiks-core-public plugin system
+**Priority:** HIGH - Replaces legacy plugin/runtime assumptions
 
 - [ ] Create `packages/modules/` directory structure
 - [ ] Implement module loader (parse module.yaml)
@@ -421,7 +432,7 @@ access:
 
 **Acceptance Criteria:**
 - Can run modules without packages/ai
-- Domain events emitted per EVENT_CONTRACTS.md
+- Domain events emitted per `../foundations/event-contracts.md`
 - No imports from mozaiks_ai
 
 ### Phase 4: packages/runtime/ (NEW)
@@ -459,7 +470,7 @@ modules:
 
 **Acceptance Criteria:**
 - Can compose ai + modules packages
-- Event routing works per EVENT_DRIVEN_EXECUTION_SPEC.md
+- Event routing works per `../foundations/event-system.md`
 - All three execution modes work
 
 ### Phase 5: packages/ui/ (Refactor chat-ui/)
@@ -502,7 +513,7 @@ modules:
 ### packages/core/ (Create All)
 | File | Priority | Spec Reference |
 |------|----------|----------------|
-| `events.py` | P0 | EVENT_CONTRACTS.md |
+| `events.py` | P0 | `../foundations/event-contracts.md` |
 | `interfaces.py` | P0 | MODULAR_ARCHITECTURE_V2.md |
 | `context.py` | P0 | RUNTIME_SPEC.md |
 | `config.py` | P1 | - |
@@ -538,7 +549,7 @@ modules:
 
 ---
 
-## 5. Deprecation Plan: mozaiks-core-public
+## 5. Legacy Donor Archival Plan
 
 ### Do NOT Migrate (Build Fresh Instead)
 | Component | Reason |
@@ -559,7 +570,7 @@ modules:
 | Config loading | JSON config patterns |
 
 ### Deprecation Steps
-1. [ ] Archive mozaiks-core-public repo (make read-only)
+1. [ ] Archive legacy donor repo material (make read-only)
 2. [ ] Add deprecation notice to README
 3. [ ] Update any docs referencing it
 4. [ ] Remove from active development

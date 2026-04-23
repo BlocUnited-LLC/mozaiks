@@ -3,17 +3,18 @@
 Repository-level guidance for coding agents working in this repo.
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md) and [CLAUDE.md](CLAUDE.md) first.
-
 Read `ARCHITECTURE_BOUNDARIES.md` before making structural changes.
 
 This repo uses layered FastAPI hosts as the canonical server composition:
+
 - `runtime_app.py`
 - `platform_app.py`
 - `studio_app.py`
 - `mozaiks_app.py`
 
-`studio_app.py` is the local/private builder host and the default local run target. `mozaiks_app.py` is the hosted Mozaiks product host.
-
+`runtime_app.py` is the execution substrate. `platform_app.py` is the headless
+app host. `studio_app.py` is the local/private builder host. `mozaiks_app.py`
+is the hosted Mozaiks product host.
 
 ## Repo Status
 
@@ -61,45 +62,73 @@ Prefer:
 - small, named abstractions with clear ownership
 - removing drift at the source
 
-## Two-Repo Boundary
+## Canonical Repo Boundary
 
-This repo (`mozaiks`) and `mozaiks-core-public` are separate deployables. Do not cross-contaminate them:
+Canonical ownership:
 
-| This repo (`mozaiks`) | `mozaiks-core-public` |
-|-----------------------|----------------------|
-| AI runtime (`mozaiksai`) | App backend runtime |
-| chat-ui components | No UI — backend only |
-| AppBackendPort contract | Module manifests + routes |
-| Platform modules (`platform/modules/`) | Modules (`platform/modules/`) |
-| Workflow authoring | Event bus, notifications, subscriptions |
+| Layer | Owns |
+|-------|------|
+| `runtime_app.py` / `mozaiksai` | AI execution substrate, sessions, transport, persistence, workflow execution |
+| `platform_app.py` | Headless app host: modules, pages, shell config, admin, actions, routing |
+| `studio_app.py` | Local/private builder UX used by CLI and local Studio |
+| `mozaiks_app.py` | Hosted Mozaiks product layer |
+| `platform/` | Default OSS/sample active app root |
+| `mozaiks-platform/app/` | Active App Zero app root |
+| `mozaiks-platform/brand/` | App Zero product brand/theme assets |
+| `mozaiks-platform/ui/` | App Zero product UI extension |
+| `mozaiks-platform/generated/` | Generator output awaiting validation/promotion |
 
-**Naming:**
-- "module" in the mozaiksai platform layer (`platform/modules/`) — declared via `module.yaml` + `handler.py`. Deterministic CRUD/action surfaces with no AI. Support workflows by providing the CRUD actions that AI agents call.
-- "module" in mozaiks-core-public (`platform/modules/`) — declared via 6 YAML manifests + `backend/logic.py` + `backend/routes.py`. Full app feature packs with event bus integration.
-- Both repos use "modules" but the file shapes differ. The mozaiksai `module.yaml` is a simple handler manifest (name, version, actions, events). The mozaiks-core-public `module.yaml` (one of six files) declares the REST endpoint surface that AI agents call.
+## Module Contract Rule
 
-Do not conflate these shapes — they differ by file structure and purpose even though both use the word "module".
+When working in or generating modules:
+
+- Every capability pack that needs deterministic app behavior must emit the
+  canonical module contract files: `module.yaml`, `events.yaml`,
+  `subscriptions.yaml`, `notifications.yaml`, `settings.yaml`, `admin.yaml`,
+  and `backend/handler.py`.
+- YAML declares contracts, capabilities, events, settings, notification rules,
+  subscriptions, and admin panels.
+- Python stubs implement behavior and hooks: `backend/handler.py` is required;
+  `backend/settings.py`, `backend/subscriptions.py`, `backend/notifications.py`,
+  and `backend/admin.py` are optional.
+- Generic modules may publish `domain.*` events. Workflow starts/resumes are
+  resolved by runtime/platform trigger contracts, not by hardcoded workflow
+  names in module code.
+- AppGenerator produces these files through structured output models. Keep the
+  generated shapes aligned with runtime loaders, docs, and tests.
+
+## Generator Output Rule
+
+Builder workflows live in `mozaiks-platform/app/workflows/` because App Zero is
+itself a Mozaiks app. Generator output must not land directly in active runtime
+paths.
+
+Use `MOZAIKS_GENERATED_ARTIFACTS_PATH`, defaulting to:
+
+```text
+mozaiks-platform/generated/
+```
+
+Canonical generated paths:
+
+```text
+mozaiks-platform/generated/apps/{app_id}/{build_id}/app/
+mozaiks-platform/generated/workflows/{app_id}/{build_id}/{workflow_name}/
+```
+
+Only explicit promotion may copy validated artifacts into active roots such as
+`platform/` or `mozaiks-platform/app/`.
 
 ## UI System Rule
 
-Treat the UI system as three separate surface contracts sharing one primitive/design foundation:
+Treat the UI system as separate surface contracts sharing one primitive/design foundation:
 
-1. `App UI` — schema-driven page primitives (AppPageSchema YAML rendered by SchemaPage)
+1. `App UI` — schema-driven page primitives rendered by `SchemaPage`
 2. `Agent UI tools` — event-driven React surfaces that compose shipped primitives
 3. `Transition UI` — router/session components with routing-specific props
-4. `Core shell pages` — first-class framework pages registered in `coreComponents.js` (ChatPage, AdminPortal, ProfilePage, AppAdminDashboard, SchemaPage)
+4. `Core shell pages` — first-class framework pages registered in `coreComponents.js`
 
 Do not collapse these into one generic contract.
-
-## Operation Manifest Rule (mozaiks-core-public)
-
-When working in or generating for `mozaiks-core-public`:
-
-- Every capability pack needs all 6 YAML files — no partial manifests
-- Event names in `events.yaml` must match `notifications.yaml` and `logic.py` exactly
-- Endpoint paths in `module.yaml` must match `routes.py` exactly
-- `operation_manager` discovers everything automatically — no edits to `director.py` needed for new operations
-- AppGenerator produces these files via `ConfigMiddlewareAgent` in `platform_config` task mode
 
 ## Validation Rule
 

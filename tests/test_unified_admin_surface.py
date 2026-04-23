@@ -25,15 +25,39 @@ def test_admin_portal_embeds_app_admin_panels() -> None:
     source = _read("chat-ui/src/pages/AdminPage.jsx")
 
     assert "import { AppAdminPanels }" in source
-    assert "BuilderWorkspaceLayout" in source
-    assert "<AppAdminPanels embedded />" in source
-    assert "BuilderWorkspacePanel" in source
-    assert "Builder Workspace" in source
-    assert "'/studio/build'" in source
-    assert "ModuleAdminPanels" in source
-    assert "normalizeModulePanels" in source
-    assert "Runtime Operations" in source
+    assert "AdminWorkspaceLayout" in source
+    assert "AdminOverviewPanel" in source
+    assert "ADMIN_SECTION_ROUTES" in source
+    assert "'/admin/users': 'users'" in source
+    assert "'/admin/usage': 'usage'" in source
+    assert "AdminSectionRoute" in source
+    assert "useLocation" in source
+    assert 'title="Usage"' in source
+    assert 'section="users"' in source
+    assert 'section="billing"' in source
+    assert "AdminExtensionPanels" in source
+    assert "normalizeExtensionPanels" in source
     assert "normalizeRuntimePanels" in source
+    assert "BuilderWorkspacePanel" not in source
+
+
+def test_platform_shell_registers_admin_section_routes() -> None:
+    source = _read("platform_app.py")
+
+    for path in [
+        "/admin",
+        "/admin/users",
+        "/admin/billing",
+        "/admin/usage",
+        "/admin/activity",
+        "/admin/settings",
+        "/admin/integrations",
+        "/admin/support",
+    ]:
+        assert f'"path": "{path}"' in source
+
+    assert '"component": "AdminPortal"' in source
+    assert "ADMIN_SHELL_ROUTES" in source
 
 
 def test_profile_menu_uses_framework_defaults() -> None:
@@ -52,7 +76,8 @@ def test_app_admin_dashboard_is_panel_group_not_registered_route() -> None:
 
     assert "export function AppAdminPanels" in source
     assert "normalizeAppAdminPanels" in source
-    assert "modules" in source
+    assert "normalizeAppPanelSection" in source
+    assert "section" in source
 
 
 def test_runtime_admin_config_uses_panel_groups() -> None:
@@ -62,6 +87,7 @@ def test_runtime_admin_config_uses_panel_groups() -> None:
     assert "_load_module_admin_panels" in source
     assert '"runtime"' in source
     assert '"modules"' in source
+    assert "_infer_admin_panel_section" in source
 
 
 def test_runtime_admin_config_discovers_module_admin_yaml(tmp_path) -> None:
@@ -79,6 +105,7 @@ def test_runtime_admin_config_discovers_module_admin_yaml(tmp_path) -> None:
                     {
                         "id": "crm.contacts",
                         "label": "Contacts",
+                        "section": "integrations",
                         "renderer": "schema",
                         "data_source": "module:crm:list_contacts",
                     }
@@ -99,6 +126,7 @@ def test_runtime_admin_config_discovers_module_admin_yaml(tmp_path) -> None:
         {
             "id": "crm.contacts",
             "label": "Contacts",
+            "section": "integrations",
             "renderer": "schema",
             "data_source": "module:crm:list_contacts",
             "module_id": "crm",

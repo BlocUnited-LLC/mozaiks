@@ -52,4 +52,4 @@ def test_studio_home_page_fetches_summary_endpoint() -> None:
     assert "/api/studio/home" in source
     assert "Studio Home" in source
     assert "next_step" in source
-    assert "BuilderWorkspaceLayout" in source
+    assert "AdminWorkspaceLayout" in source

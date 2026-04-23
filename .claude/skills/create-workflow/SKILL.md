@@ -14,7 +14,7 @@ Gather from the user:
 3. Should any agent output structured data (for UI artifacts)?
 4. Does the workflow need any UI components?
 5. Will this workflow be called as a child of another workflow?
-6. Workflow name (PascalCase like `CustomerSupport`)
+6. Workflow name (PascalCase like `LeadIntake`)
 
 ## Workflow Structure
 

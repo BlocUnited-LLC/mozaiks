@@ -221,5 +221,5 @@ Use `*.yaml` declaratives in workflow bundles.
 ## Cross References
 
 - [workflow-architecture.md](workflow-architecture.md)
-- [event-system-architecture.md](event-system-architecture.md)
+- [event-system.md](event-system.md)
 - [core-product-app-bundle-boundary.md](core-product-app-bundle-boundary.md)

@@ -9,7 +9,7 @@ Declarative files should describe durable app intent:
 
 - what pages exist
 - what workflows exist
-- what operations or backend actions are callable
+- what module actions or backend actions are callable
 - what events are emitted or handled
 - what shell, theme, and admin defaults apply
 
@@ -36,7 +36,7 @@ variables, hooks, and optional UI artifacts.
 ### `platform/modules/`
 
 Deterministic CRUD or action surfaces that support workflows and app pages.
-Operations are not AI workflows.
+Modules are not AI workflows.
 
 ### `platform/brand/`
 

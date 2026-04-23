@@ -2,11 +2,11 @@
 
 **Status:** Specification
 **Created:** 2026-04-06
-**Depends on:** MODULAR_ARCHITECTURE_V2.md, EVENT_CONTRACTS.md, EVENT_DRIVEN_EXECUTION_SPEC.md
+**Depends on:** MODULAR_ARCHITECTURE_V2.md, ../foundations/event-contracts.md, ../foundations/event-system.md
 
 This document formalizes how workflows are triggered in the Mozaiks system.
 
-> **Critical**: All orchestration triggers MUST be event-driven. Workflows emit explicit runtime events at checkpoints; the runtime reacts to these events. See [EVENT_DRIVEN_EXECUTION_SPEC.md](./EVENT_DRIVEN_EXECUTION_SPEC.md) for the complete model.
+> **Critical**: All orchestration triggers MUST be event-driven. Workflows emit explicit runtime events at checkpoints; the runtime reacts to these events. See [Event System](../foundations/event-system.md) for the complete model.
 
 ---
 
@@ -881,7 +881,7 @@ workflows:
 
 ## 10. Runtime Execution Events (MFJ Orchestration)
 
-> **Critical**: This section describes events that trigger orchestration decisions. These are NOT the same as domain events. See [EVENT_DRIVEN_EXECUTION_SPEC.md](./EVENT_DRIVEN_EXECUTION_SPEC.md) for complete details.
+> **Critical**: This section describes events that trigger orchestration decisions. These are NOT the same as domain events. See [Event System](../foundations/event-system.md) for complete details.
 
 ### Runtime Events for MFJ
 

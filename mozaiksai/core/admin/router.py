@@ -34,14 +34,14 @@ DEFAULT_ADMIN_CONFIG = {
     "enabled": True,
     "panels": {
         "app": [
-            {"id": "stats", "label": "App Overview"},
-            {"id": "users", "label": "Users"},
+            {"id": "stats", "label": "App Overview", "section": "overview"},
+            {"id": "users", "label": "Users", "section": "users"},
         ],
         "modules": [],
         "runtime": [
-            {"id": "stats", "label": "Runtime Stats"},
-            {"id": "runs", "label": "Active Runs"},
-            {"id": "sessions", "label": "Recent Sessions"},
+            {"id": "stats", "label": "Usage Stats", "section": "usage"},
+            {"id": "runs", "label": "Active Runs", "section": "usage"},
+            {"id": "sessions", "label": "Recent Sessions", "section": "activity"},
         ],
     },
     "features": {},
@@ -186,7 +186,7 @@ async def get_admin_sessions(
 async def get_admin_config(
     user: UserPrincipal = Depends(_require_admin),
 ):
-    """Return the active admin config, including module admin panel manifests."""
+    """Return the active admin config, including feature admin panel manifests."""
     config_path = _resolve_admin_config_path()
     platform_root = _resolve_platform_root()
     if not config_path.exists():
@@ -238,7 +238,7 @@ def _resolve_admin_config_path() -> Path:
 
 
 def _load_module_admin_panels(platform_root: Path) -> list[dict]:
-    """Load module-owned admin panels declared by modules/{module}/admin.yaml."""
+    """Load feature-owned admin panels declared by modules/{module}/admin.yaml."""
     modules_dir = platform_root / "modules"
     if not modules_dir.is_dir():
         return []
@@ -271,8 +271,59 @@ def _load_module_admin_panels(platform_root: Path) -> list[dict]:
             normalized.setdefault("module_id", module_dir.name)
             normalized.setdefault("label", normalized["id"])
             normalized.setdefault("source", "module")
+            normalized.setdefault("section", _infer_admin_panel_section(normalized))
             panels.append(normalized)
     return panels
+
+
+def _infer_admin_panel_section(panel: dict) -> str:
+    explicit = panel.get("section") or panel.get("category") or panel.get("group")
+    if isinstance(explicit, str) and explicit.strip():
+        return _normalize_admin_panel_section(explicit)
+
+    text = " ".join(
+        str(panel.get(key) or "")
+        for key in ("id", "label", "description", "data_source")
+    ).lower()
+    if any(token in text for token in ("user", "role", "permission", "auth", "account", "member")):
+        return "users"
+    if any(token in text for token in ("billing", "bill", "subscription", "invoice", "payment", "stripe", "revenue", "plan")):
+        return "billing"
+    if any(token in text for token in ("run", "session", "workflow", "usage", "health", "cost", "token", "error", "performance", "telemetry")):
+        return "usage"
+    if any(token in text for token in ("activity", "audit", "log", "event", "history")):
+        return "activity"
+    if any(token in text for token in ("setting", "config", "domain", "brand", "theme", "environment")):
+        return "settings"
+    if any(token in text for token in ("support", "ticket", "notification", "alert", "message")):
+        return "support"
+    return "integrations"
+
+
+def _normalize_admin_panel_section(value: str) -> str:
+    section = value.strip().lower().replace("_", "-")
+    aliases = {
+        "access": "users",
+        "user": "users",
+        "users-access": "users",
+        "payments": "billing",
+        "revenue": "billing",
+        "subscriptions": "billing",
+        "runtime": "usage",
+        "health": "usage",
+        "usage-health": "usage",
+        "logs": "activity",
+        "audit": "activity",
+        "config": "settings",
+        "configuration": "settings",
+        "module": "integrations",
+        "modules": "integrations",
+        "feature": "integrations",
+        "features": "integrations",
+    }
+    normalized = aliases.get(section, section)
+    allowed = {"overview", "users", "billing", "usage", "activity", "settings", "integrations", "support"}
+    return normalized if normalized in allowed else "integrations"
 
 
 def _normalize_panel_groups(config: dict) -> dict:

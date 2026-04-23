@@ -562,7 +562,8 @@ def run(args):
             _print_info(f"  cd {output_dir}")
             _print_info("  # Review and customise the generated files")
             if mode == "app":
-                _print_info("  mozaiks dev  # Start development server")
+                _print_info("  Promote the generated app bundle into an active app root before running it")
+                _print_info("  From the repo root, use MOZAIKS_HOST=studio python run_server.py for the local/private builder host")
             return 0
         else:
             _print_error(f"Generation failed: {result.get('error', 'Unknown error')}")

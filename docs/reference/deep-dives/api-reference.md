@@ -5,8 +5,8 @@ This page is a lightweight reference note for the current Mozaiks backend surfac
 For runtime behavior, prefer:
 
 - [Workflow Architecture](../../architecture/foundations/workflow-architecture.md)
-- [Event System Architecture](../../architecture/foundations/event-system-architecture.md)
-- [Process and Event Map](../../architecture/foundations/process-and-event-map.md)
+- [Event System](../../architecture/foundations/event-system.md)
+- [Event Contracts](../../architecture/foundations/event-contracts.md)
 
 ## Current Public Surfaces
 

@@ -4,56 +4,62 @@ This is the authoritative architecture reference. If other docs contradict this 
 
 ## What This Repo Is
 
-This repo is the **Mozaiks framework** — the AI runtime, frontend surfaces, and
-app authoring contract for Mozaiks apps.
+This repo is the **canonical Mozaiks repo** — the AI runtime, app host,
+frontend surfaces, Studio builder, hosted product shell, and generated app
+artifact contracts for Mozaiks apps.
 
-This repo does **not** contain the hosted control plane, and it does **not**
-assume one in-repo app backend implementation. App backends integrate through
-the generic `AppBackendPort` contract in
-`mozaiksai/core/ports/app_backend.py`.
+Deterministic app behavior is owned by app bundles hosted by `platform_app.py`, generated module contracts, or optional external/generated app backends connected through the generic `AppBackendPort` contract in `mozaiksai/core/ports/app_backend.py`.
 
 ```
 mozaiks/                           # This repo
 ├── mozaiksai/                     # AI workflow runtime (first-class)
 ├── chat-ui/                       # Chat interface primitives (first-class)
 ├── app/                           # Web shell / local app host
-├── platform/                      # App bundle / authoring contract
+├── platform/                      # Default OSS/sample active app root
+│   ├── app.json
+│   ├── config/                    # App host config
 │   ├── workflows/                 # AI workflows (app-level)
-│   ├── operations/                # Business logic (app-level)
+│   ├── modules/                   # Business logic (app-level)
 │   ├── pages/                     # UI screens (app-level)
-│   ├── brand/                     # Theme and assets (app-level)
-│   └── config/                    # Platform settings (app-level)
+│   └── brand/                     # Optional colocated theme/assets
 ├── mozaiks_cli/                   # CLI for local project and workflow work
-└── mozaiks-platform/              # Local generator/platform workspace (git-ignored, optional)
-```
-
-**External repo (paired, not in this repo):**
-```
-mozaiks-core-public/               # Reference app backend runtime (one deployment per app)
-├── platform/modules/{name}/       # Module manifests (6-file YAML system)
-│   ├── module.yaml                # Identity + nav routes + capabilities
-│   ├── admin.yaml                 # Module admin panels mounted inside /admin
-│   ├── events.yaml                # Domain events published + workflow triggers
-│   ├── settings.yaml              # User-facing preferences schema
-│   ├── notifications.yaml         # Notification rules per event
-│   ├── subscriptions.yaml         # Tier gates per feature
-│   └── module_surface.yaml        # REST endpoint surface for AI agents
-└── backend/core/                  # Auth, module manager, event bus, AI bridge
+├── runtime_app.py                 # Runtime substrate host
+├── platform_app.py                # Headless app host
+├── studio_app.py                  # Local/private builder host
+├── mozaiks_app.py                 # Hosted Mozaiks product host
+└── mozaiks-platform/              # App Zero / product workspace
+    ├── app/                       # Active App Zero app root
+    │   ├── app.json
+    │   ├── config/
+    │   ├── modules/
+    │   ├── pages/
+    │   └── workflows/
+    ├── brand/                     # App Zero product brand/theme assets
+    ├── ui/                        # App Zero product UI extension
+    ├── generated/                 # Generator output; not runtime-loaded until promoted
+    │   ├── apps/{app_id}/{build_id}/app/
+    │   └── workflows/{app_id}/{build_id}/{workflow_name}/
+    └── app-builder/               # Builder planning/docs; not runtime-loaded
 ```
 
 **Primary boundary for this repo:**
-- The committed, first-class product in this repo is still the **framework that runs apps**.
-- App backends are external deployables that integrate with `mozaiksai` through `AppBackendPort`.
-- The managed platform at mozaiks.ai is **not** contained in this repo.
-- A local, git-ignored `mozaiks-platform/` workspace may also exist in some clones for development, testing, and possible CLI-driven generator/platform work.
-- That local generator/platform workspace is adjacent to the framework, but it is **not** part of the canonical framework contract unless you are explicitly working in it.
+- `runtime_app.py` is the reusable execution substrate.
+- `platform_app.py` is the canonical headless app host for pages, modules,
+  shell config, admin, actions, and app routing.
+- `studio_app.py` is the local/private builder UX used by CLI and local Studio.
+- `mozaiks_app.py` is the hosted Mozaiks product layer.
+- `mozaiks-platform/app` is the active App Zero app root when running the
+  Mozaiks product locally. The parent `mozaiks-platform/` is the product
+  workspace wrapper around that app root.
 
 If you're working in this repo, you may be working in one of two modes:
 
-1. **Framework mode** — working on `mozaiksai/`, `chat-ui/`, `app/`, or the app authoring contract in `platform/`
-2. **Generator/platform mode** — working in the local, git-ignored `mozaiks-platform/` area for AppGenerator/platform development or local CLI-related experimentation
-
-Unless a task explicitly targets `mozaiks-platform/`, default to treating this repo as the **framework that runs apps**.
+1. **Framework/platform mode** — working on `runtime_app.py`,
+   `platform_app.py`, `mozaiksai/`, `chat-ui/`, `app/`, or the app authoring
+   contract in `platform/`
+2. **Studio/product mode** — working in `studio_app.py`, `mozaiks_app.py`, or
+   `mozaiks-platform/` for App Zero, AppGenerator, AgentGenerator, and hosted
+   product surfaces
 
 ---
 
@@ -124,7 +130,7 @@ Dev / CLI / Preview is local-only support code and must not become a dependency 
 - Shell config, theme config, and page serving
 - Transitions and routing composition
 - Session UX concerns such as resume, metadata, and lifecycle
-- Operation execution and app-host integration points
+- Module/action execution and app-host integration points
 - Admin and app-shell routes
 - Workflow discovery, ordering, and app-level composition
 
@@ -159,6 +165,21 @@ Dev / CLI / Preview is local-only support code and must not become a dependency 
 - AppGenerator workflows
 - AgentGenerator workflows
 
+**Bundle generation boundary:**
+
+Builder workflows live in `mozaiks-platform/app/workflows/` because App Zero is
+itself an app on the Mozaiks substrate. Those workflows produce generated app
+bundles; they are not themselves the active app bundle being generated.
+
+- `AppGenerator` owns deterministic app bundle artifacts: `app.json`,
+  `pages/*.yaml`, `config/*`, `brand/*`, and module contract files.
+- `AgentGenerator` owns agentic augmentation artifacts:
+  `workflows/{WorkflowName}/*.yaml`, workflow-local tools, hooks, and UI tool
+  surfaces.
+- Generator tools write into `MOZAIKS_GENERATED_ARTIFACTS_PATH`.
+- Promotion is the only path from generated artifacts into an active app root
+  such as `platform/` or `mozaiks-platform/app`.
+
 ### 4. Dev / CLI / Preview Layer
 
 **Purpose:** Local-only convenience and development support.
@@ -178,7 +199,7 @@ When adding code, decide placement in this order:
 
 1. Is this required for every runtime instance?
   - Put it in **Runtime**.
-2. Is this about app hosting, routing, sessions, pages, or operations?
+2. Is this about app hosting, routing, sessions, pages, or modules?
   - Put it in **Platform**.
 3. Is this about building, generating, refining, or promoting apps or workflows?
   - Put it in **Studio** for local/private builder behavior.
@@ -202,9 +223,17 @@ If the answer depends on local repo structure, build-time authoring flows, or pr
 
 **Do not let generators write into active runtime paths.**
 
-Generated artifacts must go to:
-- `artifacts/generated/`
-- `artifacts/staged/`
+Generator output must go under `MOZAIKS_GENERATED_ARTIFACTS_PATH`, which
+defaults to:
+
+- `mozaiks-platform/generated/`
+
+Current generator outputs:
+
+- AppGenerator app schemas and bundle files:
+  `mozaiks-platform/generated/apps/{app_id}/{build_id}/app/`
+- AgentGenerator workflow bundles:
+  `mozaiks-platform/generated/workflows/{app_id}/{build_id}/{workflow_name}/`
 
 Only promotion logic may write into active runtime roots.
 
@@ -222,7 +251,6 @@ Current state:
 - `runtime_app.py` is the clean runtime substrate target
 - `platform_app.py` is the platform/app-shell layer
 - `studio_app.py` is the local/private builder host
-- `studio_app.py` is the default local run target
 - `mozaiks_app.py` is the hosted Mozaiks product host
 
 ### Migration Principle
@@ -239,7 +267,7 @@ All new work should:
 | First-Class (framework) | App-Level (platform/) |
 |------------------------|----------------------|
 | mozaiksai (AI runtime) | workflows |
-| `AppBackendPort` + backend bridge tools | operations |
+| `AppBackendPort` + backend bridge tools | optional external/generated backend integration |
 | chat-ui + app shell | pages |
 | transport, artifacts, orchestration | brand/theme |
 | framework defaults and CLI | config |
@@ -295,7 +323,7 @@ module admin contract and may register custom React components via
 2. **UI tool events** — Agent-to-UI communication (`emit_ui_tool_event`)
 3. **AG2 runtime events** — Chat execution (`chat.text`, `chat.tool_call`, `chat.run_complete`)
 
-**Multi-tenant scoping:** Every operation requires `app_id`, `user_id`, `chat_id`.
+**Multi-tenant scoping:** Every runtime action requires `app_id`, `user_id`, `chat_id`.
 
 ---
 
@@ -303,29 +331,30 @@ module admin contract and may register custom React components via
 
 **What it does:** Defines how deterministic, non-AI app behavior connects to
 the AI runtime. The runtime only depends on the generic `AppBackendPort` contract —
-the specific backend may be `mozaiks-core-public`, an existing product backend, or
-any HTTP service.
+the specific backend may be an app bundle hosted by `platform_app.py`, generated
+module handlers, an existing product backend, or any HTTP service.
 
-**Reference implementation:** `mozaiks-core-public` is the canonical per-app
-backend runtime. It provides auth, notifications, subscriptions, settings,
-event bus, AI bridge, and a declarative plugin system out of the box.
+The canonical implementation path lives in this repo:
+module contracts, app-host routing, and generated app bundles are owned here.
 
 **Typical app-backend responsibilities:**
 - User settings, profiles, and preferences (exposed at `/api/me/*`)
-- Deterministic business actions and persistence (plugin `backend/logic.py`)
-- REST endpoint surface for AI agents (declared in `module.yaml`)
-- Notifications, subscriptions, and app policy (plugin YAML manifests)
-- Domain event emission → AI runtime workflow triggers (via `event_bridge`)
+- Deterministic business actions and persistence (module `backend/handler.py`)
+- REST/action surface for AI agents (declared in `module.yaml`)
+- Notifications, subscriptions, settings, and app policy (module YAML manifests)
+- Domain event emission → AI runtime workflow triggers (through runtime ingress)
 
 **Core contract files in this repo:**
 - `mozaiksai/core/ports/app_backend.py` — `AppBackendPort`
 - `mozaiksai/core/adapters/http_app_backend.py` — generic HTTP adapter
 - `mozaiksai/core/workflow/app_backend_tools.py` — built-in workflow bridge tools
 
-**Key integration points (mozaiks-core-public → mozaiksai):**
-- `POST {MOZAIKSAI_RUNTIME_URL}/internal/trigger` — domain event fires a workflow
-- `POST app_backend_url/api/ai/events` — mozaiksai pushes workflow results back
-- `GET app_backend_url/api/operations/module-surface` — AppGenerator discovers callable endpoints
+**Key integration points (app backend or platform host → runtime):**
+- runtime ingress endpoint — domain event fires or resumes a workflow
+- `AppBackendPort.emit()` — workflow result or app fact is emitted to an
+  external/generated backend when one is configured
+- module/action discovery — AppGenerator discovers callable module capabilities
+  from the in-repo module contract system
 
 **Hard rule:** The runtime never imports app-backend internals or hardcodes
 app-specific API paths. Paths are passed as arguments by workflow tools or agent context.
@@ -337,25 +366,22 @@ app-specific API paths. Paths are passed as arguments by workflow tools or agent
 ```
 Frontend (chat-ui / app shell)
     │
-  ├── REST API ──────────────► mozaiks-core-public (CRUD, operations, admin)
-  │                               │                │
-  │                               │ event_bridge   │ /api/me, /api/admin
-  │                               │                │ /api/operations/module-surface
-  └── WebSocket / HTTP ─────► mozaiksai (AI workflows)
-                │                │
-                │                └─ POST /internal/trigger ─► mozaiksai
-                ├── AG2 orchestration
-                │
-                └── AppBackendPort ─────► mozaiks-core-public
-                                            (plugin routes matching module.yaml)
+  ├── REST API ──────────────► platform_app.py (pages, modules, admin, shell)
+  │                               │
+  │                               └─ optional AppBackendPort ─► external/generated backend
+  │
+  └── WebSocket / HTTP ─────► runtime_app.py / mozaiksai (AI workflows)
+                               │
+                               ├── AG2 orchestration
+                               └── workflow tools ─► module actions or AppBackendPort
 ```
 
-**app_backend_url:** Base URL of the paired mozaiks-core-public instance. Injected
-into AppGenerator as a context variable. ServiceAgent and ControllerAgent include it
-so generated code knows where to call.
+**app_backend_url:** Optional base URL of an external/generated deterministic
+backend. It is not tied to a specific repo. Generated workflows may use it when
+the app explicitly chooses a split backend topology.
 
-**Persistence topology:** Deployment-specific. mozaiksai and mozaiks-core-public
-may share MongoDB or run with separate databases.
+**Persistence topology:** Deployment-specific. Runtime, platform host, and any
+external/generated backend may share infrastructure or run with separate stores.
 
 **Boundary rule:** App facts cross the boundary as API calls or domain events,
 not as in-repo imports.
@@ -370,27 +396,27 @@ Events are **distributed**, not centralized. No separate `automations/` director
 
 | Who | Declares | In File |
 |-----|----------|---------|
-| Operation (mozaiks-core-public) | Events it **publishes** | `operations/{name}/events.yaml` → `publishes` |
-| Operation (mozaiks-core-public) | Workflow **triggers** | `operations/{name}/events.yaml` → `triggers` |
-| Operation (mozaiks-core-public) | Notification **rules** | `operations/{name}/notifications.yaml` |
-| Operation (mozaiksai platform) | Events it **emits** | `operation.yaml` → `events` |
-| Operation (mozaiksai platform) | Events it **handles** | `operation.yaml` → `events` |
+| Module | Events it **publishes** | `modules/{name}/events.yaml` |
+| Module | Event reactions/subscriptions | `modules/{name}/subscriptions.yaml` |
+| Module | Notification **rules** | `modules/{name}/notifications.yaml` |
+| Module | Admin panels | `modules/{name}/admin.yaml` |
 | Workflow | Events it **emits** | `orchestrator.yaml` → `events.emits` |
 | Workflow | Events that **trigger** it | `orchestrator.yaml` → `triggers` |
 
 ### CRUD → AI (workflow triggers)
 
-Workflows declare what app events start or resume them. In mozaiks-core-public,
-the operation's `events.yaml` `triggers:` block is the source of truth — `event_bridge`
-aggregates all triggers at startup and subscribes to the event bus automatically.
-When an event fires, `event_bridge` calls `POST {MOZAIKSAI_RUNTIME_URL}/internal/trigger`.
+Workflows declare what app events start or resume them. Modules declare the
+domain events they publish and any app-level reactions they own. The platform
+host/runtime ingress resolves event facts to workflow triggers; modules do not
+encode AG2/groupchat semantics directly.
 
 ```yaml
-# mozaiks-core-public: operations/task_manager/events.yaml
-publishes:
-  - { name: task_created, aggregate_type: task }
-triggers:
-  - { event: task_created, workflow: TaskCreated }
+# modules/task_manager/events.yaml
+schema_version: mozaiks.events.v1
+events:
+  - type: domain.task_manager.task_created
+    version: 1
+    producer: task_manager
 ```
 
 ```yaml
@@ -423,13 +449,15 @@ or custom tools that use `AppBackendPort`.
 
 ### Framework Aggregates at Runtime
 
-The framework scans all `operation.yaml` and `orchestrator.yaml` files to build the routing table.
+The framework scans module contracts and `orchestrator.yaml` files to build the routing table.
 
 ---
 
 ## platform/ Directory
 
-Declarative configuration for the app. Both services read from it.
+Declarative configuration for the app. `platform_app.py` composes these
+surfaces, and `runtime_app.py` executes the workflow subset through stable
+contracts.
 
 ```
 platform/
@@ -444,17 +472,23 @@ platform/
 │       ├── tools/*.py          # Tool implementations
 │       └── extended_orchestration/  # MFJ and pack extension config
 │           └── mfj_extension.json   # Mid-Flight Journey fan-out/fan-in config (optional)
-├── operations/                 # Deterministic CRUD/action operations
-│   └── {operation_name}/
-│       ├── operation.yaml      # Manifest + actions + events
-│       ├── handler.py          # Operation handler class
-│       ├── ui/                 # Optional: operation's default page UI
-│       ├── models.py           # Optional: data models/schemas
-│       └── services.py         # Optional: extracted business logic
-├── pages/                      # Multi-operation pages only
+├── modules/                    # Deterministic CRUD/action capabilities
+│   └── {module_name}/
+│       ├── module.yaml         # Identity + actions + capabilities
+│       ├── events.yaml         # Domain events this module may publish
+│       ├── subscriptions.yaml  # Event reactions owned by this module
+│       ├── notifications.yaml  # Notification rules
+│       ├── settings.yaml       # User/app settings schema
+│       ├── admin.yaml          # Admin panels mounted into /admin/*
+│       ├── backend/
+│       │   ├── handler.py      # Module handler class
+│       │   ├── models.py       # Optional: data models/schemas
+│       │   └── services.py     # Optional: extracted business logic
+│       └── ui/                 # Optional: module-specific UI surfaces
+├── pages/                      # Declarative app pages
+│   ├── {page_name}.yaml        # Preferred page schema form
 │   └── {page_name}/
-│       ├── page.json           # Route, uses multiple operations
-│       └── ui/
+│       └── page.yaml           # Optional folder form
 └── brand/                      # Theme and visual assets
     ├── brand.json              # Logo, colors, fonts
     └── assets/                 # Images, icons
@@ -473,11 +507,11 @@ platform/
 
 ## Contracts
 
-### Operation Contract
+### Module Contract
 
 ```python
-# platform/modules/{name}/handler.py
-class LineupBoardOperation:
+# platform/modules/{name}/backend/handler.py
+class LineupBoardModule:
     async def list(self, ctx, **params) -> list:
         return await list_items(ctx.app_id, **params)
 
@@ -487,26 +521,28 @@ class LineupBoardOperation:
         return result
 ```
 
-### Operation Manifest (operation.yaml)
+### Module Manifest (module.yaml)
 
 ```yaml
-name: lineup_board
-version: "1.0"
-description: Shows which sets are ready
+schema_version: mozaiks.module.v1
+module:
+  id: lineup_board
+  display_name: Lineup Board
+  version: "1.0.0"
+  description: Shows which sets are ready
+  handler: backend.handler:LineupBoardModule
 
 actions:
-  - name: list
+  - id: list
     type: query
+    handler_method: list
     description: List lineup items
-  - name: create
+  - id: create
     type: mutation
+    handler_method: create
     description: Create a lineup item
     emits:
-      - lineup.created
-
-events:
-  - lineup.created
-  - lineup.updated
+      - domain.lineup_board.created
 ```
 
 ### Workflow Manifest (orchestrator.yaml)
@@ -562,11 +598,11 @@ backend-agnostic.
 |-------------------|-------------------|----------|
 | Database/Schema | App-backend persistence | Deployment-specific |
 | Config/Middleware | Platform config + runtime/backend config | `platform/config/` + environment |
-| Models | Module models | `platform/modules/{name}/models.py` |
-| Services | Module handler | `platform/modules/{name}/handler.py` |
+| Models | Module models | `platform/modules/{name}/backend/models.py` |
+| Services | Module handler or services | `platform/modules/{name}/backend/handler.py`, `platform/modules/{name}/backend/services.py` |
 | Controllers (AI) | Workflows | `platform/workflows/{name}/` |
-| Controllers (CRUD) | Module handler | `platform/modules/{name}/handler.py` |
-| Routes | App backend or runtime | external backend or `mozaiksai` |
+| Controllers (CRUD) | Module handler | `platform/modules/{name}/backend/handler.py` |
+| Routes | Platform host or optional external backend | `platform_app.py` or configured backend URL |
 | Entry Point | Framework/runtime host | `run_server.py` or deployment entrypoint |
 | Frontend | Page schema | `platform/pages/` |
 
@@ -599,19 +635,21 @@ Every bundle (module, workflow, page) has a `visibility` field:
 
 ## Key Concepts
 
-### Workflow (mozaiksai)
+### Workflow
 A multi-agent AI conversation. Defined in `platform/workflows/`. Executed by AG2. Has agents, tools, handoff rules.
 
 Workflows declare:
 - `events.emits` — What events their tools publish
 - `triggers` — What external events start/resume them
 
-### Module (mozaiksai platform)
-A unit of deterministic business logic. Defined in `platform/modules/`. Has a `handler.py`
-with action methods and a `module.yaml` manifest. NOT an AI workflow.
+### Module
+A unit of deterministic business logic. Defined in `platform/modules/`. Has a
+`backend/handler.py` with action methods and a `module.yaml` manifest. NOT an
+AI workflow.
 
-Modules support workflows — they provide the CRUD surface that AI agents call through
-the `AppBackendPort`. Modules declare:
+Modules support workflows — they provide the CRUD/action surface that AI agents
+call through platform module routes or, in split deployments, through
+`AppBackendPort`. Modules declare:
 - `actions` — Named action methods (list, create, update, delete)
 - `events` — Domain events the module can emit
 
@@ -633,9 +671,15 @@ When building features in Mozaiks, tasks decompose by feature (not by layer):
 ### Mozaiks Approach (feature-based)
 ```
 1. Define module → platform/modules/{feature}/
-   ├── module.yaml     # Metadata + actions + events
-   ├── handler.py      # Handler class with action methods
-   └── models.py       # Optional: data schemas
+   ├── module.yaml
+   ├── events.yaml
+   ├── settings.yaml
+   ├── subscriptions.yaml
+   ├── notifications.yaml
+   ├── admin.yaml
+   └── backend/
+       ├── handler.py      # Handler class with action methods
+       └── models.py       # Optional: data schemas
 
 2. Define workflow (if AI needed) → platform/workflows/{Feature}/
    ├── orchestrator.yaml   # Config + triggers + events.emits
@@ -643,19 +687,19 @@ When building features in Mozaiks, tasks decompose by feature (not by layer):
    ├── tools.yaml
    └── tools/*.py
 
-3. Standalone page (only if multi-operation) → platform/pages/{page}/
-   └── ui/
+3. Standalone page → platform/pages/{page}.yaml
+   # Optional folder form: platform/pages/{page}/page.yaml
 ```
 
 ### When to Use What
 
 | Scenario | Where to Define |
 |----------|-----------------|
-| Operation with its own page | `operation.yaml` → `page` section |
-| Page using multiple operations | `platform/pages/` |
-| Page with no operation (static) | `platform/pages/` |
+| Module with its own page | `module.yaml` capability/page metadata |
+| Page using multiple modules | `platform/pages/` |
+| Page with no module binding (static) | `platform/pages/` |
 | Event that triggers workflow | `orchestrator.yaml` → `triggers` |
-| Event emitted by operation | `operation.yaml` → `events` |
+| Event emitted by module | `events.yaml` |
 | Event emitted by workflow tool | `orchestrator.yaml` → `events.emits` |
 
 ---
@@ -676,17 +720,16 @@ When building features in Mozaiks, tasks decompose by feature (not by layer):
 | Term | Meaning |
 |------|---------|
 | AI runtime | `mozaiksai` — workflow execution layer |
-| app backend | external deterministic app service; reference implementation is `mozaiks-core-public` |
+| app backend | deterministic app service behind `platform_app.py`, generated module handlers, or an optional external/generated backend |
 | AppBackendPort | generic contract in `mozaiksai` for AI runtime ↔ app backend communication |
-| app_backend_url | base URL of the paired mozaiks-core-public instance; injected as a context variable |
-| module (mozaiks-core-public) | self-contained capability unit — module manifests + `backend/logic.py` + `backend/routes.py` |
-| module (mozaiksai platform) | deterministic CRUD/action surface declared in `platform/modules/` with `module.yaml` + `handler.py` |
+| app_backend_url | optional base URL for an external/generated app backend when a split topology is used |
+| module | self-contained deterministic capability unit under `platform/modules/` or a generated app bundle |
 | module manifest system | YAML manifest family for modules (`module.yaml`, `events.yaml`, `settings.yaml`, `notifications.yaml`, `subscriptions.yaml`, `admin.yaml`) |
-| module.yaml (platform) | handler manifest for a mozaiksai platform module — identity, capabilities, actions, events |
+| module.yaml | handler/action manifest for a module — identity, capabilities, and action definitions; event declarations live in `events.yaml` |
 | admin.yaml (platform) | module admin panels rendered inside unified `/admin` |
-| event_bridge | component in mozaiks-core-public that wires module domain events to mozaiksai workflow triggers |
-| triggers | workflow start/resume declarations — in `orchestrator.yaml` (mozaiksai) or `events.yaml` (modules) |
-| AppGenerator | workflow that generates 6-file module manifests + backend code for each capability pack |
+| runtime ingress | boundary that accepts validated app/domain events and routes them to workflow triggers |
+| triggers | workflow start/resume declarations in `orchestrator.yaml` |
+| AppGenerator | workflow that generates deterministic app bundle artifacts: `app.json`, pages, config, brand patches, module manifest families, and backend code |
 
 ---
 

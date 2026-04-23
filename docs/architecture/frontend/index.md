@@ -34,7 +34,7 @@ The architecture builds from five layered concepts. Read them in order — each 
 | [Conversation Modes](conversation-modes.md) | `ask` mode (general Q&A) vs `workflow` mode (structured agentic run) |
 | [Layout Modes](layout-modes.md) | Four visual layouts that control how chat and artifact panels share the screen |
 | [Persistent Widget](persistent-widget.md) | The floating chat entry point — context-aware, always present away from the chat page |
-| [Event-Driven State](event-driven-state.md) | How WebSocket events from the backend drive all frontend state transitions |
+| [Event System](../foundations/event-system.md) | How runtime, app, workflow, and UI events are separated |
 
 ---
 

@@ -59,7 +59,7 @@ def get_missing_studio_surfaces(platform_root: Path) -> list[str]:
         "platform/config/ai.json": platform_root / "config" / "ai.json",
         "platform/config/shell.json": platform_root / "config" / "shell.json",
         "brand/theme_config.json": _resolve_theme_config_path(platform_root),
-        "ui/extension.json": _resolve_ui_extension_path(bundle_root),
+        "ui/extension.json": _resolve_ui_extension_path(bundle_root, platform_root),
     }
     return [rel_path for rel_path, path in checks.items() if not path.exists()]
 
@@ -75,7 +75,7 @@ def build_studio_home_summary(
     ai_config = _read_json(platform_root / "config" / "ai.json")
     shell_config = _read_json(platform_root / "config" / "shell.json")
     theme_config = _read_json(_resolve_theme_config_path(platform_root))
-    ui_extension = _read_json(_resolve_ui_extension_path(bundle_root))
+    ui_extension = _read_json(_resolve_ui_extension_path(bundle_root, platform_root))
 
     admin_json_path = platform_root / "config" / "admin.json"
     admin_config = _read_json(admin_json_path) if admin_json_path.exists() else {}
@@ -213,6 +213,104 @@ def build_studio_build_summary(
     return summary
 
 
+async def build_studio_adapters_summary() -> dict:
+    import os
+
+    def _mask(value: str, show: int = 6) -> str:
+        if len(value) <= show:
+            return "•" * len(value)
+        return value[:show] + "•" * 8
+
+    def _configured(value: str) -> bool:
+        return bool(value and value.strip())
+
+    openai_key = os.getenv("OPENAI_API_KEY", "")
+    mongo_uri = os.getenv("MONGO_URI") or os.getenv("MONGODB_URI") or os.getenv("MONGO_URL") or ""
+    e2b_key = os.getenv("E2B_API_KEY", "")
+    internal_key = os.getenv("INTERNAL_API_KEY", "")
+    backend_url = os.getenv("MOZAIKS_BACKEND_URL", "")
+
+    auth_enabled = os.getenv("AUTH_ENABLED", "false").lower() in ("1", "true", "yes", "on")
+    auth_provider = os.getenv("AUTH_PROVIDER", "")
+    keycloak_url = os.getenv("KEYCLOAK_URL", "")
+    keycloak_realm = os.getenv("KEYCLOAK_REALM", "")
+    keycloak_client_id = os.getenv("KEYCLOAK_CLIENT_ID", "")
+    supabase_url = os.getenv("SUPABASE_URL", "")
+    auth_jwks_url = os.getenv("AUTH_JWKS_URL", "")
+    azure_kv_name = os.getenv("AZURE_KEY_VAULT_NAME", "")
+
+    default_model = os.getenv("DEFAULT_LLM_MODEL", "gpt-4o-mini")
+    fallback_models = [model.strip() for model in os.getenv("OPENAI_MODEL_FALLBACK", "").split(",") if model.strip()]
+
+    mongo_llm_configured = False
+    try:
+        from mozaiksai.core.core_config import get_mongo_client
+
+        db_client = get_mongo_client()
+        document = await db_client.autogen_ai_agents.LLMConfig.find_one({}, {"_id": 0, "model": 1})
+        mongo_llm_configured = document is not None
+    except Exception:
+        pass
+
+    adapters: dict = {
+        "llm": {
+            "label": "LLM Provider",
+            "kind": "llm",
+            "configured": _configured(openai_key) or mongo_llm_configured,
+            "source": "database" if mongo_llm_configured else ("environment" if _configured(openai_key) else None),
+            "primary_model": default_model,
+            "fallback_models": fallback_models,
+            "api_key_set": _configured(openai_key),
+            "api_key_masked": _mask(openai_key) if openai_key else None,
+        },
+        "database": {
+            "label": "MongoDB",
+            "kind": "database",
+            "configured": _configured(mongo_uri),
+            "uri_masked": _mask(mongo_uri, 12) if mongo_uri else None,
+        },
+        "sandbox": {
+            "label": "E2B Sandbox",
+            "kind": "sandbox",
+            "configured": _configured(e2b_key),
+            "api_key_set": _configured(e2b_key),
+            "api_key_masked": _mask(e2b_key) if e2b_key else None,
+        },
+        "auth": {
+            "label": "Authentication",
+            "kind": "auth",
+            "configured": auth_enabled,
+            "enabled": auth_enabled,
+            "provider": auth_provider or None,
+            "keycloak": {
+                "url": keycloak_url or None,
+                "realm": keycloak_realm or None,
+                "client_id": keycloak_client_id or None,
+            } if (keycloak_url or keycloak_realm) else None,
+            "supabase": {"url": supabase_url} if supabase_url else None,
+            "jwks_url": auth_jwks_url or None,
+        },
+        "backend": {
+            "label": "App Backend",
+            "kind": "backend",
+            "configured": bool(backend_url or internal_key),
+            "url": backend_url or None,
+            "internal_key_set": _configured(internal_key),
+            "internal_key_masked": _mask(internal_key) if internal_key else None,
+        },
+    }
+
+    if azure_kv_name:
+        adapters["azure_keyvault"] = {
+            "label": "Azure Key Vault",
+            "kind": "vault",
+            "configured": True,
+            "vault_name": azure_kv_name,
+        }
+
+    return {"adapters": adapters}
+
+
 def load_studio_build_state(platform_root: Path) -> dict:
     state_path = _resolve_build_state_path(platform_root)
     raw_state = _read_json(state_path) if state_path.exists() else {}
@@ -318,8 +416,12 @@ def _resolve_theme_config_path(platform_root: Path) -> Path:
     return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
 
 
-def _resolve_ui_extension_path(bundle_root: Path) -> Path:
-    return bundle_root / "ui" / "extension.json"
+def _resolve_ui_extension_path(bundle_root: Path, platform_root: Path) -> Path:
+    candidates = [
+        bundle_root / "ui" / "extension.json",
+        platform_root / "ui" / "extension.json",
+    ]
+    return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
 
 
 def _normalize_request_kind(value: object) -> str | None:

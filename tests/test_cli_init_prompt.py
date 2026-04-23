@@ -38,6 +38,9 @@ def test_init_command_prompts_for_name_when_missing(monkeypatch, tmp_path) -> No
     assert (target_dir / "ui" / "extension.json").exists()
     assert (target_dir / "platform" / "modules" / "README.md").exists()
     assert (target_dir / "platform" / "workflows" / "README.md").exists()
+    modules_readme = (target_dir / "platform" / "modules" / "README.md").read_text(encoding="utf-8")
+    assert "backend/handler.py" in modules_readme
+    assert "events.yaml" in modules_readme
     assert not (target_dir / "platform" / "workflows" / "HelloWorkflow").exists()
 
 

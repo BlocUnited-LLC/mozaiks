@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Run the canonical headless app host directly."""
+
 import uvicorn
 
 from platform_app import app

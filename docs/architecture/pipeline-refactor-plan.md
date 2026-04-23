@@ -66,9 +66,8 @@ For live runtime architecture, use:
 
 1. [Architecture Index](index.md)
 2. [Workflow Architecture](foundations/workflow-architecture.md)
-3. [Declarative Runtime System](events/declarative-runtime-system.md)
-4. [Event System Architecture](foundations/event-system-architecture.md)
-5. [Process and Event Map](foundations/process-and-event-map.md)
+3. [Event System](foundations/event-system.md)
+4. [Event Contracts](foundations/event-contracts.md)
 
 These documents describe the current runtime model more accurately than the
 original refactor plan.
@@ -117,6 +116,5 @@ Keeping it as an archival note preserves:
 ## Superseding References
 
 - [Workflow Architecture](foundations/workflow-architecture.md)
-- [Event System Architecture](foundations/event-system-architecture.md)
-- [Process and Event Map](foundations/process-and-event-map.md)
-- [Declarative Runtime System](events/declarative-runtime-system.md)
+- [Event System](foundations/event-system.md)
+- [Event Contracts](foundations/event-contracts.md)

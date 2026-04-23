@@ -303,6 +303,13 @@ Target responsibility:
   - auth/integrations
   - deterministic build tasks
 
+Current implementation note:
+
+- `save_app_schema` writes these artifacts to
+  `$MOZAIKS_GENERATED_ARTIFACTS_PATH/apps/{app_id}/{build_id}/app/`.
+- The generated app bundle is not active until an explicit promotion step copies
+  validated files into an active app root.
+
 ### AgentGenerator
 
 Owns the agentic bundle.
@@ -315,6 +322,13 @@ Target responsibility:
   - handoffs
   - agent UI surfaces
   - transition/session surfaces where needed
+
+Current implementation note:
+
+- `workflow_converter.py` writes generated workflow bundles to
+  `$MOZAIKS_GENERATED_ARTIFACTS_PATH/workflows/{app_id}/{build_id}/{workflow_name}/`.
+- Generated workflows are not runtime-loaded until explicitly promoted into an
+  active app root's `workflows/` directory.
 
 ## User-Facing Build Journey
 

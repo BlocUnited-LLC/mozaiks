@@ -122,6 +122,101 @@ async def platform_shutdown() -> None:
     _runtime_services = []
 
 
+# The admin portal is one framework-owned shell, but the app shell still needs
+# explicit section routes so navigation, route matching, and shell manifests all
+# expose the same stable paths.
+ADMIN_SHELL_ROUTES: tuple[dict[str, Any], ...] = (
+    {
+        "path": "/admin",
+        "label": "Admin",
+        "order": 999,
+        "title": "Admin",
+        "admin_section": "overview",
+    },
+    {
+        "path": "/admin/users",
+        "label": "Users",
+        "order": 1000,
+        "title": "Users",
+        "admin_section": "users",
+    },
+    {
+        "path": "/admin/billing",
+        "label": "Billing",
+        "order": 1001,
+        "title": "Billing",
+        "admin_section": "billing",
+    },
+    {
+        "path": "/admin/usage",
+        "label": "Usage",
+        "order": 1002,
+        "title": "Usage",
+        "admin_section": "usage",
+    },
+    {
+        "path": "/admin/activity",
+        "label": "Activity",
+        "order": 1003,
+        "title": "Activity",
+        "admin_section": "activity",
+    },
+    {
+        "path": "/admin/settings",
+        "label": "Settings",
+        "order": 1004,
+        "title": "Settings",
+        "admin_section": "settings",
+    },
+    {
+        "path": "/admin/integrations",
+        "label": "Integrations",
+        "order": 1005,
+        "title": "Integrations",
+        "admin_section": "integrations",
+    },
+    {
+        "path": "/admin/support",
+        "label": "Support",
+        "order": 1006,
+        "title": "Support",
+        "admin_section": "support",
+    },
+)
+
+
+STUDIO_SHELL_ROUTES: tuple[dict[str, Any], ...] = (
+    {
+        "path": "/studio",
+        "component": "StudioHomePage",
+        "label": "Studio",
+        "order": 5,
+        "title": "Studio Home",
+    },
+    {
+        "path": "/studio/build",
+        "component": "StudioBuildPage",
+        "label": "Build",
+        "order": 6,
+        "title": "Studio Build",
+    },
+    {
+        "path": "/studio/adapters",
+        "component": "StudioAdaptersPage",
+        "label": "Adapters",
+        "order": 7,
+        "title": "Studio Adapters",
+    },
+)
+
+
+def _append_page_once(pages: List[dict], page: dict) -> None:
+    path = page.get("path")
+    if not isinstance(path, str) or any(existing.get("path") == path for existing in pages):
+        return
+    pages.append(page)
+
+
 async def build_shell_config(*, include_studio: bool = False) -> dict:
     """Compose app-shell config from platform-owned manifests."""
     platform_root = resolve_platform_path()
@@ -184,40 +279,38 @@ async def build_shell_config(*, include_studio: bool = False) -> dict:
             admin_cfg = json.loads(admin_config_path.read_text(encoding="utf-8"))
             if admin_cfg.get("enabled", True):
                 pages = result.get("pages", [])
-                if not any(p.get("path") == "/admin" for p in pages):
-                    pages.append({
-                        "path": "/admin",
+                for route in ADMIN_SHELL_ROUTES:
+                    _append_page_once(pages, {
+                        "path": route["path"],
                         "component": "AdminPortal",
-                        "label": "Admin Portal",
-                        "order": 999,
+                        "label": route["label"],
+                        "order": route["order"],
                         "meta": {
                             "requiresAuth": True,
                             "requiresRole": "admin",
-                            "title": "Admin Portal",
+                            "title": route["title"],
                             "appShell": True,
+                            "adminSection": route["admin_section"],
                         },
                     })
-                    result["pages"] = pages
+                result["pages"] = _dedupe_and_sort_pages(pages)
         except Exception as exc:
             logger.warning("[shell-config] Could not read admin.json: %s", exc)
 
     if include_studio:
         pages = result.get("pages", [])
-        if not any(p.get("path") == "/studio" for p in pages):
-            pages.append({
-                "path": "/studio",
-                "component": "StudioHomePage",
-                "label": "Studio",
-                "order": 5,
-                "meta": {"requiresAuth": True, "requiresRole": "admin", "title": "Studio Home", "appShell": True},
-            })
-        if not any(p.get("path") == "/studio/build" for p in pages):
-            pages.append({
-                "path": "/studio/build",
-                "component": "StudioBuildPage",
-                "label": "Build",
-                "order": 6,
-                "meta": {"requiresAuth": True, "requiresRole": "admin", "title": "Studio Build", "appShell": True},
+        for route in STUDIO_SHELL_ROUTES:
+            _append_page_once(pages, {
+                "path": route["path"],
+                "component": route["component"],
+                "label": route["label"],
+                "order": route["order"],
+                "meta": {
+                    "requiresAuth": True,
+                    "requiresRole": "admin",
+                    "title": route["title"],
+                    "appShell": True,
+                },
             })
         result["pages"] = _dedupe_and_sort_pages(pages)
 

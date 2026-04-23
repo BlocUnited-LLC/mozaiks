@@ -93,12 +93,18 @@ Rules:
 
 It must:
 
+- write generated artifacts under
+  `$MOZAIKS_GENERATED_ARTIFACTS_PATH/apps/{app_id}/{build_id}/app/`
 - write `app.json`
 - write `pages/{name}.yaml`
 - deep-merge `theme_config_patch` into `brand/theme_config.json`
 - deep-merge `shell_config` into `config/shell.json`
 - deep-merge `asset_manifest` into `config/asset_manifest.json`
 - store `app_manifest`, `app_pages`, `app_theme_config_patch`, `app_shell_config`, `app_asset_manifest`, and `app_schema_ready` in workflow context
+
+It must not write directly into an active runtime-loaded app root such as
+`platform/` or `mozaiks-platform/app`. Activation requires an explicit
+promotion step.
 
 ### 4. AssemblyAgent
 

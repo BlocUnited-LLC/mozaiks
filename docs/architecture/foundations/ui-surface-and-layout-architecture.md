@@ -136,5 +136,4 @@ Do not:
 
 - [canonical-app-structure.md](canonical-app-structure.md)
 - [workflow-architecture.md](workflow-architecture.md)
-- [process-and-event-map.md](process-and-event-map.md)
-
+- [event-system.md](event-system.md)

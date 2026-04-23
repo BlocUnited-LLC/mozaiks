@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Run the canonical local/private Studio builder host directly."""
+
 import uvicorn
 
 from studio_app import app

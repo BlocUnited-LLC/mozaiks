@@ -1,12 +1,13 @@
 /**
  * AppAdminDashboard — app-owner admin panel group.
  *
- * The canonical visible admin route is /admin via AdminPortal. This module
- * provides the app-owner panels embedded inside that unified admin shell.
+ * The canonical visible admin routes are /admin and /admin/* via AdminPortal.
+ * This module provides the app-owner panels embedded inside that unified admin
+ * shell.
  *
  * ## How panels work
  *
- * The backend (mozaiks-core-public) is authoritative for which panels are active.
+ * The connected app backend is authoritative for which panels are active.
  * `GET {app_backend_url}/api/admin/config` returns:
  *   { panels: [{ id, label, order, plugin? }, ...] }
  *
@@ -20,6 +21,7 @@
  *   panels:
  *     - id: my_module.stats
  *       label: My Module Stats
+ *       section: usage
  *       order: 20
  *
  * Frontend: register in platform/extensions.js (or your app's index.js)
@@ -32,12 +34,19 @@
  * ## Built-in panels
  *   stats         — user/activity overview stats
  *   users         — paginated user table with suspend/unsuspend
- *   subscriptions — tier breakdown (shown when MONETIZATION=1)
+ *   subscriptions — tier breakdown (shown when monetization is enabled)
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import { useChatUI } from '../context/ChatUIContext';
 import { getComponent } from '../registry/componentRegistry';
+import {
+  StatCard as AdminStatCard,
+  SectionHeading as AdminSectionHeading,
+  Badge as AdminBadge,
+  ErrorBox as AdminErrorBox,
+  Spinner as AdminSpinner,
+} from '../admin/components/AdminPrimitives.jsx';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -89,61 +98,9 @@ function useAdminData(backendUrl, path, auth, intervalMs = 0) {
   return { data, loading, error, refresh: load };
 }
 
-// ---------------------------------------------------------------------------
-// Primitive UI (shared across all panels)
-// ---------------------------------------------------------------------------
-
-export function AdminStatCard({ label, value, sub, accent = false }) {
-  return (
-    <div className={`rounded-xl border p-5 flex flex-col gap-1 ${accent ? 'border-primary/40 bg-primary/10' : 'border-border bg-card'}`}>
-      <span className="text-xs text-muted-foreground uppercase tracking-wide">{label}</span>
-      <span className={`text-3xl font-bold ${accent ? 'text-primary' : 'text-foreground'}`}>
-        {value ?? '—'}
-      </span>
-      {sub && <span className="text-xs text-muted-foreground">{sub}</span>}
-    </div>
-  );
-}
-
-export function AdminSectionHeading({ children }) {
-  return (
-    <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-widest mt-6 mb-3">
-      {children}
-    </h2>
-  );
-}
-
-export function AdminBadge({ children, variant = 'default' }) {
-  const styles = {
-    default:  'bg-muted text-muted-foreground',
-    success:  'bg-success/20 text-success',
-    warning:  'bg-warning/20 text-warning',
-    error:    'bg-destructive/20 text-destructive',
-    primary:  'bg-primary/20 text-primary',
-  };
-  return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${styles[variant]}`}>
-      {children}
-    </span>
-  );
-}
-
-export function AdminErrorBox({ message }) {
-  return (
-    <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-      {message}
-    </div>
-  );
-}
-
-export function AdminSpinner() {
-  return (
-    <div className="flex items-center gap-2 text-muted-foreground text-sm">
-      <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-      Loading…
-    </div>
-  );
-}
+// AdminStatCard, AdminSectionHeading, AdminBadge, AdminErrorBox, AdminSpinner
+// are re-exported from AdminPrimitives — imported above.
+export { AdminStatCard, AdminSectionHeading, AdminBadge, AdminErrorBox, AdminSpinner };
 
 // ---------------------------------------------------------------------------
 // Built-in panel: Stats
@@ -381,19 +338,69 @@ const BUILT_IN_PANELS = {
   subscriptions: { component: SubscriptionsPanel },
 };
 
-function normalizeAppAdminPanels(configPanels) {
-  if (Array.isArray(configPanels)) {
-    return configPanels;
+const APP_PANEL_SECTION_BY_ID = {
+  stats: 'overview',
+  users: 'users',
+  subscriptions: 'billing',
+};
+
+function normalizeAppPanelSection(panelConfig, id) {
+  const raw =
+    typeof panelConfig === 'object'
+      ? panelConfig.section || panelConfig.category || panelConfig.group
+      : null;
+  const value = String(raw || APP_PANEL_SECTION_BY_ID[id] || 'overview')
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '-');
+
+  if (value === 'user' || value === 'access' || value === 'users-access') return 'users';
+  if (value === 'subscriptions' || value === 'payments' || value === 'revenue') return 'billing';
+  if (value === 'runtime' || value === 'usage-health' || value === 'health') return 'usage';
+  if (value === 'audit' || value === 'logs') return 'activity';
+  return value || 'overview';
+}
+
+function normalizeAppAdminPanel(panelConfig) {
+  const id = typeof panelConfig === 'string' ? panelConfig : panelConfig?.id;
+  if (!id) return null;
+  if (typeof panelConfig === 'string') {
+    return {
+      id,
+      label: id,
+      section: normalizeAppPanelSection(null, id),
+    };
   }
-  if (configPanels && typeof configPanels === 'object') {
+  return {
+    ...panelConfig,
+    id,
+    label: panelConfig?.label || id,
+    section: normalizeAppPanelSection(panelConfig, id),
+  };
+}
+
+function normalizeAppAdminPanels(configPanels) {
+  let panels;
+  if (Array.isArray(configPanels)) {
+    panels = configPanels;
+  } else if (configPanels && typeof configPanels === 'object') {
     const appPanels = Array.isArray(configPanels.app) ? configPanels.app : [];
     const modulePanels = Array.isArray(configPanels.modules) ? configPanels.modules : [];
-    const normalized = [...appPanels, ...modulePanels];
-    if (normalized.length > 0) return normalized;
+    panels = [...appPanels, ...modulePanels];
+  } else {
+    panels = [
+      { id: 'stats', label: 'Overview' },
+      { id: 'users', label: 'Users' },
+    ];
+  }
+
+  const normalized = panels.map(normalizeAppAdminPanel).filter(Boolean);
+  if (normalized.length > 0) {
+    return normalized;
   }
   return [
-    { id: 'stats', label: 'Overview' },
-    { id: 'users', label: 'Users' },
+    { id: 'stats', label: 'Overview', section: 'overview' },
+    { id: 'users', label: 'Users', section: 'users' },
   ];
 }
 
@@ -401,7 +408,12 @@ function normalizeAppAdminPanels(configPanels) {
 // Root
 // ---------------------------------------------------------------------------
 
-export function AppAdminPanels({ embedded = false } = {}) {
+export function AppAdminPanels({
+  embedded = false,
+  section = null,
+  emptyState = null,
+  showNoBackend = true,
+} = {}) {
   const { user, config, auth } = useChatUI();
   const backendUrl = getAppBackendUrl(config);
 
@@ -424,12 +436,15 @@ export function AppAdminPanels({ embedded = false } = {}) {
   }
 
   if (!backendUrl) {
+    if (!showNoBackend) {
+      return emptyState || null;
+    }
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="rounded-xl border border-border bg-card p-8 text-center max-w-sm">
           <h1 className="text-lg font-semibold text-foreground mb-2">No Backend Connected</h1>
           <p className="text-sm text-muted-foreground">
-            Deploy a mozaiks-core-public instance and set{' '}
+            Connect an app backend and set{' '}
             <code className="text-xs bg-muted px-1 rounded">appBackendUrl</code>{' '}
             in your ChatUI config to enable app administration.
           </p>
@@ -439,7 +454,8 @@ export function AppAdminPanels({ embedded = false } = {}) {
   }
 
   // Default panel list while config is loading — prevents flash of empty dashboard
-  const activePanels = normalizeAppAdminPanels(adminConfig?.panels);
+  const activePanels = normalizeAppAdminPanels(adminConfig?.panels)
+    .filter((panel) => !section || panel.section === section);
 
   const content = (
     <>
@@ -455,9 +471,9 @@ export function AppAdminPanels({ embedded = false } = {}) {
         </div>
       )}
 
-      {activePanels.map((panelConfig) => {
-        const id = typeof panelConfig === 'string' ? panelConfig : panelConfig.id;
-        const label = typeof panelConfig === 'object' ? panelConfig.label : id;
+      {activePanels.length === 0 ? emptyState : activePanels.map((panelConfig) => {
+        const id = panelConfig.id;
+        const label = panelConfig.label || id;
 
         // 1. Built-in panel
         const built = BUILT_IN_PANELS[id];

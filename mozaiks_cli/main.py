@@ -2,6 +2,10 @@
 """
 Mozaiks CLI - Main entry point.
 
+This CLI is the local Dev/CLI layer around the canonical four-host architecture.
+It scaffolds app-bundle surfaces, prepares local/private Studio work, and helps
+operators target the correct host layer.
+
 Commands:
     mozaiks init <preset>     Create a new app bundle scaffold
     mozaiks onboard           Guide setup for an existing scaffold
@@ -21,7 +25,7 @@ def create_parser():
     """Create the argument parser with subcommands."""
     parser = argparse.ArgumentParser(
         prog="mozaiks",
-        description="Mozaiks CLI - Project scaffolding for multi-tier development",
+        description="Mozaiks CLI - Dev/CLI tooling for the runtime, platform, Studio, and product host layers",
         epilog="Run 'mozaiks <command> --help' for more info on a command.",
     )
 
@@ -37,7 +41,7 @@ def create_parser():
     init_parser = subparsers.add_parser(
         "init",
         help="Initialize new Mozaiks project",
-        description="Create a new Mozaiks app bundle scaffold from a tier preset.",
+        description="Create a new Mozaiks app-bundle scaffold that can be served through the platform, Studio, or product hosts.",
     )
     init_parser.add_argument(
         "preset",
@@ -73,7 +77,7 @@ def create_parser():
         "--dir",
         dest="directory",
         default=".",
-        help="Workspace root containing platform/ and brand/ (default: current directory)",
+        help="Workspace root containing the active app root at platform/ plus any optional wrapper assets (default: current directory)",
     )
     onboard_parser.add_argument(
         "--name",
@@ -144,7 +148,7 @@ def create_parser():
         "--dir",
         dest="directory",
         default=".",
-        help="Workspace root containing platform/, brand/, and ui/ (default: current directory)",
+        help="Workspace root containing the active app root at platform/ and any optional wrapper assets (default: current directory)",
     )
     studio_parser.add_argument(
         "--json",

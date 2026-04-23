@@ -11,34 +11,27 @@ That means the main authoring folders should focus on:
 - what screens exist (`pages/`)
 - what workflows exist (`workflows/`)
 - what modules provide business logic (`modules/`)
-- what events connect them (declared in `module.json` and `orchestrator.yaml`)
+- what events connect them (declared in `events.yaml` and `orchestrator.yaml`)
 
-## Canonical Layout
+## Active App Root Layout
+
+An active app root is the directory read by `platform_app.py`. In the default
+OSS workspace this is `platform/`. In App Zero this is `mozaiks-platform/app/`.
 
 ```text
 platform/
 ├── app.json
-├── brand/
-│   ├── assets/
-│   ├── fonts/
-│   └── login-theme/
+├── config/
+│   ├── ai.json
+│   ├── shell.json
+│   └── admin.json
 ├── pages/
-│   ├── _shared/
-│   │   └── ui/
-│   │       └── *.{js,jsx}
-│   ├── admin/                  # admin dashboard (first-class page)
-│   │   └── ui/
-│   │       └── AdminPortal.jsx
+│   ├── {page_name}.yaml        # Declarative page schema
 │   └── {page_name}/
-│       ├── page.json
-│       └── ui/
-│           ├── index.js
-│           └── *.{js,jsx}
+│       └── page.yaml           # Optional folder form
 ├── workflows/
 │   └── {workflow_name}/
 │       ├── orchestrator.yaml   # includes triggers (no separate automations/)
-│       ├── admin.yaml          # optional, admin dashboard declarations
-│       ├── subscription.yaml   # optional, entitlement requirements
 │       ├── agents.yaml
 │       ├── handoffs.yaml
 │       ├── context_variables.yaml
@@ -48,26 +41,55 @@ platform/
 │       ├── hooks.yaml
 │       ├── tools/
 │       │   └── *.py
-│       ├── admin/              # optional, admin UI components
-│       │   └── *AdminPanel.jsx
 │       └── ui/                 # optional, main user-facing UI
 │           ├── index.js
 │           └── *.{js,jsx}
-├── operations/
-│   └── {operations_name}/
-│       ├── operations.json         # includes events.emits, events.handles
-│       ├── admin.yaml          # optional, admin dashboard declarations
-│       ├── subscription.yaml   # optional, entitlement requirements
-│       ├── handler.py
-│       ├── admin/              # optional, admin UI components
-│       │   └── *AdminPanel.jsx
-│       └── ui/                 # optional, main UI components
-│           ├── index.js
-│           └── *.{js,jsx}
-└── config/
-    ├── ai.json                 # LLM provider, model, temperature
-    └── theme_config.json       # Color schemes, fonts, shell chrome
+├── modules/
+│   └── {module_name}/
+│       ├── module.yaml         # identity, actions, capabilities
+│       ├── events.yaml         # domain events this module may publish
+│       ├── subscriptions.yaml  # reactions/gates owned by the module
+│       ├── notifications.yaml  # notification rules
+│       ├── settings.yaml       # user/app settings schema
+│       ├── admin.yaml          # admin panels mounted under /admin/*
+│       ├── backend/
+│       │   ├── handler.py      # required deterministic action handler
+│       │   ├── settings.py     # optional settings hooks
+│       │   ├── subscriptions.py
+│       │   ├── notifications.py
+│       │   └── admin.py
+│       └── ui/                 # optional module-specific UI surfaces
+│           └── index.js
+└── brand/                      # optional colocated brand/theme assets
+    ├── assets/
+    ├── fonts/
+    └── theme_config.json
 ```
+
+## Product Workspace Layout
+
+Some workspaces wrap the active app root with product-owned brand and UI
+extension folders. App Zero uses this shape:
+
+```text
+mozaiks-platform/
+├── app/                        # active app root read by platform_app.py
+│   ├── app.json
+│   ├── config/
+│   ├── modules/
+│   ├── pages/
+│   └── workflows/
+├── brand/                      # product brand/theme assets
+├── ui/                         # product UI extension
+├── generated/                  # generator output, not runtime-loaded
+│   ├── apps/{app_id}/{build_id}/app/
+│   └── workflows/{app_id}/{build_id}/{workflow_name}/
+└── app-builder/                # builder docs/planning, not runtime-loaded
+```
+
+The loader resolves `brand/` and `ui/` as siblings of the active app root when
+they exist. That is why `mozaiks-platform/app` can be the active app root while
+`mozaiks-platform/brand` and `mozaiks-platform/ui` remain product-level assets.
 ## What Each Family Means
 
 ### `app.json`
@@ -105,19 +127,14 @@ Normal routeable app screens.
 
 Examples:
 
-- `discover` — Browse content
-- `admin` — Admin dashboard (NOTE: currently here, should be first-class)
-- Custom pages (lineup, dashboard, settings, etc.)
+- `discover` — browse content
+- `dashboard` — app home
+- Custom pages such as lineup, catalog, settings, etc.
 
 Pages are where most CRUD-style app experience should live.
 
-Shared page UI belongs under `pages/_shared/`.
-
-**Admin Dashboard Note:**
-
-Currently located at `platform/pages/admin/`. This makes it app-level, but admin should be a **first-class framework component** (like chat-ui).
-
-Think of admin as the "admin user profile" — when an admin logs in, they see a dashboard with system health, token usage, subscription controls, etc. It's not an optional "adapter", it's a core role-based view.
+Admin is not generated as an app page. The platform shell owns the
+`/admin` route family and renders the framework-owned `AdminPortal`.
 
 **Future:** Should be promoted to first-class `admin-ui/` directory at repo root (parallel to `chat-ui/`).
 
@@ -170,10 +187,11 @@ For most new apps:
 
 1. Create `app.json`
 2. Create shell brand config only if the app needs custom identity
-3. Create pages (including admin if needed)
+3. Create app pages
 4. Create workflow definitions (with triggers in `orchestrator.yaml`)
-5. Create modules (with events in `module.json`)
-6. Add `admin.yaml` and `subscription.yaml` as needed
+5. Create modules (with actions in `module.yaml` and events in `events.yaml`)
+6. Add `admin.yaml`, `settings.yaml`, `notifications.yaml`, and
+   `subscriptions.yaml` as needed
 
 ## CRUD Minimalism
 
@@ -196,7 +214,7 @@ The repo still contains older generated and runtime projection files under
 Treat those as implementation outputs, not the ideal authoring model.
 
 The derived module catalog is one example of this. It should be derived from
-`platform/modules/*/module.json`, not hand-authored as a separate source of
+`platform/modules/*/module.yaml`, not hand-authored as a separate source of
 truth.
 
 ## Cross References

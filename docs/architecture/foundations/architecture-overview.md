@@ -18,7 +18,7 @@ If a concept does not help explain one of those four lines, it should not be par
 
 ## What The System Does
 
-Mozaiks is organized around one AI runtime plus one app-backend boundary.
+Mozaiks is organized around one AI runtime plus one app-host/backend boundary.
 
 In some deployments those may run together. In others they are split services.
 App authors should still experience them as one product surface.
@@ -35,8 +35,9 @@ This includes:
 - admin APIs
 - page backing logic
 
-This backend is external to the framework repo and connects through the runtime
-adapter boundary.
+This behavior is hosted by `platform_app.py` modules by default. Apps may also
+choose an external/generated backend that connects through the runtime adapter
+boundary.
 
 ### Workflow behavior (`mozaiksai/`)
 
@@ -184,4 +185,7 @@ Then read:
 
 ## Builder Product Note
 
-Builder-product workflow internals are maintained in a private `mozaiks-platform/` bundle and are intentionally excluded from this OSS reading path.
+Builder-product workflow internals live in `mozaiks-platform/app/workflows/`
+because App Zero is itself a Mozaiks app. They are product-specific builder
+workflows, not part of the generic app-bundle contract every generated app must
+understand.

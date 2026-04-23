@@ -1,6 +1,4 @@
-"""
-mozaiks init - Initialize a Mozaiks app bundle scaffold.
-"""
+"""mozaiks init - Initialize an app bundle from the Dev/CLI layer."""
 
 import json
 import re
@@ -220,10 +218,21 @@ def _create_bundle_scaffold(
     if features.get("admin"):
         resolved_email = admin_email or "admin@example.com"
         admin_config = {
-            "_comment": "Admin portal config. Set admin_emails to the email(s) that should have admin access.",
+            "_comment": "Unified admin shell config. Set admin_emails to the email(s) that should have admin access.",
             "enabled": True,
             "admin_emails": [resolved_email],
-            "panels": ["stats", "runs", "sessions"],
+            "panels": {
+                "app": [
+                    {"id": "stats", "label": "App Overview", "section": "overview"},
+                    {"id": "users", "label": "Users", "section": "users"},
+                ],
+                "modules": [],
+                "runtime": [
+                    {"id": "stats", "label": "Usage Stats", "section": "usage"},
+                    {"id": "runs", "label": "Active Runs", "section": "usage"},
+                    {"id": "sessions", "label": "Recent Sessions", "section": "activity"},
+                ],
+            },
             "roles": ["admin"],
             "features": {
                 "user_management": False,
@@ -474,13 +483,15 @@ def _show_next_steps(target_dir: Path, preset: str, starter: bool) -> None:
     print("\nNext Steps:")
     print(f"  1. Point PLATFORM_PATH at {platform_path}")
     print("  2. Review platform/app.json, platform/config/ai.json, and brand/theme_config.json")
+    print("  3. Start the local/private builder host with: python run_studio.py")
+    print("     Or select a specific host layer with: MOZAIKS_HOST=runtime|platform|studio|mozaiks python run_server.py")
     if starter:
-        print("  3. Replace platform/workflows/HelloWorkflow with real product workflows")
+        print("  4. Replace platform/workflows/HelloWorkflow with real product workflows")
     else:
-        print("  3. Add workflows in platform/workflows/ and modules in platform/modules/")
-    print("  4. Optional: use mozaiks gen once you have real product context")
+        print("  4. Add workflows in platform/workflows/ and modules in platform/modules/")
+    print("  5. Optional: use mozaiks gen once you have real product context")
     if features.get("admin"):
-        print("  5. Confirm admin access in platform/config/admin.json and app.json admins")
+        print("  6. Confirm admin access in platform/config/admin.json and app.json admins")
 
     print("\nTo add more features later: mozaiks add <feature>")
 
@@ -501,7 +512,12 @@ Add deterministic capabilities here when the app actually needs them.
 Each module lives under `platform/modules/<name>/` and typically includes:
 
 - `module.yaml`
-- `handler.py`
+- `events.yaml`
+- `settings.yaml`
+- `notifications.yaml`
+- `subscriptions.yaml`
+- `admin.yaml`
+- `backend/handler.py`
 
 Do not create modules until you know the real CRUD or action surface.
 """

@@ -1,19 +1,15 @@
-"""
-Factory function for creating a mountable mozaiksai app.
+"""Convenience factory for an embeddable runtime-only mozaiksai app.
 
-Usage:
-    from fastapi import FastAPI
-    from mozaiksai import create_mozaiks_app
+This factory is useful for isolated runtime embeddings, smoke scripts, and
+tests. In the canonical repo architecture, the preferred host entrypoints are:
 
-    app = FastAPI()
+- `runtime_app.py`   - runtime substrate host
+- `platform_app.py`  - headless app host
+- `studio_app.py`    - local/private builder host
+- `mozaiks_app.py`   - hosted product host
 
-    # Mount mozaiksai at /ai
-    app.mount("/ai", create_mozaiks_app(workflow_dir="./workflows"))
-
-    # Your other routes
-    @app.get("/api/users")
-    def get_users():
-        ...
+Use `create_mozaiks_app()` when you explicitly want only the runtime substrate
+as a mountable FastAPI sub-application.
 """
 
 import os
@@ -29,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 class MozaiksConfig(BaseModel):
-    """Configuration for mozaiksai runtime."""
+    """Configuration for the runtime-substrate convenience factory."""
     workflow_dir: str = Field(default="./workflows", description="Path to workflows directory")
     mongo_uri: Optional[str] = Field(default=None, description="MongoDB connection URI")
     cors_origins: list = Field(default=["*"], description="Allowed CORS origins")
@@ -44,7 +40,7 @@ def create_mozaiks_app(
     **kwargs: Any,
 ) -> FastAPI:
     """
-    Create a mountable mozaiksai FastAPI application.
+    Create a mountable runtime-substrate FastAPI application.
 
     Args:
         workflow_dir: Path to the workflows directory containing workflow definitions
@@ -53,7 +49,7 @@ def create_mozaiks_app(
         debug: Enable debug logging
 
     Returns:
-        FastAPI application that can be mounted on your main app
+        FastAPI application that can be mounted on another app
 
     Example:
         ```python
@@ -63,6 +59,12 @@ def create_mozaiks_app(
         app = FastAPI()
         app.mount("/ai", create_mozaiks_app(workflow_dir="./workflows"))
         ```
+
+    Note:
+        This is a convenience factory for the runtime layer only. For the
+        canonical four-host repo entrypoints, use the root modules
+        `runtime_app.py`, `platform_app.py`, `studio_app.py`, or
+        `mozaiks_app.py`.
     """
     # Resolve paths
     workflow_path = Path(workflow_dir).resolve()
@@ -74,17 +76,17 @@ def create_mozaiks_app(
     if mongo_uri:
         os.environ["MONGO_URI"] = mongo_uri
 
-    # Create the FastAPI app
-    mozaiks_app = FastAPI(
-        title="mozaiksai Runtime",
-        description="AI workflow runtime - mountable sub-application",
+    # Create the runtime-only FastAPI sub-application
+    runtime_subapp = FastAPI(
+        title="mozaiksai Runtime Substrate",
+        description="Convenience runtime-only sub-application",
         version="1.0.0",
         docs_url="/docs" if debug else None,
         redoc_url="/redoc" if debug else None,
     )
 
     # CORS
-    mozaiks_app.add_middleware(
+    runtime_subapp.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins or ["*"],
         allow_credentials=True,
@@ -108,17 +110,17 @@ def create_mozaiks_app(
     SimpleTransport._instance = transport
 
     # Store references on app state
-    mozaiks_app.state.persistence = persistence_manager
-    mozaiks_app.state.transport = transport
-    mozaiks_app.state.workflow_dir = workflow_path
+    runtime_subapp.state.persistence = persistence_manager
+    runtime_subapp.state.transport = transport
+    runtime_subapp.state.workflow_dir = workflow_path
 
     # ----- Health endpoint -----
-    @mozaiks_app.get("/health")
+    @runtime_subapp.get("/health")
     async def health():
         return {"status": "ok", "service": "mozaiksai"}
 
     # ----- Workflow info endpoint -----
-    @mozaiks_app.get("/workflows")
+    @runtime_subapp.get("/workflows")
     async def list_workflows():
         """List available workflows."""
         try:
@@ -133,7 +135,7 @@ def create_mozaiks_app(
         user_id: str
         context: Optional[Dict[str, Any]] = None
 
-    @mozaiks_app.post("/chats/{app_id}/{workflow_name}/start")
+    @runtime_subapp.post("/chats/{app_id}/{workflow_name}/start")
     async def start_chat(
         app_id: str,
         workflow_name: str,
@@ -182,7 +184,7 @@ def create_mozaiks_app(
         context: Optional[Dict[str, Any]] = None
         app_id: Optional[str] = None
 
-    @mozaiks_app.post("/workflows/{workflow_name}/trigger")
+    @runtime_subapp.post("/workflows/{workflow_name}/trigger")
     async def trigger_workflow_endpoint(
         workflow_name: str,
         body: TriggerRequest,
@@ -201,8 +203,8 @@ def create_mozaiks_app(
         return result
 
     # ----- Internal trigger endpoint -----
-    # Called by mozaiks-core-public event_bridge when a domain event fires.
-    # Payload shape matches what _trigger_workflow() in event_bridge.py sends.
+    # Called by platform-hosted or external/generated app backends when a
+    # domain event should trigger a workflow.
     # Protected by X-Internal-Api-Key header (set INTERNAL_API_KEY env var).
     class InternalTriggerRequest(BaseModel):
         workflow_name: str
@@ -222,16 +224,15 @@ def create_mozaiks_app(
         import hmac
         return bool(key) and hmac.compare_digest(expected.encode(), key.encode())
 
-    @mozaiks_app.post("/internal/trigger")
+    @runtime_subapp.post("/internal/trigger")
     async def internal_trigger(
         body: InternalTriggerRequest,
         x_internal_api_key: Optional[str] = Header(None, alias="X-Internal-Api-Key"),
     ):
         """
-        Internal endpoint for the mozaiks-core-public event bridge.
+        Internal endpoint for app-domain event ingress.
 
-        Called by event_bridge._trigger_workflow() when a plugin domain event
-        (e.g. task_created) should start a workflow (e.g. TaskCreated).
+        Called when an app-domain event should start or resume a workflow.
 
         Authentication: X-Internal-Api-Key header must match INTERNAL_API_KEY env var.
         If INTERNAL_API_KEY is unset the endpoint is open (development mode).
@@ -256,7 +257,7 @@ def create_mozaiks_app(
         return result
 
     # ----- WebSocket endpoint -----
-    @mozaiks_app.websocket("/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}")
+    @runtime_subapp.websocket("/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}")
     async def websocket_endpoint(
         websocket: WebSocket,
         workflow_name: str,
@@ -273,6 +274,6 @@ def create_mozaiks_app(
             user_id=user_id,
         )
 
-    logger.info(f"mozaiksai app created with workflow_dir={workflow_path}")
+    logger.info("mozaiksai runtime substrate created with workflow_dir=%s", workflow_path)
 
-    return mozaiks_app
+    return runtime_subapp

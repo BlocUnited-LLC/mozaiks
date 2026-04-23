@@ -1,8 +1,19 @@
-# mozaiksai — AI Workflow Runtime
+# mozaiksai — Runtime Substrate
 
-This is the AI orchestration runtime. It executes multi-agent workflows using AG2 (AutoGen).
+`mozaiksai` is the reusable AI execution substrate in the four-host Mozaiks
+architecture.
 
-## What This Service Does
+Canonical host entrypoints live at the repo root:
+
+- `runtime_app.py` - runtime substrate host
+- `platform_app.py` - headless app host layered on the runtime
+- `studio_app.py` - local/private builder host layered on the platform
+- `mozaiks_app.py` - hosted product host layered on Studio
+
+This package owns the runtime layer only. It does not own page serving, shell
+composition, Studio routes, or hosted product behavior.
+
+## What This Layer Owns
 
 - Executes AI agent conversations (AG2 GroupChat)
 - Streams events to frontend via WebSocket
@@ -11,21 +22,32 @@ This is the AI orchestration runtime. It executes multi-agent workflows using AG
 - Manages workflow state (in-progress, completed)
 - Token accounting and observability
 
+It must not own:
+
+- shell config or page serving
+- app admin shell composition
+- Studio builder routes
+- hosted product behavior
+- repo-specific CLI conveniences
+
 ## Directory Structure
 
 ```
 mozaiksai/
 ├── core/
-│   ├── adapters/         # AG2-specific orchestration (implements OrchestrationPort)
-│   ├── auth/             # JWT validation, WebSocket auth
-│   ├── automation/       # Event-driven workflow routing
-│   ├── events/           # 3-layer event system (business, UI tools, AG2)
+│   ├── adapters/         # Engine-specific orchestration adapters
+│   ├── admin/            # Runtime/operator admin APIs
+│   ├── auth/             # JWT validation and WebSocket auth
+│   ├── data/             # Runtime persistence and storage helpers
+│   ├── events/           # Runtime event dispatch and envelopes
 │   ├── multitenant/      # app_id/user_id/chat_id scoping
-│   ├── observability/    # Performance tracking, token logging
-│   ├── orchestration/    # Universal router, change classification
-│   ├── ports/            # Engine-agnostic contracts (OrchestrationPort)
-│   ├── transport/        # WebSocket transport, session registry
-│   └── workflow/         # Execution patterns, context management
+│   ├── observability/    # Performance tracking and token logging
+│   ├── ports/            # Engine-agnostic contracts
+│   ├── runtime/          # App/runtime loading and composition helpers
+│   ├── session/          # Session lifecycle helpers
+│   ├── tokens/           # Token accounting
+│   ├── transport/        # WebSocket transport and session registry
+│   └── workflow/         # Workflow execution patterns and context management
 ```
 
 ## Key Entry Points
@@ -100,8 +122,10 @@ class OrchestrationPort(Protocol):
 ## Workflows Are Declarative
 
 Workflows are defined in `platform/workflows/{name}/`:
-- `workflow.yaml` — Workflow metadata
+- `orchestrator.yaml` — Workflow metadata and triggers
 - `agents.yaml` — Agent definitions
+- `handoffs.yaml` — Agent routing rules
+- `context_variables.yaml` — Shared workflow state
 - `tools.yaml` — Tool bindings
 - `tools/*.py` — Tool implementations
 

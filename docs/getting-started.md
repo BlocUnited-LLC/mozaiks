@@ -14,8 +14,15 @@
 
 Everything you need to go from clone to a running local Mozaiks app.
 
-The canonical Mozaiks product host is `mozaiks_app.py`. It serves the active
-Mozaiks workspace from `mozaiks-platform/app` when that workspace is present.
+Mozaiks uses four canonical host entrypoints:
+
+- `runtime_app.py` - runtime substrate
+- `platform_app.py` - headless app host
+- `studio_app.py` - local/private builder host
+- `mozaiks_app.py` - hosted product host
+
+`python run_server.py` defaults to the local/private Studio host. Use the
+direct `run_*.py` wrappers when you want to target one specific layer.
 
 ---
 
@@ -25,7 +32,7 @@ Mozaiks is an AI app framework with three main pieces:
 
 | Piece | What it is | Where it runs |
 |-------|-----------|---------------|
-| **Backend** | Python server that runs your AI agents | `python run_server.py` |
+| **Backend** | Layered Python host selected for local work | `python run_server.py` |
 | **Frontend** | React app that users interact with | `npm run dev` |
 | **Services** | MongoDB (database) + Keycloak (login) | Docker containers |
 
@@ -67,14 +74,20 @@ mozaiks/
 │   ├── config/                 # Runtime and app bundle config
 │   ├── workflows/              # Workflow definitions and UI tools
 │   ├── modules/                # App capability contracts
-│   └── pages/                  # Multi-module UI pages
+│   ├── pages/                  # Multi-module UI pages
+│   └── brand/                  # Optional colocated shell assets
+│
+├── mozaiks-platform/           # App Zero / product workspace
+│   ├── app/                    # Active App Zero app root
+│   ├── brand/                  # App Zero brand/theme assets
+│   ├── ui/                     # App Zero UI extension
+│   └── generated/              # Generator output awaiting promotion
 │
 ├── app/                        # Web shell entrypoint and Vite config
 │   ├── App.jsx
 │   ├── main.jsx
 │   └── vite.config.js
 │
-├── platform/brand/             # Public shell assets, fonts, and login-theme files
 ├── chat-ui/                    # Shared web UI shell
 ├── mozaiksai/                  # AI runtime, orchestration, transport
 ├── mozaiks_cli/                # CLI for local initialization and tooling
@@ -95,8 +108,8 @@ mozaiks/
         └── realm-export.json   # Auto-imported Keycloak realm config
 ```
 
-    Your deterministic app backend is external to this repo and connects to the AI
-    runtime through `AppBackendPort`.
+    Deterministic app behavior is hosted by the platform host by default. Apps
+    may also connect an external/generated backend through `AppBackendPort`.
 
 ---
 
@@ -189,8 +202,14 @@ From here you can manage users, roles, and login settings. The `mozaiks` realm i
     # Install Python deps
     pip install -r requirements.txt
 
-    # Start backend (http://localhost:8000)
+    # Start backend (defaults to the local/private Studio host on http://localhost:8000)
     python run_server.py
+
+    # Optional: target one specific host directly
+    python run_runtime.py   # runtime substrate only
+    python run_platform.py  # headless app host
+    python run_studio.py    # local/private builder host
+    python run_mozaiks.py   # hosted product host
     ```
 
     In a separate terminal:
@@ -327,5 +346,5 @@ Or explore the architecture:
 
 - [Keycloak Auth Architecture](architecture/keycloak-auth.md) — How auth, databases, and the runtime fit together
 - [Workflow Architecture](architecture/foundations/workflow-architecture.md) — How workflows, tools, and agents work
-- [Event System](architecture/foundations/event-system-architecture.md) — The event-driven architecture
+- [Event System](architecture/foundations/event-system.md) — The event-driven architecture
 

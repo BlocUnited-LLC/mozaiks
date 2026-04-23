@@ -2,7 +2,7 @@
 
 **Status:** Proposed near-term strategy
 **Last updated:** 2026-04-02
-**Depends on:** [Event System](../../architecture/foundations/event-system.md), [Runtime State and Control Events](../../architecture/foundations/runtime-state-and-control-events.md), [Orchestration and Decomposition](../../architecture/orchestration-and-decomposition.md), [Mid-Flight Journeys](mid-flight-journeys.md), [Implementation Plan](ag2-beta-preperation-plan.md)
+**Depends on:** [Event System](../../architecture/foundations/event-system.md), [Event Contracts](../../architecture/foundations/event-contracts.md), [Orchestration and Decomposition](../../architecture/orchestration-and-decomposition.md), [Mid-Flight Journeys](mid-flight-journeys.md), [Implementation Plan](ag2-beta-preperation-plan.md)
 
 ---
 

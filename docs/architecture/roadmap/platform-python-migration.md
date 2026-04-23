@@ -1,5 +1,12 @@
 # Mozaiks Platform: .NET to Python Migration Plan
 
+**Status:** Historical / superseded.
+
+The current canonical architecture lives in `ARCHITECTURE.md`. The hosted
+product is now modeled as `mozaiks_app.py` on top of `platform_app.py`, with App
+Zero's active app root at `mozaiks-platform/app/`. This document is retained as
+legacy planning context only.
+
 ## Executive Summary
 
 Migrate `mozaiks-platform` from .NET microservices to Python/FastAPI to:

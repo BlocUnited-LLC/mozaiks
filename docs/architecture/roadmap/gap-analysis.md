@@ -97,14 +97,16 @@ After running the example, every user asks "now what?" The activate step needs a
 
 ### Exists
 
-- One example module: `platform/modules/lineup_board/module.json`
-- Architecture reference in `docs/architecture/events/declarative-runtime-system.md`
+- One example module: `platform/modules/lineup_board/module.yaml`
+- Architecture reference in `docs/architecture/foundations/event-system.md`
 - `mozaikscore/core/module_manager.py` — dynamic module loading
 
 ### Missing
 
 - [ ] "Create Your First Module" tutorial
-- [ ] `module.json` schema documentation with all fields explained
+- [ ] module manifest-family documentation with all fields explained:
+      `module.yaml`, `events.yaml`, `subscriptions.yaml`,
+      `notifications.yaml`, `settings.yaml`, and `admin.yaml`
 - [ ] Example modules beyond lineup_board (e.g. simple CRUD, webhook handler)
 - [ ] Module ↔ workflow event wiring walkthrough
 - [ ] Module testing patterns

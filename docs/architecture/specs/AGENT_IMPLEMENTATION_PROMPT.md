@@ -14,13 +14,13 @@ You are implementing **Mozaiks**, a modular AI-powered application platform. The
 
 Before writing any code, you MUST read and understand:
 
-1. **⭐⭐ EVENT_DRIVEN_EXECUTION_SPEC.md** - The runtime is event-first. All orchestration reacts to explicit events, NOT transcript parsing or output discovery.
+1. **⭐⭐ Event System** (`../foundations/event-system.md`) - The runtime is event-first. All orchestration reacts to explicit events, NOT transcript parsing or output discovery.
 
 2. **MODULAR_ARCHITECTURE_V2.md** - Package structure and dependency rules.
 
 3. **AGENTS_MD_V2.md** - Import rules and communication patterns.
 
-4. **EVENT_CONTRACTS.md** - Event envelope schema and naming conventions.
+4. **Event Contracts** (`../foundations/event-contracts.md`) - Event envelope schema and naming conventions.
 
 5. **RUNTIME_SPEC.md** - How the runtime composes packages.
 
@@ -322,7 +322,7 @@ Before committing, verify:
 
 ## Getting Started Checklist
 
-- [ ] Read EVENT_DRIVEN_EXECUTION_SPEC.md
+- [ ] Read `../foundations/event-system.md`
 - [ ] Read MODULAR_ARCHITECTURE_V2.md
 - [ ] Read AGENTS_MD_V2.md
 - [ ] Implement core package first
@@ -350,10 +350,10 @@ Before writing code:
 All architecture documents are in `docs/architecture/specs/`:
 
 - [INDEX.md](./INDEX.md) - Document index and quick reference
-- [EVENT_DRIVEN_EXECUTION_SPEC.md](./EVENT_DRIVEN_EXECUTION_SPEC.md) - **START HERE**
+- [Event System](../foundations/event-system.md) - **START HERE**
 - [RUNTIME_SPEC.md](./RUNTIME_SPEC.md) - Runtime behavior
 - [WORKFLOW_TRIGGERS_SPEC.md](./WORKFLOW_TRIGGERS_SPEC.md) - Event triggers
 - [TOOLS_SPEC.md](./TOOLS_SPEC.md) - Tool definitions
 - [MODULAR_ARCHITECTURE_V2.md](./MODULAR_ARCHITECTURE_V2.md) - Package structure
 - [AGENTS_MD_V2.md](./AGENTS_MD_V2.md) - Import rules
-- [EVENT_CONTRACTS.md](./EVENT_CONTRACTS.md) - Event schemas
+- [Event Contracts](../foundations/event-contracts.md) - Event schemas

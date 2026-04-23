@@ -100,7 +100,7 @@ def _show_next_steps(feature_or_preset):
 
     if feature_or_preset == "modules" or feature_or_preset in ["integrated", "full"]:
         print("  - Create modules in platform/modules/<name>/")
-        print("  - Each module needs: module.yaml, handler.py")
+        print("  - Each module needs: module.yaml, events.yaml, settings.yaml, notifications.yaml, subscriptions.yaml, admin.yaml, backend/handler.py")
 
     if feature_or_preset == "event_bus" or feature_or_preset in ["integrated", "full"]:
         print("  - Use event_bus.publish() to emit app events")
@@ -112,10 +112,10 @@ def _show_next_steps(feature_or_preset):
 
     if feature_or_preset == "admin" or feature_or_preset == "full":
         print("  - Access admin portal at /admin (requires auth)")
-        print("  - Configure admins list in platform/app.json")
+        print("  - Configure platform/config/admin.json and app.json admins")
 
     if feature_or_preset == "chat_ui" or feature_or_preset in ["chat", "integrated", "full"]:
         print("  - Chat UI will be available at root path")
-        print("  - Configure branding in brand/")
+        print("  - Configure branding in brand/ and shell behavior in platform/config/shell.json")
 
-    print("\nRestart your dev server to apply changes.")
+    print("\nRestart the relevant host layer to apply changes (run_runtime.py, run_platform.py, run_studio.py, or run_mozaiks.py).")

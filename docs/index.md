@@ -21,7 +21,7 @@
 
 **mozaiksai Runtime** is a production-ready orchestration engine that transforms AG2 (Microsoft Autogen) into an app-grade platform with:
 
-- ✅ **Event-Driven Architecture** -> Every action flows through unified event pipeline
+- ✅ **Event-Driven Architecture** -> Runtime, app, workflow, UI, and hosted events stay separated by contract
 - ✅ **Real-Time WebSocket Transport** -> Live streaming to React frontends
 - ✅ **Persistent State Management** -> Resume conversations exactly where they left off
 - ✅ **Multi-Tenant Isolation** -> app-scoped data and execution contexts
@@ -30,7 +30,7 @@
 - ✅ **Mid-Flight Journeys (MFJ)** -> Workflow-local fork/join with deterministic parent resume beyond base AG2 handoffs
 - ✅ **Comprehensive Observability** -> Built-in metrics, logging, and token tracking
 
-**mozaiksai = AG2 + Production Infrastructure + Event-Driven Core**
+**mozaiksai = AG2 + Production Infrastructure + Layered Event Contracts**
 
 ---
 

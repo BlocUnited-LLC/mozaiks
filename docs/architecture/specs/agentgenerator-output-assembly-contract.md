@@ -22,10 +22,19 @@ agent emits → runtime validates → tool auto-called inline → tool persists/
 
 AgentGenerator uses a **deferred assembly pattern**:
 agents emit → outputs persist to MongoDB → **DownloadAgent triggers assembly** →
-`gather_latest_agent_jsons()` scrapes all prior outputs → `create_workflow_files()` assembles → files written to disk → zip presented to user.
+`gather_latest_agent_jsons()` scrapes all prior outputs → `create_workflow_files()` assembles → files written under `MOZAIKS_GENERATED_ARTIFACTS_PATH` → zip presented to user.
 
 There are no auto-tool-call tools per planning agent. Every planning agent's output is
 collected in a single final pass by the `DownloadAgent`.
+
+Generated workflow bundles are staged at:
+
+```text
+$MOZAIKS_GENERATED_ARTIFACTS_PATH/workflows/{app_id}/{build_id}/{workflow_name}/
+```
+
+They do not become active runtime-loaded workflows until an explicit promotion
+step copies them into an active app root's `workflows/` directory.
 
 ---
 

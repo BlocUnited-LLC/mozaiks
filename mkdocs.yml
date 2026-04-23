@@ -100,16 +100,15 @@ nav:
           - App Manifest And Platform Targets: architecture/foundations/app-manifest-and-platform-targets.md
           - Canonical App Structure: architecture/foundations/canonical-app-structure.md
           - App Bundle Declaratives: architecture/foundations/app-bundle-declaratives.md
+          - Account, Admin, and Platform Services: architecture/foundations/account-admin-and-platform-services.md
           - Workflow Architecture: architecture/foundations/workflow-architecture.md
           - Declarative AG2 Mapping: architecture/foundations/declarative-ag2-mapping.md
           - Workflow Authoring Contracts: architecture/foundations/workflow-authoring-contracts.md
           - UI Surface and Layout: architecture/foundations/ui-surface-and-layout-architecture.md
           - Core vs Product vs App Bundle: architecture/foundations/core-product-app-bundle-boundary.md
-          - Runtime State and Control Events: architecture/foundations/runtime-state-and-control-events.md
+          - Event System: architecture/foundations/event-system.md
+          - Event Contracts: architecture/foundations/event-contracts.md
           - Learning Loop Architecture: architecture/foundations/learning-loop-architecture.md
-          - Event Taxonomy: architecture/foundations/event-taxonomy.md
-          - Event System Architecture: architecture/foundations/event-system-architecture.md
-          - Process and Event Map: architecture/foundations/process-and-event-map.md
       - Keycloak Auth: architecture/keycloak-auth.md
       - Mobile Client Contract: architecture/mobile-client-contract.md
       - Orchestration and Decomposition: architecture/orchestration-and-decomposition.md
@@ -119,11 +118,6 @@ nav:
           - Conversation Modes: architecture/frontend/conversation-modes.md
           - Layout Modes: architecture/frontend/layout-modes.md
           - Persistent Widget: architecture/frontend/persistent-widget.md
-          - Event-Driven State: architecture/frontend/event-driven-state.md
-      - Events:
-          - Overview: architecture/events/overview.md
-          - Event System Inventory: architecture/events/event-system-inventory.md
-          - Declarative Runtime System: architecture/events/declarative-runtime-system.md
   - Reference:
       - Overview: reference/index.md
       - Deep Dives:
@@ -140,7 +134,6 @@ nav:
               - Lifecycle Tools: reference/deep-dives/lifecycle-tools.md
           - Runtime and Transport:
               - Transport and Streaming: reference/deep-dives/transport-and-streaming.md
-              - Event Pipeline: reference/deep-dives/event-pipeline.md
               - Hook System Deep Dive: reference/deep-dives/hook-system-deep-dive.md
               - API Reference Notes: reference/deep-dives/api-reference.md
           - Agent and Contracts:
