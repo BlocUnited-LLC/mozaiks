@@ -12,14 +12,14 @@ def _read(relative_path: str) -> str:
 
 
 def test_studio_app_exposes_local_studio_home_endpoint() -> None:
-    source = _read("studio_app.py")
+    source = _read("mozaiksai/hosts/studio.py")
     assert '@app.get("/api/studio/home")' in source
     assert 'build_studio_home_summary(platform_root, surface="shell-home", local_only=True)' in source
 
 
 def test_platform_app_exposes_studio_route_without_header_link() -> None:
-    studio_source = _read("studio_app.py")
-    platform_source = _read("platform_app.py")
+    studio_source = _read("mozaiksai/hosts/studio.py")
+    platform_source = _read("mozaiksai/hosts/platform.py")
     assert 'build_shell_config(include_studio=True)' in studio_source
     assert "os.getenv" not in studio_source
     assert '"path": "/studio"' in platform_source
@@ -29,7 +29,7 @@ def test_platform_app_exposes_studio_route_without_header_link() -> None:
 
 
 def test_studio_extension_registers_studio_home_page() -> None:
-    source = _read("chat-ui/src/studio/index.js")
+    source = _read("factory_app/app/ui/studio/index.js")
     assert "StudioHomePage" in source
     assert "registerComponent('StudioHomePage'" in source
 
@@ -40,7 +40,7 @@ def test_core_components_do_not_register_studio_home_page() -> None:
 
 
 def test_app_shell_registers_studio_extension_by_host_mode() -> None:
-    source = _read("app/App.jsx")
+    source = _read("web_shell/App.jsx")
     assert "registerStudioComponents" in source
     assert "import.meta.env.MOZAIKS_HOST" in source
     assert "hostMode === 'studio'" in source
@@ -48,7 +48,7 @@ def test_app_shell_registers_studio_extension_by_host_mode() -> None:
 
 
 def test_studio_home_page_fetches_summary_endpoint() -> None:
-    source = _read("chat-ui/src/studio/pages/StudioHomePage.jsx")
+    source = _read("factory_app/app/ui/studio/pages/StudioHomePage.jsx")
     assert "/api/studio/home" in source
     assert "Studio Home" in source
     assert "next_step" in source

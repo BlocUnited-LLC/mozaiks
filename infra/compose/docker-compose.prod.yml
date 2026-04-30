@@ -90,7 +90,7 @@ services:
       AG2_RUNTIME_LOGGING: "sqlite"
       LOGS_BASE_DIR: /app/logs
       DOCKERIZED: "true"
-      MOZAIKS_WORKFLOWS_PATH: /app/platform/workflows
+      MOZAIKS_WORKFLOWS_PATH: /app/factory_app/app/workflows
       # Multi-tenant settings (override in .env for production)
       # DEFAULT_APP_ID: "your-app-id"
     depends_on:
@@ -101,8 +101,8 @@ services:
     volumes:
       # Persist logs outside container
       - ../../logs:/app/logs
-      # Mount platform workflows (read-only in production)
-      - ../../platform/workflows:/app/platform/workflows:ro
+      # Mount factory-owned workflow packs (read-only in production)
+      - ../../factory_app/app/workflows:/app/factory_app/app/workflows:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]

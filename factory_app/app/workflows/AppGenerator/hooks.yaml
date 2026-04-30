@@ -1,0 +1,25 @@
+hooks:
+- hook_type: update_agent_state
+  hook_agent: all
+  filename: hook_code_context.py
+  function: inject_code_context
+- hook_type: update_agent_state
+  hook_agent: AppSchemaAgent
+  filename: hook_primitive_catalog.py
+  function: inject_primitive_catalog
+- hook_type: update_agent_state
+  hook_agent: InterviewAgent
+  filename: hook_agent_backend_context.py
+  function: inject_agent_backend_context
+- hook_type: update_agent_state
+  hook_agent: AppPlanAgent
+  filename: hook_agent_backend_context.py
+  function: inject_agent_backend_context
+- hook_type: update_agent_state
+  hook_agent: AppPlanAgent
+  filename: hook_workflow_integration_contract.py
+  function: inject_workflow_integration_contract
+- hook_type: update_agent_state
+  hook_agent: ConfigMiddlewareAgent
+  filename: hook_workflow_integration_contract.py
+  function: inject_workflow_integration_contract

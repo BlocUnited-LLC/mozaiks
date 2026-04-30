@@ -62,7 +62,7 @@ class ExecutorRegistry:
     Phase 1: only WorkflowExecutor is registered by the runtime host.
     Phase 2: ModuleExecutor is registered when app declares modules.
 
-    Example (Phase 2 usage in platform_app.py):
+    Example (Phase 2 usage in mozaiksai.hosts.platform):
         registry = ExecutorRegistry()
         registry.register(workflow_executor)
         registry.register(module_executor)

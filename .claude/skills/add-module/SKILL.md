@@ -90,7 +90,7 @@ class <Name>Module:
 ### 5. Restart the backend
 
 ```bash
-python run_server.py
+mozaiks serve .
 ```
 
 Modules are loaded at startup. No registration step needed.

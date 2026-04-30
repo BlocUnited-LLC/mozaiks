@@ -1,0 +1,245 @@
+# Distribution And Workspace Model
+
+This document defines the canonical target architecture for how Mozaiks is
+distributed, how apps are created, and what shape an app workspace should take.
+
+It is intentionally more decisive than the current repo layout. The repo is
+still in transition; this document defines the end state the code should move
+toward.
+
+## Core Decision
+
+Mozaiks is not one giant app repo that permanently contains every generated
+app.
+
+Mozaiks should produce and host **app workspaces** that are separate from the
+core runtime/framework repo.
+
+That means the canonical model is:
+
+1. Mozaiks ships reusable runtime and shell dependencies
+2. the factory layer produces app artifacts
+3. each generated app becomes its own workspace/repository
+4. App Zero uses the same app-workspace contract, even if it remains in this
+   repo during transition
+
+## The Five Artifact Types
+
+Mozaiks should be understood as five distinct artifact families.
+
+### 1. Runtime package
+
+Owns:
+
+- execution substrate
+- sessions
+- transport
+- persistence
+- workflow execution
+- platform host composition primitives
+
+Current seed in this repo:
+
+- `pyproject.toml`
+- `mozaiksai/`
+- `mozaiksai/hosts/runtime.py`
+- `mozaiksai/hosts/platform.py`
+- `mozaiksai/hosts/studio.py`
+- `mozaiksai/hosts/mozaiks.py`
+
+Long-term use:
+
+- installed as a Python dependency in generated app workspaces
+
+### 2. Shared web shell package
+
+Owns:
+
+- React shell
+- page renderer
+- chat UI
+- theme runtime
+- admin and Studio shell surfaces
+
+Current source in this repo:
+
+- `chat-ui/`
+- `web_shell/` (local Vite shell host)
+
+Long-term use:
+
+- consumed as a reusable frontend dependency by generated app workspaces and by
+  hosted deployments
+
+### 3. Factory layer / shared builder workflows
+
+Owns:
+
+- shared builder workflows
+- prompts
+- structured outputs
+- assembly rules
+- validators
+- artifact generation contracts
+
+Canonical target:
+
+- the factory layer must live outside any individual app workspace
+- builder workflows are infrastructure, not app-owned runtime content
+
+Current implementation state:
+
+- `factory_app/app/` is the current first-party factory workspace
+- shared builder workflows live under `factory_app/app/workflows/`
+- App Zero consumes that factory layer through multi-root workflow loading and
+   a product-owned overlay registry at
+   `mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`
+
+### 4. App workspace
+
+An app workspace is the unit a user owns, versions, runs locally, and deploys.
+
+It is not the runtime repo.
+
+Canonical target shape:
+
+```text
+my-app/
+└── app/
+    ├── app.json
+    ├── config/
+    ├── ui/
+   │   ├── pages/
+   │   ├── route_manifest.json
+   │   └── index.js
+    ├── workflows/
+    ├── modules/
+    └── brand/
+```
+
+Rules:
+
+- `ui/` and `brand/` belong inside the active app root
+- the workspace is self-contained
+- app behavior is declared and extended inside that workspace
+- promotion lands validated artifacts into that workspace
+
+### 5. App Zero / Mozaiks product workspace
+
+App Zero is a real app workspace built on the same substrate.
+
+It may also carry hosted-only product capabilities, but it should still follow
+the same app-workspace contract as generated apps.
+
+Canonical target:
+
+```text
+mozaiks-platform/
+└── app/
+    ├── app.json
+    ├── config/
+    ├── ui/
+   │   ├── pages/
+   │   ├── route_manifest.json
+   │   └── index.js
+    ├── workflows/
+    ├── modules/
+    └── brand/
+```
+
+Current implemented state in this repo:
+
+- `mozaiks-platform/app/` is the active App Zero app root
+- App Zero now keeps `ui/` and `brand/` inside that app root
+
+## How Apps Should Be Created
+
+The canonical creation flow is:
+
+1. Studio or CLI creates a build request
+2. shared generation core runs the builder workflows
+3. artifacts are written to a generated/staging area
+4. validation and review happen
+5. promotion copies validated artifacts into an app workspace
+
+This is the important boundary:
+
+- the factory layer produces artifacts
+- app workspaces consume promoted artifacts
+- runtime hosts execute app workspaces
+
+Current composition rule in this repo:
+
+- the active app workspace is resolved first
+- that app root's `workflows/` load first
+- `factory_app/app/workflows/` loads second as the shared builder layer
+- App Zero keeps product-owned workflow definitions under
+   `mozaiks-platform/app/workflows/`, with its overlay registry at
+   `mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`
+
+That is the same composition model that should survive when `mozaiks-platform`
+moves to its own repository.
+
+## OSS Versus Hosted
+
+The bundle contract should stay the same across OSS and hosted use.
+
+### OSS / local
+
+The user should end up with their own app workspace repository and install:
+
+- the Mozaiks Python runtime package
+- the shared web shell package
+
+They then run the workspace locally through the Mozaiks host/CLI.
+
+### Hosted
+
+The hosted product runs the same app-workspace contract, but Mozaiks owns:
+
+- hosted infra
+- hosted Studio
+- product capabilities
+- billing/collaboration/deployment surfaces
+
+Hosted is a deployment and product context difference, not a different app
+bundle contract.
+
+## What This Means For The Current Repo
+
+The current repo contains both canonical pieces and transitional layout.
+
+### Canonical long-term ownership
+
+- `mozaiksai/` - runtime package source
+- `chat-ui/` - shared shell/UI source
+- `mozaiks_cli/` - developer interface
+- factory layer / shared builder workflows - should remain first-class and stay
+   outside customer app workspaces
+
+### Transitional layout that should not be deepened
+
+- App Zero-specific product concerns leaking into shared framework ownership
+
+## Canonical Decisions
+
+These are the decisions the rest of the docs should follow.
+
+1. Generated apps should become standalone workspaces/repositories.
+2. The factory layer must not permanently live inside an app workspace.
+3. Shared generation workflows must not live inside App Zero or any app
+   workspace.
+4. App workspaces should be self-contained: `config/`, `ui/pages/`, `workflows/`,
+   `modules/`, `ui/`, and `brand/` belong together.
+5. App Zero should use the same workspace contract as generated apps, with
+   hosted-only capabilities layered above it.
+6. OSS and hosted should differ primarily in deployment/product capabilities,
+   not in the app artifact contract.
+
+## Cross References
+
+- [canonical-app-structure.md](./canonical-app-structure.md)
+- [workflow-architecture.md](./workflow-architecture.md)
+- [architecture-overview.md](./architecture-overview.md)
+- repo-root `ARCHITECTURE.md`
+

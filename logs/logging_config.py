@@ -14,6 +14,8 @@ from typing import Sequence, Optional, Dict, Any
 from datetime import datetime, timezone
 from contextlib import contextmanager
 
+from logs.runtime_artifacts import clear_runtime_artifacts, should_clear_runtime_artifacts_on_start
+
 # ----------------------------------------------------------------------
 # Directory & file paths
 # ----------------------------------------------------------------------
@@ -331,6 +333,7 @@ def setup_logging(
     # Optional clearing of existing log files
     cleared_files: list[str] = []
     clear_flag = os.getenv("CLEAR_LOGS_ON_START", "0").lower() in ("1","true","yes","on")
+    cleared_runtime_artifacts: Dict[str, int] = {"agent_outputs": 0, "workflow_converter": 0}
     if clear_flag:
         # Build a list of known log artifacts to clear on startup in development
         to_clear: list[Path] = []
@@ -357,6 +360,9 @@ def setup_logging(
             except Exception:
                 # Non-fatal; continue clearing others
                 pass
+
+    if should_clear_runtime_artifacts_on_start():
+        cleared_runtime_artifacts = clear_runtime_artifacts()
 
     root = logging.getLogger(); root.handlers.clear(); root.setLevel(logging.DEBUG)
     # Choose file formatter based on env; console remains pretty
@@ -403,11 +409,18 @@ def setup_logging(
             "file_format": "jsonl" if LOGS_AS_JSON else "pretty",
             "cleared_on_start": clear_flag,
             "cleared_files_count": len(cleared_files),
+            "cleared_agent_outputs_count": cleared_runtime_artifacts["agent_outputs"],
+            "cleared_workflow_converter_count": cleared_runtime_artifacts["workflow_converter"],
         },
     )
     if clear_flag and cleared_files:
         logging.getLogger(__name__).info(
             "Cleared existing log files", extra={"cleared_files": cleared_files}
+        )
+    if any(cleared_runtime_artifacts.values()):
+        logging.getLogger(__name__).info(
+            "Cleared runtime artifact files",
+            extra={"cleared_runtime_artifacts": cleared_runtime_artifacts},
         )
     
 

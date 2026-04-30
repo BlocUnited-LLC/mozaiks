@@ -7,13 +7,16 @@
  *
  * ## How panels work
  *
- * The connected app backend is authoritative for which panels are active.
+ * The connected app backend is authoritative for which app-business panels are active.
  * `GET {app_backend_url}/api/admin/config` returns:
- *   { panels: [{ id, label, order, plugin? }, ...] }
+ *   { "schema_version": "mozaiks.admin.app_backend.v1", "panels": [...] }
  *
- * Built-in panel IDs are rendered by components in BUILT_IN_PANELS below.
- * Unknown panel IDs are resolved from the componentRegistry — register a
- * React component via platform/extensions.js using the panel id as the name.
+ * The preferred path is the same declarative contract used by module admin panels:
+ * - `renderer: "schema"` with `layout + sections[]`
+ * - `renderer: "custom_component"` with a registered component key
+ *
+ * Built-in panel IDs remain available for generic app-backend surfaces like
+ * app-user management or subscription metrics.
  *
  * ## Adding a custom panel
  *
@@ -24,7 +27,7 @@
  *       section: usage
  *       order: 20
  *
- * Frontend: register in platform/extensions.js (or your app's index.js)
+ * Frontend: register in the active app root ui/index.js extension barrel
  *   import { registerComponent } from '@mozaiks/chat-ui/registry';
  *   import MyModuleStatsPanel from './MyModuleStatsPanel';
  *   registerComponent('my_plugin_stats', MyModuleStatsPanel);
@@ -47,6 +50,8 @@ import {
   ErrorBox as AdminErrorBox,
   Spinner as AdminSpinner,
 } from '../admin/components/AdminPrimitives.jsx';
+import AdminSchemaPanel from '../admin/components/AdminSchemaPanel.jsx';
+import { parseAppBackendAdminConfig } from '../admin/contracts/appAdminContract.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,6 +101,30 @@ function useAdminData(backendUrl, path, auth, intervalMs = 0) {
   }, [load, intervalMs]);
 
   return { data, loading, error, refresh: load };
+}
+
+function prefixPanelApiEndpoints(panel, backendUrl) {
+  if (!backendUrl || !panel || panel.renderer !== 'schema' || !Array.isArray(panel.sections)) {
+    return panel;
+  }
+
+  const prefixSection = (section) => {
+    if (!section || typeof section !== 'object') return section;
+    const config = section.config && typeof section.config === 'object' ? { ...section.config } : {};
+    const endpoint = config.api_endpoint;
+    if (typeof endpoint === 'string' && endpoint.startsWith('/')) {
+      config.api_endpoint = `${backendUrl}${endpoint}`;
+    }
+    if (Array.isArray(config.children)) {
+      config.children = config.children.map(prefixSection);
+    }
+    return { ...section, config };
+  };
+
+  return {
+    ...panel,
+    sections: panel.sections.map(prefixSection),
+  };
 }
 
 // AdminStatCard, AdminSectionHeading, AdminBadge, AdminErrorBox, AdminSpinner
@@ -338,72 +367,6 @@ const BUILT_IN_PANELS = {
   subscriptions: { component: SubscriptionsPanel },
 };
 
-const APP_PANEL_SECTION_BY_ID = {
-  stats: 'overview',
-  users: 'users',
-  subscriptions: 'billing',
-};
-
-function normalizeAppPanelSection(panelConfig, id) {
-  const raw =
-    typeof panelConfig === 'object'
-      ? panelConfig.section || panelConfig.category || panelConfig.group
-      : null;
-  const value = String(raw || APP_PANEL_SECTION_BY_ID[id] || 'overview')
-    .trim()
-    .toLowerCase()
-    .replace(/_/g, '-');
-
-  if (value === 'user' || value === 'access' || value === 'users-access') return 'users';
-  if (value === 'subscriptions' || value === 'payments' || value === 'revenue') return 'billing';
-  if (value === 'runtime' || value === 'usage-health' || value === 'health') return 'usage';
-  if (value === 'audit' || value === 'logs') return 'activity';
-  return value || 'overview';
-}
-
-function normalizeAppAdminPanel(panelConfig) {
-  const id = typeof panelConfig === 'string' ? panelConfig : panelConfig?.id;
-  if (!id) return null;
-  if (typeof panelConfig === 'string') {
-    return {
-      id,
-      label: id,
-      section: normalizeAppPanelSection(null, id),
-    };
-  }
-  return {
-    ...panelConfig,
-    id,
-    label: panelConfig?.label || id,
-    section: normalizeAppPanelSection(panelConfig, id),
-  };
-}
-
-function normalizeAppAdminPanels(configPanels) {
-  let panels;
-  if (Array.isArray(configPanels)) {
-    panels = configPanels;
-  } else if (configPanels && typeof configPanels === 'object') {
-    const appPanels = Array.isArray(configPanels.app) ? configPanels.app : [];
-    const modulePanels = Array.isArray(configPanels.modules) ? configPanels.modules : [];
-    panels = [...appPanels, ...modulePanels];
-  } else {
-    panels = [
-      { id: 'stats', label: 'Overview' },
-      { id: 'users', label: 'Users' },
-    ];
-  }
-
-  const normalized = panels.map(normalizeAppAdminPanel).filter(Boolean);
-  if (normalized.length > 0) {
-    return normalized;
-  }
-  return [
-    { id: 'stats', label: 'Overview', section: 'overview' },
-    { id: 'users', label: 'Users', section: 'users' },
-  ];
-}
-
 // ---------------------------------------------------------------------------
 // Root
 // ---------------------------------------------------------------------------
@@ -418,9 +381,14 @@ export function AppAdminPanels({
   const backendUrl = getAppBackendUrl(config);
 
   // Fetch panel config from backend — authoritative source of which panels are active
-  const { data: adminConfig } = useAdminData(
+  const { data: adminConfig, loading: adminConfigLoading } = useAdminData(
     backendUrl, '/api/admin/config', auth
   );
+  const parsedAdminConfig = parseAppBackendAdminConfig(adminConfig);
+
+  if (!adminConfigLoading && adminConfig !== null && parsedAdminConfig.issues.length > 0 && process.env.NODE_ENV === 'development') {
+    console.warn('[AppAdminDashboard] Invalid app backend admin config', parsedAdminConfig.issues);
+  }
 
   // Client-side role guard (backend enforces independently)
   const isAdmin = user?.roles?.includes('admin') ?? true; // fallback = no-auth dev mode
@@ -453,8 +421,7 @@ export function AppAdminPanels({
     );
   }
 
-  // Default panel list while config is loading — prevents flash of empty dashboard
-  const activePanels = normalizeAppAdminPanels(adminConfig?.panels)
+  const activePanels = parsedAdminConfig.panels
     .filter((panel) => !section || panel.section === section);
 
   const content = (
@@ -474,10 +441,22 @@ export function AppAdminPanels({
       {activePanels.length === 0 ? emptyState : activePanels.map((panelConfig) => {
         const id = panelConfig.id;
         const label = panelConfig.label || id;
+        const resolvedPanel = prefixPanelApiEndpoints(panelConfig, backendUrl);
 
-        // 1. Built-in panel
-        const built = BUILT_IN_PANELS[id];
-        if (built) {
+        if (panelConfig.renderer === 'schema') {
+          return (
+            <div key={id}>
+              <AdminSectionHeading>{label}</AdminSectionHeading>
+              <AdminSchemaPanel panel={resolvedPanel} />
+            </div>
+          );
+        }
+
+        if (panelConfig.renderer === 'builtin') {
+          const built = BUILT_IN_PANELS[panelConfig.builtin_panel];
+          if (!built) {
+            return null;
+          }
           const Panel = built.component;
           return (
             <div key={id}>
@@ -487,21 +466,20 @@ export function AppAdminPanels({
           );
         }
 
-        // 2. Custom panel — resolved from componentRegistry
+        // 1. Custom panel — resolved from componentRegistry
         //    Register via: registerComponent('my_panel_id', MyPanelComponent)
-        const Custom = getComponent(id);
+        const Custom = getComponent(panelConfig.component);
         if (Custom) {
           return (
             <div key={id}>
               <AdminSectionHeading>{label}</AdminSectionHeading>
-              <Custom backendUrl={backendUrl} auth={auth} />
+              <Custom backendUrl={backendUrl} auth={auth} panel={resolvedPanel} />
             </div>
           );
         }
 
-        // 3. Unknown panel id — skip silently in production, warn in dev
         if (process.env.NODE_ENV === 'development') {
-          console.warn(`[AppAdminDashboard] Unknown panel id "${id}" — register a component with this name to render it.`);
+          console.warn(`[AppAdminDashboard] Unknown custom admin component "${panelConfig.component}" for panel "${id}".`);
         }
         return null;
       })}

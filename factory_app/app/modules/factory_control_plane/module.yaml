@@ -1,0 +1,10 @@
+schema_version: mozaiks.module.v1
+module:
+  id: factory_control_plane
+  display_name: Factory Control Plane
+  version: 1.0.0
+  description: Factory workspace control-plane helpers and routing policy.
+  handler: backend.handler:FactoryControlPlaneModule
+permissions: []
+actions: []
+capabilities: []

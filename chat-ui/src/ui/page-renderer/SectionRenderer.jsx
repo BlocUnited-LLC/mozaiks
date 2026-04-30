@@ -189,6 +189,10 @@ function buildButtonAction(config) {
 
 function resolveTableData(config, liveData) {
   if (Array.isArray(config.data)) return config.data;
+  if (typeof config.data_key === 'string' && config.data_key.trim()) {
+    const resolved = resolvePath(liveData, config.data_key.trim());
+    if (Array.isArray(resolved)) return resolved;
+  }
   if (Array.isArray(liveData)) return liveData;
   if (isRecord(liveData)) {
     return liveData.items ?? liveData.results ?? liveData.rows ?? liveData.data ?? [];

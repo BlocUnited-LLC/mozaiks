@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Code Context Intent Definitions",
+  "description": "Defines what context each agent role needs during AppGenerator/AgentGenerator workflows",
+  
+  "intents": {
+    "backend_service_generation": {
+      "description": "Context for generating backend service layer (business logic)",
+      "includes": ["imports", "symbols", "framework_hints"],
+      "symbol_types": ["class", "function"],
+      "max_tokens": 8000,
+      "format": "structured",
+      "notes": "Includes model schemas, database helpers, and config variables"
+    },
+    
+    "api_routes_generation": {
+      "description": "Context for generating API route handlers",
+      "includes": ["imports", "symbols", "exports"],
+      "symbol_types": ["function", "class"],
+      "max_tokens": 6000,
+      "format": "structured",
+      "notes": "Shows available service methods and controller signatures"
+    },
+    
+    "database_models_generation": {
+      "description": "Context for generating database models/schemas",
+      "includes": ["imports", "symbols", "framework_hints"],
+      "symbol_types": ["class"],
+      "max_tokens": 5000,
+      "format": "structured",
+      "notes": "Shows existing models to avoid duplication and maintain relationships"
+    },
+    
+    "frontend_components_generation": {
+      "description": "Context for generating React/Vue components",
+      "includes": ["imports", "symbols", "exports"],
+      "symbol_types": ["component", "function"],
+      "max_tokens": 6000,
+      "format": "structured",
+      "notes": "Shows reusable components and utility functions"
+    },
+    
+    "utilities_generation": {
+      "description": "Context for generating helper/utility modules",
+      "includes": ["imports", "exports"],
+      "symbol_types": ["function"],
+      "max_tokens": 4000,
+      "format": "symbols_only",
+      "notes": "Focus on exported function signatures"
+    },
+    
+    "config_middleware_generation": {
+      "description": "Context for generating config and middleware",
+      "includes": ["imports", "symbols", "framework_hints"],
+      "symbol_types": ["function", "class"],
+      "max_tokens": 4000,
+      "format": "structured",
+      "notes": "Shows environment variables and middleware patterns"
+    },
+    
+    "imports_check": {
+      "description": "Quick check of available imports (dependency verification)",
+      "includes": ["imports"],
+      "max_tokens": 2000,
+      "format": "imports_only",
+      "notes": "Used to validate dependencies before generation"
+    },
+    
+    "symbols_overview": {
+      "description": "High-level overview of all symbols (for planning)",
+      "includes": ["symbols"],
+      "max_tokens": 4000,
+      "format": "symbols_only",
+      "notes": "Used by orchestrator to plan generation order"
+    },
+    
+    "modification_scope": {
+      "description": "Context for modification workflows (what to change)",
+      "includes": ["imports", "symbols", "exports"],
+      "symbol_types": null,
+      "max_tokens": 10000,
+      "format": "structured",
+      "notes": "Broader view for understanding existing implementation before modifying"
+    }
+  },
+  
+  "workflow_mappings": {
+    "AppGenerator": {
+      "phases": {
+        "planning": "symbols_overview",
+        "backend_config": "config_middleware_generation",
+        "backend_models": "database_models_generation",
+        "backend_services": "backend_service_generation",
+        "backend_routes": "api_routes_generation",
+        "frontend_utils": "utilities_generation",
+        "frontend_components": "frontend_components_generation"
+      }
+    },
+    
+    "AgentGenerator": {
+      "phases": {
+        "planning": "symbols_overview",
+        "agent_class": "backend_service_generation",
+        "tool_definitions": "utilities_generation",
+        "integration": "api_routes_generation"
+      }
+    }
+  },
+  
+  "usage_patterns": {
+    "standard_workflow": {
+      "description": "Standard workflow (works for any scenario - initial or modification)",
+      "steps": [
+        "1. Baseline existing code: index_codebase(existing_files, mode='auto')",
+        "2. Get context: get_code_context(intent='relevant_intent')",
+        "3. Generate files: agent produces complete file contents",
+        "4. Index new files: index_codebase(generated_files, mode='auto')",
+        "5. Show diff (optional): get_code_diff(baseline_hash, new_hash)",
+        "6. Push to GitHub: push complete files (not patches)"
+      ],
+      "notes": [
+        "System auto-detects initial vs modification based on existing content",
+        "Agents always generate complete files, not patches",
+        "Diff is for feedback/optimization, not core logic",
+        "GitHub operations are identical regardless of scenario"
+      ]
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "header": {
+    "logo": {
+      "src": "/assets/logo.svg",
+      "alt": "Atlas CRM logo",
+      "href": "/"
+    },
+    "pages": [],
+    "actions": []
+  },
+  "profile": {
+    "show": false,
+    "menu": []
+  },
+  "notifications": {
+    "show": false,
+    "emptyText": "No notifications yet"
+  },
+  "footer": {
+    "links": [],
+    "visible": true
+  }
+}

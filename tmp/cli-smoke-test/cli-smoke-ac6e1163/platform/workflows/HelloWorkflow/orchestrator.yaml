@@ -1,0 +1,11 @@
+workflow_name: HelloWorkflow
+max_turns: 10
+human_in_the_loop: true
+workflow_startup_mode: UserDriven
+orchestration_pattern: AutoPattern
+initial_message_to_user: "Hello! I'm a friendly greeter. Say hello and I'll respond warmly."
+initial_message: null
+initial_agent: GreeterAgent
+triggers:
+  - type: chat
+    description: Start via chat transport

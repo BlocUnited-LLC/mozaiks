@@ -19,7 +19,7 @@ This note maps the current runtime contract to that product goal.
 
 ## What The Current Smoke Graph Means
 
-The workflow graph in [platform/workflows/SmokeParent/extended_orchestration/mfj_extension.json](../platform/workflows/SmokeParent/extended_orchestration/mfj_extension.json) currently means:
+The current smoke-graph contract can be understood as a `SmokeParent`-style `extended_orchestration/mfj_extension.json` graph:
 
 - `decomposition_agent: PlannerAgent`
   - the planner is the only agent allowed to start fan-out

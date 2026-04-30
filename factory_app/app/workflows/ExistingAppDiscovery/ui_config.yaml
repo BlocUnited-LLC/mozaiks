@@ -1,0 +1,7 @@
+# ExistingAppDiscovery UI Configuration
+
+visual_agents:
+  - DiscoveryHostAgent
+  - CapabilityMapperAgent
+  - IntegrationPlannerAgent
+  - user

@@ -107,7 +107,7 @@ Defines router decision points:
 - `id` (string, required): transition id.
 - `transition_type` (string, required): `user_choice`, `user_choice_context`, `user_choice_route`, `condition`, `confirm`, `silent`, `progress_view`, or `prerequisite_redirect`.
 - `ui` (object, required for `user_choice` and `confirm`): registered shell component binding, never a file path.
-- `options` (list, optional): selectable targets for `user_choice`; the UI emits option id, and the router resolves the target.
+- `options` (list, optional): selectable targets for `user_choice`; each option declares its own `route_to`, the UI emits option id, and the router resolves the target.
 - `route_to` (string, optional): direct target for single-route transitions.
 - `options[].context_variables` (object, optional): deterministic context seeds merged when the option is selected. The target workflow receives only keys declared in its `context_variables.yaml`.
 

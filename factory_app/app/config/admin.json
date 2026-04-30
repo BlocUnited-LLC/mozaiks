@@ -1,0 +1,19 @@
+{
+  "_comment": "Host-owned admin shell config. Feature admin panels belong in modules/{module}/admin.yaml.",
+  "schema_version": "mozaiks.admin.host.v1",
+  "enabled": true,
+  "admin_emails": [],
+  "sections": {
+    "overview": {
+      "label": "Overview",
+      "enabled": true,
+      "order": 999
+    },
+    "settings": {
+      "label": "Settings",
+      "enabled": true,
+      "order": 1000
+    }
+  },
+  "runtime_panels": []
+}

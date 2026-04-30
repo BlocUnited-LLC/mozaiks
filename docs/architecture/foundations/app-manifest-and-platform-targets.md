@@ -1,14 +1,21 @@
 # App Manifest And Platform Targets
 
-This document defines what `platform/app.json` should be for Mozaiks.
+This document defines what `app/app.json` should be for Mozaiks.
 
 ## Core Rule
 
-`platform/app.json` should be a small author-facing manifest.
+`app/app.json` should be a small author-facing manifest.
 
 It should describe app intent.
 
 It should not dump low-level platform configuration onto the user.
+
+## Current Repo Note
+
+The current repo keeps its local product manifest at
+`mozaiks-platform/app/app.json`. The canonical target for generated/customer
+apps is a self-contained app workspace with `app/app.json` inside the app
+repository.
 
 ## The Right Mental Model
 
@@ -127,16 +134,16 @@ Do not overload `app.json` with brand concerns.
 
 Branding belongs in:
 
-- `platform/config/theme_config.json` for shell tokens and chrome
-- `platform/brand/assets/` for images and icons
-- `platform/brand/fonts/` for fonts
-- `platform/brand/login-theme/` for Keycloak login theme assets
+- `app/brand/theme_config.json` for shell tokens and chrome
+- `app/brand/assets/` for images and icons
+- `app/brand/fonts/` for fonts
+- `app/brand/login-theme/` for Keycloak login theme assets
 
 That is the real shell-brand contract.
 
 ## Development Convenience
 
-Do not put local dev login shortcuts into `platform/app.json`.
+Do not put local dev login shortcuts into `app/app.json`.
 
 Local development convenience belongs in `.env`, for example:
 
@@ -176,7 +183,7 @@ It is:
 
 - who should count as an admin for this app
 
-That is why `admins` belongs in `platform/app.json`, while the portal itself
+That is why `admins` belongs in `app/app.json`, while the portal itself
 is a framework-owned first-class surface (like chat-ui).
 
 ## Cross References

@@ -186,10 +186,10 @@ handshake fields as context variables automatically. Manual declarations in
 
 The following app-bundle families are consumed before AG2 is involved:
 
-- `platform/data/*`
-- `platform/modules/*`
-- `platform/shell/*`
-- workflow `triggers:` declared in `platform/workflows/*/orchestrator.yaml`
+- `app/data/*`
+- `app/modules/*`
+- `app/config/*`
+- workflow `triggers:` declared in `app/workflows/*/orchestrator.yaml` for app-owned workflows, or `factory_app/app/workflows/*/orchestrator.yaml` for builder/system workflows
 
 Most importantly:
 
@@ -223,3 +223,4 @@ Use `*.yaml` declaratives in workflow bundles.
 - [workflow-architecture.md](workflow-architecture.md)
 - [event-system.md](event-system.md)
 - [core-product-app-bundle-boundary.md](core-product-app-bundle-boundary.md)
+

@@ -54,6 +54,19 @@ visibility: internal
 Optional fields should be present when known: `subject`, `actor`,
 `correlation`, `visibility`, and owner-specific source fields.
 
+## Frontend transport note
+
+The canonical event contract is about ownership and meaning, not one exact
+frontend payload class.
+
+Current frontend transport uses two distinct shapes:
+
+- runtime/websocket envelopes such as `chat.text` and `chat.tool_call`
+- direct typed envelopes such as `ui.datatable.refresh`
+
+The transport shape may differ from the canonical durable envelope, but the
+namespace ownership rules still apply.
+
 ## Namespace Rules
 
 ### `domain.*`
@@ -199,6 +212,14 @@ payload:
   component_id: tasks_table
 ```
 
+Current frontend delivery:
+
+- typed websocket envelope with `type: ui.datatable.refresh`
+- payload scoped by `component_id` or `modal_id`
+- consumed by `chat-ui/src/ui/hooks/useAppEventBus.js`
+
+These are primitive update commands, not workflow artifact surfaces.
+
 ### `notification.*`
 
 Owner:
@@ -270,6 +291,22 @@ Example:
 type: hosted.mozaikspay.revenue_share_recorded
 ```
 
+App Zero hosted product examples:
+
+```yaml
+type: hosted.marketplace.interest.recorded
+source:
+  layer: hosted
+  module_id: investor_marketplace
+```
+
+```yaml
+type: hosted.communication.message.sent
+source:
+  layer: hosted
+  module_id: communications
+```
+
 ## Module Event Files
 
 ### `events.yaml`
@@ -312,6 +349,18 @@ Targets may be:
 - `handler`
 - `capability`
 - `notification`
+
+Current platform support:
+
+- `notification` targets are active. The platform host creates a notification
+  intent and emits `notification.created`.
+- `capability` targets are active. The platform host resolves
+  `target.capability_id` against workflow `orchestrator.yaml` trigger
+  declarations, creates the routed workflow session, and emits
+  `platform.workflow_capability_started`.
+- `handler` targets remain reserved reaction contracts. They must stay
+  platform-routed and must not cause modules to import workflow/runtime
+  internals.
 
 Workflow starts must go through capability resolution or workflow trigger
 resolution. Do not hardcode workflow internals in module code.
@@ -364,3 +413,59 @@ contract boundary they map to the namespace rules above.
 
 The canonical contract is the event envelope and namespace ownership, not a
 specific Python class.
+
+## Current frontend mappings
+
+### Chat/runtime stream
+
+Runtime transport currently maps `kind` values to websocket event names such as:
+
+- `text` -> `chat.text`
+- `run_complete` -> `chat.run_complete`
+- `tool_call` -> `chat.tool_call`
+
+This mapping is built in `UnifiedEventDispatcher.build_outbound_event_envelope(...)`.
+
+### Workflow UI tool transport
+
+Interactive workflow UI currently travels through `chat.tool_call`, not through
+the typed `ui.*` primitive lane.
+
+Current payload shape:
+
+```yaml
+type: chat.tool_call
+data:
+  tool_name: save_plan
+  component_type: AppWorkbench
+  awaiting_response: true
+  corr: evt_123
+  display: artifact
+  display_type: artifact
+  payload:
+    workflow_name: AppGenerator
+    structured_output: {}
+```
+
+Key rules:
+
+- `component_type` selects the workflow UI component
+- `display` controls whether the surface is `inline`, `artifact`, or `view`
+- `corr` / event id is the response correlation key
+- this lane is session-scoped and may persist artifact state for resume
+
+Legacy `ui_tool_event` handling still exists in the frontend as a compatibility
+bridge, but it is not the preferred contract for new work.
+
+### Primitive UI transport
+
+Primitive UI events remain direct typed `ui.*` envelopes:
+
+```yaml
+type: ui.modal.open
+payload:
+  modal_id: create-task
+```
+
+Those are ingested by the app event bus and routed by `component_id` or
+`modal_id`, not by workflow UI component registry lookup.

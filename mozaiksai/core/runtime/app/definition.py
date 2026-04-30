@@ -6,7 +6,7 @@ An app declares product intent in app.json. Runtime composition is discovered
 from owner manifests and directories:
   - workflows/* for AI workflows
   - modules/*/module.yaml for deterministic CRUD/action modules
-  - pages/*.yaml or pages/*/page.yaml for persistent UI pages
+  - ui/pages/*.yaml or ui/pages/*/page.yaml for persistent UI pages
   - Execution mode derived from the above
 
 This is the runtime contract for the composition layer. In Phase 1
@@ -37,19 +37,19 @@ class ExecutionMode(str, Enum):
 class WorkflowRef(BaseModel):
     """Reference to a discovered workflow."""
     name: str
-    path: Optional[str] = None  # defaults to platform/workflows/{name}/
+    path: Optional[str] = None  # defaults to active app root or shared generation core
 
 
 class ModuleRef(BaseModel):
     """Reference to a discovered module."""
     name: str
-    path: Optional[str] = None  # defaults to platform/modules/{name}/
+    path: Optional[str] = None  # defaults to active app root modules/{name}/
 
 
 class PageRef(BaseModel):
     """Reference to a discovered UI page."""
     name: str
-    path: Optional[str] = None  # defaults to platform/pages/{name}/
+    path: Optional[str] = None  # defaults to active app root ui/pages/{name}/
 
 
 class AppFeatureFlags(BaseModel):

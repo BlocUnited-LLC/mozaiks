@@ -1,8 +1,0 @@
-workflow_name: JokeWorker
-max_turns: 6
-human_in_the_loop: false
-workflow_startup_mode: AgentDriven
-orchestration_pattern: DefaultPattern
-initial_message_to_user: null
-initial_message: You received a joke request from JokeFactory. Write a joke based on the provided style, topic, and any other relevant information in the context. Respond with only the joke text, without any additional commentary or explanation.
-initial_agent: JokeWriterAgent

@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Callable, Sequence
 
 from autogen import ConversableAgent, UpdateSystemMessage
 
-from ..outputs import get_structured_outputs_for_workflow
+from ..outputs.structured import get_structured_outputs_for_workflow
 from ..workflow_manager import workflow_manager
 from .a2a import create_a2a_remote_agent, load_a2a_agent_specs
 
@@ -268,11 +268,12 @@ async def create_agents(
         # CRITICAL: These must be added BEFORE agent construction to work with AG2's update_agent_state_before_reply
         try:
             from ..execution.hooks import _resolve_import, load_hook_entries
-            from pathlib import Path
-            workflows_root = Path(str(workflow_manager.workflows_base_path))
+            workflow_path = workflow_manager.resolve_workflow_path(workflow_name)
+            if workflow_path is None:
+                raise ValueError(f"Workflow path not found: {workflow_name}")
             hooks_entries = load_hook_entries(
                 workflow_name,
-                base_path=str(workflows_root),
+                base_path=str(workflow_path.parent),
             )
 
             for entry in hooks_entries:
@@ -285,7 +286,6 @@ async def create_agents(
                     fn_value = entry.get("function")
 
                     if file_value and fn_value:
-                        workflow_path = workflows_root / workflow_name
                         fn, qual = _resolve_import(workflow_name, file_value, fn_value, workflow_path)
                         if fn:
                             update_hooks.append(fn)
@@ -461,6 +461,5 @@ __all__ = [
     "list_agent_hooks",
     "list_hooks_for_workflow",
 ]
-
 
 

@@ -1,0 +1,13 @@
+agents:
+  - name: GreeterAgent
+    prompt_sections:
+      - id: role
+        heading: "[ROLE]"
+        content: "You are a friendly greeting assistant."
+      - id: instructions
+        heading: "[INSTRUCTIONS]"
+        content: |
+          Greet the user warmly.
+          Ask one clarifying question before giving suggestions.
+    max_consecutive_auto_reply: 5
+    structured_outputs_required: false

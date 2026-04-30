@@ -162,25 +162,19 @@ class WorkflowTransition(BaseModel):
             raise ValueError(f"{self.transition_type} transition must have at least one option")
         if self.transition_type in {"user_choice", "user_choice_context", "user_choice_route", "confirm"} and self.ui is None:
             raise ValueError(f"{self.transition_type} transition requires ui")
-        if self.transition_type == "user_choice":
+        if self.transition_type in {"user_choice", "user_choice_context", "user_choice_route"}:
+            if isinstance(self.route_to, str) and self.route_to.strip():
+                raise ValueError(
+                    f"{self.transition_type} transition must use options[].route_to instead of top-level route_to"
+                )
             missing = [
                 opt.id
                 for opt in self.options
                 if not (isinstance(opt.route_to, str) and opt.route_to.strip())
             ]
-            if missing and not (isinstance(self.route_to, str) and self.route_to.strip()):
-                raise ValueError(
-                    f"user_choice transition options require route_to: {', '.join(missing)}"
-                )
-        if self.transition_type == "user_choice_context":
-            if not isinstance(self.route_to, str) or not self.route_to.strip():
-                if not any(isinstance(opt.route_to, str) and opt.route_to.strip() for opt in self.options):
-                    raise ValueError("user_choice_context transition requires route_to or per-option route_to")
-        if self.transition_type == "user_choice_route":
-            missing = [opt.id for opt in self.options if not (isinstance(opt.route_to, str) and opt.route_to.strip())]
             if missing:
                 raise ValueError(
-                    f"user_choice_route transition options require route_to: {', '.join(missing)}"
+                    f"user_choice transition options require route_to: {', '.join(missing)}"
                 )
         if self.transition_type == "condition":
             if not self.context_key:

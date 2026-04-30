@@ -3,12 +3,19 @@
 `mozaiksai` is the reusable AI execution substrate in the four-host Mozaiks
 architecture.
 
-Canonical host entrypoints live at the repo root:
+Canonical host entrypoints live in `mozaiksai/hosts/`:
 
-- `runtime_app.py` - runtime substrate host
-- `platform_app.py` - headless app host layered on the runtime
-- `studio_app.py` - local/private builder host layered on the platform
-- `mozaiks_app.py` - hosted product host layered on Studio
+- `mozaiksai/hosts/runtime.py` — runtime substrate host
+- `mozaiksai/hosts/platform.py` — headless app host layered on the runtime
+- `mozaiksai/hosts/studio.py` — local/private Studio management host layered on the platform
+- `mozaiksai/hosts/mozaiks.py` — hosted product host layered on Studio
+
+Start via the CLI:
+
+```bash
+mozaiks serve .               # platform host (default)
+mozaiks serve . --host studio # Studio management host
+```
 
 This package owns the runtime layer only. It does not own page serving, shell
 composition, Studio routes, or hosted product behavior.
@@ -26,7 +33,7 @@ It must not own:
 
 - shell config or page serving
 - app admin shell composition
-- Studio builder routes
+- Studio management/create routes
 - hosted product behavior
 - repo-specific CLI conveniences
 
@@ -90,7 +97,7 @@ SimpleTransport.receive() parses message
     ↓
 run_workflow_orchestration(workflow_name, chat_id, ...)
     ↓
-Load workflow config from platform/workflows/{name}/
+Load workflow config from factory_app/app/workflows/{name}/
     ↓
 Create AG2 pattern (agents, handoffs, tools)
     ↓
@@ -121,7 +128,7 @@ class OrchestrationPort(Protocol):
 
 ## Workflows Are Declarative
 
-Workflows are defined in `platform/workflows/{name}/`:
+Workflows are defined in `factory_app/app/workflows/{name}/`:
 - `orchestrator.yaml` — Workflow metadata and triggers
 - `agents.yaml` — Agent definitions
 - `handoffs.yaml` — Agent routing rules
@@ -130,3 +137,4 @@ Workflows are defined in `platform/workflows/{name}/`:
 - `tools/*.py` — Tool implementations
 
 Don't hardcode workflow behavior in this runtime.
+

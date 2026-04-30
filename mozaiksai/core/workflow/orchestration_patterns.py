@@ -37,7 +37,7 @@ from autogen.events.agent_events import (
     SelectSpeakerEvent,
     RunCompletionEvent,
 )
-from mozaiksai.core.workflow.outputs import get_structured_outputs_for_workflow
+from mozaiksai.core.workflow.outputs.structured import get_structured_outputs_for_workflow
 from mozaiksai.core.data.persistence import AG2PersistenceManager as _PM
 from mozaiksai.core.events.event_serialization import (
     build_ui_event_payload as unified_build_ui_event_payload,
@@ -49,6 +49,7 @@ from ..data.persistence import AG2PersistenceManager
 from .execution import create_termination_handler
 from .context import DerivedContextManager
 from logs.logging_config import get_workflow_logger
+from logs.runtime_artifacts import get_agent_outputs_dir
 from mozaiksai.core.observability.ag2_runtime_logger import ag2_logging_session
 from mozaiksai.core.observability.performance_manager import get_performance_manager
 
@@ -538,7 +539,7 @@ async def _stream_events(
     See stream/handlers/ for individual event type implementations.
     """
     from .stream import EventStreamProcessor, StreamContext, StreamState
-    from .outputs import get_structured_outputs_for_workflow
+    from .outputs.structured import get_structured_outputs_for_workflow
     from .workflow_manager import workflow_manager
     from collections import Counter
     from autogen.agentchat import a_run_group_chat_iter
@@ -1319,8 +1320,7 @@ async def run_workflow_orchestration(
         
         # Log agent outputs file location
         try:
-            from pathlib import Path
-            agent_outputs_file = Path("logs/agent_outputs") / f"agent_outputs_{chat_id}.jsonl"
+            agent_outputs_file = get_agent_outputs_dir() / f"agent_outputs_{chat_id}.jsonl"
             if agent_outputs_file.exists():
                 file_size = agent_outputs_file.stat().st_size
                 with open(agent_outputs_file, 'r', encoding='utf-8') as f:

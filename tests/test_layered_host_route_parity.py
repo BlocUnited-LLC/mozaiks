@@ -10,6 +10,10 @@ CANONICAL_MOZAIKS_ROUTES = {
     ("GET", "/metrics/perf/aggregate"),
     ("GET", "/metrics/perf/chats"),
     ("GET", "/api/shell-config"),
+    ("GET", "/api/me"),
+    ("PUT", "/api/me"),
+    ("GET", "/api/me/preferences"),
+    ("PUT", "/api/me/preferences"),
     ("GET", "/api/theme-config"),
     ("GET", "/api/pages/{name}"),
     ("GET", "/api/chats/{app_id}/{workflow_name}"),
@@ -41,8 +45,8 @@ CANONICAL_MOZAIKS_ROUTES = {
     ("POST", "/api/user-input/submit"),
     ("POST", "/api/ui-tool/submit"),
     ("GET", "/api/studio/home"),
-    ("GET", "/api/studio/build"),
-    ("PUT", "/api/studio/build"),
+    ("GET", "/api/studio/create"),
+    ("PUT", "/api/studio/create"),
     ("WS", "/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}"),
 }
 
@@ -71,12 +75,12 @@ def _public_routes(app) -> set[tuple[str, str]]:
 
 
 def test_mozaiks_host_contains_canonical_routes():
-    mozaiks_routes = _public_routes(import_module("mozaiks_app").app)
+    mozaiks_routes = _public_routes(import_module("mozaiksai.hosts.mozaiks").app)
 
     assert CANONICAL_MOZAIKS_ROUTES <= mozaiks_routes
 
 
 def test_mozaiks_host_does_not_restore_removed_legacy_routes():
-    mozaiks_routes = _public_routes(import_module("mozaiks_app").app)
+    mozaiks_routes = _public_routes(import_module("mozaiksai.hosts.mozaiks").app)
 
     assert not (REMOVED_LEGACY_ROUTES & mozaiks_routes)

@@ -17,88 +17,69 @@ import {
 import { useChatUI } from '../../context/ChatUIContext'
 
 
-const NAV_GROUPS = [
+const ADMIN_NAV_DEFS = [
+  { id: 'overview', label: 'Overview', path: '/admin', icon: RiDashboardFill, exact: true, order: 999 },
+  { id: 'users', label: 'Users', path: '/admin/users', icon: RiUser3Fill, order: 1000 },
+  { id: 'billing', label: 'Billing', path: '/admin/billing', icon: RiMoneyDollarCircleFill, order: 1001 },
+  { id: 'usage', label: 'Usage', path: '/admin/usage', icon: RiServerFill, order: 1002 },
+  { id: 'activity', label: 'Activity', path: '/admin/activity', icon: RiFileList3Fill, order: 1003 },
+  { id: 'settings', label: 'Settings', path: '/admin/settings', icon: RiSettings3Fill, order: 1004 },
+  { id: 'integrations', label: 'Integrations', path: '/admin/integrations', icon: RiAppsFill, order: 1005 },
+  { id: 'support', label: 'Support', path: '/admin/support', icon: RiNotification2Fill, order: 1006 },
+]
+
+const STUDIO_NAV_ITEMS = [
   {
-    label: 'Administration',
-    items: [
-      {
-        id: 'overview',
-        label: 'Overview',
-        path: '/admin',
-        icon: RiDashboardFill,
-        exact: true,
-      },
-      {
-        id: 'users',
-        label: 'Users',
-        path: '/admin/users',
-        icon: RiUser3Fill,
-      },
-      {
-        id: 'billing',
-        label: 'Billing',
-        path: '/admin/billing',
-        icon: RiMoneyDollarCircleFill,
-      },
-      {
-        id: 'usage',
-        label: 'Usage',
-        path: '/admin/usage',
-        icon: RiServerFill,
-      },
-      {
-        id: 'activity',
-        label: 'Activity',
-        path: '/admin/activity',
-        icon: RiFileList3Fill,
-      },
-      {
-        id: 'settings',
-        label: 'Settings',
-        path: '/admin/settings',
-        icon: RiSettings3Fill,
-      },
-      {
-        id: 'integrations',
-        label: 'Integrations',
-        path: '/admin/integrations',
-        icon: RiAppsFill,
-      },
-      {
-        id: 'support',
-        label: 'Support',
-        path: '/admin/support',
-        icon: RiNotification2Fill,
-      },
-    ],
+    id: 'studio',
+    label: 'Studio',
+    path: '/studio',
+    icon: RiRobot2Line,
+    exact: true,
   },
   {
-    label: 'Builder',
-    items: [
-      {
-        id: 'studio',
-        label: 'Studio',
-        path: '/studio',
-        icon: RiRobot2Line,
-        exact: true,
-      },
-      {
-        id: 'build',
-        label: 'Build',
-        path: '/studio/build',
-        icon: RiCodeSSlashLine,
-        exact: true,
-      },
-      {
-        id: 'adapters',
-        label: 'Adapters',
-        path: '/studio/adapters',
-        icon: RiPlugLine,
-        exact: true,
-      },
-    ],
+    id: 'create',
+    label: 'Create',
+    path: '/studio/create',
+    icon: RiCodeSSlashLine,
+    exact: true,
+  },
+  {
+    id: 'adapters',
+    label: 'Adapters',
+    path: '/studio/adapters',
+    icon: RiPlugLine,
+    exact: true,
   },
 ]
+
+function buildNavGroups(adminSections = null) {
+  const sectionConfig = adminSections && typeof adminSections === 'object' ? adminSections : {}
+  const adminItems = ADMIN_NAV_DEFS
+    .filter((item) => {
+      const config = sectionConfig[item.id]
+      return typeof config !== 'object' || config?.enabled !== false
+    })
+    .map((item) => {
+      const config = sectionConfig[item.id]
+      return {
+        ...item,
+        label: typeof config?.label === 'string' && config.label.trim() ? config.label.trim() : item.label,
+        order: Number.isInteger(config?.order) ? config.order : item.order,
+      }
+    })
+    .sort((left, right) => left.order - right.order)
+
+  return [
+    {
+      label: 'Administration',
+      items: adminItems,
+    },
+    {
+      label: 'Studio',
+      items: STUDIO_NAV_ITEMS,
+    },
+  ]
+}
 
 
 function MenuGlyph() {
@@ -140,13 +121,14 @@ function isItemActive(item, location) {
 }
 
 
-function findActiveItem(location) {
-  return NAV_GROUPS.flatMap((group) => group.items).find((item) => isItemActive(item, location))
+function findActiveItem(location, navGroups) {
+  return navGroups.flatMap((group) => group.items).find((item) => isItemActive(item, location))
 }
 
 
-function AdminSidebar({ onNavigate = null }) {
+function AdminSidebar({ adminSections = null, onNavigate = null }) {
   const location = useLocation()
+  const navGroups = useMemo(() => buildNavGroups(adminSections), [adminSections])
 
   return (
     <aside className="rounded-lg border border-border bg-card p-3 shadow-sm">
@@ -161,7 +143,7 @@ function AdminSidebar({ onNavigate = null }) {
       </div>
 
       <nav aria-label="Admin workspace" className="space-y-5">
-        {NAV_GROUPS.map((group) => (
+        {navGroups.map((group) => (
           <div key={group.label}>
             <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
               {group.label}
@@ -196,10 +178,11 @@ function AdminSidebar({ onNavigate = null }) {
 }
 
 
-function AdminTopbar({ onOpenMenu }) {
+function AdminTopbar({ adminSections = null, onOpenMenu }) {
   const location = useLocation()
   const { user } = useChatUI()
-  const activeItem = useMemo(() => findActiveItem(location), [location])
+  const navGroups = useMemo(() => buildNavGroups(adminSections), [adminSections])
+  const activeItem = useMemo(() => findActiveItem(location, navGroups), [location, navGroups])
   const userLabel = getUserLabel(user)
 
   return (
@@ -234,7 +217,7 @@ function AdminTopbar({ onOpenMenu }) {
 }
 
 
-export function AdminWorkspaceLayout({ children }) {
+export function AdminWorkspaceLayout({ children, adminSections = null }) {
   const [mobileOpen, setMobileOpen] = useState(false)
 
   return (
@@ -242,7 +225,7 @@ export function AdminWorkspaceLayout({ children }) {
       <div className="mx-auto flex w-full max-w-[92rem] gap-6 px-4 py-6 md:px-6 lg:px-8">
         <div className="hidden w-72 shrink-0 lg:block">
           <div className="sticky top-24">
-            <AdminSidebar />
+            <AdminSidebar adminSections={adminSections} />
           </div>
         </div>
 
@@ -265,13 +248,13 @@ export function AdminWorkspaceLayout({ children }) {
                   <CloseGlyph />
                 </button>
               </div>
-              <AdminSidebar onNavigate={() => setMobileOpen(false)} />
+              <AdminSidebar adminSections={adminSections} onNavigate={() => setMobileOpen(false)} />
             </div>
           </div>
         ) : null}
 
         <div className="min-w-0 flex-1 space-y-5">
-          <AdminTopbar onOpenMenu={() => setMobileOpen(true)} />
+          <AdminTopbar adminSections={adminSections} onOpenMenu={() => setMobileOpen(true)} />
           {children}
         </div>
       </div>

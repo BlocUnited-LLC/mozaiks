@@ -116,6 +116,31 @@ if (-not $KeepLogs) {
             }
         }
     }
+
+    $artifactDirs = @(
+        "logs/agent_outputs",
+        "logs/workflow_converter"
+    )
+    foreach ($artifactDir in $artifactDirs) {
+        if (-not (Test-Path $artifactDir)) {
+            continue
+        }
+        $artifactFiles = Get-ChildItem -Path $artifactDir -Recurse -File -ErrorAction SilentlyContinue
+        if (-not $artifactFiles) {
+            Write-Host "    No files found in $artifactDir/" -ForegroundColor Gray
+            continue
+        }
+        $deletedArtifacts = 0
+        foreach ($artifactFile in $artifactFiles) {
+            try {
+                Remove-Item -Path $artifactFile.FullName -Force -ErrorAction Stop
+                $deletedArtifacts++
+            } catch {
+                # best effort
+            }
+        }
+        Write-Host "    Removed $artifactDir/* ($deletedArtifacts file(s))" -ForegroundColor Green
+    }
 } else {
     Write-Host "`n Keeping logs (-KeepLogs flag set)" -ForegroundColor Gray
 }

@@ -62,10 +62,13 @@ def test_hooks_loader_reads_yaml_only(tmp_path: Path) -> None:
 
 
 def test_agent_tools_loader_reads_yaml_only(tmp_path: Path) -> None:
+    _tools_mod.workflow_manager.workflow_base_paths = [tmp_path]
     _tools_mod.workflow_manager.workflows_base_path = tmp_path
+    _tools_mod.workflow_manager._workflow_paths = {}
 
     flow_yaml = tmp_path / "FlowToolsYaml"
     flow_yaml.mkdir(parents=True)
+    (flow_yaml / "orchestrator.yaml").write_text("workflow_name: FlowToolsYaml\n", encoding="utf-8")
     (flow_yaml / "tool_file.py").write_text(
         "def run_task(context_variables=None):\n"
         "    return {'ok': True}\n",
@@ -87,6 +90,7 @@ def test_agent_tools_loader_reads_yaml_only(tmp_path: Path) -> None:
 
     flow_json = tmp_path / "FlowToolsJsonOnly"
     flow_json.mkdir(parents=True)
+    (flow_json / "orchestrator.yaml").write_text("workflow_name: FlowToolsJsonOnly\n", encoding="utf-8")
     (flow_json / "tool_file.py").write_text(
         "def run_task(context_variables=None):\n"
         "    return {'ok': True}\n",

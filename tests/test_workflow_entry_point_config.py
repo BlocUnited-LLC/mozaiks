@@ -8,7 +8,7 @@ _workflow_manager_mod = import_module_directly("mozaiksai.core.workflow.workflow
 
 
 def _mozaiks_workflow_manager():
-    workflows_root = Path(__file__).resolve().parents[1] / "mozaiks-platform" / "app" / "workflows"
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "app" / "workflows"
     _workflow_manager_mod.UnifiedWorkflowManager._instance = None
     return _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(workflows_root))
 

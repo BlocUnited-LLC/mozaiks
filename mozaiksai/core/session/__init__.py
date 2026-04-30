@@ -7,12 +7,30 @@ from .model import (
     TriggerInput,
     UnmetDependency,
 )
+from .launcher import (
+    PreparedWorkflowLaunch,
+    TransitionLaunchResult,
+    WorkflowLaunchResult,
+    create_routed_chat_session,
+    emit_workflow_launch_navigation,
+    launch_prepared_workflow,
+    launch_routed_workflow,
+    launch_transition,
+    prepare_routed_workflow_launch,
+    validate_context_for_workflow,
+)
 
 
 def get_session_router():
     from .router import get_session_router as _get_session_router
 
     return _get_session_router()
+
+
+def configure_session_router(*, trigger_route_resolver=None):
+    from .router import configure_session_router as _configure_session_router
+
+    return _configure_session_router(trigger_route_resolver=trigger_route_resolver)
 
 
 def __getattr__(name: str):
@@ -28,13 +46,24 @@ def __getattr__(name: str):
 
 __all__ = [
     "JourneyAdvanceDecision",
+    "PreparedWorkflowLaunch",
     "RoutingDecision",
     "SessionLifecycle",
     "SessionRouter",
     "SessionState",
     "SessionStateStore",
+    "TransitionLaunchResult",
     "TransitionResolution",
     "TriggerInput",
     "UnmetDependency",
+    "WorkflowLaunchResult",
+    "create_routed_chat_session",
+    "configure_session_router",
+    "emit_workflow_launch_navigation",
     "get_session_router",
+    "launch_prepared_workflow",
+    "launch_routed_workflow",
+    "launch_transition",
+    "prepare_routed_workflow_launch",
+    "validate_context_for_workflow",
 ]

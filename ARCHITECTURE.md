@@ -5,61 +5,105 @@ This is the authoritative architecture reference. If other docs contradict this 
 ## What This Repo Is
 
 This repo is the **canonical Mozaiks repo** — the AI runtime, app host,
-frontend surfaces, Studio builder, hosted product shell, and generated app
+frontend surfaces, Studio management/create control plane, hosted product shell, and generated app
 artifact contracts for Mozaiks apps.
 
-Deterministic app behavior is owned by app bundles hosted by `platform_app.py`, generated module contracts, or optional external/generated app backends connected through the generic `AppBackendPort` contract in `mozaiksai/core/ports/app_backend.py`.
+Deterministic app behavior is owned by app bundles hosted by `mozaiksai.hosts.platform`, generated module contracts, or optional external/generated app backends connected through the generic `AppBackendPort` contract in `mozaiksai/core/ports/app_backend.py`.
 
-```
-mozaiks/                           # This repo
+```text
+mozaiks/                           # This repo (current transitional layout)
 ├── mozaiksai/                     # AI workflow runtime (first-class)
 ├── chat-ui/                       # Chat interface primitives (first-class)
-├── app/                           # Web shell / local app host
-├── platform/                      # Default OSS/sample active app root
-│   ├── app.json
-│   ├── config/                    # App host config
-│   ├── workflows/                 # AI workflows (app-level)
-│   ├── modules/                   # Business logic (app-level)
-│   ├── pages/                     # UI screens (app-level)
-│   └── brand/                     # Optional colocated theme/assets
+├── web_shell/                     # Local Vite shell host source
+├── factory_app/                   # First-party factory workspace
+│   └── app/
+│       ├── app.json
+│       ├── brand/
+│       ├── config/
+│       ├── modules/
+│       ├── ui/
+│       └── workflows/
+├── generated/                     # Staged generated apps/workflows awaiting promotion
 ├── mozaiks_cli/                   # CLI for local project and workflow work
-├── runtime_app.py                 # Runtime substrate host
-├── platform_app.py                # Headless app host
-├── studio_app.py                  # Local/private builder host
-├── mozaiks_app.py                 # Hosted Mozaiks product host
+├── mozaiksai/hosts/runtime.py                 # Runtime substrate host
+├── mozaiksai/hosts/platform.py                # Headless app host
+├── mozaiksai/hosts/studio.py                  # Local/private Studio management/create host
+├── mozaiksai/hosts/mozaiks.py                 # Hosted Mozaiks product host
 └── mozaiks-platform/              # App Zero / product workspace
     ├── app/                       # Active App Zero app root
     │   ├── app.json
+    │   ├── brand/
     │   ├── config/
     │   ├── modules/
-    │   ├── pages/
+    │   ├── ui/
     │   └── workflows/
-    ├── brand/                     # App Zero product brand/theme assets
-    ├── ui/                        # App Zero product UI extension
-    ├── generated/                 # Generator output; not runtime-loaded until promoted
-    │   ├── apps/{app_id}/{build_id}/app/
-    │   └── workflows/{app_id}/{build_id}/{workflow_name}/
+    │       └── extended_orchestration/
+    │           └── extension_registry.json
     └── app-builder/               # Builder planning/docs; not runtime-loaded
 ```
 
+## Canonical Target
+
+The repo above is the current implementation state, not the desired end-state
+for Mozaiks distribution.
+
+The canonical target architecture is:
+
+1. **Mozaiks runtime package** — reusable Python dependency
+2. **Shared web shell package** — reusable frontend dependency
+3. **Factory app workspace** — first-party builder workflows and artifact assembly logic
+4. **App workspaces** — standalone app repositories
+5. **App Zero / Mozaiks product workspace** — same workspace contract, plus
+   hosted-only capabilities
+
+Generated apps should become their own workspaces/repositories. They should not
+live permanently inside this repo.
+
+Canonical target workspace shape:
+
+```text
+my-app/
+└── app/
+    ├── app.json
+    ├── config/
+    ├── ui/
+    ├── workflows/
+    ├── modules/
+    └── brand/
+```
+
+That means:
+
+- the first-party factory layer now lives under `factory_app/`
+- `ui/` and `brand/` belong inside the app workspace in the canonical target
+- App Zero now uses the same self-contained app-root contract inside `mozaiks-platform/app`
+
+See [docs/architecture/foundations/distribution-and-workspace-model.md](docs/architecture/foundations/distribution-and-workspace-model.md)
+for the authoritative target model.
+
 **Primary boundary for this repo:**
-- `runtime_app.py` is the reusable execution substrate.
-- `platform_app.py` is the canonical headless app host for pages, modules,
+- `mozaiksai.hosts.runtime` is the reusable execution substrate.
+- `mozaiksai.hosts.platform` is the canonical headless app host for pages, modules,
   shell config, admin, actions, and app routing.
-- `studio_app.py` is the local/private builder UX used by CLI and local Studio.
-- `mozaiks_app.py` is the hosted Mozaiks product layer.
-- `mozaiks-platform/app` is the active App Zero app root when running the
+- `mozaiksai.hosts.studio` is the Studio management interface host — the shared management layer used by both local and hosted deployments.
+- `mozaiksai.hosts.mozaiks` is the hosted Mozaiks product host — extends Studio with hosted-only capabilities.
+- `mozaiks-platform/app` is the current App Zero app root when running the
   Mozaiks product locally. The parent `mozaiks-platform/` is the product
-  workspace wrapper around that app root.
+  workspace around that app root and now mainly owns planning assets such as
+  `app-builder/`.
 
-If you're working in this repo, you may be working in one of two modes:
+If you're working in this repo, you may be working in one of three modes:
 
-1. **Framework/platform mode** — working on `runtime_app.py`,
-   `platform_app.py`, `mozaiksai/`, `chat-ui/`, `app/`, or the app authoring
-   contract in `platform/`
-2. **Studio/product mode** — working in `studio_app.py`, `mozaiks_app.py`, or
-   `mozaiks-platform/` for App Zero, AppGenerator, AgentGenerator, and hosted
-   product surfaces
+1. **Framework/platform mode** — working on `mozaiksai.hosts.runtime`,
+   `mozaiksai.hosts.platform`, `mozaiksai/`, `chat-ui/`, `web_shell/`, or App Zero's
+   local app root in `mozaiks-platform/app/`
+2. **Studio mode** — working in `mozaiksai.hosts.studio`, `factory_app/app/ui/studio/`,
+  `factory_app/app/modules/factory_control_plane/`, or `chat-ui/src/admin/`
+  for the shared management interface, refinement control plane, AppGenerator,
+  or AgentGenerator workflows
+3. **Mozaiks App / product mode** — working in `mozaiksai.hosts.mozaiks` or
+   `mozaiks-platform/` for App Zero, hosted product surfaces, and
+   product-only extensions
 
 ---
 
@@ -72,21 +116,58 @@ When writing or modifying code, these rules take precedence over legacy patterns
 
 ### Layer Model
 
-The system is composed of four layers:
+The system is composed of the following layers:
 
-1. **Factory** — builder / generator layer
+1. **Runtime** — AI substrate
 2. **Platform** — app shell / app host layer
-3. **Runtime** — AI substrate
-4. **Dev / CLI / Preview** — local-only convenience layer
+3. **Factory** — builder / generator layer
+4. **Studio** — shared management interface (local and hosted)
+5. **Mozaiks App** — hosted product layer, extends Studio
+6. **CLI** — developer interface, parallel to Studio
 
-Dependency direction should flow downward through stable contracts:
+Dependency direction flows upward through stable contracts:
 
 ```
-Factory (builder / generator)
-   -> Platform (app shell / app host)
-      -> Runtime (AI substrate)
+Runtime (AI substrate)
+   <- Platform (app shell / app host)
+      <- Factory (builder / generator)
+         <- Studio (management interface)
+            <- Mozaiks App (hosted product)
 
-Dev / CLI / Preview is local-only support code and must not become a dependency of reusable hosts.
+CLI and Studio are parallel interfaces over shared system capabilities.
+CLI is the developer interface — filesystem, scaffolding, and process management.
+Studio is the management interface — workspace status, build lifecycle, artifacts,
+run history, and configuration.
+Mozaiks App extends Studio with hosted-only capabilities (collaboration, billing,
+marketplace, deployment controls).
+CLI must not become a dependency of Studio, Platform, or Runtime.
+
+### Universal Substrate Versus Framework Capabilities
+
+Not every first-class capability in this repo is a universal app-runtime
+primitive.
+
+- **Universal substrate** is the code every downstream app runtime depends on to
+  execute: runtime, platform host, and the core shell primitives.
+- **Framework-owned optional capabilities** are shipped by Mozaiks and may be
+  first-class in the distribution, but not every downstream app must include
+  them at runtime.
+
+In practice:
+
+- `mozaiksai/`, `mozaiksai.hosts.runtime`, `mozaiksai.hosts.platform`, and core `chat-ui/`
+  primitives are universal substrate.
+- `factory_app/`, including shared create/refinement routing helpers, Studio,
+  and CLI are framework-owned capabilities layered above the substrate.
+- `mozaiksai.hosts.mozaiks` and `mozaiks-platform/` are product/workspace consumers of
+  those lower layers.
+
+That means Studio and `factory_app/` are allowed to be first-class in this
+repo without becoming mandatory runtime content for every generated app.
+
+See
+[docs/architecture/foundations/framework-capability-classification.md](docs/architecture/foundations/framework-capability-classification.md)
+for the stricter classification and dependency rules.
 ```
 
 ### 1. Runtime (AI Substrate)
@@ -108,7 +189,7 @@ Dev / CLI / Preview is local-only support code and must not become a dependency 
 - Pages (`/api/pages`)
 - Themes (`/api/theme-config`)
 - Transitions (`/api/transitions`)
-- Studio or build routes
+- Studio or create routes
 - Admin app-shell routes or product-shell UI composition
 - Platform workflow ordering or app-host composition logic
 - Generator or refinement behavior
@@ -116,7 +197,7 @@ Dev / CLI / Preview is local-only support code and must not become a dependency 
 - CLI conveniences, preview helpers, or other local-only behavior
 
 **Examples:**
-- `runtime_app.py`
+- `mozaiksai.hosts.runtime`
 - `mozaiksai/core/transport/*`
 - `mozaiksai/core/workflow/*`
 - `mozaiksai/core/events/*`
@@ -128,6 +209,7 @@ Dev / CLI / Preview is local-only support code and must not become a dependency 
 **Owns:**
 - Chat and session APIs such as `/api/chats/*`
 - Shell config, theme config, and page serving
+- Host-owned account/profile APIs such as `/api/me` and `/api/me/preferences`
 - Transitions and routing composition
 - Session UX concerns such as resume, metadata, and lifecycle
 - Module/action execution and app-host integration points
@@ -139,40 +221,95 @@ Dev / CLI / Preview is local-only support code and must not become a dependency 
 - Transport internals
 - Event dispatch internals
 - Generator or build logic
+- Module-specific business records that only resemble profiles, such as investor
+  profiles, seller profiles, creator profiles, or other domain entities
 
 **Examples:**
-- `platform_app.py`
+- `mozaiksai.hosts.platform`
 
-### 3. Studio / Mozaiks Product Layer
+### 3. Studio Layer (Shared Management Interface)
 
-**Purpose:** Creates, refines, and manages apps and workflows.
+**Purpose:** The management interface for any Mozaiks workspace — local or hosted.
+Studio is not the CLI's UI layer. CLI and Studio are parallel interfaces over
+shared system capabilities. Studio owns the management surface; CLI owns
+developer tooling (filesystem, scaffolding, process management).
 
 **Owns:**
-- Studio and build UI
-- App generation
-- Workflow generation
-- Refinement triggers and iteration flows
-- Artifact lifecycle from generated to staged to promoted
-- Export, download, build, and promotion endpoints
+- Workspace status and readiness surfaces
+- Build lifecycle: request drafting, workflow routing, generation triggers
+- Artifact lifecycle: generated → staged → promoted
+- Run history, logs, and validation status
+- Diff viewer and promotion controls
+- Adapter and API key configuration
+- Workflow and module inspection
+- Platform-management surfaces including the admin portal
+- Local preview controls
 
 **Must not own:**
+- Hosted-only assumptions (multi-user collaboration, remote deployment, billing)
 - Runtime execution logic
-- Generic platform routing unless it is explicitly extending the platform layer through a stable contract
+- CLI-only concerns (filesystem scaffolding, process management)
 
 **Examples:**
-- `studio_app.py`
-- `mozaiks_app.py`
-- AppGenerator workflows
-- AgentGenerator workflows
+- `mozaiksai.hosts.studio`
+- `factory_app/app/ui/studio/`
+- `factory_app/app/modules/factory_control_plane/`
+- `chat-ui/src/admin/` (admin portal is a platform-management surface)
+- shared factory workflows in `factory_app/app/workflows/`
+
+### 4. Mozaiks App Layer (Hosted Product)
+
+**Purpose:** Extends Studio with hosted-only capabilities. Not a separate product
+from Studio — an extension layer on top of it.
+
+**Owns:**
+- Collaboration: shared workspaces, comments, presence
+- Billing and subscriptions
+- Marketplace: template discovery, publishing, install
+- Deployment controls: hosted environment management, domain config
+- Team and org management
+- Hosted preview controls (distinct from local preview because they involve remote infra)
+- Any feature that requires a persistent server-side user account beyond session scope
+
+**Must not own:**
+- Anything that belongs in Studio — Mozaiks App inherits Studio, it does not fork it
+- Runtime execution logic
+
+**Examples:**
+- `mozaiksai.hosts.mozaiks`
+- `mozaiks-platform/app/ui/` (product UI extensions)
 
 **Bundle generation boundary:**
 
-Builder workflows live in `mozaiks-platform/app/workflows/` because App Zero is
-itself an app on the Mozaiks substrate. Those workflows produce generated app
-bundles; they are not themselves the active app bundle being generated.
+Shared factory workflows live in `factory_app/app/workflows/`. The
+shared build journeys, transitions, and transition UI live under
+`factory_app/app/workflows/extended_orchestration/`. App Zero keeps only a
+product overlay in
+`mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`.
+That overlay may add product-owned workflows, but the shared builder routing
+contract and transition UI are not App Zero-owned.
+
+Workflow loading is multi-root by contract:
+
+- active app root `workflows/` first
+- shared `factory_app/app/workflows/` second
+- `MOZAIKS_WORKFLOW_ROOTS` may override that order explicitly
+
+That is what lets App Zero keep product workflows under
+`mozaiks-platform/app/workflows/` while still referencing shared generation-core
+workflow IDs in its local launcher graph.
+
+App Zero consumes the factory layer by composition, not by copying shared
+builder logic into `mozaiks-platform/`:
+
+- the active app workspace is resolved from `PLATFORM_PATH` or
+  `MOZAIKS_APP_WORKSPACE_PATH` when provided
+- the active app root's `workflows/` load first
+- `factory_app/app/workflows/` loads second as the shared builder layer
+- App Zero keeps only its product-owned overlay registry and product workflows
 
 - `AppGenerator` owns deterministic app bundle artifacts: `app.json`,
-  `pages/*.yaml`, `config/*`, `brand/*`, and module contract files.
+  `ui/pages/*.yaml`, `config/*`, `brand/*`, and module contract files.
 - `AgentGenerator` owns agentic augmentation artifacts:
   `workflows/{WorkflowName}/*.yaml`, workflow-local tools, hooks, and UI tool
   surfaces.
@@ -180,32 +317,78 @@ bundles; they are not themselves the active app bundle being generated.
 - Promotion is the only path from generated artifacts into an active app root
   such as `platform/` or `mozaiks-platform/app`.
 
-### 4. Dev / CLI / Preview Layer
+**App Zero product module direction:**
 
-**Purpose:** Local-only convenience and development support.
+`mozaiks-platform/app/modules/` is not a generic app-project bookkeeping area.
+It is the hosted Mozaiks product's deterministic business layer. The canonical
+App Zero modules are:
+
+- `investor_marketplace` — marketplace listings, investor profiles, and
+  investment-interest capture
+- `communications` — hosted conversations, announcements, and marketplace/app
+  owner messaging
+
+These modules publish hosted product events such as `hosted.marketplace.*` and
+`hosted.communication.*`. They may be used by Studio and Mozaiks product
+surfaces, but they must not become runtime-kernel assumptions and they must not
+be copied into generated OSS app bundles unless explicitly selected as hosted
+capability packs.
+
+### 5. CLI / Developer Interface Layer
+
+**Purpose:** Developer tooling. Parallel to Studio, not beneath it. CLI and Studio
+are different interfaces to shared system capabilities — they are not a chain where
+Studio is the UI for CLI. CLI owns filesystem and process concerns; Studio owns
+the management interface.
 
 **Owns:**
-- CLI tools
-- Local preview servers
-- Repo path shortcuts
-- Dev-only endpoints and probes
-- Temporary or generated file access used only for local development workflows
+- Scaffold generation: `mozaiks init`, `mozaiks onboard`, `mozaiks add`
+- Process management: starting/stopping the local server
+- Workspace diagnostics: `mozaiks studio` (terminal status, not a Studio replacement)
+- Offline generation: `mozaiks gen` (terminal-initiated AI generation)
+- Repo path shortcuts and dev-only probes
 
-This layer must not leak into runtime, platform, Studio, or Mozaiks product code.
+**Must not own:**
+- Management state (run history, artifacts, generation status) — these belong in Studio
+- Any UI surface that Studio already provides
+- Assumptions about persistent user accounts
+
+**Explicit scope limit on `mozaiks gen`:**
+`mozaiks gen` is a developer convenience for bootstrapping from a terminal prompt.
+It is not the canonical build lifecycle. The CLI must not expand `gen` or any other
+command to duplicate:
+- artifact review or diff
+- run history or build state
+- validation or promotion
+- any surface that Studio already owns
+
+If generation output needs review, diffing, or promotion, the path is Studio.
+The CLI hands off — it does not grow a parallel project-management surface.
+
+**Must not leak into:** Runtime, Platform, Studio, or Mozaiks App code.
 
 ### Decision Rules (MANDATORY)
 
 When adding code, decide placement in this order:
 
 1. Is this required for every runtime instance?
-  - Put it in **Runtime**.
+   - Put it in **Runtime**.
 2. Is this about app hosting, routing, sessions, pages, or modules?
-  - Put it in **Platform**.
-3. Is this about building, generating, refining, or promoting apps or workflows?
-  - Put it in **Studio** for local/private builder behavior.
-  - Put it in **Mozaiks product** for hosted product behavior.
-4. Is this only for local development, CLI usage, preview behavior, or repo structure?
-  - Put it in **Dev / CLI / Preview**.
+   - Put it in **Platform**.
+3. Is this about workspace management, build lifecycle, artifact review, run history, or configuration?
+   - Put it in **Studio** (shared management layer).
+4. Is this a hosted-only capability (collaboration, billing, marketplace, deployment)?
+   - Put it in **Mozaiks App**.
+5. Is this filesystem scaffolding, process management, or a terminal diagnostic?
+   - Put it in **CLI**.
+
+Key distinctions:
+- Studio and CLI are parallel — a feature is not CLI just because it runs locally.
+  If it's management UI, it belongs in Studio regardless of environment.
+- Mozaiks App extends Studio. Never fork Studio behavior for hosted mode;
+  extend it through the `@platform/extensions` mechanism.
+- `chat-ui/` is the substrate. Studio and Mozaiks App register extensions into it;
+  they do not add core primitives to it.
 
 If the answer depends on local repo structure, build-time authoring flows, or preview-only behavior, it does not belong in reusable runtime code.
 
@@ -226,18 +409,20 @@ If the answer depends on local repo structure, build-time authoring flows, or pr
 Generator output must go under `MOZAIKS_GENERATED_ARTIFACTS_PATH`, which
 defaults to:
 
-- `mozaiks-platform/generated/`
+- `generated/`
 
 Current generator outputs:
 
 - AppGenerator app schemas and bundle files:
-  `mozaiks-platform/generated/apps/{app_id}/{build_id}/app/`
+  `generated/apps/{app_id}/{build_id}/app/`
 - AgentGenerator workflow bundles:
-  `mozaiks-platform/generated/workflows/{app_id}/{build_id}/{workflow_name}/`
+  `generated/workflows/{app_id}/{build_id}/{workflow_name}/`
 
 Only promotion logic may write into active runtime roots.
 
-**Do not rely on repo layout in reusable hosts.**
+**Do not rely on repo layout in reusable hosts.** Prefer explicit app-root
+inputs via `PLATFORM_PATH` or `MOZAIKS_APP_WORKSPACE_PATH` when composing the
+core repo against an external app workspace.
 
 Avoid:
 - `sys.path.insert(...)`
@@ -248,23 +433,23 @@ Avoid:
 
 Current state:
 
-- `runtime_app.py` is the clean runtime substrate target
-- `platform_app.py` is the platform/app-shell layer
-- `studio_app.py` is the local/private builder host
-- `mozaiks_app.py` is the hosted Mozaiks product host
+- `mozaiksai.hosts.runtime` is the clean runtime substrate target
+- `mozaiksai.hosts.platform` is the platform/app-shell layer
+- `mozaiksai.hosts.studio` is the local/private Studio management/create host
+- `mozaiksai.hosts.mozaiks` is the hosted Mozaiks product host
 
 ### Migration Principle
 
 All new work should:
 
-- Prefer layered hosts (`runtime_app.py`, `platform_app.py`, `studio_app.py`, `mozaiks_app.py`)
+- Prefer layered hosts (`mozaiksai.hosts.runtime`, `mozaiksai.hosts.platform`, `mozaiksai.hosts.studio`, `mozaiksai.hosts.mozaiks`)
 - Avoid introducing new cross-layer dependencies
 
 ---
 
 ## First-Class vs App-Level
 
-| First-Class (framework) | App-Level (platform/) |
+| First-Class (framework) | App-Level (app workspace) |
 |------------------------|----------------------|
 | mozaiksai (AI runtime) | workflows |
 | `AppBackendPort` + backend bridge tools | optional external/generated backend integration |
@@ -272,29 +457,49 @@ All new work should:
 | transport, artifacts, orchestration | brand/theme |
 | framework defaults and CLI | config |
 
-**First-class = every app gets it automatically. App-level = defined per app in `platform/`.**
+**First-class = every app gets it automatically. App-level = defined per app in an `app/` workspace root.**
 
 ### First-Class UI Surfaces
 
-All five are registered in `chat-ui/src/registry/coreComponents.js` — every app gets them automatically, no platform/extensions.js wiring needed.
+These are registered in `chat-ui/src/registry/coreComponents.js` — every app gets them automatically, regardless of which platform or Studio is loaded.
 
 | Component | Route | Purpose |
 |-----------|-------|---------|
 | `ChatPage` | `/chat` | Main AI workflow interface |
 | `SchemaPage` | `/{page}` | Renders declarative AppPageSchema from `/api/pages/{name}` |
-| `AdminPortal` | `/admin` | Unified admin shell — app owner panels, module panels, and runtime/operator panels |
-| `ProfilePage` | `/profile` | User profile view/edit — calls `app_backend_url/api/me` |
+| `ProfilePage` | `/profile` | User profile view/edit — calls host `/api/me` and `/api/me/preferences` |
 
-`AdminPortal` is one visible admin surface. It separates authority internally:
-- **App admin panels** — app owner/user/subscription panels from `app_backend_url/api/admin/*`
+### Platform-Management Surfaces
+
+The admin portal and Studio pages are **not** core `chat-ui` primitives. They are
+platform-management surfaces registered by Studio and inherited by the Mozaiks App.
+Every app that uses Studio gets them; apps that do not use Studio do not.
+
+Registered in `factory_app/app/ui/studio/index.js` via `registerStudioComponents()` and loaded by the shell through `@studio/extensions`:
+
+| Component | Route | Purpose |
+|-----------|-------|---------|
+| `AdminPortal` | `/admin` | Unified admin shell — app owner panels, module panels, and runtime/operator panels |
+| `StudioPage` | `/studio/*` | Studio management interface — workspace status, build, adapters |
+
+`AdminPortal` separates authority internally:
+- **App-business admin panels** — optional panels from `app_backend_url/api/admin/*` using `mozaiks.admin.app_backend.v1`
 - **Module admin panels** — panels declared by modules and rendered inside `/admin`
 - **Runtime panels** — Mozaiks runtime/operator panels such as workflow runs, tokens, cost, and sessions
 
-Panel lists are config-driven. The runtime reads `platform/config/admin.json` for
-runtime/operator panels; the app backend exposes app and module panels via
-`GET app_backend_url/api/admin/config`. Modules contribute panels through their
+Panel lists are config-driven. Runtime/operator panels live in
+`app/config/admin.json`. In this repo, App Zero keeps that file at
+`mozaiks-platform/app/config/admin.json`. A connected app backend may expose app-business panels via
+`GET app_backend_url/api/admin/config` using `mozaiks.admin.app_backend.v1`. Modules contribute panels through their
 module admin contract and may register custom React components via
-`platform/extensions.js`.
+the active app root's `ui/index.js` extension barrel.
+
+### Hosted-Product UI Extensions
+
+Hosted-only surfaces are registered via the `@platform/extensions` mechanism in
+`mozaiks-platform/app/ui/`. Studio components are inherited automatically; extension
+components add Mozaiks-App-specific pages (marketplace, billing, collaboration)
+on top without forking the Studio layer.
 
 ---
 
@@ -331,7 +536,7 @@ module admin contract and may register custom React components via
 
 **What it does:** Defines how deterministic, non-AI app behavior connects to
 the AI runtime. The runtime only depends on the generic `AppBackendPort` contract —
-the specific backend may be an app bundle hosted by `platform_app.py`, generated
+the specific backend may be an app bundle hosted by `mozaiksai.hosts.platform`, generated
 module handlers, an existing product backend, or any HTTP service.
 
 The canonical implementation path lives in this repo:
@@ -366,11 +571,11 @@ app-specific API paths. Paths are passed as arguments by workflow tools or agent
 ```
 Frontend (chat-ui / app shell)
     │
-  ├── REST API ──────────────► platform_app.py (pages, modules, admin, shell)
+  ├── REST API ──────────────► mozaiksai/hosts/platform.py (pages, modules, admin, shell)
   │                               │
   │                               └─ optional AppBackendPort ─► external/generated backend
   │
-  └── WebSocket / HTTP ─────► runtime_app.py / mozaiksai (AI workflows)
+  └── WebSocket / HTTP ─────► mozaiksai/hosts/runtime.py / mozaiksai (AI workflows)
                                │
                                ├── AG2 orchestration
                                └── workflow tools ─► module actions or AppBackendPort
@@ -420,7 +625,7 @@ events:
 ```
 
 ```yaml
-# mozaiks: platform/workflows/WritersRoom/orchestrator.yaml (mozaiksai platform side)
+# mozaiks: app/workflows/WritersRoom/orchestrator.yaml
 triggers:
   - event: set.brief_confirmed
     action: run
@@ -453,17 +658,17 @@ The framework scans module contracts and `orchestrator.yaml` files to build the 
 
 ---
 
-## platform/ Directory
+## App Zero Workspace
 
-Declarative configuration for the app. `platform_app.py` composes these
-surfaces, and `runtime_app.py` executes the workflow subset through stable
-contracts.
+`mozaiks-platform/app/` is the repo-local App Zero app workspace.
+`mozaiksai.hosts.platform` composes these surfaces, and `mozaiksai.hosts.runtime` executes the
+workflow subset through stable contracts.
 
 ```
-platform/
+mozaiks-platform/app/
 ├── config/                     # Platform-wide settings
 │   ├── ai.json                 # LLM provider, model, temperature
-│   └── theme_config.json       # Color schemes, fonts, shell chrome
+│   └── shell.json              # Header/footer/profile/notification chrome
 ├── workflows/                  # AI workflow definitions (mozaiksai)
 │   └── {WorkflowName}/
 │       ├── orchestrator.yaml   # Config + triggers + events.emits
@@ -472,7 +677,7 @@ platform/
 │       ├── tools/*.py          # Tool implementations
 │       └── extended_orchestration/  # MFJ and pack extension config
 │           └── mfj_extension.json   # Mid-Flight Journey fan-out/fan-in config (optional)
-├── modules/                    # Deterministic CRUD/action capabilities
+├── modules/                    # Deterministic hosted-product capabilities
 │   └── {module_name}/
 │       ├── module.yaml         # Identity + actions + capabilities
 │       ├── events.yaml         # Domain events this module may publish
@@ -489,8 +694,13 @@ platform/
 │   ├── {page_name}.yaml        # Preferred page schema form
 │   └── {page_name}/
 │       └── page.yaml           # Optional folder form
+├── ui/                         # Bounded extension barrel
+│   ├── route_manifest.json     # Custom full-page route ownership metadata
+│   ├── pages/
+│   │   └── custom/             # Optional hand-authored full-page React routes
+│   └── index.js                # React registration barrel
 └── brand/                      # Theme and visual assets
-    ├── brand.json              # Logo, colors, fonts
+    ├── theme_config.json       # Logo, colors, fonts
     └── assets/                 # Images, icons
 ```
 
@@ -510,7 +720,7 @@ platform/
 ### Module Contract
 
 ```python
-# platform/modules/{name}/backend/handler.py
+# app/modules/{name}/backend/handler.py
 class LineupBoardModule:
     async def list(self, ctx, **params) -> list:
         return await list_items(ctx.app_id, **params)
@@ -573,7 +783,7 @@ triggers:
 ### Workflow Tool Contract
 
 ```python
-# platform/workflows/{Name}/tools/some_tool.py
+# app/workflows/{Name}/tools/some_tool.py
 from mozaiksai.core.events.unified_event_dispatcher import emit_ui_tool_event
 
 async def my_tool(context_variables=None, **kwargs) -> dict:
@@ -597,14 +807,14 @@ backend-agnostic.
 | Traditional Layer | Mozaiks Equivalent | Location |
 |-------------------|-------------------|----------|
 | Database/Schema | App-backend persistence | Deployment-specific |
-| Config/Middleware | Platform config + runtime/backend config | `platform/config/` + environment |
-| Models | Module models | `platform/modules/{name}/backend/models.py` |
-| Services | Module handler or services | `platform/modules/{name}/backend/handler.py`, `platform/modules/{name}/backend/services.py` |
-| Controllers (AI) | Workflows | `platform/workflows/{name}/` |
-| Controllers (CRUD) | Module handler | `platform/modules/{name}/backend/handler.py` |
-| Routes | Platform host or optional external backend | `platform_app.py` or configured backend URL |
-| Entry Point | Framework/runtime host | `run_server.py` or deployment entrypoint |
-| Frontend | Page schema | `platform/pages/` |
+| Config/Middleware | App workspace config + runtime/backend config | `app/config/` + environment |
+| Models | Module models | `app/modules/{name}/backend/models.py` |
+| Services | Module handler or services | `app/modules/{name}/backend/handler.py`, `app/modules/{name}/backend/services.py` |
+| Controllers (AI) | Workflows | `app/workflows/{name}/` or shared generation-core workflows |
+| Controllers (CRUD) | Module handler | `app/modules/{name}/backend/handler.py` |
+| Routes | Platform host or optional external backend | `mozaiksai.hosts.platform` or configured backend URL |
+| Entry Point | Framework/runtime host | `mozaiks serve .` or deployment entrypoint |
+| Frontend | Page schema | `app/ui/pages/` |
 
 **Key insight:** Modules are your app's deterministic logic contract. Workflows are the AI
 orchestration layer. The framework handles the runtime side of that boundary.
@@ -615,9 +825,9 @@ orchestration layer. The framework handles the runtime side of that boundary.
 
 | File | Status | Notes |
 |------|--------|-------|
-| `platform/config/ai.json` | Keep | LLM provider, model, temperature |
-| `platform/config/theme_config.json` | Keep | Color schemes, fonts, shell chrome |
-| `platform/config/admin.json` | Keep (app-level) | Declares `admin_emails` and runtime/operator panels for the unified AdminPortal |
+| `app/config/ai.json` | Keep | LLM provider, model, temperature |
+| `app/brand/theme_config.json` | Keep | Color schemes, fonts, shell chrome |
+| `app/config/admin.json` | Keep (app-level) | Declares `admin_emails` and runtime/operator panels for the unified AdminPortal |
 
 ---
 
@@ -636,14 +846,16 @@ Every bundle (module, workflow, page) has a `visibility` field:
 ## Key Concepts
 
 ### Workflow
-A multi-agent AI conversation. Defined in `platform/workflows/`. Executed by AG2. Has agents, tools, handoff rules.
+A multi-agent AI conversation. Defined in `app/workflows/` for app-owned
+workflows, or in the shared generation core for builder workflows. Executed by
+AG2. Has agents, tools, handoff rules.
 
 Workflows declare:
 - `events.emits` — What events their tools publish
 - `triggers` — What external events start/resume them
 
 ### Module
-A unit of deterministic business logic. Defined in `platform/modules/`. Has a
+A unit of deterministic business logic. Defined in `app/modules/`. Has a
 `backend/handler.py` with action methods and a `module.yaml` manifest. NOT an
 AI workflow.
 
@@ -654,7 +866,9 @@ call through platform module routes or, in split deployments, through
 - `events` — Domain events the module can emit
 
 ### Page (frontend)
-A UI screen. Pages can bind to module routes via `/api/modules/<name>/<action>`. Use `platform/pages/` for all page schemas.
+A UI screen. Pages can bind to module routes via `/api/modules/<name>/<action>`.
+Use `app/ui/pages/` for all declarative page schemas.
+Use `app/ui/route_manifest.json` + `app/ui/pages/custom/` only for rare hand-authored full-page React escapes.
 
 ### Event
 Three kinds exist (don't confuse them):
@@ -670,7 +884,7 @@ When building features in Mozaiks, tasks decompose by feature (not by layer):
 
 ### Mozaiks Approach (feature-based)
 ```
-1. Define module → platform/modules/{feature}/
+1. Define module → app/modules/{feature}/
    ├── module.yaml
    ├── events.yaml
    ├── settings.yaml
@@ -681,14 +895,14 @@ When building features in Mozaiks, tasks decompose by feature (not by layer):
        ├── handler.py      # Handler class with action methods
        └── models.py       # Optional: data schemas
 
-2. Define workflow (if AI needed) → platform/workflows/{Feature}/
+2. Define workflow (if AI needed) → app/workflows/{Feature}/
    ├── orchestrator.yaml   # Config + triggers + events.emits
    ├── agents.yaml
    ├── tools.yaml
    └── tools/*.py
 
-3. Standalone page → platform/pages/{page}.yaml
-   # Optional folder form: platform/pages/{page}/page.yaml
+3. Standalone page → app/ui/pages/{page}.yaml
+   # Optional folder form: app/ui/pages/{page}/page.yaml
 ```
 
 ### When to Use What
@@ -696,8 +910,8 @@ When building features in Mozaiks, tasks decompose by feature (not by layer):
 | Scenario | Where to Define |
 |----------|-----------------|
 | Module with its own page | `module.yaml` capability/page metadata |
-| Page using multiple modules | `platform/pages/` |
-| Page with no module binding (static) | `platform/pages/` |
+| Page using multiple modules | `app/ui/pages/` |
+| Page with no module binding (static) | `app/ui/pages/` |
 | Event that triggers workflow | `orchestrator.yaml` → `triggers` |
 | Event emitted by module | `events.yaml` |
 | Event emitted by workflow tool | `orchestrator.yaml` → `events.emits` |
@@ -720,10 +934,17 @@ When building features in Mozaiks, tasks decompose by feature (not by layer):
 | Term | Meaning |
 |------|---------|
 | AI runtime | `mozaiksai` — workflow execution layer |
-| app backend | deterministic app service behind `platform_app.py`, generated module handlers, or an optional external/generated backend |
+| CLI | command/developer interface — filesystem, scaffolding, process management; parallel to Studio, not its predecessor |
+| Studio | shared management interface — workspace status, build lifecycle, artifacts, run history, config; available in both local and hosted deployments |
+| Mozaiks App | hosted product — extends Studio with collaboration, billing, marketplace, and deployment controls; does not fork Studio |
+| `chat-ui` | reusable frontend substrate — chat interface, route rendering, registry, transport; must not accumulate Studio or product assumptions as core primitives |
+| `web_shell/` | thin browser host — wires adapters, gates Studio registration via `VITE_MOZAIKS_HOST`, calls `@platform/extensions` |
+| `mozaiks-platform/app/ui/` | Studio/Mozaiks product UI extensions — registered via `@platform/extensions`; never imported by `chat-ui` core |
+| platform-management surface | UI surface registered by Studio and inherited by Mozaiks App (e.g., `AdminPortal`) — not a core substrate primitive |
+| app backend | deterministic app service behind `mozaiksai.hosts.platform`, generated module handlers, or an optional external/generated backend |
 | AppBackendPort | generic contract in `mozaiksai` for AI runtime ↔ app backend communication |
 | app_backend_url | optional base URL for an external/generated app backend when a split topology is used |
-| module | self-contained deterministic capability unit under `platform/modules/` or a generated app bundle |
+| module | self-contained deterministic capability unit under an app workspace `modules/` root or a generated app bundle |
 | module manifest system | YAML manifest family for modules (`module.yaml`, `events.yaml`, `settings.yaml`, `notifications.yaml`, `subscriptions.yaml`, `admin.yaml`) |
 | module.yaml | handler/action manifest for a module — identity, capabilities, and action definitions; event declarations live in `events.yaml` |
 | admin.yaml (platform) | module admin panels rendered inside unified `/admin` |
@@ -748,3 +969,4 @@ When building features in Mozaiks, tasks decompose by feature (not by layer):
 **AI triggers app behavior:** workflow agent → `backend_request()` or `emit_event()` → app backend
 
 **App backend boundary:** `mozaiksai` talks to the app backend through `AppBackendPort`
+

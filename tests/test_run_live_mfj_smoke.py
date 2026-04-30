@@ -10,7 +10,7 @@ def test_smoke_result_as_dict_serializes_nested_datetimes() -> None:
         success=True,
         app_id="app-1",
         chat_id="chat-1",
-        workflow_name="JokeWorker",
+        workflow_name="RuntimeSmoke",
         prompt="prompt",
         assistant_message="done",
         structured_output={

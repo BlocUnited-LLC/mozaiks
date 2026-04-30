@@ -9,7 +9,9 @@ depends_on: ui-systems.md, session-router.md
 # Workflow Routing Transitions
 
 The global workflow routing layer lives in
-`mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`.
+`factory_app/app/workflows/extended_orchestration/extension_registry.json`.
+App/workspace roots may overlay it with their own
+`workflows/extended_orchestration/extension_registry.json`.
 
 It is not agent routing, not app navigation, and not workflow-local MFJ.
 
@@ -38,7 +40,7 @@ Do not put MFJ graphs in the global registry.
 
 ## Hard Rules
 
-- For branded transition visuals, place transition components in `mozaiks-platform/app/workflows/extended_orchestration/ui/` and export them from `ui/index.js`.
+- For shared build transition visuals, place transition components in `factory_app/app/workflows/extended_orchestration/ui/` and export them from `ui/index.js`.
 - Keep transition UI files focused on transition screens only; keep shared runtime helpers in `chat-ui/src/platform`.
 - Do not put top-level `component`, `config`, title, background, option label, or option description fields in product transition declarations.
 - Do not put `entry_transition` on workflow sequence declarations.
@@ -59,14 +61,15 @@ semantic and workflow-agnostic.
     "component": "AppTypeSelector",
     "mode": "screen"
   },
-  "route_to": "ValueEngine",
   "options": [
     {
       "id": "new_app",
+      "route_to": "ValueEngine",
       "context_variables": { "app_type": "new" }
     },
     {
       "id": "existing_app",
+      "route_to": "ValueEngine",
       "context_variables": { "app_type": "existing" }
     }
   ]
@@ -79,8 +82,9 @@ Supported target types:
 - `route_to` can point to a workflow id.
 - The loader stamps `route_type` internally after validation.
 - Transition UI emits `option_id`; it does not emit `route_to`.
-- `user_choice_context` uses a shared top-level `route_to` unless an option overrides it.
-- `user_choice_route` requires each option to declare `route_to`.
+- All user choice transitions declare `route_to` on each option.
+- Use `user_choice_context` when the main point is deterministic context seeding, even if multiple options still route to the same next step.
+- Use `user_choice_route` when the main point is branch routing across different targets.
 - `options[].context_variables` is merged into the accumulated transition context before target workflow creation.
 - The workflow start path filters context against the target workflow's `context_variables.yaml` definitions.
 - Keep transition declarations semantic. Put branded copy/images/layout in the
@@ -93,11 +97,11 @@ registry key, not a file path. Built-in screens such as `LauncherScreen` and
 create a workflow-local transition component and export it via:
 
 ```text
-mozaiks-platform/app/workflows/extended_orchestration/ui/index.js
+factory_app/app/workflows/extended_orchestration/ui/index.js
 ```
 
-The registry owns routing and context semantics (`transition_type`, `route_to`,
-`options[].route_to`, and `options[].context_variables`).
+The registry owns routing and context semantics (`transition_type`, single-route
+`route_to`, `options[].route_to`, and `options[].context_variables`).
 
 ## Dependencies
 

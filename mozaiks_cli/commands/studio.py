@@ -1,20 +1,29 @@
 """
-mozaiks studio - Local Studio Home summary for an existing Mozaiks app bundle.
+mozaiks studio - Print workspace status to the terminal.
+
+This command is a developer diagnostic tool. It reads the active workspace and
+prints a status summary: app intent, readiness, adapter config, workflow count,
+and the recommended next step.
+
+Studio (the management interface at /studio) is a separate, parallel interface.
+This command does not replicate Studio — it provides a quick terminal view of
+the same workspace state. For the full management interface, run the server and
+open /studio in the browser.
 """
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from mozaiksai.core.runtime.app import build_studio_home_summary, get_missing_studio_surfaces
+from mozaiks_cli.workspace import resolve_active_app_root, resolve_workspace_root
 
 
 def run(args) -> None:
     """Execute the studio command."""
-    workspace_root = _resolve_workspace_root(getattr(args, "directory", None))
-    platform_root = workspace_root / "platform"
-    missing_surfaces = get_missing_studio_surfaces(platform_root)
+    workspace_root = resolve_workspace_root(getattr(args, "directory", None))
+    app_root = resolve_active_app_root(workspace_root)
+    missing_surfaces = get_missing_studio_surfaces(app_root)
     if missing_surfaces:
         print(f"Error: no valid Mozaiks scaffold found in {workspace_root}")
         print("Missing required files:")
@@ -23,16 +32,12 @@ def run(args) -> None:
         print("Run 'mozaiks init <preset>' first or point --dir at an existing scaffold.")
         return
 
-    summary = build_studio_home_summary(platform_root, surface="cli-home", local_only=True)
+    summary = build_studio_home_summary(app_root, surface="cli-home", local_only=True)
     if getattr(args, "json_output", False):
         print(json.dumps(summary, indent=2, ensure_ascii=False))
         return
 
     _print_studio_home(summary)
-
-
-def _resolve_workspace_root(explicit_directory: str | None) -> Path:
-    return Path(explicit_directory or ".").resolve()
 
 
 def _print_studio_home(summary: dict) -> None:
@@ -60,4 +65,5 @@ def _print_studio_home(summary: dict) -> None:
     print(f"Runtime Readiness: {workspace['runtime_readiness']}")
     print("\nNext Step:")
     print(f"  {home['next_step']}")
-    print("\nUse 'mozaiks studio --json' for machine-readable output or open /studio in the local shell.")
+    print("\nUse 'mozaiks studio --json' for machine-readable output.")
+    print("For the full management interface, run the server and open /studio in the browser.")

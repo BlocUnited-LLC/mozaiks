@@ -7,15 +7,17 @@
  * Access is gated by the "admin" role (client-side guard here; backend enforces
  * independently on all /api/admin/* routes).
  *
- * Runtime panels are driven by platform/config/admin.json:
- *   { "panels": { "runtime": ["stats", "runs", "sessions"] } }
+ * Host/runtime panels are driven by platform/config/admin.json via
+ * GET /api/admin/config:
+ *   { "sections": { ... }, "runtime_panels": [...], "module_panels": [...] }
  *
- * Extension panels come from the connected app backend's /api/admin/config.
+ * App-business admin panels may come from a connected app backend's
+ * /api/admin/config and are embedded by section-level components such as
+ * UsersSection and BillingSection.
  */
 
 import { useLocation } from 'react-router-dom'
 import { useChatUI } from '../context/ChatUIContext'
-import { AppAdminPanels } from './AppAdminDashboard.jsx'
 import { AdminExtensionPanels, useAdminFetch } from '../admin/components/AdminPrimitives.jsx'
 import { AdminWorkspaceLayout } from '../admin/components/AdminWorkspaceLayout.jsx'
 import { OverviewSection as AdminOverviewPanel } from '../admin/pages/OverviewSection.jsx'
@@ -83,7 +85,7 @@ function getPanelId(panelConfig) {
   return typeof panelConfig === 'string' ? panelConfig : panelConfig?.id
 }
 
-function normalizeRuntimePanels(configPanels) {
+function normalizeRuntimePanels(runtimePanels) {
   const normalize = (p) => {
     const id = getPanelId(p)
     if (!id) return null
@@ -91,16 +93,13 @@ function normalizeRuntimePanels(configPanels) {
     if (typeof p === 'string') return { id: p, section: fallback }
     return { ...p, section: normalizeSection(p?.section || p?.category || p?.group, fallback) }
   }
-  let panels
-  if (Array.isArray(configPanels))              panels = configPanels
-  else if (configPanels?.runtime)               panels = configPanels.runtime
-  else                                          panels = ['stats', 'runs', 'sessions']
+  const panels = Array.isArray(runtimePanels) ? runtimePanels : ['stats', 'runs', 'sessions']
   return panels.map(normalize).filter(Boolean)
 }
 
-function normalizeExtensionPanels(configPanels) {
-  if (!configPanels?.modules) return []
-  return configPanels.modules.map((p) => ({
+function normalizeModulePanels(modulePanels) {
+  if (!Array.isArray(modulePanels)) return []
+  return modulePanels.map((p) => ({
     ...p,
     section: normalizeSection(p?.section || p?.category || p?.group, inferSection(p)),
   }))
@@ -133,8 +132,8 @@ export default function AdminPage() {
   }
 
   const activeSection       = AdminSectionRoute(location.pathname)
-  const allRuntimePanels    = normalizeRuntimePanels(config?.panels)
-  const allExtensionPanels  = normalizeExtensionPanels(config?.panels)
+  const allRuntimePanels    = normalizeRuntimePanels(config?.runtime_panels)
+  const allExtensionPanels  = normalizeModulePanels(config?.module_panels)
   const runtimePanels       = sectionPanels(allRuntimePanels, activeSection)
   const extensionPanels     = sectionPanels(allExtensionPanels, activeSection)
 
@@ -176,7 +175,7 @@ export default function AdminPage() {
   }
 
   return (
-    <AdminWorkspaceLayout>
+    <AdminWorkspaceLayout adminSections={config?.sections}>
       <div className="space-y-6">{content}</div>
     </AdminWorkspaceLayout>
   )

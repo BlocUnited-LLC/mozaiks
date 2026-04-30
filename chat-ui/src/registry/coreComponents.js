@@ -19,7 +19,6 @@ import { registerComponent } from './componentRegistry';
 // Shell pages
 import ChatPage from '../pages/ChatPage';
 import { SchemaPage } from '../ui/screens/SchemaPage.jsx';
-import AdminPage from '../pages/AdminPage.jsx';
 import ProfilePage from '../pages/ProfilePage.jsx';
 
 // Transition renderers — referenced by transition.ui.component
@@ -46,16 +45,11 @@ registerComponent('ConfirmScreen', ConfirmScreen, {
   description: 'Built-in renderer for confirm transitions. Receives { transition, onResolve } props.',
 });
 
-registerComponent('AdminPortal', AdminPage, {
-  core: true,
-  description: 'Unified admin shell — app, module, and runtime/operator panels',
-});
-
 registerComponent('ProfilePage', ProfilePage, {
   core: true,
-  description: 'First-class user profile page — calls app_backend_url/api/me. Show when auth is enabled.',
+  description: 'Host-owned account page — calls /api/me and /api/me/preferences.',
 });
 
-export const CORE_COMPONENTS = ['ChatPage', 'SchemaPage', 'LauncherScreen', 'ConfirmScreen', 'AdminPortal', 'ProfilePage'];
+export const CORE_COMPONENTS = ['ChatPage', 'SchemaPage', 'LauncherScreen', 'ConfirmScreen', 'ProfilePage'];
 
 console.log('[CoreComponents] Registered core chat-ui components:', CORE_COMPONENTS);

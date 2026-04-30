@@ -1,0 +1,94 @@
+# ExistingAppDiscovery Handoff Rules
+#
+# Linear pipeline: Host → Mapper → Planner → Assembler → user
+# Each conversational agent hands off to user between turns,
+# then advances to the next agent when their phase is complete.
+
+handoff_rules:
+# DiscoveryHostAgent waits for user input between turns
+- source_agent: DiscoveryHostAgent
+  target_agent: user
+  handoff_type: after_work
+  transition_target: RevertToUserTarget
+
+# Host → CapabilityMapper when identity is gathered
+- source_agent: DiscoveryHostAgent
+  target_agent: CapabilityMapperAgent
+  handoff_type: condition
+  condition_type: expression
+  condition: ${identity_complete} == True
+  transition_target: AgentTarget
+
+# CapabilityMapperAgent waits for user input between turns
+- source_agent: CapabilityMapperAgent
+  target_agent: user
+  handoff_type: after_work
+  transition_target: RevertToUserTarget
+
+# Mapper → IntegrationPlanner when capabilities are mapped
+- source_agent: CapabilityMapperAgent
+  target_agent: IntegrationPlannerAgent
+  handoff_type: condition
+  condition_type: expression
+  condition: ${capabilities_complete} == True
+  transition_target: AgentTarget
+
+# IntegrationPlannerAgent waits for user input between turns
+- source_agent: IntegrationPlannerAgent
+  target_agent: user
+  handoff_type: after_work
+  transition_target: RevertToUserTarget
+
+# Planner → DiscoveryArtifactAssembler when integration plan is confirmed
+- source_agent: IntegrationPlannerAgent
+  target_agent: DiscoveryArtifactAssemblerAgent
+  handoff_type: condition
+  condition_type: expression
+  condition: ${plan_complete} == True
+  transition_target: AgentTarget
+
+# DiscoveryArtifactAssembler → user (presents the artifact for review)
+- source_agent: DiscoveryArtifactAssemblerAgent
+  target_agent: user
+  handoff_type: after_work
+  transition_target: RevertToUserTarget
+
+# User wants to revise something → restart from host
+- source_agent: user
+  target_agent: DiscoveryHostAgent
+  handoff_type: condition
+  condition_type: string_llm
+  condition: >
+    When the user wants to change their app details, go back to the
+    beginning, start over, or correct something about the app identity.
+  transition_target: AgentTarget
+
+# User wants to update capabilities → go to mapper
+- source_agent: user
+  target_agent: CapabilityMapperAgent
+  handoff_type: condition
+  condition_type: string_llm
+  condition: >
+    When the user wants to change capability mappings, add or remove
+    features, or update their API or entity information.
+  transition_target: AgentTarget
+
+# User wants to update integration plan → go to planner
+- source_agent: user
+  target_agent: IntegrationPlannerAgent
+  handoff_type: condition
+  condition_type: string_llm
+  condition: >
+    When the user wants to change the integration level, update which
+    capabilities are AI-accessible, or revise auth delegation settings.
+  transition_target: AgentTarget
+
+# User approves the augmentation artifact → terminate
+- source_agent: user
+  target_agent: terminate
+  handoff_type: condition
+  condition_type: string_llm
+  condition: >
+    When the user approves the discovery artifact, says the adoption plan
+    looks good, confirms they are satisfied, or thanks the team without requesting changes.
+  transition_target: TerminateTarget

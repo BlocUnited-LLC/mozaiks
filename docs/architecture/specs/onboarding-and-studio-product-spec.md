@@ -53,7 +53,7 @@ Mozaiks should separate the user journey into three distinct layers:
    - writes or updates only app-owned configuration surfaces
 
 3. `mozaiks studio`
-   - launches the local, private builder and operator control plane
+   - launches the local, private Studio create and operator control plane
    - becomes the main place where the user asks agents to build, installs capabilities, reviews diffs, checks runtime health, and iterates
 
 This keeps the current blank-scaffold `init` decision intact while still giving Mozaiks the OpenClaw-like guided experience users expect.
@@ -90,7 +90,7 @@ The Mozaiks experience should read as one product journey:
 3. Run guided onboarding
 4. Land in Studio Home
 5. Add or enable capabilities
-6. Submit the first build request
+6. Submit the first create request
 7. Review proposed changes before write
 8. Run, validate, and refine from the same surface
 
@@ -126,8 +126,8 @@ Outputs should be constrained to app-owned configuration and planning artifacts,
 
 Responsibility:
 
-- open the builder/operator control plane for the current workspace
-- show dashboard, build requests, installed capabilities, validation, runtime state, and admin access
+- open the Studio create/operator control plane for the current workspace
+- show dashboard, create requests, installed capabilities, validation, runtime state, and admin access
 - keep the operations dashboard local-only and private for now
 
 ### `mozaiks add`
@@ -146,7 +146,7 @@ Responsibility:
 
 ## Studio Information Architecture
 
-`mozaiks studio` should be the main home for both builders and operators.
+`mozaiks studio` should be the main home for both app authors and operators.
 
 Recommended sections:
 
@@ -160,15 +160,15 @@ Shows:
 - recent runs and recent changes
 - current provider and model profile
 
-### 2. Build
+### 2. Create
 
 Shows:
 
 - freeform request box
-- current build plan
+- current create plan
 - owned paths and acceptance criteria
 - approval state
-- recent build history
+- recent create history
 
 This is where the user says things like:
 
@@ -197,7 +197,7 @@ Shows:
 - theme and brand config
 - entry points and app modes
 
-This is where `platform/config/shell.json`, `brand/theme_config.json`, and related shell surfaces become inspectable instead of hidden files.
+This is where `app/config/shell.json`, `app/brand/theme_config.json`, and related shell surfaces become inspectable instead of hidden files.
 
 ### 5. Workflows
 
@@ -228,9 +228,9 @@ Shows:
 
 This should follow the two-tier admin boundary already defined in `admin-system.md`.
 
-## Builder Request Flow
+## Studio Create Request Flow
 
-The Studio build loop should be artifact-first, not transcript-first.
+The Studio create loop should be artifact-first, not transcript-first.
 
 Canonical flow:
 
@@ -283,12 +283,12 @@ Onboarding and Studio should operate on app-bundle surfaces, not runtime interna
 
 Primary writable surfaces:
 
-- `platform/app.json`
-- `platform/config/ai.json`
-- `platform/config/shell.json`
-- `platform/config/admin.json`
-- `brand/theme_config.json`
-- `ui/extension.json`
+- `app/app.json`
+- `app/config/ai.json`
+- `app/config/shell.json`
+- `app/config/admin.json`
+- `app/brand/theme_config.json`
+- `app/ui/route_manifest.json`
 
 Optional supporting surfaces:
 

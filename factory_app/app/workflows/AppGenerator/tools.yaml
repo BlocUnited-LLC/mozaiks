@@ -1,0 +1,82 @@
+tools:
+- agent: AppSchemaAgent
+  file: save_app_schema.py
+  function: save_app_schema
+  description: >
+    Persist the AppSchemaOutput to the app bundle directory. Serializes app startup to
+    app.json, each AppPageSchema to ui/pages/{name}.yaml, optional custom_route_bundle
+    artifacts to ui/route_manifest.json + ui/pages/custom/*.jsx + ui/index.js, and merges
+    theme/shell/asset artifacts into their canonical config files when provided.
+    Called automatically after AppSchemaAgent speaks.
+  tool_type: Agent_Tool
+  auto_tool_call: true
+- agent: AppPlanAgent
+  file: app_build_plan.py
+  function: app_build_plan
+  description: Persist the canonical app build plan so downstream generation agents
+    can read the same scoped capability packs, pages, entities, roles, integrations,
+    theme preferences, and generation order.
+  tool_type: Agent_Tool
+  auto_tool_call: true
+- agent: AssemblyAgent
+  file: assemble_app_tasks.py
+  function: assemble_app_tasks
+  description: Merge MFJ child task outputs into one assembled code_files bundle.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: DownloadAgent
+  file: generate_and_download.py
+  function: generate_and_download
+  description: Bundle generated app files into a ZIP and present the AppWorkbench
+    artifact UI (code + preview + export).
+  tool_type: UI_Tool
+  auto_tool_call: true
+  ui:
+    component: AppWorkbench
+    mode: artifact
+- agent: AppValidationAgent
+  file: app_validation.py
+  function: validate_app_build
+  description: Validate generated application code by building and optionally running
+    it using the explicit app validation strategy (e2b | local | skip).
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: AppValidationAgent
+  file: app_validation.py
+  function: parse_build_errors
+  description: Parse build output into structured error entries (file/line/column/message).
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: IntegrationTestAgent
+  file: integration_tests.py
+  function: run_integration_tests
+  description: Run lightweight integration checks between the generated frontend app
+    and the agent backend context (env var wiring, endpoint availability).
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: ConfigMiddlewareAgent
+  file: backend_tools.py
+  function: generate_scaffold
+  description: Generate app scaffold files (boilerplate, config, dockerfiles) via
+    the backend.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: DatabaseAgent
+  file: backend_tools.py
+  function: provision_database
+  description: Provision a database for the application via the backend.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: DatabaseAgent
+  file: backend_tools.py
+  function: apply_database_schema
+  description: Apply the database schema via the backend.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: DatabaseAgent
+  file: backend_tools.py
+  function: seed_database
+  description: Seed the database with initial data via the backend.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+lifecycle_tools: []

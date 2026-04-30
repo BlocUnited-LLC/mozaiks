@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "admin_emails": [
+    "founder@example.com"
+  ],
+  "panels": [
+    "stats",
+    "runs",
+    "sessions"
+  ],
+  "roles": [
+    "admin"
+  ],
+  "features": {
+    "user_management": false,
+    "billing": false,
+    "audit_log": false
+  }
+}

@@ -9,7 +9,7 @@ It does not define chat startup defaults or workflow entry selection.
 
 ## Current Ownership
 
-### `platform/app.json`
+### `app/app.json`
 
 Owns the app-facing auth declaration and client-target manifest:
 
@@ -27,14 +27,14 @@ In the current manifest shape, this means:
 - `mobile.auth.*` is advanced native/mobile auth override territory
 - `targets.*` is the browser/mobile target declaration
 
-`platform/app.json` does not own:
+`app/app.json` does not own:
 
 - `chat.chat_startup_mode`
 - `workflows.entry_point`
 
-Those belong in `platform/config/ai.json`.
+Those belong in `app/config/ai.json`.
 
-### `platform/config/ai.json`
+### `app/config/ai.json`
 
 Owns app-level AI boot defaults such as:
 
@@ -56,16 +56,24 @@ Own deployment-time backend overrides and local dev auth convenience, such as:
 - `VITE_DEV_AUTOLOGIN`
 - `VITE_MOCK_MODE`
 
-### `platform/brand/login-theme/`
+### `app/brand/login-theme/`
 
 Owns Keycloak login-theme assets and templates.
 
-This is separate from the in-app shell assets under `platform/brand/assets/`.
+This is separate from the in-app shell assets under `app/brand/assets/`.
+
+## Current Repo Note
+
+The current repo now uses `mozaiks-platform/app/app.json`,
+`mozaiks-platform/app/config/ai.json`, and `mozaiks-platform/app/brand/*` in
+the local App Zero workspace. The canonical
+target for generated/customer apps is a self-contained app workspace with
+`app/app.json`, `app/config/ai.json`, and `app/brand/*`.
 
 ## Runtime Flow
 
 ```text
-platform/app.json
+app/app.json
     -> host app boot config
     -> web shell creates Keycloak auth adapter
     -> user logs in through Keycloak
@@ -77,7 +85,7 @@ platform/app.json
   Separately:
 
   ```text
-  platform/config/ai.json
+  app/config/ai.json
     -> app-level chat startup mode
     -> app-level default workflow selection
     -> frontend boot selection only
@@ -94,7 +102,7 @@ Key points:
 - config is passed in from the host app
 - no separate `auth.json` is used
 - Keycloak uses Authorization Code + PKCE flow in the browser
-- native/mobile auth selection is declared in `platform/app.json -> mobile.auth`
+- native/mobile auth selection is declared in `app/app.json -> mobile.auth`
 
 ## Backend
 
@@ -117,17 +125,17 @@ The backend should be configured to validate against the same Keycloak realm and
 
 Use this order of operations:
 
-1. declare app-facing auth in `platform/app.json`
-2. declare app-level chat/workflow boot defaults in `platform/config/ai.json`
+1. declare app-facing auth in `app/app.json`
+2. declare app-level chat/workflow boot defaults in `app/config/ai.json`
 3. use environment variables for deployment overrides
-4. keep Keycloak login-theme assets under `platform/brand/login-theme/`
+4. keep Keycloak login-theme assets under `app/brand/login-theme/`
 
 Do not reintroduce:
 
 - `auth.json`
 - split frontend/backend auth files for the same app
 
-Do not move `entry_point` or `chat.chat_startup_mode` into `platform/app.json`.
+Do not move `entry_point` or `chat.chat_startup_mode` into `app/app.json`.
 
 ## Minimal Example
 
@@ -151,7 +159,7 @@ Separate app-level boot example:
 }
 ```
 
-That example belongs in `platform/config/ai.json`, not in `platform/app.json`.
+That example belongs in `app/config/ai.json`, not in `app/app.json`.
 
 For mobile:
 
@@ -198,8 +206,8 @@ For the broader manifest model, read
 
 After auth changes:
 
-1. verify `platform/app.json` parses
-2. verify `platform/config/ai.json` still contains only app-level AI boot settings
+1. verify `app/app.json` parses
+2. verify `app/config/ai.json` still contains only app-level AI boot settings
 3. verify the web shell can initialize the Keycloak adapter
 4. verify login redirects to the intended Keycloak realm
 5. verify backend-protected routes accept the resulting token

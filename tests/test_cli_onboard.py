@@ -3,6 +3,7 @@ from argparse import Namespace
 
 from mozaiks_cli.commands import init_command, onboard_command
 from mozaiks_cli.main import create_parser
+from mozaiks_cli.workspace import resolve_theme_config_path, resolve_ui_route_manifest_path
 
 
 def _load_json(path):
@@ -54,11 +55,11 @@ def test_onboard_command_updates_scaffold_surfaces_non_interactively(tmp_path) -
         )
     )
 
-    app_json = _load_json(target_dir / "platform" / "app.json")
-    ai_json = _load_json(target_dir / "platform" / "config" / "ai.json")
-    shell_json = _load_json(target_dir / "platform" / "config" / "shell.json")
-    theme_json = _load_json(target_dir / "brand" / "theme_config.json")
-    admin_json = _load_json(target_dir / "platform" / "config" / "admin.json")
+    app_json = _load_json(target_dir / "app" / "app.json")
+    ai_json = _load_json(target_dir / "app" / "config" / "ai.json")
+    shell_json = _load_json(target_dir / "app" / "config" / "shell.json")
+    theme_json = _load_json(target_dir / "app" / "brand" / "theme_config.json")
+    admin_json = _load_json(target_dir / "app" / "config" / "admin.json")
 
     assert app_json["appName"] == "Atlas CRM"
     assert app_json["onboarding"]["journey"] == "existing_app"
@@ -79,8 +80,11 @@ def test_onboard_command_updates_scaffold_surfaces_non_interactively(tmp_path) -
     assert theme_json["identity"]["tagline"] == "Private revenue workflows"
     assert theme_json["colors"]["primary"]["main"] == "#1d4ed8"
     assert admin_json["admin_emails"] == ["founder@example.com"]
-    assert admin_json["panels"]["runtime"][0]["section"] == "usage"
-    assert admin_json["panels"]["runtime"][2]["section"] == "activity"
+    assert admin_json["schema_version"] == "mozaiks.admin.host.v1"
+    assert admin_json["sections"]["usage"]["enabled"] is True
+    assert admin_json["sections"]["billing"]["enabled"] is True
+    assert admin_json["runtime_panels"][0]["section"] == "usage"
+    assert admin_json["runtime_panels"][2]["section"] == "activity"
 
 
 def test_onboard_command_prompts_when_values_are_missing(monkeypatch, tmp_path) -> None:
@@ -118,10 +122,10 @@ def test_onboard_command_prompts_when_values_are_missing(monkeypatch, tmp_path) 
         )
     )
 
-    app_json = _load_json(target_dir / "platform" / "app.json")
-    ai_json = _load_json(target_dir / "platform" / "config" / "ai.json")
-    theme_json = _load_json(target_dir / "brand" / "theme_config.json")
-    admin_json = _load_json(target_dir / "platform" / "config" / "admin.json")
+    app_json = _load_json(target_dir / "app" / "app.json")
+    ai_json = _load_json(target_dir / "app" / "config" / "ai.json")
+    theme_json = _load_json(target_dir / "app" / "brand" / "theme_config.json")
+    admin_json = _load_json(target_dir / "app" / "config" / "admin.json")
 
     assert app_json["appName"] == "Atlas Prime"
     assert app_json["onboarding"]["journey"] == "new_app"
@@ -131,5 +135,12 @@ def test_onboard_command_prompts_when_values_are_missing(monkeypatch, tmp_path) 
     assert theme_json["theme"]["primary"] == "emerald"
     assert theme_json["identity"]["tagline"] == "Operator workspace"
     assert admin_json["admin_emails"] == ["owner@example.com"]
-    assert admin_json["panels"]["app"][0]["section"] == "overview"
-    assert admin_json["panels"]["app"][1]["section"] == "users"
+    assert admin_json["schema_version"] == "mozaiks.admin.host.v1"
+    assert admin_json["sections"]["overview"]["enabled"] is True
+    assert admin_json["sections"]["users"]["enabled"] is True
+
+
+def test_workspace_helpers_keep_brand_and_ui_inside_active_app_root(tmp_path) -> None:
+    app_root = tmp_path / "workspace" / "app"
+    assert resolve_theme_config_path(app_root) == app_root / "brand" / "theme_config.json"
+    assert resolve_ui_route_manifest_path(app_root) == app_root / "ui" / "route_manifest.json"

@@ -97,7 +97,7 @@ After running the example, every user asks "now what?" The activate step needs a
 
 ### Exists
 
-- One example module: `platform/modules/lineup_board/module.yaml`
+- Canonical module contract docs in `docs/architecture/foundations/canonical-app-structure.md` and `docs/architecture/foundations/platform-authoring.md`
 - Architecture reference in `docs/architecture/foundations/event-system.md`
 - `mozaikscore/core/module_manager.py` — dynamic module loading
 

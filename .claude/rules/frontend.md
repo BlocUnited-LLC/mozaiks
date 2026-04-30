@@ -11,26 +11,26 @@ Use these rules when editing the web shell, shared UI, or app bundle surfaces.
 
 ---
 
-## Two UI Systems — Know Which One You're In
+## Four UI Surfaces — Know Which One You're In
 
-Mozaiks has two completely separate UI systems. Before touching any UI code, identify which system:
+Mozaiks has four distinct UI surfaces. Before touching any UI code, identify which one:
 
-| | App UI | Agentic UI |
-|-|--------|------------|
-| **What** | Persistent pages (dashboard, tables, forms) | Agent-driven components in the chat interface |
-| **Generator** | AppGenerator | AgentGenerator |
-| **Files** | `platform/pages/*.yaml` (AppPageSchema) | `ui/<WorkflowName>/<Component>.jsx` + `tools/<name>.py` |
-| **Renderer** | PageRenderer ← SchemaPage ← /api/pages/{name} | useAppEventBus ← ingestEvent ← WebSocket |
-| **React?** | Never generated — primitives declared in YAML | Always generated — primitives imported as JSX |
-| **Analogy** | Traditional SPA page | CopilotKit / ag-ui generative UI |
+| | App UI | Agentic UI | Product Extension UI | Transition UI |
+|-|--------|------------|----------------------|---------------|
+| **What** | Generated persistent pages | Agent-driven artifacts in chat | Complex product pages (hand-authored) | Pre-workflow routing choices |
+| **Generator** | AppGenerator | AgentGenerator | Hand-authored | Hand-authored |
+| **Files** | `app/pages/*.yaml` | `ui/<WorkflowName>/<Component>.jsx` + `tools/<name>.py` | `mozaiks-platform/ui/pages/*.jsx` | `extension_registry.json` transitions |
+| **Renderer** | PageRenderer ← SchemaPage ← /api/pages/{name} | useAppEventBus ← ingestEvent ← WebSocket | `@platform/extensions` → register() → component registry | LauncherScreen / ConfirmScreen / TransitionScreen |
+| **React?** | Never — primitives declared in YAML | Always — generated alongside Python tool | Always — hand-authored product pages | Optional — branded transition components |
 
 **Full spec:** [docs/architecture/specs/ui-systems.md](../../docs/architecture/specs/ui-systems.md)
 
 ### App UI quick rules
-- Defined as AppPageSchema YAML in `platform/pages/`
+- Defined as AppPageSchema YAML in `app/pages/` (or `mozaiks-platform/app/pages/` for App Zero)
 - Primitives declared by type string (`primitive: DataTable`), not imported
 - AppGenerator writes the files; `save_app_schema` tool persists them
 - No custom React — if the layout doesn't fit, adjust the schema or primitive config
+- Do not create an AppPageSchema YAML for a route already owned by Product Extension UI
 
 ### Agentic UI quick rules
 - Python tool calls `send_ui_tool_event(component_name, display_type, payload)`
@@ -39,7 +39,30 @@ Mozaiks has two completely separate UI systems. Before touching any UI code, ide
 - User actions return via `onAction` prop; agent reads them from next turn context
 - Primitives imported as JSX building blocks (`import { Card } from '../../ui/primitives/Card.jsx'`)
 
+### Product Extension UI quick rules
+- Lives in `mozaiks-platform/ui/` — the App Zero product UI extension layer
+- `index.js` exports `register(registerComponent)` — called once at shell bootstrap
+- `extension.json` declares routes — every page must be listed here and registered in `index.js`
+- Use when AppPageSchema primitives cannot express the layout or behavior needed
+- Each route must have exactly one owner — never duplicate a `ui/extension.json` route in `app/pages/*.yaml`
+
 ---
+
+## Frontend Layer Model
+
+Three extension layers sit on top of `chat-ui/`:
+
+| Layer | Files | Registered via |
+|-------|-------|----------------|
+| `chat-ui/` substrate | `src/registry/coreComponents.js` | Always loaded |
+| Studio management | `factory_app/app/ui/studio/`, `src/admin/` | `@studio/extensions` → `registerStudioComponents()` |
+| Mozaiks App extensions | `mozaiks-platform/ui/` | `@platform/extensions` → `register()` |
+
+**Critical rules:**
+- `chat-ui/coreComponents.js` must contain only substrate primitives: `ChatPage`, `SchemaPage`, `LauncherScreen`, `ConfirmScreen`, `ProfilePage`. Studio and product pages are not core primitives.
+- `AdminPortal` and all Studio pages are **platform-management surfaces** — registered by Studio (`factory_app/app/ui/studio/index.js` via `@studio/extensions`), not by `coreComponents.js`.
+- `mozaiks-platform/ui/` never imports from `factory_app/app/ui/studio/` or `chat-ui/src/admin/` directly. The dependency goes one way: product extensions build on the substrate; the substrate does not depend on extensions.
+- CLI and Studio are parallel interfaces. Do not add UI to `chat-ui` just because it is used locally.
 
 ## Boundaries
 

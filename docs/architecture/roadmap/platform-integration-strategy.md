@@ -3,10 +3,13 @@
 **Status:** Historical / superseded.
 
 This document predates the canonical layered host architecture. The current
-source of truth is `ARCHITECTURE.md`: `runtime_app.py`, `platform_app.py`,
-`studio_app.py`, and `mozaiks_app.py`, with App Zero rooted at
+source of truth is `ARCHITECTURE.md`: `mozaiksai/hosts/runtime.py`, `mozaiksai/hosts/platform.py`,
+`mozaiksai/hosts/studio.py`, and `mozaiksai/hosts/mozaiks.py`, with App Zero rooted at
 `mozaiks-platform/app/`. Treat references to separate .NET platform services as
 legacy planning context.
+
+Legacy filesystem examples that appear below, including `platform/workflows/`,
+are preserved only to explain the superseded integration model.
 
 ## The Core Question
 

@@ -8,6 +8,10 @@ This page describes a retired in-repo entitlement implementation built around
 `mozaikscore`. It is not canonical for the current backend-agnostic runtime
 architecture and should not be used as the source of truth for new work.
 
+Legacy paths that appear below, including `platform/config/*`,
+`platform/modules/*`, and `platform/pages/*`, are preserved only to explain the
+retired design.
+
 ## Overview
 
 The **entitlement system** is an event-driven, declarative approach to subscription-based access control. It separates pricing/billing configuration from runtime access gating, allowing modules and workflows to declare their requirements independently.

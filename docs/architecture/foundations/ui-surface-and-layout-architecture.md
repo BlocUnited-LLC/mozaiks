@@ -21,7 +21,12 @@ This is where controls such as `UserProfile`, `Notifications`, and `Discover`
 belong.
 
 Shell defaults (such as startup mode and landing spot) are derived from
-`platform/config/ai.json` and served via `/api/shell-config`.
+`app/config/ai.json` and served via `/api/shell-config`.
+
+Current repo note:
+
+- the local App Zero workspace now uses `mozaiks-platform/app/config/ai.json`
+- the canonical target for generated/customer apps is `app/config/ai.json`
 
 ### 2. Page surface
 
@@ -35,7 +40,7 @@ Owns:
 
 Pages are the default surface for non-AI product behavior.
 
-Shared page UI should live in `platform/pages/_shared/`.
+Shared page UI should live in `app/ui/pages/_shared/`.
 
 Admin is a first-class framework surface (like chat-ui), not an app-level page.
 
@@ -137,3 +142,4 @@ Do not:
 - [canonical-app-structure.md](canonical-app-structure.md)
 - [workflow-architecture.md](workflow-architecture.md)
 - [event-system.md](event-system.md)
+

@@ -12,7 +12,7 @@ Many new developers are unsure which files are "real runtime state" vs "project 
 
 Use this model:
 
-1. `platform/app.json` + `.env` are your persistent project manifests.
+1. `app/app.json` + `.env` are your persistent project manifests.
 2. Generated files (`infra/keycloak/realm-export.json`, Keycloak theme CSS) are derived artifacts.
 3. Live runtime state lives in MongoDB + Keycloak volumes.
 
@@ -44,7 +44,7 @@ python -m mozaiksai.cli up --frontend
 
 Then it:
 
-1. writes/updates `platform/app.json`
+1. writes/updates `app/app.json`
 2. creates `.env` from `.env.example` if needed
 3. updates key env values, including local dev auth defaults
 4. regenerates Keycloak realm + theme artifacts
@@ -83,5 +83,4 @@ After init/doctor:
 python -m mozaiksai.cli up --frontend
 ```
 
-This runs generate + doctor preflight and starts the local docker stack. With `--frontend`, it also starts `npm run dev` inside `app/`.
-
+This runs generate + doctor preflight and starts the local docker stack. With `--frontend`, it also starts `npm run dev` inside `web_shell/`.

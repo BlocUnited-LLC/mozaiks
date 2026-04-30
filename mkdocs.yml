@@ -93,10 +93,21 @@ nav:
   - Start Here:
       - Getting Started: getting-started.md
       - First-Run Ritual: first-run-ritual.md
+  - Guides:
+    - Add Workflows: guides/adding-workflows/01-overview.md
+    - App Shell And Branding: guides/custom-brand-integration/01-overview.md
+    - Telemetry:
+      - Overview: guides/telemetry/01-overview.md
+      - Cost Tracking: guides/telemetry/03-cost-tracking.md
+      - Budget Management: guides/telemetry/04-budget-management.md
+    - AI Coding Agents:
+      - Prompt Packs: instruction-prompts/prompt-packs.md
+      - Agent Bootstrap Prompt: agent-bootstrap-prompt.md
   - Architecture:
       - Overview: architecture/index.md
       - Foundations:
           - Overview: architecture/foundations/overview.md
+          - Framework Capability Classification: architecture/foundations/framework-capability-classification.md
           - App Manifest And Platform Targets: architecture/foundations/app-manifest-and-platform-targets.md
           - Canonical App Structure: architecture/foundations/canonical-app-structure.md
           - App Bundle Declaratives: architecture/foundations/app-bundle-declaratives.md
@@ -117,7 +128,7 @@ nav:
           - UI Surface Model: architecture/frontend/ui-surface-model.md
           - Conversation Modes: architecture/frontend/conversation-modes.md
           - Layout Modes: architecture/frontend/layout-modes.md
-          - Persistent Widget: architecture/frontend/persistent-widget.md
+          - AG-UI Comparison: architecture/frontend/ag-ui-copilotkit-comparison.md
   - Reference:
       - Overview: reference/index.md
       - Deep Dives:

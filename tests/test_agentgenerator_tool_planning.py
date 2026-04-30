@@ -10,7 +10,7 @@ def _load_tool_planning_module():
     workspace = Path(__file__).resolve().parents[1]
     file_path = (
         workspace
-        / "mozaiks-platform"
+        / "factory_app"
         / "app"
         / "workflows"
         / "AgentGenerator"

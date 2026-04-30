@@ -1,0 +1,102 @@
+tools:
+- agent: DownloadAgent
+  file: generate_and_download.py
+  function: generate_and_download
+  description: Prepare workflow files and present inline download request.
+  tool_type: UI_Tool
+  auto_tool_call: true
+  ui:
+    component: FileDownloadCenter
+    mode: inline
+- agent: DownloadAgent
+  file: export_to_github.py
+  function: export_to_github
+  description: Export the generated bundle to GitHub via the Mozaiks Backend repo
+    endpoints (initial export + secrets + deploy status) and return repo + deployment
+    info.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: PatternAgent
+  file: pattern_selection.py
+  function: pattern_selection
+  description: Cache AG2 pattern selection in context variables for downstream agents.
+  tool_type: Agent_Tool
+  auto_tool_call: true
+- agent: WorkflowStrategyAgent
+  file: workflow_strategy.py
+  function: workflow_strategy
+  description: Cache high-level workflow architecture (pattern, startup_mode, modules)
+    in context variables.
+  tool_type: Agent_Tool
+  auto_tool_call: true
+- agent: AgentRosterAgent
+  file: agent_roster.py
+  function: agent_roster
+  description: Persist AgentRoster output so downstream agents can read shared context.
+  tool_type: Agent_Tool
+  auto_tool_call: true
+- agent: ToolPlanningAgent
+  file: tool_planning.py
+  function: tool_planning
+  description: Submit tool planning specifications that merge with workflow strategy
+    modules.
+  tool_type: Agent_Tool
+  auto_tool_call: true
+- agent: DownloadAgent
+  file: attachments_tools.py
+  function: list_attachments
+  description: List uploaded chat attachments (metadata only).
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: ProjectOverviewAgent
+  file: mermaid_sequence_diagram.py
+  function: mermaid_sequence_diagram
+  description: Render the workflow sequence diagram artifact for user review.
+  tool_type: UI_Surface
+  auto_tool_call: true
+  ui:
+    component: MermaidSequenceDiagram
+    mode: artifact
+- agent: ContextVariablesAgent
+  file: attachments_tools.py
+  function: list_attachments
+  description: List uploaded chat attachments (metadata only).
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: DownloadAgent
+  file: attachments_tools.py
+  function: set_attachment_intent
+  description: Update an attachment's intent/bundle_path (hybrid model; gated by attachments_allow_bundling).
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: ContextVariablesAgent
+  file: attachments_tools.py
+  function: set_attachment_intent
+  description: Update an attachment's intent/bundle_path (hybrid model; gated by attachments_allow_bundling).
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: ContextVariablesAgent
+  file: get_or_request_api_key.py
+  function: get_or_request_api_key
+  description: Smart API key retrieval - checks existing connectors first, only prompts if expired/missing.
+  tool_type: UI_Tool
+  auto_tool_call: false
+  ui:
+    component: AgentAPIKeysBundleInput
+    mode: inline
+lifecycle_tools:
+- trigger: before_agent
+  agent: ContextVariablesAgent
+  file: collect_api_keys.py
+  function: collect_api_keys_from_action_plan
+  description: Collect API keys for third-party services before context variable planning
+  tool_type: UI_Tool
+  ui:
+    component: AgentAPIKeysBundleInput
+    mode: inline
+- trigger: after_agent
+  agent: OrchestratorAgent
+  file: iterator_tool.py
+  function: iterator_check
+  description: 'Generic iterator controller: manages loop state for multi-item processing'
+  tool_type: Agent_Tool

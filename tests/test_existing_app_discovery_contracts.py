@@ -34,7 +34,7 @@ class _Context(dict):
 
 
 def test_existing_app_discovery_structured_outputs_use_augmentation_artifact() -> None:
-    data = _read_yaml("mozaiks-platform/app/workflows/ExistingAppDiscovery/structured_outputs.yaml")
+    data = _read_yaml("factory_app/app/workflows/ExistingAppDiscovery/structured_outputs.yaml")
 
     assert data["registry"]["DiscoveryArtifactAssemblerAgent"] == "ExistingAppAugmentationArtifact"
 
@@ -63,8 +63,8 @@ def test_existing_app_discovery_structured_outputs_use_augmentation_artifact() -
 
 
 def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> None:
-    context_vars = _read_yaml("mozaiks-platform/app/workflows/ExistingAppDiscovery/context_variables.yaml")
-    agents = _read_text("mozaiks-platform/app/workflows/ExistingAppDiscovery/agents.yaml")
+    context_vars = _read_yaml("factory_app/app/workflows/ExistingAppDiscovery/context_variables.yaml")
+    agents = _read_text("factory_app/app/workflows/ExistingAppDiscovery/agents.yaml")
 
     definitions = context_vars["definitions"]
     assert "discovery_preset" not in definitions
@@ -100,7 +100,7 @@ def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> N
 
 
 def test_create_route_enters_canonical_build_transition() -> None:
-    registry = _read_yaml("mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json")
+    registry = _read_yaml("factory_app/app/workflows/extended_orchestration/extension_registry.json")
     create_page = next(item for item in registry["entrypoints"] if item["path"] == "/create")
 
     assert create_page["transition"] == "app_type_selector"
@@ -111,8 +111,8 @@ def test_create_route_enters_canonical_build_transition() -> None:
 
 
 def test_new_app_entry_routes_into_valueengine_first() -> None:
-    registry = _read_yaml("mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json")
-    value_context = _read_yaml("mozaiks-platform/app/workflows/ValueEngine/context_variables.yaml")
+    registry = _read_yaml("factory_app/app/workflows/extended_orchestration/extension_registry.json")
+    value_context = _read_yaml("factory_app/app/workflows/ValueEngine/context_variables.yaml")
 
     workflow_sequences = registry.get("workflow_sequences") or []
     build_journey = next(item for item in workflow_sequences if item["id"] == "build")
@@ -128,34 +128,35 @@ def test_new_app_entry_routes_into_valueengine_first() -> None:
     transition_map = {item["id"]: item for item in registry["transitions"]}
     app_type_selector = transition_map["app_type_selector"]
     assert app_type_selector["transition_type"] == "user_choice_context"
-    assert app_type_selector["route_to"] == "ValueEngine"
     new_app_option = next(item for item in app_type_selector["options"] if item["id"] == "new_app")
+    assert new_app_option["route_to"] == "ValueEngine"
     assert new_app_option["context_variables"] == {"app_type": "new"}
     assert "app_type" in value_context["definitions"]
 
 
 def test_existing_app_entry_uses_valueengine_with_context() -> None:
-    registry = _read_yaml("mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json")
+    registry = _read_yaml("factory_app/app/workflows/extended_orchestration/extension_registry.json")
     transition_map = {item["id"]: item for item in registry["transitions"]}
 
     app_type_selector = transition_map["app_type_selector"]
     existing_app_option = next(item for item in app_type_selector["options"] if item["id"] == "existing_app")
+    assert existing_app_option["route_to"] == "ValueEngine"
     assert existing_app_option["context_variables"] == {"app_type": "existing"}
-    assert "route_to" not in existing_app_option
 
     assert "existing_app_entry_selector" not in transition_map
 
     coding_selector = transition_map["coding_journey_selector"]
     assert coding_selector["transition_type"] == "user_choice_context"
-    assert coding_selector["route_to"] == "DesignDocs"
     coding_options = {item["id"]: item for item in coding_selector["options"]}
+    assert coding_options["autonomous"]["route_to"] == "DesignDocs"
+    assert coding_options["guided"]["route_to"] == "DesignDocs"
     assert coding_options["autonomous"]["context_variables"]["design_docs_hitl"] is False
     assert coding_options["guided"]["context_variables"]["design_docs_hitl"] is True
 
 
 def test_existing_app_preload_supports_workspace_host_with_split_repo_inputs() -> None:
     module = _load_module(
-        "mozaiks-platform/app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
+        "factory_app/app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
         "tests.preload_discovery_context_direct",
     )
 
@@ -268,7 +269,7 @@ def test_existing_app_preload_supports_workspace_host_with_split_repo_inputs() -
 
 def test_existing_app_artifact_saver_persists_canonical_fields() -> None:
     module = _load_module(
-        "mozaiks-platform/app/workflows/ExistingAppDiscovery/tools/save_existing_app_artifacts.py",
+        "factory_app/app/workflows/ExistingAppDiscovery/tools/save_existing_app_artifacts.py",
         "tests.save_existing_app_artifacts_direct",
     )
 
@@ -362,10 +363,13 @@ def test_existing_app_strategy_docs_are_indexed() -> None:
 
 
 def test_platform_readme_documents_existing_app_dogfood_path() -> None:
-    readme_text = _read_text("mozaiks-platform/README.md")
+    from conftest import active_app_root
+    app_root = active_app_root()
+    readme_text = (app_root.parent / "README.md").read_text(encoding="utf-8")
 
     assert "Existing-App Dogfood" in readme_text
     assert "host_app_source" in readme_text
     assert "workspace_host" in readme_text
     assert "ThemeCapture" in readme_text
     assert "/api/themes/mozaiks-platform" in readme_text
+

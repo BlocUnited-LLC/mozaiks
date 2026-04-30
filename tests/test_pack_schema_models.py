@@ -17,7 +17,7 @@ parse_workflow_pack_graph = _schema.parse_workflow_pack_graph
 def test_pack_metadata_structured_output_transition_options_match_runtime_contract() -> None:
     path = (
         Path(__file__).resolve().parents[1]
-        / "mozaiks-platform"
+        / "factory_app"
         / "app"
         / "workflows"
         / "AgentGenerator"
@@ -31,7 +31,7 @@ def test_pack_metadata_structured_output_transition_options_match_runtime_contra
 def test_pack_metadata_structured_output_entrypoints_match_runtime_contract() -> None:
     path = (
         Path(__file__).resolve().parents[1]
-        / "mozaiks-platform"
+        / "factory_app"
         / "app"
         / "workflows"
         / "AgentGenerator"
@@ -99,8 +99,7 @@ def test_parse_global_pack_graph_allows_workflow_entrypoints() -> None:
                     "id": "app_type_selector",
                     "transition_type": "user_choice_context",
                     "ui": {"component": "AppTypeSelector", "mode": "screen"},
-                    "route_to": "ValueEngine",
-                    "options": [{"id": "new_app", "context_variables": {"app_type": "new"}}],
+                    "options": [{"id": "new_app", "route_to": "ValueEngine", "context_variables": {"app_type": "new"}}],
                 }
             ],
         }
@@ -281,10 +280,10 @@ def test_parse_global_pack_graph_allows_transition_context_variables() -> None:
                     "id": "entry",
                     "transition_type": "user_choice_context",
                     "ui": {"component": "LauncherScreen", "mode": "screen"},
-                    "route_to": "ValueEngine",
                     "options": [
                         {
                             "id": "new_app",
+                            "route_to": "ValueEngine",
                             "context_variables": {"app_type": "new"},
                         }
                     ],
@@ -295,7 +294,33 @@ def test_parse_global_pack_graph_allows_transition_context_variables() -> None:
 
     option = graph.transitions[0].options[0]
     assert option.context_variables == {"app_type": "new"}
-    assert option.route_to is None
+    assert option.route_to == "ValueEngine"
+
+
+def test_parse_global_pack_graph_rejects_top_level_route_to_for_user_choice_context() -> None:
+    with pytest.raises(ValueError, match=r"options\[\]\.route_to"):
+        parse_global_pack_graph(
+            {
+                "version": 3,
+                "workflows": [{"id": "ValueEngine"}],
+                "workflow_sequences": [],
+                "transitions": [
+                    {
+                        "id": "entry",
+                        "transition_type": "user_choice_context",
+                        "ui": {"component": "LauncherScreen", "mode": "screen"},
+                        "route_to": "ValueEngine",
+                        "options": [
+                            {
+                                "id": "new_app",
+                                "route_to": "ValueEngine",
+                                "context_variables": {"app_type": "new"},
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
 
 
 def test_parse_global_pack_graph_allows_transition_steps_in_workflow_sequences() -> None:
@@ -318,8 +343,7 @@ def test_parse_global_pack_graph_allows_transition_steps_in_workflow_sequences()
                     "id": "coding_journey_selector",
                     "transition_type": "user_choice_context",
                     "ui": {"component": "CodingJourneySelector", "mode": "screen"},
-                    "route_to": "DesignDocs",
-                    "options": [{"id": "guided", "context_variables": {"design_docs_hitl": True}}],
+                    "options": [{"id": "guided", "route_to": "DesignDocs", "context_variables": {"design_docs_hitl": True}}],
                 }
             ],
         }

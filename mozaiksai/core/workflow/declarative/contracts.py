@@ -48,8 +48,9 @@ class OrchestratorTriggerSpec(DeclarativeModel):
     endpoint: Optional[str] = None
     method: Optional[str] = None
     description: Optional[str] = None
+    capability_id: Optional[str] = None
 
-    @field_validator("type", "event", "endpoint", "method", "description", mode="before")
+    @field_validator("type", "event", "endpoint", "method", "description", "capability_id", mode="before")
     @classmethod
     def _normalize_optional_fields(cls, value: Any) -> Optional[str]:
         return _optional_text(value)

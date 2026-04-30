@@ -1,0 +1,578 @@
+# ThemeCapture Structured Outputs
+#
+# Only ThemeConfigAssemblerAgent produces structured output.
+# The output matches the live theme_config contract used by themeProvider.js.
+
+registry:
+  ThemeInterviewAgent: null
+  ThemeAnalysisAgent: null
+  ThemeConfigAssemblerAgent: CapturedThemeConfig
+
+models:
+  ColorVariant:
+    type: model
+    description: A semantic color with main/light/dark hex variants.
+    fields:
+      main:
+        type: str
+        description: Primary hex value.
+      light:
+        type: str
+        description: Lighter variant.
+      dark:
+        type: str
+        description: Darker variant.
+      name:
+        type: str
+        description: Named palette color.
+
+  BackgroundColors:
+    type: model
+    description: Background layers.
+    fields:
+      base:
+        type: str
+        description: Deepest background color.
+      surface:
+        type: str
+        description: Default panel surface color.
+      elevated:
+        type: str
+        description: Elevated container color.
+      overlay:
+        type: str
+        description: Semi-transparent overlay color.
+
+  BorderColors:
+    type: model
+    description: Border color tones.
+    fields:
+      subtle:
+        type: str
+        description: Faint divider color.
+      strong:
+        type: str
+        description: Strong border color.
+      accent:
+        type: str
+        description: Accent border color.
+
+  TextColors:
+    type: model
+    description: Text hierarchy colors.
+    fields:
+      primary:
+        type: str
+        description: Primary text color.
+      secondary:
+        type: str
+        description: Secondary text color.
+      muted:
+        type: str
+        description: Muted text color.
+      onAccent:
+        type: str
+        description: Text color used on accent backgrounds.
+
+  FontSpec:
+    type: model
+    description: A font slot with family, fallbacks, and optional Google Font URL.
+    fields:
+      family:
+        type: str
+        description: Font family name.
+      fallbacks:
+        type: str
+        description: CSS fallback chain.
+      googleFont:
+        type: optional_str
+        description: Google Fonts URL or null.
+      tailwindClass:
+        type: str
+        description: Tailwind class name.
+
+  LogoFontSpec:
+    type: model
+    description: Logo font slot including optional local font source.
+    fields:
+      family:
+        type: optional_str
+        description: Font family name or null.
+      fallbacks:
+        type: str
+        description: CSS fallback chain.
+      localFont:
+        type: bool
+        description: True when the logo font is self-hosted.
+      src:
+        type: optional_str
+        description: Optional self-hosted font source path.
+      tailwindClass:
+        type: str
+        description: Tailwind class name.
+
+  ThemeFonts:
+    type: model
+    description: All theme font slots.
+    fields:
+      body:
+        type: FontSpec
+        description: Body copy font slot.
+      heading:
+        type: FontSpec
+        description: Heading font slot.
+      logo:
+        type: LogoFontSpec
+        description: Logo font slot.
+
+  ThemeBranding:
+    type: model
+    description: v2 theme branding block.
+    fields:
+      app_name:
+        type: str
+        description: Display name for the app.
+      logo_url:
+        type: optional_str
+        description: Logo path or null.
+      favicon_url:
+        type: optional_str
+        description: Favicon path or null.
+
+  ThemeV2:
+    type: model
+    description: Simplified v2 theme tokens for the --mz-* CSS variable system.
+    fields:
+      primary:
+        type: str
+        description: Named palette color.
+      variant:
+        type: str
+        description: modern, classic, or brutalist.
+      radius:
+        type: str
+        description: none, small, medium, or large.
+      font:
+        type: str
+        description: Body font token.
+      font_heading:
+        type: str
+        description: Heading font token.
+      appearance:
+        type: str
+        description: dark, light, or system.
+      density:
+        type: str
+        description: compact, comfortable, or spacious.
+      branding:
+        type: ThemeBranding
+        description: App branding metadata.
+
+  Identity:
+    type: model
+    description: App identity block.
+    fields:
+      name:
+        type: str
+        description: Internal app name.
+      tagline:
+        type: str
+        description: Short app tagline.
+      app_name:
+        type: str
+        description: Display name.
+
+  AssetConfig:
+    type: model
+    description: Optional brand assets for Mozaiks-owned surfaces.
+    fields:
+      logo:
+        type: optional_str
+        description: Logo mark asset or null.
+      wordmark:
+        type: optional_str
+        description: Wordmark asset or null.
+      favicon:
+        type: optional_str
+        description: Favicon asset or null.
+      chatbackgroundImage:
+        type: optional_str
+        description: Optional chat background image asset or null.
+
+  ThemeColors:
+    type: model
+    description: Full semantic color map.
+    fields:
+      primary:
+        type: ColorVariant
+        description: Primary semantic color.
+      secondary:
+        type: ColorVariant
+        description: Secondary semantic color.
+      accent:
+        type: ColorVariant
+        description: Accent semantic color.
+      success:
+        type: ColorVariant
+        description: Success semantic color.
+      warning:
+        type: ColorVariant
+        description: Warning semantic color.
+      error:
+        type: ColorVariant
+        description: Error semantic color.
+      background:
+        type: BackgroundColors
+        description: Background layers.
+      border:
+        type: BorderColors
+        description: Border tones.
+      text:
+        type: TextColors
+        description: Text hierarchy.
+
+  ThemeShadows:
+    type: model
+    description: Named shadow values matching the theme contract.
+    fields:
+      primary:
+        type: str
+        description: Primary shadow value.
+      secondary:
+        type: str
+        description: Secondary shadow value.
+      accent:
+        type: str
+        description: Accent shadow value.
+      success:
+        type: str
+        description: Success shadow value.
+      warning:
+        type: str
+        description: Warning shadow value.
+      error:
+        type: str
+        description: Error shadow value.
+      elevated:
+        type: str
+        description: Elevated container shadow.
+      focus:
+        type: str
+        description: Focus ring shadow.
+
+  ChatModeConfig:
+    type: model
+    description: Chat mode tint and label.
+    fields:
+      tint:
+        type: str
+        description: Mode tint color.
+      label:
+        type: str
+        description: Mode label.
+
+  ChatModes:
+    type: model
+    description: Supported chat mode styling.
+    fields:
+      ask:
+        type: ChatModeConfig
+        description: Ask mode styling.
+      workflow:
+        type: ChatModeConfig
+        description: Workflow mode styling.
+
+  ChatUi:
+    type: model
+    description: Chat UI configuration.
+    fields:
+      modes:
+        type: ChatModes
+        description: Chat mode styling map.
+      bubbleRadius:
+        type: str
+        description: Bubble radius CSS value.
+      feedMaxWidth:
+        type: str
+        description: Maximum readable width for the chat feed.
+      feedPaddingTop:
+        type: ResponsiveSpacing
+        description: Responsive top padding for the chat feed.
+      feedPaddingBottom:
+        type: ResponsiveSpacing
+        description: Responsive bottom padding for the chat feed.
+      feedPaddingX:
+        type: ResponsiveSpacing
+        description: Responsive horizontal padding for the chat feed.
+      bubblePaddingY:
+        type: str
+        description: Assistant bubble vertical padding.
+      bubblePaddingX:
+        type: str
+        description: Assistant bubble horizontal padding.
+      userBubblePaddingY:
+        type: str
+        description: User bubble vertical padding.
+      userBubblePaddingX:
+        type: str
+        description: User bubble horizontal padding.
+      bubbleGap:
+        type: str
+        description: Vertical gap between message groups.
+      bubbleHeaderGap:
+        type: str
+        description: Gap between bubble header and body.
+      namePillPaddingY:
+        type: str
+        description: Name-pill vertical padding.
+      namePillPaddingX:
+        type: str
+        description: Name-pill horizontal padding.
+      namePillFontSize:
+        type: str
+        description: Name-pill font size.
+
+  PrimitiveRadiusConfig:
+    type: model
+    description: Shared radius primitives for shell and content surfaces.
+    fields:
+      surface:
+        type: str
+        description: Default surface radius.
+      control:
+        type: str
+        description: Default control/button radius.
+      bubble:
+        type: str
+        description: Chat bubble radius.
+
+  PrimitiveMeasureConfig:
+    type: model
+    description: Shared measure primitives.
+    fields:
+      shell:
+        type: str
+        description: Maximum shell frame width.
+      chat_feed:
+        type: str
+        description: Maximum readable width for the chat feed.
+
+  PrimitiveSpacingConfig:
+    type: model
+    description: High-level spacing scale for semantic token fallbacks.
+    fields:
+      tight:
+        type: str
+        description: Tight spacing value.
+      base:
+        type: str
+        description: Default spacing value.
+      loose:
+        type: str
+        description: Loose spacing value.
+
+  ThemePrimitives:
+    type: model
+    description: Shared visual primitives captured from the host brand.
+    fields:
+      radius:
+        type: PrimitiveRadiusConfig
+        description: Radius primitives.
+      measure:
+        type: PrimitiveMeasureConfig
+        description: Measure primitives.
+      spacing:
+        type: PrimitiveSpacingConfig
+        description: Spacing primitives.
+
+  ResponsiveSpacing:
+    type: model
+    description: Responsive spacing scale.
+    fields:
+      base:
+        type: str
+        description: Base breakpoint value.
+      sm:
+        type: optional_str
+        description: Small breakpoint override.
+      md:
+        type: optional_str
+        description: Medium breakpoint override.
+      xl:
+        type: optional_str
+        description: Extra-large breakpoint override.
+
+  ShellFrameUi:
+    type: model
+    description: Shell frame sizing tokens.
+    fields:
+      maxWidth:
+        type: str
+        description: Maximum width of the shell frame.
+
+  ShellHeaderUi:
+    type: model
+    description: Semantic header spacing and sizing tokens.
+    fields:
+      height:
+        type: str
+        description: Header height.
+      paddingX:
+        type: str
+        description: Horizontal padding inside the header frame.
+      gap:
+        type: str
+        description: Gap between left and right header clusters.
+      clusterGap:
+        type: str
+        description: Gap within the left header cluster.
+      navGap:
+        type: str
+        description: Gap between header nav actions.
+      navPaddingLeft:
+        type: str
+        description: Left inset before header navigation.
+      controlGap:
+        type: str
+        description: Gap between utility controls.
+      actionHeight:
+        type: str
+        description: Primary action height.
+      actionPaddingX:
+        type: str
+        description: Primary action horizontal padding.
+      utilitySize:
+        type: str
+        description: Icon button size.
+      utilityPadding:
+        type: str
+        description: Icon button padding.
+      avatarSize:
+        type: str
+        description: Small avatar size.
+      avatarLargeSize:
+        type: str
+        description: Large avatar size for dropdown summaries.
+      profileHeight:
+        type: str
+        description: Profile control height.
+      profilePaddingX:
+        type: str
+        description: Profile control horizontal padding.
+      panelRadius:
+        type: str
+        description: Dropdown and popover radius.
+
+  ShellFooterUi:
+    type: model
+    description: Semantic footer spacing tokens.
+    fields:
+      maxWidth:
+        type: str
+        description: Maximum footer frame width.
+      paddingY:
+        type: str
+        description: Footer vertical padding.
+      paddingX:
+        type: str
+        description: Footer horizontal padding.
+      gap:
+        type: str
+        description: Gap between footer links.
+
+  ShellUi:
+    type: model
+    description: Semantic shell tokens for Mozaiks-owned chrome.
+    fields:
+      frame:
+        type: ShellFrameUi
+        description: Shell frame sizing tokens.
+      header:
+        type: ShellHeaderUi
+        description: Header spacing and sizing tokens.
+      footer:
+        type: ShellFooterUi
+        description: Footer spacing tokens.
+
+  PageMaxWidthUi:
+    type: model
+    description: Layout-specific page width tokens.
+    fields:
+      grid:
+        type: str
+        description: Max width for grid pages.
+      sidebar:
+        type: str
+        description: Max width for sidebar pages.
+      full_width:
+        type: str
+        description: Max width for full-width pages.
+      split:
+        type: str
+        description: Max width for split pages.
+
+  PageUi:
+    type: model
+    description: Semantic page-frame tokens.
+    fields:
+      maxWidth:
+        type: PageMaxWidthUi
+        description: Layout-specific page widths.
+      paddingX:
+        type: ResponsiveSpacing
+        description: Horizontal page padding scale.
+      paddingY:
+        type: ResponsiveSpacing
+        description: Vertical page padding scale.
+      sectionGap:
+        type: str
+        description: Gap between page sections.
+      titlePaddingBottom:
+        type: str
+        description: Spacing below the page title.
+
+  UiConfig:
+    type: model
+    description: Semantic shell/page/chat configuration for Mozaiks-owned surfaces.
+    fields:
+      chat:
+        type: ChatUi
+        description: Chat UI configuration.
+      shell:
+        type: ShellUi
+        description: Shell chrome spacing and sizing tokens.
+      page:
+        type: PageUi
+        description: Persistent page-frame tokens.
+
+  CapturedThemeConfig:
+    type: model
+    description: Complete theme_config.json output matching the live Mozaiks theme contract.
+    fields:
+      agent_message:
+        type: str
+        description: Summary message about the captured theme.
+      theme:
+        type: ThemeV2
+        description: Simplified v2 theme tokens.
+      identity:
+        type: Identity
+        description: App identity metadata.
+      assets:
+        type: AssetConfig
+        description: Brand assets for Mozaiks-owned surfaces.
+      primitives:
+        type: ThemePrimitives
+        description: Shared visual primitives for radii, measures, and spacing.
+      fonts:
+        type: ThemeFonts
+        description: Font slots for body, heading, and logo usage.
+      colors:
+        type: ThemeColors
+        description: Full semantic color map.
+      shadows:
+        type: ThemeShadows
+        description: Named shadow values.
+      ui:
+        type: UiConfig
+        description: Shell and chat configuration for Mozaiks-owned surfaces.

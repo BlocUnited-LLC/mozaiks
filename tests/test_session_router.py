@@ -8,6 +8,9 @@ _schema = import_module_directly("mozaiksai.core.workflow.pack.schema")
 _session_model = import_module_directly("mozaiksai.core.session.model")
 _session_persist = import_module_directly("mozaiksai.core.session.persistence")
 _session_router = import_module_directly("mozaiksai.core.session.router")
+_refinement_router = import_module_directly(
+    "factory_app.app.modules.factory_control_plane.backend.refinement_router"
+)
 _data_models = import_module_directly("mozaiksai.core.data.models")
 
 parse_global_pack_graph = _schema.parse_global_pack_graph
@@ -15,6 +18,7 @@ TriggerInput = _session_model.TriggerInput
 SessionRouter = _session_router.SessionRouter
 SessionStateStore = _session_persist.SessionStateStore
 WorkflowStatus = _data_models.WorkflowStatus
+get_refinement_trigger_route_resolver = _refinement_router.get_refinement_trigger_route_resolver
 
 
 class _MemoryCollection:
@@ -144,10 +148,14 @@ async def test_route_trigger_keeps_requested_workflow_when_dependencies_met(monk
 
 
 @pytest.mark.asyncio
-async def test_route_trigger_refinement_uses_refinement_router(monkeypatch):
+async def test_route_trigger_refinement_uses_injected_trigger_route_resolver(monkeypatch):
     persistence = _FakePersistence()
     store = SessionStateStore(persistence)
-    router = SessionRouter(persistence=persistence, store=store)
+    router = SessionRouter(
+        persistence=persistence,
+        store=store,
+        trigger_route_resolver=get_refinement_trigger_route_resolver(),
+    )
     pack = _make_pack()
     monkeypatch.setattr(_session_router, "load_global_pack_graph", lambda: pack)
 
@@ -157,10 +165,12 @@ async def test_route_trigger_refinement_uses_refinement_router(monkeypatch):
             user_id="user_1",
             trigger_source="refinement",
             workflow_id=None,
-            change_class="patch",
-            artifact_kind="workflow_bundle",
-            artifact_version_id="v1",
-            raw_user_request="Update workflow naming",
+            trigger_payload={
+                "change_class": "patch",
+                "artifact_kind": "workflow_bundle",
+                "artifact_version_id": "v1",
+                "raw_user_request": "Update workflow naming",
+            },
         )
     )
 
@@ -168,9 +178,28 @@ async def test_route_trigger_refinement_uses_refinement_router(monkeypatch):
     assert decision.requested_workflow_id == "AgentGenerator"
     assert decision.workflow_id == "ValueEngine"
     assert decision.rerouted_by_dependency is True
+    assert decision.lifecycle_state == _session_model.SessionLifecycle.ACTIVE
     assert decision.context_seed.get("change_class") == "patch"
     assert decision.context_seed.get("artifact_kind") == "workflow_bundle"
     assert decision.context_seed.get("artifact_version_id") == "v1"
+
+
+@pytest.mark.asyncio
+async def test_session_store_normalizes_legacy_refining_state_to_active():
+    persistence = _FakePersistence()
+    store = SessionStateStore(persistence)
+    session_coll = await persistence._coll("SessionRouterState")
+    session_coll._docs["session_router::app_1::user_1"] = {
+        "_id": "session_router::app_1::user_1",
+        "app_id": "app_1",
+        "user_id": "user_1",
+        "lifecycle_state": "refining",
+    }
+
+    state = await store.load(app_id="app_1", user_id="user_1")
+
+    assert state is not None
+    assert state.lifecycle_state == _session_model.SessionLifecycle.ACTIVE
 
 
 @pytest.mark.asyncio
@@ -303,9 +332,8 @@ async def test_resolve_transition_merges_option_context_variables(monkeypatch):
                     "id": "entry",
                     "transition_type": "user_choice_context",
                     "ui": {"component": "LauncherScreen", "mode": "screen"},
-                    "route_to": "ValueEngine",
                     "options": [
-                        {"id": "existing_app", "context_variables": {"app_type": "existing"}},
+                        {"id": "existing_app", "route_to": "ValueEngine", "context_variables": {"app_type": "existing"}},
                     ],
                 }
             ],
@@ -512,8 +540,7 @@ async def test_bind_workflow_session_infers_position_after_entry_transition(monk
                     "id": "app_type_selector",
                     "transition_type": "user_choice_context",
                     "ui": {"component": "AppTypeSelector", "mode": "screen"},
-                    "route_to": "ValueEngine",
-                    "options": [{"id": "new_app", "context_variables": {"app_type": "new"}}],
+                    "options": [{"id": "new_app", "route_to": "ValueEngine", "context_variables": {"app_type": "new"}}],
                 }
             ],
             "workflow_sequences": [
@@ -652,8 +679,7 @@ async def test_advance_journey_after_run_complete_can_pause_on_transition(monkey
                     "id": "coding_journey_selector",
                     "transition_type": "user_choice_context",
                     "ui": {"component": "CodingJourneySelector", "mode": "screen"},
-                    "route_to": "DesignDocs",
-                    "options": [{"id": "guided", "context_variables": {"design_docs_hitl": True}}],
+                    "options": [{"id": "guided", "route_to": "DesignDocs", "context_variables": {"design_docs_hitl": True}}],
                 }
             ],
             "workflow_sequences": [

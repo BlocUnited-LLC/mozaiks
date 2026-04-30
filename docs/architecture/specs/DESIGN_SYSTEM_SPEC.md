@@ -721,7 +721,7 @@ The contract boundary is strict:
 - `brand/theme_config.json` owns visual primitives plus semantic shell/page/chat tokens.
 - `config/shell.json` owns shell content and behavior such as header actions, profile menus, notification text, and footer links.
 - `config/asset_manifest.json` owns reusable media inventory metadata (asset ids, source/path/url, provenance, usage).
-- `pages/*.yaml` own persistent page structure and primitive composition.
+- `ui/pages/*.yaml` own persistent page structure and primitive composition.
 
 Do not put raw spacing, padding, widths, or density controls in `shell.json`.
 Do not put header actions or footer links in `theme_config.json`.
@@ -1321,3 +1321,4 @@ icons:
 │                                                                            │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
+

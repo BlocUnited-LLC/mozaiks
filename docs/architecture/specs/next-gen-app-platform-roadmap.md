@@ -34,7 +34,7 @@
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  1. SCHEMA-DRIVEN GENERATION                                                 │
-│     Agent outputs a structured schema (app.yaml + pages/*.yaml)              │
+│     Agent outputs a structured schema (app.yaml + ui/pages/*.yaml)              │
 │     Runtime renders it using pre-built primitives                            │
 │     → Design system survives generation. No frozen raw code.                 │
 │                                                                              │
@@ -97,7 +97,7 @@
 │  ┌──────────────────────────────────────────────────────────────────────┐   │
 │  │  AppGenerator workflow                                                 │   │
 │  │  InterviewAgent → AppPlanAgent → AppSchemaAgent → AssemblyAgent      │   │
-│  │  Output: app.yaml + pages/*.yaml (primitive schemas) + modules/       │   │
+│  │  Output: app.yaml + ui/pages/*.yaml (primitive schemas) + modules/       │   │
 │  │  NOT raw React code — declarative schemas only                        │   │
 │  │  AppSchemaAgent outputs AppSchemaOutput (manifest + pages + theme)    │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
@@ -112,7 +112,7 @@
 │                              ▼                                               │
 │  PHASE 4: RUNTIME RENDERING                                                  │
 │  ┌──────────────────────────────────────────────────────────────────────┐   │
-│  │  Page Renderer reads pages/*.yaml                                      │   │
+│  │  Page Renderer reads ui/pages/*.yaml                                      │   │
 │  │  Resolves data bindings (module:contacts:list → API call → data)      │   │
 │  │  Maps primitive types → pre-built React components                    │   │
 │  │  Applies theme tokens from app.yaml                                   │   │
@@ -187,17 +187,17 @@ pages:
 
 Currently: gathers CRUD/page/auth/integration requirements, then generates… presumably raw app code.
 
-**Needs to become:** outputs `app.yaml` + `pages/*.yaml` using primitive schemas. The E2B sandbox then validates the schema renders correctly without needing npm install.
+**Needs to become:** outputs `app.yaml` + `ui/pages/*.yaml` using primitive schemas. The E2B sandbox then validates the schema renders correctly without needing npm install.
 
 Agent roster change needed:
 - `InterviewAgent` — stays: gathers requirements
 - Add `SchemaAgent` — translates requirements into `app.yaml` (theme, navigation, module declarations)
-- Add `PageDefinitionAgent` — translates page requirements into `pages/*.yaml` primitive schemas
+- Add `PageDefinitionAgent` — translates page requirements into `ui/pages/*.yaml` primitive schemas
 - `ModuleAgent` — stays: generates Python module actions (CRUD handlers)
 
 ### AgentGenerator → no schema changes needed
 
-Already outputs the correct declarative YAML format (orchestrator.yaml, agents.yaml, handoffs.yaml, etc.). The only future addition is generating a companion `pages/*.yaml` if the workflow has an associated dashboard/status page.
+Already outputs the correct declarative YAML format (orchestrator.yaml, agents.yaml, handoffs.yaml, etc.). The only future addition is generating a companion `ui/pages/*.yaml` if the workflow has an associated dashboard/status page.
 
 ---
 
@@ -208,8 +208,8 @@ Already outputs the correct declarative YAML format (orchestrator.yaml, agents.y
 - [ ] Install shadcn/ui base components into `chat-ui/src/ui/base/` — the internal layer AI never sees
 - [ ] Install and configure Tailwind CSS in `chat-ui/`
 - [ ] Create CSS token system (`chat-ui/src/ui/theme/tokens.js`) — maps theme config to CSS variables
-- [ ] Create `mozaiks-platform/brand/` folder with `theme_config.json` and base CSS tokens
-- [ ] Wire `mozaiks-platform/brand/` into the existing `themeProvider.js` pipeline
+- [ ] Create `mozaiks-platform/app/brand/` folder with `theme_config.json` and base CSS tokens
+- [ ] Wire `mozaiks-platform/app/brand/` into the existing `themeProvider.js` pipeline
 - [ ] Create `chat-ui/src/ui/primitives/` directory — home for all Mozaiks primitives
 
 ### Layer 1 — Core Primitives (the moat, build in this order)
@@ -255,7 +255,7 @@ Already outputs the correct declarative YAML format (orchestrator.yaml, agents.y
 - [ ] `ComponentCompositor` — maps `type: DataTable` → `<MozaiksDataTable />` with resolved props
 - [ ] `PageRenderer` React component — renders a full `PageDefinition` schema
 - [ ] Register `PageRenderer` in `componentRegistry` so navigation can mount it
-- [ ] Add `/api/pages/{name}` endpoint in `platform_app.py` — serves page schemas from the active app `pages/` directory
+- [ ] Add `/api/pages/{name}` endpoint in `mozaiksai/hosts/platform.py` — serves page schemas from the active app `pages/` directory
 
 ### Layer 4 — Workflow Updates
 
@@ -290,8 +290,8 @@ Already outputs the correct declarative YAML format (orchestrator.yaml, agents.y
 
 ### Layer 5 — mozaiks-platform Migration
 
-- [ ] Create `mozaiks-platform/brand/theme_config.json` with platform theme tokens
-- [ ] Create `mozaiks-platform/app/pages/dashboard.yaml` using DataTable + Card + Stat primitives (replaces `Dashboard.jsx` hand-written code)
+- [ ] Create `mozaiks-platform/app/brand/theme_config.json` with platform theme tokens
+- [ ] Create `mozaiks-platform/app/ui/pages/dashboard.yaml` using DataTable + Card + Stat primitives (replaces `Dashboard.jsx` hand-written code)
 - [ ] Keep `CreateApp.jsx` as-is — it's a workflow launcher, not a CRUD page, intentionally imperative
 - [ ] Add `AppCard` usage as a `Card` primitive instance in `dashboard.yaml`
 - [ ] Verify `list_apps` module endpoint wired and returning data
@@ -309,8 +309,8 @@ Already outputs the correct declarative YAML format (orchestrator.yaml, agents.y
 - [x] `LauncherScreen.jsx` + `LauncherCard.jsx` registered as core shell components
 
 **Shell wire-up**
-- [x] `/api/transitions/{id}` endpoint in `platform_app.py`
-- [x] `/api/transitions/resolve` endpoint in `platform_app.py`
+- [x] `/api/transitions/{id}` endpoint in `mozaiksai/hosts/platform.py`
+- [x] `/api/transitions/resolve` endpoint in `mozaiksai/hosts/platform.py`
 - [x] Shell router detects `transition:` nav entries and renders `TransitionScreen`
 - [x] Transition chaining: `route_to` transition id -> render next transition
 - [x] Workflow target resolution creates chat session with validated context variables
@@ -327,8 +327,8 @@ Already outputs the correct declarative YAML format (orchestrator.yaml, agents.y
 
 ### Layer 7 — CLI
 
-- [ ] `mozaiks add page <name>` — scaffolds `pages/<name>.yaml` with starter schema
-- [ ] `mozaiks validate` — validates `app.yaml` + all `pages/*.yaml` against primitive schemas
+- [ ] `mozaiks add page <name>` — scaffolds `ui/pages/<name>.yaml` with starter schema
+- [ ] `mozaiks validate` — validates `app.yaml` + all `ui/pages/*.yaml` against primitive schemas
 - [ ] `mozaiks build` — packages `app.yaml` + `pages/` + `modules/` → deployable bundle
 - [ ] `mozaiks doctor` — checks Python/Node versions, DB, primitives installed
 
@@ -340,7 +340,7 @@ Already outputs the correct declarative YAML format (orchestrator.yaml, agents.y
 Week 1 — Foundation + 3 primitives (unblocks testing)
   Layer 0 complete
   Card, Grid, Stat primitives
-  mozaiks-platform/brand/ wired
+  mozaiks-platform/app/brand/ wired
 
 Week 2 — Core table + form primitives (unblocks AppGenerator output)
   DataTable primitive with ui.datatable.refresh
@@ -384,10 +384,13 @@ Week 5 — E2B + polish
    - Recommendation: start in `chat-ui/`, extract to package when OSS CLI needs it
 
 2. **Data binding protocol**: does `module:contacts:list` call the Python module directly via API, or go through a GraphQL/REST adapter?
-   - Recommendation: HTTP to `/api/operations/{name}/{action}` — already the pattern in `platform_app.py`
+   - Recommendation: HTTP to `/api/operations/{name}/{action}` — already the pattern in `mozaiksai/hosts/platform.py`
 
 3. **AppGenerator output format**: page schemas as `.yaml` files or inline in `app.yaml`?
-   - Recommendation: separate `pages/*.yaml` files per spec — easier for agents to output incrementally
+   - Recommendation: separate `ui/pages/*.yaml` files per spec — easier for agents to output incrementally
 
 4. **Event bus transport**: do App UI events share the workflow WebSocket or get a separate connection?
    - Recommendation: share the workflow WebSocket — same bus, different event namespace (`ui.*` vs workflow events)
+
+
+

@@ -20,10 +20,10 @@ Responsibilities:
 import asyncio
 import json
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Set, Type
 
 from pydantic import ValidationError
+from logs.runtime_artifacts import get_agent_outputs_dir
 
 from .base import BaseEventHandler
 
@@ -389,7 +389,7 @@ class TextEventHandler(BaseEventHandler):
     ) -> None:
         """Save structured output to agent outputs file."""
         try:
-            agent_outputs_dir = Path("logs/agent_outputs")
+            agent_outputs_dir = get_agent_outputs_dir()
             agent_outputs_dir.mkdir(parents=True, exist_ok=True)
 
             output_file = agent_outputs_dir / f"agent_outputs_{ctx.chat_id}.jsonl"

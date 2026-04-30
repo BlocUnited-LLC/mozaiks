@@ -221,8 +221,11 @@ class AutoToolEventHandler:
             }
             logger.debug("[AUTO_TOOL] Agent %s has functions: %s", agent, list(agent_function_index[agent].keys()))
 
-        workflows_root = Path(str(workflow_manager.workflows_base_path))
-        workflow_path = workflows_root / workflow_name
+        workflow_path = workflow_manager.resolve_workflow_path(workflow_name)
+        if workflow_path is None:
+            logger.warning("[AUTO_TOOL] Workflow path not found for workflow=%s", workflow_name)
+            self._workflow_bindings[workflow_name] = mapping
+            return mapping
         tools_yaml_path = workflow_path / "tools.yaml"
         tools_data: Dict[str, Any] = {}
 

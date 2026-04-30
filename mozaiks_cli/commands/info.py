@@ -3,8 +3,9 @@ mozaiks info - Show current configuration.
 """
 
 import json
-import os
 from pathlib import Path
+
+from mozaiks_cli.workspace import resolve_active_app_root
 
 # Tier definitions
 TIER_PRESETS = {
@@ -71,10 +72,12 @@ def _show_available_tiers():
 
 def _show_current_config():
     """Show current project configuration."""
-    app_json_path = Path("platform") / "app.json"
+    app_root = resolve_active_app_root(Path(".").resolve())
+    app_root_label = app_root.name if app_root.name in {"app", "platform"} else "."
+    app_json_path = app_root / "app.json"
 
     if not app_json_path.exists():
-        print("No platform/app.json found.")
+        print(f"No {app_root_label}/app.json found.")
         print("Run 'mozaiks init <preset>' to create a new project.")
         return
 
@@ -82,7 +85,7 @@ def _show_current_config():
         with open(app_json_path, "r", encoding="utf-8") as f:
             app_config = json.load(f)
     except Exception as e:
-        print(f"Error reading platform/app.json: {e}")
+        print(f"Error reading {app_json_path}: {e}")
         return
 
     # Extract current preset

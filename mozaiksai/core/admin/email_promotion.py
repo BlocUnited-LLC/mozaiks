@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 from typing import List, Optional
 
+from mozaiksai.core.admin.paths import resolve_admin_config_path
 from logs.logging_config import get_core_logger
 
 logger = get_core_logger("admin.email_promotion")
@@ -26,7 +27,7 @@ def get_admin_emails() -> List[str]:
     """
     Return the normalised admin email list from admin.json.
 
-    Checks both the OSS platform/ path and the mozaiks-platform/app/ path.
+    Checks the active app root, defaulting to the local App Zero app root.
     Returns an empty list if admin.json is missing or malformed — callers
     treat an empty list as "no email promotion configured".
     """
@@ -51,9 +52,4 @@ def is_admin_by_email(email: Optional[str]) -> bool:
 
 def _resolve_admin_config_path() -> Path:
     """Find admin.json from the active platform root."""
-    monorepo = Path(__file__).parents[3] / "mozaiks-platform" / "app"
-    if monorepo.is_dir():
-        candidate = monorepo / "config" / "admin.json"
-        if candidate.exists():
-            return candidate
-    return Path(__file__).parents[3] / "platform" / "config" / "admin.json"
+    return resolve_admin_config_path()

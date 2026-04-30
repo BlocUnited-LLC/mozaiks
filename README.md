@@ -11,18 +11,7 @@
 
 </div>
 
-## 🎯 What is This?
-
-This repo now uses four canonical host entrypoints:
-
-- `runtime_app.py` - reusable runtime substrate
-- `platform_app.py` - headless app host
-- `studio_app.py` - local/private builder host
-- `mozaiks_app.py` - hosted Mozaiks product host
-
-`mozaiksai/` is the runtime layer inside that model. It is not the whole stack by itself.
-
-### **mozaiksai Runtime**
+## 🎯 What is MozaiksAI?
 Production-ready declarative orchestration engine for AG2 (formerly Microsoft Autogen):
 
 - ✅ **Event-Driven Architecture** — Runtime, app, workflow, UI, and hosted events stay separated by contract
@@ -35,6 +24,12 @@ Production-ready declarative orchestration engine for AG2 (formerly Microsoft Au
 - ✅ **Persistent State Management** — Resume conversations exactly where they left off
 
 **Soon:** `pip install mozaiksai`
+
+Current repo layout:
+
+- `web_shell/` - local Vite shell host source
+- `mozaiks-platform/app/` - repo-local App Zero app workspace
+- `factory_app/app/workflows/` - shared builder workflow root
 
 ---
 
@@ -63,41 +58,12 @@ Production-ready declarative orchestration engine for AG2 (formerly Microsoft Au
 ## 📚 Documentation
 
 - [Architecture Overview](ARCHITECTURE.md) — System design and component model
-- [Separation Plan](SEPARATION_PLAN.md) — How we're splitting runtime from template
 - [Getting Started](docs/getting-started.md) — Full setup guide
 - [Mid-Flight Journeys](docs/reference/deep-dives/mid-flight-journeys.md) — Flagship orchestration capability and runtime semantics
 - [Workflow Authoring Contracts](docs/architecture/foundations/workflow-authoring-contracts.md) — Canonical strict YAML contract
 - [Contributing](CONTRIBUTING.md) — Development workflow
 
----
-
-## Declarative Contract Snapshot
-
-Mozaiks workflows are authored as strict YAML bundles. The runtime validates
-these contracts and rejects unknown fields.
-
-```text
-platform/workflows/{workflow_name}/
-  orchestrator.yaml
-  agents.yaml
-  handoffs.yaml
-  context_variables.yaml
-  structured_outputs.yaml
-  tools.yaml
-  ui_config.yaml
-  hooks.yaml
-```
-
-Minimal `context_variables.yaml` shape:
-
-```yaml
-definitions: {}
-agents:
-  GreeterAgent:
-    variables: []
-```
-
-Use the canonical contract guide for full file schemas and required fields.
+Build the docs locally with `pip install -r requirements-docs.txt` and `./scripts/build-docs.ps1`.
 
 ---
 

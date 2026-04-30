@@ -11,7 +11,7 @@ def _load_save_app_schema_module():
     workspace = Path(__file__).resolve().parents[1]
     file_path = (
         workspace
-        / "mozaiks-platform"
+        / "factory_app"
         / "app"
         / "workflows"
         / "AppGenerator"
@@ -47,6 +47,7 @@ def _base_manifest():
         "version": "1.0.0",
         "default_route": "/dashboard",
         "pages": ["Dashboard"],
+        "custom_routes": [],
     }
 
 
@@ -157,6 +158,47 @@ def _canonical_page():
     }
 
 
+def _custom_route_bundle():
+    return {
+        "route_manifest": [
+            {
+                "id": "deal-room",
+                "label": "Deal Room",
+                "path": "/deal-room",
+                "component": "InvestorDealRoomPage",
+                "requiresAuth": True,
+                "order": 2,
+                "meta": {"title": "Investor Deal Room"},
+                "purpose": "Complex investor collaboration surface with live state and nested interactions.",
+            }
+        ],
+        "page_files": [
+            {
+                "route_id": "deal-room",
+                "path": "ui/pages/custom/InvestorDealRoom.jsx",
+                "component_name": "InvestorDealRoom",
+                "registry_key": "InvestorDealRoomPage",
+                "purpose": "Bounded custom marketplace deal room page.",
+                "contract_refs": ["custom_route_bundle.route_manifest[deal-room]"],
+                "content": (
+                    "import { PageFrame, useChatUI } from '@mozaiks/chat-ui';\n\n"
+                    "export default function InvestorDealRoom() {\n"
+                    "  const { user } = useChatUI();\n"
+                    "  return (\n"
+                    "    <PageFrame name=\"investor-deal-room\" layout=\"full-width\">\n"
+                    "      <section className=\"flex flex-col gap-4\">\n"
+                    "        <h1 className=\"text-2xl font-semibold text-foreground\">Deal Room</h1>\n"
+                    "        <p className=\"text-sm text-muted-foreground\">{user?.displayName || 'Investor'}</p>\n"
+                    "      </section>\n"
+                    "    </PageFrame>\n"
+                    "  );\n"
+                    "}\n"
+                ),
+            }
+        ],
+    }
+
+
 def test_save_app_schema_rejects_unknown_top_level_primitive(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     page = _base_page()
@@ -223,7 +265,7 @@ def test_save_app_schema_accepts_canonical_declarative_config(monkeypatch, tmp_p
         context_variables=context,
     )
 
-    dashboard_yaml = (tmp_path / "pages" / "Dashboard.yaml").read_text(encoding="utf-8")
+    dashboard_yaml = (tmp_path / "ui" / "pages" / "Dashboard.yaml").read_text(encoding="utf-8")
     app_json = json.loads((tmp_path / "app.json").read_text(encoding="utf-8"))
 
     assert "App: Ops Portal" in result
@@ -232,6 +274,39 @@ def test_save_app_schema_accepts_canonical_declarative_config(monkeypatch, tmp_p
     assert not (tmp_path / "app.yaml").exists()
     assert "create-user-modal" in dashboard_yaml
     assert context.data["app_pages"][0]["sections"][0]["primitive"] == "Grid"
+
+
+def test_save_app_schema_writes_custom_route_bundle(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    context = _Context()
+    manifest = {
+        "app_name": "Investor Room",
+        "version": "1.0.0",
+        "default_route": "/deal-room",
+        "pages": [],
+        "custom_routes": ["deal-room"],
+    }
+
+    result = save_app_schema_module.save_app_schema(
+        manifest=manifest,
+        pages=[],
+        custom_route_bundle=_custom_route_bundle(),
+        context_variables=context,
+    )
+
+    route_manifest = json.loads((tmp_path / "ui" / "route_manifest.json").read_text(encoding="utf-8"))
+    custom_page = (tmp_path / "ui" / "pages" / "custom" / "InvestorDealRoom.jsx").read_text(encoding="utf-8")
+    ui_index = (tmp_path / "ui" / "index.js").read_text(encoding="utf-8")
+    app_json = json.loads((tmp_path / "app.json").read_text(encoding="utf-8"))
+
+    assert "ui/route_manifest.json" in result
+    assert route_manifest["pages"][0]["id"] == "deal-room"
+    assert "PageFrame" in custom_page
+    assert "useChatUI" in custom_page
+    assert "registerComponent('InvestorDealRoomPage'" in ui_index
+    assert app_json["startup"]["landing_spot"] == "/deal-room"
+    assert context.data["app_custom_route_bundle"]["route_manifest"][0]["component"] == "InvestorDealRoomPage"
+    assert context.data["app_schema_ready"] is True
 
 
 def test_save_app_schema_rejects_manifest_page_mismatch(monkeypatch, tmp_path: Path) -> None:
@@ -243,6 +318,22 @@ def test_save_app_schema_rejects_manifest_page_mismatch(monkeypatch, tmp_path: P
         save_app_schema_module.save_app_schema(
             manifest=manifest,
             pages=[_base_page()],
+            context_variables=_Context(),
+        )
+
+
+def test_save_app_schema_rejects_custom_route_overlap(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    manifest = _base_manifest()
+    manifest["custom_routes"] = ["deal-room"]
+    custom_bundle = _custom_route_bundle()
+    custom_bundle["route_manifest"][0]["path"] = "/dashboard"
+
+    with pytest.raises(ValueError, match="must not overlap"):
+        save_app_schema_module.save_app_schema(
+            manifest=manifest,
+            pages=[_base_page()],
+            custom_route_bundle=custom_bundle,
             context_variables=_Context(),
         )
 
@@ -433,24 +524,31 @@ def test_save_app_schema_writes_to_generated_artifact_root(monkeypatch, tmp_path
 
     output_dir = generated_root / "apps" / "app-one" / "build-one" / "app"
     assert (output_dir / "app.json").exists()
-    assert (output_dir / "pages" / "Dashboard.yaml").exists()
+    assert (output_dir / "ui" / "pages" / "Dashboard.yaml").exists()
     assert context.data["generated_app_dir"] == str(output_dir)
+
+
+def test_save_app_schema_defaults_generated_root_to_repo_generated(monkeypatch) -> None:
+    workspace = Path(__file__).resolve().parents[1]
+    monkeypatch.delenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", raising=False)
+
+    assert save_app_schema_module._resolve_generated_artifacts_root() == (workspace / "generated").resolve()
 
 
 def test_promote_generated_app_copies_allowlisted_artifacts(tmp_path: Path) -> None:
     source = tmp_path / "generated" / "apps" / "app-1" / "build-1" / "app"
     target = tmp_path / "active-app"
-    (source / "pages").mkdir(parents=True)
+    (source / "ui" / "pages").mkdir(parents=True)
     (source / "brand").mkdir()
     (source / "config").mkdir()
     (source / "app.json").write_text('{"appName": "Demo"}', encoding="utf-8")
-    (source / "pages" / "Dashboard.yaml").write_text("name: Dashboard\n", encoding="utf-8")
+    (source / "ui" / "pages" / "Dashboard.yaml").write_text("name: Dashboard\n", encoding="utf-8")
     (source / "brand" / "theme_config.json").write_text("{}", encoding="utf-8")
     (source / "config" / "shell.json").write_text("{}", encoding="utf-8")
 
     result = save_app_schema_module.promote_generated_app(source, target)
 
     assert result["status"] == "success"
-    assert sorted(result["copied"]) == ["app.json", "brand", "config", "pages"]
+    assert sorted(result["copied"]) == ["app.json", "brand", "config", "ui"]
     assert (target / "app.json").exists()
-    assert (target / "pages" / "Dashboard.yaml").exists()
+    assert (target / "ui" / "pages" / "Dashboard.yaml").exists()

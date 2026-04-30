@@ -20,10 +20,10 @@ The current web shell and platform primarily rely on:
 
 ## Where To Look In Code
 
-- `runtime_app.py`
-- `platform_app.py`
-- `studio_app.py`
-- `mozaiks_app.py`
+- `mozaiksai/hosts/runtime.py`
+- `mozaiksai/hosts/platform.py`
+- `mozaiksai/hosts/studio.py`
+- `mozaiksai/hosts/mozaiks.py`
 - `mozaiksai/core/transport/`
 - `mozaiksai/core/workflow/`
 

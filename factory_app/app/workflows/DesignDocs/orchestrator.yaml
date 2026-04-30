@@ -1,0 +1,12 @@
+workflow_name: DesignDocs
+max_turns: 8
+human_in_the_loop: false
+workflow_startup_mode: BackendOnly
+orchestration_pattern: DefaultPattern
+initial_message_to_user: null
+initial_message: 'DesignDocsAgent: concept_overview is provided via context variables
+  (data_reference) for this app_id. Generate frontend, backend, and database Markdown
+  docs plus a ui_schema YAML document that serves as the current serialized ExperienceSpec.
+  After each doc is generated, call save_design_doc with kind=frontend|backend|database|ui_schema,
+  stage=draft, and the doc content. Finally output exactly: DONE.'
+initial_agent: DesignDocsAgent

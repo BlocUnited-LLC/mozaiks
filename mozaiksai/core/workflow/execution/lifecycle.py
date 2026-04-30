@@ -8,7 +8,7 @@ Lifecycle Tools - Declarative Hook System for Workflows
 
 Purpose:
 - Execute tools at orchestration boundaries (before_chat, after_chat, before_agent, after_agent)
-- Driven by platform/workflows/<workflow>/tools.yaml "lifecycle_tools" list
+- Driven by <workflow_root>/<workflow>/tools.yaml "lifecycle_tools" list
 - Integrates with existing event system for observability
 - AG2-native context injection via ContextVariables
 
@@ -32,7 +32,6 @@ import asyncio
 import importlib.util
 import inspect
 import logging
-import os
 import sys
 from dataclasses import dataclass
 from enum import Enum
@@ -44,31 +43,9 @@ import yaml
 from logs.logging_config import get_workflow_logger
 from logs.tools_logs import get_tool_logger, log_tool_event
 from ..declarative import parse_tools_config
+from ..workflow_manager import workflow_manager
 
 logger = logging.getLogger(__name__)
-
-
-def _resolve_workflows_root() -> Path:
-    """Return the platform workflows root directory.
-
-    Respects ``MOZAIKS_WORKFLOWS_PATH`` when set, otherwise walks up from this
-    file to find the repo root and returns ``<repo>/platform/workflows``.
-    """
-    override = str(os.getenv("MOZAIKS_WORKFLOWS_PATH") or "").strip()
-    if override:
-        candidate = Path(override)
-        if not candidate.is_absolute():
-            here = Path(__file__).resolve()
-            for parent in [here] + list(here.parents):
-                if (parent / "mozaiksai").is_dir():
-                    return (parent / candidate).resolve()
-        return Path(override).resolve()
-    here = Path(__file__).resolve()
-    for parent in [here] + list(here.parents):
-        if (parent / "mozaiksai").is_dir():
-            return (parent / "platform" / "workflows").resolve()
-    return (Path.cwd() / "platform" / "workflows").resolve()
-
 
 class LifecycleTrigger(Enum):
     """Valid lifecycle hook trigger points."""
@@ -104,11 +81,15 @@ class LifecycleToolManager:
         self._loaded = False
 
     def load_lifecycle_tools(self) -> None:
-        """Load lifecycle tools from platform/workflows/<workflow>/tools.yaml."""
+        """Load lifecycle tools from the resolved workflow root's tools.yaml."""
         if self._loaded:
             return
 
-        base_dir = _resolve_workflows_root() / self.workflow_name
+        base_dir = workflow_manager.resolve_workflow_path(self.workflow_name)
+        if base_dir is None:
+            logger.debug(f"[LIFECYCLE] Workflow path not found for '{self.workflow_name}'")
+            self._loaded = True
+            return
         tools_yaml_path = base_dir / 'tools.yaml'
 
         if not tools_yaml_path.exists():

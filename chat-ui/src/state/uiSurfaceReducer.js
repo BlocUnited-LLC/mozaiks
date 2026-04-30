@@ -311,18 +311,6 @@ export const mapSurfaceEventToAction = (event) => {
     }
   }
 
-  if (eventType.startsWith('agui.lifecycle.')) {
-    if (eventType === 'agui.lifecycle.RunStarted') {
-      return { type: 'WORKFLOW_STATUS', status: 'running' };
-    }
-    if (eventType === 'agui.lifecycle.RunFinished') {
-      return { type: 'WORKFLOW_STATUS', status: 'completed' };
-    }
-    if (eventType === 'agui.lifecycle.RunError') {
-      return { type: 'WORKFLOW_STATUS', status: 'error' };
-    }
-  }
-
   return null;
 };
 

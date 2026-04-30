@@ -1,7 +1,7 @@
 # App Bundle Declaratives
 
-App bundle declaratives are the files under `platform/` that describe an app
-without requiring changes to framework runtime code.
+App bundle declaratives are the files under an app workspace's active app root
+that describe an app without requiring changes to framework runtime code.
 
 ## Purpose
 
@@ -18,27 +18,30 @@ hardcoded app-specific branches.
 
 ## Canonical Families
 
-### `platform/config/`
+### `app/config/`
 
 Runtime-facing app configuration, including AI provider settings, shell config,
 admin config, and theme config.
 
-### `platform/pages/`
+### `app/ui/pages/`
 
 Schema-driven app pages rendered by the app UI surface.
 
-### `platform/workflows/`
+### `app/workflows/`
 
 Declarative workflow definitions for agentic execution. A workflow owns its
 orchestrator config, agents, handoffs, tools, structured outputs, context
 variables, hooks, and optional UI artifacts.
 
-### `platform/modules/`
+Builder workflows may also exist in the shared generation core, but those are
+not app-owned bundle content.
+
+### `app/modules/`
 
 Deterministic CRUD or action surfaces that support workflows and app pages.
 Modules are not AI workflows.
 
-### `platform/brand/`
+### `app/brand/`
 
 Brand assets, fonts, and theme inputs used by the shell.
 
@@ -51,7 +54,9 @@ Brand assets, fonts, and theme inputs used by the shell.
 
 ## Related Docs
 
+- [Distribution And Workspace Model](distribution-and-workspace-model.md)
 - [Canonical App Structure](canonical-app-structure.md)
 - [App Manifest and Platform Targets](app-manifest-and-platform-targets.md)
 - [Core, Product, and App Bundle Boundary](core-product-app-bundle-boundary.md)
 - [Workflow Authoring Contracts](workflow-authoring-contracts.md)
+

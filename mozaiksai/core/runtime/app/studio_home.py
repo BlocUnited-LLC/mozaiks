@@ -3,15 +3,12 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
+from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
+    build_app_validation_strategy_summary,
+)
 
-REQUIRED_STUDIO_SURFACES = [
-    "platform/app.json",
-    "platform/config/ai.json",
-    "platform/config/shell.json",
-    "brand/theme_config.json",
-    "ui/extension.json",
-]
 
 GENERATOR_WORKFLOW_IDS = [
     "ValueEngine",
@@ -27,9 +24,7 @@ BUILD_REQUEST_EXAMPLES = [
     "Add a reports capability with export and approval routing.",
 ]
 
-STUDIO_BUILD_STATE_FILE = "platform/config/build.json"
-
-DEFAULT_STUDIO_BUILD_STATE = {
+DEFAULT_STUDIO_CREATE_STATE = {
     "current_request": {
         "text": "",
         "request_kind": None,
@@ -51,15 +46,19 @@ DEFAULT_STUDIO_BUILD_STATE = {
     "last_saved_at": None,
 }
 
+STUDIO_CREATE_STATE_COLLECTION = "StudioCreateState"
+
 
 def get_missing_studio_surfaces(platform_root: Path) -> list[str]:
-    bundle_root = _bundle_root(platform_root)
+    app_prefix = "app"
+    theme_rel = f"{app_prefix}/brand/theme_config.json"
+    ui_rel = f"{app_prefix}/ui/route_manifest.json"
     checks = {
-        "platform/app.json": platform_root / "app.json",
-        "platform/config/ai.json": platform_root / "config" / "ai.json",
-        "platform/config/shell.json": platform_root / "config" / "shell.json",
-        "brand/theme_config.json": _resolve_theme_config_path(platform_root),
-        "ui/extension.json": _resolve_ui_extension_path(bundle_root, platform_root),
+        f"{app_prefix}/app.json": platform_root / "app.json",
+        f"{app_prefix}/config/ai.json": platform_root / "config" / "ai.json",
+        f"{app_prefix}/config/shell.json": platform_root / "config" / "shell.json",
+        theme_rel: _resolve_theme_config_path(platform_root),
+        ui_rel: _resolve_ui_route_manifest_path(platform_root),
     }
     return [rel_path for rel_path, path in checks.items() if not path.exists()]
 
@@ -70,12 +69,11 @@ def build_studio_home_summary(
     surface: str = "cli-home",
     local_only: bool = True,
 ) -> dict:
-    bundle_root = _bundle_root(platform_root)
     app_config = _read_json(platform_root / "app.json")
     ai_config = _read_json(platform_root / "config" / "ai.json")
     shell_config = _read_json(platform_root / "config" / "shell.json")
     theme_config = _read_json(_resolve_theme_config_path(platform_root))
-    ui_extension = _read_json(_resolve_ui_extension_path(bundle_root, platform_root))
+    ui_route_manifest = _read_json(_resolve_ui_route_manifest_path(platform_root))
 
     admin_json_path = platform_root / "config" / "admin.json"
     admin_config = _read_json(admin_json_path) if admin_json_path.exists() else {}
@@ -85,7 +83,7 @@ def build_studio_home_summary(
     identity = theme_config.get("identity") or {}
     workflow_names = _list_workflows(platform_root)
     workflow_count = len(workflow_names)
-    extension_page_count = len(ui_extension.get("pages") or [])
+    custom_page_count = len(ui_route_manifest.get("pages") or [])
     schema_page_count = _count_schema_pages(platform_root)
     entry_point = (ai_config.get("workflows") or {}).get("entry_point")
     admin_emails = _resolve_admin_emails(app_config, admin_config)
@@ -94,11 +92,11 @@ def build_studio_home_summary(
         "studio": {
             "surface": surface,
             "local_only": local_only,
-            "workspace_root": str(bundle_root),
+            "workspace_root": str(platform_root),
             "route": "/studio",
         },
         "app": {
-            "name": app_config.get("appName") or bundle_root.name,
+            "name": app_config.get("appName") or platform_root.name,
             "preset": app_config.get("preset") or "unknown",
             "journey": onboarding.get("journey"),
             "first_goal": onboarding.get("first_goal"),
@@ -124,8 +122,8 @@ def build_studio_home_summary(
             "admin_emails": admin_emails,
         },
         "workspace": {
-            "page_count": extension_page_count + schema_page_count,
-            "extension_page_count": extension_page_count,
+            "page_count": custom_page_count + schema_page_count,
+            "custom_page_count": custom_page_count,
             "schema_page_count": schema_page_count,
             "workflow_count": workflow_count,
             "workflow_names": workflow_names,
@@ -144,20 +142,16 @@ def build_studio_home_summary(
     }
 
 
-def build_studio_build_summary(
-    platform_root: Path,
-    *,
-    surface: str = "shell-build",
-    local_only: bool = True,
-) -> dict:
-    summary = build_studio_home_summary(platform_root, surface=surface, local_only=local_only)
-    build_state = load_studio_build_state(platform_root)
-    workflow_names = summary["workspace"].get("workflow_names") or []
+def build_create_section(home_summary: dict, create_state: dict) -> dict:
+    """Compose the Studio create response section from a home summary and build state.
+
+    Used by both the HTTP endpoint and the CLI diagnostic path so the shape stays identical.
+    """
+    workflow_names = home_summary["workspace"].get("workflow_names") or []
     generator_workflows = {
         workflow_id: workflow_id in workflow_names
         for workflow_id in GENERATOR_WORKFLOW_IDS
     }
-    current_plan = build_state["current_plan"]
 
     if generator_workflows["ValueEngine"]:
         initial_compile_workflow = "ValueEngine"
@@ -185,31 +179,34 @@ def build_studio_build_summary(
         },
     }
 
-    summary["studio"] = {
-        **summary["studio"],
-        "surface": surface,
-        "route": "/studio/build",
-    }
-    summary["build"] = {
+    return {
         "available_workflows": workflow_names,
         "generator_workflows": generator_workflows,
+        "app_validation": build_app_validation_strategy_summary(),
         "supports_initial_compile": initial_compile_workflow is not None,
         "initial_compile_workflow": initial_compile_workflow,
         "refinement_support": refinement_support,
         "request_examples": BUILD_REQUEST_EXAMPLES,
-        "state_file": STUDIO_BUILD_STATE_FILE,
-        "current_request": build_state["current_request"],
-        "current_plan": current_plan,
-        "recent_requests": build_state["recent_requests"],
-        "plan_state": build_state["plan_state"],
-        "approval_state": build_state["approval_state"],
-        "last_saved_at": build_state["last_saved_at"],
-        "draft_handoff_mode": "manual",
-        "draft_handoff_note": (
-            "Studio Build now persists the current request in platform/config/build.json. "
-            "Initial build launches still open the workflow conversation directly and do not auto-seed that request into generator workflows yet."
-        ),
+        "current_request": create_state["current_request"],
+        "current_plan": create_state["current_plan"],
+        "recent_requests": create_state["recent_requests"],
+        "plan_state": create_state["plan_state"],
+        "approval_state": create_state["approval_state"],
+        "last_saved_at": create_state["last_saved_at"],
     }
+
+
+def build_studio_create_summary(
+    platform_root: Path,
+    *,
+    surface: str = "shell-create",
+    local_only: bool = True,
+) -> dict:
+    """CLI diagnostic path for workspace readiness and available build workflows."""
+    summary = build_studio_home_summary(platform_root, surface=surface, local_only=local_only)
+    create_state = _normalize_create_state({})
+    summary["studio"] = {**summary["studio"], "surface": surface, "route": "/studio/create"}
+    summary["create"] = build_create_section(summary, create_state)
     return summary
 
 
@@ -311,14 +308,82 @@ async def build_studio_adapters_summary() -> dict:
     return {"adapters": adapters}
 
 
-def load_studio_build_state(platform_root: Path) -> dict:
-    state_path = _resolve_build_state_path(platform_root)
-    raw_state = _read_json(state_path) if state_path.exists() else {}
-    current_plan = _normalize_current_plan(raw_state.get("current_plan"))
-    current_request = _normalize_current_request(raw_state.get("current_request"))
-    recent_requests = _normalize_recent_requests(raw_state.get("recent_requests"))
+async def load_studio_create_state_from_db(app_id: str) -> dict:
+    """Load Studio create-surface draft state from MongoDB."""
+    try:
+        from mozaiksai.core.core_config import get_mongo_client
+        client = get_mongo_client()
+        coll = client["mozaiksai"][STUDIO_CREATE_STATE_COLLECTION]
+        raw: Any = await coll.find_one({"_id": app_id})
+        if isinstance(raw, dict):
+            raw.pop("_id", None)
+            return _normalize_create_state(raw)
+    except Exception:
+        pass
+    return _normalize_create_state({})
 
-    raw_plan_state = raw_state.get("plan_state")
+
+async def save_studio_create_state_to_db(
+    app_id: str,
+    *,
+    request_text: str,
+    request_kind: str | None,
+    change_class: str | None = None,
+) -> dict:
+    """Persist Studio create-surface draft state to MongoDB."""
+    from mozaiksai.core.core_config import get_mongo_client
+
+    current_state = await load_studio_create_state_from_db(app_id)
+    normalized_kind = _normalize_request_kind(request_kind)
+    normalized_class = _normalize_change_class(change_class)
+    timestamp = _utc_now_iso()
+    normalized_text = (request_text or "").strip()
+
+    current_state["current_request"] = {
+        "text": normalized_text,
+        "request_kind": normalized_kind,
+        "change_class": normalized_class,
+        "updated_at": timestamp,
+    }
+    current_state["last_saved_at"] = timestamp
+
+    if normalized_text:
+        current_state["plan_state"] = "draft_saved"
+        entry = {
+            "text": normalized_text,
+            "request_kind": normalized_kind,
+            "change_class": normalized_class,
+            "saved_at": timestamp,
+        }
+        recent = [
+            item
+            for item in current_state["recent_requests"]
+            if not (
+                item.get("text") == entry["text"]
+                and item.get("request_kind") == entry["request_kind"]
+                and item.get("change_class") == entry["change_class"]
+            )
+        ]
+        current_state["recent_requests"] = [entry, *recent][:8]
+    else:
+        current_state["plan_state"] = "not_started"
+
+    client = get_mongo_client()
+    coll = client["mozaiksai"][STUDIO_CREATE_STATE_COLLECTION]
+    await coll.update_one(
+        {"_id": app_id},
+        {"$set": {**current_state, "_id": app_id}},
+        upsert=True,
+    )
+    return await load_studio_create_state_from_db(app_id)
+
+
+def _normalize_create_state(raw: dict) -> dict:
+    current_plan = _normalize_current_plan(raw.get("current_plan"))
+    current_request = _normalize_current_request(raw.get("current_request"))
+    recent_requests = _normalize_recent_requests(raw.get("recent_requests"))
+
+    raw_plan_state = raw.get("plan_state")
     if isinstance(raw_plan_state, str) and raw_plan_state.strip():
         plan_state = raw_plan_state.strip()
     elif current_plan["build_tasks"] or current_plan["summary"] or current_plan["owned_paths"]:
@@ -326,13 +391,12 @@ def load_studio_build_state(platform_root: Path) -> dict:
     elif current_request["text"]:
         plan_state = "draft_saved"
     else:
-        plan_state = DEFAULT_STUDIO_BUILD_STATE["plan_state"]
+        plan_state = DEFAULT_STUDIO_CREATE_STATE["plan_state"]
 
-    raw_approval_state = raw_state.get("approval_state")
-    approval_state = raw_approval_state.strip() if isinstance(raw_approval_state, str) and raw_approval_state.strip() else DEFAULT_STUDIO_BUILD_STATE["approval_state"]
-
-    raw_last_saved_at = raw_state.get("last_saved_at")
-    last_saved_at = raw_last_saved_at if isinstance(raw_last_saved_at, str) and raw_last_saved_at.strip() else current_request["updated_at"]
+    raw_approval = raw.get("approval_state")
+    approval_state = raw_approval.strip() if isinstance(raw_approval, str) and raw_approval.strip() else DEFAULT_STUDIO_CREATE_STATE["approval_state"]
+    raw_saved = raw.get("last_saved_at")
+    last_saved_at = raw_saved if isinstance(raw_saved, str) and raw_saved.strip() else current_request["updated_at"]
 
     return {
         "current_request": current_request,
@@ -344,82 +408,20 @@ def load_studio_build_state(platform_root: Path) -> dict:
     }
 
 
-def save_studio_build_request(
-    platform_root: Path,
-    *,
-    request_text: str,
-    request_kind: str | None,
-    change_class: str | None = None,
-) -> dict:
-    build_state = load_studio_build_state(platform_root)
-    normalized_request_kind = _normalize_request_kind(request_kind)
-    normalized_change_class = _normalize_change_class(change_class)
-    timestamp = _utc_now_iso()
-    normalized_text = (request_text or "").strip()
-
-    build_state["current_request"] = {
-        "text": normalized_text,
-        "request_kind": normalized_request_kind,
-        "change_class": normalized_change_class,
-        "updated_at": timestamp,
-    }
-    build_state["last_saved_at"] = timestamp
-
-    if normalized_text:
-        build_state["plan_state"] = "draft_saved"
-        entry = {
-            "text": normalized_text,
-            "request_kind": normalized_request_kind,
-            "change_class": normalized_change_class,
-            "saved_at": timestamp,
-        }
-        recent_requests = [
-            item
-            for item in build_state["recent_requests"]
-            if not (
-                item.get("text") == entry["text"]
-                and item.get("request_kind") == entry["request_kind"]
-                and item.get("change_class") == entry["change_class"]
-            )
-        ]
-        build_state["recent_requests"] = [entry, *recent_requests][:8]
-    else:
-        build_state["plan_state"] = "not_started"
-
-    _write_json(_resolve_build_state_path(platform_root), build_state)
-    return load_studio_build_state(platform_root)
-
-
-def _bundle_root(platform_root: Path) -> Path:
-    return platform_root.resolve().parent
-
-
 def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _write_json(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
-
-
-def _resolve_build_state_path(platform_root: Path) -> Path:
-    return platform_root / "config" / "build.json"
-
-
 def _resolve_theme_config_path(platform_root: Path) -> Path:
-    bundle_root = _bundle_root(platform_root)
     candidates = [
-        bundle_root / "brand" / "theme_config.json",
         platform_root / "brand" / "theme_config.json",
     ]
     return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
 
 
-def _resolve_ui_extension_path(bundle_root: Path, platform_root: Path) -> Path:
+def _resolve_ui_route_manifest_path(platform_root: Path) -> Path:
     candidates = [
-        bundle_root / "ui" / "extension.json",
-        platform_root / "ui" / "extension.json",
+        platform_root / "ui" / "route_manifest.json",
     ]
     return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
 
@@ -551,17 +553,23 @@ def _utc_now_iso() -> str:
 
 
 def _list_workflows(platform_root: Path) -> list[str]:
+    discovered: list[str] = []
     workflows_dir = platform_root / "workflows"
-    if not workflows_dir.exists():
-        return []
-    return sorted(
-        [
-            child.name
-            for child in workflows_dir.iterdir()
-            if child.is_dir() and child.name != "extended_orchestration"
-        ],
-        key=str.lower,
-    )
+    if workflows_dir.exists():
+        for child in workflows_dir.iterdir():
+            if child.is_dir() and child.name != "extended_orchestration" and child.name not in discovered:
+                discovered.append(child.name)
+
+    try:
+        from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+        for name in workflow_manager.get_all_workflow_names():
+            if isinstance(name, str) and name not in discovered:
+                discovered.append(name)
+    except Exception:
+        pass
+
+    return sorted(discovered, key=str.lower)
 
 
 def _count_workflows(platform_root: Path) -> int:
@@ -569,7 +577,7 @@ def _count_workflows(platform_root: Path) -> int:
 
 
 def _count_schema_pages(platform_root: Path) -> int:
-    pages_dir = platform_root / "pages"
+    pages_dir = platform_root / "ui" / "pages"
     if not pages_dir.exists():
         return 0
 
@@ -577,7 +585,7 @@ def _count_schema_pages(platform_root: Path) -> int:
     for child in pages_dir.iterdir():
         if child.is_file() and child.suffix.lower() in {".yaml", ".yml"}:
             count += 1
-        elif child.is_dir() and (child / "page.yaml").exists():
+        elif child.is_dir() and ((child / "page.yaml").exists() or (child / "page.yml").exists()):
             count += 1
     return count
 
@@ -609,7 +617,7 @@ def _recommend_next_step(
     if not onboarding.get("journey") or not onboarding.get("first_goal"):
         return "Run 'mozaiks onboard' so Studio Home has product intent, provider defaults, and admin bootstrap."
     if not provider or not model:
-        return "Confirm your default provider and model in platform/config/ai.json before starting build work."
+        return "Confirm your default provider and model in app/config/ai.json before starting build work."
     if not admin_emails:
         return "Add a local admin email with 'mozaiks onboard --admin-email <email>' before opening admin workflows."
     if workflow_count == 0:

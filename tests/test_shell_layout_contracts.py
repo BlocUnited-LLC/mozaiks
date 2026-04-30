@@ -37,7 +37,7 @@ def test_transition_screens_use_shell_safe_height() -> None:
 
 def test_platform_transitions_stay_declarative() -> None:
     registry = json.loads(
-        _read("mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json")
+        _read("factory_app/app/workflows/extended_orchestration/extension_registry.json")
     )
     assert any(t.get("transition_type") == "user_choice_context" for t in registry["transitions"])
     for transition in registry["transitions"]:
@@ -47,10 +47,17 @@ def test_platform_transitions_stay_declarative() -> None:
         assert "context" not in transition
         if transition["transition_type"] in {"user_choice", "user_choice_context", "user_choice_route", "confirm"}:
             assert transition.get("ui", {}).get("component")
+        if transition["transition_type"] in {"user_choice", "user_choice_context", "user_choice_route"}:
+            assert "route_to" not in transition
         for option in transition.get("options", []):
             assert "label" not in option
             assert "description" not in option
             assert "context" not in option
+            assert option.get("route_to")
             if "context_variables" in option:
                 assert isinstance(option["context_variables"], dict)
-    assert (_workspace() / "mozaiks-platform" / "app" / "workflows" / "extended_orchestration" / "ui").exists()
+    assert (_workspace() / "factory_app" / "app" / "workflows" / "extended_orchestration" / "ui").exists()
+    # App workspace overlay should not have a UI bundle (shared factory owns it)
+    from conftest import active_app_root
+    app_root = active_app_root()
+    assert not (app_root / "workflows" / "extended_orchestration" / "ui" / "index.js").exists()

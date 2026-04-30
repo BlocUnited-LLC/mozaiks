@@ -7,6 +7,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { getComponent } from '../../registry/componentRegistry'
+import { useChatUI } from '../../context/ChatUIContext'
+import AdminSchemaPanel from './AdminSchemaPanel.jsx'
 
 // ---------------------------------------------------------------------------
 // Runtime base URL
@@ -171,6 +173,7 @@ function getPanelId(panelConfig) {
  * component registry by id; falls back to DeclarativeExtensionPanel.
  */
 export function AdminExtensionPanels({ panels }) {
+  const { auth } = useChatUI()
   if (!panels?.length) return null
 
   return (
@@ -186,7 +189,13 @@ export function AdminExtensionPanels({ panels }) {
         return (
           <div key={panelId}>
             <SectionHeading>{label}</SectionHeading>
-            {Custom ? <Custom panel={panelConfig} /> : <DeclarativeExtensionPanel panel={panelConfig} />}
+            {panelConfig?.renderer === 'schema' ? (
+              <AdminSchemaPanel panel={panelConfig} />
+            ) : Custom ? (
+              <Custom panel={panelConfig} apiBaseUrl={API_BASE} auth={auth} />
+            ) : (
+              <DeclarativeExtensionPanel panel={panelConfig} />
+            )}
           </div>
         )
       })}

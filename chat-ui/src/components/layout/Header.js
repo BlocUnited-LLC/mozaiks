@@ -46,6 +46,39 @@ const isAuthenticatedUser = (user) => {
   return Boolean(user) && id !== "anonymous" && id !== "guest";
 };
 
+const resolveRoleScopedRoute = (mapping, roles = []) => {
+  if (!mapping || typeof mapping !== "object" || Array.isArray(mapping)) return null;
+
+  for (const role of roles) {
+    const candidate = mapping[role];
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+  }
+
+  const fallback = mapping.default ?? mapping["*"];
+  if (typeof fallback === "string" && fallback.trim()) return fallback.trim();
+  return null;
+};
+
+const resolveActionByRole = (action, roles = []) => {
+  if (!action || typeof action !== "object") return action;
+
+  const resolved = { ...action };
+  const routeOverride = resolveRoleScopedRoute(action.path_by_role || action.paths_by_role, roles);
+  const hrefOverride = resolveRoleScopedRoute(action.href_by_role, roles);
+  const chosen = routeOverride || hrefOverride;
+
+  if (!chosen) return resolved;
+  if (chosen.startsWith("/")) {
+    resolved.path = chosen;
+    delete resolved.href;
+    return resolved;
+  }
+
+  resolved.href = chosen;
+  delete resolved.path;
+  return resolved;
+};
+
 const getDefaultProfileMenu = (user) => {
   const authed = isAuthenticatedUser(user);
   const items = [
@@ -273,28 +306,29 @@ const Header = ({
 
   const executeAction = async (action) => {
     if (!action) return;
+    const resolvedAction = resolveActionByRole(action, userRoles);
 
-    if (action.action === "signout" || action.id === "signout") {
+    if (resolvedAction.action === "signout" || resolvedAction.id === "signout") {
       await logout?.();
       setIsProfileOpen(false);
       return;
     }
 
-    if (action.action === "signin" || action.id === "signin") {
+    if (resolvedAction.action === "signin" || resolvedAction.id === "signin") {
       await login?.();
       setIsProfileOpen(false);
       return;
     }
 
-    if (action.path || action.href || action.trigger || action.action === "navigate") {
-      handleNavigationItem(action);
+    if (resolvedAction.path || resolvedAction.href || resolvedAction.trigger || resolvedAction.action === "navigate") {
+      handleNavigationItem(resolvedAction);
       setIsProfileOpen(false);
       setIsNotificationsOpen(false);
       return;
     }
 
-    if (action.id) {
-      onAction(action.id, action);
+    if (resolvedAction.id) {
+      onAction(resolvedAction.id, resolvedAction);
     }
   };
 
@@ -307,7 +341,7 @@ const Header = ({
   const profileSubLabel = getUserSubLabel(currentUser, profileConfig.sublabel || "");
   const showProfile = profileConfig.show !== false;
   const showNotifications = notificationsConfig.show !== false;
-  const primaryActionLabel = primaryAction?.label || primaryAction?.id || "Discover";
+  const primaryActionLabel = primaryAction?.label || primaryAction?.id || "Action";
   const headerFrameStyle = {
     maxWidth: "var(--shell-frame-max-width, 1440px)",
     minHeight: "var(--shell-header-height, 4rem)",

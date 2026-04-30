@@ -1,0 +1,9 @@
+{
+  "appName": "plutus2",
+  "preset": "chat",
+  "targets": {
+    "web": true,
+    "mobile": false
+  },
+  "authRequired": false
+}

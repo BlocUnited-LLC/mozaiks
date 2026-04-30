@@ -1,0 +1,13 @@
+{
+  "appName": "Factory App",
+  "appId": "factory-app",
+  "startup": {
+    "landing_spot": "/create"
+  },
+  "targets": {
+    "web": true,
+    "mobile": false
+  },
+  "authRequired": false,
+  "admins": []
+}

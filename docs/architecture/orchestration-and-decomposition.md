@@ -16,7 +16,7 @@
 
 ### 1. Global Orchestrator
 
-The global pack graph in `platform/workflows/extended_orchestration/extension_registry.json` is for sequencing across workflows.
+The global pack graph in `factory_app/app/workflows/extended_orchestration/extension_registry.json` is for sequencing across workflows.
 
 Sequence key: `workflow_sequences[]`.
 
@@ -40,7 +40,7 @@ Use the global layer for coarse journey phases such as:
 
 ### 2. Workflow-Level MFJ
 
-The per-workflow pack graph in `platform/workflows/<workflow>/extended_orchestration/mfj_extension.json` is for mid-flight journeys inside one workflow.
+The per-workflow pack graph in `app/workflows/<workflow>/extended_orchestration/mfj_extension.json` is for mid-flight journeys inside one workflow. Builder workflows use the same contract under `factory_app/app/workflows/<workflow>/extended_orchestration/mfj_extension.json`.
 
 It answers:
 

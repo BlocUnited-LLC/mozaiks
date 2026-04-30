@@ -1,0 +1,11 @@
+tools:
+- agent: CreateLaunchAgent
+  file: launch_shared_create.py
+  function: launch_shared_create
+  description: >
+    Launches the shared create journey through the canonical session launcher
+    using the selected app type transition option.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+
+lifecycle_tools: []

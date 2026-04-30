@@ -8,27 +8,36 @@ The bundle should describe the app, not the platform internals.
 
 That means the main authoring folders should focus on:
 
-- what screens exist (`pages/`)
+- what screens exist (`ui/pages/`)
 - what workflows exist (`workflows/`)
 - what modules provide business logic (`modules/`)
 - what events connect them (declared in `events.yaml` and `orchestrator.yaml`)
 
 ## Active App Root Layout
 
-An active app root is the directory read by `platform_app.py`. In the default
-OSS workspace this is `platform/`. In App Zero this is `mozaiks-platform/app/`.
+An active app root is the directory read by `mozaiksai/hosts/platform.py`.
+
+The canonical target is a self-contained app workspace whose active root is
+`app/`.
 
 ```text
-platform/
+app/
 ├── app.json
 ├── config/
 │   ├── ai.json
 │   ├── shell.json
 │   └── admin.json
-├── pages/
-│   ├── {page_name}.yaml        # Declarative page schema
-│   └── {page_name}/
-│       └── page.yaml           # Optional folder form
+├── ui/
+│   ├── index.js                # registers contract-declared custom components
+│   ├── route_manifest.json     # custom full-page React route declarations
+│   ├── pages/                  # declarative page schemas
+│   │   ├── {page_name}.yaml
+│   │   └── {page_name}/
+│   │       └── page.yaml
+│   │   └── custom/
+│   │       └── *.{js,jsx}      # optional custom full-page React routes (escape hatch)
+│   └── admin/
+│       └── *.{js,jsx}          # optional admin custom components
 ├── workflows/
 │   └── {workflow_name}/
 │       ├── orchestrator.yaml   # includes triggers (no separate automations/)
@@ -60,36 +69,88 @@ platform/
 │       │   └── admin.py
 │       └── ui/                 # optional module-specific UI surfaces
 │           └── index.js
-└── brand/                      # optional colocated brand/theme assets
+└── brand/                      # colocated brand/theme assets
     ├── assets/
     ├── fonts/
     └── theme_config.json
 ```
 
+Canonical rule:
+
+- `config/`, `ui/pages/`, `workflows/`, `modules/`, `ui/`, and `brand/` belong
+  together under the active app root
+- generated/customer app workspaces should be self-contained
+- sibling `ui/` and `brand/` folders outside the app root are transitional,
+  not canonical
+
 ## Product Workspace Layout
 
-Some workspaces wrap the active app root with product-owned brand and UI
-extension folders. App Zero uses this shape:
+App Zero should ultimately use the same self-contained app-workspace contract.
+
+Canonical target:
 
 ```text
 mozaiks-platform/
-├── app/                        # active app root read by platform_app.py
-│   ├── app.json
-│   ├── config/
-│   ├── modules/
-│   ├── pages/
-│   └── workflows/
-├── brand/                      # product brand/theme assets
-├── ui/                         # product UI extension
+└── app/                        # active app root read by mozaiksai/hosts/platform.py
+    ├── app.json
+    ├── config/
+    ├── modules/
+    ├── ui/
+    ├── workflows/
+    │   └── extended_orchestration/
+    │       └── extension_registry.json
+    └── brand/
+```
+
+Current transitional state in this repo:
+
+```text
+mozaiks-platform/
+├── app/                        # current active app root
+├── brand/                      # transitional sibling product brand assets
+├── ui/                         # transitional sibling product UI extension
 ├── generated/                  # generator output, not runtime-loaded
 │   ├── apps/{app_id}/{build_id}/app/
 │   └── workflows/{app_id}/{build_id}/{workflow_name}/
 └── app-builder/                # builder docs/planning, not runtime-loaded
 ```
 
-The loader resolves `brand/` and `ui/` as siblings of the active app root when
-they exist. That is why `mozaiks-platform/app` can be the active app root while
-`mozaiks-platform/brand` and `mozaiks-platform/ui` remain product-level assets.
+The sibling `brand/` and `ui/` layout above is transitional, not the canonical
+end-state.
+
+App Zero's local `workflows/` directory is now primarily an overlay surface.
+The shared generator implementations App Zero consumes resolve from the shared
+generation core, while
+`factory_app/app/workflows/extended_orchestration/extension_registry.json`
+defines the shared build journeys and entrypoints and
+`mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`
+adds App Zero product-specific workflow overlays.
+
+Runtime workflow loading is multi-root. By default the runtime searches:
+
+1. `<active app root>/workflows`
+2. the shared generation-core workflow root
+
+If needed, `MOZAIKS_WORKFLOW_ROOTS` can override that order explicitly.
+That is what allows App Zero's local registry to reference both shared
+generation workflows and product-owned workflows such as `AppMarketing` and
+`InvestorMarketplace`.
+
+For generated OSS-style bundles, bounded frontend customization lives inside the
+active app root at `app/ui/index.js`. That file is the app-owned extension
+barrel loaded through `@platform/extensions`.
+
+App Zero's active modules are hosted-product modules, not generic sample
+modules:
+
+```text
+mozaiks-platform/app/modules/
+├── investor_marketplace/       # listings, investor profiles, investment interest
+└── communications/             # conversations, messages, announcements
+```
+
+Those modules publish `hosted.*` product events. Generated customer apps should
+usually publish `domain.*` events from their own modules instead.
 ## What Each Family Means
 
 ### `app.json`
@@ -119,9 +180,9 @@ Use this family for:
 - fonts
 - Keycloak login-theme assets
 
-Use `platform/config/theme_config.json` to point at those assets.
+Use app shell/theme config to point at those assets.
 
-### `pages/*`
+### `ui/pages/*`
 
 Normal routeable app screens.
 
@@ -136,7 +197,17 @@ Pages are where most CRUD-style app experience should live.
 Admin is not generated as an app page. The platform shell owns the
 `/admin` route family and renders the framework-owned `AdminPortal`.
 
-**Future:** Should be promoted to first-class `admin-ui/` directory at repo root (parallel to `chat-ui/`).
+Admin remains a framework-owned management surface. In the current architecture,
+`AdminPortal` is registered through the Studio composition layer rather than a
+separate top-level UI package.
+
+### `ui/pages/custom/*`
+
+Custom full-page React routes are the escape hatch for cases the declarative
+page schema cannot express yet.
+
+These routes must be mounted through `ui/route_manifest.json` and should be used
+sparingly; declarative `ui/pages/*` remains the default.
 
 ### `workflows/*`
 
@@ -153,7 +224,7 @@ Use workflows for:
 **Event triggers are declared in `orchestrator.yaml`:**
 
 ```yaml
-# platform/workflows/WritersRoom/orchestrator.yaml
+# app/workflows/WritersRoom/orchestrator.yaml
 triggers:
   - event: set.brief_confirmed
     action: run
@@ -166,7 +237,7 @@ triggers:
 
 Support bundles for shared logic.
 
-Modules should not be the main mental model for app authors.
+Modules should not be the main mental model for app users.
 
 Use them when you need:
 
@@ -174,6 +245,15 @@ Use them when you need:
 - reusable handlers
 - shared feature UI helpers
 - page-triggered workflow helpers
+
+For generated apps, modules own deterministic business facts and publish
+`domain.*` events after state commits. For hosted Mozaiks product features,
+modules may publish `hosted.*` events, but those hosted semantics stay above
+the runtime kernel.
+
+At runtime, `mozaiksai/hosts/platform.py` registers `ModuleEventRouter` for loaded module
+manifests. That router consumes `subscriptions.yaml` and `notifications.yaml`
+and derives platform reactions such as `notification.created`.
 
 ### `config/*`
 
@@ -185,11 +265,11 @@ This folder should not be the primary authoring target.
 
 For most new apps:
 
-1. Create `app.json`
+1. Create `app/app.json`
 2. Create shell brand config only if the app needs custom identity
-3. Create app pages
-4. Create workflow definitions (with triggers in `orchestrator.yaml`)
-5. Create modules (with actions in `module.yaml` and events in `events.yaml`)
+3. Create app pages in `app/ui/pages/`
+4. Create workflow definitions in `app/workflows/` (with triggers in `orchestrator.yaml`)
+5. Create modules in `app/modules/` (with actions in `module.yaml` and events in `events.yaml`)
 6. Add `admin.yaml`, `settings.yaml`, `notifications.yaml`, and
    `subscriptions.yaml` as needed
 
@@ -208,17 +288,20 @@ That is enough to prove the product shape without drowning the user in schema.
 
 ## Current Repo Reality
 
-The repo still contains older generated and runtime projection files under
-`platform/config/*`.
+The current repo now carries an App Zero product workspace under
+`mozaiks-platform/` whose active app root is `mozaiks-platform/app/`.
 
-Treat those as implementation outputs, not the ideal authoring model.
+Treat those as implementation state, not the canonical long-term authoring
+model.
 
-The derived module catalog is one example of this. It should be derived from
-`platform/modules/*/module.yaml`, not hand-authored as a separate source of
-truth.
+The canonical target is:
+
+- self-contained app workspaces
+- shared generation core outside app workspaces
+- App Zero converging on the same workspace contract
 
 ## Cross References
 
 - [overview.md](overview.md)
-- [page-model.md](page-model.md)
 - [app-bundle-declaratives.md](app-bundle-declaratives.md)
+- [distribution-and-workspace-model.md](distribution-and-workspace-model.md)

@@ -1,24 +1,30 @@
 #!/usr/bin/env python3
 """
-Mozaiks CLI - Main entry point.
+Mozaiks CLI - Developer interface for the Mozaiks platform.
 
-This CLI is the local Dev/CLI layer around the canonical four-host architecture.
-It scaffolds app-bundle surfaces, prepares local/private Studio work, and helps
-operators target the correct host layer.
+The CLI is a parallel interface to Studio, not Studio's terminal representation.
+Both CLI and Studio sit on top of the same shared system capabilities (runtime,
+platform, generation). CLI owns filesystem and process concerns; Studio owns the
+management interface.
+
+CLI commands are developer conveniences and should not expand into a parallel
+project-management surface. The canonical build lifecycle — artifact review,
+diff, run history, promotion, build state — belongs to Studio.
 
 Commands:
     mozaiks init <preset>     Create a new app bundle scaffold
+    mozaiks serve [path]      Start the Mozaiks runtime for an app workspace
     mozaiks onboard           Guide setup for an existing scaffold
-    mozaiks studio            Show Studio Home for the current workspace
+    mozaiks studio            Print workspace status (terminal diagnostic)
     mozaiks add <feature>     Add feature to existing project
-    mozaiks gen <mode>        Generate workflows or apps using AI
+    mozaiks gen <mode>        Convenience shortcut: generate from a prompt
     mozaiks info              Show current config and available presets
 """
 
 import argparse
 import sys
 
-from mozaiks_cli.commands import init_command, onboard_command, studio_command, add_command, info_command, gen_command
+from mozaiks_cli.commands import init_command, onboard_command, serve_command, studio_command, add_command, info_command, gen_command
 
 
 def create_parser():
@@ -67,6 +73,46 @@ def create_parser():
         help="Seed a starter workflow after creating the blank scaffold",
     )
 
+    # mozaiks serve
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="Start the Mozaiks runtime for an app workspace",
+        description=(
+            "Resolve the app bundle at the given workspace path and start the selected "
+            "host layer. The platform host serves the app without the Studio management "
+            "UI. Use --host studio to include Studio (requires factory_app in the Python "
+            "path, available when running from the Mozaiks repo checkout)."
+        ),
+    )
+    serve_parser.add_argument(
+        "workspace",
+        nargs="?",
+        default=".",
+        help="Path to the app workspace root (default: current directory)",
+    )
+    serve_parser.add_argument(
+        "--host",
+        choices=["runtime", "platform", "studio"],
+        default="platform",
+        help="Host layer to start (default: platform)",
+    )
+    serve_parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port to listen on (default: 8000)",
+    )
+    serve_parser.add_argument(
+        "--listen",
+        default="0.0.0.0",
+        help="Interface to bind (default: 0.0.0.0)",
+    )
+    serve_parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="Enable uvicorn auto-reload (development only)",
+    )
+
     # mozaiks onboard
     onboard_parser = subparsers.add_parser(
         "onboard",
@@ -77,7 +123,7 @@ def create_parser():
         "--dir",
         dest="directory",
         default=".",
-        help="Workspace root containing the active app root at platform/ plus any optional wrapper assets (default: current directory)",
+        help="Workspace root containing the active app root at app/ (default: current directory)",
     )
     onboard_parser.add_argument(
         "--name",
@@ -120,7 +166,7 @@ def create_parser():
     onboard_parser.add_argument(
         "--admin-email",
         default=None,
-        help="Admin email to write into platform/config/admin.json",
+        help="Admin email to write into the active app root config/admin.json",
     )
     onboard_parser.add_argument(
         "--existing-url",
@@ -141,14 +187,14 @@ def create_parser():
     # mozaiks studio
     studio_parser = subparsers.add_parser(
         "studio",
-        help="Show local Studio Home summary",
-        description="Read the current workspace and show the first local/private Studio Home surface.",
+        help="Print workspace status to the terminal",
+        description="Read the active workspace and print a status summary. This is a developer diagnostic tool — for the full management interface, run the server and open /studio in the browser.",
     )
     studio_parser.add_argument(
         "--dir",
         dest="directory",
         default=".",
-        help="Workspace root containing the active app root at platform/ and any optional wrapper assets (default: current directory)",
+        help="Workspace root containing the active app root at app/ (default: current directory)",
     )
     studio_parser.add_argument(
         "--json",
@@ -196,6 +242,12 @@ def create_parser():
         default=None,
         help="Output directory (default: ./generated)",
     )
+    gen_parser.add_argument(
+        "--validation-strategy",
+        choices=["e2b", "local", "skip"],
+        default=None,
+        help="App validation strategy for AppGenerator runs (default: resolved from the current environment)",
+    )
 
     # mozaiks info
     info_parser = subparsers.add_parser(
@@ -224,6 +276,8 @@ def main():
     try:
         if args.command == "init":
             init_command.run(args)
+        elif args.command == "serve":
+            serve_command.run(args)
         elif args.command == "onboard":
             onboard_command.run(args)
         elif args.command == "studio":

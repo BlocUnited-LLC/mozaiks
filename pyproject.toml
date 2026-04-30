@@ -82,69 +82,14 @@ line-length = 100
 target-version = "py311"
 
 # ---------------------------------------------------------------------------
-# Package mapping — migrated to mozaiksai.core flat structure
+# Package discovery — auto-discovers all mozaiksai, mozaiks_cli, and logs
+# subpackages.  factory_app is not included in the distribution package;
+# Studio/factory features require the full repo checkout (OSS) or the hosted
+# Mozaiks deployment.
 # ---------------------------------------------------------------------------
-[tool.setuptools.package-dir]
-"mozaiks" = "mozaiksai"
-
-[tool.setuptools]
-packages = [
-    # ── public API namespace ──
-    "mozaiks",
-    "mozaiks.core",
-    "mozaiks.core.artifacts",
-    "mozaiks.core.auth",
-    "mozaiks.core.capabilities",
-    "mozaiks.core.data",
-    "mozaiks.core.data.persistence",
-    "mozaiks.core.data.themes",
-    "mozaiks.core.events",
-    "mozaiks.core.multitenant",
-    "mozaiks.core.observability",
-    "mozaiks.core.orchestration",
-    "mozaiks.core.runtime",
-    "mozaiks.core.tokens",
-    "mozaiks.core.transport",
-    "mozaiks.core.workflow",
-    "mozaiks.core.workflow.agents",
-    "mozaiks.core.workflow.context",
-    "mozaiks.core.workflow.execution",
-    "mozaiks.core.workflow.messages",
-    "mozaiks.core.workflow.outputs",
-    "mozaiks.core.workflow.pack",
-    "mozaiks.core.workflow.validation",
-    # ── internal namespace (maps to same files on disk) ──
-    "mozaiksai",
-    "mozaiksai.core",
-    "mozaiksai.core.adapters",
-    "mozaiksai.core.artifacts",
-    "mozaiksai.core.auth",
-    "mozaiksai.core.capabilities",
-    "mozaiksai.core.data",
-    "mozaiksai.core.data.persistence",
-    "mozaiksai.core.data.themes",
-    "mozaiksai.core.events",
-    "mozaiksai.core.multitenant",
-    "mozaiksai.core.observability",
-    "mozaiksai.core.orchestration",
-    "mozaiksai.core.ports",
-    "mozaiksai.core.runtime",
-    "mozaiksai.core.tokens",
-    "mozaiksai.core.transport",
-    "mozaiksai.core.workflow",
-    "mozaiksai.core.workflow.agents",
-    "mozaiksai.core.workflow.context",
-    "mozaiksai.core.workflow.execution",
-    "mozaiksai.core.workflow.messages",
-    "mozaiksai.core.workflow.outputs",
-    "mozaiksai.core.workflow.pack",
-    "mozaiksai.core.workflow.validation",
-    # ── support packages (repo-root modules used by mozaiksai) ──
-    "logs",
-    # ── mozaiks_cli (project scaffolding) ──
-    "mozaiks_cli",
-    "mozaiks_cli.commands",
-]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mozaiksai*", "mozaiks_cli*", "logs*"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

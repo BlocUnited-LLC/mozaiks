@@ -112,6 +112,28 @@ function validateShellConfig(config) {
         if (action.icon && !ICON_FILE_RE.test(action.icon) && !URL_RE.test(action.icon)) {
           issues.push({ level: 'error', file, message: `header.actions[${i}].icon="${action.icon}" is not a valid asset filename. Use "sparkle.svg" not "sparkle".` });
         }
+        if (action.path_by_role !== undefined) {
+          if (!action.path_by_role || typeof action.path_by_role !== 'object' || Array.isArray(action.path_by_role)) {
+            issues.push({ level: 'error', file, message: `header.actions[${i}].path_by_role must be an object mapping role names to route paths.` });
+          } else {
+            Object.entries(action.path_by_role).forEach(([role, path]) => {
+              if (typeof path !== 'string' || !path.startsWith('/')) {
+                issues.push({ level: 'error', file, message: `header.actions[${i}].path_by_role["${role}"] must be a route path starting with "/".` });
+              }
+            });
+          }
+        }
+        if (action.href_by_role !== undefined) {
+          if (!action.href_by_role || typeof action.href_by_role !== 'object' || Array.isArray(action.href_by_role)) {
+            issues.push({ level: 'error', file, message: `header.actions[${i}].href_by_role must be an object mapping role names to URLs/paths.` });
+          } else {
+            Object.entries(action.href_by_role).forEach(([role, href]) => {
+              if (typeof href !== 'string' || href.length === 0) {
+                issues.push({ level: 'error', file, message: `header.actions[${i}].href_by_role["${role}"] must be a non-empty string.` });
+              }
+            });
+          }
+        }
       });
     }
   }

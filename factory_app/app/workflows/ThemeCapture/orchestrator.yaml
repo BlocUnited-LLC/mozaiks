@@ -1,0 +1,23 @@
+# ThemeCapture Workflow Orchestrator
+# Captures the visual identity of an existing application and produces
+# a valid theme_config.json that Mozaiks can use for embedded widgets
+# or full app-shell branding.
+#
+# Flow: ThemeInterviewAgent → ThemeAnalysisAgent → ThemeConfigAssemblerAgent
+#
+# Inputs:
+#   - app_url (optional): live URL to inspect
+#   - css_snapshot (optional): extracted CSS/computed styles
+#   - screenshot_description (optional): user description of the app's look
+#   - parent_theme_config (optional): existing theme_config.json to refine
+
+workflow_name: ThemeCapture
+max_turns: 30
+human_in_the_loop: true
+workflow_startup_mode: AgentDriven
+orchestration_pattern: DefaultPattern
+initial_message_to_user: null
+initial_message:
+  You are part of the Mozaiks ThemeCapture process. ThemeInterviewAgent,
+  greet the user and begin gathering their app's visual identity.
+initial_agent: ThemeInterviewAgent

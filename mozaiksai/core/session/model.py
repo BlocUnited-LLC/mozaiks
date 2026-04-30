@@ -11,7 +11,6 @@ class SessionLifecycle(str, Enum):
     ACTIVE = "active"
     AWAITING_TRANSITION = "awaiting_transition"
     AWAITING_APPROVAL = "awaiting_approval"
-    REFINING = "refining"
     COMPLETED = "completed"
     STALE = "stale"
 
@@ -51,11 +50,8 @@ class TriggerInput:
     user_id: str
     trigger_source: str
     workflow_id: Optional[str] = None
-    change_class: Optional[str] = None
-    artifact_kind: Optional[str] = None
-    artifact_version_id: Optional[str] = None
-    raw_user_request: Optional[str] = None
     context_variables: Dict[str, Any] = field(default_factory=dict)
+    trigger_payload: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

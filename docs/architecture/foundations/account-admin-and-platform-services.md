@@ -38,19 +38,23 @@ Mozaiks ships the visible shell surfaces for account and admin flows.
   bundles.
 
 This means app generation should not create replacement profile or admin pages
-under `platform/pages/` just to make these features exist.
+under `app/ui/pages/` just to make these features exist.
 
-### 2. App Backend APIs
+### 2. Host And App Backend APIs
 
-The app backend is authoritative for user/account/admin data.
+The platform host owns the universal account/admin APIs. A connected app
+backend may extend them with app-business admin data.
 
-- `GET/PUT {app_backend_url}/api/me` owns the current user's core profile data.
-- `GET {app_backend_url}/api/me/preferences` owns the current user's preference
+- `GET/PUT /api/me` owns the current user's core account/profile data.
+- `GET/PUT /api/me/preferences` owns the current user's generic preference
   payload.
-- `GET {app_backend_url}/api/admin/config` and related `app_backend_url/api/admin/*`
-  endpoints own app-admin panels and app-admin data.
+- `GET /api/admin/config` owns host admin shell state, runtime panels, and
+  module admin panel discovery.
+- `GET {app_backend_url}/api/admin/config` and related
+  `app_backend_url/api/admin/*` endpoints optionally own app-business admin
+  panels that are embedded inside the unified `/admin` shell.
 
-The shell can render these surfaces only because the deterministic backend
+The shell can render these surfaces only because deterministic backend
 contracts exist. The shell is not the source of truth.
 
 ### 3. Module Declaratives And Hooks
@@ -65,6 +69,8 @@ Modules can extend these deterministic systems through explicit contracts.
   event.
 - `modules/{module}/admin.yaml` declares feature-owned admin panels rendered
   inside the unified `/admin` shell.
+- contract-declared custom admin components are materialized as frontend stubs
+  and registered through the active app root's `ui/index.js` extension barrel.
 
 Optional Python hooks such as `backend/settings.py`,
 `backend/subscriptions.py`, `backend/notifications.py`, and `backend/admin.py`
@@ -74,11 +80,11 @@ implement deterministic behavior behind those manifests.
 
 | Concern | Primary UX surface | Source of truth | Extension contract | Not owned by |
 |---|---|---|---|---|
-| Profile | `/profile` via `ProfilePage` | `GET/PUT {app_backend_url}/api/me` | none today | workflows, generated page bundles |
-| Preferences | `/profile` preferences section | `GET {app_backend_url}/api/me/preferences` | `modules/{module}/settings.yaml` and optional `backend/settings.py` for module-local settings | workflow prompts |
+| Profile | `/profile` via `ProfilePage` | `GET/PUT /api/me` | none today | workflows, generated page bundles |
+| Preferences | `/profile` preferences section | `GET/PUT /api/me/preferences` | `modules/{module}/settings.yaml` and optional `backend/settings.py` for module-local settings | workflow prompts |
 | Notifications | shell notification surfaces and backend delivery rules | app backend plus module notification policy | `modules/{module}/notifications.yaml` and optional `backend/notifications.py` | workflows as source of truth |
 | Subscriptions and entitlements | profile badges, billing/admin views, and gated capability behavior | app backend entitlement state | `modules/{module}/subscriptions.yaml` and optional `backend/subscriptions.py` | capability-pack generation |
-| Admin | `/admin` route family via `AdminPortal` | app backend admin APIs plus platform admin config | `platform/config/admin.json`, `modules/{module}/admin.yaml`, optional `backend/admin.py` | custom admin page generation |
+| Admin | `/admin` route family via `AdminPortal` | host admin APIs plus optional app-backend admin APIs | `app/config/admin.json`, `modules/{module}/admin.yaml`, optional `backend/admin.py` | custom admin page generation |
 
 ## Profile
 
@@ -88,9 +94,9 @@ registry.
 Current behavior:
 
 - it renders the current user's account view at `/profile`
-- it loads and updates profile data from `app_backend_url/api/me`
-- it loads app/user preference data from `app_backend_url/api/me/preferences`
-- it shows a deterministic no-backend state when no app backend is connected
+- it loads and updates profile data from `/api/me`
+- it loads app/user preference data from `/api/me/preferences`
+- it uses the host API adapter rather than a custom page-local backend contract
 
 Important boundary:
 
@@ -120,7 +126,7 @@ change hooks in `backend/settings.py`.
 
 ### Shell Configuration
 
-Shell behavior and shell content belong in `platform/config/shell.json`.
+Shell behavior and shell content belong in `app/config/shell.json`.
 Examples include header actions, profile menu items, notification text, and
 footer links.
 
@@ -156,15 +162,15 @@ the thing that makes the notification system exist.
 
 Mozaiks has one visible admin route family. The framework injects `/admin` and
 its section routes through the `AdminPortal` shell surface when
-`platform/config/admin.json` is enabled.
+`app/config/admin.json` is enabled.
 
 Authority is separated by panel source:
 
-- app-admin panels come from `app_backend_url/api/admin/config` and related
-  `app_backend_url/api/admin/*` endpoints
+- app-business panels may come from `app_backend_url/api/admin/config` and
+  related `app_backend_url/api/admin/*` endpoints
 - feature-owned admin panels come from `modules/{module}/admin.yaml`
 - runtime/operator panels come from same-host admin APIs and
-  `platform/config/admin.json`
+  `app/config/admin.json`
 
 Important boundaries:
 
@@ -174,6 +180,8 @@ Important boundaries:
   separate admin React shell
 
 For the admin-only deep dive, see [Admin System](admin-system.md).
+The optional connected app-backend panel contract remains repo-internal
+planning material for now.
 
 ## What This Means For Generation
 
@@ -194,3 +202,4 @@ specific business modules and AI workflows to sit on top.
 - [Core, Product, and App Bundle Boundary](core-product-app-bundle-boundary.md)
 - [UI Surface and Layout](ui-surface-and-layout-architecture.md)
 - [Workflow Architecture](workflow-architecture.md)
+

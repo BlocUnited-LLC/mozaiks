@@ -10,7 +10,7 @@
 AppGenerator owns the deterministic product bundle artifacts for persistent app UI:
 
 - `app.json`
-- `pages/*.yaml`
+- `ui/pages/*.yaml`
 - `brand/theme_config.json`
 - `config/shell.json`
 - `config/asset_manifest.json`
@@ -18,7 +18,7 @@ AppGenerator owns the deterministic product bundle artifacts for persistent app 
 The ownership split is strict:
 
 - `app.json` defines app identity, targets, auth intent, and startup behavior such as `startup.landing_spot`.
-- `pages/*.yaml` define persistent page structure and route ownership.
+- `ui/pages/*.yaml` define persistent page structure and route ownership.
 - `brand/theme_config.json` defines visual tokens, shared primitives, and semantic `ui.chat` / `ui.shell` / `ui.page` styling.
 - `config/shell.json` defines shell content and behavior such as header actions, profile controls, notifications, and footer links.
 - `config/asset_manifest.json` defines reusable media inventory metadata for non-token assets (icons/images/video), including source/provenance and usage hints.
@@ -69,10 +69,11 @@ It does **not** emit shell content such as header actions, profile menu items, n
 
 ### 2. AppSchemaAgent
 
-`AppSchemaAgent` compiles persistent UI into one `AppSchemaOutput` with five payloads:
+`AppSchemaAgent` compiles persistent UI into one `AppSchemaOutput` with six payloads:
 
 - `manifest`
 - `pages`
+- `custom_route_bundle`
 - `theme_config_patch`
 - `shell_config`
 - `asset_manifest`
@@ -80,12 +81,14 @@ It does **not** emit shell content such as header actions, profile menu items, n
 Rules:
 
 - `manifest.default_route` is persisted to `app.json -> startup.landing_spot`
+- `custom_route_bundle` is a rare bounded escape hatch for persistent routes that cannot be expressed cleanly through shipped primitives
 - `theme_config_patch` is a partial patch for `brand/theme_config.json`
 - `shell_config` is a partial patch for `config/shell.json`
 - `asset_manifest` is a partial patch for `config/asset_manifest.json`
 - raw spacing, width, density, and sizing tokens belong in `theme_config_patch`, not `shell_config`
 - header/profile/notifications/footer content belongs in `shell_config`, not `theme_config_patch`
 - reusable media inventory belongs in `asset_manifest`, not in `theme_config_patch` or `shell_config`
+- custom routes must be owned exclusively by `custom_route_bundle` (`ui/route_manifest.json` + `ui/pages/custom/*.jsx`) and must not duplicate any `ui/pages/*.yaml` route
 
 ### 3. save_app_schema
 
@@ -96,11 +99,14 @@ It must:
 - write generated artifacts under
   `$MOZAIKS_GENERATED_ARTIFACTS_PATH/apps/{app_id}/{build_id}/app/`
 - write `app.json`
-- write `pages/{name}.yaml`
+- write `ui/pages/{name}.yaml`
+- write `ui/route_manifest.json` when `custom_route_bundle` exists
+- write `ui/pages/custom/*.jsx` when `custom_route_bundle` exists
+- synthesize `ui/index.js` from `custom_route_bundle.page_files` when custom routes exist
 - deep-merge `theme_config_patch` into `brand/theme_config.json`
 - deep-merge `shell_config` into `config/shell.json`
 - deep-merge `asset_manifest` into `config/asset_manifest.json`
-- store `app_manifest`, `app_pages`, `app_theme_config_patch`, `app_shell_config`, `app_asset_manifest`, and `app_schema_ready` in workflow context
+- store `app_manifest`, `app_pages`, `app_custom_route_bundle`, `app_theme_config_patch`, `app_shell_config`, `app_asset_manifest`, and `app_schema_ready` in workflow context
 
 It must not write directly into an active runtime-loaded app root such as
 `platform/` or `mozaiks-platform/app`. Activation requires an explicit
@@ -113,7 +119,10 @@ When `app_schema_ready == true`, `AssemblyAgent` must emit those artifacts back 
 Required schema-driven outputs:
 
 - `app.json`
-- `pages/{name}.yaml`
+- `ui/pages/{name}.yaml`
+- `ui/route_manifest.json` when `app_custom_route_bundle` exists
+- `ui/pages/custom/*.jsx` when `app_custom_route_bundle` exists
+- `ui/index.js` when `app_custom_route_bundle` exists
 - `brand/theme_config.json` when `app_theme_config_patch` exists
 - `config/shell.json` when `app_shell_config` exists
 - `config/asset_manifest.json` when `app_asset_manifest` exists
@@ -127,7 +136,7 @@ AppGenerator no longer carries a secondary raw frontend page/component generatio
 Rules:
 
 - ordinary persistent pages still compile through `AppSchemaAgent`
-- raw React page/component tasks do not belong in AppGenerator build plans
+- raw React page/component tasks do not belong in AppGenerator build plans outside the explicit `custom_route_bundle` contract
 - shell content compiles through `shell_config`, not through a separate frontend shell agent
 - if the primitive system is insufficient, the platform should add a primitive, pattern, or page capability rather than reviving a second frontend codegen path
 
@@ -135,7 +144,45 @@ Rules:
 
 `generate_and_download` is the bundling tool.
 
-It does not reason about artifact ownership. It simply packages the emitted `code_files` into the downloadable app bundle.
+It does not reason about artifact ownership. It packages the materialized file set
+into the downloadable app bundle.
+
+### 6. AppValidation Strategy
+
+`AppValidationAgent` must use an explicit validation strategy contract instead of
+implicit E2B-only behavior.
+
+Canonical strategy values:
+
+- `e2b`
+- `local`
+- `skip`
+
+Canonical status values:
+
+- `passed`
+- `failed`
+- `skipped`
+
+Rules:
+
+- Studio/hosted environments may prefer `e2b` when sandbox credentials are available.
+- CLI/local environments may resolve to `local` or explicit `skip`.
+- generation/export must not be blocked solely because E2B is unavailable.
+- `skip` is explicit and deterministic; it is not a hidden fallback and it is not
+  reported as `passed`.
+- export gating must allow only `passed` or explicit `skipped`, and still requires
+  integration checks to pass.
+
+Materialization rule:
+
+- typed agent outputs such as `app_backend_admin_config`, `python_files`, and
+  `js_files` are the source of truth for their owned lanes
+- the same applies to `database_files`, `model_files`, and `backend_foundation_bundle.files`
+- extraction may regenerate canonical file content from those typed fields before
+  packaging
+- raw `code_files` are the serialized mirror, not the authority, when a typed
+  lane exists
 
 ---
 
@@ -163,3 +210,5 @@ Do not:
 
 Without this split, AppGenerator either under-specifies visual/media control or mixes styling, shell behavior, and asset inventory.
 The contract above keeps bundle generation deterministic, keeps ThemeCapture reusable, and gives the runtime a stable set of artifacts to consume.
+
+

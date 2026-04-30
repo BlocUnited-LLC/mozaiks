@@ -6,7 +6,7 @@ The app manifest owns product intent and startup metadata. Runtime composition
 is discovered from owner manifests:
   - workflows/* directories
   - modules/*/module.yaml
-  - pages/*.yaml or pages/*/page.yaml
+  - ui/pages/*.yaml or ui/pages/*/page.yaml
 
 Workflow loading is handled by the existing WorkflowManager (unchanged).
 
@@ -137,14 +137,14 @@ class AppLoader:
 
     @classmethod
     def _discover_page_names(cls, base_path: Path) -> List[str]:
-        pages_dir = base_path / "pages"
+        pages_dir = base_path / "ui" / "pages"
         if not pages_dir.exists():
             return []
         names: List[str] = []
         for child in sorted(pages_dir.iterdir(), key=lambda item: item.name.lower()):
             if child.is_file() and child.suffix.lower() in {".yaml", ".yml"}:
                 names.append(child.stem)
-            elif child.is_dir() and (child / "page.yaml").exists():
+            elif child.is_dir() and ((child / "page.yaml").exists() or (child / "page.yml").exists()):
                 names.append(child.name)
         return names
 

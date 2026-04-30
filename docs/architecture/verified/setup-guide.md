@@ -35,7 +35,7 @@ host files:
 
 ```bash
 # Defaults to the local/private Studio host
-python run_server.py
+mozaiks serve .
 
 # Or target a specific layer directly
 python run_runtime.py
@@ -59,14 +59,14 @@ from mozaiksai import create_mozaiks_app
 
 app = FastAPI()
 
-# Canonical workflows path for this repo layout
-os.environ["MOZAIKS_WORKFLOWS_PATH"] = "./platform/workflows"
+# Canonical shared generation-core path for this repo layout
+os.environ["MOZAIKS_WORKFLOWS_PATH"] = "./factory_app/app/workflows"
 
 @app.get("/api/users")
 def get_users():
     ...
 
-app.mount("/ai", create_mozaiks_app(workflow_dir="./platform/workflows"))
+app.mount("/ai", create_mozaiks_app(workflow_dir="./factory_app/app/workflows"))
 ```
 
 This `/ai` mount pattern is for external embedding mode only. In the canonical
@@ -136,22 +136,23 @@ The ChatWidget is a floating button that expands to a chat overlay:
 
 ## 3. Workflow Directory Structure
 
-You will need a place for your workflows to live. Create a `platform/workflows/`
-folder at the root of your project. Below is the canonical structure:
+You will need a place for first-party factory workflows to live. In this repo they
+live under `factory_app/app/workflows/`. App-owned workflows live under the
+active app root's `app/workflows/`. Below is the canonical factory workspace
+structure:
 
 ```
-platform/
-├── config/
-│   └── ai.json                    # Chat startup + entry point config
-└── workflows/
+factory_app/
+└── app/
+  └── workflows/
     ├── extended_orchestration/
     │   └── extension_registry.json   # Cross-workflow pack registry (optional)
     └── {workflow_name}/
-        ├── extended_orchestration/
-        │   └── mfj_extension.json    # Per-workflow MFJ config (optional)
-        ├── orchestrator.yaml
-        ├── agents.yaml
-        ├── handoffs.yaml
+      ├── extended_orchestration/
+      │   └── mfj_extension.json    # Per-workflow MFJ config (optional)
+      ├── orchestrator.yaml
+      ├── agents.yaml
+      ├── handoffs.yaml
         ├── context_variables.yaml
         ├── structured_outputs.yaml
         ├── tools.yaml
@@ -192,8 +193,10 @@ A general-purpose agent that lets users ask questions about your app or product.
 ### Workflow Mode
 
 Purpose-built multi-agent workflows for specific tasks. These are the workflows
-you create in the active app root, such as `mozaiks-platform/app/workflows/`
-for the local Mozaiks workspace.
+you create in the active app root, such as `app/workflows/` in the canonical
+workspace model. App Zero keeps local journey and launcher config under
+`mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`, but its shared build
+workflow implementations also resolve from `factory_app/app/workflows/`.
 
 - Follows a defined agent orchestration pattern
 - Has specific tools, handoffs, and structured outputs
@@ -217,7 +220,7 @@ for the local Mozaiks workspace.
 The `ai.json` file controls which mode the ChatWidget opens in:
 
 ```json
-// platform/config/ai.json
+// app/config/ai.json
 {
   "ask": {
     "ask_mode_prompt": "You are a helpful assistant for our product. Answer questions about features, pricing, and usage.",

@@ -20,10 +20,15 @@ def _read_yaml(relative_path: str):
 
 
 def _workflow_manifest_paths() -> list[Path]:
+    from conftest import _resolve_active_app_root
     workspace = _workspace()
+    roots = ["factory_app/app/workflows"]
+    app_root = _resolve_active_app_root()
+    if app_root is not None:
+        roots.insert(0, str(app_root / "workflows"))
     paths: list[Path] = []
-    for root in ("mozaiks-platform/app/workflows", "platform/workflows"):
-        workflow_root = workspace / root
+    for root in roots:
+        workflow_root = workspace / root if not (Path(root).is_absolute()) else Path(root)
         if not workflow_root.exists():
             continue
         paths.extend(sorted(workflow_root.glob("*/tools.yaml")))
@@ -70,9 +75,9 @@ def _resolve_export_target(index_file: Path, module_path: str) -> Path | None:
 
 def test_repo_owned_interactive_ui_tools_use_canonical_helper_import() -> None:
     files = [
-        "mozaiks-platform/app/workflows/AppGenerator/tools/generate_and_download.py",
-        "mozaiks-platform/app/workflows/AgentGenerator/tools/generate_and_download.py",
-        "mozaiks-platform/app/workflows/AgentGenerator/tools/request_api_key.py",
+        "factory_app/app/workflows/AppGenerator/tools/generate_and_download.py",
+        "factory_app/app/workflows/AgentGenerator/tools/generate_and_download.py",
+        "factory_app/app/workflows/AgentGenerator/tools/request_api_key.py",
     ]
 
     for relative_path in files:
@@ -83,8 +88,8 @@ def test_repo_owned_interactive_ui_tools_use_canonical_helper_import() -> None:
 
 
 def test_agent_generator_runtime_helpers_are_yaml_first() -> None:
-    generate_download = _read("mozaiks-platform/app/workflows/AgentGenerator/tools/generate_and_download.py")
-    export_helper = _read("mozaiks-platform/app/workflows/AgentGenerator/tools/export_agent_workflow.py")
+    generate_download = _read("factory_app/app/workflows/AgentGenerator/tools/generate_and_download.py")
+    export_helper = _read("factory_app/app/workflows/AgentGenerator/tools/export_agent_workflow.py")
 
     assert "tools.json" not in generate_download
     assert "agents.json" not in generate_download
@@ -97,20 +102,25 @@ def test_agent_generator_runtime_helpers_are_yaml_first() -> None:
 
 
 def test_repo_workflow_tools_do_not_import_global_shared_workflow_bucket() -> None:
-    workflow_root = _workspace() / "mozaiks-platform/app/workflows"
+    from conftest import _resolve_active_app_root
+    app_root = _resolve_active_app_root()
+    if app_root is None:
+        import pytest
+        pytest.skip("No active app workspace configured.")
+    workflow_root = app_root / "workflows"
     assert not (workflow_root / "_shared").exists()
 
     offenders = []
     for path in workflow_root.rglob("*.py"):
         content = path.read_text(encoding="utf-8")
         if "workflows._shared" in content or "app.workflows._shared" in content:
-            offenders.append(str(path.relative_to(_workspace())))
+            offenders.append(str(path.relative_to(app_root)))
 
     assert offenders == []
 
 
 def test_request_api_key_exposes_current_runtime_contract() -> None:
-    source = _read("mozaiks-platform/app/workflows/AgentGenerator/tools/request_api_key.py")
+    source = _read("factory_app/app/workflows/AgentGenerator/tools/request_api_key.py")
     module = ast.parse(source)
     function_def = next(
         node for node in module.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "request_api_key"
@@ -124,9 +134,9 @@ def test_request_api_key_exposes_current_runtime_contract() -> None:
 
 
 def test_app_generator_page_contract_stays_declarative() -> None:
-    content = _read("mozaiks-platform/app/workflows/AppGenerator/agents.yaml")
-    agents = _read_yaml("mozaiks-platform/app/workflows/AppGenerator/agents.yaml")
-    handoffs = _read_yaml("mozaiks-platform/app/workflows/AppGenerator/handoffs.yaml")
+    content = _read("factory_app/app/workflows/AppGenerator/agents.yaml")
+    agents = _read_yaml("factory_app/app/workflows/AppGenerator/agents.yaml")
+    handoffs = _read_yaml("factory_app/app/workflows/AppGenerator/handoffs.yaml")
 
     agent_names = {agent["name"] for agent in agents["agents"]}
     expected_agents = {
@@ -141,9 +151,8 @@ def test_app_generator_page_contract_stays_declarative() -> None:
         "IntegrationTestAgent",
         "DownloadAgent",
         "ServiceAgent",
+        "FrontendStubAgent",
         "ControllerAgent",
-        "RouteAgent",
-        "EntryPointAgent",
     }
     connected_agents = {
         rule[side]
@@ -153,11 +162,12 @@ def test_app_generator_page_contract_stays_declarative() -> None:
     }
 
     assert "Keep persistent app pages declarative." in content
-    assert "Do NOT generate React/TSX/CSS files for pages." in content
+    assert "Only emit custom full-page React when a true primitive gap remains" in content
     assert "The default owner of persistent pages is `AppSchemaAgent`." in content
     assert "Do NOT plan a second raw-frontend lane inside AppGenerator." in content
     assert "Persistent page ownership is exclusive to `AppSchemaAgent`." in content
-    assert "persistent app pages still belong in `app.json` + `pages/*.yaml`" in content
+    assert "persistent app pages still belong in `app.json` + `ui/pages/*.yaml`" in content
+    assert "ui/index.js" in content
     assert "theme_config_patch" in content
     assert "shell_config" in content
     assert "config/shell.json" in content
@@ -195,9 +205,9 @@ def test_architecture_index_references_appgenerator_output_contract() -> None:
 
 
 def test_generated_workflow_ui_contract_is_co_located_with_workflow_pack() -> None:
-    converter = _read("mozaiks-platform/app/workflows/AgentGenerator/tools/workflow_converter.py")
+    converter = _read("factory_app/app/workflows/AgentGenerator/tools/workflow_converter.py")
     registry = _read("chat-ui/src/@chat-workflows/index.js")
-    app_vite = _read("app/vite.config.js")
+    app_vite = _read("web_shell/vite.config.js")
     embed_vite = _read("chat-ui/vite.embed.config.js")
     router = _read("chat-ui/src/core/WorkflowUIRouter.js")
     tailwind = _read("chat-ui/tailwind.config.js")
@@ -206,10 +216,12 @@ def test_generated_workflow_ui_contract_is_co_located_with_workflow_pack() -> No
     assert "ui/components/" in converter
     assert "'path': \"ui/index.js\"" in converter
 
+    assert "@chat-workflows-root-secondary/*/ui/index.{js,jsx}" in registry
     assert "@chat-workflows-root/*/ui/index.{js,jsx}" in registry
     assert "mozaiks-platform/app/workflows" not in registry
     assert "const namespacedComponentName = `${workflowName}:${componentName}`;" in registry
-    assert "'@chat-workflows-root': platformWorkflowRoot" in app_vite
+    assert "'@chat-workflows-root': platformWorkflowRoots.primary" in app_vite
+    assert "'@chat-workflows-root-secondary': platformWorkflowRoots.secondary" in app_vite
     assert "'@chat-workflows-root': fileURLToPath(new URL('./src/workflows_stub', import.meta.url))" in embed_vite
     assert "../mozaiks-platform/" not in tailwind
     assert "`@chat-workflows/${workflow}/components/index.js`" not in router
@@ -219,16 +231,16 @@ def test_generated_workflow_ui_contract_is_co_located_with_workflow_pack() -> No
 
 def test_repo_owned_workflow_ui_surfaces_use_shared_bridges() -> None:
     style_files = [
-        "mozaiks-platform/app/workflows/AgentGenerator/ui/AgentAPIKeysBundleInput.js",
-        "mozaiks-platform/app/workflows/AgentGenerator/ui/FileDownloadCenter.js",
-        "mozaiks-platform/app/workflows/AgentGenerator/ui/MermaidSequenceDiagram.js",
-        "mozaiks-platform/app/workflows/AppGenerator/ui/AppWorkbench.js",
-        "mozaiks-platform/app/workflows/ValueEngine/ui/ValueEngine/components/ConceptBlueprint.js",
+        "factory_app/app/workflows/AgentGenerator/ui/AgentAPIKeysBundleInput.js",
+        "factory_app/app/workflows/AgentGenerator/ui/FileDownloadCenter.js",
+        "factory_app/app/workflows/AgentGenerator/ui/MermaidSequenceDiagram.js",
+        "factory_app/app/workflows/AppGenerator/ui/AppWorkbench.js",
+        "factory_app/app/workflows/ValueEngine/ui/ValueEngine/components/ConceptBlueprint.js",
     ]
     runtime_files = [
-        "mozaiks-platform/app/workflows/AgentGenerator/ui/ActionPlan.js",
-        "mozaiks-platform/app/workflows/AgentGenerator/ui/AgentAPIKeysBundleInput.js",
-        "mozaiks-platform/app/workflows/AgentGenerator/ui/FileDownloadCenter.js",
+        "factory_app/app/workflows/AgentGenerator/ui/ActionPlan.js",
+        "factory_app/app/workflows/AgentGenerator/ui/AgentAPIKeysBundleInput.js",
+        "factory_app/app/workflows/AgentGenerator/ui/FileDownloadCenter.js",
     ]
 
     for relative_path in style_files:
@@ -243,11 +255,11 @@ def test_repo_owned_workflow_ui_surfaces_use_shared_bridges() -> None:
 
 
 def test_repo_owned_workflow_ui_barrels_register_top_level_surfaces() -> None:
-    agent_index = _read("mozaiks-platform/app/workflows/AgentGenerator/ui/index.js")
-    app_index = _read("mozaiks-platform/app/workflows/AppGenerator/ui/index.js")
-    value_index = _read("mozaiks-platform/app/workflows/ValueEngine/ui/index.js")
-    app_workbench = _read("mozaiks-platform/app/workflows/AppGenerator/ui/AppWorkbench.js")
-    export_actions = _read("mozaiks-platform/app/workflows/AppGenerator/ui/ExportActions.js")
+    agent_index = _read("factory_app/app/workflows/AgentGenerator/ui/index.js")
+    app_index = _read("factory_app/app/workflows/AppGenerator/ui/index.js")
+    value_index = _read("factory_app/app/workflows/ValueEngine/ui/index.js")
+    app_workbench = _read("factory_app/app/workflows/AppGenerator/ui/AppWorkbench.js")
+    export_actions = _read("factory_app/app/workflows/AppGenerator/ui/ExportActions.js")
 
     assert "AgentAPIKeysBundleInput" in agent_index
     assert "FileDownloadCenter" in agent_index
@@ -255,16 +267,16 @@ def test_repo_owned_workflow_ui_barrels_register_top_level_surfaces() -> None:
     assert "AppWorkbench" in app_index
     assert "ConceptBlueprint" in value_index
 
-    assert "import { useE2BSandbox } from './useE2BSandbox';" in app_workbench
+    assert "import { useAppValidationWorkbench } from './useAppValidationWorkbench';" in app_workbench
     assert "theme_config.json" not in app_workbench
     assert "../../AgentGenerator/ui/FileDownloadCenter.js" in export_actions
 
 
 def test_repo_owned_one_way_ui_emitters_use_canonical_surface_helper() -> None:
     files = [
-        "mozaiks-platform/app/workflows/AgentGenerator/tools/mermaid_sequence_diagram.py",
-        "mozaiks-platform/app/workflows/ValueEngine/tools/manifest.py",
-        "mozaiks-platform/app/workflows/ExistingAppDiscovery/tools/save_existing_app_artifacts.py",
+        "factory_app/app/workflows/AgentGenerator/tools/mermaid_sequence_diagram.py",
+        "factory_app/app/workflows/ValueEngine/tools/manifest.py",
+        "factory_app/app/workflows/ExistingAppDiscovery/tools/save_existing_app_artifacts.py",
     ]
 
     for relative_path in files:
@@ -284,10 +296,10 @@ def test_ui_system_spec_documents_interactive_vs_one_way_producer_contracts() ->
 
 def test_workflow_manifests_use_explicit_ui_surface_types() -> None:
     files = [
-        "mozaiks-platform/app/workflows/AgentGenerator/tools.yaml",
-        "mozaiks-platform/app/workflows/AppGenerator/tools.yaml",
-        "mozaiks-platform/app/workflows/DesignDocs/tools.yaml",
-        "mozaiks-platform/app/workflows/ValueEngine/tools.yaml",
+        "factory_app/app/workflows/AgentGenerator/tools.yaml",
+        "factory_app/app/workflows/AppGenerator/tools.yaml",
+        "factory_app/app/workflows/DesignDocs/tools.yaml",
+        "factory_app/app/workflows/ValueEngine/tools.yaml",
     ]
 
     for relative_path in files:
@@ -340,9 +352,9 @@ def test_ui_manifest_components_are_exported_by_resolvable_workflow_barrels() ->
 
 def test_workflow_ui_components_use_payload_prop_contract() -> None:
     files = [
-        "mozaiks-platform/app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",
-        "platform/workflows/JokeFactory/ui/JokeRatingsCard.jsx",
-        "platform/workflows/JokeFactory/ui/JokeGallery.jsx",
+        "factory_app/app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",
+        "factory_app/app/workflows/AppGenerator/ui/AppWorkbench.js",
+        "factory_app/app/workflows/AgentGenerator/ui/ActionPlan.js",
     ]
     for relative_path in files:
         content = _read(relative_path)
@@ -365,19 +377,24 @@ def test_transition_shell_screens_stay_workflow_agnostic() -> None:
 
 
 def test_frontend_prompts_enforce_theme_shell_ownership_boundaries() -> None:
-    app_generator = _read("mozaiks-platform/app/workflows/AppGenerator/agents.yaml")
-    design_docs = _read("mozaiks-platform/app/workflows/DesignDocs/agents.yaml")
-    agent_generator = _read("mozaiks-platform/app/workflows/AgentGenerator/agents.yaml")
+    app_generator = _read("factory_app/app/workflows/AppGenerator/agents.yaml")
+    design_docs = _read("factory_app/app/workflows/DesignDocs/agents.yaml")
+    agent_generator = _read("factory_app/app/workflows/AgentGenerator/agents.yaml")
 
     assert "theme_config_patch` owns visual tokens only" in app_generator
     assert "shell_config` owns shell content/behavior only" in app_generator
     assert "asset_manifest` owns reusable media inventory metadata" in app_generator
+    assert "custom_route_bundle" in app_generator
+    assert "use `PageFrame` from `@mozaiks/chat-ui`" in app_generator
+    assert "use `useChatUI()` / shipped adapters instead of hardcoded API base URLs" in app_generator
     assert "Do NOT put raw spacing, padding, width, or density tokens in `shell_config`" in app_generator
     assert "Do NOT put header actions, profile menu items, or footer links in `theme_config_patch`" in app_generator
 
     assert "Do NOT define header/profile/notification/footer content objects in ui_schema" in design_docs
     assert "Do NOT encode raw visual token values" in design_docs
     assert "asset_manifest.json" in design_docs
+    assert "custom_route_bundle" in design_docs
+    assert "generic account/profile/preferences as host-owned platform primitives" in design_docs
 
     assert "Typography must come from semantic theme tokens" in agent_generator
     assert "never hardcode `font-family` names in component code" in agent_generator
@@ -386,7 +403,7 @@ def test_frontend_prompts_enforce_theme_shell_ownership_boundaries() -> None:
 
 
 def test_agent_generator_primitive_reference_matches_runtime_contract() -> None:
-    content = _read("mozaiks-platform/app/workflows/AgentGenerator/agents.yaml")
+    content = _read("factory_app/app/workflows/AgentGenerator/agents.yaml")
 
     # Canonical runtime-aligned props
     assert "`DataTable`  — `id`, `columns[]`, `data[]`" in content
@@ -411,8 +428,8 @@ def test_form_primitive_uses_static_tailwind_grid_column_classes() -> None:
 
 
 def test_extended_orchestration_transition_components_are_file_backed() -> None:
-    index_content = _read("mozaiks-platform/app/workflows/extended_orchestration/ui/index.js")
-    registry = _read_yaml("mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json")
+    index_content = _read("factory_app/app/workflows/extended_orchestration/ui/index.js")
+    registry = _read_yaml("factory_app/app/workflows/extended_orchestration/extension_registry.json")
 
     assert "CodingJourneySelector" in index_content
     assert "AppTypeSelector" in index_content
@@ -438,9 +455,11 @@ def test_extended_orchestration_transition_components_are_file_backed() -> None:
 
 
 def test_platform_ui_fonts_flow_through_semantic_theme_tokens() -> None:
-    typography = _read("mozaiks-platform/ui/theme/typography.js")
-    app_card = _read("mozaiks-platform/ui/components/AppCard.jsx")
-    dashboard = _read("mozaiks-platform/ui/pages/Dashboard.jsx")
+    from conftest import active_app_root
+    app_root = active_app_root()
+    typography = (app_root / "ui" / "theme" / "typography.js").read_text(encoding="utf-8")
+    app_card = (app_root / "ui" / "components" / "AppCard.jsx").read_text(encoding="utf-8")
+    dashboard = (app_root / "ui" / "pages" / "custom" / "Dashboard.jsx").read_text(encoding="utf-8")
 
     assert "var(--font-body" in typography
     assert "var(--font-heading" in typography
@@ -453,7 +472,7 @@ def test_platform_ui_fonts_flow_through_semantic_theme_tokens() -> None:
 
     # Do not regress to literal brand font names in component code.
     literal_font_names = ("Rajdhani", "Orbitron", "Fagrak")
-    ui_root = _workspace() / "mozaiks-platform" / "ui"
+    ui_root = app_root / "ui"
     for path in sorted(ui_root.rglob("*.jsx")):
         source = path.read_text(encoding="utf-8")
         for font_name in literal_font_names:

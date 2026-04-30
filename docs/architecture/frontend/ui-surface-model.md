@@ -1,70 +1,138 @@
 # UI Surface Model
 
-The entire Mozaiks UI is built around a single mental model:
+The frontend runtime is organized around one persistent session layer and a
+small state machine that decides which surface is visible.
 
-> **The user is either inside the chat — or they are somewhere else with the chat running in the background.**
+The canonical owner is `chat-ui/src/state/uiSurfaceReducer.js`. `ChatUIContext`
+stores the reducer state plus the session caches that survive navigation:
 
-There are not two chat experiences. There is one session. The difference is only whether the full chat interface is visible or a compact floating widget is visible in its place.
+- `activeChatId`
+- `activeWorkflowName`
+- `askMessages`
+- `workflowMessages`
+- `workflowStatus`
 
----
+## Core rule
 
-## Two visible states
+There is one session, not separate chat products.
 
-### State A — Widget visible
+The user is either:
 
-The user is on a non-chat route (a dashboard, settings page, workflow gallery, anything), or they are on the chat page but have expanded the artifact to fullscreen (`view` mode). Either way:
+- on the full chat surface
+- on another route with the same session available through the widget
+- in workflow `view` layout, where the artifact takes over the screen and the
+  widget becomes the re-entry point back into chat
 
-- The full chat UI is **hidden**
-- A floating 80×80px widget is **pinned to the bottom-right of the screen**
-- The underlying WebSocket session is still **connected and running**
-- Any messages or workflow output arriving from the backend are **cached in context** and waiting for the user
+## Visible surfaces
 
-Tapping the widget expands it into a compact chat panel directly above the button — no navigation required. The user can read messages, send a reply, and collapse it again without ever leaving the page they were on.
+| Surface | When visible | Owner |
+| --- | --- | --- |
+| Full chat surface | `/chat` and workflow chat routes | `chat-ui/src/pages/ChatPage.js` |
+| Floating widget | non-chat routes | `chat-ui/src/widget/GlobalChatWidgetWrapper.jsx` + `chat-ui/src/components/chat/PersistentChatWidget.jsx` |
+| Floating widget in `view` layout | fullscreen artifact inside ChatPage | `ArtifactPanel` via `floatingWidget` |
 
-### State B — Widget gone
+`view` is not a third conversation product. It is a workflow layout state.
 
-The user navigated to the chat page (route `/chat`) or to a workflow page (`/app/:id/:workflow`). The `GlobalChatWidgetWrapper` detects these routes and **renders nothing** — the floating button disappears entirely. The user is now inside the full chat interface, which owns the screen.
+## Surface state machine
 
----
+The reducer tracks three related concepts:
 
-## Why `view` mode is the same as a non-chat route
+### Conversation mode
 
-`view` mode is a layout mode where the artifact panel expands to 100% of the screen width and the chat column disappears. Visually it looks exactly like a non-chat route: there is a fullscreen piece of content and a widget in the corner.
+- `ask` means general chat
+- `workflow` means an active workflow run
 
-The difference is technical, not visual:
+`ask` always collapses to `full` layout because it does not own an artifact
+panel.
 
-| | Non-chat route | ChatPage `view` mode |
-|---|---|---|
-| Route | `/dashboard`, `/settings`, etc. | `/chat` |
-| Widget mounted by | `GlobalChatWidgetWrapper` | `ArtifactPanel` via `floatingWidget` prop |
-| WebSocket | Stays connected | Stays connected |
-| Session | Same `chat_id` in context | Same `chat_id` in context |
-| User experience | Identical | Identical |
+### Layout mode
 
-Both scenarios look and behave the same to the user. The distinction only matters to the code that decides *where* to mount the widget.
+- `full` means chat only
+- `split` means chat plus artifact
+- `minimized` means chat compressed while artifact remains visible
+- `view` means fullscreen artifact with widget re-entry
 
----
+### Widget state
 
-## Session continuity across navigation
+The reducer also tracks widget visibility separately from route ownership:
 
-One of the deliberate design constraints is that **navigation never restarts the session**.
+- `isInWidgetMode`
+- `isWidgetVisible`
+- `isChatOverlayOpen`
+- `widgetOverlayOpen`
 
-When the user navigates from a dashboard to the chat page, the `ChatUIContext` — which holds `activeChatId`, `workflowMessages`, `askMessages`, and `workflowStatus` — persists in memory. The chat page reads those values rather than starting from scratch.
+`GlobalChatWidgetWrapper` suppresses widget rendering on primary chat routes and
+enables it on other routes.
 
-When the user navigates away from the chat page, the context stays alive. The WebSocket may close or stay open depending on whether the chat page unmounts, but the `chat_id` and message caches survive.
+## Event-driven surface changes
 
-The result: opening the widget on a non-chat route shows the same conversation the user was in before. There is no "start over" unless the user explicitly composes a new conversation.
+Frontend surfaces are not changed by ad hoc component logic alone. The reducer
+reacts to event classes:
 
----
+| Event family | Effect on surface |
+| --- | --- |
+| `chat.tool_call` with `display=artifact|view|fullscreen` | opens artifact surface |
+| legacy `ui_tool_event` with artifact/view display | same as above, compatibility path |
 
-## What is and is not a surface
+This mapping lives in `mapSurfaceEventToAction(...)`.
 
-The Mozaiks UI provides **two rendered surfaces**, not three:
+## Session continuity
 
-| Surface | Route context | Owner |
-|---------|--------------|-------|
-| Full chat interface | `/chat`, `/app/:id/:workflow` | `ChatPage.js` |
-| Floating widget | All other routes + `view` mode | `PersistentChatWidget.jsx` |
+Navigation must not discard the active session.
 
-There is no third surface. The `view` mode within ChatPage is a layout state, not a separate surface — the artifact is fullscreen but the session is unchanged and the widget provides the same entry point the floating button provides on non-chat routes.
+Current implementation:
 
+- `ChatUIContext` survives route changes
+- `ChatPage` restores cached `askMessages` and `workflowMessages`
+- artifact state is cached for restoration
+- the widget reads the same shared caches instead of opening a second session
+
+That is why a user can leave `/chat`, browse elsewhere, and still reopen the
+same run from the widget.
+
+## Widget contract
+
+The widget is the session entry point outside the full chat surface.
+
+### Where it renders
+
+| Context | Mounted by |
+| --- | --- |
+| non-chat routes | `GlobalChatWidgetWrapper` |
+| ChatPage `view` layout | `ArtifactPanel` |
+
+### What it shows
+
+The widget follows the active context:
+
+- if a workflow is active, it defaults to `workflowMessages`
+- otherwise it shows `askMessages`
+
+The user can switch to ask context inline without navigating.
+
+### Header contract
+
+The expanded widget keeps a two-button header:
+
+- left button: switch to ask context or open the full ask chat
+- right button: return to the active workflow chat when one exists
+
+The compose affordance for ask mode lives in the sub-header as `+ New conversation`.
+
+### Route suppression
+
+`GlobalChatWidgetWrapper` returns `null` on:
+
+- `/chat`
+- `/chat/*`
+- `/app/:id/:workflow`
+
+That keeps the widget from competing with the full chat surface.
+
+## Canonical implementation files
+
+- `chat-ui/src/state/uiSurfaceReducer.js`
+- `chat-ui/src/context/ChatUIContext.jsx`
+- `chat-ui/src/pages/ChatPage.js`
+- `chat-ui/src/widget/GlobalChatWidgetWrapper.jsx`
+- `chat-ui/src/components/chat/PersistentChatWidget.jsx`

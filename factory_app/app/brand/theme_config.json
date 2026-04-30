@@ -1,0 +1,176 @@
+{
+  "_comment": "Canonical Mozaiks Platform brand config. 'theme' drives --mz-* CSS tokens (App UI system, v2), top-level identity/assets/fonts/colors/shadows drive --color-* / --core-primitive-* tokens, 'primitives' + 'ui' own visual shell/page/chat spacing and density, and shell content/behavior lives in app/config/shell.json. themeProvider.js reads this file from /api/theme-config.",
+
+  "theme": {
+    "primary":    "cyan",
+    "variant":    "modern",
+    "radius":     "medium",
+    "font":       "rajdhani",
+    "font_heading": "orbitron",
+    "appearance": "dark",
+    "density":    "comfortable",
+    "branding": {
+      "app_name":   "Mozaiks Platform",
+      "logo_url":   "/assets/mozaik_logo.svg",
+      "favicon_url": "/favicon.ico"
+    }
+  },
+
+  "identity": {
+    "name":     "MozaiksAI",
+    "tagline":  "AI-Powered Workflows",
+    "app_name": "Mozaiks"
+  },
+
+  "assets": {
+    "logo":              "mozaik_logo.svg",
+    "wordmark":          "mozaik.png",
+    "favicon":           "/favicon.ico",
+    "chatbackgroundImage": "chat_bg_template.png"
+  },
+
+  "fonts": {
+    "body": {
+      "family":      "Rajdhani",
+      "fallbacks":   "ui-sans-serif, system-ui, -apple-system, sans-serif",
+      "googleFont":  "https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&display=swap",
+      "tailwindClass": "font-sans"
+    },
+    "heading": {
+      "family":      "Orbitron",
+      "fallbacks":   "Rajdhani, ui-sans-serif, system-ui, sans-serif",
+      "googleFont":  "https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&display=swap",
+      "tailwindClass": "font-heading"
+    },
+    "logo": {
+      "family":      "Fagrak Inline",
+      "fallbacks":   "Rajdhani, ui-sans-serif, system-ui, sans-serif",
+      "localFont":   true,
+      "src":         "/fonts/Fagrak Inline.otf",
+      "tailwindClass": "font-logo"
+    }
+  },
+
+  "colors": {
+    "primary":    { "main": "#06b6d4", "light": "#67e8f9", "dark": "#0e7490", "name": "cyan" },
+    "secondary":  { "main": "#8b5cf6", "light": "#a78bfa", "dark": "#6d28d9", "name": "violet" },
+    "accent":     { "main": "#f59e0b", "light": "#fbbf24", "dark": "#d97706", "name": "amber" },
+    "success":    { "main": "#10b981", "light": "#34d399", "dark": "#059669", "name": "emerald" },
+    "warning":    { "main": "#f59e0b", "light": "#fbbf24", "dark": "#d97706", "name": "amber" },
+    "error":      { "main": "#ef4444", "light": "#f87171", "dark": "#dc2626", "name": "red" },
+    "background": { "base": "#0b1220", "surface": "#0f1724", "elevated": "#131d33", "overlay": "rgba(13, 23, 42, 0.72)" },
+    "border":     { "subtle": "#1e293b", "strong": "#334155", "accent": "#06b6d4" },
+    "text":       { "primary": "#e6eef8", "secondary": "#94a3b8", "muted": "#64748b", "onAccent": "#f8fafc" }
+  },
+
+  "shadows": {
+    "primary":   "0 20px 45px rgba(6, 182, 212, 0.24)",
+    "secondary": "0 20px 45px rgba(139, 92, 246, 0.24)",
+    "accent":    "0 18px 40px rgba(245, 158, 11, 0.32)",
+    "success":   "0 18px 40px rgba(16, 185, 129, 0.24)",
+    "warning":   "0 18px 45px rgba(245, 158, 11, 0.34)",
+    "error":     "0 18px 45px rgba(239, 68, 68, 0.3)",
+    "elevated":  "0 24px 60px rgba(11, 18, 32, 0.55)",
+    "focus":     "0 0 0 3px rgba(8, 145, 178, 0.55)"
+  },
+
+  "primitives": {
+    "radius": {
+      "surface": "1rem",
+      "control": "1rem",
+      "bubble": "18px"
+    },
+    "measure": {
+      "shell": "1440px",
+      "chat_feed": "1040px"
+    },
+    "spacing": {
+      "tight": "0.5rem",
+      "base": "1rem",
+      "loose": "1.5rem"
+    }
+  },
+
+  "ui": {
+    "shell": {
+      "frame": {
+        "maxWidth": "1440px"
+      },
+      "header": {
+        "height": "4rem",
+        "paddingX": "1.5rem",
+        "gap": "1rem",
+        "clusterGap": "0.875rem",
+        "navGap": "0.5rem",
+        "navPaddingLeft": "0.5rem",
+        "controlGap": "0.75rem",
+        "actionHeight": "2.75rem",
+        "actionPaddingX": "1rem",
+        "utilitySize": "2.75rem",
+        "utilityPadding": "0.375rem",
+        "avatarSize": "2rem",
+        "avatarLargeSize": "3rem",
+        "profileHeight": "2.875rem",
+        "profilePaddingX": "0.75rem",
+        "panelRadius": "1rem"
+      },
+      "footer": {
+        "maxWidth": "1440px",
+        "paddingY": "0.9rem",
+        "paddingX": "1rem",
+        "gap": "0.75rem"
+      }
+    },
+    "page": {
+      "maxWidth": {
+        "grid": "1280px",
+        "sidebar": "1360px",
+        "full-width": "1200px",
+        "split": "1280px"
+      },
+      "paddingX": {
+        "base": "1rem",
+        "md": "2rem",
+        "xl": "2.5rem"
+      },
+      "paddingY": {
+        "base": "2rem",
+        "md": "2.5rem"
+      },
+      "sectionGap": "2rem",
+      "titlePaddingBottom": "1rem"
+    },
+    "chat": {
+      "modes": {
+        "ask":      { "tint": "#06b6d4", "label": "Ask" },
+        "workflow": { "tint": "#8b5cf6", "label": "Workflow" }
+      },
+      "bubbleRadius": "18px",
+      "feedMaxWidth": "1040px",
+      "feedPaddingTop": {
+        "base": "1rem",
+        "sm": "1.25rem",
+        "md": "1.75rem"
+      },
+      "feedPaddingBottom": {
+        "base": "3.25rem",
+        "sm": "3.75rem",
+        "md": "4rem"
+      },
+      "feedPaddingX": {
+        "base": "1rem",
+        "sm": "1.5rem",
+        "md": "1.75rem"
+      },
+      "bubblePaddingY": "0.95rem",
+      "bubblePaddingX": "1.15rem",
+      "userBubblePaddingY": "0.7rem",
+      "userBubblePaddingX": "0.95rem",
+      "bubbleGap": "0.85rem",
+      "bubbleHeaderGap": "0.35rem",
+      "namePillPaddingY": "1px",
+      "namePillPaddingX": "0.55rem",
+      "namePillFontSize": "10px"
+    }
+  }
+}

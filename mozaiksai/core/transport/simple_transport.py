@@ -11,7 +11,7 @@ import os
 from typing import Dict, Any, Optional, Union, Tuple, List
 from fastapi import WebSocket
 from pymongo import ReturnDocument
-from starlette.websockets import WebSocketDisconnect
+from starlette.websockets import WebSocketDisconnect, WebSocketState
 from datetime import datetime, timezone
 from websockets.exceptions import ConnectionClosed
 
@@ -219,11 +219,18 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         error_code: str,
     ) -> None:
         """Send a standardized error response to the WebSocket client."""
-        await websocket.send_json({
-            "type": "chat.error",
-            "data": {"message": message, "error_code": error_code},
-            "timestamp": _utc_timestamp(),
-        })
+        if getattr(websocket, "application_state", None) is not WebSocketState.CONNECTED:
+            return
+        if getattr(websocket, "client_state", None) is WebSocketState.DISCONNECTED:
+            return
+        try:
+            await websocket.send_json({
+                "type": "chat.error",
+                "data": {"message": message, "error_code": error_code},
+                "timestamp": _utc_timestamp(),
+            })
+        except RuntimeError:
+            logger.debug("Skipping websocket error frame because the socket is already closed")
 
     # ==================================================================================
     # USER INPUT COLLECTION (Production-Ready)

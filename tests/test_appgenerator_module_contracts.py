@@ -18,15 +18,21 @@ def _read_yaml(relative_path: str):
 
 
 def test_appgenerator_structured_outputs_include_canonical_module_contract_models() -> None:
-    config = _read_yaml("mozaiks-platform/app/workflows/AppGenerator/structured_outputs.yaml")
+    config = _read_yaml("factory_app/app/workflows/AppGenerator/structured_outputs.yaml")
     models = config["models"]
     registry = config["registry"]
 
     assert registry["ConfigMiddlewareAgent"] == "ConfigMiddlewareOutput"
+    assert registry["DatabaseAgent"] == "DatabaseOutput"
+    assert registry["ModelAgent"] == "ModelOutput"
+    assert registry["ServiceAgent"] == "ServiceOutput"
+    assert registry["FrontendStubAgent"] == "FrontendStubOutput"
+    assert registry["ControllerAgent"] == "ControllerOutput"
     assert "module_contract" in models["AppBuildTask"]["fields"]["task_type"]["values"]
     assert "platform_config" not in models["AppBuildTask"]["fields"]["task_type"]["values"]
 
     for model_name in [
+        "ModuleIdentity",
         "ModuleManifest",
         "ModuleEventsManifest",
         "ModuleSubscriptionsManifest",
@@ -34,13 +40,73 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "ModuleSettingsManifest",
         "ModuleAdminPanel",
         "ModuleAdminManifest",
+        "ModulePythonStub",
+        "ModuleJsStub",
+        "HostAdminRuntimePanel",
+        "HostAdminConfig",
+        "DatabaseArtifactFile",
+        "DatabaseOutput",
+        "BackendFoundationFile",
+        "BackendFoundationBundle",
+        "ModelFile",
+        "ModelOutput",
+        "AppBackendAdminPanel",
+        "AppBackendAdminConfig",
+        "AppCustomRouteEntry",
+        "AppCustomPageFile",
+        "AppCustomRouteBundle",
         "ModuleContractBundle",
         "ConfigMiddlewareOutput",
+        "ImplementedPythonStub",
+        "ServiceOutput",
+        "ImplementedJsStub",
+        "FrontendStubOutput",
+        "ControllerOutput",
     ]:
         assert model_name in models
 
     contract_fields = models["ModuleContractBundle"]["fields"]
     assert contract_fields["admin_yaml"]["type"] == "ModuleAdminManifest"
+    assert contract_fields["python_stubs"]["items"] == "ModulePythonStub"
+    assert contract_fields["js_stubs"]["items"] == "ModuleJsStub"
+    assert models["ConfigMiddlewareOutput"]["fields"]["mode"]["values"] == [
+        "module_contract_bundle",
+        "admin_config_bundle",
+        "backend_foundation",
+    ]
+    assert models["ConfigMiddlewareOutput"]["fields"]["host_admin_config"]["variants"] == [
+        "HostAdminConfig",
+        "null",
+    ]
+    assert models["ConfigMiddlewareOutput"]["fields"]["backend_foundation_bundle"]["variants"] == [
+        "BackendFoundationBundle",
+        "null",
+    ]
+    assert models["ModuleJsStub"]["fields"]["surface"]["values"] == ["admin_component"]
+    assert models["AppSchemaOutput"]["fields"]["custom_route_bundle"]["variants"] == ["AppCustomRouteBundle", "null"]
+    assert models["AppManifest"]["fields"]["custom_routes"]["items"] == "str"
+    assert models["AppCustomRouteBundle"]["fields"]["route_manifest"]["items"] == "AppCustomRouteEntry"
+    assert models["AppCustomRouteBundle"]["fields"]["page_files"]["items"] == "AppCustomPageFile"
+    assert models["ModuleManifest"]["fields"]["module"]["type"] == "ModuleIdentity"
+    assert models["ModuleAdminManifest"]["fields"]["schema_version"]["description"] == "Must be mozaiks.admin.v2."
+    assert models["HostAdminConfig"]["fields"]["schema_version"]["values"] == ["mozaiks.admin.host.v1"]
+    assert models["HostAdminRuntimePanel"]["fields"]["id"]["values"] == ["stats", "runs", "sessions"]
+    assert models["AppBackendAdminConfig"]["fields"]["schema_version"]["values"] == ["mozaiks.admin.app_backend.v1"]
+    assert models["ControllerOutput"]["fields"]["mode"]["values"] == [
+        "module_api_adapter",
+        "app_backend_admin_surface",
+    ]
+    assert models["ControllerOutput"]["fields"]["app_backend_admin_config"]["variants"] == [
+        "AppBackendAdminConfig",
+        "null",
+    ]
+    assert models["ServiceOutput"]["fields"]["python_files"]["items"] == "ImplementedPythonStub"
+    assert models["FrontendStubOutput"]["fields"]["js_files"]["items"] == "ImplementedJsStub"
+    assert models["FrontendStubOutput"]["fields"]["registration_barrel"]["variants"] == ["str", "null"]
+    assert models["DatabaseOutput"]["fields"]["database_files"]["items"] == "DatabaseArtifactFile"
+    assert models["ModelOutput"]["fields"]["model_files"]["items"] == "ModelFile"
+    assert models["AppValidation"]["fields"]["validation_strategy"]["values"] == ["e2b", "local", "skip"]
+    assert models["AppValidation"]["fields"]["validation_status"]["values"] == ["passed", "failed", "skipped"]
     admin_panel_fields = models["ModuleAdminPanel"]["fields"]
     assert admin_panel_fields["section"]["values"] == [
         "overview",
@@ -52,29 +118,89 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "integrations",
         "support",
     ]
+    assert admin_panel_fields["layout"]["variants"] == ["str", "null"]
+    assert admin_panel_fields["sections"]["items"] == "AppPageSection"
 
 
 def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations_contract() -> None:
-    source = _read("mozaiks-platform/app/workflows/AppGenerator/agents.yaml")
+    source = _read("factory_app/app/workflows/AppGenerator/agents.yaml")
+    handoffs = _read_yaml("factory_app/app/workflows/AppGenerator/handoffs.yaml")
 
     assert "task_type: module_contract" in source
+    assert "task_type: admin_config" in source
+    assert "mode\": \"admin_config_bundle\"" in source
+    assert "host_admin_config" in source
+    assert "backend_foundation_bundle" in source
+    assert "Never emit `module_panels`" in source
+    assert "Fail the task rather than guessing a fallback mode." in source
     assert "modules/{pack_name}/module.yaml" in source
     assert "modules/{pack_name}/subscriptions.yaml" in source
     assert "modules/{pack_name}/admin.yaml" in source
     assert "backend/handler.py" in source
+    assert "Frontend Stub Agent" in source
+    assert "module_contract.js_stubs" in source
+    assert "ServiceOutput" in source
+    assert "FrontendStubOutput" in source
+    assert "\"python_files\"" in source
+    assert "\"js_files\"" in source
+    assert "\"registration_barrel\"" in source
+    assert "`ui/index.js` registration barrel" in source
+    assert "Persistent app pages still belong in `app.json` + `ui/pages/*.yaml`." in source
+    assert "`ui/route_manifest.json` + `ui/pages/custom/*.jsx`" in source
+    assert "custom_route_bundle" in source
     assert "domain.task_manager.task_created" in source
-    assert "schema_version: mozaiks.admin.v1" in source
+    assert "schema_version: mozaiks.admin.v2" in source
+    assert "schema_version: mozaiks.admin.app_backend.v1" in source
+    assert "ControllerOutput.app_backend_admin_config" in source
+    assert "\"mode\": \"app_backend_admin_surface\"" in source
+    assert "\"app_backend_admin_config\"" in source
+    assert "backend/admin_config.py" in source
+    assert "backend/routes/admin.py" in source
+    assert "build_app_backend_admin_router" in source
+    assert "validate_app_backend_admin_config" in source
+    assert "`app/config/admin.json`" in source
+    assert "`platform/config/admin.json`" not in source
     assert "Every panel must set `section`" in source
+    assert "structured-output-first contract" in source
+    assert "app_validation_strategy" in source
+    assert "validation_status" in source
+    assert "validate_app_build" in source
+    assert "passed` or explicit `skipped`" in source
+    assert "python_stubs" in source
+    assert "js_stubs" in source
+    assert "\"database_files\"" in source
+    assert "\"model_files\"" in source
+    assert "contract_refs" in source
+    assert "`page_component` and `shell_extension`" not in source
+    assert any(
+        rule["source_agent"] == "ServiceAgent" and rule["target_agent"] == "FrontendStubAgent"
+        for rule in handoffs["handoff_rules"]
+    )
+    assert any(
+        rule["source_agent"] == "FrontendStubAgent" and rule["target_agent"] == "ControllerAgent"
+        for rule in handoffs["handoff_rules"]
+    )
 
     assert "task_type: platform_config" not in source
     assert "operations/{pack_name}" not in source
     assert "subscription.yaml" not in source
     assert "operation.yaml" not in source
     assert "admin_surfaces" not in source
+    assert "legacy standalone" not in source
+    assert "backend/main.py" not in source
+    assert "backend/routes/api_router.py" not in source
+    assert "RouteAgent" not in source
+    assert "EntryPointAgent" not in source
+    assert "page_component" not in _read("factory_app/app/workflows/AppGenerator/structured_outputs.yaml")
+    assert "shell_extension" not in _read("factory_app/app/workflows/AppGenerator/structured_outputs.yaml")
 
 
 def test_appgenerator_download_tool_does_not_inject_legacy_admin_surfaces() -> None:
-    source = _read("mozaiks-platform/app/workflows/AppGenerator/tools/generate_and_download.py")
+    source = _read("factory_app/app/workflows/AppGenerator/tools/generate_and_download.py")
+    assembly = _read("factory_app/app/workflows/AppGenerator/tools/assembly_phase.py")
 
     assert "admin_surfaces" not in source
     assert "_inject_admin_surfaces(files_map)" not in source
+    assert "extract_code_file_map_from_payload" in source
+    assert "extract_code_file_entries_from_payload" in assembly
+

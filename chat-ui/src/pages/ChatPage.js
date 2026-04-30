@@ -7,7 +7,7 @@ import WorkflowCompletion from '../components/chat/WorkflowCompletion';
 import FluidChatLayout from '../components/chat/FluidChatLayout';
 import MobileArtifactDrawer from '../components/chat/MobileArtifactDrawer';
 import { TransitionScreen } from '../ui/screens/TransitionScreen';
-import { applyArtifactUpdate, applyJsonPatch, applyOptimisticUpdate, deriveArtifactId, interpolateParams } from '../core/actions/actionUtils';
+import { applyArtifactUpdate, applyOptimisticUpdate, deriveArtifactId, interpolateParams } from '../core/actions/actionUtils';
 import { useNavigate, useLocation } from "react-router-dom";
 import { useContext } from "react";
 import { useChatUI } from "../context/ChatUIContext";
@@ -102,46 +102,6 @@ const formatHistoryTimestamp = (timestamp) => {
   } catch {
     return 'Just now';
   }
-};
-
-const normalizeSnapshotMessage = (msg, index) => {
-  if (!msg || typeof msg !== 'object') {
-    return {
-      id: `snapshot-${index}-${Date.now()}`,
-      sender: 'user',
-      agentName: 'user',
-      content: '',
-      isStreaming: false,
-    };
-  }
-  const role = msg.role || 'user';
-  const agentName = msg.agent || msg.agent_name || msg.name || (role === 'assistant' ? 'assistant' : 'user');
-  const metadata = msg.metadata || null;
-  const uiToolMeta = metadata?.ui_tool;
-  const uiToolEvent = uiToolMeta && typeof uiToolMeta === 'object'
-    ? {
-        ui_tool_id: uiToolMeta.ui_tool_id,
-        eventId: uiToolMeta.event_id,
-        payload: uiToolMeta.payload || {},
-        display: uiToolMeta.display || 'inline',
-        workflow_name: msg.workflow_name || uiToolMeta.workflow_name,
-      }
-    : null;
-
-  return {
-    id: msg.id || `snapshot-${index}-${Date.now()}`,
-    sender: role === 'assistant' ? 'agent' : 'user',
-    agentName,
-    content: msg.content || '',
-    isStreaming: false,
-    structuredOutput: msg.structured_output,
-    structuredSchema: msg.structured_schema,
-    uiToolEvent,
-    ui_tool_completed: uiToolMeta?.ui_tool_completed || false,
-    ui_tool_status: uiToolMeta?.ui_tool_status || null,
-    metadata,
-    timestamp: msg.timestamp || null,
-  };
 };
 
 const AskHistorySidebar = ({
@@ -474,7 +434,6 @@ const ChatPage = () => {
   const [messages, setMessages] = useState([]);
   // Ref mirror to access latest messages inside callbacks without stale closure
   const messagesRef = useRef([]);
-  const messagesSnapshotAppliedRef = useRef(false);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   const [ws, setWs] = useState(null);
   const wsRef = useRef(null);
@@ -484,7 +443,6 @@ const ChatPage = () => {
   const [transportType, setTransportType] = useState(null);
   const [modeChangePending, setModeChangePending] = useState(false);
   const [currentChatId, setCurrentChatId] = useState(null); // set via start/resume flow below
-  useEffect(() => { messagesSnapshotAppliedRef.current = false; }, [currentChatId]);
   const LOCAL_STORAGE_KEY = 'mozaiks.current_chat_id';
   const [, setConnectionInitialized] = useState(false);
   const [workflowConfigLoaded, setWorkflowConfigLoaded] = useState(false); // becomes true once workflow config resolved
@@ -514,7 +472,7 @@ const ChatPage = () => {
   const queryWorkflowName = searchParams.get('workflow');
   const queryChatId = searchParams.get('chat_id');
   const queryMode = searchParams.get('mode'); // 'ask' or 'workflow'
-  const queryDiscover = searchParams.get('discover');
+  const queryEmbeddedView = searchParams.get('view');
   const queryResume = searchParams.get('resume');
   // Gate / action / refinement context — set by useWorkflowStart
   // e.g. /chat?workflow=AppGenerator&context={"app_type":"new"}&trigger_source=gate
@@ -577,7 +535,7 @@ const ChatPage = () => {
   const isSidePanelOpen = isArtifactOpen;
   const setIsSidePanelOpen = setIsArtifactOpen;
   const [forceOverlay, setForceOverlay] = useState(false);
-  const [discoveryChatMinimized, setDiscoveryChatMinimized] = useState(false);
+  const [widgetChatMinimized, setWidgetChatMinimized] = useState(false);
   const [isAskHistoryDrawerOpen, setIsAskHistoryDrawerOpen] = useState(false);
   const [pendingTransitionId, setPendingTransitionId] = useState(null);
   const [pendingTransitionContext, setPendingTransitionContext] = useState({});
@@ -598,7 +556,7 @@ const ChatPage = () => {
   }, [currentArtifactMessages]);
   const navTriggerRef = useRef(null);
   const navCacheContextRef = useRef(null);
-  const discoverHandledRef = useRef(false);
+  const embeddedViewHandledRef = useRef(false);
   const viewArtifactSnapshotRef = useRef(null);
   // Track the most recent artifact-mode UI event id to manage auto-collapse
   const lastArtifactEventRef = useRef(null);
@@ -1479,44 +1437,6 @@ const ChatPage = () => {
       }
     }
 
-    // AG-UI state sync events (Phase 6)
-    if (data.type && data.type.startsWith('agui.state.')) {
-      const payload = data.data || {};
-      if (data.type === 'agui.state.StateSnapshot') {
-        const artifactId = payload.artifact_id || payload.artifactId || payload.id || null;
-        const statePayload = payload.state || payload.snapshot || payload.payload || payload.artifact || null;
-        if (statePayload !== null && statePayload !== undefined) {
-          updateArtifactPayload(artifactId, () => statePayload);
-        }
-        return;
-      }
-      if (data.type === 'agui.state.StateDelta') {
-        const artifactId = payload.artifact_id || payload.artifactId || payload.id || null;
-        const patchOps = payload.patch || payload.delta || payload.operations || payload.payload;
-        if (Array.isArray(patchOps)) {
-          updateArtifactPayload(artifactId, (current) => applyJsonPatch(current || {}, patchOps));
-        } else if (payload.state !== undefined) {
-          updateArtifactPayload(artifactId, () => payload.state);
-        }
-        return;
-      }
-      if (data.type === 'agui.state.MessagesSnapshot') {
-        const snapshotMessages = payload.messages;
-        const shouldReplace = payload.replace === true;
-        if (Array.isArray(snapshotMessages)) {
-          if (!shouldReplace && messagesSnapshotAppliedRef.current) {
-            return;
-          }
-          if (!shouldReplace && messagesRef.current.length > 0) {
-            return;
-          }
-          const normalized = snapshotMessages.map((msg, idx) => normalizeSnapshotMessage(msg, idx));
-          setMessagesWithLogging(normalized);
-          messagesSnapshotAppliedRef.current = true;
-        }
-        return;
-      }
-    }
     // Minimal passthrough for still-emitted dynamic UI events until backend fully migrated
     if (data.type === 'ui_tool_event' || data.type === 'UI_TOOL_EVENT') {
       // Create a response callback that uses the WebSocket connection
@@ -2917,8 +2837,13 @@ useEffect(() => {
 
       if (reuseChatId) {
         console.log('[EXISTS] Checking existence of chat', reuseChatId);
+        const wfName = resolveKnownWorkflowName(currentWorkflowName);
+        if (!wfName) {
+          console.warn('[EXISTS] No runnable workflow resolved; skipping chat reuse check');
+          pendingStartRef.current = false;
+          return;
+        }
         try {
-          const wfName = resolveKnownWorkflowName(currentWorkflowName);
           const resp = await fetch(`${api.getHttpBaseUrl()}/api/chats/exists/${currentAppId}/${wfName}/${reuseChatId}`);
           if (resp.ok) {
             const data = await resp.json();
@@ -2929,7 +2854,7 @@ useEffect(() => {
               
               // Update global chat context for persistent bubble
               setActiveChatId(reuseChatId);
-              setActiveWorkflowName(currentWorkflowName);
+              setActiveWorkflowName(wfName);
               setChatMinimized(false);
               
               pendingStartRef.current = false;
@@ -2947,7 +2872,7 @@ useEffect(() => {
             setCurrentChatId(reuseChatId);
             setChatExists(null);
             setActiveChatId(reuseChatId);
-            setActiveWorkflowName(currentWorkflowName);
+            setActiveWorkflowName(wfName);
             setChatMinimized(false);
             pendingStartRef.current = false;
             return;
@@ -2957,7 +2882,7 @@ useEffect(() => {
           setCurrentChatId(reuseChatId);
           setChatExists(null);
           setActiveChatId(reuseChatId);
-          setActiveWorkflowName(currentWorkflowName);
+          setActiveWorkflowName(wfName || null);
           setChatMinimized(false);
           pendingStartRef.current = false;
           return;
@@ -2965,16 +2890,22 @@ useEffect(() => {
       }
 
       console.log('[INIT] Creating new chat via startChat');
+      const startWorkflowName = resolveKnownWorkflowName(currentWorkflowName);
+      if (!startWorkflowName) {
+        console.warn('[INIT] No runnable workflow resolved; skipping startChat');
+        return;
+      }
       const triggerMeta = {
         trigger_source: queryTriggerSource,
         ...(queryActionId ? { action_id: queryActionId } : {}),
         ...(queryChangeClass ? { change_class: queryChangeClass } : {}),
         ...(queryArtifactVersionId ? { artifact_version_id: queryArtifactVersionId } : {}),
       };
-      const result = await api.startChat(currentAppId, currentWorkflowName, currentUserId, {}, queryContext, triggerMeta);
+      const result = await api.startChat(currentAppId, startWorkflowName, currentUserId, {}, queryContext, triggerMeta);
       if (result && (result.chat_id || result.id)) {
         const newId = result.chat_id || result.id;
         const reused = !!result.reused;
+        const resolvedWorkflowName = result.workflow_name || startWorkflowName;
         setCurrentChatId(newId);
         setChatExists(reused);
 
@@ -2988,7 +2919,8 @@ useEffect(() => {
 
         // Update global chat context for persistent bubble
         setActiveChatId(newId);
-        setActiveWorkflowName(currentWorkflowName);
+        setActiveWorkflowName(resolvedWorkflowName);
+        setCurrentWorkflowName(resolvedWorkflowName);
         setChatMinimized(false);
         setStoredActiveChatId(newId);
         if (!reused) {
@@ -4686,16 +4618,16 @@ useEffect(() => {
     }
   }, []);
 
-  const resolveDiscoverPage = (value) => {
+  const resolveEmbeddedViewId = (value) => {
     if (!value) return null;
     if (value === '1' || value === 'true') return null;
-    return value;
+    return String(value).trim() || null;
   };
 
-  const openDiscoveryView = useCallback(async (source = 'discover', page = null) => {
+  const openEmbeddedView = useCallback(async (source = 'header_action', viewId = null) => {
     try {
-      const resolvedPage = resolveDiscoverPage(page);
-      if (!resolvedPage) return;
+      const resolvedViewId = resolveEmbeddedViewId(viewId);
+      if (!resolvedViewId) return;
       if (conversationMode === 'workflow') {
         viewArtifactSnapshotRef.current = {
           isOpen: isSidePanelOpen,
@@ -4709,19 +4641,19 @@ useEffect(() => {
         await handleConversationModeChange('workflow');
       }
 
-      const eventId = `discover-${Date.now()}`;
+      const eventId = `embedded-view-${Date.now()}`;
       const payload = {
         embedded: true,
         presentation: 'artifact',
-        page: resolvedPage,
+        page: resolvedViewId,
         source,
         workflow_name: 'core',
-        component_type: resolvedPage,
+        component_type: resolvedViewId,
       };
 
       emitLocalArtifactEvent({
         type: 'ui_tool_event',
-        ui_tool_id: resolvedPage,
+        ui_tool_id: resolvedViewId,
         eventId,
         workflow_name: 'core',
         display: 'view',
@@ -4730,38 +4662,38 @@ useEffect(() => {
         agent_name: 'System',
       });
     } catch (err) {
-      console.warn('Failed to open discovery view', err);
+      console.warn('Failed to open embedded view', err);
     }
   }, [conversationMode, emitLocalArtifactEvent, handleConversationModeChange, isSidePanelOpen, layoutMode, currentArtifactMessages]);
 
-  const handleDiscoverClick = async (pageOverride = null) => {
+  const handleEmbeddedViewClick = async (viewOverride = null) => {
     try {
       if (isInWidgetMode) {
         setIsInWidgetMode(false);
       }
-      const page = resolveDiscoverPage(pageOverride);
-      await openDiscoveryView('header', page);
+      const viewId = resolveEmbeddedViewId(viewOverride);
+      await openEmbeddedView('header_action', viewId);
     } catch (err) {
-      console.warn('Failed to open discovery view', err);
+      console.warn('Failed to open embedded view', err);
     }
   };
 
   useEffect(() => {
-    if (!queryDiscover) {
-      discoverHandledRef.current = false;
+    if (!queryEmbeddedView) {
+      embeddedViewHandledRef.current = false;
       return;
     }
-    if (discoverHandledRef.current) {
+    if (embeddedViewHandledRef.current) {
       return;
     }
-    discoverHandledRef.current = true;
+    embeddedViewHandledRef.current = true;
     if (isInWidgetMode) {
       setIsInWidgetMode(false);
     }
-    openDiscoveryView('query', resolveDiscoverPage(queryDiscover));
+    openEmbeddedView('query_param', resolveEmbeddedViewId(queryEmbeddedView));
     try {
       const params = new URLSearchParams(location.search || '');
-      params.delete('discover');
+      params.delete('view');
       const nextSearch = params.toString();
       navigate(
         { pathname: location.pathname, search: nextSearch ? `?${nextSearch}` : '' },
@@ -4770,12 +4702,30 @@ useEffect(() => {
     } catch (_) {
       /* ignore navigation cleanup errors */
     }
-  }, [queryDiscover, isInWidgetMode, location.pathname, location.search, navigate, openDiscoveryView, setIsInWidgetMode]);
+  }, [queryEmbeddedView, isInWidgetMode, location.pathname, location.search, navigate, openEmbeddedView, setIsInWidgetMode]);
+
+  const resolveHeaderActionViewId = (action = null) => {
+    if (!action || typeof action !== 'object') return null;
+    return (
+      action.view ||
+      action.surface ||
+      action.target ||
+      action.component ||
+      action.component_type ||
+      action?.payload?.view ||
+      action?.payload?.surface ||
+      action?.payload?.component ||
+      action?.payload?.component_type ||
+      action?.payload?.page ||
+      null
+    );
+  };
 
   const handleHeaderAction = (actionId, action = null) => {
-    if (actionId === 'discover') {
-      const page = action?.page || action?.target || action?.payload?.page || null;
-      handleDiscoverClick(page);
+    const explicitActionType = String(action?.action || action?.action_type || '').trim().toLowerCase();
+    const viewId = resolveHeaderActionViewId(action);
+    if (explicitActionType === 'open_view' || explicitActionType === 'open_surface' || viewId) {
+      handleEmbeddedViewClick(viewId);
       return;
     }
 
@@ -4812,15 +4762,15 @@ useEffect(() => {
     navigate('/chat');
   }, [navigate]);
 
-  const toggleDiscoveryChatMinimized = useCallback(() => {
-    setDiscoveryChatMinimized(prev => !prev);
+  const toggleWidgetChatMinimized = useCallback(() => {
+    setWidgetChatMinimized(prev => !prev);
   }, []);
 
   useEffect(() => {
-    if (!isInWidgetMode && discoveryChatMinimized) {
-      setDiscoveryChatMinimized(false);
+    if (!isInWidgetMode && widgetChatMinimized) {
+      setWidgetChatMinimized(false);
     }
-  }, [isInWidgetMode, discoveryChatMinimized]);
+  }, [isInWidgetMode, widgetChatMinimized]);
 
   const toggleSidePanel = () => {
     if (layoutMode === 'view') {
@@ -5281,12 +5231,12 @@ useEffect(() => {
 
   // Widget mode has its own UI (persistent widget on non-ChatPage routes), so render that
   if (isInWidgetMode) {
-    if (discoveryChatMinimized) {
+    if (widgetChatMinimized) {
       return (
         <div className="fixed right-4 bottom-4 z-50 widget-safe-bottom">
           <button
             type="button"
-            onClick={toggleDiscoveryChatMinimized}
+            onClick={toggleWidgetChatMinimized}
             className="group relative w-20 h-20 rounded-2xl bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-secondary)] shadow-[0_8px_32px_rgba(15,23,42,0.6)] border-2 border-[rgba(var(--color-primary-light-rgb),0.5)] hover:shadow-[0_16px_48px_rgba(51,240,250,0.4)] hover:scale-105 transition-all duration-300 flex items-center justify-center"
             title="Expand chat"
           >
@@ -5306,7 +5256,7 @@ useEffect(() => {
       <div className="fixed right-4 bottom-4 z-50 flex flex-col items-end gap-0 pointer-events-none widget-safe-bottom">
         <button
           type="button"
-          onClick={toggleDiscoveryChatMinimized}
+          onClick={toggleWidgetChatMinimized}
           className="pointer-events-auto relative group mb-[-1px] z-20"
           title="Minimize chat"
         >

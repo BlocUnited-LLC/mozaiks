@@ -1,0 +1,28 @@
+# ExistingAppDiscovery Tools
+#
+# before_chat collector preloads deterministic evidence into context.
+# DiscoveryArtifactAssemblerAgent then persists the canonical existing-app
+# augmentation artifacts and emits the DiscoveryBriefCard UI summary.
+
+tools:
+- agent: DiscoveryArtifactAssemblerAgent
+  file: save_existing_app_artifacts.py
+  function: save_existing_app_artifacts
+  description: >
+    Auto-invoked after DiscoveryArtifactAssemblerAgent outputs the structured
+    existing-app augmentation artifact. Persists the artifact set and emits a
+    UI summary for the user to review.
+  tool_type: UI_Surface
+  auto_tool_call: true
+  ui:
+    component: DiscoveryBriefCard
+    mode: artifact
+
+lifecycle_tools:
+- trigger: before_chat
+  agent: null
+  file: preload_discovery_context.py
+  function: collect_prechat_discovery_context
+  description: >
+    Deterministically preload discovery context from explicit inputs such as
+    repo_path, github_repo, backend_base_url, openapi_url, or uploaded spec paths.

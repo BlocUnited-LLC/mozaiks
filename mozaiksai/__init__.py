@@ -1,19 +1,23 @@
 """Public package surface for the runtime substrate.
 
 `mozaiksai` owns the reusable AI execution layer in the four-host architecture.
-The canonical repo entrypoints are the root hosts:
+The canonical host entrypoints live in ``mozaiksai.hosts``:
 
-- `runtime_app.py`   - runtime substrate host
-- `platform_app.py`  - headless app host
-- `studio_app.py`    - local/private builder host
-- `mozaiks_app.py`   - hosted product host
+- ``mozaiksai.hosts.runtime``   — runtime substrate host
+- ``mozaiksai.hosts.platform``  — headless app host
+- ``mozaiksai.hosts.studio``    — local/private Studio management/create host
+- ``mozaiksai.hosts.mozaiks``   — hosted product host
+
+Start via the CLI::
+
+    mozaiks serve ./my-app
+    mozaiks serve ./my-app --host studio
 
 `create_mozaiks_app()` remains available as a convenience factory for isolated
 runtime-only embeddings, smoke tests, and scripts. It is not the canonical
-full-stack entrypoint for this repo.
+full-stack entrypoint.
 """
 
 from mozaiksai.factory import create_mozaiks_app
-from mozaiksai.trigger import trigger_workflow
 
-__all__ = ["create_mozaiks_app", "trigger_workflow"]
+__all__ = ["create_mozaiks_app"]

@@ -1,14 +1,15 @@
 """Convenience factory for an embeddable runtime-only mozaiksai app.
 
 This factory is useful for isolated runtime embeddings, smoke scripts, and
-tests. In the canonical repo architecture, the preferred host entrypoints are:
+tests. In the canonical architecture, the preferred host entrypoints are in
+``mozaiksai.hosts``:
 
-- `runtime_app.py`   - runtime substrate host
-- `platform_app.py`  - headless app host
-- `studio_app.py`    - local/private builder host
-- `mozaiks_app.py`   - hosted product host
+- ``mozaiksai.hosts.runtime``   — runtime substrate host
+- ``mozaiksai.hosts.platform``  — headless app host
+- ``mozaiksai.hosts.studio``    — local/private Studio management/create host
+- ``mozaiksai.hosts.mozaiks``   — hosted product host
 
-Use `create_mozaiks_app()` when you explicitly want only the runtime substrate
+Use ``create_mozaiks_app()`` when you explicitly want only the runtime substrate
 as a mountable FastAPI sub-application.
 """
 
@@ -17,7 +18,7 @@ import logging
 from typing import Optional, Dict, Any
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, Depends
+from fastapi import FastAPI, HTTPException, Request, WebSocket, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -62,9 +63,8 @@ def create_mozaiks_app(
 
     Note:
         This is a convenience factory for the runtime layer only. For the
-        canonical four-host repo entrypoints, use the root modules
-        `runtime_app.py`, `platform_app.py`, `studio_app.py`, or
-        `mozaiks_app.py`.
+        canonical four-host entrypoints, import from ``mozaiksai.hosts`` or
+        use ``mozaiks serve`` from the CLI.
     """
     # Resolve paths
     workflow_path = Path(workflow_dir).resolve()
@@ -99,8 +99,7 @@ def create_mozaiks_app(
     from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
     from mozaiksai.core.transport.simple_transport import SimpleTransport
     from mozaiksai.core.workflow.workflow_manager import workflow_status_summary
-    from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id
-    from mozaiksai.trigger import trigger_workflow
+    from mozaiksai.core.multitenant import coalesce_app_id
 
     # Initialize persistence
     persistence_manager = AG2PersistenceManager()
@@ -177,84 +176,6 @@ def create_mozaiks_app(
         except Exception as e:
             logger.error(f"Failed to start chat: {e}")
             raise HTTPException(status_code=500, detail=str(e))
-
-    # ----- Trigger endpoint -----
-    class TriggerRequest(BaseModel):
-        user_id: str
-        context: Optional[Dict[str, Any]] = None
-        app_id: Optional[str] = None
-
-    @runtime_subapp.post("/workflows/{workflow_name}/trigger")
-    async def trigger_workflow_endpoint(
-        workflow_name: str,
-        body: TriggerRequest,
-    ):
-        """Trigger a workflow programmatically (for webhooks, backend events, etc.)."""
-        result = await trigger_workflow(
-            workflow_name=workflow_name,
-            user_id=body.user_id,
-            context=body.context,
-            app_id=body.app_id,
-        )
-
-        if not result.get("success"):
-            raise HTTPException(status_code=500, detail=result.get("error"))
-
-        return result
-
-    # ----- Internal trigger endpoint -----
-    # Called by platform-hosted or external/generated app backends when a
-    # domain event should trigger a workflow.
-    # Protected by X-Internal-Api-Key header (set INTERNAL_API_KEY env var).
-    class InternalTriggerRequest(BaseModel):
-        workflow_name: str
-        user_id: str
-        app_id: Optional[str] = None
-        context: Optional[Dict[str, Any]] = None
-
-    def _validate_internal_key(key: Optional[str]) -> bool:
-        expected = os.getenv("INTERNAL_API_KEY", "").strip()
-        if not expected:
-            # No key configured — allow in dev, but warn
-            logger.warning(
-                "INTERNAL_API_KEY not set; /internal/trigger is open. "
-                "Set INTERNAL_API_KEY in production."
-            )
-            return True
-        import hmac
-        return bool(key) and hmac.compare_digest(expected.encode(), key.encode())
-
-    @runtime_subapp.post("/internal/trigger")
-    async def internal_trigger(
-        body: InternalTriggerRequest,
-        x_internal_api_key: Optional[str] = Header(None, alias="X-Internal-Api-Key"),
-    ):
-        """
-        Internal endpoint for app-domain event ingress.
-
-        Called when an app-domain event should start or resume a workflow.
-
-        Authentication: X-Internal-Api-Key header must match INTERNAL_API_KEY env var.
-        If INTERNAL_API_KEY is unset the endpoint is open (development mode).
-        """
-        if not _validate_internal_key(x_internal_api_key):
-            raise HTTPException(status_code=401, detail="Invalid internal API key")
-
-        result = await trigger_workflow(
-            workflow_name=body.workflow_name,
-            user_id=body.user_id,
-            context=body.context,
-            app_id=body.app_id,
-        )
-
-        if not result.get("success"):
-            raise HTTPException(status_code=500, detail=result.get("error"))
-
-        logger.info(
-            "Internal trigger: workflow=%s user=%s app=%s",
-            body.workflow_name, body.user_id, body.app_id,
-        )
-        return result
 
     # ----- WebSocket endpoint -----
     @runtime_subapp.websocket("/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}")

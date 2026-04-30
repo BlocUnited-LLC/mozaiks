@@ -28,7 +28,7 @@ class _Context:
 
 def _load_workflow_converter_module():
     workspace = Path(__file__).resolve().parents[1]
-    file_path = workspace / "mozaiks-platform" / "app" / "workflows" / "AgentGenerator" / "tools" / "workflow_converter.py"
+    file_path = workspace / "factory_app" / "app" / "workflows" / "AgentGenerator" / "tools" / "workflow_converter.py"
     module_name = "tests.workflow_converter_direct"
     spec = importlib.util.spec_from_file_location(module_name, file_path)
     if spec is None or spec.loader is None:
@@ -129,6 +129,13 @@ def test_workflow_output_dir_uses_generated_artifact_root(monkeypatch, tmp_path:
     assert output_dir == generated_root / "workflows" / "app-one" / "chat-one" / "Review-Workflow"
 
 
+def test_workflow_output_dir_defaults_to_repo_generated(monkeypatch) -> None:
+    workspace = Path(__file__).resolve().parents[1]
+    monkeypatch.delenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", raising=False)
+
+    assert workflow_converter._resolve_generated_artifacts_root() == (workspace / "generated").resolve()
+
+
 def test_promote_generated_workflow_copies_to_active_workflows_root(tmp_path: Path) -> None:
     source = tmp_path / "generated" / "workflows" / "app-1" / "build-1" / "ReviewWorkflow"
     target_root = tmp_path / "active" / "workflows"
@@ -187,6 +194,7 @@ def test_orchestrator_triggers_are_normalized_to_runtime_schema() -> None:
             "type": "event",
             "event": "domain.documents.document_uploaded",
             "description": "Start after upload commit",
+            "capability_id": "documents.review",
         },
         {"type": "route", "endpoint": "/api/review", "method": "POST"},
     ]

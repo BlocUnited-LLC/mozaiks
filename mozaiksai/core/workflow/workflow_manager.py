@@ -7,7 +7,7 @@ import json
 import os
 import yaml
 import importlib
-from typing import Dict, Any, List, Optional, Tuple, Callable, Awaitable, Set
+from typing import Dict, Any, Iterable, List, Optional, Tuple, Callable, Awaitable, Set
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -22,6 +22,13 @@ from .declarative import (
     parse_structured_outputs_config,
     parse_tools_config,
     parse_ui_config,
+)
+from .paths import (
+    discover_workflow_paths,
+    normalize_workflow_roots,
+    primary_workflows_root,
+    resolve_active_app_root,
+    resolve_workflow_path,
 )
 
 logger = get_workflow_logger(workflow_name="unified_workflow_manager")
@@ -64,13 +71,22 @@ class UnifiedWorkflowManager:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, workflows_base_path: str = "workflows"):
+    def __init__(self, workflows_base_path: Optional[str | Iterable[str]] = None):
         if hasattr(self, "_initialized"):
             return
         # Core caches / registries
-        self.workflows_base_path = Path(workflows_base_path)
+        if workflows_base_path is None:
+            self.workflow_base_paths = normalize_workflow_roots()
+        else:
+            self.workflow_base_paths = normalize_workflow_roots(
+                workflows_base_path
+                if isinstance(workflows_base_path, (list, tuple, set))
+                else [workflows_base_path]
+            )
+        self.workflows_base_path = primary_workflows_root(self.workflow_base_paths)
         self._ai_config: Dict[str, Any] = {}
         self._workflows: Dict[str, WorkflowInfo] = {}
+        self._workflow_paths: Dict[str, Path] = {}
         self._config_cache: Dict[str, Dict[str, Any]] = {}
         self._ui_registry: Dict[str, Dict[str, Any]] = {}
         self._ui_tool_path_cache: Dict[str, str] = {}
@@ -278,18 +294,15 @@ class UnifiedWorkflowManager:
     
     def discover_workflows(self) -> List[str]:
         """Discover all available workflows in the workflows directory."""
-        if not self.workflows_base_path.exists():
-            logger.warning(f"Workflows directory not found: {self.workflows_base_path}")
+        if not any(root.exists() for root in self.workflow_base_paths):
+            logger.warning(f"Workflows directories not found: {self.workflow_base_paths}")
             return []
-        
-        workflows = []
-        for item in self.workflows_base_path.iterdir():
-            if item.is_dir() and not item.name.startswith('.'):
-                if (item / "orchestrator.yaml").exists():
-                    workflows.append(item.name)
-                    logger.debug(f"Discovered workflow (orchestrator.yaml): {item.name}")
-        
-        return workflows
+
+        workflows = discover_workflow_paths(self.workflow_base_paths)
+        self._workflow_paths = {name.lower(): path for name, path in workflows.items()}
+        for name, path in workflows.items():
+            logger.debug(f"Discovered workflow (orchestrator.yaml): {name} @ {path}")
+        return list(workflows.keys())
     
     def _load_all_workflows(self) -> None:
         """Load all workflow configs and initialize them"""
@@ -307,10 +320,11 @@ class UnifiedWorkflowManager:
                 except Exception as e:
                     logger.error(f"❌ Failed to load workflow {workflow_name}: {e}")
                     # Store error info for debugging
+                    workflow_path = self.resolve_workflow_path(workflow_name)
                     self._workflows[workflow_name.lower()] = WorkflowInfo(
                         name=workflow_name,
                         config={},
-                        path=str(self.workflows_base_path / workflow_name),
+                        path=str(workflow_path or (self.workflows_base_path / workflow_name)),
                         status="error",
                         error=str(e)
                     )
@@ -320,9 +334,9 @@ class UnifiedWorkflowManager:
     
     def _load_single_workflow(self, workflow_name: str) -> WorkflowInfo:
         """Load a single workflow with all its components"""
-        workflow_path = self.workflows_base_path / workflow_name
+        workflow_path = self.resolve_workflow_path(workflow_name)
         
-        if not workflow_path.exists():
+        if workflow_path is None or not workflow_path.exists():
             raise ValueError(f"Workflow not found: {workflow_name}")
         # Load configuration directly from modular YAML files.
         config = self._load_modular_workflow_config(workflow_path)
@@ -358,9 +372,22 @@ class UnifiedWorkflowManager:
 
         normalized_name = workflow_name.lower()
         self._workflows[normalized_name] = workflow_info
+        self._workflow_paths[normalized_name] = workflow_path
         self._config_cache[normalized_name] = config
         logger.info(f"Successfully loaded workflow: {workflow_name}")
         return workflow_info
+
+    def resolve_workflow_path(self, workflow_name: str) -> Optional[Path]:
+        normalized_name = str(workflow_name or "").strip().lower()
+        if not normalized_name:
+            return None
+        cached = self._workflow_paths.get(normalized_name)
+        if cached and cached.exists():
+            return cached
+        resolved = resolve_workflow_path(workflow_name, self.workflow_base_paths)
+        if resolved is not None:
+            self._workflow_paths[normalized_name] = resolved
+        return resolved
     
     # ========================================================================
     # CONFIGURATION ACCESS API
@@ -541,7 +568,9 @@ class UnifiedWorkflowManager:
         
         # Reload embedded UI tool metadata
         try:
-            workflow_path = self.workflows_base_path / workflow_name
+            workflow_path = self.resolve_workflow_path(workflow_name)
+            if workflow_path is None:
+                raise ValueError(f"Workflow not found: {workflow_name}")
             keys_to_remove = [k for k,v in self._ui_registry.items() if v.get('workflow_name') == workflow_name]
             for k in keys_to_remove:
                 self._ui_registry.pop(k, None)
@@ -592,7 +621,7 @@ class UnifiedWorkflowManager:
     
     def validate_workflow(self, workflow_name: str) -> Dict[str, Any]:
         """Validate a workflow's structure and configuration"""
-        workflow_path = self.workflows_base_path / workflow_name
+        workflow_path = self.resolve_workflow_path(workflow_name) or (self.workflows_base_path / workflow_name)
         validation_result = {
             'valid': True,
             'errors': [],
@@ -692,6 +721,7 @@ class UnifiedWorkflowManager:
             "tools_loaded_count": tools_loaded_count,
             "workflow_names": [w.name for w in self._workflows.values()],
             "base_path": str(self.workflows_base_path),
+            "base_paths": [str(path) for path in self.workflow_base_paths],
             "summary": f"{loaded_count} loaded, {error_count} errors, {tools_loaded_count} with tools"
         }
     
@@ -699,6 +729,7 @@ class UnifiedWorkflowManager:
         """Refresh all workflows and return summary"""
         logger.info("Refreshing all workflows...")
         self._workflows.clear()
+        self._workflow_paths.clear()
         self._config_cache.clear()
         self._hooks_loaded_workflows.clear()
         self._load_all_workflows()
@@ -741,10 +772,7 @@ class UnifiedWorkflowManager:
         if platform_scoped.exists():
             return platform_scoped
 
-        # Legacy fallback for repos where workflows may live under a product path
-        # but ai.json still exists under ./platform/config.
-        legacy_fallback = Path(__file__).resolve().parents[3] / "platform" / "config" / "ai.json"
-        return legacy_fallback
+        return (resolve_active_app_root() / "config" / "ai.json").resolve()
 
     def _load_ai_config(self) -> Dict[str, Any]:
         path = self._resolve_ai_config_path()
@@ -954,7 +982,9 @@ class UnifiedWorkflowManager:
 
         try:
             from .execution.hooks import register_hooks_for_workflow
-            registered = register_hooks_for_workflow(workflow_name, agents, base_path=str(self.workflows_base_path))
+            workflow_path = self.resolve_workflow_path(workflow_name)
+            base_path = str(workflow_path.parent if workflow_path is not None else self.workflows_base_path)
+            registered = register_hooks_for_workflow(workflow_name, agents, base_path=base_path)
             if registered:
                 self._hooks_loaded_workflows.add(workflow_name)
                 logger.info(f"Added '{workflow_name}' to hooks-loaded set; total loaded workflows={len(self._hooks_loaded_workflows)}")
@@ -1004,22 +1034,15 @@ class UnifiedWorkflowManager:
 # GLOBAL INSTANCE & API
 # ========================================================================
 
-# Single global instance — path driven by MOZAIKS_WORKFLOWS_PATH env or platform/workflows
-def _resolve_workflows_path() -> str:
-    raw = (os.getenv("MOZAIKS_WORKFLOWS_PATH") or "").strip()
-    if raw:
-        return os.path.abspath(raw)
-    return os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "..", "platform", "workflows")
-    )
-
-_unified_workflow_manager = UnifiedWorkflowManager(workflows_base_path=_resolve_workflows_path())
+# Single global instance — roots driven by MOZAIKS_WORKFLOW_ROOTS,
+# MOZAIKS_WORKFLOWS_PATH, or the active app root workflows directory.
+_unified_workflow_manager = UnifiedWorkflowManager(workflows_base_path=normalize_workflow_roots())
 
 def get_workflow_manager() -> UnifiedWorkflowManager:
     """Get the global workflow manager instance"""
     return _unified_workflow_manager
 
-def initialize_workflows(base_path: str = "workflows") -> Dict[str, Dict[str, Any]]:
+def initialize_workflows(base_path: Optional[str | Iterable[str]] = None) -> Dict[str, Dict[str, Any]]:
     """Initialize workflows with custom base path"""
     global _unified_workflow_manager, workflow_manager
 

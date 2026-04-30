@@ -25,7 +25,7 @@ At minimum, a workflow should include:
 ## Canonical Directory
 
 ```text
-platform/workflows/{workflow_name}/
+app/workflows/{workflow_name}/
   orchestrator.yaml
   agents.yaml
   handoffs.yaml
@@ -41,6 +41,10 @@ platform/workflows/{workflow_name}/
   ui/
     *.js
 ```
+
+For builder/system workflows, the same contract applies under the shared
+generation-core workflow root. The file shape is canonical; the owning root
+depends on whether the workflow is app-owned or generation-core-owned.
 
 There is no canonical `workflows/_shared` folder. Generated tools are owned by
 one workflow and live under that workflow's `tools/` directory. If multiple
@@ -86,14 +90,14 @@ choose the smallest valid re-entry point.
 ### `orchestrator.yaml`
 
 ```yaml
-workflow_name: JokeFactory
+workflow_name: ExampleWorkflow
 max_turns: 20
 human_in_the_loop: true
 workflow_startup_mode: AgentDriven
 orchestration_pattern: Pipeline
 initial_message_to_user: null
-initial_message: "Start with JokeHostAgent."
-initial_agent: JokeHostAgent
+initial_message: "Start with ExampleHostAgent."
+initial_agent: ExampleHostAgent
 triggers:
   - type: chat
     description: Start from chat transport
@@ -110,7 +114,7 @@ Rules:
 
 ```yaml
 agents:
-  - name: JokeHostAgent
+  - name: ExampleHostAgent
     prompt_sections:
       - id: role
         heading: "[ROLE]"
@@ -131,12 +135,12 @@ Rules:
 ```yaml
 handoff_rules:
   - source_agent: user
-    target_agent: JokeHostAgent
+    target_agent: ExampleHostAgent
     handoff_type: condition
     condition_type: string_llm
     condition: "When user starts the conversation."
     transition_target: AgentTarget
-  - source_agent: JokeHostAgent
+  - source_agent: ExampleHostAgent
     target_agent: user
     handoff_type: after_work
     transition_target: RevertToUserTarget
@@ -162,17 +166,17 @@ definitions:
           ui_hidden: true
           match:
             equals: NEXT
-  joke_topic:
+  example_topic:
     type: string
     source:
       type: state
       default: null
 
 agents:
-  JokeHostAgent:
+  ExampleHostAgent:
     variables:
       - host_complete
-      - joke_topic
+      - example_topic
 ```
 
 Rules:

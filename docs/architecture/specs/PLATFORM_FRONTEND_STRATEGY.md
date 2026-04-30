@@ -40,7 +40,7 @@ Mozaiks frontend behavior is split across **three different UI surface contracts
 All three share the same design foundation, but they should not be collapsed into one generic contract.
 
 For the platform-owned app shell:
-- `app.json + pages/*.yaml` defines route entry, page labels, order, and transition/component routing
+- `app.json + ui/pages/*.yaml` defines route entry, page labels, order, and transition/component routing
 - `app.json` owns app startup behavior such as `landing_spot`
 - `shell.json` owns shell content and behavior such as header pills, notifications, profile, footer, and header actions
 - `theme_config.json` owns visual theme tokens, shared primitives, and semantic `ui.shell` / `ui.page` / `ui.chat` styling
@@ -296,7 +296,7 @@ pre_bundled:
 These are emitted configuration outcomes, not freeform styling decisions invented in isolation. For consistent generation, theme and branding settings should compile from the approved upstream concept and `brand_intent`.
 
 ```yaml
-# What AI can set in app.json + pages/*.yaml (NOT what it provisions)
+# What AI can set in app.json + ui/pages/*.yaml (NOT what it provisions)
 
 configurable_by_agents:
   # Theme selection (from predefined options)
@@ -593,7 +593,7 @@ e2b_font_strategy:
 │                                    ▲                                         │
 │                                    │ Composed into                           │
 │                                    │                                         │
-│  LAYER 4: App Definition (app.json + pages/*.yaml)                                          │
+│  LAYER 4: App Definition (app.json + ui/pages/*.yaml)                                          │
 │  ═══════════════════════════════════════════════════════════════════════    │
 │  │ name: my-crm                                                          │   │
 │  │ theme: { primary: blue, ... }                                         │   │
@@ -636,7 +636,7 @@ e2b_font_strategy:
 │                                       │                                      │
 │  Who creates it:                      │  Who creates it:                     │
 │  Built into platform/runtime          │  AI generates definitions            │
-│  Not generated per-app                │  Rendered from app.json + pages/*.yaml              │
+│  Not generated per-app                │  Rendered from app.json + ui/pages/*.yaml              │
 │                                       │                                      │
 │  Relationship:                        │                                      │
 │  ───────────────────────────────────────────────────────────────────────    │
@@ -721,24 +721,24 @@ $ mozaiks add module contacts
   Created: modules/contacts/
   Created: modules/contacts/schema.py
   Created: modules/contacts/actions.py
-  Updated: app.json + pages/*.yaml
+  Updated: app.json + ui/pages/*.yaml
 
 # Add a new workflow
 $ mozaiks add workflow onboarding
   Created: workflows/onboarding/
   Created: workflows/onboarding/workflow.py
   Created: workflows/onboarding/prompts.py
-  Updated: app.json + pages/*.yaml
+  Updated: app.json + ui/pages/*.yaml
 
 # Add a new page
 $ mozaiks add page settings
   Created: pages/settings.yaml
-  Updated: app.json + pages/*.yaml (navigation)
+  Updated: app.json + ui/pages/*.yaml (navigation)
 
 # Add a tool
 $ mozaiks add tool send-email
   Created: tools/send_email.py
-  Updated: app.json + pages/*.yaml
+  Updated: app.json + ui/pages/*.yaml
 
 # ═══════════════════════════════════════════════════════════════════════════
 # BUILDING & DEPLOYMENT
@@ -746,7 +746,7 @@ $ mozaiks add tool send-email
 
 # Build for production
 $ mozaiks build
-  ✓ Validating app.json + pages/*.yaml
+  ✓ Validating app.json + ui/pages/*.yaml
   ✓ Building frontend bundle
   ✓ Packaging Python modules
   ✓ Output: dist/
@@ -765,7 +765,7 @@ $ mozaiks export --format vercel
 
 # Validate app definition
 $ mozaiks validate
-  ✓ app.json + pages/*.yaml is valid
+  ✓ app.json + ui/pages/*.yaml is valid
   ✓ All modules have valid schemas
   ✓ All workflows have valid definitions
   ✓ All pages reference valid primitives
@@ -788,7 +788,7 @@ $ mozaiks doctor
 
 ```
 my-app/
-├── app.json + pages/*.yaml                    # App definition
+├── app.json + ui/pages/*.yaml                    # App definition
 ├── package.json                # Frontend dependencies
 ├── pyproject.toml              # Python dependencies
 │
@@ -843,7 +843,7 @@ my-app/
 │                                                                              │
 │  LEVEL 1: Configuration Only                                                 │
 │  ═══════════════════════════════════════════════════════════════════════    │
-│  │ Modify app.json + pages/*.yaml                                                       │  │
+│  │ Modify app.json + ui/pages/*.yaml                                                       │  │
 │  │ • Theme settings                                                      │  │
 │  │ • Page definitions                                                    │  │
 │  │ • Navigation structure                                                │  │
@@ -894,7 +894,7 @@ my-app/
 | Capability | CLI (OSS) | Platform (Hosted) |
 |------------|-----------|-------------------|
 | Create projects | `mozaiks new` | Web UI / API |
-| Theme configuration | app.json + pages/*.yaml | Web theme builder |
+| Theme configuration | app.json + ui/pages/*.yaml | Web theme builder |
 | Modify base components | Direct file access | Not allowed |
 | Custom primitives | `components/primitives/` | Not allowed |
 | Font self-hosting | `public/fonts/` | Not allowed |
@@ -1137,7 +1137,7 @@ platform_exclusive:
 │  DONE PER PREVIEW (Fast)                                                     │
 │  ═══════════════════════════════════════════════════════════════════════    │
 │                                                                              │
-│  1. Inject app.json + pages/*.yaml (app definition)                                        │
+│  1. Inject app.json + ui/pages/*.yaml (app definition)                                        │
 │  2. Inject modules/ (Python modules)                                        │
 │  3. Inject workflows/ (Python workflows)                                    │
 │  4. Inject pages/ (YAML page definitions)                                   │
@@ -1158,7 +1158,7 @@ async function startE2BPreview(appBundle: AppBundle): Promise<PreviewUrl> {
   const sandbox = await e2b.Sandbox.create("mozaiks-runtime-v1");
 
   // 2. Inject app-specific files (seconds)
-  await sandbox.filesystem.write("/app/app.json + pages/*.yaml", appBundle.appYaml);
+  await sandbox.filesystem.write("/app/app.json + ui/pages/*.yaml", appBundle.appYaml);
 
   for (const module of appBundle.modules) {
     await sandbox.filesystem.write(
@@ -1176,7 +1176,7 @@ async function startE2BPreview(appBundle: AppBundle): Promise<PreviewUrl> {
 
   for (const page of appBundle.pages) {
     await sandbox.filesystem.write(
-      `/app/pages/${page.name}.yaml`,
+      `/app/ui/pages/${page.name}.yaml`,
       page.content
     );
   }
@@ -1220,7 +1220,7 @@ e2b_fonts:
 
   # Theme resolution activates the right font
   runtime_behavior: |
-    // When app.json + pages/*.yaml specifies font: "inter"
+    // When app.json + ui/pages/*.yaml specifies font: "inter"
     // CSS variable is set, browser uses cached Google Font
     :root {
       --font-sans: 'Inter', system-ui, sans-serif;
@@ -1298,3 +1298,5 @@ e2b_fonts:
 | **Platform = enhanced experience** | Additional services, not lock-in |
 | **E2B = prepared environment** | No dynamic provisioning |
 | **Fonts/themes are tokens** | Resolved at runtime, not generated |
+
+

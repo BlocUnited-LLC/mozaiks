@@ -9,13 +9,6 @@ from logs.logging_config import get_core_logger
 from mozaiksai.core.data.models import WorkflowStatus
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.multitenant import build_app_scope_filter
-from mozaiksai.core.refinement.router import (
-    ArtifactKind,
-    ChangeClass,
-    ChangeRequest,
-    RefinementRouter,
-    get_refinement_router,
-)
 from mozaiksai.core.workflow.pack.config import (
     compute_required_dependencies,
     get_workflow_sequence,
@@ -37,22 +30,23 @@ from .model import (
     UnmetDependency,
 )
 from .persistence import SessionStateStore
+from .trigger_routing import NullTriggerRouteResolver, TriggerRouteResolver
 
 logger = get_core_logger("session_router")
 
 
 class SessionRouter:
-    """Unified session-level router for workflow starts and refinement re-entry."""
+    """Unified session-level router for workflow starts and host-supplied trigger routing."""
 
     def __init__(
         self,
         *,
         persistence: Optional[AG2PersistenceManager] = None,
-        refinement_router: Optional[RefinementRouter] = None,
+        trigger_route_resolver: Optional[TriggerRouteResolver] = None,
         store: Optional[SessionStateStore] = None,
     ) -> None:
         self._persistence = persistence or AG2PersistenceManager()
-        self._refinement_router = refinement_router or get_refinement_router()
+        self._trigger_route_resolver = trigger_route_resolver or NullTriggerRouteResolver()
         self._store = store or SessionStateStore(self._persistence)
 
     async def route_trigger(self, trigger: TriggerInput) -> RoutingDecision:
@@ -68,23 +62,13 @@ class SessionRouter:
         is_full_restart = False
         lifecycle_state = SessionLifecycle.ACTIVE
 
-        if trigger_source == "refinement" and trigger.change_class:
-            change_class = ChangeClass(str(trigger.change_class))
-            artifact_kind = ArtifactKind(str(trigger.artifact_kind or ArtifactKind.APP_BUNDLE.value))
-            refinement_decision = self._refinement_router.route(
-                ChangeRequest(
-                    change_class=change_class,
-                    artifact_kind=artifact_kind,
-                    artifact_version_id=trigger.artifact_version_id,
-                    raw_user_request=trigger.raw_user_request,
-                    app_id=app_id,
-                )
-            )
-            context_seed.update(refinement_decision.context_seed)
-            explanation = refinement_decision.explanation
-            is_full_restart = bool(refinement_decision.is_full_restart)
-            requested_workflow_id = requested_workflow_id or refinement_decision.workflow_id
-            lifecycle_state = SessionLifecycle.STALE if is_full_restart else SessionLifecycle.REFINING
+        route_contribution = self._trigger_route_resolver.resolve(trigger)
+        if route_contribution is not None:
+            context_seed.update(route_contribution.context_seed)
+            explanation = route_contribution.explanation
+            is_full_restart = bool(route_contribution.is_full_restart)
+            requested_workflow_id = requested_workflow_id or route_contribution.workflow_id
+            lifecycle_state = route_contribution.lifecycle_state
 
         if not requested_workflow_id:
             raise ValueError("workflow_id is required unless refinement routing resolves one")
@@ -925,8 +909,6 @@ class SessionRouter:
                 resolved_context.update(option_context)
             target = str(getattr(option, "route_to", "") or "").strip()
             if not target:
-                target = str(getattr(transition, "route_to", "") or "").strip()
-            if not target:
                 raise ValueError(
                     f"option_id '{selected}' for transition '{transition.id}' has no route_to"
                 )
@@ -1046,10 +1028,21 @@ class SessionRouter:
 
 
 _router: Optional[SessionRouter] = None
+_router_trigger_route_resolver: Optional[TriggerRouteResolver] = None
+
+
+def configure_session_router(
+    *,
+    trigger_route_resolver: Optional[TriggerRouteResolver] = None,
+) -> SessionRouter:
+    global _router, _router_trigger_route_resolver
+    _router_trigger_route_resolver = trigger_route_resolver
+    _router = SessionRouter(trigger_route_resolver=_router_trigger_route_resolver)
+    return _router
 
 
 def get_session_router() -> SessionRouter:
     global _router
     if _router is None:
-        _router = SessionRouter()
+        _router = SessionRouter(trigger_route_resolver=_router_trigger_route_resolver)
     return _router

@@ -126,10 +126,10 @@ class TestExtractChildSpecs:
 
 
 class TestWorkflowExists:
-    def test_writers_room_exists_under_platform_workflows(self):
-        # JokeFactory is a real workflow under platform/workflows/ — verifies
-        # that _workflow_exists resolves against the repo tree.
-        assert WorkflowPackCoordinator._workflow_exists("JokeFactory") is True
+    def test_shared_generator_workflow_exists_under_platform_workflows(self):
+        # AgentGenerator is a real shared workflow under factory_app/app/workflows/ —
+        # verifies that _workflow_exists resolves against the repo tree.
+        assert WorkflowPackCoordinator._workflow_exists("AgentGenerator") is True
 
 
 # ---------------------------------------------------------------------------
@@ -531,3 +531,4 @@ class TestMergeStrategyIntegration:
         result = ConcatenateMerge().merge(children)
         assert result.merged.get("a") == 1
         assert result.merged.get("c") == 3
+

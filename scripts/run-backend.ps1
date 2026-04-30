@@ -1,6 +1,16 @@
 <#
 .SYNOPSIS
   Start Mozaiks backend (uvicorn), optionally ensuring local infra is running first.
+
+.DESCRIPTION
+  Local development runs clear previous-run files on startup by default:
+    - clears prior files under logs/logs/*
+    - clears prior files under logs/agent_outputs/*
+    - clears prior files under logs/workflow_converter/*
+
+  After startup, the current run writes fresh logs and artifacts normally.
+  Use -KeepLogsBetweenRuns and/or -KeepRuntimeArtifactsBetweenRuns to preserve
+  previous-run files when starting the next run.
 #>
 
 param(
@@ -8,7 +18,13 @@ param(
   [switch]$SkipInfra,
   [ValidateSet("example", "mongo")]
   [string]$InfraProfile = "example",
-  [switch]$ForceStop
+  [string]$PlatformPath = "",
+  [string]$AppWorkspacePath = "",
+  [switch]$ForceStop,
+  [switch]$CleanRuntimeArtifactsOnStart,
+  [switch]$CleanRuntimeArtifactsOnExit,
+  [switch]$KeepLogsBetweenRuns,
+  [switch]$KeepRuntimeArtifactsBetweenRuns
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,61 +32,10 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
-function Get-RepoEnvValue {
-  param([string]$Name)
+. "$PSScriptRoot/dev-path-selection.ps1"
 
-  $envFile = Join-Path $RepoRoot ".env"
-  if (-not (Test-Path $envFile)) {
-    return $null
-  }
-
-  foreach ($line in Get-Content $envFile) {
-    $trimmed = $line.Trim()
-    if (-not $trimmed -or $trimmed.StartsWith("#")) {
-      continue
-    }
-
-    if ($trimmed -notmatch '^([^=]+)=(.*)$') {
-      continue
-    }
-
-    $key = $matches[1].Trim()
-    if ($key -ne $Name) {
-      continue
-    }
-
-    $value = $matches[2].Trim()
-    if ($value.Length -ge 2) {
-      $first = $value[0]
-      $last = $value[$value.Length - 1]
-      if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
-        $value = $value.Substring(1, $value.Length - 2)
-      }
-    }
-    return $value
-  }
-
-  return $null
-}
-
-function Get-ConfigValue {
-  param(
-    [string]$Name,
-    [string]$Default = ""
-  )
-
-  $envValue = [Environment]::GetEnvironmentVariable($Name)
-  if (-not [string]::IsNullOrWhiteSpace($envValue)) {
-    return $envValue
-  }
-
-  $repoValue = Get-RepoEnvValue -Name $Name
-  if (-not [string]::IsNullOrWhiteSpace($repoValue)) {
-    return $repoValue
-  }
-
-  return $Default
-}
+$appSelection = Set-DevAppSelection -RepoRoot $RepoRoot -SurfaceName "backend" -PlatformPath $PlatformPath -AppWorkspacePath $AppWorkspacePath
+Write-Host $appSelection.Message -ForegroundColor DarkCyan
 
 function Get-ListeningProcessInfo {
   param([int]$LocalPort)
@@ -102,7 +67,7 @@ function Get-ListeningProcessInfo {
   return $results
 }
 
-function Ensure-PortAvailable {
+function Confirm-PortAvailable {
   param(
     [int]$LocalPort,
     [switch]$KillExisting
@@ -143,12 +108,45 @@ if (-not $SkipInfra) {
   & "$PSScriptRoot/run-infra.ps1" -Profile $InfraProfile
 }
 
-Ensure-PortAvailable -LocalPort $Port -KillExisting:$ForceStop
+Confirm-PortAvailable -LocalPort $Port -KillExisting:$ForceStop
+
+$cleanLogsOnStart = -not $KeepLogsBetweenRuns
+$cleanRuntimeArtifactsNow = $CleanRuntimeArtifactsOnStart -or (-not $KeepRuntimeArtifactsBetweenRuns)
+
+if ($cleanLogsOnStart -or $cleanRuntimeArtifactsNow) {
+  $cleanupArgs = @("-Quiet")
+  $cleanupTargets = @()
+
+  if ($cleanLogsOnStart) {
+    $cleanupArgs += "-IncludeMainLogs"
+    $cleanupTargets += "main logs"
+  }
+  if ($cleanRuntimeArtifactsNow) {
+    $cleanupTargets += "runtime artifacts"
+  }
+
+  Write-Host ("[backend] Cleaning {0} before startup..." -f ($cleanupTargets -join " + ")) -ForegroundColor Cyan
+  & "$PSScriptRoot/clean-runtime-artifacts.ps1" @cleanupArgs
+}
 
 $venvPython = Join-Path $RepoRoot ".venv/Scripts/python.exe"
 $pythonCmd = if (Test-Path $venvPython) { $venvPython } else { "python" }
 
 Write-Host "[backend] Starting uvicorn on port $Port..." -ForegroundColor Cyan
-Write-Host "[backend] Command: $pythonCmd -m uvicorn mozaiks_app:app --host 0.0.0.0 --port $Port" -ForegroundColor DarkGray
+Write-Host "[backend] Command: $pythonCmd -m uvicorn mozaiksai.hosts.mozaiks:app --host 0.0.0.0 --port $Port" -ForegroundColor DarkGray
 
-& $pythonCmd -m uvicorn mozaiks_app:app --host 0.0.0.0 --port $Port
+$backendExitCode = 0
+try {
+  & $pythonCmd -m uvicorn mozaiksai.hosts.mozaiks:app --host 0.0.0.0 --port $Port
+  $backendExitCode = $LASTEXITCODE
+}
+finally {
+  if ($CleanRuntimeArtifactsOnExit) {
+    Write-Host "[backend] Cleaning runtime artifacts after shutdown..." -ForegroundColor Cyan
+    & "$PSScriptRoot/clean-runtime-artifacts.ps1" -Quiet
+  }
+}
+
+if ($backendExitCode -ne 0) {
+  exit $backendExitCode
+}

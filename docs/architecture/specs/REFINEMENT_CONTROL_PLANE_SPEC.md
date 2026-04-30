@@ -373,22 +373,25 @@ That produces a better DX than forcing every change through `AgentGenerator` or 
 
 ### Python API
 
-**Location:** `mozaiksai/core/refinement/router.py`
+**Location:** `factory_app/app/modules/factory_control_plane/backend/refinement_router.py`
 
-The module exposes a platform-agnostic router. Nothing in this module knows about specific products, workflows, or UI surfaces.
+The module exposes a framework-owned refinement resolver. Studio and Mozaiks wire
+it into SessionRouter through the runtime trigger-route resolver seam, so the
+runtime stays policy-agnostic while the shared generation layer owns create and
+refinement routing.
 
 ```python
-from mozaiksai.core.refinement import (
-    RefinementRouter,
+from factory_app.app.modules.factory_control_plane.backend.refinement_router import (
     ChangeClass,     # Enum: patch | design | feature | core
     ArtifactKind,    # Enum: app_bundle | workflow_bundle | design_docs | concept
     ChangeRequest,   # Input dataclass
-    RoutingDecision, # Output dataclass
+    RefinementTriggerRouteResolver,
+    get_refinement_trigger_route_resolver,
 )
 
-router = get_refinement_router()  # module-level singleton
+resolver = get_refinement_trigger_route_resolver()  # module-level singleton
 
-decision = router.route(ChangeRequest(
+decision = resolver.route(ChangeRequest(
     change_class=ChangeClass.PATCH,
     artifact_kind=ArtifactKind.APP_BUNDLE,
     artifact_version_id="v3",
@@ -453,7 +456,8 @@ The only thing declared explicitly is **artifact ownership**:
 | `design_docs` | `DesignDocs` | `DesignDocs` | `ValueEngine` |
 | `concept` | `ValueEngine` | `ValueEngine` | `ValueEngine` |
 
-The runtime derives routes generically:
+The shared generation-core resolver derives routes generically and hands the
+result back to SessionRouter:
 
 - `patch` -> owner workflow
 - `feature` -> owner workflow
@@ -472,10 +476,12 @@ Refinement is triggered via the unified trigger endpoint:
 POST /api/workflows/trigger
 {
   "trigger_source": "refinement",
-  "change_class": "patch",
-  "artifact_kind": "app_bundle",
-  "artifact_version_id": "v3",
-  "raw_user_request": "Fix the login redirect",
+  "trigger_payload": {
+    "change_class": "patch",
+    "artifact_kind": "app_bundle",
+    "artifact_version_id": "v3",
+    "raw_user_request": "Fix the login redirect"
+  },
   "app_id": "abc123"
 }
 ```

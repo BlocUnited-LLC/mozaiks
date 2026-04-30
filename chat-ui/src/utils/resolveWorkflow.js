@@ -10,7 +10,7 @@
 // ==============================================================================
 
 import workflowConfig from '../config/workflowConfig';
-import { getLoadedWorkflows } from '../@chat-workflows/index.js';
+const NON_RUNNABLE_IDS = new Set(['extended_orchestration']);
 
 /**
  * Resolve the active workflow name using a deterministic priority chain.
@@ -26,7 +26,12 @@ export default function resolveWorkflow(explicit = null) {
   if (explicit) {
     const trimmed = String(explicit).trim();
     const lowered = trimmed.toLowerCase();
-    if (trimmed && lowered !== 'workflow' && lowered !== 'workflows') {
+    if (
+      trimmed
+      && lowered !== 'workflow'
+      && lowered !== 'workflows'
+      && !NON_RUNNABLE_IDS.has(lowered)
+    ) {
       return trimmed;
     }
   }
@@ -35,14 +40,7 @@ export default function resolveWorkflow(explicit = null) {
   const entryPoint = workflowConfig.getEntryPointWorkflow();
   if (entryPoint) return entryPoint;
 
-  // 3. Singleton auto-select — if there's exactly one workflow, use it
-  const loaded = getLoadedWorkflows();
-  if (Array.isArray(loaded) && loaded.length === 1) {
-    const name = loaded[0]?.name || loaded[0];
-    if (name) return typeof name === 'string' ? name : String(name);
-  }
-
-  // Also check backend-fetched configs as a fallback for the singleton case
+  // 3. Singleton auto-select from backend-fetched workflows only.
   const available = workflowConfig.getAvailableWorkflows();
   if (available.length === 1) return available[0];
 

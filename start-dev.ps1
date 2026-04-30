@@ -287,8 +287,13 @@ if ($BypassAuth) {
     $env:AUTH_ENABLED = "true"
 }
 
+$pythonExe = Get-PythonExe
+if (-not $pythonExe) {
+    Write-Host "Python not found. Activate your venv or install Python." -ForegroundColor Red
+    exit 1
+}
 Write-Host "Starting local backend on http://localhost:$AppPort (AUTH_ENABLED=$($env:AUTH_ENABLED))" -ForegroundColor Yellow
-python run_server.py
+& $pythonExe -m uvicorn mozaiksai.hosts.mozaiks:app --host 0.0.0.0 --port $AppPort
 
 if ($StartFrontend) {
     Write-Host "Starting frontend (app) in a new process..." -ForegroundColor Green

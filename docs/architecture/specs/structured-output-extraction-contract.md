@@ -55,17 +55,17 @@ Defines Pydantic models and maps agents to their output models.
 ```yaml
 # Registry: agent name → model name
 registry:
-  JokeDecomposerAgent: JokeDecomposition
-  JokePresenterAgent: JokePresentation
+  ExampleDecomposerAgent: ExampleDecomposition
+  ExamplePresenterAgent: ExamplePresentation
 
 # Model definitions
 models:
-  JokeAngleSpec:
+  ExampleChildSpec:
     type: model
     fields:
       name:
         type: literal
-        values: [JokeWorker]
+        values: [ExampleWorker]
         description: Fixed child workflow name
       description:
         type: str
@@ -74,7 +74,7 @@ models:
         type: str
         description: Full prompt for the child workflow
 
-  JokeDecomposition:
+  ExampleDecomposition:
     type: model
     fields:
       agent_message:
@@ -82,7 +82,7 @@ models:
         description: Status message shown to user
       workflows:
         type: list
-        items: JokeAngleSpec
+        items: ExampleChildSpec
         description: Child workflows to spawn
 ```
 
@@ -102,7 +102,7 @@ Agents that produce structured outputs must set `structured_outputs_required: tr
 
 ```yaml
 agents:
-  - name: JokeDecomposerAgent
+  - name: ExampleDecomposerAgent
     prompt_sections:
       - id: role
         heading: '[ROLE]'
@@ -110,7 +110,7 @@ agents:
       - id: output_format
         heading: '[OUTPUT FORMAT]'
         content: |
-          Respond with ONLY valid JSON matching JokeDecomposition.
+          Respond with ONLY valid JSON matching ExampleDecomposition.
           No extra text. No markdown fences.
     structured_outputs_required: true  # REQUIRED
     max_consecutive_auto_reply: 3
@@ -128,20 +128,20 @@ Tools with `auto_tool_call: true` are called automatically when their agent prod
 ```yaml
 tools:
   # Auto-invoked tool for structured output consumption
-  - agent: JokeDecomposerAgent
-    file: spawn_joke_workers.py
-    function: spawn_joke_workers
+  - agent: ExampleDecomposerAgent
+    file: spawn_example_workers.py
+    function: spawn_example_workers
     tool_type: Agent_Tool
     auto_tool_call: true  # Called automatically after agent output
 
   # One-way UI surface for artifact display
-  - agent: JokePresenterAgent
+  - agent: ExamplePresenterAgent
     file: display_presentation.py
     function: display_presentation
     tool_type: UI_Surface
     auto_tool_call: true
     ui:
-      component: JokeGallery
+      component: ExampleGallery
       mode: artifact
 ```
 
@@ -156,20 +156,20 @@ tools:
 Tools receive the validated structured output fields as keyword arguments.
 
 ```python
-# tools/spawn_joke_workers.py
+# tools/spawn_example_workers.py
 
-async def spawn_joke_workers(
+async def spawn_example_workers(
     agent_message: str,
     workflows: list,
     context_variables=None,  # Optional: runtime context
     **kwargs
 ) -> dict:
     """
-    Receives validated JokeDecomposition fields directly.
+    Receives validated ExampleDecomposition fields directly.
 
     Args:
-        agent_message: From JokeDecomposition.agent_message
-        workflows: From JokeDecomposition.workflows (list of JokeAngleSpec)
+        agent_message: From ExampleDecomposition.agent_message
+        workflows: From ExampleDecomposition.workflows (list of ExampleChildSpec)
         context_variables: Runtime context container
     """
     # Tool logic - persist, spawn children, emit events
@@ -222,8 +222,8 @@ Stream processor detects structured output
 Emits chat.agent_output_validated event:
 {
   "kind": "runtime.agent_output_validated",
-  "agent_name": "JokeDecomposerAgent",
-  "model_name": "JokeDecomposition",
+  "agent_name": "ExampleDecomposerAgent",
+  "model_name": "ExampleDecomposition",
   "structured_data": { ... validated JSON ... },
   "auto_tool_call": true,
   "context": { "chat_id", "app_id", "workflow_name" }
@@ -248,17 +248,17 @@ For workflows that fan-out to child workflows, use `extended_orchestration/mfj_e
   "version": 3,
   "mid_flight_journeys": [
     {
-      "id": "parallel-joke-generation",
-      "description": "Spawn 3 parallel JokeWorker children",
-      "decomposition_agent": "JokeDecomposerAgent",
+      "id": "parallel-example-generation",
+      "description": "Spawn 3 parallel ExampleWorker children",
+      "decomposition_agent": "ExampleDecomposerAgent",
       "fan_out": {
         "spawn_mode": "workflow",
         "max_children": 3
       },
       "fan_in": {
-        "resume_agent": "JokePresenterAgent",
+        "resume_agent": "ExamplePresenterAgent",
         "resume_entry_agent": "ResumeRouterAgent",
-        "inject_as": "mfj_joke_results"
+        "inject_as": "mfj_example_results"
       }
     }
   ]
@@ -282,14 +282,15 @@ The following do NOT exist in the mozaiks runtime:
 
 ## Complete Example
 
-See `platform/workflows/JokeFactory/` for a complete legacy sample workflow example
-(reference only; production onboarding now centers on `mozaiks-platform/app/workflows/*`):
+Below is a schematic workflow bundle showing the complete contract shape.
+Use live production workflows under `factory_app/app/workflows/*` or an active
+app root's `app/workflows/*` for implementation references:
 
 ```
-JokeFactory/
+ExampleWorkflow/
 ├── orchestrator.yaml           # workflow_startup_mode, initial_agent
 ├── agents.yaml                 # Agents with structured_outputs_required
-├── structured_outputs.yaml     # JokeDecomposition, JokePresentation models
+├── structured_outputs.yaml     # ExampleDecomposition, ExamplePresentation models
 ├── handoffs.yaml              # Agent-to-agent routing
 ├── tools.yaml                 # auto_tool_call tools
 ├── context_variables.yaml     # State definitions

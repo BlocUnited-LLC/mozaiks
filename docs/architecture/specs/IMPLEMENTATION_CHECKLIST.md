@@ -10,8 +10,8 @@
 
 This checklist is for future package extraction work. It is not the current
 runtime/source-of-truth architecture. The current canonical architecture is the
-layered host model in `ARCHITECTURE.md`: `runtime_app.py`, `platform_app.py`,
-`studio_app.py`, and `mozaiks_app.py`.
+layered host model in `ARCHITECTURE.md`: `mozaiksai/hosts/runtime.py`, `mozaiksai/hosts/platform.py`,
+`mozaiksai/hosts/studio.py`, and `mozaiksai/hosts/mozaiks.py`.
 
 If you are working on **agentic app generation** specifically, this checklist is not sufficient by itself. Also follow:
 
@@ -22,10 +22,10 @@ Those documents define the canonical artifact model for turning user intent into
 
 ```
 CURRENT STATE:
-├── runtime_app.py           # runtime substrate
-├── platform_app.py          # headless app host
-├── studio_app.py            # local/private builder host
-├── mozaiks_app.py           # hosted product host
+├── mozaiksai/hosts/runtime.py           # runtime substrate
+├── mozaiksai/hosts/platform.py          # headless app host
+├── mozaiksai/hosts/studio.py            # local/private builder host
+├── mozaiksai/hosts/mozaiks.py           # hosted product host
 ├── platform/                # default OSS/sample active app root
 └── mozaiks-platform/
     └── app/                 # active App Zero app root
@@ -87,17 +87,17 @@ TARGET STATE:
 | `mozaiks dev` | ❌ | Need to add |
 | `mozaiks build` | ❌ | Need to add |
 
-### platform/workflows/ → app/workflows/
-**Status:** Example workflows, keep as templates
+### factory_app/app/workflows/ + app/workflows/
+**Status:** Canonical workflow roots, keep clean
 
-- JokeFactory (multi-agent demo)
-- JokeWorker (fan-out pattern)
-- YAML-first declarative structure
+- Shared generation-core workflows live under `factory_app/app/workflows/`
+- App-owned workflows live under the active app root's `app/workflows/`
+- No legacy demo/sample workflows in the canonical roots
 
 ### Layered FastAPI Hosts
 **Status:** Canonical
 
-The active hosts are `runtime_app.py`, `platform_app.py`, `studio_app.py`, and `mozaiks_app.py`.
+The active hosts are `mozaiksai/hosts/runtime.py`, `mozaiksai/hosts/platform.py`, `mozaiksai/hosts/studio.py`, and `mozaiksai/hosts/mozaiks.py`.
 Keep new server behavior in the lowest correct layer.
 
 ---

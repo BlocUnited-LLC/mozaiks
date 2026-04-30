@@ -34,7 +34,7 @@ Mozaiks has two separate graph layers.
 
 Path:
 
-- `platform/workflows/extended_orchestration/mfj_extension.json`
+- `factory_app/app/workflows/extended_orchestration/extension_registry.json`
 
 Owns:
 
@@ -50,7 +50,9 @@ Does not own:
 
 Path:
 
-- `platform/workflows/{workflow_name}/extended_orchestration/mfj_extension.json`
+- `app/workflows/{workflow_name}/extended_orchestration/mfj_extension.json`
+
+For builder workflows, the same file shape lives under `factory_app/app/workflows/{workflow_name}/extended_orchestration/mfj_extension.json`.
 
 Owns:
 
@@ -98,12 +100,14 @@ resumed host agent.
 At a high level:
 
 ```text
-platform/workflows/{workflow}/extended_orchestration/mfj_extension.json
+app/workflows/{workflow}/extended_orchestration/mfj_extension.json
   -> workflow loaders
   -> runtime orchestration support
   -> child runs + aggregation
   -> resume router handoff
 ```
+
+Builder workflows use the same MFJ contract under `factory_app/app/workflows/{workflow}/extended_orchestration/mfj_extension.json`.
 
 Relevant runtime areas are described in:
 
@@ -140,7 +144,7 @@ Canonical minimal example:
 
 This is also the live pattern used in:
 
-- `platform/workflows/WritersRoom/extended_orchestration/mfj_extension.json`
+- `factory_app/app/workflows/AgentGenerator/extended_orchestration/mfj_extension.json`
 
 Meaning:
 

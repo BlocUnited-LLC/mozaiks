@@ -10,7 +10,7 @@ This document defines:
 
 ## Canonical File
 
-`platform/workflows/{workflow}/context_variables.yaml`
+`app/workflows/{workflow}/context_variables.yaml`
 
 ## Canonical Contract Shape
 
@@ -102,7 +102,7 @@ Source types supported by runtime:
 
 Source file analyzed:
 
-- `mozaiks-platform/app/workflows/AgentGenerator/context_variables.yaml`
+- `factory_app/app/workflows/AgentGenerator/context_variables.yaml`
 
 ### Resolution Matrix
 
@@ -128,7 +128,7 @@ Source file analyzed:
 | `pack_name` | `string` | `computed` | Starts `null`; populated by pattern-selection logic |
 | `current_workflow_index` | `integer` | `state` | Initialized to `0`; updated by pack iteration/runtime loop |
 | `workflows_spec` | `array` | `computed` | Starts `[]`; populated from pattern-selection output |
-| `macro_workflow_graph` | `object` | `file` | Loads JSON from `workflows/extended_orchestration/mfj_extension.json`, fallback `null` |
+| `macro_workflow_graph` | `object` | `file` | Loads JSON from repo-relative `workflows/extended_orchestration/extension_registry.json`, which resolves to the shared generation-core registry in this repo; fallback `null` |
 | `generated_workflows` | `array` | `state` | Initialized to `[]`; appended during pack generation |
 | `pack_generation_complete` | `boolean` | `state` | Initialized to `false`; set by pack loop lifecycle path (for example `pack_loop_check`) |
 
@@ -154,7 +154,7 @@ Environment variable:
 Example:
 
 ```env
-MOZAIKS_CONTEXT_PLACEHOLDERS_FILE=platform/config/context_placeholders.example.json
+MOZAIKS_CONTEXT_PLACEHOLDERS_FILE=
 ```
 
 Placeholder file shape:

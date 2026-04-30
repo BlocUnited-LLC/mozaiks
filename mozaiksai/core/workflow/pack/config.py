@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import os
 from dataclasses import dataclass
@@ -19,52 +20,35 @@ from .schema import (
     parse_global_pack_graph,
     parse_workflow_pack_graph,
 )
+from ..paths import normalize_workflow_roots, primary_workflows_root, resolve_active_app_root, resolve_workflow_path
 
 
 @dataclass
 class _CacheEntry:
-    path: str
-    mtime: float
+    source: Tuple[Tuple[str, float], ...]
     payload: Any
 
 
 _GLOBAL_CACHE: Optional[_CacheEntry] = None
 _WORKFLOW_CACHE: Dict[str, _CacheEntry] = {}
 
-
-def _repo_root() -> Path:
-    """Resolve monorepo root for canonical path resolution."""
-    here = Path(__file__).resolve()
-    for parent in [here] + list(here.parents):
-        try:
-            if (parent / "mozaiksai").is_dir():
-                return parent
-        except Exception:
-            continue
-    return Path.cwd().resolve()
-
-
 def _workflows_root() -> Path:
     """Resolve canonical workflows root.
 
     Resolution order:
-      1. MOZAIKS_WORKFLOWS_PATH (absolute or repo-relative)
-      2. <repo_root>/platform/workflows
+      1. First entry in MOZAIKS_WORKFLOW_ROOTS
+      2. MOZAIKS_WORKFLOWS_PATH
+            3. active app root workflows
     """
-    override = str(os.getenv("MOZAIKS_WORKFLOWS_PATH") or "").strip()
-    if override:
-        candidate = Path(override)
-        if not candidate.is_absolute():
-            candidate = (_repo_root() / candidate).resolve()
-        return candidate
-    return (_repo_root() / "platform" / "workflows").resolve()
+    return primary_workflows_root(normalize_workflow_roots())
 
 
 def get_global_pack_graph_path() -> Path:
-    """Resolve global extension registry path.
-
-    Canonical default: <workflows_root>/extended_orchestration/extension_registry.json
-    """
+    """Resolve the highest-precedence global extension registry path."""
+    for root in normalize_workflow_roots():
+        candidate = (root / "extended_orchestration" / "extension_registry.json").resolve()
+        if candidate.exists():
+            return candidate
     return (_workflows_root() / "extended_orchestration" / "extension_registry.json").resolve()
 
 
@@ -76,6 +60,9 @@ def get_workflow_pack_graph_path(workflow_name: str) -> Path:
     wf = str(workflow_name or "").strip()
     if not wf:
         raise ValueError("workflow_name is required")
+    workflow_dir = resolve_workflow_path(wf, normalize_workflow_roots())
+    if workflow_dir is not None:
+        return (workflow_dir / "extended_orchestration" / "mfj_extension.json").resolve()
     return (_workflows_root() / wf / "extended_orchestration" / "mfj_extension.json").resolve()
 
 
@@ -91,26 +78,116 @@ def _load_json_file(path: Path) -> Optional[Dict[str, Any]]:
         raise ValueError(f"Failed loading pack graph {path}: {exc}") from exc
 
 
+def _load_global_pack_graph_sources() -> List[Path]:
+    sources: List[Path] = []
+    seen: set[Path] = set()
+    for root in normalize_workflow_roots():
+        candidate = (root / "extended_orchestration" / "extension_registry.json").resolve()
+        if candidate in seen or not candidate.exists():
+            continue
+        seen.add(candidate)
+        sources.append(candidate)
+    return sources
+
+
+def _merge_section_items(
+    current: List[Dict[str, Any]],
+    incoming: List[Dict[str, Any]],
+    *,
+    key_fields: Tuple[str, ...],
+) -> List[Dict[str, Any]]:
+    merged: List[Dict[str, Any]] = [deepcopy(item) for item in current if isinstance(item, dict)]
+    index_by_key: Dict[Tuple[str, str], int] = {}
+
+    def item_keys(item: Dict[str, Any]) -> List[Tuple[str, str]]:
+        keys: List[Tuple[str, str]] = []
+        for field in key_fields:
+            value = item.get(field)
+            if isinstance(value, str) and value.strip():
+                keys.append((field, value.strip()))
+        return keys
+
+    for index, item in enumerate(merged):
+        for key in item_keys(item):
+            index_by_key[key] = index
+
+    for item in incoming or []:
+        if not isinstance(item, dict):
+            continue
+        clone = deepcopy(item)
+        keys = item_keys(clone)
+        target_index = next((index_by_key[key] for key in keys if key in index_by_key), None)
+        if target_index is None:
+            target_index = len(merged)
+            merged.append(clone)
+        else:
+            merged[target_index] = clone
+        for key in item_keys(clone):
+            index_by_key[key] = target_index
+
+    return merged
+
+
+def _merge_global_pack_graph_dicts(raw_graphs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    merged: Dict[str, Any] = {
+        "version": 3,
+        "workflows": [],
+        "entrypoints": [],
+        "workflow_sequences": [],
+        "transitions": [],
+    }
+    section_keys: Dict[str, Tuple[str, ...]] = {
+        "workflows": ("id",),
+        "entrypoints": ("id", "path"),
+        "workflow_sequences": ("id",),
+        "transitions": ("id",),
+    }
+
+    for raw in raw_graphs:
+        if "version" in raw:
+            merged["version"] = raw["version"]
+        for scalar in ("pack_name", "description"):
+            if scalar in raw and raw[scalar] is not None:
+                merged[scalar] = deepcopy(raw[scalar])
+        for section, key_fields in section_keys.items():
+            merged[section] = _merge_section_items(
+                merged.get(section, []),
+                raw.get(section) or [],
+                key_fields=key_fields,
+            )
+
+    return merged
+
+
 def load_global_pack_graph() -> Optional[GlobalPackGraph]:
-    """Load and validate the canonical global pack graph."""
+    """Load and validate the canonical global pack graph.
+
+    Shared generation-core orchestration is the base layer. App/workspace roots
+    may provide an overlay registry that augments or overrides entries by id.
+    """
     global _GLOBAL_CACHE
 
-    path = get_global_pack_graph_path()
-    if not path.exists():
+    paths = _load_global_pack_graph_sources()
+    if not paths:
         return None
 
-    mtime = path.stat().st_mtime
+    signature = tuple((str(path), path.stat().st_mtime) for path in paths)
     cached = _GLOBAL_CACHE
-    if cached and cached.path == str(path) and cached.mtime == mtime:
+    if cached and cached.source == signature:
         payload = cached.payload
         if isinstance(payload, GlobalPackGraph):
             return payload
 
-    raw = _load_json_file(path)
-    if raw is None:
+    raw_graphs: List[Dict[str, Any]] = []
+    for path in reversed(paths):
+        raw = _load_json_file(path)
+        if raw is not None:
+            raw_graphs.append(raw)
+    if not raw_graphs:
         return None
-    graph = parse_global_pack_graph(raw)
-    _GLOBAL_CACHE = _CacheEntry(path=str(path), mtime=mtime, payload=graph)
+
+    graph = parse_global_pack_graph(_merge_global_pack_graph_dicts(raw_graphs))
+    _GLOBAL_CACHE = _CacheEntry(source=signature, payload=graph)
     return graph
 
 
@@ -126,7 +203,8 @@ def load_workflow_pack_graph(workflow_name: str) -> Optional[WorkflowPackGraph]:
 
     mtime = path.stat().st_mtime
     cached = _WORKFLOW_CACHE.get(wf)
-    if cached and cached.path == str(path) and cached.mtime == mtime:
+    signature = ((str(path), mtime),)
+    if cached and cached.source == signature:
         payload = cached.payload
         if isinstance(payload, WorkflowPackGraph):
             return payload
@@ -135,7 +213,7 @@ def load_workflow_pack_graph(workflow_name: str) -> Optional[WorkflowPackGraph]:
     if raw is None:
         return None
     graph = parse_workflow_pack_graph(raw)
-    _WORKFLOW_CACHE[wf] = _CacheEntry(path=str(path), mtime=mtime, payload=graph)
+    _WORKFLOW_CACHE[wf] = _CacheEntry(source=signature, payload=graph)
     return graph
 
 

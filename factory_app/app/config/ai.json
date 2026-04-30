@@ -1,0 +1,13 @@
+{
+  "ask": {
+    "ask_mode_prompt": "You are the Factory App assistant. Help users shape, generate, connect, and refine Mozaiks apps using the shared builder workflows.",
+    "ask_context_variables": null
+  },
+  "chat": {
+    "chat_startup_mode": "ask"
+  },
+  "workflows": {
+    "entry_point": "CreateLauncher",
+    "resume_policy": "last_active_then_oldest_then_entry_point"
+  }
+}

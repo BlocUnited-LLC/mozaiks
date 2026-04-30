@@ -89,7 +89,8 @@ Use a workflow when the value comes from:
 
 Question a workflow answers: **what run is happening**
 
-The workflow definition lives under `platform/workflows/*`.
+Canonically, app-owned workflow definitions live under `app/workflows/*`.
+The shared generation core lives under `factory_app/app/workflows/*`.
 
 ## 3. Module
 
@@ -131,7 +132,8 @@ Pages can launch workflows.
 
 Pages can also display workflow results.
 
-But the workflow definition still lives under `platform/workflows/*`.
+But the workflow definition still lives under the app workspace's
+`app/workflows/*`, or under the shared generation core for builder workflows.
 
 ## Current Examples
 
@@ -206,3 +208,4 @@ But those are secondary details. They are not the first classification question.
 - [architecture-overview.md](architecture-overview.md)
 - [canonical-app-structure.md](canonical-app-structure.md)
 - [workflow-architecture.md](workflow-architecture.md)
+

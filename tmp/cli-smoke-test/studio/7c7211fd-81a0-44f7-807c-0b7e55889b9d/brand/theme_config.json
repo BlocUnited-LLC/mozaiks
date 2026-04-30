@@ -1,0 +1,73 @@
+{
+  "_comment": "Blank visual identity scaffold. Replace colors and assets when the product direction is clear.",
+  "theme": {
+    "primary": "blue",
+    "variant": "modern",
+    "radius": "medium",
+    "font": "system",
+    "font_heading": "system",
+    "appearance": "light",
+    "density": "comfortable",
+    "branding": {
+      "app_name": "Atlas CRM",
+      "logo_url": "/assets/logo.svg"
+    }
+  },
+  "identity": {
+    "name": "Atlas CRM",
+    "tagline": "Private revenue workflows",
+    "app_name": "Atlas CRM"
+  },
+  "assets": {
+    "logo": "logo.svg"
+  },
+  "colors": {
+    "primary": {
+      "main": "#1d4ed8",
+      "light": "#60a5fa",
+      "dark": "#1e40af",
+      "name": "blue"
+    },
+    "secondary": {
+      "main": "#1d4ed8",
+      "light": "#60a5fa",
+      "dark": "#1e40af",
+      "name": "blue"
+    },
+    "background": {
+      "base": "#f8fafc",
+      "surface": "#ffffff",
+      "elevated": "#ffffff",
+      "overlay": "rgba(15, 23, 42, 0.24)"
+    },
+    "border": {
+      "subtle": "#dbeafe",
+      "strong": "#93c5fd",
+      "accent": "#1d4ed8"
+    },
+    "text": {
+      "primary": "#0f172a",
+      "secondary": "#334155",
+      "muted": "#64748b",
+      "onAccent": "#f8fafc"
+    }
+  },
+  "shadows": {
+    "primary": "0 20px 45px rgba(15, 118, 110, 0.18)",
+    "elevated": "0 24px 60px rgba(15, 23, 42, 0.12)"
+  },
+  "ui": {
+    "chat": {
+      "modes": {
+        "ask": {
+          "tint": "#1d4ed8",
+          "label": "Ask"
+        },
+        "workflow": {
+          "tint": "#1d4ed8",
+          "label": "Workflow"
+        }
+      }
+    }
+  }
+}

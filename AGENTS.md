@@ -3,18 +3,42 @@
 Repository-level guidance for coding agents working in this repo.
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md) and [CLAUDE.md](CLAUDE.md) first.
-Read `ARCHITECTURE_BOUNDARIES.md` before making structural changes.
 
 This repo uses layered FastAPI hosts as the canonical server composition:
 
-- `runtime_app.py`
-- `platform_app.py`
-- `studio_app.py`
-- `mozaiks_app.py`
+- `mozaiksai.hosts.runtime`
+- `mozaiksai.hosts.platform`
+- `mozaiksai.hosts.studio`
+- `mozaiksai.hosts.mozaiks`
 
-`runtime_app.py` is the execution substrate. `platform_app.py` is the headless
-app host. `studio_app.py` is the local/private builder host. `mozaiks_app.py`
-is the hosted Mozaiks product host.
+`mozaiksai.hosts.runtime` is the execution substrate. `mozaiksai.hosts.platform`
+is the headless app host. `mozaiksai.hosts.studio` is the Studio management
+interface host — the shared management layer for both local and hosted
+deployments. `mozaiksai.hosts.mozaiks` is the hosted Mozaiks product host —
+extends Studio, does not replace it.
+
+Start via the CLI:
+
+```
+mozaiks serve ./my-app                  # platform host (no factory dependency)
+mozaiks serve ./my-app --host studio    # Studio management host (requires factory_app)
+```
+
+Or directly via uvicorn:
+
+```
+uvicorn mozaiksai.hosts.studio:app --reload
+```
+
+CLI and Studio are **parallel interfaces** over shared system capabilities, not a
+superset chain. Studio is not the CLI's UI. CLI owns developer tooling (filesystem,
+scaffolding, process management). Studio owns the management interface (workspace
+status, build lifecycle, artifacts, run history, config).
+
+The current repo layout is transitional. The canonical target is documented in
+[docs/architecture/foundations/distribution-and-workspace-model.md](docs/architecture/foundations/distribution-and-workspace-model.md).
+Do not reintroduce a hybrid root that mixes the starter app bundle with shared
+factory workflows.
 
 ## Repo Status
 
@@ -68,15 +92,26 @@ Canonical ownership:
 
 | Layer | Owns |
 |-------|------|
-| `runtime_app.py` / `mozaiksai` | AI execution substrate, sessions, transport, persistence, workflow execution |
-| `platform_app.py` | Headless app host: modules, pages, shell config, admin, actions, routing |
-| `studio_app.py` | Local/private builder UX used by CLI and local Studio |
-| `mozaiks_app.py` | Hosted Mozaiks product layer |
-| `platform/` | Default OSS/sample active app root |
-| `mozaiks-platform/app/` | Active App Zero app root |
-| `mozaiks-platform/brand/` | App Zero product brand/theme assets |
-| `mozaiks-platform/ui/` | App Zero product UI extension |
-| `mozaiks-platform/generated/` | Generator output awaiting validation/promotion |
+| `mozaiksai.hosts.runtime` / `mozaiksai` | AI execution substrate, sessions, transport, persistence, workflow execution |
+| `mozaiksai.hosts.platform` | Headless app host: modules, pages, shell config, admin, actions, routing |
+| `mozaiksai.hosts.studio` | Studio management interface host — shared management layer (local and hosted) |
+| `mozaiksai.hosts.mozaiks` | Hosted Mozaiks product host — extends Studio with hosted-only capabilities |
+| `mozaiksai.hosts.bootstrap` | Repo-local path defaults (CWD-relative; no-ops when not in repo checkout) |
+| `mozaiks_cli/` | CLI / developer interface — parallel to Studio, not a subset of it |
+| `factory_app/app/` | First-party factory app workspace root — builder/control-plane app contract |
+| `factory_app/app/ui/studio/` | Studio UI components — management interface layer |
+| `chat-ui/src/admin/` | Platform-management surfaces — registered by Studio, inherited by Mozaiks App |
+| `mozaiks-platform/app/` | Current App Zero app root |
+| `mozaiks-platform/app-builder/` | Product planning/docs; not runtime-loaded |
+| `generated/` | Generator output awaiting validation/promotion |
+
+Canonical target:
+
+- generated/customer apps become standalone workspaces/repositories
+- shared generation core lives outside any individual app workspace
+- app workspaces are self-contained and keep `config/`, `ui/pages/`, `workflows/`,
+  `modules/`, `ui/`, and `brand/` together under the active app root
+- App Zero should converge on that same self-contained workspace contract
 
 ## Module Contract Rule
 
@@ -97,23 +132,69 @@ When working in or generating modules:
 - AppGenerator produces these files through structured output models. Keep the
   generated shapes aligned with runtime loaders, docs, and tests.
 
+## Structured-Output-First Contract Rule
+
+When introducing or changing YAML contracts:
+
+- Treat canonical YAML files as structured-output-first contracts, not loose
+  configuration blobs.
+- Every canonical YAML shape must map cleanly to a strict structured output
+  model that agents can produce repeatably and runtime code can validate
+  deterministically.
+- If a taxonomy is used by agents or loaders, define it explicitly as reusable
+  typed fields/enums. Do not rely on prompt prose or naming conventions alone.
+- Prefer shared submodels and finite namespaces over freeform nested objects.
+- When a contract changes, update prompts, structured outputs, runtime
+  validators/loaders, docs, and tests together so generators do not drift from
+  execution.
+
+This applies to `module.yaml`, `events.yaml`, `subscriptions.yaml`,
+`notifications.yaml`, `settings.yaml`, `admin.yaml`, workflow YAMLs, and page
+schemas.
+
+## Contract-Declared Customization Rule
+
+Customization is allowed, but only as a bounded extension of a strict
+contract.
+
+- YAML may reference helper/customization stubs only through explicit
+  contract-defined fields.
+- Python stubs are for backend/runtime-side extensions. JS/TS stubs are for
+  frontend/admin/workflow UI extensions.
+- Stubs must remain contract-bound: they implement declared hooks or entry
+  points, not alternate schemas or undeclared behavior paths.
+- Generator prompts must understand both the declarative contract and the stub
+  shape they are allowed to emit.
+- If a stub reference is optional, the contract must say when it is omitted and
+  what the canonical no-customization behavior is.
+
 ## Generator Output Rule
 
-Builder workflows live in `mozaiks-platform/app/workflows/` because App Zero is
-itself a Mozaiks app. Generator output must not land directly in active runtime
-paths.
+Shared factory workflows live in `factory_app/app/workflows/`. App Zero currently consumes the shared workflows
+through a local product overlay under
+`mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`. Generator output must
+not land directly in active runtime paths.
+
+Workflow loading is multi-root by contract:
+
+- active app root `workflows/` first
+- shared `factory_app/app/workflows/` second
+- `MOZAIKS_WORKFLOW_ROOTS` may override that order explicitly
+
+App Zero's local extended-orchestration overlay may reference both shared factory
+workflow IDs and product-owned workflow IDs under `mozaiks-platform/app/workflows/`.
 
 Use `MOZAIKS_GENERATED_ARTIFACTS_PATH`, defaulting to:
 
 ```text
-mozaiks-platform/generated/
+generated/
 ```
 
 Canonical generated paths:
 
 ```text
-mozaiks-platform/generated/apps/{app_id}/{build_id}/app/
-mozaiks-platform/generated/workflows/{app_id}/{build_id}/{workflow_name}/
+generated/apps/{app_id}/{build_id}/app/
+generated/workflows/{app_id}/{build_id}/{workflow_name}/
 ```
 
 Only explicit promotion may copy validated artifacts into active roots such as
@@ -137,3 +218,4 @@ For runtime, generator, orchestration, or contract changes:
 - run targeted tests
 - update docs
 - prefer at least one real runtime smoke when practical
+

@@ -100,7 +100,7 @@ Persistent app pages should stay declarative by default. The intended customizat
 1. **Define `ExperienceSpec` using page archetypes**
    - Start from higher-level page types such as dashboard, entity-list, entity-detail, feed, thread, or analytics overview.
 2. **Compile archetypes into shipped primitives**
-   - Use richer primitive config, better layout choices, and theme overrides in `app.yaml` + `pages/*.yaml`.
+   - Use richer primitive config, better layout choices, and theme overrides in `app.yaml` + `ui/pages/*.yaml`.
 3. **Add a platform-owned primitive, page pattern, or explicit custom slot**
    - If the shipped page registry is insufficient, developers extend `PrimitiveRegistry` and the generator/validator contracts once, then future apps can use that new surface declaratively.
 4. **Use React only for non-page surfaces**
@@ -1110,3 +1110,4 @@ payload:
 | Actions | Button, ActionMenu, Toolbar |
 | Feedback | Alert, Toast, Progress, Skeleton, Empty |
 | Navigation | NavBar, Sidebar, Breadcrumb |
+

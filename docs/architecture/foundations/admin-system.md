@@ -13,46 +13,55 @@ Mozaiks has one visible admin route family:
 /admin/support
 ```
 
-The routes are rendered by the framework-owned `AdminPortal` component. The
-visible UX is app-owner oriented: users, billing, usage, activity, settings,
-integrations, and support. Builder surfaces such as Studio and Build are
-separate product routes, not admin sections. Authority remains separated by
-panel source.
+These routes are rendered by the framework-owned `AdminPortal` component. The
+shell is fixed and semantic. Studio, Build, and other builder surfaces are
+separate product routes, not admin sections.
 
-## Panel Sources
+## Ownership
 
 | Source | Owner | Declared In | Data/API |
 |---|---|---|---|
-| App panels | app backend | app backend `/api/admin/config` | `app_backend_url/api/admin/*` |
-| Feature panels | module contract | `modules/{module}/admin.yaml` | module actions / optional module admin hooks |
-| Usage/health panels | platform/runtime host | `platform/config/admin.json` | same-host `/api/admin/*` |
+| Runtime/operator panels | platform host | `app/config/admin.json` | same-host `/api/admin/*` |
+| Feature panels | module contract | `modules/{module}/admin.yaml` | module actions and optional `backend/admin.py` hooks |
+| App-business panels | optional connected app backend | `app_backend_url/api/admin/config` | `app_backend_url/api/admin/*` |
 
-## Runtime Config
+The platform host owns the shell and access model. Modules own feature admin
+panels. An app backend may add app-business panels, but it does not replace the
+host-owned `/admin` shell.
 
-`platform/config/admin.json` controls admin access and runtime/operator panels:
+## Host Config
+
+`app/config/admin.json` is host-owned. It controls:
+
+- whether admin is enabled
+- admin email allowlist
+- section visibility and ordering
+- runtime/operator panel visibility
+
+It does not declare feature panels.
+
+Example:
 
 ```json
 {
+  "schema_version": "mozaiks.admin.host.v1",
   "enabled": true,
   "admin_emails": ["builder@example.com"],
-  "panels": {
-    "app": [
-      { "id": "stats", "label": "App Overview", "section": "overview" },
-      { "id": "users", "label": "Users", "section": "users" }
-    ],
-    "modules": [],
-    "runtime": [
-      { "id": "stats", "label": "Usage Stats", "section": "usage" },
-      { "id": "runs", "label": "Active Runs", "section": "usage" },
-      { "id": "sessions", "label": "Recent Sessions", "section": "activity" }
-    ]
+  "sections": {
+    "overview": { "label": "Overview", "enabled": true, "order": 999 },
+    "users": { "label": "Users", "enabled": true, "order": 1000 },
+    "billing": { "label": "Billing", "enabled": false, "order": 1001 },
+    "usage": { "label": "Usage", "enabled": true, "order": 1002 },
+    "activity": { "label": "Activity", "enabled": true, "order": 1003 },
+    "settings": { "label": "Settings", "enabled": true, "order": 1004 },
+    "integrations": { "label": "Integrations", "enabled": true, "order": 1005 },
+    "support": { "label": "Support", "enabled": true, "order": 1006 }
   },
-  "roles": ["admin"],
-  "features": {
-    "user_management": false,
-    "billing": false,
-    "audit_log": false
-  }
+  "runtime_panels": [
+    { "id": "stats", "label": "Usage Stats", "section": "usage" },
+    { "id": "runs", "label": "Active Runs", "section": "usage" },
+    { "id": "sessions", "label": "Recent Sessions", "section": "activity" }
+  ]
 }
 ```
 
@@ -63,18 +72,20 @@ shell.
 
 ## Feature Admin Contract
 
-Modules contribute app-owner panels through `modules/{module}/admin.yaml`, but
-the UI does not expose "modules" as a user-facing admin section. Each panel must
-declare a semantic section:
+Feature-owned admin UI lives in `modules/{module}/admin.yaml`.
+
+Each panel must declare one semantic section:
 
 ```text
 overview | users | billing | usage | activity | settings | integrations | support
 ```
 
+The canonical module admin schema is `mozaiks.admin.v2`.
+
 Example:
 
 ```yaml
-schema_version: mozaiks.admin.v1
+schema_version: mozaiks.admin.v2
 panels:
   - id: campaigns.overview
     label: Campaigns
@@ -82,28 +93,77 @@ panels:
     section: usage
     order: 20
     renderer: schema
-    component: null
-    data_source: module:campaigns:list_campaigns
-    actions: [pause_campaign, archive_campaign]
+    layout: full-width
+    sections:
+      - id: campaigns-table
+        primitive: DataTable
+        config:
+          api_endpoint: /api/modules/campaigns/list_campaigns
+          columns:
+            - key: name
+              label: Campaign
+            - key: status
+              label: Status
+              type: badge
     permissions: [campaigns.write]
 hooks: []
 ```
 
-Use `renderer: schema` for normal panels. Use `renderer: custom_component` only
-when a developer provides a registered React component. Optional Python support
-for complex panel data belongs in `modules/{module}/backend/admin.py`.
+Use `renderer: schema` for the normal path. Schema panels reuse the same
+primitive section system as `ui/pages/*.yaml`, but they render inside the
+host-owned `/admin` shell rather than becoming standalone routes.
 
-Do not use `modules`, `plugins`, `operations`, `tools`, `studio`, `build`, or
-manifest terms as admin sections. Those concepts belong in builder surfaces or
-developer documentation.
+Use `renderer: custom_component` only when the shipped primitive system cannot
+express the panel cleanly. In that case:
+
+- `admin.yaml` declares `renderer: custom_component` and a stable `component`
+  registry key
+- `module_contract.js_stubs` declares the required React stub file
+- the app-level `ui/index.js` registration barrel registers that component
+
+Optional Python support for complex panel data belongs in
+`modules/{module}/backend/admin.py`.
+
+## App-Backend Panels
+
+A connected app backend may contribute app-business admin panels through
+`GET {app_backend_url}/api/admin/config`.
+
+Those panels must declare:
+
+- `schema_version: mozaiks.admin.app_backend.v1`
+- `panels[]`
+- `renderer: builtin | schema | custom_component`
+- `builtin_panel` for builtin panels
+- `layout + sections[]` for schema panels
+- `component` for bounded custom components
+
+Recommended generated file ownership for split backends:
+
+- `backend/admin_config.py` returns the canonical payload
+- `backend/routes/admin.py` exposes it through
+  `mozaiksai.core.admin.build_app_backend_admin_router(...)`
+- AppGenerator should treat `ControllerOutput.app_backend_admin_config` as the
+  typed source of truth and may regenerate those two files from it during
+  assembly/download validation.
+
+This keeps admin rendering deterministic across module-owned and app-backend
+surfaces.
+
+The detailed connected app-backend panel contract remains repo-internal
+planning material for now. Keep the public contract anchored on this page plus
+the host-owned `/admin` shell behavior described here.
 
 ## Generator Rules
 
-- Generate `platform/config/admin.json` for admin access and runtime/operator
-  panel visibility.
-- Generate `modules/{module}/admin.yaml` for feature-owned app admin panels.
+- Generate `app/config/admin.json` for admin access and runtime/operator panel
+  visibility only.
+- Generate `modules/{module}/admin.yaml` for feature-owned admin panels.
 - Every generated admin panel must set `section` to one of the semantic admin
   sections listed above.
+- Prefer `renderer: schema` with `layout + sections[]`.
+- Use `renderer: custom_component` only when the shipped primitive system
+  cannot express the panel cleanly.
 - Mark admin-only module actions in `module.yaml.actions[]` with admin
   permissions.
 - Do not generate admin page schemas, `/app-admin`, standalone admin servers,
@@ -114,9 +174,11 @@ developer documentation.
 Admin access follows the platform auth rules:
 
 1. JWT role includes `admin`
-2. user email matches `admin_emails` in `platform/config/admin.json`
+2. user email matches `admin_emails` in `app/config/admin.json`
 3. local dev auth mode allows admin access
 
-The unified UI does not collapse authority: app panels still call the app
-backend, feature panels use module contracts, and usage/health panels use
-same-host runtime admin APIs.
+The unified UI does not collapse authority:
+
+- runtime/operator panels use same-host admin APIs
+- feature panels use module contracts
+- app-business panels may use a connected app backend

@@ -1,0 +1,49 @@
+# ValueEngine Tools
+# Simplified tools that work with mozaiks runtime
+
+tools:
+# ============================================================================
+# GapAnalysisAgent Tools - Value Manifest & Decomposition
+# ============================================================================
+- agent: GapAnalysisAgent
+  file: manifest.py
+  function: save_value_manifest
+  description: Auto-invoked after GapAnalysisAgent outputs ConceptBlueprint. Persists manifest and emits UI artifact.
+  tool_type: UI_Surface
+  auto_tool_call: true
+  ui:
+    component: ConceptBlueprint
+    mode: artifact
+
+- agent: GapAnalysisAgent
+  file: manifest.py
+  function: get_value_manifest
+  description: Retrieve the Value Manifest for an app.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+
+- agent: GapAnalysisAgent
+  file: decompose.py
+  function: save_build_plan
+  description: Save a BuildPlan derived from the approved concept. The LLM/orchestration layer reasons about capability packs and tasks; this tool just saves.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+
+- agent: GapAnalysisAgent
+  file: decompose.py
+  function: get_build_plan
+  description: Retrieve the BuildPlan for an app.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+
+- agent: GapAnalysisAgent
+  file: decompose.py
+  function: get_feature_context
+  description: Get context for a specific feature from the manifest.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+
+# ============================================================================
+# LIFECYCLE TOOLS
+# ============================================================================
+lifecycle_tools: []

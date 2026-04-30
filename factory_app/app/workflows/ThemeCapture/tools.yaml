@@ -1,0 +1,27 @@
+# ThemeCapture Tools
+#
+# before_chat preloads deterministic theme evidence.
+# ThemeConfigAssemblerAgent then persists the canonical theme artifact and emits
+# the ThemePreviewCard UI summary.
+
+tools:
+- agent: ThemeConfigAssemblerAgent
+  file: save_captured_theme.py
+  function: save_captured_theme
+  description: >
+    Auto-invoked after ThemeConfigAssemblerAgent outputs the structured
+    CapturedThemeConfig. Persists the artifact set and emits a preview card.
+  tool_type: UI_Surface
+  auto_tool_call: true
+  ui:
+    component: ThemePreviewCard
+    mode: artifact
+
+lifecycle_tools:
+- trigger: before_chat
+  agent: null
+  file: preload_theme_capture_context.py
+  function: collect_prechat_theme_context
+  description: >
+    Deterministically preload theme evidence from an app URL, parent theme config,
+    screenshot description, or frontend repo summary before the interview begins.

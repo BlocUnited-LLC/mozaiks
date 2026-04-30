@@ -1,9 +1,13 @@
 """
-mozaiks gen - Generate workflows or apps using AI.
+mozaiks gen - Developer convenience command for AI generation.
 
-This is the "quick gen" mode that skips the interview process.
-User provides a descriptive prompt and the generator agents create
-the workflow/app files directly.
+This is a terminal shortcut for bootstrapping workflows or apps from a prompt.
+It is a convenience, not the canonical build lifecycle.
+
+The canonical build lifecycle — artifact review, diff, run history, promotion,
+and build state management — belongs to Studio. This command should not expand
+to duplicate those surfaces. If you need to review output, compare versions,
+track history, or promote artifacts, use Studio.
 
 Usage:
     mozaiks gen workflow --prompt "description of what you want"
@@ -21,6 +25,12 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 import yaml
+from mozaiks_cli.workspace import resolve_active_app_root
+from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
+    APP_VALIDATION_STRATEGIES,
+    default_app_validation_strategy,
+    normalize_app_validation_strategy,
+)
 
 # Rich for nice CLI output
 try:
@@ -65,12 +75,8 @@ def _check_api_key() -> bool:
 def _find_generator_source() -> Optional[Path]:
     """Locate the AgentGenerator workflow source directory."""
     candidates = [
-        # Inside the mozaiks repo (submodule / subtree copy)
-        Path(__file__).parents[2] / "mozaiks-platform" / "app" / "workflows",
-        # Sibling repo on disk
-        Path(__file__).parents[3] / "mozaiks-platform" / "app" / "workflows",
-        # Local platform directory
-        Path(__file__).parents[2] / "platform" / "workflows",
+        # Factory-owned workflow packs inside this repo
+        Path(__file__).parents[2] / "factory_app" / "app" / "workflows",
         # Env override
         Path(os.environ.get("MOZAIKS_WORKFLOWS_PATH", ""))
         if os.environ.get("MOZAIKS_WORKFLOWS_PATH") else None,
@@ -424,10 +430,30 @@ def _setup_environment(repo_root: Path, staging_workflows: Path):
 
 # ── Runner ─────────────────────────────────────────────────────────
 
+def _resolve_workspace_app_id(repo_root: Path) -> str:
+    """Read appId from the active workspace app.json so CLI artifacts share the Studio namespace."""
+    explicit_root = os.environ.get("PLATFORM_PATH")
+    workspace_root = Path(explicit_root).resolve() if explicit_root else Path.cwd().resolve()
+    app_root = resolve_active_app_root(workspace_root)
+    if not (app_root / "app.json").exists():
+        app_root = resolve_active_app_root(repo_root)
+    app_json = app_root / "app.json"
+    if app_json.exists():
+        try:
+            data = json.loads(app_json.read_text(encoding="utf-8"))
+            app_id = str(data.get("appId", "")).strip()
+            if app_id:
+                return app_id
+        except Exception:
+            pass
+    return "default"
+
+
 async def _run_generator(
     mode: str,
     prompt: str,
     output_dir: Path,
+    validation_strategy: str,
     workflow_name: str = "AgentGenerator",
 ) -> Dict[str, Any]:
     """
@@ -438,7 +464,8 @@ async def _run_generator(
     """
     from mozaiksai.core.workflow.orchestration_patterns import run_workflow_orchestration
 
-    app_id = f"cli_gen_{uuid.uuid4().hex[:8]}"
+    repo_root = Path(__file__).parents[2]
+    app_id = _resolve_workspace_app_id(repo_root)
     chat_id = f"gen_{uuid.uuid4().hex[:12]}"
 
     context_variables = {
@@ -450,6 +477,7 @@ async def _run_generator(
         "context_aware": True,
         "output_dir": str(output_dir),
         "generation_mode": mode,
+        "app_validation_strategy": validation_strategy,
     }
 
     def context_factory():
@@ -510,9 +538,14 @@ def run(args):
         _print_info("Ensure you are in the mozaiks repo or set MOZAIKS_WORKFLOWS_PATH")
         return 1
 
+    resolved_validation_strategy = args.validation_strategy
+    if not resolved_validation_strategy:
+        resolved_validation_strategy, _ = default_app_validation_strategy()
+
     _print("\nMozaiks Quick Generator", style="bold cyan")
     _print(f"   Mode: {mode}", style="dim")
     _print(f"   Output: {output_dir}\n", style="dim")
+    _print_info(f"Validation strategy: {resolved_validation_strategy}")
 
     # Resolve repo root (for sys.path setup)
     # gen.py lives at mozaiks/mozaiks_cli/commands/gen.py → parents[2] = repo root
@@ -543,11 +576,25 @@ def run(args):
                 console=console,
             ) as progress:
                 task = progress.add_task("Running AgentGenerator...", total=None)
-                result = asyncio.run(_run_generator(mode=mode, prompt=prompt, output_dir=output_dir))
+                result = asyncio.run(
+                    _run_generator(
+                        mode=mode,
+                        prompt=prompt,
+                        output_dir=output_dir,
+                        validation_strategy=resolved_validation_strategy,
+                    )
+                )
                 progress.update(task, completed=True)
         else:
             print("Running AgentGenerator...")
-            result = asyncio.run(_run_generator(mode=mode, prompt=prompt, output_dir=output_dir))
+            result = asyncio.run(
+                _run_generator(
+                    mode=mode,
+                    prompt=prompt,
+                    output_dir=output_dir,
+                    validation_strategy=resolved_validation_strategy,
+                )
+            )
 
         if result.get("success"):
             _print_success("Generation complete!")
@@ -563,7 +610,7 @@ def run(args):
             _print_info("  # Review and customise the generated files")
             if mode == "app":
                 _print_info("  Promote the generated app bundle into an active app root before running it")
-                _print_info("  From the repo root, use MOZAIKS_HOST=studio python run_server.py for the local/private builder host")
+                _print_info("  Run the Studio management host: mozaiks serve . --host studio")
             return 0
         else:
             _print_error(f"Generation failed: {result.get('error', 'Unknown error')}")
@@ -624,5 +671,23 @@ def run_interactive(args):
     default_output = f"./generated-{args.mode}"
     output_input = input(f"\nOutput directory [{default_output}]: ").strip()
     args.output = output_input if output_input else default_output
+
+    default_strategy, default_reason = default_app_validation_strategy()
+    _print("\nChoose app validation strategy:", style="bold")
+    _print(f"  1. e2b   - Hosted sandbox validation")
+    _print(f"  2. local - Run validation on this machine")
+    _print(f"  3. skip  - Skip build validation")
+    _print_info(f"Default: {default_strategy} ({default_reason})")
+    strategy_input = input(f"Validation strategy [{default_strategy}]: ").strip().lower()
+    if strategy_input:
+        normalized_strategy = normalize_app_validation_strategy(strategy_input)
+        if normalized_strategy is None:
+            _print_error(
+                f"Invalid validation strategy. Choose one of: {', '.join(APP_VALIDATION_STRATEGIES)}"
+            )
+            return 1
+        args.validation_strategy = normalized_strategy
+    else:
+        args.validation_strategy = default_strategy
 
     return run(args)

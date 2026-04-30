@@ -4,7 +4,7 @@
  * All workflow starts converge here regardless of trigger source:
  *   - transition resolution → trigger_source: "transition"
  *   - action button      → trigger_source: "action", action_id: "..."
- *   - refinement control → trigger_source: "refinement", change_class: "patch|design|feature|core"
+ *   - routed non-chat trigger → trigger_source: "refinement" | "route" | ..., trigger_payload: {...}
  *   - direct chat        → trigger_source: "chat" (default)
  *
  * Behavior:
@@ -16,7 +16,7 @@
  *   const { startWorkflow, starting, error } = useWorkflowStart()
  *
  *   startWorkflow('AppGenerator', { app_type: 'new' }, { trigger_source: 'transition' })
- *   startWorkflow('PatchWorkflow', { artifact_version_id: 'v3' }, { trigger_source: 'refinement', change_class: 'patch' })
+ *   startWorkflow(null, {}, { trigger_source: 'refinement', trigger_payload: { change_class: 'patch' } })
  *   startWorkflow('ContactAnalyzer', { contact_id }, { trigger_source: 'action', action_id: 'analyze_contact' })
  */
 
@@ -58,10 +58,7 @@ export function useWorkflowStart() {
       const {
         trigger_source = CHAT_TRIGGER_SOURCE,
         action_id = null,
-        change_class = null,
-        artifact_version_id = null,
-        artifact_kind = null,
-        raw_user_request = null,
+        trigger_payload = null,
         app_id = null,
         user_id = null,
       } = options;
@@ -92,10 +89,7 @@ export function useWorkflowStart() {
           // workflow_id is optional for refinement triggers — backend router resolves it
           ...(workflowId ? { workflow_id: workflowId } : {}),
           ...(action_id ? { action_id } : {}),
-          ...(change_class ? { change_class } : {}),
-          ...(artifact_version_id ? { artifact_version_id } : {}),
-          ...(artifact_kind ? { artifact_kind } : {}),
-          ...(raw_user_request ? { raw_user_request } : {}),
+          ...(trigger_payload && Object.keys(trigger_payload).length > 0 ? { trigger_payload } : {}),
         };
 
         const res = await fetch('/api/workflows/trigger', {

@@ -1,0 +1,176 @@
+# ThemeCapture Context Variables
+#
+# Uses the canonical definitions/agents contract so NEXT-triggered handoffs work
+# the same way they do in the rest of the platform workflows.
+
+definitions:
+  app_url:
+    type: string
+    description: Optional live URL used to preload deterministic theme evidence.
+    source:
+      type: state
+      default: null
+
+  css_snapshot:
+    type: string
+    description: Optional CSS or style snapshot supplied directly or generated during before_chat preload.
+    source:
+      type: state
+      default: null
+
+  screenshot_description:
+    type: string
+    description: Optional natural-language description of the host app's look and feel.
+    source:
+      type: state
+      default: null
+
+  parent_theme_config:
+    type: object
+    description: Existing theme_config.json mapping used as strong evidence or refinement input.
+    source:
+      type: state
+      default: null
+
+  is_child_workflow:
+    type: boolean
+    description: True when ThemeCapture is launched from another workflow with seeded context.
+    source:
+      type: state
+      default: false
+
+  app_name:
+    type: string
+    description: Known app display name if available upstream.
+    source:
+      type: state
+      default: null
+
+  app_description:
+    type: string
+    description: Existing product summary if already known.
+    source:
+      type: state
+      default: null
+
+  tech_stack:
+    type: string
+    description: Optional frontend stack summary from discovery.
+    source:
+      type: state
+      default: null
+
+  frontend_repo_summary:
+    type: object
+    description: Structured frontend repo summary from ExistingAppDiscovery.
+    source:
+      type: state
+      default: {}
+
+  preloaded_context_ready:
+    type: boolean
+    description: True when before_chat captured usable deterministic evidence.
+    source:
+      type: state
+      default: false
+
+  preload_status:
+    type: string
+    description: "before_chat evidence status: none, partial, or ready."
+    source:
+      type: state
+      default: "none"
+
+  preload_summary:
+    type: string
+    description: Human-readable summary of the evidence gathered before chat.
+    source:
+      type: state
+      default: null
+
+  theme_capture_evidence:
+    type: object
+    description: Structured deterministic evidence gathered from URL, theme config, screenshots, or repo hints.
+    source:
+      type: state
+      default: {}
+
+  interview_complete:
+    type: boolean
+    description: True when ThemeInterviewAgent emits NEXT.
+    source:
+      type: state
+      default: false
+      triggers:
+        - type: agent_text
+          agent: ThemeInterviewAgent
+          ui_hidden: true
+          match:
+            equals: NEXT
+
+  analysis_complete:
+    type: boolean
+    description: True when ThemeAnalysisAgent emits NEXT.
+    source:
+      type: state
+      default: false
+      triggers:
+        - type: agent_text
+          agent: ThemeAnalysisAgent
+          ui_hidden: true
+          match:
+            equals: NEXT
+
+  captured_theme_config:
+    type: object
+    description: Canonical theme_config.json persisted after ThemeConfigAssemblerAgent completes.
+    source:
+      type: computed
+      default: null
+
+  theme_capture_persisted:
+    type: boolean
+    description: True once save_captured_theme has persisted the captured theme artifact.
+    source:
+      type: computed
+      default: false
+
+agents:
+  ThemeInterviewAgent:
+    variables:
+      - app_url
+      - css_snapshot
+      - screenshot_description
+      - parent_theme_config
+      - is_child_workflow
+      - app_name
+      - app_description
+      - tech_stack
+      - frontend_repo_summary
+      - preloaded_context_ready
+      - preload_status
+      - preload_summary
+      - theme_capture_evidence
+      - interview_complete
+
+  ThemeAnalysisAgent:
+    variables:
+      - app_name
+      - app_description
+      - tech_stack
+      - css_snapshot
+      - screenshot_description
+      - parent_theme_config
+      - preload_status
+      - preload_summary
+      - theme_capture_evidence
+      - interview_complete
+      - analysis_complete
+
+  ThemeConfigAssemblerAgent:
+    variables:
+      - app_name
+      - parent_theme_config
+      - preload_summary
+      - theme_capture_evidence
+      - captured_theme_config

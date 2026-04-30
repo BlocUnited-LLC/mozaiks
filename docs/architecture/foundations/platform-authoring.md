@@ -1,11 +1,13 @@
 # Platform Authoring
 
-This document defines what should be authored under `platform/` and the key file contracts.
+This document defines what should be authored in an app workspace and the key
+file contracts.
 
 ## Core Rule
 
-`platform/` is the default active app root. The same app-root shape appears
-inside product workspaces such as `mozaiks-platform/app`.
+The canonical target is a self-contained app workspace rooted at `app/`. The
+same app-root shape should appear inside product workspaces such as
+`mozaiks-platform/app`.
 
 It should contain declaratives, assets, and explicit logic stubs. It should not contain framework compiler logic.
 
@@ -20,35 +22,31 @@ Modules exist as support bundles, but they should not dominate the authoring mod
 
 ## Active Root vs Workspace Wrapper
 
-The runtime reads an active app root:
+The runtime reads an active app root. Canonically, that root is:
 
-- default OSS/sample root: `platform/`
-- App Zero root: `mozaiks-platform/app/`
-- generated app root after promotion: the target app's active root
+- `app/` in a generated/customer app workspace
+- `mozaiks-platform/app/` in the current App Zero repo layout
 
-A workspace may also include sibling product assets:
+Current repo note:
 
-- `brand/` for theme and visual assets
-- `ui/` for product UI extensions
-- `generated/` for generator output awaiting promotion
-
-Those wrapper folders are not a different app contract. They are product
-workspace support around the same active app-root shape.
+- `mozaiks-platform/app/` is the repo-local App Zero app-root path inside this repo
+- App Zero now follows the same self-contained app-root pattern with
+  `mozaiks-platform/app/brand` and `mozaiks-platform/app/ui`
 
 ## Primary Families
 
 | Family | Purpose | Path |
 | --- | --- | --- |
-| App manifest | Small app identity and target manifest | `platform/app.json` |
-| Pages | Normal app screens | `platform/pages/*` |
-| Workflows | Agentic execution | `platform/workflows/*` |
-| Workflow triggers | App event to workflow rules | `platform/workflows/*/orchestrator.yaml` |
+| App manifest | Small app identity and target manifest | `app/app.json` |
+| Pages | Normal app screens | `app/ui/pages/*` |
+| Workflows | Agentic execution | `app/workflows/*` |
+| Workflow triggers | App event to workflow rules | `app/workflows/*/orchestrator.yaml` |
 
 ## Support Family
 
 | Family | Purpose | Path |
 | --- | --- | --- |
-| Modules | Shared backing logic and helpers | `platform/modules/*` |
+| Modules | Shared backing logic and helpers | `app/modules/*` |
 
 ## What Users Should Mostly Author
 
@@ -74,7 +72,7 @@ Generator outputs must not be written directly into the active app root. The
 builder writes to `MOZAIKS_GENERATED_ARTIFACTS_PATH` first:
 
 ```text
-mozaiks-platform/generated/
+generated/
 ├── apps/{app_id}/{build_id}/app/
 └── workflows/{app_id}/{build_id}/{workflow_name}/
 ```
@@ -91,16 +89,16 @@ An explicit promotion step copies validated artifacts into the active root.
 - runtime loaders
 - defaulting logic
 
-Those do not belong in `platform/`.
+Those do not belong in an app workspace.
 
 Example:
 
 - `chat-ui/src/platform/appManifest.js` is framework-owned
-- `platform/app.json` is generator-owned
+- `app/app.json` is generator-owned
 
 ## File Contracts
 
-### `platform/app.json`
+### `app/app.json`
 
 Small authoring manifest only.
 
@@ -125,13 +123,13 @@ Expected default shape:
 
 The generator should not author low-level runtime plumbing here unless the user explicitly requests advanced overrides.
 
-`platform/app.json` is for app identity, startup route, and product auth intent.
+`app/app.json` is for app identity, startup route, and product auth intent.
 
 It is not the place for shell colors, login theme files, footer links, or header chrome.
 
 It is also not the place for local development shortcuts such as auto-login.
 
-### `platform/pages/{page}.yaml`
+### `app/ui/pages/{page}.yaml`
 
 Required:
 
@@ -139,13 +137,14 @@ Required:
 
 Optional:
 
-- folder form: `platform/pages/{page}/page.yaml`
+- folder form: `app/ui/pages/{page}/page.yaml`
 - custom UI extension files when a page intentionally leaves the primitive
   schema path
 
-Shared page-level UI should live under `platform/pages/_shared/`, not inside a module by default.
+Shared page-level UI should live under `app/ui/pages/_shared/`, not inside a
+module by default.
 
-### `platform/workflows/{workflow}/`
+### `app/workflows/{workflow}/`
 
 Required:
 
@@ -166,10 +165,10 @@ Optional but common:
 - `extended_orchestration/mfj_extension.json`
 
 Event routing and workflow triggers are configured via:
-- `platform/workflows/{workflow}/orchestrator.yaml` - `triggers` declare which app events start or resume a workflow
-- app hosts/backends emit domain events through the runtime ingress boundary; there is no separate `platform/automations/event_catalog.json`
+- `app/workflows/{workflow}/orchestrator.yaml` - `triggers` declare which app events start or resume a workflow
+- app hosts/backends emit domain events through the runtime ingress boundary; there is no separate app-owned automations catalog file
 
-### `platform/modules/{module}/`
+### `app/modules/{module}/`
 
 Required:
 
@@ -194,17 +193,33 @@ Modules are backing capability bundles. The generator should not create module U
 
 Modules do not own page routing by default. Routeable surfaces should be pages.
 
-### `platform/brand/`
+### Active app-root frontend extension barrel
+
+When a generated app needs bounded frontend customization, the active app root
+may also contain:
+
+- `app/ui/index.js` in app workspaces
+- `mozaiks-platform/app/ui/index.js` in App Zero
+
+This file is the deterministic registration barrel loaded by `@platform/extensions`.
+Generators may create it only to register contract-declared UI stubs such as
+custom admin components declared through `modules/{module}/admin.yaml` and
+materialized from `module_contract.js_stubs`.
+
+Do not treat `ui/index.js` as a second page system. It is only a bounded
+extension entrypoint for declared customization stubs.
+
+### `app/brand/`
 
 Generator-owned when the app needs shell branding.
 
 Use:
 
-- `platform/brand/assets/` for logos and icons
-- `platform/brand/fonts/` for local fonts
-- `platform/brand/login-theme/` only when auth login theme assets change
+- `app/brand/assets/` for logos and icons
+- `app/brand/fonts/` for local fonts
+- `app/brand/login-theme/` only when auth login theme assets change
 
-Do not use `platform/brand/` for page route logic.
+Do not use `app/brand/` for page route logic.
 
 ## What Mozaiks Should Default
 
@@ -246,8 +261,8 @@ These should not be generator-authored:
 
 Current examples:
 
-- `platform/brand/realm-export.json` is a generated deployment artifact
-- `platform/brand/_system/silent-check-sso.html` is framework support
+- `app/brand/realm-export.json` is a generated deployment artifact
+- `app/brand/_system/silent-check-sso.html` is framework support
 
 ## Anti-Drift Rule
 
@@ -257,10 +272,11 @@ That means:
 
 - do not duplicate module metadata into a separate catalog file
 - do not duplicate app defaults into authored manifests
-- do not add compiler helpers to `platform/`
+- do not add compiler helpers to the app workspace
 
 ## Cross References
 
 - [canonical-app-structure.md](canonical-app-structure.md)
 - [architecture-overview.md](architecture-overview.md)
 - [surface-model.md](surface-model.md)
+

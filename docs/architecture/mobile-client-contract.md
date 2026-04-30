@@ -38,7 +38,7 @@ Auth-disabled local mode (`AUTH_ENABLED=false`) is supported for local developme
 ## Workflow discovery
 - `GET /api/workflows`
   - Returns workflow config map keyed by `workflow_name`.
-  - Use `entry_point: true` when present for default launch selection. Canonical source is `platform/config/ai.json`.
+  - Use `entry_point: true` when present for default launch selection. Canonical source is `app/config/ai.json`.
 
 ## Start chat
 - `POST /api/chats/{app_id}/{workflow_name}/start`

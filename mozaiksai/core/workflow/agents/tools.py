@@ -234,7 +234,10 @@ def load_agent_tool_functions(workflow_name: str) -> Dict[str, List[Callable]]:
     - Logs to logs/logs/tools.log (workflow-agnostic)
     """
     mapping: Dict[str, List[Callable]] = {}
-    base_dir = Path(str(workflow_manager.workflows_base_path)) / workflow_name
+    base_dir = workflow_manager.resolve_workflow_path(workflow_name)
+    if base_dir is None:
+        logger.debug(f"[TOOLS] Workflow path not found for '{workflow_name}'")
+        return mapping
     tools_yaml_path = base_dir / 'tools.yaml'
 
     data: Dict[str, Any] = {}

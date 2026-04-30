@@ -3,7 +3,7 @@
 **Status:** Design Proposal
 **Created:** 2026-04-06
 **Based on:** Legacy modularization analysis; current canonical hosts are
-`runtime_app.py`, `platform_app.py`, `studio_app.py`, and `mozaiks_app.py`.
+`mozaiksai/hosts/runtime.py`, `mozaiksai/hosts/platform.py`, `mozaiksai/hosts/studio.py`, and `mozaiksai/hosts/mozaiks.py`.
 
 ---
 
@@ -1585,10 +1585,10 @@ CURRENT:
 │   ├── mozaiksai/               # Main package
 │   ├── mozaiks_cli/             # CLI
 │   ├── platform/                # Example/template bundle
-│   ├── runtime_app.py           # Runtime host
-│   ├── platform_app.py          # Platform shell host
-│   ├── studio_app.py            # Local/private Studio builder host
-│   └── mozaiks_app.py           # Default Mozaiks product host
+│   ├── mozaiksai/hosts/runtime.py           # Runtime host
+│   ├── mozaiksai/hosts/platform.py          # Platform shell host
+│   ├── mozaiksai/hosts/studio.py            # Local/private Studio management host
+│   └── mozaiksai/hosts/mozaiks.py           # Default Mozaiks product host
 │
 └── legacy donor material         # Reference-only patterns, not an active runtime
 ```

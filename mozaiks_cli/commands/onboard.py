@@ -6,6 +6,14 @@ import json
 import sys
 from pathlib import Path
 
+from mozaiksai.core.admin.contract import build_default_host_admin_config
+from mozaiks_cli.workspace import (
+    resolve_active_app_root,
+    resolve_theme_config_path,
+    resolve_ui_route_manifest_path,
+    resolve_workspace_root,
+)
+
 
 THEME_PRESETS = {
     "teal": {
@@ -51,8 +59,9 @@ PROVIDER_DEFAULT_MODELS = {
 
 def run(args) -> None:
     """Execute the onboard command."""
-    workspace_root = _resolve_workspace_root(getattr(args, "directory", None))
-    missing_surfaces = _missing_scaffold_surfaces(workspace_root)
+    workspace_root = resolve_workspace_root(getattr(args, "directory", None))
+    app_root = resolve_active_app_root(workspace_root)
+    missing_surfaces = _missing_scaffold_surfaces(workspace_root, app_root)
     if missing_surfaces:
         print(f"Error: no valid Mozaiks scaffold found in {workspace_root}")
         print("Missing required files:")
@@ -61,11 +70,11 @@ def run(args) -> None:
         print("Run 'mozaiks init <preset>' first or point --dir at an existing scaffold.")
         return
 
-    app_json_path = workspace_root / "platform" / "app.json"
-    ai_json_path = workspace_root / "platform" / "config" / "ai.json"
-    shell_json_path = workspace_root / "platform" / "config" / "shell.json"
-    theme_json_path = workspace_root / "brand" / "theme_config.json"
-    admin_json_path = workspace_root / "platform" / "config" / "admin.json"
+    app_json_path = app_root / "app.json"
+    ai_json_path = app_root / "config" / "ai.json"
+    shell_json_path = app_root / "config" / "shell.json"
+    theme_json_path = resolve_theme_config_path(app_root)
+    admin_json_path = app_root / "config" / "admin.json"
 
     app_config = _read_json(app_json_path)
     ai_config = _read_json(ai_json_path)
@@ -200,35 +209,32 @@ def run(args) -> None:
     )
 
     _write_json(app_json_path, app_config)
-    print("Updated platform/app.json")
+    print(f"Updated {app_json_path.relative_to(workspace_root)}")
     _write_json(ai_json_path, ai_config)
-    print("Updated platform/config/ai.json")
+    print(f"Updated {ai_json_path.relative_to(workspace_root)}")
     _write_json(shell_json_path, shell_config)
-    print("Updated platform/config/shell.json")
+    print(f"Updated {shell_json_path.relative_to(workspace_root)}")
     _write_json(theme_json_path, theme_config)
-    print("Updated brand/theme_config.json")
+    print(f"Updated {theme_json_path.relative_to(workspace_root)}")
 
     if admin_email:
         resolved_admin = _apply_admin_config(admin_config or {}, admin_email)
         _write_json(admin_json_path, resolved_admin)
-        print("Updated platform/config/admin.json")
+        print(f"Updated {admin_json_path.relative_to(workspace_root)}")
 
     print("\nOnboarding completed.")
     _show_next_steps(workspace_root=workspace_root, journey=journey, first_goal=first_goal, admin_email=admin_email)
-
-
-def _resolve_workspace_root(explicit_directory: str | None) -> Path:
-    return Path(explicit_directory or ".").resolve()
-
-
-def _missing_scaffold_surfaces(workspace_root: Path) -> list[str]:
-    required = [
-        "platform/app.json",
-        "platform/config/ai.json",
-        "platform/config/shell.json",
-        "brand/theme_config.json",
-    ]
-    return [rel_path for rel_path in required if not (workspace_root / rel_path).exists()]
+def _missing_scaffold_surfaces(workspace_root: Path, app_root: Path) -> list[str]:
+    theme_path = resolve_theme_config_path(app_root)
+    ui_path = resolve_ui_route_manifest_path(app_root)
+    required = {
+        str((app_root / "app.json").relative_to(workspace_root)): app_root / "app.json",
+        str((app_root / "config" / "ai.json").relative_to(workspace_root)): app_root / "config" / "ai.json",
+        str((app_root / "config" / "shell.json").relative_to(workspace_root)): app_root / "config" / "shell.json",
+        str(theme_path.relative_to(workspace_root)): theme_path,
+        str(ui_path.relative_to(workspace_root)): ui_path,
+    }
+    return [rel_path for rel_path, path in required.items() if not path.exists()]
 
 
 def _read_json(path: Path) -> dict:
@@ -428,6 +434,14 @@ def _apply_theme_config(*, theme_config: dict, app_name: str, tagline: str, them
 
 
 def _apply_admin_config(admin_config: dict, admin_email: str) -> dict:
+    if not isinstance(admin_config, dict):
+        admin_config = build_default_host_admin_config()
+
+    if "sections" not in admin_config or "runtime_panels" not in admin_config:
+        baseline = build_default_host_admin_config()
+        baseline.update({key: value for key, value in admin_config.items() if key != "_comment"})
+        admin_config = baseline
+
     admin_config["enabled"] = True
     emails = admin_config.get("admin_emails")
     if not isinstance(emails, list):
@@ -435,43 +449,23 @@ def _apply_admin_config(admin_config: dict, admin_email: str) -> dict:
     if admin_email not in emails:
         emails.append(admin_email)
     admin_config["admin_emails"] = emails
-    panels = admin_config.get("panels")
-    if not isinstance(panels, dict):
-        panels = {
-            "app": [
-                {"id": "stats", "label": "App Overview", "section": "overview"},
-                {"id": "users", "label": "Users", "section": "users"},
-            ],
-            "modules": [],
-            "runtime": [
-                {"id": "stats", "label": "Usage Stats", "section": "usage"},
-                {"id": "runs", "label": "Active Runs", "section": "usage"},
-                {"id": "sessions", "label": "Recent Sessions", "section": "activity"},
-            ],
-        }
-    admin_config["panels"] = panels
-    admin_config.setdefault("roles", ["admin"])
-    admin_config.setdefault(
-        "features",
-        {
-            "user_management": False,
-            "billing": False,
-            "audit_log": False,
-        },
-    )
+    admin_config.setdefault("schema_version", "mozaiks.admin.host.v1")
+    admin_config.setdefault("sections", build_default_host_admin_config()["sections"])
+    admin_config.setdefault("runtime_panels", build_default_host_admin_config()["runtime_panels"])
     return admin_config
 
 
 def _show_next_steps(*, workspace_root: Path, journey: str, first_goal: str, admin_email: str) -> None:
+    app_root = resolve_active_app_root(workspace_root)
     print("\nNext Steps:")
-    print(f"  1. Review {workspace_root / 'platform' / 'app.json'} and confirm the onboarding summary")
-    print("  2. Confirm your default AI provider and model in platform/config/ai.json")
+    print(f"  1. Review {app_root / 'app.json'} and confirm the onboarding summary")
+    print(f"  2. Confirm your default AI provider and model in {app_root / 'config' / 'ai.json'}")
     print("  3. Use the first goal below as your next build request:")
     print(f"     {first_goal}")
-    print("  4. Start the local/private builder host with python run_studio.py")
+    print("  4. Start the local/private Studio management/create host with python run_studio.py")
     if journey == "existing_app":
         print("  5. Bridge the first host-owned surface before attempting broader generation")
     else:
         print("  5. Add the first real workflow or module only after you confirm the product surface")
     if admin_email:
-        print("  6. Verify admin access in platform/config/admin.json")
+        print(f"  6. Verify admin access in {app_root / 'config' / 'admin.json'}")

@@ -12,7 +12,12 @@ depends_on:
 # SessionRouter
 
 This document defines the SessionRouter — the unified session-level coordinator that
-sits above `JourneyOrchestrator`, refinement re-entry policy, and MFJ.
+sits above `JourneyOrchestrator`, host-supplied trigger routing policy, and MFJ.
+
+The concrete refinement re-entry policy is framework-owned. It currently lives in
+`factory_app/app/modules/factory_control_plane/backend/` and is injected by the Studio/Mozaiks host into
+SessionRouter through a trigger-route resolver seam. The runtime does not import
+that policy directly.
 
 ---
 
@@ -74,7 +79,7 @@ coordinates them.
 ```
 
 `JourneyOrchestrator` becomes a sub-handler for the `run_complete` case.
-Refinement re-entry policy becomes a helper for the `refinement` case.
+Refinement re-entry policy becomes a host-supplied helper for the `refinement` case.
 `GlobalPackGraph` is consulted by SessionRouter (currently also by JourneyOrchestrator —
 that duplication goes away once SessionRouter owns the journey position read).
 
@@ -188,22 +193,23 @@ Recommended direction:
   "id": "coding_journey_selector",
   "transition_type": "user_choice_context",
   "ui": { "component": "CodingJourneySelector", "mode": "screen" },
-  "route_to": "DesignDocs",
   "options": [
-    { "id": "autonomous", "context_variables": { "design_docs_hitl": false } },
-    { "id": "guided", "context_variables": { "design_docs_hitl": true } }
+    { "id": "autonomous", "route_to": "DesignDocs", "context_variables": { "design_docs_hitl": false } },
+    { "id": "guided", "route_to": "DesignDocs", "context_variables": { "design_docs_hitl": true } }
   ]
 }
 ```
 
 Important:
 
-- `route_to` targets a workflow or another transition id, never a `.jsx` file
+- Single-route transitions use `route_to`; user-choice transitions use `options[].route_to`
 - `ui.component` is a renderer name resolved from the UI registry
 - transition components emit `option_id`; SessionRouter owns option resolution
 - transition declarations may seed `options[].context_variables`
 - target workflow creation filters transition context against declared `context_variables.yaml` keys
 - richer visuals belong in the component implementation, not in the generic routing schema
+
+Programmatic workflow starts should use `mozaiksai.core.session.launcher` so they still pass through SessionRouter validation, dependency rerouting, context filtering, and chat-session binding.
 
 Recommended transition types:
 
@@ -245,7 +251,7 @@ class Session:
 
     # Lifecycle
     lifecycle_state: SessionLifecycle
-    # initial | active | awaiting_transition | awaiting_approval | refining | completed | stale
+    # initial | active | awaiting_transition | awaiting_approval | completed | stale
 
     # Active execution
     current_run_id: str | None       # chat_id of the currently executing workflow run
@@ -275,7 +281,6 @@ class SessionLifecycle(str, Enum):
     ACTIVE = "active"
     AWAITING_TRANSITION = "awaiting_transition"
     AWAITING_APPROVAL = "awaiting_approval"
-    REFINING = "refining"
     COMPLETED = "completed"
     STALE = "stale"             # upstream artifact invalidated by a core change
 ```
@@ -295,18 +300,14 @@ active
   → active                 (journey auto-advance spawned next step)
   → awaiting_transition    (router surfaces a transition)
   → awaiting_approval      (workflow emitted approval_required event)
-  → refining               (refinement trigger received)
+  → active                 (refinement trigger resolved to a workflow start)
   → completed              (last journey step completed)
-
-refining
-  → active                 (refinement workflow spawned)
-  → completed              (refinement workflow completed)
 
 awaiting_approval
   → active                 (approval received → resume)
 
 completed
-  → refining               (post-completion refinement request)
+  → active                 (post-completion refinement request resolves to a workflow start)
   → stale                  (core change invalidated upstream layer)
 
 stale

@@ -16,13 +16,18 @@ Everything you need to go from clone to a running local Mozaiks app.
 
 Mozaiks uses four canonical host entrypoints:
 
-- `runtime_app.py` - runtime substrate
-- `platform_app.py` - headless app host
-- `studio_app.py` - local/private builder host
-- `mozaiks_app.py` - hosted product host
+- `mozaiksai/hosts/runtime.py` - runtime substrate
+- `mozaiksai/hosts/platform.py` - headless app host
+- `mozaiksai/hosts/studio.py` - local/private Studio management/create host
+- `mozaiksai/hosts/mozaiks.py` - hosted product host
 
-`python run_server.py` defaults to the local/private Studio host. Use the
+`mozaiks serve .` defaults to the local/private Studio host. Use the
 direct `run_*.py` wrappers when you want to target one specific layer.
+
+For day-to-day local development, prefer `.\scripts\run-backend.ps1`. That
+runner clears previous-run files on startup by default:
+`logs/logs/*`, `logs/agent_outputs/*`, and `logs/workflow_converter/*`. The
+current run then writes fresh logs and artifacts normally.
 
 ---
 
@@ -32,7 +37,7 @@ Mozaiks is an AI app framework with three main pieces:
 
 | Piece | What it is | Where it runs |
 |-------|-----------|---------------|
-| **Backend** | Layered Python host selected for local work | `python run_server.py` |
+| **Backend** | Layered Python host selected for local work | `mozaiks serve .` |
 | **Frontend** | React app that users interact with | `npm run dev` |
 | **Services** | MongoDB (database) + Keycloak (login) | Docker containers |
 
@@ -61,29 +66,26 @@ Use the `/setup` skill in Claude Code:
 /setup
 ```
 
-This is the best path for first-time developers because it walks you through configuring `platform/app.json`, `.env`, Docker, and local auth defaults before startup. The skill will verify everything works.
+This is the best path for first-time developers because it walks you through the
+current repo starter layout, `.env`, Docker, and local auth defaults before
+startup. The skill will verify everything works.
 
 ---
 
-## Repo layout
+## Repo layout (current repo state)
 
 ```
 mozaiks/
-├── platform/                   # Declarative app bundle consumed by the runtime
-│   ├── app.json                # App identity, auth requirement, admin emails
-│   ├── config/                 # Runtime and app bundle config
-│   ├── workflows/              # Workflow definitions and UI tools
-│   ├── modules/                # App capability contracts
-│   ├── pages/                  # Multi-module UI pages
-│   └── brand/                  # Optional colocated shell assets
+├── factory_app/                # First-party factory workspace
+│   └── app/workflows/
+│
+├── generated/                  # Staged generated apps/workflows awaiting promotion
 │
 ├── mozaiks-platform/           # App Zero / product workspace
 │   ├── app/                    # Active App Zero app root
-│   ├── brand/                  # App Zero brand/theme assets
-│   ├── ui/                     # App Zero UI extension
-│   └── generated/              # Generator output awaiting promotion
+│   │   └── modules/            # Hosted product modules: marketplace + communications
 │
-├── app/                        # Web shell entrypoint and Vite config
+├── web_shell/                  # Local web shell host source
 │   ├── App.jsx
 │   ├── main.jsx
 │   └── vite.config.js
@@ -92,11 +94,11 @@ mozaiks/
 ├── mozaiksai/                  # AI runtime, orchestration, transport
 ├── mozaiks_cli/                # CLI for local initialization and tooling
 ├── docs/                       # Architecture and usage documentation
-├── runtime_app.py              # Pure runtime FastAPI host
-├── platform_app.py             # Runtime + platform shell host
-├── studio_app.py               # Runtime + platform + local/private Studio host
-├── mozaiks_app.py              # Runtime + platform + Studio + Mozaiks product host
-├── run_server.py               # Start the selected host
+├── mozaiksai/hosts/runtime.py              # Pure runtime FastAPI host
+├── mozaiksai/hosts/platform.py             # Runtime + platform shell host
+├── mozaiksai/hosts/studio.py               # Runtime + platform + local/private Studio host
+├── mozaiksai/hosts/mozaiks.py              # Runtime + platform + Studio + Mozaiks product host
+├── mozaiks serve .               # Start the selected host
 ├── requirements.txt            # Python dependencies
 ├── .env.example                # Secrets & config template (copy to .env)
 │
@@ -110,6 +112,20 @@ mozaiks/
 
     Deterministic app behavior is hosted by the platform host by default. Apps
     may also connect an external/generated backend through `AppBackendPort`.
+
+!!! note "Canonical target architecture"
+
+    The repo layout above is the **current implementation state**, not the
+    long-term distribution model. The canonical target is:
+
+    - shared generation core outside app workspaces
+    - self-contained app workspaces with `app/config`, `app/ui/pages`,
+      `app/workflows`, `app/modules`, `app/ui`, and `app/brand`
+    - generated/customer apps as standalone workspaces or repositories
+
+    See
+    [Distribution And Workspace Model](architecture/foundations/distribution-and-workspace-model.md)
+    for the target architecture.
 
 ---
 
@@ -130,6 +146,41 @@ OPENAI_API_KEY=sk-...
 ```
 
 That's the only required edit. Everything else has working defaults.
+
+App validation for `AppGenerator` also has one canonical env knob when you want
+to override the runtime default:
+
+```dotenv
+MOZAIKS_APP_VALIDATION_STRATEGY=local
+```
+
+Allowed values are:
+
+- `e2b`
+- `local`
+- `skip`
+
+If you leave it blank, the runtime resolves the strategy in this order:
+
+1. `e2b` when `E2B_API_KEY` is configured
+2. `local` when `npm` is available on the current machine
+3. `skip` when neither runtime is available
+
+Studio Create and `mozaiks gen` can also set this explicitly per run, so the
+env var is only needed when you want a workspace-wide default.
+
+If you want this repo to run against an app that lives outside the repo, set
+one of these optional values in `.env`:
+
+```dotenv
+# Either point directly at the app bundle or workspace root
+PLATFORM_PATH=C:/repos/customer-app
+
+# Or use the external-workspace alias
+MOZAIKS_APP_WORKSPACE_PATH=C:/repos/customer-app
+```
+
+Leave both blank to use the repo-local App Zero workspace.
 
 See `.env.example` for the full list with inline comments.
 
@@ -202,24 +253,43 @@ From here you can manage users, roles, and login settings. The `mozaiks` realm i
     # Install Python deps
     pip install -r requirements.txt
 
-    # Start backend (defaults to the local/private Studio host on http://localhost:8000)
-    python run_server.py
+    # Start backend (recommended local dev runner; clears previous-run logs/artifacts on startup)
+    .\scripts\run-backend.ps1
+
+    # Optional: target an external app workspace/repo instead of repo-local App Zero
+    .\scripts\run-backend.ps1 -AppWorkspacePath C:/repos/customer-app
 
     # Optional: target one specific host directly
     python run_runtime.py   # runtime substrate only
     python run_platform.py  # headless app host
-    python run_studio.py    # local/private builder host
+    python run_studio.py    # local/private Studio management/create host
     python run_mozaiks.py   # hosted product host
+    ```
+
+    To preserve previous-run files when starting the next run, opt out explicitly:
+
+    ```powershell
+    .\scripts\run-backend.ps1 -KeepLogsBetweenRuns -KeepRuntimeArtifactsBetweenRuns
     ```
 
     In a separate terminal:
 
     ```powershell
     # Start frontend (http://localhost:3000)
-    cd app
-    npm install   # first time only
-    npm run dev
+    npm --prefix web_shell install   # first time only
+    .\scripts\run-frontend.ps1
+
+    # Optional: target the same external app workspace/repo
+    .\scripts\run-frontend.ps1 -AppWorkspacePath C:/repos/customer-app
     ```
+
+### Validation strategy in practice
+
+- Studio Create exposes an **App Validation** selector before launching create or
+  refinement flows.
+- `mozaiks gen` exposes `--validation-strategy e2b|local|skip`.
+- Export remains blocked unless validation ends in `passed` or explicit
+  `skipped`, and integration checks pass.
 
 === "Full Docker"
 
@@ -231,9 +301,8 @@ From here you can manage users, roles, and login settings. The `mozaiks` realm i
     Start the frontend separately:
 
     ```powershell
-    cd app
-    npm install   # first time only
-    npm run dev
+    npm --prefix web_shell install   # first time only
+    .\scripts\run-frontend.ps1
     ```
 
 ---
@@ -260,7 +329,7 @@ After login, you're redirected back to the app with a valid JWT session.
 
 ---
 
-## Step 5 — Configure `platform/app.json`
+## Step 5 — Configure the current starter app root
 
 ```json
 {
@@ -274,7 +343,15 @@ After login, you're redirected back to the app with a valid JWT session.
 }
 ```
 
-`appName` appears in the browser tab and is also used by the mobile shell. `authRequired` says whether the product needs sign-in. `admins` says which signed-in users should count as admins. The active workflow is resolved automatically from backend config, with the canonical entry-point workflow declared in `platform/config/ai.json`. Backend URLs and local dev auth behavior now live in `.env`.
+`appName` appears in the browser tab and is also used by the mobile shell. `authRequired` says whether the product needs sign-in. `admins` says which signed-in users should count as admins. The active workflow is resolved automatically from backend config, with startup behavior declared in the active app root's `app/config/ai.json`. Backend URLs and local dev auth behavior now live in `.env`.
+
+This file path is part of the repo's current transitional starter layout. The
+canonical target for generated/customer apps is a self-contained workspace with
+`app/app.json` inside the app repository.
+
+`mozaiks init` now scaffolds that canonical workspace shape directly, so new
+customer app repos should use `app/app.json`, `app/config/*`, `app/workflows/*`,
+`app/modules/*`, `app/ui/*`, and `app/brand/*`.
 
 For most users, this is the only config file they should touch. The `clients/mobile` directory is the repo-owned native implementation layer.
 

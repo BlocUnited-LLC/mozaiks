@@ -372,6 +372,27 @@ class ArtifactStore:
         await coll.insert_one(doc.model_dump(by_alias=True, mode="python"))
         return doc
 
+    async def list_change_requests(
+        self,
+        *,
+        app_id: str,
+        artifact_version_id: Optional[str] = None,
+        classification: Optional[ChangeClassification] = None,
+        limit: int = 50,
+    ) -> List[ChangeRequestDoc]:
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        query: Dict[str, Any] = {"app_id": resolved_app_id}
+        if artifact_version_id:
+            query["artifact_version_id"] = artifact_version_id
+        if classification:
+            query["classification"] = classification.value
+        coll = await self._coll("ChangeRequests")
+        cursor = coll.find(query).sort("created_at", -1).limit(max(1, int(limit)))
+        rows = await cursor.to_list(length=max(1, int(limit)))
+        return [ChangeRequestDoc.model_validate(row) for row in rows]
+
     async def create_refinement_session(
         self,
         *,

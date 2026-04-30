@@ -398,7 +398,7 @@ def test_workflow_manager_rejects_manifest_tool_integration_metadata(tmp_path: P
 
 
 def test_build_workflows_load_from_workspace_bundle() -> None:
-    workflows_root = Path(__file__).resolve().parents[1] / "mozaiks-platform" / "app" / "workflows"
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "app" / "workflows"
 
     _workflow_manager_mod.UnifiedWorkflowManager._instance = None
     manager = _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(workflows_root))

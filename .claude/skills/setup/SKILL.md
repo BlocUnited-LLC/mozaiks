@@ -58,7 +58,7 @@ docker compose -f infra/compose/docker-compose.yml ps
 python -m venv .venv
 # Activate: .\.venv\Scripts\Activate.ps1 (Windows) or source .venv/bin/activate (Unix)
 pip install -r requirements.txt
-python run_server.py
+mozaiks serve .
 ```
 
 Keep backend running. Verify: `curl http://localhost:8000/api/health`

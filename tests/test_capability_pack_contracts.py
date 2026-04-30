@@ -45,7 +45,7 @@ class _Context:
 
 def test_valueengine_structured_outputs_define_capability_pack_contract() -> None:
     structured_outputs = _read_yaml(
-        "mozaiks-platform/app/workflows/ValueEngine/structured_outputs.yaml"
+        "factory_app/app/workflows/ValueEngine/structured_outputs.yaml"
     )
     models = structured_outputs["models"]
 
@@ -67,7 +67,7 @@ def test_valueengine_structured_outputs_define_capability_pack_contract() -> Non
 
 def test_appgenerator_structured_outputs_define_capability_first_build_plan() -> None:
     structured_outputs = _read_yaml(
-        "mozaiks-platform/app/workflows/AppGenerator/structured_outputs.yaml"
+        "factory_app/app/workflows/AppGenerator/structured_outputs.yaml"
     )
     models = structured_outputs["models"]
 
@@ -83,20 +83,22 @@ def test_appgenerator_structured_outputs_define_capability_first_build_plan() ->
 
 
 def test_app_plan_agent_prompt_requires_capability_first_planning() -> None:
-    content = _read_text("mozaiks-platform/app/workflows/AppGenerator/agents.yaml")
+    content = _read_text("factory_app/app/workflows/AppGenerator/agents.yaml")
 
     assert "Decompose into product capability packs first" in content
     assert "capability_pack_hints" in content
     assert "experience_spec_document" in content
     assert "The default owner of persistent pages is `AppSchemaAgent`." in content
     assert "Do NOT plan a second raw-frontend lane inside AppGenerator." in content
+    assert "domain-specific profile records" in content
+    assert "host-owned `/api/me` account/profile contract" in content
     assert '"capability_packs": [' in content
     assert '"capability_pack_id": null' in content
     assert '\n        "workflows": [' in content
 
 
 def test_appgenerator_context_exposes_current_experience_spec_alias() -> None:
-    context_vars = _read_yaml("mozaiks-platform/app/workflows/AppGenerator/context_variables.yaml")
+    context_vars = _read_yaml("factory_app/app/workflows/AppGenerator/context_variables.yaml")
     definitions = context_vars["definitions"]
     agents = context_vars["agents"]
 
@@ -107,7 +109,7 @@ def test_appgenerator_context_exposes_current_experience_spec_alias() -> None:
 
 def test_app_build_plan_tool_preserves_capability_packs_theme_preferences_and_brand_intent() -> None:
     module = _load_module(
-        "mozaiks-platform/app/workflows/AppGenerator/tools/app_build_plan.py",
+        "factory_app/app/workflows/AppGenerator/tools/app_build_plan.py",
         "tests.app_build_plan_tool_direct",
     )
     context = _Context()
@@ -148,8 +150,8 @@ def test_app_build_plan_tool_preserves_capability_packs_theme_preferences_and_br
                     "execution_target": "AppGenerator",
                     "initial_agent": "AppSchemaAgent",
                     "description": "Compile inbox page schema",
-                    "initial_message": "Compile the inbox page schema into app.json/pages/*.yaml.",
-                    "owned_paths": ["pages/inbox.yaml"],
+                    "initial_message": "Compile the inbox page schema into app.json/ui/pages/*.yaml.",
+                    "owned_paths": ["ui/pages/inbox.yaml"],
                     "depends_on": [],
                     "acceptance_criteria": ["Route exists"],
                 }
@@ -169,7 +171,7 @@ def test_app_build_plan_tool_preserves_capability_packs_theme_preferences_and_br
 
 def test_app_build_plan_tool_rejects_non_schema_page_bundles() -> None:
     module = _load_module(
-        "mozaiks-platform/app/workflows/AppGenerator/tools/app_build_plan.py",
+        "factory_app/app/workflows/AppGenerator/tools/app_build_plan.py",
         "tests.app_build_plan_tool_schema_guard",
     )
 
@@ -206,7 +208,7 @@ def test_app_build_plan_tool_rejects_non_schema_page_bundles() -> None:
                         "initial_agent": "AssemblyAgent",
                         "description": "Compile inbox page",
                         "initial_message": "Compile the inbox page schema",
-                        "owned_paths": ["pages/inbox.yaml"],
+                        "owned_paths": ["ui/pages/inbox.yaml"],
                         "depends_on": [],
                         "acceptance_criteria": ["Route exists"],
                     }
@@ -219,7 +221,7 @@ def test_app_build_plan_tool_rejects_non_schema_page_bundles() -> None:
 
 def test_app_build_plan_tool_rejects_raw_frontend_source_outputs() -> None:
     module = _load_module(
-        "mozaiks-platform/app/workflows/AppGenerator/tools/app_build_plan.py",
+        "factory_app/app/workflows/AppGenerator/tools/app_build_plan.py",
         "tests.app_build_plan_tool_frontend_source_guard",
     )
 
@@ -267,9 +269,135 @@ def test_app_build_plan_tool_rejects_raw_frontend_source_outputs() -> None:
         )
 
 
+def test_app_build_plan_tool_rejects_admin_config_with_wrong_owner() -> None:
+    module = _load_module(
+        "factory_app/app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_tool_admin_config_guard",
+    )
+
+    with pytest.raises(ValueError, match="admin_config must start at ConfigMiddlewareAgent"):
+        module.app_build_plan(
+            AppBuildPlan={
+                "agent_message": "Planned the product.",
+                "app_kind": "marketplace",
+                "pages": [{"name": "Home", "route": "/", "purpose": "Land on the product"}],
+                "entities": [],
+                "roles": ["admin"],
+                "auth_strategy": "role-based",
+                "backend_scope": ["host admin"],
+                "frontend_scope": ["home ui"],
+                "theme_preferences": None,
+                "brand_intent": None,
+                "capability_packs": [],
+                "external_integrations": [],
+                "agent_backend_required": False,
+                "build_tasks": [
+                    {
+                        "task_id": "task_admin_config",
+                        "task_type": "admin_config",
+                        "capability_pack_id": None,
+                        "execution_target": "AppGenerator",
+                        "initial_agent": "ControllerAgent",
+                        "description": "Generate host admin config.",
+                        "initial_message": "Generate app/config/admin.json",
+                        "owned_paths": ["app/config/admin.json"],
+                        "depends_on": [],
+                        "acceptance_criteria": ["Admin emails configured"],
+                    }
+                ],
+                "generation_order": ["admin"],
+            },
+            context_variables=_Context(),
+        )
+
+
+def test_app_build_plan_tool_rejects_host_admin_config_hidden_in_backend_foundation() -> None:
+    module = _load_module(
+        "factory_app/app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_tool_host_admin_path_guard",
+    )
+
+    with pytest.raises(ValueError, match="Host admin config must be generated through the explicit admin_config task"):
+        module.app_build_plan(
+            AppBuildPlan={
+                "agent_message": "Planned the product.",
+                "app_kind": "marketplace",
+                "pages": [{"name": "Home", "route": "/", "purpose": "Land on the product"}],
+                "entities": [],
+                "roles": ["admin"],
+                "auth_strategy": "role-based",
+                "backend_scope": ["host admin"],
+                "frontend_scope": ["home ui"],
+                "theme_preferences": None,
+                "brand_intent": None,
+                "capability_packs": [],
+                "external_integrations": [],
+                "agent_backend_required": False,
+                "build_tasks": [
+                    {
+                        "task_id": "task_backend_foundation",
+                        "task_type": "backend_foundation",
+                        "capability_pack_id": None,
+                        "execution_target": "AppGenerator",
+                        "initial_agent": "ConfigMiddlewareAgent",
+                        "description": "Generate backend glue.",
+                        "initial_message": "Generate backend glue.",
+                        "owned_paths": ["backend/config.py", "app/config/admin.json"],
+                        "depends_on": [],
+                        "acceptance_criteria": ["Config exists"],
+                    }
+                ],
+                "generation_order": ["backend-foundation"],
+            },
+            context_variables=_Context(),
+        )
+
+
+def test_app_build_plan_tool_rejects_split_admin_api_with_wrong_task_type() -> None:
+    module = _load_module(
+        "factory_app/app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_tool_split_admin_api_guard",
+    )
+
+    with pytest.raises(ValueError, match="Use the explicit api_surface task"):
+        module.app_build_plan(
+            AppBuildPlan={
+                "agent_message": "Planned the product.",
+                "app_kind": "marketplace",
+                "pages": [{"name": "Home", "route": "/", "purpose": "Land on the product"}],
+                "entities": [],
+                "roles": ["admin"],
+                "auth_strategy": "role-based",
+                "backend_scope": ["split app backend"],
+                "frontend_scope": ["home ui"],
+                "theme_preferences": None,
+                "brand_intent": None,
+                "capability_packs": [],
+                "external_integrations": [],
+                "agent_backend_required": False,
+                "build_tasks": [
+                    {
+                        "task_id": "task_split_admin",
+                        "task_type": "backend_foundation",
+                        "capability_pack_id": None,
+                        "execution_target": "AppGenerator",
+                        "initial_agent": "ControllerAgent",
+                        "description": "Generate split admin API.",
+                        "initial_message": "Generate split admin API.",
+                        "owned_paths": ["backend/admin_config.py", "backend/routes/admin.py"],
+                        "depends_on": [],
+                        "acceptance_criteria": ["Admin config route exists"],
+                    }
+                ],
+                "generation_order": ["backend-foundation"],
+            },
+            context_variables=_Context(),
+        )
+
+
 def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators() -> None:
     module = _load_module(
-        "mozaiks-platform/app/workflows/ValueEngine/tools/manifest.py",
+        "factory_app/app/workflows/ValueEngine/tools/manifest.py",
         "tests.valueengine_manifest_direct",
     )
     module._HAS_PERSISTENCE = False
@@ -324,7 +452,7 @@ def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators()
 
 def test_valueengine_save_build_plan_preserves_capability_packs_and_concept_blueprint() -> None:
     module = _load_module(
-        "mozaiks-platform/app/workflows/ValueEngine/tools/decompose.py",
+        "factory_app/app/workflows/ValueEngine/tools/decompose.py",
         "tests.valueengine_decompose_direct",
     )
     module._HAS_PERSISTENCE = False
@@ -383,3 +511,4 @@ def test_app_generation_strategy_docs_are_indexed_and_examples_are_grounded() ->
     assert "Phase 0: Strategy Alignment" in checklist_text
     assert "Decompose into product artifacts first" in decomposition_text
     assert "augmentation first" in existing_app_text
+

@@ -45,7 +45,7 @@ Ordered work items derived from [gap-analysis.md](gap-analysis.md). Grouped into
 |---|------|--------|------------|-------|
 | 3.1 | GitHub Actions CI pipeline (pytest + lint) | Not started | — | Basic PR checks |
 | 3.2 | E2E test suite | Not started | 3.1 | Boot server → API call → verify |
-| 3.3 | Startup validator (check Docker, env vars, ports) | Not started | — | Run on `python run_server.py`, print clear error if something's wrong |
+| 3.3 | Startup validator (check Docker, env vars, ports) | Not started | — | Run on `mozaiks serve .`, print clear error if something's wrong |
 | 3.4 | Error troubleshooting page in docs | Not started | 3.3 | Common errors and fixes |
 | 3.5 | Fly.io / VPS deployment tutorial (for user's own apps) | Not started | — | Beyond playground — how to deploy their project |
 | 3.6 | SSL/TLS and domain configuration guide | Not started | 3.5 | Caddy or Let's Encrypt |

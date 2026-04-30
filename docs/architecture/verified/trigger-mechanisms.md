@@ -69,11 +69,15 @@ function OrderHelpPage({ params }) {
 
 ## 3. CRUD Event Trigger (Backend)
 
-Trigger a workflow when something happens in your backend:
+Trigger a workflow when something happens in your backend by calling the
+runtime host's trigger endpoint. This is an HTTP call — there is no
+Python helper function; the trigger goes over the wire to the running server.
 
 ```python
 # your_backend/routes/orders.py
-from mozaiksai import trigger_workflow
+import httpx
+
+MOZAIKS_BASE_URL = "http://localhost:8000"
 
 @router.post("/orders")
 async def create_order(order: Order):
@@ -81,11 +85,14 @@ async def create_order(order: Order):
     saved = await db.orders.insert_one(order.dict())
 
     # Trigger CustomerSupport workflow for follow-up
-    await trigger_workflow(
-        workflow_name="CustomerSupport",
-        user_id=order.user_id,
-        context={"order_id": str(saved.inserted_id), "trigger": "new_order"}
-    )
+    async with httpx.AsyncClient() as client:
+        await client.post(
+            f"{MOZAIKS_BASE_URL}/api/workflows/CustomerSupport/trigger",
+            json={
+                "user_id": order.user_id,
+                "context": {"order_id": str(saved.inserted_id), "trigger": "new_order"},
+            },
+        )
 
     return saved
 ```
@@ -94,25 +101,7 @@ async def create_order(order: Order):
 
 ## 4. Webhook/External Trigger
 
-External systems (Stripe, Zapier, etc.) can call either the embedded runtime
-factory or the canonical repo hosts directly.
-
-Embedded runtime mode (`create_mozaiks_app()` mounted at `/ai`):
-
-```http
-POST /ai/workflows/CustomerSupport/trigger
-Content-Type: application/json
-
-{
-  "user_id": "user_123",
-  "context": {
-    "order_id": "order_456",
-    "issue": "payment_failed"
-  }
-}
-```
-
-Canonical repo host mode (`runtime_app.py`, `platform_app.py`, `studio_app.py`, or `mozaiks_app.py`):
+External systems (Stripe, Zapier, etc.) can call the canonical host directly:
 
 ```http
 POST /api/workflows/CustomerSupport/trigger
@@ -126,6 +115,9 @@ Content-Type: application/json
   }
 }
 ```
+
+This endpoint is available on `mozaiksai.hosts.runtime` and all hosts that
+layer on top of it (`platform`, `studio`, `mozaiks`).
 
 ---
 
@@ -160,30 +152,16 @@ const { startWorkflow } = useMozaiks();
 startWorkflow(workflowName: string, options?: { context?: object })
 ```
 
-### Backend (`mozaiksai`)
-
-```python
-from mozaiksai import trigger_workflow
-
-# trigger_workflow signature:
-await trigger_workflow(workflow_name, user_id, context={})
-```
-
-`create_mozaiks_app()` is the runtime-only convenience factory for external
-embedding. It is not required when you run the canonical repo hosts directly.
-
 ### REST Endpoints
 
 ```
-Embedded runtime factory:
-POST /workflows/{name}/trigger
-GET /workflows
-
-Canonical repo hosts:
 POST /api/workflows/{name}/trigger
-GET /api/workflows
+     → Trigger a workflow from a backend or external system
 
-GET /api/workflows/{name}/runs?user_id=xxx
+GET  /api/workflows
+     → List available workflows
+
+GET  /api/workflows/{name}/runs?user_id=xxx
      → Get user's conversation history
 ```
 
@@ -195,5 +173,5 @@ GET /api/workflows/{name}/runs?user_id=xxx
 |---------|-----|
 | Button | `startWorkflow('CustomerSupport', {context})` |
 | Route/Embed | `<WorkflowChat workflow="CustomerSupport" />` |
-| Backend | `await trigger_workflow('CustomerSupport', ...)` |
+| Backend | `POST /api/workflows/CustomerSupport/trigger` |
 | External | `POST /api/workflows/CustomerSupport/trigger` |

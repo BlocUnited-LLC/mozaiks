@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
-import platform_app
+from mozaiksai.hosts import platform as platform_app
 from mozaiksai.core.auth.dependencies import UserPrincipal
 
 
@@ -32,6 +32,28 @@ def test_resolve_scope_from_principal_accepts_dev_body_scope() -> None:
         principal,
         app_id="demo-app",
         user_id="demo-user",
+    )
+
+    assert app_id == "demo-app"
+    assert user_id == "demo-user"
+
+
+def test_resolve_scope_from_principal_uses_default_user_for_anonymous_scope() -> None:
+    principal = UserPrincipal(
+        user_id="anonymous",
+        email=None,
+        name="Anonymous User",
+        roles=[],
+        scopes=["access_as_user"],
+        raw_claims={},
+        provider="none",
+        app_id=None,
+    )
+
+    app_id, user_id = platform_app.resolve_scope_from_principal(
+        principal,
+        app_id="demo-app",
+        default_user_id="demo-user",
     )
 
     assert app_id == "demo-app"

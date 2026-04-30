@@ -25,11 +25,35 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 DEFAULT_WORKFLOWS_ROOT = REPO_ROOT / "platform" / "workflows"
-PLATFORM_WORKFLOWS_ROOT = REPO_ROOT / "mozaiks-platform" / "app" / "workflows"
-DEFAULT_ACTIVE_WORKFLOWS_ROOT = (
-    PLATFORM_WORKFLOWS_ROOT if PLATFORM_WORKFLOWS_ROOT.exists() else DEFAULT_WORKFLOWS_ROOT
-)
-DEFAULT_ACTIVE_WORKFLOW = "RuntimeSmoke" if PLATFORM_WORKFLOWS_ROOT.exists() else "JokeWorker"
+_app_workspace = os.environ.get("MOZAIKS_APP_WORKSPACE_PATH", "")
+APP_ZERO_WORKFLOWS_ROOT = (Path(_app_workspace) / "app" / "workflows") if _app_workspace else Path("/dev/null")
+DEFAULT_ACTIVE_WORKFLOW = "RuntimeSmoke"
+
+
+def _has_workflow_definitions(workflows_root: Path) -> bool:
+    if not workflows_root.exists():
+        return False
+    for child in workflows_root.iterdir():
+        if not child.is_dir() or child.name == "extended_orchestration":
+            continue
+        if (child / "orchestrator.yaml").exists():
+            return True
+    return False
+
+
+def _resolve_default_workflows_root() -> Path:
+    override = str(os.getenv("MOZAIKS_WORKFLOWS_PATH") or "").strip()
+    if override:
+        candidate = Path(override)
+        if not candidate.is_absolute():
+            candidate = (REPO_ROOT / candidate).resolve()
+        return candidate
+    if _has_workflow_definitions(APP_ZERO_WORKFLOWS_ROOT):
+        return APP_ZERO_WORKFLOWS_ROOT
+    return DEFAULT_WORKFLOWS_ROOT
+
+
+DEFAULT_ACTIVE_WORKFLOWS_ROOT = _resolve_default_workflows_root()
 
 
 def _json_safe(value: Any) -> Any:

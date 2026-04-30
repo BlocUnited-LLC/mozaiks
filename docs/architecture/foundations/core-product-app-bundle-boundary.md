@@ -25,7 +25,7 @@ concerns, not bespoke application logic.
 
 Current implementation zone:
 
-- `platform_app.py` and app bundle modules in this repo
+- `mozaiksai/hosts/platform.py` and app bundle modules in this repo
 - optional external/generated app backends connected through `AppBackendPort`
 
 Current framework contract in this repo:

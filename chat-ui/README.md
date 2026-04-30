@@ -57,7 +57,7 @@ import path from 'path';
 export default defineConfig({
   resolve: {
     alias: {
-      '@chat-workflows-root': path.resolve(__dirname, '../platform/workflows'),
+      '@chat-workflows-root': path.resolve(__dirname, '../factory_app/app/workflows'),
     },
   },
 });
@@ -136,3 +136,4 @@ Starts a lightweight app with mock auth/API adapters for testing without a full 
 ## Frontend Build Guide
 
 See `/docs/guides/CREATE_FRONTEND_WITH_MOZAIKS.md` for step-by-step frontend setup and declarative `brand.json` customization.
+

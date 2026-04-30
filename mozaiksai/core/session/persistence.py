@@ -9,6 +9,11 @@ from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceMa
 from .model import SessionLifecycle, SessionState
 
 
+_LEGACY_LIFECYCLE_ALIASES = {
+    "refining": SessionLifecycle.ACTIVE,
+}
+
+
 def _coerce_datetime(value: Any, *, fallback: datetime) -> datetime:
     if isinstance(value, datetime):
         return value
@@ -63,7 +68,7 @@ class SessionStateStore:
         try:
             lifecycle_state = SessionLifecycle(raw_lifecycle)
         except Exception:
-            lifecycle_state = SessionLifecycle.INITIAL
+            lifecycle_state = _LEGACY_LIFECYCLE_ALIASES.get(raw_lifecycle, SessionLifecycle.INITIAL)
 
         return SessionState(
             session_id=session_id,

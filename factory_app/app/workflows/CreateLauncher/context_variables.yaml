@@ -1,0 +1,15 @@
+definitions:
+
+  create_launch_result:
+    type: object
+    description: >
+      Result payload from the workflow-local shared create launcher tool.
+      Includes the launched workflow id, chat id, websocket URL, and routing metadata.
+    source:
+      type: state
+      default: null
+
+agents:
+  CreateLaunchAgent:
+    variables:
+      - create_launch_result

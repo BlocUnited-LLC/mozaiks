@@ -98,6 +98,10 @@ def resolve_field_type(field_def: Dict[str, Any], available_models: Dict[str, ty
         field_kwargs['description'] = field_def['description']
     if 'default' in field_def:
         field_kwargs['default'] = field_def['default']
+    if field_type_str == 'optional_dict':
+        if 'default' not in field_kwargs:
+            field_kwargs['default'] = None
+        return Optional[Dict[str, Any]], Field(**field_kwargs)  # type: ignore[return-value]
     # Primitive
     if field_type_str in {'list', 'optional_list'}:
         items_type = field_def.get('items')

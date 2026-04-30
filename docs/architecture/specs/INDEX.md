@@ -11,18 +11,19 @@
 The current canonical architecture is the layered host model documented in
 [`../../../ARCHITECTURE.md`](../../../ARCHITECTURE.md):
 
-- `runtime_app.py` — runtime substrate
-- `platform_app.py` — headless app host
-- `studio_app.py` — local/private builder host
-- `mozaiks_app.py` — hosted Mozaiks product host
-- `platform/` — default OSS/sample active app root
-- `mozaiks-platform/app/` — active App Zero app root
+- `mozaiksai/hosts/runtime.py` — runtime substrate
+- `mozaiksai/hosts/platform.py` — headless app host
+- `mozaiksai/hosts/studio.py` — local/private builder host
+- `mozaiksai/hosts/mozaiks.py` — hosted Mozaiks product host
+- current repo layout includes transitional roots such as `platform/` and
+  `mozaiks-platform/app/`
 
 The package-splitting documents are retained as future packaging proposals, not
 as the current source of truth.
 
 **Start here:**
 - [../../../ARCHITECTURE.md](../../../ARCHITECTURE.md) - canonical architecture
+- [../foundations/distribution-and-workspace-model.md](../foundations/distribution-and-workspace-model.md) - canonical target distribution and workspace model
 - [../foundations/canonical-app-structure.md](../foundations/canonical-app-structure.md) - active app root and product workspace layout
 - [agentic-app-generation-strategy.md](./agentic-app-generation-strategy.md) - app-generation architecture
 - [appgenerator-output-assembly-contract.md](./appgenerator-output-assembly-contract.md) - AppGenerator bundle output contract
@@ -82,6 +83,7 @@ use different naming conventions for the same packages:
 | **Understand workflow routing transitions (between-workflow routing)** | [workflow-routing-gates.md](./workflow-routing-gates.md) ⭐⭐ |
 | **Understand the App UI system (primitives, pages, schemas)** | [UI_SYSTEM_SPEC.md](./UI_SYSTEM_SPEC.md) ⭐ |
 | **Understand the canonical app-generation model** | [agentic-app-generation-strategy.md](./agentic-app-generation-strategy.md) ⭐⭐⭐ |
+| **Understand the canonical distribution/workspace model** | [../foundations/distribution-and-workspace-model.md](../foundations/distribution-and-workspace-model.md) ⭐⭐⭐ |
 | **Track the app-generation implementation plan** | [agentic-app-generation-checklist.md](./agentic-app-generation-checklist.md) ⭐⭐⭐ |
 | **Define the onboarding wizard and Studio product flow** | [onboarding-and-studio-product-spec.md](./onboarding-and-studio-product-spec.md) ⭐⭐⭐ |
 | **Understand how AppGenerator assembles app bundles** | [appgenerator-output-assembly-contract.md](./appgenerator-output-assembly-contract.md) ⭐⭐ |
@@ -160,7 +162,7 @@ Comprehensive prompt for coding agents to begin implementation:
 
 Comprehensive implementation checklist for the modular architecture:
 
-- **What exists in mozaiks today:** mozaiksai/, chat-ui/, mozaiks_cli/, platform/workflows/
+- **What exists in mozaiks today:** mozaiksai/, chat-ui/, mozaiks_cli/, factory_app/app/workflows/
 - **What needs to be created:** packages/core/, packages/modules/, packages/runtime/
 - **Implementation order:** 6 phases (core → ai → modules → runtime → ui → cli)
 - **Key files to create:** Priority-ordered file lists for each package
@@ -506,10 +508,10 @@ Built-in admin dashboard specification:
 
 ```
 CURRENT STATE:
-├── runtime_app.py              # runtime substrate
-├── platform_app.py             # headless app host
-├── studio_app.py               # local/private builder host
-├── mozaiks_app.py              # hosted product host
+├── mozaiksai/hosts/runtime.py              # runtime substrate
+├── mozaiksai/hosts/platform.py             # headless app host
+├── mozaiksai/hosts/studio.py               # local/private builder host
+├── mozaiksai/hosts/mozaiks.py              # hosted product host
 ├── platform/                   # default OSS/sample active app root
 └── mozaiks-platform/
     └── app/                    # active App Zero app root

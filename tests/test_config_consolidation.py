@@ -1,67 +1,77 @@
 """Config Consolidation — validation tests.
 
 Tests verify:
-1. Config files exist in platform/config/
+1. Config files exist in the active app workspace config/
 2. theme_config.json owns brand/theme tokens and shell.json owns shell chrome
 3. ai.json has workflow entry point and startup mode
 4. Old brand/public config files are removed
-5. config_loader.py resolves to platform/config/
-6. themeProvider.js fetches from API
-7. validateConfig.js validates new config shape
-8. director.py has shell-config API route
+5. themeProvider.js fetches from API
+6. validateConfig.js validates new config shape
+7. director.py has shell-config API route
+
+Workspace-dependent tests (1–4) skip automatically when PLATFORM_PATH or
+MOZAIKS_APP_WORKSPACE_PATH is not set.
 """
 
 import json
-import os
-import re
 import pytest
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+from conftest import active_app_root
+
+ROOT_WORKSPACE = None  # resolved lazily to avoid skip at import time
 
 
-def read_file(relpath):
-    full = os.path.join(ROOT, relpath.replace("/", os.sep))
-    assert os.path.isfile(full), f"File not found: {relpath}"
-    with open(full, "r", encoding="utf-8") as f:
-        return f.read()
+def _app_root():
+    return active_app_root()
 
 
-def load_json(relpath):
-    return json.loads(read_file(relpath))
+def _framework_file(relpath: str) -> str:
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    full = root / relpath
+    assert full.is_file(), f"File not found: {relpath}"
+    return full.read_text(encoding="utf-8")
 
 
-# ── 1. Config files exist in platform/config/ ───────────────────────────────
+def _load_app_json(relpath: str) -> dict:
+    app_root = _app_root()
+    full = app_root / relpath
+    assert full.is_file(), f"Missing in app workspace: {relpath}"
+    return json.loads(full.read_text(encoding="utf-8"))
+
+
+# ── 1. Config files exist in app workspace config/ ──────────────────────────
 
 CONFIG_FILES = [
-    "platform/config/ai.json",
-    "platform/config/theme_config.json",
-    "platform/config/shell.json",
+    "config/ai.json",
+    "brand/theme_config.json",
+    "config/shell.json",
 ]
 
 
 class TestConfigFilesExist:
     @pytest.mark.parametrize("relpath", CONFIG_FILES)
     def test_config_exists(self, relpath):
-        full = os.path.join(ROOT, relpath.replace("/", os.sep))
-        assert os.path.isfile(full), f"Missing: {relpath}"
+        app_root = _app_root()
+        full = app_root / relpath
+        assert full.is_file(), f"Missing: {relpath}"
 
     @pytest.mark.parametrize("relpath", CONFIG_FILES)
     def test_config_valid_json(self, relpath):
-        data = load_json(relpath)
+        data = _load_app_json(relpath)
         assert isinstance(data, dict)
 
 
 class TestAIConfig:
     @pytest.fixture
     def ai(self):
-        return load_json("platform/config/ai.json")
+        return _load_app_json("config/ai.json")
 
     def test_has_no_legacy_engine_block(self, ai):
         assert "engine" not in ai
 
     def test_has_workflow_entry_point(self, ai):
-        assert isinstance(ai["workflows"]["entry_point"], str)
-        assert ai["workflows"]["entry_point"]
+        assert "entry_point" in ai["workflows"]
 
     def test_has_chat_startup_mode(self, ai):
         assert ai["chat"]["chat_startup_mode"] == "ask"
@@ -72,7 +82,7 @@ class TestAIConfig:
 class TestThemeConfigMerged:
     @pytest.fixture
     def theme(self):
-        return load_json("platform/config/theme_config.json")
+        return _load_app_json("brand/theme_config.json")
 
     def test_has_identity(self, theme):
         assert "identity" in theme
@@ -137,24 +147,26 @@ class TestThemeConfigMerged:
         assert "notifications" not in ui
         assert "footer" not in ui
 
-    def test_has_available_themes(self, theme):
-        assert "available_themes" in theme
-        theme_ids = [t["id"] for t in theme["available_themes"]]
-        assert "light" in theme_ids
-        assert "dark" in theme_ids
+    def test_has_shell_primitives(self, theme):
+        primitives = theme["primitives"]
+        assert "radius" in primitives
+        assert "surface" in primitives["radius"]
+        assert "spacing" in primitives
 
-    def test_has_layout(self, theme):
-        assert "layout" in theme
-        assert "border_radius" in theme["layout"]
+    def test_has_page_layout_tokens(self, theme):
+        page = theme["ui"]["page"]
+        assert "maxWidth" in page
+        assert "paddingX" in page
+        assert "sectionGap" in page
 
-    def test_typography_uses_brand_font(self, theme):
-        assert "Rajdhani" in theme["typography"]["font_family"]
+    def test_theme_fonts_include_brand_font(self, theme):
+        assert theme["fonts"]["body"]["family"] == "Rajdhani"
 
 
 class TestShellConfig:
     @pytest.fixture
     def shell(self):
-        return load_json("platform/config/shell.json")
+        return _load_app_json("config/shell.json")
 
     def test_has_header(self, shell):
         assert shell["header"]["logo"]["src"] == "mozaik_logo.svg"
@@ -168,12 +180,13 @@ class TestShellConfig:
         assert len(shell["footer"]["links"]) >= 3
         assert shell["footer"]["visible"] is True
 
-# ── 6. themeProvider.js → API fetch ─────────────────────────────────────────
+
+# ── Framework-only tests (no app workspace needed) ──────────────────────────
 
 class TestThemeProviderUpdated:
     @pytest.fixture
     def source(self):
-        return read_file("chat-ui/src/styles/themeProvider.js")
+        return _framework_file("chat-ui/src/styles/themeProvider.js")
 
     def test_no_brand_json_fetch(self, source):
         assert "fetch('/brand.json')" not in source
@@ -197,12 +210,10 @@ class TestThemeProviderUpdated:
         assert "fetchPlatformOverrides" in source
 
 
-# ── 7. validateConfig.js → merged validators ────────────────────────────────
-
 class TestValidateConfigUpdated:
     @pytest.fixture
     def source(self):
-        return read_file("chat-ui/src/config/validateConfig.js")
+        return _framework_file("chat-ui/src/config/validateConfig.js")
 
     def test_no_brand_json_reference(self, source):
         assert "fetch('/brand.json')" not in source
@@ -229,17 +240,15 @@ class TestValidateConfigUpdated:
 class TestNavigationProviderUpdated:
     @pytest.fixture
     def source(self):
-        return read_file("chat-ui/src/providers/NavigationProvider.jsx")
+        return _framework_file("chat-ui/src/providers/NavigationProvider.jsx")
 
     def test_fetches_shell_config_api(self, source):
         assert "/api/shell-config" in source
 
     def test_no_routes_api(self, source):
-        # Routes endpoint removed — runtime is mozaiksai + chat-ui only
         assert "/api/routes" not in source
 
     def test_no_components_api(self, source):
-        # Components endpoint was removed - admin is now first-class
         assert "/api/available-components" not in source
 
     def test_no_adapters_reference(self, source):

@@ -1,0 +1,10 @@
+workflow_name: AppGenerator
+max_turns: 25
+human_in_the_loop: true
+workflow_startup_mode: AgentDriven
+orchestration_pattern: DefaultPattern
+initial_message_to_user: null
+initial_message: 'InterviewAgent: Greet the user, clarify the non-AI app scope,
+  and gather any missing CRUD/page/auth/integration requirements before code generation
+  begins.'
+initial_agent: InterviewAgent

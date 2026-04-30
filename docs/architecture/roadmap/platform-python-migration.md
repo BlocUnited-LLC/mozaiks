@@ -3,7 +3,7 @@
 **Status:** Historical / superseded.
 
 The current canonical architecture lives in `ARCHITECTURE.md`. The hosted
-product is now modeled as `mozaiks_app.py` on top of `platform_app.py`, with App
+product is now modeled as `mozaiksai/hosts/mozaiks.py` on top of `mozaiksai/hosts/platform.py`, with App
 Zero's active app root at `mozaiks-platform/app/`. This document is retained as
 legacy planning context only.
 

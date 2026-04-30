@@ -1,6 +1,7 @@
 # Architecture Overview
 
-This is the authoritative architecture reference for Mozaiks. **For the detailed implementation view, see [/ARCHITECTURE.md](../../../ARCHITECTURE.md) in the repo root.**
+This is the authoritative architecture reference for Mozaiks. For the detailed
+implementation view, see the repo-root `ARCHITECTURE.md`.
 
 ## The Model
 
@@ -35,7 +36,7 @@ This includes:
 - admin APIs
 - page backing logic
 
-This behavior is hosted by `platform_app.py` modules by default. Apps may also
+This behavior is hosted by `mozaiksai/hosts/platform.py` modules by default. Apps may also
 choose an external/generated backend that connects through the runtime adapter
 boundary.
 
@@ -76,7 +77,8 @@ The key contract is:
 
 The key workflow trigger declarations live in:
 
-- `platform/workflows/{workflow}/orchestrator.yaml`
+- `app/workflows/{workflow}/orchestrator.yaml` for app-owned workflows
+- the shared generation-core workflow root for builder/system workflows
 
 ## The Surface Model
 
@@ -111,24 +113,34 @@ They are useful, but they should not be the first mental model for app authors.
 
 ## Current Repo Shape
 
-The current repo already reflects most of this:
+The current repo still carries a bundled starter workspace, but the app-root
+contracts are now aligned.
 
-- `platform/pages/*`
-- `platform/workflows/*`
-- `platform/modules/*`
+Today it contains:
 
-The remaining cleanup is mostly about simplifying authoring and defaults, not inventing more architecture.
+- `mozaiks-platform/app/*` — current App Zero app root
+- `generated/*` and `mozaiks-platform/app-builder/*` — staged generated output
+  plus product-owned planning assets
+- `chat-ui/` and `web_shell/` — shared shell source plus local shell host
+
+The canonical target is:
+
+- shared generation core outside app workspaces
+- self-contained app workspaces with `app/config`, `app/ui/pages`,
+  `app/workflows`, `app/modules`, `app/ui`, and `app/brand`
+- App Zero converging on that same workspace contract
 
 ## What App Authors Should Think About
 
 For most apps, the authoring model should be:
 
-1. `platform/app.json`
-2. `platform/pages/*`
-3. `platform/workflows/*`
-4. `platform/modules/*`
+1. `app/app.json`
+2. `app/ui/pages/*`
+3. `app/workflows/*`
+4. `app/modules/*`
 
-`platform/modules/*` should be treated as a support layer for shared handlers or page backing logic, not as the first thing users think about.
+`app/modules/*` should be treated as a support layer for shared handlers or
+page backing logic, not as the first thing users think about.
 
 ## Practical Rule Set
 
@@ -171,21 +183,25 @@ That is the clearest proof of Mozaiks value.
 
 Read these first:
 
-1. [Canonical App Structure](canonical-app-structure.md)
-2. [Platform Authoring](platform-authoring.md)
-3. [Surface Model](surface-model.md)
-4. [Event System](event-system.md)
-5. [Workflow Architecture](workflow-architecture.md)
+1. [Distribution And Workspace Model](distribution-and-workspace-model.md)
+2. [Canonical App Structure](canonical-app-structure.md)
+3. [Platform Authoring](platform-authoring.md)
+4. [Surface Model](surface-model.md)
+5. [Event System](event-system.md)
+6. [Workflow Architecture](workflow-architecture.md)
 
 Then read:
 
 1. [Core, Product, and App Bundle Boundary](core-product-app-bundle-boundary.md)
 2. [Workflow Authoring Contracts](workflow-authoring-contracts.md)
-3. [Flagship Use Case](../../../platform/FLAGSHIP_USE_CASE.md)
+3. App Zero under `mozaiks-platform/app/` when you need the repo-local product
+   app bundle
 
 ## Builder Product Note
 
-Builder-product workflow internals live in `mozaiks-platform/app/workflows/`
-because App Zero is itself a Mozaiks app. They are product-specific builder
-workflows, not part of the generic app-bundle contract every generated app must
-understand.
+Shared generation-core workflows live in `factory_app/app/workflows/`. App Zero keeps only its product overlay under
+`mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`. Generated apps should
+understand the shared workflow contract, not an App Zero-specific workflow
+directory layout.
+
+

@@ -43,7 +43,7 @@ def _load_update_agent_state_pattern_module():
     workspace = Path(__file__).resolve().parents[1]
     file_path = (
         workspace
-        / "mozaiks-platform"
+        / "factory_app"
         / "app"
         / "workflows"
         / "AgentGenerator"
@@ -137,7 +137,7 @@ def test_ui_file_generator_prompt_uses_runtime_helper_contract() -> None:
     workspace = Path(__file__).resolve().parents[1]
     agents_yaml = (
         workspace
-        / "mozaiks-platform"
+        / "factory_app"
         / "app"
         / "workflows"
         / "AgentGenerator"

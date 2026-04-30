@@ -94,7 +94,7 @@ async def create_item(request: CreateItemRequest):
 ### 5. Restart the backend
 
 ```bash
-python run_server.py
+mozaiks serve .
 ```
 
 Capabilities are loaded at startup. No registration step needed.

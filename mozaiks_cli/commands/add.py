@@ -5,6 +5,8 @@ mozaiks add - Add feature to existing project.
 import json
 from pathlib import Path
 
+from mozaiks_cli.workspace import resolve_active_app_root
+
 # Tier definitions
 TIER_PRESETS = {
     "engine": {
@@ -44,10 +46,12 @@ TIER_PRESETS = {
 
 def run(args):
     """Execute the add command."""
-    app_json_path = Path("platform") / "app.json"
+    app_root = resolve_active_app_root(Path(".").resolve())
+    app_root_label = app_root.name if app_root.name in {"app", "platform"} else "."
+    app_json_path = app_root / "app.json"
 
     if not app_json_path.exists():
-        print("Error: No platform/app.json found.")
+        print(f"Error: No {app_root_label}/app.json found.")
         print("Run 'mozaiks init <preset>' to create a new project first.")
         return
 
@@ -55,7 +59,7 @@ def run(args):
         with open(app_json_path, "r", encoding="utf-8") as f:
             app_config = json.load(f)
     except Exception as e:
-        print(f"Error reading platform/app.json: {e}")
+        print(f"Error reading {app_json_path}: {e}")
         return
 
     # Upgrade to preset
@@ -85,21 +89,21 @@ def run(args):
         with open(app_json_path, "w", encoding="utf-8") as f:
             json.dump(app_config, f, indent=2, ensure_ascii=False)
             f.write("\n")
-        print(f"\nUpdated platform/app.json")
+        print(f"\nUpdated {app_json_path}")
     except Exception as e:
-        print(f"Error writing platform/app.json: {e}")
+        print(f"Error writing {app_json_path}: {e}")
         return
 
     # Show next steps
-    _show_next_steps(args.preset or feature)
+    _show_next_steps(args.preset or feature, app_root_label)
 
 
-def _show_next_steps(feature_or_preset):
+def _show_next_steps(feature_or_preset, app_root_label: str):
     """Show next steps after adding a feature."""
     print("\nNext Steps:")
 
     if feature_or_preset == "modules" or feature_or_preset in ["integrated", "full"]:
-        print("  - Create modules in platform/modules/<name>/")
+        print(f"  - Create modules in {app_root_label}/modules/<name>/")
         print("  - Each module needs: module.yaml, events.yaml, settings.yaml, notifications.yaml, subscriptions.yaml, admin.yaml, backend/handler.py")
 
     if feature_or_preset == "event_bus" or feature_or_preset in ["integrated", "full"]:
@@ -108,14 +112,14 @@ def _show_next_steps(feature_or_preset):
 
     if feature_or_preset == "auth" or feature_or_preset in ["integrated", "full"]:
         print("  - Configure Keycloak in .env (KEYCLOAK_* variables)")
-        print("  - Update authRequired in platform/app.json")
+        print(f"  - Update authRequired in {app_root_label}/app.json")
 
     if feature_or_preset == "admin" or feature_or_preset == "full":
         print("  - Access admin portal at /admin (requires auth)")
-        print("  - Configure platform/config/admin.json and app.json admins")
+        print(f"  - Configure {app_root_label}/config/admin.json and {app_root_label}/app.json admins")
 
     if feature_or_preset == "chat_ui" or feature_or_preset in ["chat", "integrated", "full"]:
         print("  - Chat UI will be available at root path")
-        print("  - Configure branding in brand/ and shell behavior in platform/config/shell.json")
+        print(f"  - Configure branding in {app_root_label}/brand/ and shell behavior in {app_root_label}/config/shell.json")
 
     print("\nRestart the relevant host layer to apply changes (run_runtime.py, run_platform.py, run_studio.py, or run_mozaiks.py).")

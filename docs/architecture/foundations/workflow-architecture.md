@@ -86,8 +86,25 @@ If something is mostly optional operator tooling, make it an adapter.
 
 Workflow files live under:
 
-- `platform/workflows/*` — product and showcase workflows
-- `mozaiks-platform/app/workflows/*` — platform-builder workflows (AgentGenerator etc.)
+- `app/workflows/*` — workflows owned by one app workspace
+- shared factory workflows — owned by the builder system, not by individual app workspaces
+- `mozaiks-platform/app/workflows/*` — current App Zero product-owned workflow implementations during transition
+- `factory_app/app/workflows/extended_orchestration/` — shared build launcher, journeys, and transition UI
+- `mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json` — App Zero product overlay on top of that shared routing layer
+
+Workflow resolution is multi-root:
+
+- the active app root's `workflows/` directory is searched first
+- the shared generation-core workflow root is searched second
+- `MOZAIKS_WORKFLOW_ROOTS` may override that order explicitly
+
+This lets App Zero keep product workflows locally while still consuming shared
+factory workflows through the same runtime and launcher graph.
+
+That is the current composition contract between `mozaiks-platform` and
+`factory_app`: App Zero owns its product workflows and overlay registry, while
+`factory_app/app/workflows/` remains the shared builder layer loaded alongside
+the active app root.
 
 Builder workflows may generate new workflow bundles, but generated output is
 staged under `MOZAIKS_GENERATED_ARTIFACTS_PATH` and is not runtime-loaded until
