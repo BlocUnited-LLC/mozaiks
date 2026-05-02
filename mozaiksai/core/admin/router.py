@@ -22,7 +22,10 @@ from mozaiksai.core.admin.contract import (
     normalize_host_admin_sections,
 )
 from mozaiksai.core.auth.dependencies import require_user, UserPrincipal
-from mozaiksai.core.admin.paths import resolve_admin_config_path, resolve_platform_root
+from mozaiksai.core.admin.paths import (
+    resolve_admin_app_root as resolve_admin_app_root_path,
+    resolve_admin_config_path,
+)
 from mozaiksai.core.auth.adapters.registry import is_auth_enabled
 from mozaiksai.core.admin.email_promotion import is_admin_by_email
 from mozaiksai.core.observability.performance_manager import get_performance_manager
@@ -179,17 +182,17 @@ async def get_admin_config(
 ):
     """Return the active admin config, including feature admin panel manifests."""
     config_path = _resolve_admin_config_path()
-    platform_root = _resolve_platform_root()
+    app_root = _resolve_admin_app_root()
     if not config_path.exists():
-        return _merge_module_admin_panels(deepcopy(DEFAULT_ADMIN_CONFIG), platform_root)
+        return _merge_module_admin_panels(deepcopy(DEFAULT_ADMIN_CONFIG), app_root)
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
         if not isinstance(config, dict):
             config = deepcopy(DEFAULT_ADMIN_CONFIG)
-        return _merge_module_admin_panels(config, platform_root)
+        return _merge_module_admin_panels(config, app_root)
     except Exception as e:
         logger.warning(f"[admin] failed to read admin.json: {e}")
-        return _merge_module_admin_panels(deepcopy(DEFAULT_ADMIN_CONFIG), platform_root)
+        return _merge_module_admin_panels(deepcopy(DEFAULT_ADMIN_CONFIG), app_root)
 
 
 # ---------------------------------------------------------------------------
@@ -207,21 +210,21 @@ async def get_admin_health(
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_platform_root() -> Path:
-    """Find the active platform root without importing the platform host."""
-    return resolve_platform_root()
+def _resolve_admin_app_root() -> Path:
+    """Find the active app root without importing the platform host."""
+    return resolve_admin_app_root_path()
 
 
 def _resolve_admin_config_path() -> Path:
-    """Find admin.json relative to the active platform root."""
+    """Find admin.json relative to the active app root."""
     return resolve_admin_config_path()
 
 
-def _load_module_admin_panels(platform_root: Path) -> list[dict]:
+def _load_module_admin_panels(app_root: Path) -> list[dict]:
     """Load feature-owned admin panels declared by modules/{module}/admin.yaml."""
     from mozaiksai.core.runtime.app.module_loader import ModuleAdminManifest
 
-    modules_dir = platform_root / "modules"
+    modules_dir = app_root / "modules"
     if not modules_dir.is_dir():
         return []
 
@@ -346,9 +349,9 @@ def _normalize_host_admin_config(config: dict) -> dict:
     return normalized
 
 
-def _merge_module_admin_panels(config: dict, platform_root: Path) -> dict:
+def _merge_module_admin_panels(config: dict, app_root: Path) -> dict:
     config = _normalize_host_admin_config(config)
-    module_panels = _load_module_admin_panels(platform_root)
+    module_panels = _load_module_admin_panels(app_root)
     if not module_panels:
         return config
 

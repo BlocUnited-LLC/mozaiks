@@ -28,8 +28,7 @@ export class DynamicUIHandler {
    */
   setupDefaultHandlers() {
     // Register only canonical lowercase event types
-    this.registerHandler('ui_tool_event', this.handleUIToolEvent.bind(this));
-    this.registerHandler('user_input_request', this.handleUserInputRequest.bind(this));
+    this.registerHandler('tool_call', this.handleToolCall.bind(this));
     this.registerHandler('component_update', this.handleComponentUpdate.bind(this));
     this.registerHandler('status', this.handleStatusUpdate.bind(this));
 
@@ -116,7 +115,7 @@ export class DynamicUIHandler {
     }
 
     try {
-      if (type === 'ui_tool_event') {
+      if (type === 'tool_call') {
         await handler(data, sendResponse);
       } else {
         await handler(data, eventData);
@@ -183,11 +182,11 @@ export class DynamicUIHandler {
    */
   notifyUIUpdate(updateData) {
     console.log('📢 Notifying UI update:', updateData);
-    if (updateData?.type === 'ui_tool_event') {
-      const { ui_tool_id, eventId, workflow_name, payload } = updateData;
-      console.log('🧭 ui_tool_event routed to UI callbacks', {
-        ui_tool_id,
-        eventId,
+    if (updateData?.type === 'tool_call') {
+      const { tool_name, tool_call_id, workflow_name, payload } = updateData;
+      console.log('🧭 tool_call routed to UI callbacks', {
+        tool_name,
+        tool_call_id,
         workflow_name,
         hasOnResponse: !!updateData.onResponse,
         payloadKeys: payload ? Object.keys(payload) : []
@@ -292,27 +291,35 @@ export class DynamicUIHandler {
   }
 
   /**
-   * Handle UI tool action events - SIMPLIFIED (removed duplication)
+   * Handle workflow UI tool_call events
    * @param {Object} eventData - Event data from backend  
    * @param {Function} responseCallback - Callback to send response to backend
    */
-  async handleUIToolEvent(eventData, responseCallback) {
+  async handleToolCall(eventData, responseCallback) {
     try {
-      console.log('🎯 DynamicUIHandler: Processing UI tool event', eventData);
+      console.log('🎯 DynamicUIHandler: Processing tool_call', eventData);
       console.log('🎯 DynamicUIHandler: responseCallback type:', typeof responseCallback);
 
-      const { ui_tool_id, payload, eventId, workflow_name } = eventData;
+      const {
+        tool_name,
+        payload = {},
+        tool_call_id,
+        workflow_name,
+        component_type,
+      } = eventData;
+      const toolName = tool_name || payload.tool_name || component_type;
+      const toolCallId = tool_call_id || payload.tool_call_id || eventData?.corr || null;
       const agentName = eventData?.agentName || eventData?.agent_name || eventData.agent_name || eventData.agent || null;
       // Logging: record how agent attribution was resolved for auditing/debugging
       try {
-        const logger = createToolsLogger({ tool: ui_tool_id, eventId, workflowName: workflow_name, agentMessageId: payload?.agent_message_id });
+        const logger = createToolsLogger({ tool: toolName, toolCallId, workflowName: workflow_name, agentMessageId: payload?.agent_message_id });
         const provided = {
           top_level_agent: eventData.agentName || eventData.agent_name || eventData.agent || null,
           payload_agent: payload?.agentName || payload?.agent_name || payload?.agent || null,
           resolved: agentName || null,
         };
         const chatKey = payload?.chat_id || eventData.chat_id || eventData.chatId || workflow_name || eventData.workflow_name || null;
-        logger.info('UI TOOL ATTRIBUTION', { ui_tool_id, workflow_name, chatKey, ...provided });
+        logger.info('UI TOOL ATTRIBUTION', { tool_name: toolName, workflow_name, chatKey, ...provided });
       } catch (err) {
         try { console.debug('Failed to log UI tool attribution', err); } catch {}
       }
@@ -328,7 +335,7 @@ export class DynamicUIHandler {
         if (chatKey) {
           this._lastSpeaker.set(chatKey, agentName);
           try {
-            const logger = createToolsLogger({ tool: ui_tool_id, eventId, workflowName: workflow_name, agentMessageId: payload?.agent_message_id });
+            const logger = createToolsLogger({ tool: toolName, toolCallId, workflowName: workflow_name, agentMessageId: payload?.agent_message_id });
             logger.info('Updated last speaker', { chatKey, agentName });
           } catch (err) {
             try { console.debug('Failed to log last speaker update', err); } catch {}
@@ -336,22 +343,22 @@ export class DynamicUIHandler {
         }
       }
 
-      if (!ui_tool_id) {
-        console.error('❌ Missing ui_tool_id in UI tool event');
+      if (!toolName) {
+        console.error('❌ Missing tool_name in tool_call event');
         return null;
       }
 
       // Create response handler that sends data back to backend
       const onResponse = async (response) => {
-        const tlog = createToolsLogger({ tool: ui_tool_id, eventId, workflowName: workflow_name, agentMessageId: payload?.agent_message_id });
+        const tlog = createToolsLogger({ tool: toolName, toolCallId, workflowName: workflow_name, agentMessageId: payload?.agent_message_id });
         tlog.event('ui_response', response?.status || 'unknown');
-        console.log(`📤 DynamicUIHandler: Sending UI tool response for ${ui_tool_id}`, response);
+        console.log(`📤 DynamicUIHandler: Sending UI tool response for ${toolName}`, response);
         
         if (responseCallback && typeof responseCallback === 'function') {
           await responseCallback({
-            type: 'ui_tool_response',
-            ui_tool_id,
-            eventId,
+            type: 'tool_call_response',
+            tool_name: toolName,
+            tool_call_id: toolCallId,
             workflow_name,
             payload,
             response
@@ -362,12 +369,12 @@ export class DynamicUIHandler {
       };
 
   // Determine display mode ('inline' or 'artifact') with robust fallbacks
-  const display = eventData.display || eventData.display_type || (payload && (payload.display || payload.mode)) || null;
+      const display = eventData.display || eventData.display_type || (payload && (payload.display || payload.mode)) || null;
 
       // CRITICAL: Skip rendering for auto-tool events without explicit display mode
       // Auto-tool events are followed by explicit tool calls with proper display settings
       if (payload?.interaction_type === 'auto_tool' && !display) {
-        console.log(`⏭️ DynamicUIHandler: Skipping auto-tool event without display mode (${ui_tool_id}) - waiting for explicit tool call`);
+        console.log(`⏭️ DynamicUIHandler: Skipping auto-tool event without display mode (${toolName}) - waiting for explicit tool call`);
         return true; // Successful processing, just not rendering yet
       }
 
@@ -377,70 +384,29 @@ export class DynamicUIHandler {
       // SIMPLIFIED: Just notify UI callbacks - let ChatInterface handle rendering
       // This eliminates duplication with eventDispatcher
   this.notifyUIUpdate({
-        type: 'ui_tool_event',
-        ui_tool_id,
+        type: 'tool_call',
+        tool_name: toolName,
+        tool_call_id: toolCallId,
+        component_type: component_type || payload?.component_type || toolName,
         payload,
-        eventId,
         workflow_name,
         display: finalDisplay,
-    onResponse,
-    agent_name: agentName || undefined,
-    agentName: agentName || undefined,
-    agent: agentName || undefined
+        onResponse,
+        agent_name: agentName || undefined,
+        agentName: agentName || undefined,
+        agent: agentName || undefined
       });
 
-  console.log(`✅ DynamicUIHandler: Notified UI callbacks for ${ui_tool_id} (display=${finalDisplay})`);
+  console.log(`✅ DynamicUIHandler: Notified UI callbacks for ${toolName} (display=${finalDisplay})`);
 
       return true; // Indicate successful processing
 
     } catch (error) {
-      console.error('❌ DynamicUIHandler: Error handling UI tool event', error);
+      console.error('❌ DynamicUIHandler: Error handling tool_call event', error);
       return null;
     }
   }
 
-  /**
-  * Bridge simple user_input_request events into a standardized ui_tool_event
-  * so the chat can render an inline component based on backend-provided metadata.
-   */
-  async handleUserInputRequest(data) {
-    try {
-      const { input_request_id, chat_id, payload = {} } = data || {};
-
-  // Only route to UI if the backend explicitly provides a tool/component
-  const prompt = payload.prompt || '';
-  const uiToolId = payload.ui_tool_id || payload.component_type || null;
-
-      // If we can't infer a component, don't inject anything; let chat text stand
-      if (!uiToolId) {
-        console.warn('⚠️ DynamicUIHandler: user_input_request did not match a known UI tool; skipping component injection');
-        return false;
-      }
-
-      // Emit a unified ui_tool_event for UI consumers
-      this.notifyUIUpdate({
-        type: 'ui_tool_event',
-        ui_tool_id: uiToolId,
-        eventId: input_request_id,
-        workflowname: payload.workflow_name || payload.workflow,
-        payload: {
-          ...payload,
-          chat_id,
-          // Ensure router has needed routing hints
-          workflow_name: payload.workflow_name || payload.workflow,
-          workflow: payload.workflow_name || payload.workflow,
-          component_type: uiToolId,
-          // Surface the original prompt so it can be displayed next to the UI control
-          description: prompt
-        }
-      });
-
-      return true;
-    } catch (error) {
-      console.error('❌ DynamicUIHandler: Error handling user_input_request', error);
-      return null;
-    }
-  }
 }
 
 // Export singleton instance

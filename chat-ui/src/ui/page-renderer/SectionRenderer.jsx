@@ -5,7 +5,7 @@
  *   - Resolve section.primitive → React component via PrimitiveRegistry
  *   - Adapt declarative schema config into live primitive props
  *   - Inject live data from usePageData when api_endpoint is present
- *   - Execute declarative page actions (navigate, event, submit, delete)
+ *   - Execute declarative page actions (navigate, event, workflow, submit, delete)
  *   - Render nested schema children for container primitives
  *   - Render section.title above the primitive when present
  *   - Render an Unknown fallback when the primitive type is not registered
@@ -16,6 +16,7 @@ import { getPrimitive } from './PrimitiveRegistry.js';
 import { getChildSections } from './schemaUtils.js';
 import { emitAppEvent } from '../hooks/useAppEventBus.js';
 import { cn } from '../lib/cn.js';
+import { useWorkflowStart } from '../../hooks/useWorkflowStart.js';
 
 function UnknownPrimitive({ type }) {
   return (
@@ -72,6 +73,7 @@ function resolveActionType(action) {
   if (!isRecord(action)) return null;
   if (typeof action.action_type === 'string' && action.action_type.trim()) return action.action_type;
   if (typeof action.event_type === 'string' && action.event_type.trim()) return 'event';
+  if (typeof action.workflow_id === 'string' && action.workflow_id.trim()) return 'workflow';
   if (typeof action.href === 'string' && action.href.trim()) return 'navigate';
   return null;
 }
@@ -157,6 +159,8 @@ function buildEmptyAction(config, executeAction, defaultPrefix) {
         action_type: config.action_type,
         href: config.href ?? null,
         event_type: config.action_event ?? config.event_type ?? null,
+        workflow_id: config.workflow_id ?? null,
+        context_variables: isRecord(config.context_variables) ? config.context_variables : null,
         event_payload: config.action_payload ?? config.event_payload ?? null,
       }
     : null;
@@ -174,7 +178,7 @@ function buildButtonAction(config) {
   if (!isRecord(config)) return null;
   if (isRecord(config.action)) return config.action;
 
-  if (!config.action_type && !config.event_type && !config.href) {
+  if (!config.action_type && !config.event_type && !config.workflow_id && !config.href) {
     return null;
   }
 
@@ -183,6 +187,8 @@ function buildButtonAction(config) {
     action_type: config.action_type,
     href: config.href ?? null,
     event_type: config.event_type ?? null,
+    workflow_id: config.workflow_id ?? null,
+    context_variables: isRecord(config.context_variables) ? config.context_variables : null,
     event_payload: config.event_payload ?? null,
   };
 }
@@ -233,6 +239,7 @@ export function SectionRenderer({
   inheritedRefreshTargetId = null,
 }) {
   const Primitive = getPrimitive(section.primitive);
+  const { startWorkflow } = useWorkflowStart();
 
   if (!Primitive) {
     return <UnknownPrimitive type={section.primitive} />;
@@ -277,6 +284,19 @@ export function SectionRenderer({
         return target;
       }
 
+      if (actionType === 'workflow' && action.workflow_id) {
+        const workflowId = interpolateString(action.workflow_id, context);
+        if (!workflowId) return null;
+        const workflowContext = isRecord(action.context_variables)
+          ? interpolateValue(action.context_variables, context)
+          : {};
+        await startWorkflow(workflowId, workflowContext, {
+          trigger_source: 'page',
+          action_id: action.id ?? null,
+        });
+        return workflowId;
+      }
+
       if ((actionType === 'submit' || actionType === 'delete') && action.href) {
         const target = interpolateString(action.href, context);
         if (!target) return null;
@@ -310,7 +330,7 @@ export function SectionRenderer({
       console.error(`Failed to execute page action for section '${section.id}'`, error);
       return null;
     }
-  }, [effectiveData, onNavigate, onRefetch, section.id]);
+  }, [effectiveData, onNavigate, onRefetch, section.id, startWorkflow]);
 
   const nestedChildren = getChildSections(section).map((child) => (
     <SectionRenderer

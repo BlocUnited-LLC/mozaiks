@@ -40,6 +40,10 @@ Owns:
 
 Pages are the default surface for non-AI product behavior.
 
+When a durable product page needs to open an agent workflow, it should do so
+through a page-owned workflow launch affordance, not by inlining workflow UI
+components into the page surface.
+
 Shared page UI should live in `app/ui/pages/_shared/`.
 
 Admin is a first-class framework surface (like chat-ui), not an app-level page.
@@ -99,6 +103,12 @@ Examples:
 - "Review with AI"
 - "Summarize and escalate"
 
+Canonical persistent-page launch seam:
+
+- declarative page action with `action_type: workflow`
+- runtime workflow registry id in `workflow_id`
+- deterministic `context_variables` only
+
 ### Domain event creates background automation
 
 Examples:
@@ -142,4 +152,3 @@ Do not:
 - [canonical-app-structure.md](canonical-app-structure.md)
 - [workflow-architecture.md](workflow-architecture.md)
 - [event-system.md](event-system.md)
-

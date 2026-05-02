@@ -977,7 +977,7 @@ In OSS mode, developers have **full control**:
 │  │ │       ├── data-table.tsx                                          │   │
 │  │ │       └── ...                                                     │   │
 │  │ ├── tailwind.config.js    ← Full control                            │   │
-│  │ └── app.yaml              ← Theme config (optional)                 │   │
+│  │ └── brand/theme_config.json ← Theme config (optional)              │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -995,7 +995,7 @@ In Platform mode, customization is **constrained and safe**:
 │  USERS CAN:                                                                 │
 │  ─────────────────────────────────────────────────────────────────────────  │
 │                                                                              │
-│  1. Configure theme via app.yaml                                            │
+│  1. Configure theme via brand/theme_config.json                              │
 │     theme:                                                                  │
 │       primary: blue                                                         │
 │       variant: modern                                                       │
@@ -1069,7 +1069,7 @@ In Platform mode, customization is **constrained and safe**:
 │                                    ▼                                         │
 │  STEP 3: Apply Theme Tokens                                                 │
 │  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │ • Load theme config from app.yaml                                      │ │
+│  │ • Load theme config from brand/theme_config.json                       │ │
 │  │ • Generate CSS variables                                               │ │
 │  │ • Inject font imports                                                  │ │
 │  └───────────────────────────────────────────────────────────────────────┘ │
@@ -1321,4 +1321,3 @@ icons:
 │                                                                            │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
-

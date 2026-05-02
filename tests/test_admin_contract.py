@@ -29,6 +29,7 @@ def test_admin_paths_resolve_platform_root_from_direct_app_root(monkeypatch, tmp
     _write_json(app_root / "app.json", {"appName": "Custom App"})
     monkeypatch.setenv("PLATFORM_PATH", str(app_root))
 
+    assert admin_paths.resolve_admin_app_root() == app_root.resolve()
     assert admin_paths.resolve_platform_root() == app_root.resolve()
     assert admin_paths.resolve_admin_config_path() == (app_root / "config" / "admin.json").resolve()
 
@@ -39,6 +40,19 @@ def test_admin_paths_resolve_platform_root_from_workspace_root(monkeypatch, tmp_
     _write_json(app_root / "app.json", {"appName": "Workspace App"})
     monkeypatch.setenv("PLATFORM_PATH", str(workspace_root))
 
+    assert admin_paths.resolve_admin_app_root() == app_root.resolve()
+    assert admin_paths.resolve_platform_root() == app_root.resolve()
+    assert admin_paths.resolve_admin_config_path() == (app_root / "config" / "admin.json").resolve()
+
+
+def test_admin_paths_resolve_platform_root_from_workspace_env(monkeypatch, tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace-from-env"
+    app_root = workspace_root / "app"
+    _write_json(app_root / "app.json", {"appName": "Workspace Env App"})
+    monkeypatch.delenv("PLATFORM_PATH", raising=False)
+    monkeypatch.setenv("MOZAIKS_APP_WORKSPACE_PATH", str(workspace_root))
+
+    assert admin_paths.resolve_admin_app_root() == app_root.resolve()
     assert admin_paths.resolve_platform_root() == app_root.resolve()
     assert admin_paths.resolve_admin_config_path() == (app_root / "config" / "admin.json").resolve()
 

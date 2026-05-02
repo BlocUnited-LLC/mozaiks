@@ -8,7 +8,7 @@ Canonical hook declarations live in:
 
 - `app/workflows/{workflow}/hooks.yaml`
 
-Builder workflows use the same contract under `factory_app/app/workflows/{workflow}/hooks.yaml`.
+Builder workflows use the same contract under `factory_app/workflows/{workflow}/hooks.yaml`.
 
 No workflow hook JSON files are used in the canonical runtime contract.
 

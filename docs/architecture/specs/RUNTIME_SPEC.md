@@ -33,7 +33,7 @@ The runtime is the **central orchestrator** of a Mozaiks application. It:
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  1. APPLICATION LOADING                                                     │
-│     • Parse app.yaml                                                        │
+│     • Read app/app.json and discover bundle families                        │
 │     • Validate configuration                                                │
 │     • Detect execution mode                                                 │
 │     • Initialize logging                                                    │
@@ -94,7 +94,7 @@ The runtime is the **central orchestrator** of a Mozaiks application. It:
 │                        APPLICATION LOAD SEQUENCE                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  1. READ app.yaml                                                           │
+│  1. READ app/app.json                                                       │
 │       │                                                                     │
 │       ▼                                                                     │
 │  2. PARSE and VALIDATE                                                      │
@@ -154,13 +154,13 @@ class AppLoader:
     @classmethod
     async def load(cls, path: str = ".") -> AppDefinition:
         """Load app from directory."""
-        app_yaml = Path(path) / "app.yaml"
+        app_manifest_path = Path(path) / "app.json"
 
-        if not app_yaml.exists():
-            raise AppLoadError(f"app.yaml not found in {path}")
+        if not app_manifest_path.exists():
+            raise AppLoadError(f"app.json not found in {path}")
 
-        with open(app_yaml) as f:
-            content = yaml.safe_load(f)
+        with open(app_manifest_path, encoding="utf-8") as f:
+            content = json.loads(f.read())
 
         # Resolve environment variables
         content = cls._resolve_env_vars(content)
@@ -169,7 +169,7 @@ class AppLoader:
         try:
             app_def = AppDefinition.model_validate(content)
         except ValidationError as e:
-            raise AppLoadError(f"Invalid app.yaml: {e}")
+            raise AppLoadError(f"Invalid app.json: {e}")
 
         # Validate references exist
         await cls._validate_references(path, app_def)
@@ -328,7 +328,7 @@ async def initialize_executors(app_def: AppDefinition) -> ExecutorRegistry:
 │       │       Check: trigger_resolver.has_route("/api/contacts", "POST")    │
 │       │       If match → Workflow execution                                 │
 │       │                                                                     │
-│       ├─► (2) Explicit routes in app.yaml                                   │
+│       ├─► (2) Explicit custom routes in app/ui/route_manifest.json          │
 │       │       Check: app_def.routes for path match                          │
 │       │       If match → Parse handler, dispatch                            │
 │       │                                                                     │
@@ -727,7 +727,7 @@ class EventCoordinator:
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  1. LOAD CONFIGURATION                                                      │
-│       ├── Read app.yaml                                                     │
+│       ├── Read app/app.json                                                 │
 │       ├── Load .env                                                         │
 │       └── Resolve environment variables                                     │
 │                                                                              │
@@ -1059,7 +1059,7 @@ RIGHT:  DecompositionAgent → emits runtime.decomposition_planned → runtime r
 
 | Responsibility | Description |
 |----------------|-------------|
-| **Load App** | Parse app.yaml, validate, detect mode |
+| **Load App** | Parse app/app.json, validate, discover bundle parts, detect mode |
 | **Init Executors** | Create and register ModuleExecutor, WorkflowExecutor |
 | **Route Requests** | Match to triggers, routes, modules, pages |
 | **Manage Context** | Build and inject RequestContext |

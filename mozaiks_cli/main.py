@@ -132,7 +132,7 @@ def create_parser():
     )
     onboard_parser.add_argument(
         "--journey",
-        choices=["new_app", "existing_app"],
+        choices=["greenfield_app", "brownfield_app"],
         default=None,
         help="Onboarding track to configure",
     )
@@ -171,7 +171,7 @@ def create_parser():
     onboard_parser.add_argument(
         "--existing-url",
         default=None,
-        help="Existing app URL for the existing_app track",
+        help="Existing app URL for the brownfield_app track",
     )
     onboard_parser.add_argument(
         "--host-owned-summary",

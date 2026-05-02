@@ -38,7 +38,7 @@ from mozaiksai.core.auth.dependencies import (
     validate_path_app_id,
     validate_user_id_against_principal as _validate_user_id_against_principal,
 )
-from mozaiksai.core.core_config import get_mongo_client
+from mozaiksai.core.core_config import close_mongo_client, get_mongo_client
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
 from mozaiksai.core.multitenant import build_app_scope_filter
@@ -282,7 +282,7 @@ async def _runtime_shutdown() -> None:
 
     simple_transport = None
     if mongo_client:
-        mongo_client.close()
+        close_mongo_client()
         mongo_client = None
 
 
@@ -679,30 +679,6 @@ async def handle_user_input(
     return {"status": "Message received and is being processed.", "result": result}
 
 
-@app.post("/api/user-input/submit")
-async def submit_user_input_response(
-    request: Request,
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    """Submit a human response for a pending workflow input request."""
-    _ = principal
-    if simple_transport is None:
-        raise HTTPException(status_code=503, detail="Transport service is not available")
-
-    try:
-        data = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
-
-    input_request_id = data.get("input_request_id")
-    user_input = data.get("user_input")
-    if not input_request_id:
-        raise HTTPException(status_code=400, detail="input_request_id is required")
-
-    success = await simple_transport.submit_user_input(input_request_id, user_input)
-    return {"success": success}
-
-
 @app.post("/chat/{app_id}/{chat_id}/component_action")
 async def handle_component_action(
     request: Request,
@@ -744,8 +720,8 @@ async def handle_component_action(
     return {"status": "success", "result": result}
 
 
-@app.post("/api/ui-tool/submit")
-async def submit_ui_tool_response(
+@app.post("/api/tool-call/respond")
+async def submit_tool_call_response(
     request: Request,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
@@ -766,7 +742,7 @@ async def submit_ui_tool_response(
     if not response_data:
         raise HTTPException(status_code=400, detail="response_data is required")
 
-    success = await simple_transport.submit_ui_tool_response(event_id, response_data)
+    success = await simple_transport.submit_tool_call_response(event_id, response_data)
     if not success:
         raise HTTPException(status_code=404, detail="UI tool event not found or already completed")
     return {"status": "success"}

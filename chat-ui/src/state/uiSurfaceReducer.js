@@ -231,7 +231,7 @@ export const uiSurfaceReducer = (state, action) => {
           status: ARTIFACT_STATUS.ACTIVE,
           display,
           panelOpen: true,
-          lastEventId: action.eventId || state.artifact.lastEventId,
+          lastEventId: action.toolCallId || state.artifact.lastEventId,
         },
       };
     }
@@ -273,31 +273,6 @@ export const mapSurfaceEventToAction = (event) => {
 
   const eventType = String(event.type);
 
-  if (eventType === 'ui_tool_event' || eventType === 'UI_TOOL_EVENT') {
-    const detail = event.data || event.payload || {};
-    const display = event.display
-      || event.display_type
-      || event.mode
-      || detail.display
-      || detail.display_type
-      || detail.mode
-      || detail?.payload?.display;
-    const normalized = normalizeDisplayMode(display);
-    if (normalized === 'artifact' || normalized === 'view' || normalized === 'fullscreen') {
-      return {
-        type: 'ARTIFACT_EMITTED',
-        display: normalized,
-        eventId: event.eventId
-          || event.event_id
-          || detail.eventId
-          || detail.event_id
-          || detail?.payload?.event_id
-          || null,
-      };
-    }
-    return null;
-  }
-
   if (eventType === 'tool_call' || eventType === 'chat.tool_call') {
     const detail = event.data || {};
     const display = event.display || event.display_type || event.mode || detail.display || detail.display_type || detail.mode || detail?.payload?.display;
@@ -306,7 +281,7 @@ export const mapSurfaceEventToAction = (event) => {
       return {
         type: 'ARTIFACT_EMITTED',
         display: normalized,
-        eventId: event.tool_call_id || event.corr || detail.tool_call_id || detail.corr || null,
+        toolCallId: event.tool_call_id || event.corr || detail.tool_call_id || detail.corr || null,
       };
     }
   }

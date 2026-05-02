@@ -199,9 +199,13 @@ Then read:
 
 ## Builder Product Note
 
-Shared generation-core workflows live in `factory_app/app/workflows/`. App Zero keeps only its product overlay under
+Shared generation-core workflows live in `factory_app/workflows/`. App Zero keeps only its product overlay under
 `mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`. Generated apps should
 understand the shared workflow contract, not an App Zero-specific workflow
 directory layout.
+
+For the factory dogfood workspace, `factory_app/app/workflows/` is only an
+app-local overlay seam. It is expected to remain empty until the factory app
+actually owns a workflow that is not part of the shared generation core.
 
 

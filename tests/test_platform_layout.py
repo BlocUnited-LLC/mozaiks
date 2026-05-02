@@ -58,7 +58,7 @@ def test_mozaiks_app_workflows_are_local_and_builder_workflows_are_shared() -> N
     assert app_marketing["workflow_startup_mode"] == "AgentDriven"
     assert investor_marketplace["workflow_startup_mode"] == "AgentDriven"
 
-    shared_root = ROOT / "factory_app" / "app" / "workflows"
+    shared_root = ROOT / "factory_app" / "workflows"
     for workflow_name in ("AppGenerator", "AgentGenerator", "ExistingAppDiscovery"):
         orchestrator = shared_root / workflow_name / "orchestrator.yaml"
         assert orchestrator.exists(), f"Expected shared workflow: {workflow_name}"

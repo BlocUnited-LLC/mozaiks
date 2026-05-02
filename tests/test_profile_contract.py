@@ -131,7 +131,7 @@ async def test_platform_profile_preferences_are_app_scoped(monkeypatch):
 async def test_platform_shell_config_injects_profile_route():
     from mozaiksai.hosts import platform as platform_app
 
-    shell_config = await platform_app.build_shell_config(include_studio=True)
+    shell_config = await platform_app.build_shell_config(surface="studio")
     pages = {page.get("path"): page for page in shell_config.get("pages", [])}
     header_paths = {
         page.get("path")

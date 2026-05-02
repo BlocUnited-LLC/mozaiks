@@ -29,7 +29,7 @@ app/
 │   └── admin.json
 ├── ui/
 │   ├── index.js                # registers contract-declared custom components
-│   ├── route_manifest.json     # custom full-page React route declarations
+│   ├── route_manifest.json     # custom full-page React route declarations, including surface-gated routes
 │   ├── pages/                  # declarative page schemas
 │   │   ├── {page_name}.yaml
 │   │   └── {page_name}/
@@ -83,6 +83,52 @@ Canonical rule:
 - sibling `ui/` and `brand/` folders outside the app root are transitional,
   not canonical
 
+## Factory App Workspace
+
+`factory_app/app/` is intentionally app-shaped.
+
+It follows the same top-level active app root contract:
+
+- `app.json`
+- `config/`
+- `ui/`
+- `workflows/`
+- `modules/`
+- `brand/`
+
+Inside that workspace contract, `factory_app/app/workflows/` is now reserved
+for app-local overlays only. Shared generation-core workflows no longer live
+there; they live under `factory_app/workflows/`.
+
+That is deliberate. The factory workspace is the first-party dogfood app for the
+builder/control-plane layer, so it should stay close to the same workspace
+shape generated or customer apps use.
+
+In practice, that means `factory_app/app/` can be used as a real active app
+workspace when dogfooding builder and revision flows.
+
+But it is not the same thing as a generic generated customer app.
+
+It still includes framework-owned responsibilities that a normal generated app
+would not own:
+
+- shared builder workflows under `factory_app/workflows/`
+- framework-owned Studio management routes declared through `factory_app/app/ui/route_manifest.json` and `factory_app/app/ui/index.js`
+- factory control-plane modules such as `factory_app/app/modules/factory_control_plane/`
+- framework-owned admin shell composition through `AdminPortal`
+
+That means `factory_app/app/workflows/` should be read as an optional overlay
+root for the dogfood app workspace, not as the home of shared factory builder
+implementations.
+
+Use this distinction when reasoning about changes:
+
+- if the goal is dogfooding the workspace contract, keeping `factory_app/app/`
+  app-shaped is correct
+- if the goal is defining the canonical customer-app output, generated apps
+  should still target the generic `app/` contract without the factory/studio
+  exceptions
+
 ## Product Workspace Layout
 
 App Zero should ultimately use the same self-contained app-workspace contract.
@@ -121,10 +167,14 @@ end-state.
 App Zero's local `workflows/` directory is now primarily an overlay surface.
 The shared generator implementations App Zero consumes resolve from the shared
 generation core, while
-`factory_app/app/workflows/extended_orchestration/extension_registry.json`
+`factory_app/workflows/extended_orchestration/extension_registry.json`
 defines the shared build journeys and entrypoints and
 `mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`
 adds App Zero product-specific workflow overlays.
+
+The same boundary applies to `factory_app/app/workflows/`: it is an app-local
+overlay surface and may legitimately stay empty when the factory app does not
+own any workflow beyond the shared builder layer.
 
 Runtime workflow loading is multi-root. By default the runtime searches:
 
@@ -208,6 +258,10 @@ page schema cannot express yet.
 
 These routes must be mounted through `ui/route_manifest.json` and should be used
 sparingly; declarative `ui/pages/*` remains the default.
+
+Route manifest entries may also declare `meta.surfaces` when a route belongs to
+the normal app UI contract but should only appear on a specific shell surface,
+such as Studio management routes.
 
 ### `workflows/*`
 

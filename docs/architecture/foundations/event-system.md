@@ -26,18 +26,18 @@ The runtime may transport many event families. Transport is not ownership.
 
 ## Current frontend event model
 
-The frontend currently has three canonical event lanes plus one compatibility
-bridge:
+The frontend currently has three canonical event lanes:
 
 | Lane | Current producer | Current consumer | Purpose |
 | --- | --- | --- | --- |
 | `chat.*` | runtime transport | `ChatPage` | transcript, lifecycle, tool-call transport |
 | `chat.tool_call` | runtime UI tool transport | `ChatPage` + workflow UI renderer | interactive or artifact workflow surfaces |
 | `ui.*` | workflow/page/platform UI emitters | `useAppEventBus` primitives | typed primitive reactions such as refresh, modal open, stat update |
-| legacy `ui_tool_event` | older runtime emitters | `dynamicUIHandler` bridge | compatibility during migration to `chat.tool_call` |
+New interactive workflow UI should follow the `chat.tool_call` transport path.
 
-The compatibility path still exists in `ChatPage`, but new interactive workflow
-UI should follow the `chat.tool_call` transport path.
+Response-required AG2 input interactions normalize onto `chat.tool_call` with
+`interaction_type=input_request`. That is the only canonical browser-facing
+lane for runtime-managed interactive input.
 
 ## Layer Responsibilities
 
@@ -53,6 +53,12 @@ UI should follow the `chat.tool_call` transport path.
 - persistence of runtime session state
 - transport envelopes such as `chat.text`, `chat.run_complete`, and
   `chat.tool_call`
+
+`chat.run_complete` is slice-scoped. Clients and orchestrators must read its
+`status` field:
+
+- `1` means terminal workflow completion
+- `0` means the workflow paused awaiting user input and remains resumable
 
 The runtime must not define app business events such as invoices, bookings,
 campaigns, payments, or app-specific status changes.
@@ -163,18 +169,22 @@ sync.
 
 ### 2. Workflow UI tool lane
 
-Interactive workflow-owned UI is no longer just a conceptual `ui_tool_event`.
+Interactive workflow-owned UI is a `chat.tool_call` transport concern.
 
 Current canonical runtime path:
 
 ```text
 workflow tool
-  -> transport.send_ui_tool_event(...)
+  -> transport.send_tool_call_event(...)
   -> runtime emits kind=tool_call
   -> transport maps to chat.tool_call
-  -> ChatPage inserts artifact/inline message state
+  -> ChatPage inserts `toolCall` artifact/inline message state
   -> WorkflowUIRouter resolves workflow-scoped component
 ```
+
+AG2 `InputRequestEvent` now follows the same transport lane, using
+`interaction_type=input_request` and a generic `UserInputRequest` fallback
+component when no workflow-specific component hint is provided.
 
 Key implications:
 
@@ -249,6 +259,10 @@ user action or integration
 | Workflow runtime stream and AG2 custom event types | runtime code in `mozaiksai/core/events/` |
 | Page primitive UI reactions | `ui/pages/*.yaml` and primitive component contracts |
 | Hosted-only product events | hosted capability pack contracts |
+
+Persistent pages may also launch workflow sessions through declarative page
+actions, but that is a page-action contract, not an event-stream contract.
+Those launches use runtime workflow ids and session routing, not `chat.tool_call`.
 
 ## `orchestrator.yaml`
 

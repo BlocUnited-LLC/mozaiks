@@ -49,7 +49,7 @@ drift.
 Any prompt pack for this repo should preserve these boundaries:
 
 - canonical hosts live under `mozaiksai/hosts/`
-- shared builder workflows live under `factory_app/app/workflows/`
+- shared builder workflows live under `factory_app/workflows/`
 - app-owned workflows live under the active app root's `app/workflows/`
 - App Zero's local product app root is `mozaiks-platform/app/`
 - do not reintroduce retired roots such as `platform/` as the canonical app

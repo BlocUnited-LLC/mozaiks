@@ -28,7 +28,7 @@ This repo is the canonical runtime/platform/factory repo.
 
 - `platform/` is the current transitional starter/app root.
 - `factory_app/app/` is the current first-party factory workspace.
-- `factory_app/app/workflows/` is the shared builder workflow root.
+- `factory_app/workflows/` is the shared builder workflow root.
 - `mozaiks-platform/app/` is the current App Zero app root.
 - App Zero brand/UI assets now live inside `mozaiks-platform/app/`.
 - `mozaiks-platform/app-builder/` contains product planning/docs and is not runtime-loaded.
@@ -45,7 +45,7 @@ Canonical target:
 Working modes:
 
 1. **Framework/platform mode** — work on runtime, platform host, app shell, app bundle contracts, and `platform/`
-2. **Studio mode** — work on `mozaiksai/hosts/studio.py`, `factory_app/app/ui/studio/`, `factory_app/app/modules/factory_control_plane/`, `chat-ui/src/admin/`, and the shared factory workflows in `factory_app/app/workflows/`
+2. **Studio mode** — work on `mozaiksai/hosts/studio.py`, `factory_app/app/ui/studio/`, `factory_app/app/modules/factory_control_plane/`, `chat-ui/src/admin/`, and the shared factory workflows in `factory_app/workflows/`
 3. **Mozaiks App / product mode** — work on `mozaiksai/hosts/mozaiks.py`, `mozaiks-platform/`, App Zero, and hosted product surfaces
 
 ## Pre-Production Cleanup Policy
@@ -127,7 +127,7 @@ Deterministic app behavior belongs in generated app/module contracts hosted by `
 
 | If you're adding... | Put it in... |
 |---------------------|--------------|
-| AI workflow logic | `factory_app/app/workflows/{name}/` |
+| AI workflow logic | `factory_app/workflows/{name}/` |
 | Deterministic module (CRUD/actions) | `app/modules/{name}/` in an app workspace |
 | Multi-module page | `app/ui/ui/pages/{name}.yaml` in an app workspace |
 | Runtime infrastructure | `mozaiksai/core/` |
@@ -136,7 +136,7 @@ Deterministic app behavior belongs in generated app/module contracts hosted by `
 | AG2 tool function | `mozaiksai/core/workflow/` |
 | App Zero active bundle | `mozaiks-platform/app/` |
 | App Zero brand/UI extension | `mozaiks-platform/app/brand/`, `mozaiks-platform/app/ui/` |
-| Shared factory workflows | `factory_app/app/workflows/` |
+| Shared factory workflows | `factory_app/workflows/` |
 | App Zero workflow overlay | `mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json` |
 | Generated app/workflow artifacts | `generated/` |
 
@@ -178,7 +178,7 @@ modules/{pack_name}/
 
 ## Generator Output Boundary
 
-Shared factory workflows live in `factory_app/app/workflows/`. App Zero keeps only a product-specific extended-orchestration overlay under
+Shared factory workflows live in `factory_app/workflows/`. App Zero keeps only a product-specific extended-orchestration overlay under
 `mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`. Generator workflows
 generate app bundles and workflow bundles, but they must not write those
 outputs into active runtime paths.
@@ -186,7 +186,7 @@ outputs into active runtime paths.
 Workflow loading is multi-root by default:
 
 - active app root `workflows/` first
-- shared `factory_app/app/workflows/` second
+- shared `factory_app/workflows/` second
 - `MOZAIKS_WORKFLOW_ROOTS` may override that order explicitly
 
 That allows App Zero to reference both shared generator workflows and
@@ -252,7 +252,7 @@ contract, not an escape hatch from it.
 ### File Structure
 
 ```
-factory_app/app/workflows/{WorkflowName}/
+factory_app/workflows/{WorkflowName}/
 ├── orchestrator.yaml       # Workflow bootstrap config
 ├── agents.yaml             # Agent roster and prompts
 ├── handoffs.yaml           # Agent-to-agent routing

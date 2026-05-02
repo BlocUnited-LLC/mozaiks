@@ -1,0 +1,8 @@
+workflow_name: RuntimeSmoke
+max_turns: 6
+human_in_the_loop: false
+workflow_startup_mode: AgentDriven
+orchestration_pattern: DefaultPattern
+initial_message_to_user: null
+initial_message: Write a one-sentence runtime smoke confirmation.
+initial_agent: RuntimeSmokeAgent

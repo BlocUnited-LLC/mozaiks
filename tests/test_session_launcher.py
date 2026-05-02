@@ -137,6 +137,60 @@ async def test_launch_routed_workflow_creates_chat_and_binds_session(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_launch_routed_workflow_binds_brownfield_app_adoption_journey(monkeypatch):
+    persistence = _FakePersistence()
+    store = SessionStateStore(persistence)
+    router = SessionRouter(persistence=persistence, store=store)
+    pack = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [{"id": "ValueEngine"}, {"id": "ExistingAppDiscovery"}],
+            "transitions": [
+                {
+                    "id": "app_type_selector",
+                    "transition_type": "user_choice_context",
+                    "ui": {"component": "AppTypeSelector", "mode": "screen"},
+                    "options": [
+                        {"id": "greenfield_app", "route_to": "ValueEngine", "context_variables": {"app_type": "greenfield_app"}},
+                        {
+                            "id": "brownfield_app",
+                            "route_to": "ExistingAppDiscovery",
+                            "context_variables": {"app_type": "brownfield_app"},
+                        },
+                    ],
+                }
+            ],
+            "workflow_sequences": [
+                {"id": "build", "steps": [{"transition": "app_type_selector"}, {"workflows": ["ValueEngine"]}]},
+                {
+                    "id": "brownfield_app_adoption",
+                    "steps": [
+                        {"transition": "app_type_selector"},
+                        {"workflows": ["ExistingAppDiscovery"]},
+                    ],
+                },
+            ],
+        }
+    )
+    monkeypatch.setattr(_session_router, "load_global_pack_graph", lambda: pack)
+    monkeypatch.setattr(_session_launcher, "_PERSISTENCE_MANAGER", _ChatSessionPersistenceAdapter(persistence))
+
+    launch = await _session_launcher.launch_routed_workflow(
+        workflow_id="ExistingAppDiscovery",
+        app_id="app_1",
+        user_id="user_1",
+        context_variables={"app_type": "brownfield_app"},
+        session_router=router,
+    )
+
+    state = await store.load(app_id="app_1", user_id="user_1")
+    assert state is not None
+    assert state.current_chat_id == launch.chat_id
+    assert state.current_workflow_id == "ExistingAppDiscovery"
+    assert state.journey_key == "brownfield_app_adoption"
+
+
+@pytest.mark.asyncio
 async def test_launch_transition_returns_next_transition_payload(monkeypatch):
     persistence = _FakePersistence()
     store = SessionStateStore(persistence)

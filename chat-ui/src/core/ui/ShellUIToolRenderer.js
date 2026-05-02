@@ -21,13 +21,12 @@ import { PrimitiveRenderer, isCoreArtifact } from '../../primitives';
 const ShellUIToolRenderer = ({ 
   event, 
   onResponse,
-  submitInputRequest,
   className = "",
   onArtifactAction,
   actionStatusMap
 }) => {
   // Validate event structure
-  if (!event || !event.ui_tool_id) {
+  if (!event || !event.tool_name) {
   console.warn('⚠️ UIToolRenderer: Invalid event structure', event);
     return (
       <div className={`ui-tool-error ${className}`}>
@@ -40,17 +39,17 @@ const ShellUIToolRenderer = ({
     // Prefer explicit agentName when available to attribute UI tools correctly
     const resolvedAgentName = event.agentName || event.agent_name || event.payload?.agentName || event.payload?.agent_name || event.agent || null;
     console.log('🧩 UIToolRenderer: Rendering', {
-      ui_tool_id: event.ui_tool_id,
-      eventId: event.eventId,
+      tool_name: event.tool_name,
+      tool_call_id: event.tool_call_id,
       workflow_name: event.workflow_name,
       agentName: resolvedAgentName,
       payloadKeys: event.payload ? Object.keys(event.payload) : []
     });
     const payload = event.payload || {};
-    const isCore = isCoreArtifact(payload) || (typeof event.ui_tool_id === 'string' && event.ui_tool_id.startsWith('core.'));
+    const isCore = isCoreArtifact(payload) || (typeof event.tool_name === 'string' && event.tool_name.startsWith('core.'));
     const hasArtifactType = payload?.artifact_type || payload?.data?.artifact_type;
     const corePayload = isCore && !hasArtifactType
-      ? { ...payload, artifact_type: event.ui_tool_id }
+      ? { ...payload, artifact_type: event.tool_name }
       : payload;
     if (isCore) {
       return (
@@ -64,14 +63,14 @@ const ShellUIToolRenderer = ({
       );
     }
     // Use the event dispatcher to render the component
-    const renderedComponent = handleEvent(event, onResponse, submitInputRequest);
+    const renderedComponent = handleEvent(event, onResponse);
 
     if (!renderedComponent) {
       console.warn('⚠️ UIToolRenderer: handleEvent returned null; component may be missing');
       return (
         <div className={`ui-tool-not-found ${className}`}>
           <p className="text-[var(--color-warning)] text-slate-200">
-            UI tool '{event.ui_tool_id}' not found or failed to load
+            UI tool '{event.tool_name}' not found or failed to load
           </p>
           <p className="text-gray-400 text-sm">
             Check if the workflow is properly registered
@@ -90,7 +89,7 @@ const ShellUIToolRenderer = ({
     console.error('❌ UIToolRenderer: Error rendering UI tool', error);
     return (
       <div className={`ui-tool-error ${className}`}>
-        <p className="text-[var(--color-error)]">Error rendering UI tool: {event.ui_tool_id}</p>
+        <p className="text-[var(--color-error)]">Error rendering UI tool: {event.tool_name}</p>
         <p className="text-gray-400 text-sm">{error.message}</p>
       </div>
     );

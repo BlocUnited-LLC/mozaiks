@@ -7,7 +7,7 @@
  * Access is gated by the "admin" role (client-side guard here; backend enforces
  * independently on all /api/admin/* routes).
  *
- * Host/runtime panels are driven by platform/config/admin.json via
+ * Host/runtime panels are driven by app/config/admin.json via
  * GET /api/admin/config:
  *   { "sections": { ... }, "runtime_panels": [...], "module_panels": [...] }
  *

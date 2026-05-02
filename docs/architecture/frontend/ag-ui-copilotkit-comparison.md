@@ -3,6 +3,10 @@
 This document compares the current Mozaiks frontend/runtime interaction model
 against AG-UI and CopilotKit with AG2.
 
+For the exact local runtime mapping of `use_ui_tool(...)`, `chat.tool_call`,
+frontend render state, and response submission, see
+[Tool Event Lifecycle](tool-event-lifecycle.md).
+
 It is not a marketing comparison. It is a contract and implementation
 comparison intended to answer:
 
@@ -34,8 +38,8 @@ Mozaiks implementation references:
 - `chat-ui/src/core/dynamicUIHandler.js`
 - `chat-ui/src/ui/hooks/useAppEventBus.js`
 - `chat-ui/src/state/uiSurfaceReducer.js`
-- `factory_app/app/workflows/AgentGenerator/agents.yaml`
-- `factory_app/app/workflows/AppGenerator/agents.yaml`
+- `factory_app/workflows/AgentGenerator/agents.yaml`
+- `factory_app/workflows/AppGenerator/agents.yaml`
 
 ## Executive Summary
 
@@ -54,7 +58,7 @@ many parallel paths:
 - `chat.*`
 - `chat.tool_call`
 - typed `ui.*`
-- legacy `ui_tool_event`
+- reducer-driven chat/artifact render state built from `tool_call`
 - reducer-driven layout state
 - widget/session cache behavior
 - workflow-local UI registry
@@ -65,6 +69,7 @@ Mozaiks is solving a larger problem:
 
 - generated workflow UI
 - generated app pages
+- persistent pages that can launch workflow sessions without becoming workflow UI
 - deterministic module contracts
 - domain events and workflow triggers
 - artifact-aware shell layout
@@ -81,16 +86,17 @@ The conclusion is:
 
 | Concept | AG-UI / CopilotKit | Current Mozaiks | Assessment | Recommended direction |
 | --- | --- | --- | --- | --- |
-| Wire protocol | AG-UI standard event stream over HTTP SSE or compatible transport | Custom `chat.*` transport plus direct `ui.*` events and compatibility `ui_tool_event` | Mozaiks is more fragmented | Adopt an AG-UI-shaped canonical wire model |
+| Wire protocol | AG-UI standard event stream over HTTP SSE or compatible transport | Custom `chat.*` transport plus direct `ui.*` events and `toolCall` render state in the shell | Mozaiks is more fragmented | Adopt an AG-UI-shaped canonical wire model |
 | Text streaming | `RUN_STARTED`, `TEXT_MESSAGE_*`, `RUN_FINISHED` | `chat.text`, `chat.run_complete`, resume events | Comparable capability | Keep, but normalize naming/structure toward AG-UI |
 | Tool lifecycle | `TOOL_CALL_START`, `TOOL_CALL_ARGS`, `TOOL_CALL_END`, `TOOL_CALL_RESULT` | `chat.tool_call`, `chat.tool_response`, completion/dismiss side events | Mozaiks is less explicit | Split tool lifecycle more cleanly or emulate AG-UI chunk/result semantics |
 | Frontend tools | UI advertises tools in `RunAgentInput.tools`; frontend executes and renders them | Runtime-owned `use_ui_tool(...)` emits workflow-local components through transport | Ownership model differs | Keep Mozaiks workflow-local generation, but simplify protocol semantics |
 | Generative UI | CopilotKit `useComponent`, `useRenderTool`, `useDefaultRenderTool` | `WorkflowUIRouter`, component registry, workflow-local `ui/index.js` barrels | Mozaiks is more generator-friendly, less ergonomic | Keep workflow-local registry, add a simpler top-level render contract |
 | Shared state | `STATE_SNAPSHOT`, `STATE_DELTA`, `MESSAGES_SNAPSHOT`; CopilotKit `useCoAgent`/`useAgent` | `ChatUIContext` caches plus artifact/session state in the chat shell | Mozaiks has shell/session state but no canonical AG-UI-style runtime shared-state stream | If shared runtime state is needed, add it as a first-class protocol instead of another ad hoc frontend cache path |
-| HITL | Explicit interrupt/pause semantics; CopilotKit `renderAndWaitForResponse`, `useInterrupt` | `use_ui_tool(...)` + pending futures, plus `chat.input_request` path | Mozaiks supports HITL but through mixed abstractions | Unify around one pause/resume model |
+| HITL | Explicit interrupt/pause semantics; CopilotKit `renderAndWaitForResponse`, `useInterrupt` | `use_ui_tool(...)` plus normalized `chat.tool_call` input interactions | Mozaiks supports HITL, but pause/resume semantics are still under-modeled | Keep one response-required lane and model pause/resume more explicitly |
 | Tool transparency | Built-in default tool renderer and wildcard renderer | Requires workflow UI or custom handling; partial fallback behavior | CopilotKit is cleaner | Add a default renderer for all tool calls |
 | Session persistence | AG-UI thread/run model; CopilotKit thread support | `activeChatId`, `askMessages`, `workflowMessages`, artifact cache, widget re-entry | Mozaiks is stronger at shell/session UX | Keep as differentiator |
 | App shell/layout | Usually chat-centric with optional custom UI | First-class `ask/workflow/view` layouts and persistent widget | Mozaiks is stronger | Keep |
+| Persistent page -> workflow seam | Usually app-specific glue or custom frontend composition | Declarative persistent pages can now launch workflow sessions through `action_type: workflow` while workflow-local React stays on the `chat.tool_call` lane | Mozaiks has the stronger generated-app story here | Keep this split; do not collapse pages into tool renderers |
 | Domain event integration | Usually outside the UI framework contract | Built-in module events, subscriptions, notifications, capability-triggered workflows | Mozaiks is much stronger | Keep |
 | Generator fit | Clean for hand-authored apps and UI-defined frontend tools | Strong fit for AgentGenerator/AppGenerator and workflow-local codegen | Mozaiks is stronger for generated apps | Keep |
 
@@ -120,6 +126,29 @@ Recommendation:
   compatibility shell over AG-UI event semantics instead of a second event
   model.
 
+### 1b. Generated app surface scope
+
+AG-UI and CopilotKit are centered on workflow/session interaction.
+
+Mozaiks also has to define how generated product pages and generated workflow UI
+fit together without collapsing into one abstraction.
+
+Current direction:
+
+- persistent app pages stay declarative
+- workflow-local React stays on the `chat.tool_call` lane
+- persistent pages may launch workflow sessions through `action_type: workflow`
+- event-driven workflow starts still use workflow capability ids in
+  `event_flows` and `subscriptions.yaml`
+
+Assessment:
+
+- This separation is stronger for generated apps than a pure CopilotKit-style
+  tool-rendering model.
+- The important requirement is to keep the identifier boundary clean:
+  workflow registry ids for page launches, workflow capability ids for event
+  wiring.
+
 ### 2. Tool lifecycle
 
 AG-UI has a clean tool model:
@@ -137,7 +166,7 @@ Current Mozaiks equivalent:
 - `UnifiedEventDispatcher` maps that to `chat.tool_call`
 - `ChatPage` inserts artifact or inline UI state
 - `WorkflowUIRouter` resolves the component
-- `submit_ui_tool_response(...)` resolves a pending future
+- `submit_tool_call_response(...)` resolves a pending future
 
 Assessment:
 
@@ -218,20 +247,20 @@ AG-UI supports interrupt-aware runs. CopilotKit separates:
 Current Mozaiks equivalent:
 
 - `use_ui_tool(...)` waits on a pending response future
-- `chat.input_request` exists as another user-input path
+- AG2 input requests now normalize onto `chat.tool_call` with
+  `interaction_type=input_request`
 - completion and dismiss behavior is partly tool-specific
 
 Assessment:
 
 - Mozaiks supports HITL.
-- Mozaiks does not yet have one canonical pause/resume contract.
+- The render lane is now mostly canonical.
+- Pause/resume semantics are still not modeled as explicitly as AG-UI.
 
 Recommendation:
 
-- Unify `use_ui_tool(...)` and `chat.input_request` under a single interrupt or
-  response-required interaction model.
-- Stop modeling some user pauses as “tool UI” and others as “input request”
-  unless there is a genuine protocol distinction.
+- Keep routing response-required interactions through one workflow UI lane.
+- Model pauses and resumes more explicitly at the protocol layer.
 
 ### 6. Generative UI rendering
 
@@ -258,7 +287,7 @@ Recommendation:
 - Keep workflow-local generated React surfaces.
 - Add a default catch-all renderer for all tool calls.
 - Make the renderer path singular:
-  remove long-term reliance on `dynamicUIHandler` + legacy `ui_tool_event`.
+  reduce `dynamicUIHandler` to a thin response/dispatch adapter.
 
 ### 7. Session, shell, and layout
 
@@ -322,15 +351,14 @@ Keep these because AG-UI/CopilotKit does not replace them:
 
 ### Remove as first-class architecture
 
-- `ui_tool_event` as a long-term primary runtime/frontend path
+- extra frontend-only event taxonomies layered on top of `chat.tool_call`
 
 ### Collapse into one model
 
 - `use_ui_tool(...)` response flow
-- `chat.input_request`
 - `chat.tool_call`
 
-They should feel like one coherent runtime/frontend protocol, not three separate
+They should feel like one coherent runtime/frontend protocol, not two separate
 ideas.
 
 ### Make strictly secondary
@@ -390,9 +418,9 @@ AgentGenerator and AppGenerator stay responsible for:
 | `ChatUIContext` shell/session state | Keep | Needed for Mozaiks shell UX |
 | `WorkflowUIRouter` | Keep | Good workflow-local UI registry seam |
 | `ui.*` primitive bus | Keep but narrow | Useful for local primitive updates only |
-| `ui_tool_event` | Deprecate | Legacy compatibility path only |
+| second frontend event taxonomy for workflow UI | Delete | `chat.tool_call` already owns the workflow UI lane |
 | `dynamicUIHandler` as first-class architecture | Merge downward | Transitional bridge, not the target model |
-| separate `chat.input_request` vs UI tool pause logic | Merge | One canonical HITL model is cleaner |
+| second browser-facing response lane | Delete | The canonical lane should stay `chat.tool_call` |
 
 ## Code Paths To Change First
 
@@ -400,9 +428,9 @@ If Mozaiks is simplified toward AG-UI/CopilotKit semantics, these are the first
 change targets:
 
 1. `chat-ui/src/pages/ChatPage.js`
-   - continue shrinking event handling to `chat.tool_call` plus temporary legacy compatibility
+   - keep event handling centered on `chat.tool_call`
 2. `chat-ui/src/core/dynamicUIHandler.js`
-   - reduce to compatibility adapter or remove
+   - reduce to a thin response/dispatch adapter or remove
 3. `chat-ui/src/core/WorkflowUIRouter.js`
    - keep as the single workflow UI mount path
 4. `chat-ui/src/ui/hooks/useAppEventBus.js`
@@ -411,7 +439,7 @@ change targets:
    - align emitted UI tool lifecycle more tightly with AG-UI semantics
 6. `mozaiksai/core/workflow/ui_tools.py`
    - preserve generator-friendly helpers while narrowing the transport contract
-7. `factory_app/app/workflows/AgentGenerator/agents.yaml`
+7. `factory_app/workflows/AgentGenerator/agents.yaml`
    - simplify generator instructions so they target one canonical frontend path
 
 ## Final Judgment

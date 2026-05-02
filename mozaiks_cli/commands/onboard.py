@@ -98,14 +98,14 @@ def run(args) -> None:
     journey = _prompt_choice(
         label="What are you doing first?",
         explicit=getattr(args, "journey", None),
-        default=previous_onboarding.get("journey") or "new_app",
-        options=["new_app", "existing_app"],
+        default=previous_onboarding.get("journey") or "greenfield_app",
+        options=["greenfield_app", "brownfield_app"],
         should_prompt=should_prompt,
     )
 
     goal_label = "What should Mozaiks help with first?"
     default_goal = previous_onboarding.get("first_goal") or (
-        "Define the first real product capability" if journey == "new_app" else "Bridge the first useful host capability"
+        "Define the first real product capability" if journey == "greenfield_app" else "Bridge the first useful host capability"
     )
     first_goal = _prompt_text(
         label=goal_label,
@@ -116,7 +116,7 @@ def run(args) -> None:
 
     existing_url = None
     host_owned_summary = None
-    if journey == "existing_app":
+    if journey == "brownfield_app":
         existing_url = _prompt_text(
             label="Existing app URL (optional)",
             explicit=getattr(args, "existing_url", None),
@@ -377,7 +377,7 @@ def _apply_ai_config(
 
 
 def _build_ask_prompt(*, app_name: str, journey: str, first_goal: str) -> str:
-    if journey == "existing_app":
+    if journey == "brownfield_app":
         return (
             f"You are the assistant for {app_name}. Help the builder augment an existing app safely. "
             f"Prioritize bridging and scoped adoption first. Current first goal: {first_goal}."
@@ -463,7 +463,7 @@ def _show_next_steps(*, workspace_root: Path, journey: str, first_goal: str, adm
     print("  3. Use the first goal below as your next build request:")
     print(f"     {first_goal}")
     print("  4. Start the local/private Studio management/create host with python run_studio.py")
-    if journey == "existing_app":
+    if journey == "brownfield_app":
         print("  5. Bridge the first host-owned surface before attempting broader generation")
     else:
         print("  5. Add the first real workflow or module only after you confirm the product surface")

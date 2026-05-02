@@ -60,13 +60,13 @@ from mozaiksai import create_mozaiks_app
 app = FastAPI()
 
 # Canonical shared generation-core path for this repo layout
-os.environ["MOZAIKS_WORKFLOWS_PATH"] = "./factory_app/app/workflows"
+os.environ["MOZAIKS_WORKFLOWS_PATH"] = "./factory_app/workflows"
 
 @app.get("/api/users")
 def get_users():
     ...
 
-app.mount("/ai", create_mozaiks_app(workflow_dir="./factory_app/app/workflows"))
+app.mount("/ai", create_mozaiks_app(workflow_dir="./factory_app/workflows"))
 ```
 
 This `/ai` mount pattern is for external embedding mode only. In the canonical
@@ -137,7 +137,7 @@ The ChatWidget is a floating button that expands to a chat overlay:
 ## 3. Workflow Directory Structure
 
 You will need a place for first-party factory workflows to live. In this repo they
-live under `factory_app/app/workflows/`. App-owned workflows live under the
+live under `factory_app/workflows/`. App-owned workflows live under the
 active app root's `app/workflows/`. Below is the canonical factory workspace
 structure:
 
@@ -196,7 +196,7 @@ Purpose-built multi-agent workflows for specific tasks. These are the workflows
 you create in the active app root, such as `app/workflows/` in the canonical
 workspace model. App Zero keeps local journey and launcher config under
 `mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`, but its shared build
-workflow implementations also resolve from `factory_app/app/workflows/`.
+workflow implementations also resolve from `factory_app/workflows/`.
 
 - Follows a defined agent orchestration pattern
 - Has specific tools, handoffs, and structured outputs

@@ -1,0 +1,16 @@
+WS ws://127.0.0.1:55696/ws/ValueEngine/debug-smoke-2bfb132a/chat_debug_c6c6c3a3/smoke-user
+EVENT 0 chat.text agent= user selected= None content= I want to build a web-first task prioritization app for independent consultants. It should help them decide what to work on each morning bas
+EVENT 1 chat.text agent= user selected= None content= I want to build a web-first task prioritization app for independent consultants. It should help them decide what to work on each morning bas
+EVENT 2 chat.stream_chunk agent= ValueInterviewAgent selected= None content= Who 
+EVENT 3 chat.stream_chunk agent= ValueInterviewAgent selected= None content= specifically 
+EVENT 4 chat.usage_delta agent= None selected= None content= 
+EVENT 5 chat.stream_chunk agent= ValueInterviewAgent selected= None content= is 
+EVENT 6 chat.stream_chunk agent= ValueInterviewAgent selected= None content= your 
+EVENT 7 chat.stream_chunk agent= ValueInterviewAgent selected= None content= target 
+EVENT 8 chat.stream_chunk agent= ValueInterviewAgent selected= None content= user 
+EVENT 9 chat.stream_chunk agent= ValueInterviewAgent selected= None content= among 
+EVENT 10 chat.stream_chunk agent= ValueInterviewAgent selected= None content= independent 
+EVENT 11 chat.stream_chunk agent= ValueInterviewAgent selected= None content= consultants?
+EVENT 12 chat.stream_end agent= ValueInterviewAgent selected= None content= Who specifically is your target user among independent consultants?
+EVENT 13 chat.tool_call agent= Agent selected= None content= 
+RECV_ERR TimeoutError 

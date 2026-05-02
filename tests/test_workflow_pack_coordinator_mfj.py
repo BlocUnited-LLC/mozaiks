@@ -16,6 +16,7 @@ _obs_mod = import_module_directly("mozaiksai.core.workflow.pack.mfj_observabilit
 WorkflowPackCoordinator = _coord_mod.WorkflowPackCoordinator
 _ChildRunState = _coord_mod._ChildRunState
 _ActivePackRun = _coord_mod._ActivePackRun
+_is_terminal_child_status = _coord_mod._is_terminal_child_status
 
 ChildResult = _merge_mod.ChildResult
 CollectAllMerge = _merge_mod.CollectAllMerge
@@ -78,6 +79,17 @@ class TestCoordinatorInit:
         assert coord._max_retry_rounds == 3
 
 
+class TestChildCompletionStatus:
+    def test_completed_status_is_terminal(self):
+        assert _is_terminal_child_status(1) is True
+        assert _is_terminal_child_status("completed") is True
+
+    def test_paused_status_is_not_terminal(self):
+        assert _is_terminal_child_status(0) is False
+        assert _is_terminal_child_status("paused") is False
+        assert _is_terminal_child_status("in_progress") is False
+
+
 # ---------------------------------------------------------------------------
 # _extract_child_specs — static method
 # ---------------------------------------------------------------------------
@@ -127,7 +139,7 @@ class TestExtractChildSpecs:
 
 class TestWorkflowExists:
     def test_shared_generator_workflow_exists_under_platform_workflows(self):
-        # AgentGenerator is a real shared workflow under factory_app/app/workflows/ —
+        # AgentGenerator is a real shared workflow under factory_app/workflows/ —
         # verifies that _workflow_exists resolves against the repo tree.
         assert WorkflowPackCoordinator._workflow_exists("AgentGenerator") is True
 

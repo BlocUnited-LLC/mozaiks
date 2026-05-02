@@ -1,0 +1,16 @@
+registry:
+  RuntimeSmokeAgent: RuntimeSmokeResult
+
+models:
+  RuntimeSmokeResult:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: User-facing confirmation message.
+      result:
+        type: str
+        description: One-sentence runtime smoke status.
+      confidence:
+        type: float
+        description: Confidence score in the result, from 0.0 to 1.0.

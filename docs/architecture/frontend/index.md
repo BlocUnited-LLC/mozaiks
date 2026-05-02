@@ -32,7 +32,9 @@ The architecture builds from four layered concepts. Read them in order.
 | [UI Surface Model](ui-surface-model.md) | Surface state machine, widget ownership, and session continuity |
 | [Conversation Modes](conversation-modes.md) | `ask` mode (general Q&A) vs `workflow` mode (structured agentic run) |
 | [Layout Modes](layout-modes.md) | Four visual layouts that control how chat and artifact panels share the screen |
+| [Generated Frontend Surface Contract](generated-frontend-surface-contract.md) | Where persistent app UI ends, workflow UI begins, and how generated apps launch workflows cleanly |
 | [Event System](../foundations/event-system.md) | How domain, runtime, `chat.*`, `chat.tool_call`, and `ui.*` events stay separate |
+| [Tool Event Lifecycle](tool-event-lifecycle.md) | Exact runtime-to-frontend path for `use_ui_tool(...)`, `chat.tool_call`, response handling, and AG-UI/CopilotKit comparison |
 | [AG-UI Comparison](ag-ui-copilotkit-comparison.md) | Where Mozaiks should keep its architecture and where it should converge toward AG-UI/CopilotKit |
 
 ---
@@ -47,5 +49,6 @@ The architecture builds from four layered concepts. Read them in order.
 | `chat-ui/src/widget/GlobalChatWidgetWrapper.jsx` | Mounts the widget on non-chat routes; suppresses it on chat routes |
 | `chat-ui/src/components/chat/PersistentChatWidget.jsx` | The floating widget component |
 | `chat-ui/src/components/chat/FluidChatLayout.jsx` | Animates between layout modes (full / split / minimized / view) |
+| `chat-ui/src/ui/page-renderer/SectionRenderer.jsx` | Executes declarative persistent page actions, including workflow launch actions |
 | `chat-ui/src/ui/hooks/useAppEventBus.js` | In-process bus for typed `ui.*` primitive events and `routing.transition.*` |
 | `chat-ui/src/core/WorkflowUIRouter.js` | Dynamic resolver for workflow-owned UI tool components |

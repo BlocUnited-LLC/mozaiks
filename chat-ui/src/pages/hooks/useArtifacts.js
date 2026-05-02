@@ -56,22 +56,22 @@ export function useArtifacts({
     }
 
     const artifactMsg =
-      currentArtifactMessages.find((m) => m?.uiToolEvent?.ui_tool_id) ||
+      currentArtifactMessages.find((m) => m?.toolCall?.tool_name) ||
       currentArtifactMessages[0];
-    const uiToolEvent = artifactMsg?.uiToolEvent;
+    const toolCall = artifactMsg?.toolCall;
 
-    if (!uiToolEvent) {
+    if (!toolCall) {
       setCurrentArtifactContext(null);
       return;
     }
 
     setCurrentArtifactContext({
-      id: uiToolEvent.eventId || artifactMsg.id || null,
-      type: uiToolEvent.ui_tool_id,
-      payload: uiToolEvent.payload || null,
+      id: toolCall.tool_call_id || artifactMsg.id || null,
+      type: toolCall.tool_name,
+      payload: toolCall.payload || null,
       artifact_id: deriveArtifactId(
-        uiToolEvent.payload,
-        uiToolEvent.eventId || artifactMsg.id || null
+        toolCall.payload,
+        toolCall.tool_call_id || artifactMsg.id || null
       ),
       chat_id: chatId,
       workflow_name: workflowName,
@@ -84,27 +84,27 @@ export function useArtifacts({
     if (!Array.isArray(currentArtifactMessages) || currentArtifactMessages.length === 0) return;
 
     const artifactMsg =
-      currentArtifactMessages.find((m) => m?.uiToolEvent?.payload) ||
+      currentArtifactMessages.find((m) => m?.toolCall?.payload) ||
       currentArtifactMessages[0];
-    const uiToolEvent = artifactMsg?.uiToolEvent;
-    if (!uiToolEvent) return;
+    const toolCall = artifactMsg?.toolCall;
+    if (!toolCall) return;
 
-    const payload = uiToolEvent.payload || {};
+    const payload = toolCall.payload || {};
     const displayMode =
-      uiToolEvent.display || payload.display || payload.mode || 'artifact';
+      toolCall.display || payload.display || payload.mode || 'artifact';
     if (displayMode !== 'artifact') return;
 
     const artifactPayload = {
       ...payload,
-      artifact_id: deriveArtifactId(payload, uiToolEvent.eventId || artifactMsg?.id || null),
+      artifact_id: deriveArtifactId(payload, toolCall.tool_call_id || artifactMsg?.id || null),
     };
 
     try {
       const cacheKey = `mozaiks.current_artifact.${chatId}`;
       const serializableArtifact = {
         ...artifactMsg,
-        uiToolEvent: {
-          ...uiToolEvent,
+        toolCall: {
+          ...toolCall,
           payload: artifactPayload,
           onResponse: null,
         },
@@ -115,9 +115,9 @@ export function useArtifacts({
       platform.storage.setItem(
         lastKey,
         JSON.stringify({
-          ui_tool_id: uiToolEvent.ui_tool_id || 'core.state',
-          eventId: uiToolEvent.eventId || null,
-          workflow_name: uiToolEvent.workflow_name || workflowName,
+          tool_name: toolCall.tool_name || 'core.state',
+          tool_call_id: toolCall.tool_call_id || null,
+          workflow_name: toolCall.workflow_name || workflowName,
           payload: artifactPayload,
           display: displayMode || 'artifact',
           ts: Date.now(),
@@ -138,16 +138,16 @@ export function useArtifacts({
 
       let updated = false;
       const next = prev.map((msg) => {
-        const payload = msg?.uiToolEvent?.payload;
-        if (!msg?.uiToolEvent) return msg;
-        const resolvedId = deriveArtifactId(payload, msg?.uiToolEvent?.eventId || msg?.id);
+        const payload = msg?.toolCall?.payload;
+        if (!msg?.toolCall) return msg;
+        const resolvedId = deriveArtifactId(payload, msg?.toolCall?.tool_call_id || msg?.id);
         if (artifactId && resolvedId !== artifactId) return msg;
         updated = true;
         const nextPayload = updateFn(payload || {});
         return {
           ...msg,
-          uiToolEvent: {
-            ...msg.uiToolEvent,
+          toolCall: {
+            ...msg.toolCall,
             payload: nextPayload,
           },
         };
@@ -158,13 +158,13 @@ export function useArtifacts({
       // Fallback: apply to most recent artifact if id mismatch
       const lastIdx = prev.length - 1;
       const last = prev[lastIdx];
-      if (last?.uiToolEvent) {
-        const nextPayload = updateFn(last.uiToolEvent.payload || {});
+      if (last?.toolCall) {
+        const nextPayload = updateFn(last.toolCall.payload || {});
         const fallback = [...prev];
         fallback[lastIdx] = {
           ...last,
-          uiToolEvent: {
-            ...last.uiToolEvent,
+          toolCall: {
+            ...last.toolCall,
             payload: nextPayload,
           },
         };
@@ -240,32 +240,32 @@ export function useArtifacts({
 
   // Set artifact from UI tool event
   const setArtifactFromEvent = useCallback(
-    (uiToolEvent, options = {}) => {
+    (toolCall, options = {}) => {
       const { openPanelAutomatically = true, agentName = 'Agent' } = options;
       const {
-        ui_tool_id,
+        tool_name,
         payload = {},
-        eventId,
+        tool_call_id,
         workflow_name,
         onResponse,
         display,
-      } = uiToolEvent;
+      } = toolCall;
 
       const artifactPayload = {
         ...payload,
-        artifact_id: deriveArtifactId(payload, eventId || ui_tool_id || null),
+        artifact_id: deriveArtifactId(payload, tool_call_id || tool_name || null),
       };
 
       const artifactMsg = {
-        id: `ui-artifact-${eventId || Date.now()}`,
+        id: `tool-call-artifact-${tool_call_id || Date.now()}`,
         sender: 'agent',
         agentName,
         content: artifactPayload.structured_output || artifactPayload.content || artifactPayload || {},
         isStreaming: false,
-        uiToolEvent: {
-          ui_tool_id,
+        toolCall: {
+          tool_name,
           payload: artifactPayload,
-          eventId,
+          tool_call_id,
           workflow_name,
           onResponse,
           display,
@@ -274,7 +274,7 @@ export function useArtifacts({
 
       setCurrentArtifactMessages([artifactMsg]);
       artifactCacheValidRef.current = true;
-      lastArtifactEventRef.current = eventId;
+      lastArtifactEventRef.current = tool_call_id;
 
       if (openPanelAutomatically) {
         openPanel();
@@ -296,18 +296,18 @@ export function useArtifacts({
         if (!raw) return false;
 
         const cached = JSON.parse(raw);
-        if (!cached?.ui_tool_id) return false;
+        if (!cached?.tool_name) return false;
 
         const restoredMsg = {
-          id: `ui-restored-${Date.now()}`,
+          id: `tool-call-restored-${Date.now()}`,
           sender: 'agent',
           agentName: cached.payload?.agentName || 'Agent',
           content: cached.payload?.structured_output || cached.payload || {},
           isStreaming: false,
-          uiToolEvent: {
-            ui_tool_id: cached.ui_tool_id,
+          toolCall: {
+            tool_name: cached.tool_name,
             payload: cached.payload || {},
-            eventId: cached.eventId || null,
+            tool_call_id: cached.tool_call_id || null,
             workflow_name: cached.workflow_name || workflowName,
             display: cached.display || 'artifact',
             restored: true,

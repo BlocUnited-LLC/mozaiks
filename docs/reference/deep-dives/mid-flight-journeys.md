@@ -4,7 +4,7 @@
 **Last updated:** 2026-04-12
 **Depends on:** [Orchestration and Decomposition](../../architecture/orchestration-and-decomposition.md), [Workflow Architecture](../../architecture/foundations/workflow-architecture.md), [MFJ Strict Resume Contract](mfj-strict-resume-contract.md)
 
-**Validation status:** MFJ runtime semantics are implemented in the current codepath, but end-to-end confidence should come from the live smoke harness at `scripts/run_live_mfj_smoke.py` and `tests/test_mfj_live_smoke.py`, not from contract or mock coverage alone. That harness requires `OPENAI_API_KEY`, `MONGO_URI`, and a reachable MongoDB instance.
+**Validation status:** MFJ runtime semantics are implemented in the current codepath, but end-to-end confidence should come from the live smoke harness at `scripts/run_live_mfj_smoke.py` and `tests/test_mfj_live_smoke.py`, not from contract or mock coverage alone. The canonical no-HITL entry workflow for that harness is `factory_app/workflows/RuntimeSmoke`. The harness requires `OPENAI_API_KEY`, `MONGO_URI`, and a reachable MongoDB instance.
 
 ---
 
@@ -34,7 +34,7 @@ Mozaiks has two separate graph layers.
 
 Path:
 
-- `factory_app/app/workflows/extended_orchestration/extension_registry.json`
+- `factory_app/workflows/extended_orchestration/extension_registry.json`
 
 Owns:
 
@@ -52,7 +52,7 @@ Path:
 
 - `app/workflows/{workflow_name}/extended_orchestration/mfj_extension.json`
 
-For builder workflows, the same file shape lives under `factory_app/app/workflows/{workflow_name}/extended_orchestration/mfj_extension.json`.
+For builder workflows, the same file shape lives under `factory_app/workflows/{workflow_name}/extended_orchestration/mfj_extension.json`.
 
 Owns:
 
@@ -107,7 +107,7 @@ app/workflows/{workflow}/extended_orchestration/mfj_extension.json
   -> resume router handoff
 ```
 
-Builder workflows use the same MFJ contract under `factory_app/app/workflows/{workflow}/extended_orchestration/mfj_extension.json`.
+Builder workflows use the same MFJ contract under `factory_app/workflows/{workflow}/extended_orchestration/mfj_extension.json`.
 
 Relevant runtime areas are described in:
 
@@ -144,7 +144,7 @@ Canonical minimal example:
 
 This is also the live pattern used in:
 
-- `factory_app/app/workflows/AgentGenerator/extended_orchestration/mfj_extension.json`
+- `factory_app/workflows/AgentGenerator/extended_orchestration/mfj_extension.json`
 
 Meaning:
 

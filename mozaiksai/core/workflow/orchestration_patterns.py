@@ -658,6 +658,9 @@ async def run_workflow_orchestration(
     workflow_name_upper = workflow_name.upper()
     orchestration_pattern = "unknown"
     agents: Dict[str, Any] = {}
+    stream_state: Dict[str, Any] = {}
+    result_payload: Optional[Dict[str, Any]] = None
+    workflow_status_value = 0
 
     # Create workflow logger for this session  
     wf_lifecycle_logger = get_workflow_logger(workflow_name, chat_id=chat_id)
@@ -1241,18 +1244,27 @@ async def run_workflow_orchestration(
 
             max_turns_reached = getattr(response, 'max_turns_reached', False)
 
-            # Ensure termination handler is called to update status
-            try:
-                termination_result = await termination_handler.on_conversation_end(
-                    max_turns_reached=max_turns_reached
-                )
+            workflow_complete = bool(stream_state.get("run_completed", False))
+            awaiting_user_input = bool(stream_state.get("awaiting_user_input", False))
+            workflow_status_value = 1 if workflow_complete else 0
+
+            if workflow_complete:
                 try:
-                    status_val = getattr(termination_result, 'status', 'completed')
-                    logger.info(f" Termination completed: {status_val}")
-                except Exception:
-                    logger.info(" Termination completed (offline mode)")
-            except Exception as term_err:
-                logger.error(f" Termination handler failed: {term_err}")
+                    termination_result = await termination_handler.on_conversation_end(
+                        max_turns_reached=max_turns_reached
+                    )
+                    try:
+                        status_val = getattr(termination_result, 'status', 'completed')
+                        logger.info(f" Termination completed: {status_val}")
+                    except Exception:
+                        logger.info(" Termination completed (offline mode)")
+                except Exception as term_err:
+                    logger.error(f" Termination handler failed: {term_err}")
+            else:
+                wf_logger.info(
+                    " [%s] Run paused awaiting user input; chat remains resumable",
+                    workflow_name_upper,
+                )
 
             # Safely extract messages for logging and returning.
             # Some AG2 responses expose `messages` as an awaitable; never leak the coroutine.
@@ -1277,7 +1289,10 @@ async def run_workflow_orchestration(
                 "user_id": user_id,
                 "messages": messages_obj,
                 "max_turns_reached": max_turns_reached,
-                "response": response
+                "response": response,
+                "run_completed": workflow_complete,
+                "awaiting_user_input": awaiting_user_input,
+                "run_status": workflow_status_value,
             }
                 
         except Exception as e:
@@ -1289,10 +1304,8 @@ async def run_workflow_orchestration(
                 logger.error(f" Termination handler error cleanup failed: {term_err}")
             raise
         finally:
-            from mozaiksai.core.data.models import WorkflowStatus
-            status = WorkflowStatus.COMPLETED
             try:
-                await perf_mgr.record_workflow_end(chat_id, int(status))
+                await perf_mgr.record_workflow_end(chat_id, workflow_status_value)
                 await perf_mgr.flush(chat_id)
             except Exception as e:
                 logger.debug(f"perf finalize failed: {e}")
@@ -1304,19 +1317,23 @@ async def run_workflow_orchestration(
         duration = perf_counter() - start_time
         
         # Log workflow completion with summary
+        final_status_label = "completed" if workflow_status_value == 1 else "awaiting_user_input"
         wf_lifecycle_logger.info(
-            f" [{workflow_name_upper}] Workflow completed",
+            f" [{workflow_name_upper}] Workflow execution settled",
             duration_sec=duration,
             event_count=(stream_state.get('sequence_counter', 0) if isinstance(stream_state, dict) else 0),
             agent_count=len(agents),
             pattern_used=orchestration_pattern,
             chat_id=chat_id,
             app_id=app_id,
-            result_status="success" if result_payload else "empty"
+            result_status=final_status_label if result_payload else "empty",
         )
         
         # Single consolidated completion log instead of multiple lines
-        chat_logger.info(f"[{workflow_name_upper}] WORKFLOW_COMPLETED chat_id={chat_id} duration={duration:.2f}s agents={len(agents)}")
+        chat_logger.info(
+            f"[{workflow_name_upper}] WORKFLOW_{'COMPLETED' if workflow_status_value == 1 else 'AWAITING_INPUT'} "
+            f"chat_id={chat_id} duration={duration:.2f}s agents={len(agents)}"
+        )
         
         # Log agent outputs file location
         try:

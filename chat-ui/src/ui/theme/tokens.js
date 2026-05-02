@@ -1,7 +1,7 @@
 /**
  * Theme token generator for the Mozaiks App UI system.
  *
- * Maps theme_config.json (from /api/theme-config or PLATFORM_PATH/brand/theme_config.json)
+ * Maps theme_config.json (from /api/theme-config or the active app root's brand/theme_config.json)
  * to CSS custom properties on a target element.
  *
  * All variables use the --mz-* namespace to avoid collisions with existing

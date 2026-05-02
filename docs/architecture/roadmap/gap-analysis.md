@@ -51,7 +51,7 @@ Every other gap compounds on this one. Without a playground, every user journey 
 ### Exists
 
 - `docs/reference/deep-dives/api-reference.md` — lightweight reference notes, ~5 endpoints, explicitly says "not exhaustive"
-- 15+ route modules in `mozaikscore/core/routes/`: admin_observability, admin_users, analytics, app_config, app_metadata, events, health, modules, notifications, pages, profile, push_subscriptions, settings, status, subscriptions, subscription_sync, theme
+- multiple route families already exist for admin, events, health, modules, notifications, pages, profile, settings, subscriptions, and theme
 
 ### Missing
 

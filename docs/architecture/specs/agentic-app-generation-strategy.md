@@ -76,8 +76,8 @@ Classifies what the user is asking for.
 
 Canonical values:
 
-- `new_app`
-- `existing_app`
+- `greenfield_app`
+- `brownfield_app`
 - `refinement`
 - `agent_only`
 
@@ -336,11 +336,11 @@ The product experience should feel like one journey:
 
 ### New app
 
-`RequestIntent(new_app) -> ProductSpec -> CapabilitySpec[] -> ExperienceSpec + AgentAugmentationPlan -> BuildGraph -> Product bundle + Agent bundle`
+`RequestIntent(greenfield_app) -> ProductSpec -> CapabilitySpec[] -> ExperienceSpec + AgentAugmentationPlan -> BuildGraph -> Product bundle + Agent bundle`
 
 ### Existing app
 
-`RequestIntent(existing_app) -> ExistingProductSpec -> CapabilitySpec[] -> AgentAugmentationPlan -> same downstream planning path`
+`RequestIntent(brownfield_app) -> ExistingProductSpec -> CapabilitySpec[] -> AgentAugmentationPlan -> same downstream planning path`
 
 ### Refinement
 

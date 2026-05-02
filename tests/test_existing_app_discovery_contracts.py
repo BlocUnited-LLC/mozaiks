@@ -34,7 +34,7 @@ class _Context(dict):
 
 
 def test_existing_app_discovery_structured_outputs_use_augmentation_artifact() -> None:
-    data = _read_yaml("factory_app/app/workflows/ExistingAppDiscovery/structured_outputs.yaml")
+    data = _read_yaml("factory_app/workflows/ExistingAppDiscovery/structured_outputs.yaml")
 
     assert data["registry"]["DiscoveryArtifactAssemblerAgent"] == "ExistingAppAugmentationArtifact"
 
@@ -63,8 +63,8 @@ def test_existing_app_discovery_structured_outputs_use_augmentation_artifact() -
 
 
 def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> None:
-    context_vars = _read_yaml("factory_app/app/workflows/ExistingAppDiscovery/context_variables.yaml")
-    agents = _read_text("factory_app/app/workflows/ExistingAppDiscovery/agents.yaml")
+    context_vars = _read_yaml("factory_app/workflows/ExistingAppDiscovery/context_variables.yaml")
+    agents = _read_text("factory_app/workflows/ExistingAppDiscovery/agents.yaml")
 
     definitions = context_vars["definitions"]
     assert "discovery_preset" not in definitions
@@ -93,14 +93,14 @@ def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> N
     assert "AgentAugmentationPlan" in agents
     assert "discovery_mode" in agents
     assert "host_app_source" in agents
-    assert "workspace_host" in agents
+    assert "workspace_app" in agents
     assert "theme_adaptation_strategy" in agents
     assert "embed_theme_ready" in agents
     assert "brand_theme_summary" in agents
 
 
 def test_create_route_enters_canonical_build_transition() -> None:
-    registry = _read_yaml("factory_app/app/workflows/extended_orchestration/extension_registry.json")
+    registry = _read_yaml("factory_app/workflows/extended_orchestration/extension_registry.json")
     create_page = next(item for item in registry["entrypoints"] if item["path"] == "/create")
 
     assert create_page["transition"] == "app_type_selector"
@@ -111,8 +111,9 @@ def test_create_route_enters_canonical_build_transition() -> None:
 
 
 def test_new_app_entry_routes_into_valueengine_first() -> None:
-    registry = _read_yaml("factory_app/app/workflows/extended_orchestration/extension_registry.json")
-    value_context = _read_yaml("factory_app/app/workflows/ValueEngine/context_variables.yaml")
+    registry = _read_yaml("factory_app/workflows/extended_orchestration/extension_registry.json")
+    value_context = _read_yaml("factory_app/workflows/ValueEngine/context_variables.yaml")
+    design_docs_context = _read_yaml("factory_app/workflows/DesignDocs/context_variables.yaml")
 
     workflow_sequences = registry.get("workflow_sequences") or []
     build_journey = next(item for item in workflow_sequences if item["id"] == "build")
@@ -121,27 +122,35 @@ def test_new_app_entry_routes_into_valueengine_first() -> None:
     assert build_journey["steps"][1]["workflows"] == ["ValueEngine"]
     assert build_journey["steps"][2]["workflows"] == ["ThemeCapture"]
     assert build_journey["steps"][3]["transition"] == "coding_journey_selector"
-    assert build_journey["steps"][4]["workflows"] == ["DesignDocs"]
-    assert build_journey["steps"][5]["workflows"] == ["AgentGenerator"]
-    assert build_journey["steps"][6]["workflows"] == ["AppGenerator"]
+    assert build_journey["steps"][4]["transition"] == "database_setup_selector"
+    assert build_journey["steps"][5]["workflows"] == ["DesignDocs"]
+    assert build_journey["steps"][6]["workflows"] == ["AgentGenerator"]
+    assert build_journey["steps"][7]["workflows"] == ["AppGenerator"]
 
     transition_map = {item["id"]: item for item in registry["transitions"]}
     app_type_selector = transition_map["app_type_selector"]
     assert app_type_selector["transition_type"] == "user_choice_context"
-    new_app_option = next(item for item in app_type_selector["options"] if item["id"] == "new_app")
+    new_app_option = next(item for item in app_type_selector["options"] if item["id"] == "greenfield_app")
     assert new_app_option["route_to"] == "ValueEngine"
-    assert new_app_option["context_variables"] == {"app_type": "new"}
+    assert new_app_option["context_variables"] == {"app_type": "greenfield_app"}
     assert "app_type" in value_context["definitions"]
+    assert "database_provider" in design_docs_context["definitions"]
+    assert "database_setup_mode" in design_docs_context["definitions"]
 
 
-def test_existing_app_entry_uses_valueengine_with_context() -> None:
-    registry = _read_yaml("factory_app/app/workflows/extended_orchestration/extension_registry.json")
+def test_existing_app_entry_routes_into_discovery_with_context() -> None:
+    registry = _read_yaml("factory_app/workflows/extended_orchestration/extension_registry.json")
     transition_map = {item["id"]: item for item in registry["transitions"]}
+    workflow_sequences = registry.get("workflow_sequences") or []
+
+    adoption_journey = next(item for item in workflow_sequences if item["id"] == "brownfield_app_adoption")
+    assert adoption_journey["steps"][0]["transition"] == "app_type_selector"
+    assert adoption_journey["steps"][1]["workflows"] == ["ExistingAppDiscovery"]
 
     app_type_selector = transition_map["app_type_selector"]
-    existing_app_option = next(item for item in app_type_selector["options"] if item["id"] == "existing_app")
-    assert existing_app_option["route_to"] == "ValueEngine"
-    assert existing_app_option["context_variables"] == {"app_type": "existing"}
+    existing_app_option = next(item for item in app_type_selector["options"] if item["id"] == "brownfield_app")
+    assert existing_app_option["route_to"] == "ExistingAppDiscovery"
+    assert existing_app_option["context_variables"] == {"app_type": "brownfield_app"}
 
     assert "existing_app_entry_selector" not in transition_map
 
@@ -153,50 +162,68 @@ def test_existing_app_entry_uses_valueengine_with_context() -> None:
     assert coding_options["autonomous"]["context_variables"]["design_docs_hitl"] is False
     assert coding_options["guided"]["context_variables"]["design_docs_hitl"] is True
 
+    database_selector = transition_map["database_setup_selector"]
+    assert database_selector["transition_type"] == "user_choice_context"
+    database_options = {item["id"]: item for item in database_selector["options"]}
+    assert database_options["local_mongodb"]["route_to"] == "DesignDocs"
+    assert database_options["mongodb_atlas"]["route_to"] == "DesignDocs"
+    assert database_options["existing_uri"]["route_to"] == "DesignDocs"
+    assert database_options["skip_for_now"]["route_to"] == "DesignDocs"
+    assert database_options["local_mongodb"]["context_variables"] == {
+        "database_provider": "mongodb",
+        "database_setup_mode": "local",
+    }
+    assert database_options["skip_for_now"]["context_variables"] == {
+        "database_provider": "mongodb",
+        "database_setup_mode": "skip",
+    }
 
-def test_existing_app_preload_supports_workspace_host_with_split_repo_inputs() -> None:
+
+def test_existing_app_preload_supports_workspace_app_preset() -> None:
     module = _load_module(
-        "factory_app/app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
+        "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
         "tests.preload_discovery_context_direct",
     )
 
     def _fake_host_source_inputs(host_app_source: str | None) -> dict:
-        if host_app_source == "workspace_host":
+        if host_app_source == "workspace_app":
             return {
-                "frontend_repo_path": "C:/dogfood/MOZ-UI",
-                "backend_repo_path": "C:/dogfood/mozaiks-platform/services",
+                "repo_path": "C:/workspace/mozaiks-app",
                 "discovery_mode": "guided",
             }
         return {}
 
     async def _fake_scan(local_repo_path: str | None, github_repo: str | None, github_ref: str | None) -> dict:
-        if local_repo_path == "C:/dogfood/MOZ-UI":
+        if local_repo_path == "C:/workspace/mozaiks-app":
             return {
                 "success": True,
                 "source": "local_repo",
-                "repo_name": "MOZ-UI",
-                "languages": ["JavaScript/TypeScript"],
-                "frameworks": ["React"],
+                "repo_name": "mozaiks-app",
+                "languages": ["JavaScript/TypeScript", "Python"],
+                "frameworks": ["React", "FastAPI"],
                 "target_frameworks": [],
                 "route_files": ["src/AppRoutes.js"],
-                "service_entrypoints": [],
+                "service_entrypoints": ["Services/Messaging/Program.cs"],
                 "hub_files": [],
-                "total_files_scanned": 42,
-                "inferred_tech_stack": "JavaScript/TypeScript, React",
+                "total_files_scanned": 84,
+                "inferred_tech_stack": "JavaScript/TypeScript, Python, React, FastAPI",
             }
-        if local_repo_path == "C:/dogfood/mozaiks-platform/services":
+        return {"success": False, "error": "unexpected repo path"}
+
+    def _fake_scan_local_repo(repo_path: str) -> dict:
+        if repo_path == "C:/workspace/mozaiks-app":
             return {
                 "success": True,
                 "source": "local_repo",
-                "repo_name": "services",
-                "languages": ["C#"],
-                "frameworks": [".NET"],
-                "target_frameworks": ["net8.0"],
-                "route_files": [],
+                "repo_name": "mozaiks-app",
+                "languages": ["JavaScript/TypeScript", "Python"],
+                "frameworks": ["React", "FastAPI"],
+                "target_frameworks": [],
+                "route_files": ["src/AppRoutes.js"],
                 "service_entrypoints": ["Services/Messaging/Program.cs"],
-                "hub_files": ["Services/Messaging/Hubs/MessageHub.cs"],
+                "hub_files": [],
                 "total_files_scanned": 84,
-                "inferred_tech_stack": "C#, .NET, net8.0",
+                "inferred_tech_stack": "JavaScript/TypeScript, Python, React, FastAPI",
             }
         return {"success": False, "error": "unexpected repo path"}
 
@@ -234,7 +261,7 @@ def test_existing_app_preload_supports_workspace_host_with_split_repo_inputs() -
             return {"success": True, "preload_status": "ready"}
 
     module._resolve_host_app_source_inputs = _fake_host_source_inputs
-    module._scan_repo_source = _fake_scan
+    module._scan_local_repo = _fake_scan_local_repo
     module._collect_openapi = _fake_collect_openapi
     module._probe_backend = _fake_probe_backend
     module._load_theme_capture_preloader = lambda: _FakeThemeModule
@@ -242,8 +269,8 @@ def test_existing_app_preload_supports_workspace_host_with_split_repo_inputs() -
     module._collect_theme_css_snapshot = lambda repo_path: "body { font-family: Rajdhani; background: #060B26; }"
 
     context = _Context(
-        app_type="existing",
-        host_app_source="workspace_host",
+        app_type="brownfield_app",
+        host_app_source="workspace_app",
         backend_base_url="https://api.mozaiks.test",
     )
 
@@ -251,15 +278,13 @@ def test_existing_app_preload_supports_workspace_host_with_split_repo_inputs() -
 
     assert result["success"] is True
     assert context["discovery_mode"] == "guided"
-    assert context["host_app_source"] == "workspace_host"
-    assert context["app_name"] == "Mozaiks"
-    assert context["frontend_repo_summary"]["repo_name"] == "MOZ-UI"
-    assert context["backend_repo_summary"]["repo_name"] == "services"
-    assert context["repo_summary"]["source"] == "multi_repo"
-    assert context["repo_summary"]["repo_names"] == ["MOZ-UI", "services"]
+    assert context["host_app_source"] == "workspace_app"
+    assert context["app_name"] == "mozaiks-app"
+    assert context["repo_summary"]["source"] == "local_repo"
+    assert context["repo_summary"]["repo_name"] == "mozaiks-app"
     assert context["service_surfaces"][0]["kind"] == "rest_api"
     assert context["route_surfaces"][0]["module"] == "src"
-    assert context["existing_experience_summary"].startswith("Current host experience is delivered by the MOZ-UI frontend")
+    assert context["existing_experience_summary"].startswith("Current experience appears to be organized around route/module surfaces")
     assert context["preload_status"] == "ready"
     assert context["theme_capture_ready"] is True
     assert context["theme_capture_status"] == "ready"
@@ -269,7 +294,7 @@ def test_existing_app_preload_supports_workspace_host_with_split_repo_inputs() -
 
 def test_existing_app_artifact_saver_persists_canonical_fields() -> None:
     module = _load_module(
-        "factory_app/app/workflows/ExistingAppDiscovery/tools/save_existing_app_artifacts.py",
+        "factory_app/workflows/ExistingAppDiscovery/tools/save_existing_app_artifacts.py",
         "tests.save_existing_app_artifacts_direct",
     )
 
@@ -285,10 +310,10 @@ def test_existing_app_artifact_saver_persists_canonical_fields() -> None:
     context = _Context(
         chat_id="chat_123",
         structured_output={
-            "request_intent": "existing_app",
+            "request_intent": "brownfield_app",
             "existing_product_spec": {
-                "app_name": "MOZ-UI",
-                "app_description": "Existing product frontend",
+                "app_name": "mozaiks-app",
+                "app_description": "Existing product host app",
                 "tech_stack": "React, .NET, MongoDB",
                 "auth_model": "OIDC JWT",
                 "brand_theme_summary": "Dark appearance with purple glass surfaces and Rajdhani/Orbitron typography.",
@@ -330,10 +355,10 @@ def test_existing_app_artifact_saver_persists_canonical_fields() -> None:
     result = asyncio.run(module.save_existing_app_artifacts(context_variables=context))
 
     assert result["success"] is True
-    assert context["existing_product_spec"]["app_name"] == "MOZ-UI"
+    assert context["existing_product_spec"]["app_name"] == "mozaiks-app"
     assert context["capability_specs"][0]["capability_id"] == "direct_messaging"
     assert context["agent_augmentation_plan"]["adoption_level"] == "bridge"
-    assert context["existing_app_discovery_artifact"]["request_intent"] == "existing_app"
+    assert context["existing_app_discovery_artifact"]["request_intent"] == "brownfield_app"
 
     assert emitted["component"] == "DiscoveryBriefCard"
     assert emitted["payload"]["adoption_level"] == "bridge"
@@ -356,20 +381,17 @@ def test_existing_app_strategy_docs_are_indexed() -> None:
     assert "Embed" in augmentation_text
     assert "Native Migration" in augmentation_text
     assert "guided product walkthrough" in augmentation_text
-    assert "workspace_host" in augmentation_text
+    assert "workspace_app" in augmentation_text
     assert "guided plain-language onboarding first" in strategy_text
     assert "Existing-app augmentation doc is canonical" in checklist_text
-    assert "Mozaiks workspace-host dogfood path" in checklist_text
+    assert "workspace-app preset" in checklist_text
 
 
-def test_platform_readme_documents_existing_app_dogfood_path() -> None:
-    from conftest import active_app_root
-    app_root = active_app_root()
-    readme_text = (app_root.parent / "README.md").read_text(encoding="utf-8")
+def test_existing_app_docs_describe_workspace_app_preset() -> None:
+    augmentation_text = _read_text("docs/architecture/specs/existing-app-augmentation-strategy.md")
 
-    assert "Existing-App Dogfood" in readme_text
-    assert "host_app_source" in readme_text
-    assert "workspace_host" in readme_text
-    assert "ThemeCapture" in readme_text
-    assert "/api/themes/mozaiks-platform" in readme_text
+    assert "workspace-app preset" in augmentation_text
+    assert "host_app_source = \"workspace_app\"" in augmentation_text
+    assert "mozaiks-app" in augmentation_text
+    assert "ThemeCapture" in augmentation_text
 

@@ -30,17 +30,20 @@ def test_mozaiks_platform_has_platform_scoped_ai_config() -> None:
 
 def test_shell_config_uses_active_platform_path_first() -> None:
     source = _read("mozaiksai/hosts/platform.py")
-    assert 'platform_root = resolve_platform_path()' in source
-    assert 'ai_path = platform_root / "config" / "ai.json"' in source
+    assert 'def resolve_app_root() -> Path:' in source
+    assert 'def resolve_platform_path() -> Path:' in source
+    assert 'app_root = resolve_app_root()' in source
+    assert 'ai_path = app_root / "config" / "ai.json"' in source
+    assert 'Path(__file__).parent / "platform" / "config" / "ai.json"' not in source
     assert 'app_manifest_path = _resolve_app_manifest_path()' in source
-    assert 'platform_root / "app.json"' in source
+    assert 'app_root / "app.json"' in source
     assert 'shell_config_path = _resolve_shell_config_path()' in source
-    assert 'platform_root / "config" / "shell.json"' in source
+    assert 'app_root / "config" / "shell.json"' in source
     assert "_load_ui_route_manifest_pages" in source
     assert "_load_page_schema_routes" in source
     assert "_load_workflow_entrypoint_pages" in source
-    assert 'platform_root / "app.yaml"' not in source
-    assert 'platform_root / "config" / "navigation.json"' not in source
+    assert 'app_root / "app.yaml"' not in source
+    assert 'app_root / "config" / "navigation.json"' not in source
 
 
 def test_mozaiks_platform_app_yaml_is_removed() -> None:
@@ -76,7 +79,7 @@ def test_mozaiks_platform_route_manifest_owns_dashboard_route() -> None:
 
 
 def test_mozaiks_platform_workflow_registry_owns_create_route() -> None:
-    registry_path = _workspace() / "factory_app" / "app" / "workflows" / "extended_orchestration" / "extension_registry.json"
+    registry_path = _workspace() / "factory_app" / "workflows" / "extended_orchestration" / "extension_registry.json"
     data = json.loads(registry_path.read_text(encoding="utf-8"))
 
     create_route = next(item for item in data["entrypoints"] if item["path"] == "/create")
@@ -87,7 +90,7 @@ def test_mozaiks_platform_workflow_registry_owns_create_route() -> None:
 
 def test_mozaiks_platform_workflow_registry_uses_shared_base_and_local_overlay() -> None:
     app_root = active_app_root()
-    shared_registry_path = _workspace() / "factory_app" / "app" / "workflows" / "extended_orchestration" / "extension_registry.json"
+    shared_registry_path = _workspace() / "factory_app" / "workflows" / "extended_orchestration" / "extension_registry.json"
     overlay_registry_path = app_root / "workflows" / "extended_orchestration" / "extension_registry.json"
     shared = json.loads(shared_registry_path.read_text(encoding="utf-8"))
     overlay = json.loads(overlay_registry_path.read_text(encoding="utf-8"))
@@ -96,7 +99,8 @@ def test_mozaiks_platform_workflow_registry_uses_shared_base_and_local_overlay()
     overlay_workflow_ids = {item["id"] for item in overlay["workflows"]}
 
     assert {"ValueEngine", "ThemeCapture", "DesignDocs", "AgentGenerator", "AppGenerator"}.issubset(shared_workflow_ids)
-    assert overlay_workflow_ids == {"CreateLauncher", "AppMarketing", "InvestorMarketplace"}
+    assert {"AppMarketing", "InvestorMarketplace"}.issubset(overlay_workflow_ids)
+    assert "CreateLauncher" not in overlay_workflow_ids
     assert "entrypoints" not in overlay
     assert "workflow_sequences" not in overlay
     assert "transitions" not in overlay

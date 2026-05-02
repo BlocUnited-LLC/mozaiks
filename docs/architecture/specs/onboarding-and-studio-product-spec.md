@@ -118,7 +118,7 @@ Responsibility:
 
 - collect app intent in guided form
 - configure AI provider, model defaults, auth/admin bootstrap, theme intent, and entry surfaces
-- support both `new_app` and `existing_app` onboarding tracks
+- support both `greenfield_app` and `brownfield_app` onboarding tracks
 
 Outputs should be constrained to app-owned configuration and planning artifacts, not runtime internals.
 
@@ -235,7 +235,7 @@ The Studio create loop should be artifact-first, not transcript-first.
 Canonical flow:
 
 1. user enters a build or refinement request
-2. system classifies the request: `new_app`, `existing_app`, or `refinement`
+2. system classifies the request: `greenfield_app`, `brownfield_app`, or `refinement`
 3. system produces typed planning artifacts
 4. Studio renders a proposed plan:
    - owned paths
@@ -254,6 +254,138 @@ This preserves the core Mozaiks model:
 - artifacts first
 - deterministic product surfaces first
 - agentic augmentation second
+
+## Canonical Create Journeys
+
+Before additional routing or selector work lands, Mozaiks should treat the Studio
+Create surface as three different user journeys that happen to share one entry box.
+
+The important rule is: the user should feel one product, but the system should not
+pretend all create requests mean the same kind of work.
+
+### 1. `greenfield_app`
+
+This is the Mozaiks-native build path.
+
+Use this when the user is asking Mozaiks to create the first canonical app bundle.
+
+Typical asks:
+
+- build a CRM for startup fundraising
+- create a marketplace app for equipment rentals
+- generate an operations dashboard for internal staff
+
+Default posture:
+
+- Mozaiks owns the generated app artifacts
+- Mozaiks owns the first-pass planning and generation flow
+- hosted deployments should default to Mozaiks-managed runtime, MongoDB, and secret management unless the user explicitly chooses an advanced external path
+
+Canonical internal stages today:
+
+- concept and value definition
+- theme and brand capture
+- product design docs
+- workflow and app generation
+
+The user-facing questions for this path should be about:
+
+- what they are building
+- how guided vs autonomous the build should be
+- whether data should use the default managed MongoDB path, a known external MongoDB, or a deferred setup choice
+
+The user should not be asked discovery-style questions about an existing host app unless they explicitly indicate a bring-your-own system.
+
+### 2. `brownfield_app`
+
+This is the augmentation and adoption-planning path.
+
+Use this when the user already has a product and wants Mozaiks to augment it,
+embed into it, bridge to it, or selectively migrate parts of it later.
+
+Typical asks:
+
+- connect our current app and add an AI workspace
+- let agents read and update selected host capabilities
+- embed Mozaiks into our existing frontend
+
+Default posture:
+
+- the host product already owns core behavior
+- discovery comes before generation
+- adoption should default to the smallest useful move: embed or bridge before ecosystem or migration
+
+Canonical internal stages today:
+
+- existing product discovery
+- capability mapping
+- adoption-level recommendation
+- augmentation artifact assembly
+
+The user-facing questions for this path should be about:
+
+- where the current app lives
+- whether Mozaiks is embedding, bridging, or planning later migration
+- what should stay host-owned vs become AI-accessible
+- how Mozaiks should authenticate against the host system
+
+This path should not begin by asking which new database Mozaiks should create.
+In many cases, the correct first move is no direct database ownership at all.
+It may be API bridge first, host capability bridge first, or a Mozaiks-owned
+embedded workspace with no backend bridge yet.
+
+The companion strategy for this path is [existing-app-augmentation-strategy.md](./existing-app-augmentation-strategy.md).
+
+### 3. `refinement`
+
+This is the change-management path for a Mozaiks-owned artifact that already exists.
+
+Use this when the user is not starting from zero and is not discovering an unknown
+external product. They are modifying a known app bundle or workflow bundle that
+Mozaiks already generated or already treats as the active artifact baseline.
+
+Typical asks:
+
+- add a new field to the contacts flow
+- redesign the dashboard layout
+- add a reporting feature to the current app
+- change the app concept enough that the build must be reconsidered
+
+Default posture:
+
+- start from the persisted artifact version
+- classify the change first
+- re-enter at the smallest valid boundary instead of replaying the full intake journey
+
+Canonical refinement classifications:
+
+- `patch`
+- `design`
+- `feature`
+- `core`
+
+This path is not discovery. It already has a known baseline.
+
+### Journey Boundary Rules
+
+These boundaries should stay explicit across routing, prompts, and UI:
+
+1. `greenfield_app` is initial creation of a Mozaiks-native app.
+2. `brownfield_app` is discovery and augmentation of a host system that already exists.
+3. `refinement` is scoped change-management against a known artifact version.
+
+Practical implications:
+
+- `brownfield_app` should route into discovery before planning generation
+- `refinement` should not re-enter the same intake selectors as `greenfield_app`
+- database setup questions differ by journey:
+   - `greenfield_app`: choose managed MongoDB vs external MongoDB vs defer
+   - `brownfield_app`: decide host access mode first, not new database ownership first
+   - `refinement`: ask only when the requested change actually affects data/storage
+
+The system may still present all three from one Studio Create surface, but the
+classifier and transition graph must treat them as different request kinds with
+different next questions.
 
 ## Capability Model
 

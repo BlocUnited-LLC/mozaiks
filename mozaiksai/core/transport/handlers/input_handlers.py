@@ -58,19 +58,13 @@ async def handle_user_input_submit(
             await transport._send_ws_error(websocket, "General mode is unavailable right now. Please try again.", "GENERAL_MODE_FAILED")
         return
 
-    # AG2 InputRequestEvent response
     if req_id:
-        logger.info(f"[INPUT] Routing to submit_user_input for AG2 InputRequestEvent: req_id={req_id}")
-        try:
-            ok = await transport.submit_user_input(req_id, text)
-            logger.info(f"[INPUT] submit_user_input returned: {ok} for req_id={req_id}")
-            await websocket.send_json({
-                "type": "ack.input",
-                "data": {"input_request_id": req_id, "status": "accepted" if ok else "rejected"},
-                "timestamp": utc_timestamp()
-            })
-        except Exception as ie:
-            logger.error(f"Failed to process inbound user input {req_id}: {ie}", exc_info=True)
+        logger.warning("[INPUT] request_id=%s is no longer accepted on user.input.submit; use tool_call_response instead", req_id)
+        await transport._send_ws_error(
+            websocket,
+            "Response-required interactions must be answered with tool_call_response",
+            "INPUT_REQUEST_SUBMIT_DEPRECATED",
+        )
         return
 
     # Free-form user message (no pending request)
@@ -141,25 +135,25 @@ async def handle_user_input_submit(
         await transport._send_ws_error(websocket, "User message failed", "USER_MESSAGE_FAILED")
 
 
-async def handle_ui_tool_response(
+async def handle_tool_call_response(
     transport: "SimpleTransport",
     data: Dict[str, Any],
     chat_id: str,
     websocket: WebSocket,
 ) -> None:
-    """Handle ui_tool_response message type."""
-    event_id = data.get('eventId') or data.get('ui_tool_id')
+    """Handle tool_call_response message type."""
+    event_id = data.get('tool_call_id')
     response_data = data.get('response', {})
     if not event_id:
         return
     try:
-        ok = await transport.submit_ui_tool_response(event_id, response_data)
-        logger.info(f"UI tool response received for event {event_id}: {ok}")
+        ok = await transport.submit_tool_call_response(event_id, response_data)
+        logger.info(f"Tool call response received for event {event_id}: {ok}")
         await websocket.send_json({
-            "type": "ack.ui_tool_response",
-            "data": {"eventId": event_id, "status": "accepted" if ok else "rejected"},
+            "type": "ack.tool_call_response",
+            "data": {"tool_call_id": event_id, "status": "accepted" if ok else "rejected"},
             "timestamp": utc_timestamp()
         })
     except Exception as uie:
-        logger.error(f"Failed to process UI tool response {event_id}: {uie}")
-        await transport._send_ws_error(websocket, "UI tool response failed", "UI_TOOL_RESPONSE_FAILED")
+        logger.error(f"Failed to process tool call response {event_id}: {uie}")
+        await transport._send_ws_error(websocket, "Tool call response failed", "TOOL_CALL_RESPONSE_FAILED")

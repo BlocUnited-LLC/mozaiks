@@ -121,7 +121,7 @@ def test_emit_ui_surface_uses_registry_resolved_display_and_no_response() -> Non
         captured.update(kwargs)
         return "evt_artifact_1"
 
-    ui_tools_module._emit_ui_tool_event_core = _fake_emit
+    ui_tools_module._emit_tool_call_core = _fake_emit
 
     event_id = asyncio.run(
         ui_tools_module.emit_ui_surface(
@@ -155,8 +155,8 @@ def test_use_ui_tool_requests_response_and_returns_event_id() -> None:
         assert event_id == "evt_interactive_1"
         return {"status": "ok"}
 
-    ui_tools_module._emit_ui_tool_event_core = _fake_emit
-    ui_tools_module._wait_for_ui_tool_response_internal = _fake_wait
+    ui_tools_module._emit_tool_call_core = _fake_emit
+    ui_tools_module._wait_for_tool_call_response_internal = _fake_wait
 
     response = asyncio.run(
         ui_tools_module.use_ui_tool(

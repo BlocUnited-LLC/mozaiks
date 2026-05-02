@@ -198,7 +198,7 @@ const DENSITY_UI_PRESETS = {
 // FILE: chat-ui/src/styles/themeProvider.js
 // PURPOSE: Dynamic theme system for multi-tenant branding
 // USAGE: Theme is loaded from the /api/theme-config endpoint
-//        (backed by app/config/theme_config.json). In platform mode,
+//        (backed by brand/theme_config.json). In platform mode,
 //        /api/themes/{appId} overrides are deep-merged on top.
 // ============================================================================
 
@@ -734,7 +734,7 @@ function themeConfigToTheme(config, basePath) {
 
 /**
  * Apply App UI --mz-* tokens when the config response contains a `theme` key
- * (the schema-driven format from PLATFORM_PATH/brand/theme_config.json).
+ * (the schema-driven format from the active app root's brand/theme_config.json).
  *
  * Dynamically imports the token engine so this module stays usable in
  * environments where the theme module hasn't been bundled yet.
@@ -962,7 +962,7 @@ async function fetchPlatformOverrides(appId) {
  * Load the theme for a given app.
  *
  * Load order:
- *   1. /api/theme-config     — declarative config (app/config/theme_config.json).
+ *   1. /api/theme-config     — declarative config (brand/theme_config.json).
  *   2. /api/themes/{appId}   — platform overrides merged on top (multi-tenant only).
  *
  * This guarantees theme_config.json is the source of truth in local dev.

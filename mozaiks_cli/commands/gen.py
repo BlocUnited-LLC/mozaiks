@@ -76,7 +76,7 @@ def _find_generator_source() -> Optional[Path]:
     """Locate the AgentGenerator workflow source directory."""
     candidates = [
         # Factory-owned workflow packs inside this repo
-        Path(__file__).parents[2] / "factory_app" / "app" / "workflows",
+        Path(__file__).parents[2] / "factory_app" / "workflows",
         # Env override
         Path(os.environ.get("MOZAIKS_WORKFLOWS_PATH", ""))
         if os.environ.get("MOZAIKS_WORKFLOWS_PATH") else None,

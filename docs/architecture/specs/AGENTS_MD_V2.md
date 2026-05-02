@@ -403,11 +403,13 @@ RULES = {
 
 ### AI-Only Mode
 
-```yaml
-# app.yaml
-capabilities:
-  ai: true
-  modules: false
+```json
+{
+  "appName": "ai-only-app",
+  "targets": {
+    "web": true
+  }
+}
 ```
 
 - Only packages/ai is loaded
@@ -416,11 +418,13 @@ capabilities:
 
 ### Modules-Only Mode
 
-```yaml
-# app.yaml
-capabilities:
-  ai: false
-  modules: true
+```json
+{
+  "appName": "modules-only-app",
+  "targets": {
+    "web": true
+  }
+}
 ```
 
 - Only packages/modules is loaded
@@ -429,11 +433,13 @@ capabilities:
 
 ### Full Mode
 
-```yaml
-# app.yaml
-capabilities:
-  ai: true
-  modules: true
+```json
+{
+  "appName": "full-app",
+  "targets": {
+    "web": true
+  }
+}
 ```
 
 - Both loaded
@@ -480,6 +486,6 @@ event = Event.create(
 3. **Runtime composes them** - It's the only place they meet
 4. **Tools use context** - Runtime injects executors
 5. **Events for async** - Fire-and-forget communication
-6. **Modes are explicit** - app.yaml declares what's enabled
+6. **Modes are explicit** - the app bundle declares what's enabled
 
 When in doubt, ask: "Can this package run standalone?" If yes, you're on the right track.

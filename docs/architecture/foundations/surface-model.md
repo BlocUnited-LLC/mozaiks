@@ -43,7 +43,7 @@ If the user can navigate to it as part of the product experience, it should usua
 
 - render UI
 - call a module for data or actions
-- launch a workflow
+- launch a workflow through a page-owned action or entrypoint
 - show the result of previous workflows
 
 ### What a page should not be:
@@ -90,7 +90,7 @@ Use a workflow when the value comes from:
 Question a workflow answers: **what run is happening**
 
 Canonically, app-owned workflow definitions live under `app/workflows/*`.
-The shared generation core lives under `factory_app/app/workflows/*`.
+The shared generation core lives under `factory_app/workflows/*`.
 
 ## 3. Module
 
@@ -208,4 +208,3 @@ But those are secondary details. They are not the first classification question.
 - [architecture-overview.md](architecture-overview.md)
 - [canonical-app-structure.md](canonical-app-structure.md)
 - [workflow-architecture.md](workflow-architecture.md)
-

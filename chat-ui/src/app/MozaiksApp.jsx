@@ -49,11 +49,10 @@ export default function MozaiksApp({
   };
 
   const renderUiTool = useCallback(
-    (event, onResponse, submitInputRequest, options = {}) => (
+    (event, onResponse, options = {}) => (
       <ShellUIToolRenderer
         event={event}
         onResponse={onResponse}
-        submitInputRequest={submitInputRequest}
         onArtifactAction={options.onArtifactAction}
         actionStatusMap={options.actionStatusMap}
       />

@@ -280,7 +280,11 @@ class TextEventHandler(BaseEventHandler):
 
         # Emit agent output validated event
         await self._emit_agent_output_validated(
-            sender_name, normalized_structured, ctx, state, auto_mode=auto_mode
+            sender_name,
+            normalized_structured,
+            ctx,
+            state,
+            auto_tool_call_enabled=auto_tool_call_enabled,
         )
         await self._emit_decomposition_planned(
             sender_name, normalized_structured, ctx, state
@@ -421,7 +425,7 @@ class TextEventHandler(BaseEventHandler):
         ctx: "StreamContext",
         state: "StreamState",
         *,
-        auto_mode: bool,
+        auto_tool_call_enabled: bool,
     ) -> None:
         """Emit canonical runtime.agent_output_validated event through dispatcher."""
         turn_key = build_turn_idempotency_key(ctx.chat_id, state.sequence_counter)

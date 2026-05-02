@@ -12,7 +12,6 @@ def _load_save_app_schema_module():
     file_path = (
         workspace
         / "factory_app"
-        / "app"
         / "workflows"
         / "AppGenerator"
         / "tools"
@@ -252,6 +251,36 @@ def test_save_app_schema_accepts_empty_primitive(monkeypatch, tmp_path: Path) ->
 
     assert "App: Ops Portal" in result
     assert "Empty" in context.data["available_page_primitives"]
+
+
+def test_save_app_schema_accepts_workflow_action(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    context = _Context()
+    page = _base_page()
+    page["sections"] = [
+        {
+            "id": "launch-workflow",
+            "primitive": "Button",
+            "config": {
+                "label": "Open Customer Support",
+                "action_type": "workflow",
+                "workflow_id": "CustomerSupport",
+                "context_variables": {
+                    "customer_id": "{id}",
+                    "source_page": "dashboard",
+                },
+            },
+        }
+    ]
+
+    result = save_app_schema_module.save_app_schema(
+        manifest=_base_manifest(),
+        pages=[page],
+        theme_config_patch=None,
+        context_variables=context,
+    )
+
+    assert "App: Ops Portal" in result
 
 
 def test_save_app_schema_accepts_canonical_declarative_config(monkeypatch, tmp_path: Path) -> None:

@@ -34,7 +34,7 @@ _LAZY_EXPORTS: dict[str, str] = {
     "AG2PersistenceManager": ".data",
     # Events
     "emit_business_event": ".events",
-    "emit_ui_tool_event": ".events",
+    "emit_tool_call_request": ".events",
     "get_event_dispatcher": ".events",
 }
 
@@ -51,4 +51,3 @@ def __getattr__(name: str) -> Any:  # noqa: ANN001
 
 
 __all__ = list(_LAZY_EXPORTS)
-

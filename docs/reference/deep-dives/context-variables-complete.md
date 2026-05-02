@@ -102,7 +102,7 @@ Source types supported by runtime:
 
 Source file analyzed:
 
-- `factory_app/app/workflows/AgentGenerator/context_variables.yaml`
+- `factory_app/workflows/AgentGenerator/context_variables.yaml`
 
 ### Resolution Matrix
 

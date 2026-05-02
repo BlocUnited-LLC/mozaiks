@@ -189,7 +189,7 @@ The following app-bundle families are consumed before AG2 is involved:
 - `app/data/*`
 - `app/modules/*`
 - `app/config/*`
-- workflow `triggers:` declared in `app/workflows/*/orchestrator.yaml` for app-owned workflows, or `factory_app/app/workflows/*/orchestrator.yaml` for builder/system workflows
+- workflow `triggers:` declared in `app/workflows/*/orchestrator.yaml` for app-owned workflows, or `factory_app/workflows/*/orchestrator.yaml` for builder/system workflows
 
 Most importantly:
 

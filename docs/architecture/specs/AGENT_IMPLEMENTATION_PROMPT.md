@@ -16,13 +16,16 @@ Before writing any code, you MUST read and understand:
 
 1. **⭐⭐ Event System** (`../foundations/event-system.md`) - The runtime is event-first. All orchestration reacts to explicit events, NOT transcript parsing or output discovery.
 
-2. **MODULAR_ARCHITECTURE_V2.md** - Package structure and dependency rules.
+2. **Canonical App Structure** (`../foundations/canonical-app-structure.md`) - The active app-root contract for pages, modules, workflows, config, and brand.
 
-3. **AGENTS_MD_V2.md** - Import rules and communication patterns.
+3. **Repository Guidance** (`../../../AGENTS.md`) - Active repository-level operating rules.
 
 4. **Event Contracts** (`../foundations/event-contracts.md`) - Event envelope schema and naming conventions.
 
 5. **RUNTIME_SPEC.md** - How the runtime composes packages.
+
+Use **MODULAR_ARCHITECTURE_V2.md** only when the task is specifically about a
+future package split. It is not the canonical greenfield app-bundle contract.
 
 If the task touches app generation, builder workflows, persistent app UI, or refinement routing, also read:
 
@@ -183,7 +186,7 @@ packages/modules/
 ### Phase 5: Runtime Package (`packages/runtime/`)
 
 **What to implement:**
-- App definition loading (app.yaml)
+- App definition loading (`app/app.json` plus discovered bundle parts)
 - Request routing
 - Executor registry (injecting AI/modules executors into context)
 - Event bus with routing rules
@@ -323,8 +326,8 @@ Before committing, verify:
 ## Getting Started Checklist
 
 - [ ] Read `../foundations/event-system.md`
-- [ ] Read MODULAR_ARCHITECTURE_V2.md
-- [ ] Read AGENTS_MD_V2.md
+- [ ] Read `../foundations/canonical-app-structure.md`
+- [ ] Read `../../../AGENTS.md`
 - [ ] Implement core package first
 - [ ] Add Event class with proper envelope
 - [ ] Implement AI adapter with real-time event iteration
@@ -354,6 +357,6 @@ All architecture documents are in `docs/architecture/specs/`:
 - [RUNTIME_SPEC.md](./RUNTIME_SPEC.md) - Runtime behavior
 - [WORKFLOW_TRIGGERS_SPEC.md](./WORKFLOW_TRIGGERS_SPEC.md) - Event triggers
 - [TOOLS_SPEC.md](./TOOLS_SPEC.md) - Tool definitions
-- [MODULAR_ARCHITECTURE_V2.md](./MODULAR_ARCHITECTURE_V2.md) - Package structure
-- [AGENTS_MD_V2.md](./AGENTS_MD_V2.md) - Import rules
+- [MODULAR_ARCHITECTURE_V2.md](./MODULAR_ARCHITECTURE_V2.md) - Future package-splitting proposal
+- [../../../AGENTS.md](../../../AGENTS.md) - Active repository guidance
 - [Event Contracts](../foundations/event-contracts.md) - Event schemas

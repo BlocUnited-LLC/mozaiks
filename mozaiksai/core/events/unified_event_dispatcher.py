@@ -8,7 +8,7 @@
 Centralized dispatcher for mozaiksai runtime events.
 
 This module is responsible for:
-- BusinessLogEvent / UIToolEvent internal domain events
+- BusinessLogEvent / ToolCallRequestEvent internal domain events
 - Lightweight outbound envelope construction for already-normalized chat/runtime events
 
 AG2 runtime events should already arrive normalized into dicts with a `kind` field
@@ -52,23 +52,23 @@ class EventCategory(Enum):
               - Examples: SERVER_STARTUP_COMPLETED, WORKFLOW_SYSTEM_READY
               - Handled by BusinessLogHandler for logging/observability
     
-    UI_TOOL:  Interactive agent-to-UI communication
-              - Uses 'ui_tool_id' field for component identification  
+    TOOL_CALL: Interactive agent-to-UI communication
+              - Uses 'tool_name' field for component identification
               - Examples: agent_api_key_input, file_download_center
-              - Handled by UIToolHandler for dynamic UI components
+              - Handled by ToolCallRequestHandler for dynamic UI components
               
     Note: AG2 Runtime Events use a separate 'kind' field and are processed
           via event_serialization.py -> WebSocket transport (not this enum)
     """
     BUSINESS = "business"
-    UI_TOOL = "ui_tool"
+    TOOL_CALL = "tool_call"
 
 @dataclass
 class BusinessLogEvent:
     """
     System monitoring and lifecycle events for observability.
     
-    Key field: log_event_type (distinguishes this from AG2 'kind' and UI 'ui_tool_id')
+    Key field: log_event_type (distinguishes this from AG2 'kind' and tool-call 'tool_name')
     Purpose: Application health monitoring, performance tracking, debugging
     Handler: BusinessLogHandler -> structured logging
     """
@@ -81,24 +81,24 @@ class BusinessLogEvent:
     category: str = field(default="business")
 
 @dataclass
-class UIToolEvent:
+class ToolCallRequestEvent:
     """
     Interactive agent-to-UI communication for dynamic components.
     
-    Key field: ui_tool_id (distinguishes this from business 'log_event_type' and AG2 'kind')
+    Key field: tool_name (distinguishes this from business 'log_event_type' and AG2 'kind')
     Purpose: Agent requests for user input, dynamic UI rendering, interactive flows
-    Handler: UIToolHandler -> WebSocket transport to frontend
+    Handler: ToolCallRequestHandler -> WebSocket transport to frontend
     """
-    ui_tool_id: str       # Component identifier (e.g. "agent_api_key_input")  
+    tool_name: str
     payload: Dict[str, Any]
     workflow_name: str
     display: str = "inline"
     chat_id: Optional[str] = None
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     event_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
-    category: str = field(default="ui_tool")
+    category: str = field(default="tool_call")
 
-EventType = Union[BusinessLogEvent, UIToolEvent, DomainEvent]
+EventType = Union[BusinessLogEvent, ToolCallRequestEvent, DomainEvent]
 
 class EventHandler(ABC):
     @abstractmethod
@@ -120,14 +120,14 @@ class BusinessLogHandler(EventHandler):
         lvl(f"[BUSINESS] {event.log_event_type}: {event.description} context={event.context}")
         return True
 
-class UIToolHandler(EventHandler):
+class ToolCallRequestHandler(EventHandler):
     def can_handle(self, event: EventType) -> bool:
-        return isinstance(event, UIToolEvent)
+        return isinstance(event, ToolCallRequestEvent)
 
     async def handle(self, event: EventType) -> bool:
-        if not isinstance(event, UIToolEvent):
+        if not isinstance(event, ToolCallRequestEvent):
             return False
-        logger.debug(f"[UI_TOOL] id={event.ui_tool_id} workflow={event.workflow_name} display={event.display}")
+        logger.debug(f"[TOOL_CALL] tool=%s workflow=%s display=%s", event.tool_name, event.workflow_name, event.display)
         return True
 
 
@@ -153,7 +153,7 @@ class UnifiedEventDispatcher:
     Central event dispatcher for mozaiksai's three-layer event system:
     
     1. Business Events: Use emit_business_event(log_event_type=...) for monitoring
-    2. UI Tool Events: Use emit_ui_tool_event(ui_tool_id=...) for agent-UI interaction  
+    2. Tool call request events: Use emit_tool_call_request(tool_name=...) for agent-UI interaction
     3. AG2 Runtime Events: Handled separately via event_serialization.py using 'kind' field
     
     AG2 events flow: AG2 -> event_serialization.py -> WebSocket transport
@@ -170,7 +170,7 @@ class UnifiedEventDispatcher:
         self.metrics: Dict[str, Any] = {
             "events_processed": 0,
             "events_failed": 0,
-            "events_by_category": {"business": 0, "ui_tool": 0},
+            "events_by_category": {"business": 0, "tool_call": 0},
             "created": datetime.now(UTC).isoformat(),
         }
         self._auto_tool_handler = AutoToolEventHandler()
@@ -192,7 +192,7 @@ class UnifiedEventDispatcher:
 
     def _setup_default_handlers(self):
         self.register_handler(BusinessLogHandler())
-        self.register_handler(UIToolHandler())
+        self.register_handler(ToolCallRequestHandler())
         self.register_handler(DomainEventHandler())
 
     def register_handler(
@@ -299,15 +299,15 @@ class UnifiedEventDispatcher:
         event = BusinessLogEvent(log_event_type=log_event_type, description=description, context=context or {}, level=level)
         return await self.dispatch(event)
 
-    async def emit_ui_tool_event(
+    async def emit_tool_call_request(
         self,
-        ui_tool_id: str,
+        tool_name: str,
         payload: Dict[str, Any],
         workflow_name: str,
         display: str = "inline",
         chat_id: Optional[str] = None,
     ) -> bool:
-        event = UIToolEvent(ui_tool_id=ui_tool_id, payload=payload, workflow_name=workflow_name, display=display, chat_id=chat_id)
+        event = ToolCallRequestEvent(tool_name=tool_name, payload=payload, workflow_name=workflow_name, display=display, chat_id=chat_id)
         return await self.dispatch(event)
 
     async def emit_domain_event(self, event: DomainEvent) -> bool:
@@ -497,10 +497,10 @@ class UnifiedEventDispatcher:
                 event_dict['auto_tool_call'] = bool(event_dict['auto_tool_call'])
 
         ns_map = {
-            'print': 'chat.print', 'text': 'chat.text', 'input_request': 'chat.input_request', 'input_ack': 'chat.input_ack',
+            'print': 'chat.print', 'text': 'chat.text', 'input_ack': 'chat.input_ack',
             'input_timeout': 'chat.input_timeout', 'select_speaker': 'chat.select_speaker', 'resume_boundary': 'chat.resume_boundary',
             'usage_delta': 'chat.usage_delta', 'usage_summary': 'chat.usage_summary', 'run_complete': 'chat.run_complete', 'error': 'chat.error', 'tool_call': 'chat.tool_call', 'tool_response': 'chat.tool_response',
-            'agent_output_validated': 'chat.agent_output_validated', 'run_start': 'chat.run_start', 'ui_tool_dismiss': 'chat.ui_tool_dismiss',
+            'agent_output_validated': 'chat.agent_output_validated', 'run_start': 'chat.run_start', 'tool_call_dismiss': 'chat.tool_call_dismiss',
             'attachment_uploaded': 'chat.attachment_uploaded',
             'stream_chunk': 'chat.stream_chunk', 'stream_end': 'chat.stream_end', 'custom_event': 'chat.custom_event',
             'greeting_echo': 'chat.greeting_echo',
@@ -534,13 +534,13 @@ async def emit_business_event(
     
     This is distinct from:
     - AG2 runtime events (use 'kind' field, processed via event_serialization.py)  
-    - UI tool events (use emit_ui_tool_event with 'ui_tool_id' field)
+    - Tool call request events (use emit_tool_call_request with 'tool_name' field)
     """
     dispatcher = get_event_dispatcher()
     return await dispatcher.emit_business_event(log_event_type, description, context, level)
 
-async def emit_ui_tool_event(
-    ui_tool_id: str,
+async def emit_tool_call_request(
+    tool_name: str,
     payload: Dict[str, Any],
     workflow_name: str,
     display: str = "inline",
@@ -550,7 +550,7 @@ async def emit_ui_tool_event(
     Emit a UI TOOL event for agent-to-UI interactive communication.
     
     Args:
-        ui_tool_id: UI component identifier (e.g. "agent_api_key_input")
+        tool_name: UI component identifier (e.g. "agent_api_key_input")
         payload: Component-specific data and configuration
         workflow_name: Which workflow is requesting the UI interaction
         display: Display mode ("inline", "artifact", etc.)
@@ -561,6 +561,6 @@ async def emit_ui_tool_event(
     - AG2 runtime events (use 'kind' field, processed via event_serialization.py)
     """
     dispatcher = get_event_dispatcher()
-    return await dispatcher.emit_ui_tool_event(ui_tool_id, payload, workflow_name, display, chat_id)
+    return await dispatcher.emit_tool_call_request(tool_name, payload, workflow_name, display, chat_id)
 
 

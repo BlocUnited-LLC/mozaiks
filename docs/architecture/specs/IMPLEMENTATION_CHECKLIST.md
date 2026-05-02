@@ -87,11 +87,12 @@ TARGET STATE:
 | `mozaiks dev` | ❌ | Need to add |
 | `mozaiks build` | ❌ | Need to add |
 
-### factory_app/app/workflows/ + app/workflows/
+### factory_app/workflows/ + app/workflows/
 **Status:** Canonical workflow roots, keep clean
 
-- Shared generation-core workflows live under `factory_app/app/workflows/`
+- Shared generation-core workflows live under `factory_app/workflows/`
 - App-owned workflows live under the active app root's `app/workflows/`
+- `factory_app/app/workflows/` should stay empty until the factory app has a real app-owned overlay workflow
 - No legacy demo/sample workflows in the canonical roots
 
 ### Layered FastAPI Hosts
@@ -157,7 +158,7 @@ packages/modules/
 ```
 packages/runtime/
 ├── __init__.py
-├── app.py                 # Load app.yaml, compose packages
+├── app.py                 # Load app/app.json and discover bundle parts
 ├── router.py              # Request routing
 ├── executors.py           # Executor registry
 ├── middleware.py          # Auth, context injection
@@ -439,7 +440,7 @@ access:
 **Priority:** HIGH - Composes ai + modules
 
 - [ ] Create `packages/runtime/` directory structure
-- [ ] Implement app loader (parse app.yaml)
+- [ ] Implement app loader (parse `app/app.json` and discover bundle parts)
 - [ ] Implement executor registry
 - [ ] Implement request router
 - [ ] Implement event bus with routing rules
@@ -450,22 +451,17 @@ access:
 - [ ] Integration tests (all modes)
 
 **App Definition Example:**
-```yaml
-# app.yaml
-name: my-app
-version: "1.0"
-
-capabilities:
-  ai: true
-  modules: true
-
-workflows:
-  - AppGenerator
-  - ValueEngine
-
-modules:
-  - contacts
-  - projects
+```json
+{
+  "appName": "my-app",
+  "version": "1.0",
+  "targets": {
+    "web": true
+  },
+  "startup": {
+    "landing_spot": "/"
+  }
+}
 ```
 
 **Acceptance Criteria:**
@@ -657,7 +653,7 @@ modules:
 - [ ] Role-based access enforced
 
 ### Integration
-- [ ] Create `app.yaml` for platform-admin
+- [ ] Create `app/app.json` for platform-admin
 - [ ] Deploy platform-admin on mozaiks runtime
 - [ ] Actions trigger .NET service calls
 - [ ] Performance <500ms page load

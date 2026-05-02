@@ -234,7 +234,7 @@ async def test_platform_host_loads_app_zero_product_modules(monkeypatch):
 
     from conftest import active_app_root
     monkeypatch.setenv("PLATFORM_PATH", str(active_app_root()))
-    load_result = await AppLoader.load(str(platform_app.resolve_platform_path()))
+    load_result = await AppLoader.load(str(platform_app.resolve_app_root()))
     loaded_modules = {module.name: type(module.handler).__name__ for module in load_result.modules}
 
     assert loaded_modules == {

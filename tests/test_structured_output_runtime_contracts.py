@@ -9,7 +9,7 @@ _structured_mod = import_module_directly("mozaiksai.core.workflow.outputs.struct
 
 
 def test_agentgenerator_structured_outputs_load_optional_dict_contracts() -> None:
-    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "app" / "workflows"
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
 
     _workflow_manager_mod.UnifiedWorkflowManager._instance = None
     _workflow_manager_mod.initialize_workflows(base_path=str(workflows_root))

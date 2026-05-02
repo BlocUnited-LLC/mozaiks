@@ -20,19 +20,31 @@ def _unconfigured_active_app_root() -> Path:
     return (repo_root() / "__no_active_app__").resolve()
 
 
+def _repo_factory_workflows_root() -> Path:
+    return (repo_root() / "factory_app" / "workflows").resolve()
+
+
+def _resolve_app_root_candidate(value: str | os.PathLike[str]) -> Path:
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        candidate = (repo_root() / candidate).resolve()
+    direct_app_json = candidate / "app.json"
+    nested_app_json = candidate / "app" / "app.json"
+    if direct_app_json.exists():
+        return candidate.resolve()
+    if nested_app_json.exists():
+        return (candidate / "app").resolve()
+    return candidate.resolve()
+
+
 def resolve_active_app_root() -> Path:
     override = str(os.getenv("PLATFORM_PATH") or "").strip()
     if override:
-        candidate = Path(override)
-        if not candidate.is_absolute():
-            candidate = (repo_root() / candidate).resolve()
-        direct_app_json = candidate / "app.json"
-        nested_app_json = candidate / "app" / "app.json"
-        if direct_app_json.exists():
-            return candidate.resolve()
-        if nested_app_json.exists():
-            return (candidate / "app").resolve()
-        return candidate.resolve()
+        return _resolve_app_root_candidate(override)
+
+    workspace_override = str(os.getenv("MOZAIKS_APP_WORKSPACE_PATH") or "").strip()
+    if workspace_override:
+        return _resolve_app_root_candidate(workspace_override)
 
     return _unconfigured_active_app_root()
 
@@ -79,8 +91,17 @@ def normalize_workflow_roots(
         add(single_root)
         return candidates
 
-    active_root = (resolve_active_app_root() / "workflows").resolve()
-    add(active_root)
+    resolved_active_root = resolve_active_app_root()
+    unconfigured_root = _unconfigured_active_app_root()
+    if resolved_active_root != unconfigured_root:
+        add((resolved_active_root / "workflows").resolve())
+
+    repo_factory_root = _repo_factory_workflows_root()
+    if repo_factory_root.is_dir():
+        add(repo_factory_root)
+
+    if not candidates:
+        add((resolved_active_root / "workflows").resolve())
     return candidates
 
 

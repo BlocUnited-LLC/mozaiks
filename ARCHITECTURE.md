@@ -255,7 +255,7 @@ developer tooling (filesystem, scaffolding, process management).
 - `factory_app/app/ui/studio/`
 - `factory_app/app/modules/factory_control_plane/`
 - `chat-ui/src/admin/` (admin portal is a platform-management surface)
-- shared factory workflows in `factory_app/app/workflows/`
+- shared factory workflows in `factory_app/workflows/`
 
 ### 4. Mozaiks App Layer (Hosted Product)
 
@@ -281,18 +281,23 @@ from Studio — an extension layer on top of it.
 
 **Bundle generation boundary:**
 
-Shared factory workflows live in `factory_app/app/workflows/`. The
+Shared factory workflows live in `factory_app/workflows/`. The
 shared build journeys, transitions, and transition UI live under
-`factory_app/app/workflows/extended_orchestration/`. App Zero keeps only a
+`factory_app/workflows/extended_orchestration/`. App Zero keeps only a
 product overlay in
 `mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`.
 That overlay may add product-owned workflows, but the shared builder routing
 contract and transition UI are not App Zero-owned.
 
+`factory_app/app/workflows/` is now an app-local overlay seam, not the shared
+builder root. It may be empty. That is the expected clean state until the
+factory dogfood app owns a workflow that is specific to that app workspace
+rather than to the shared generation core.
+
 Workflow loading is multi-root by contract:
 
 - active app root `workflows/` first
-- shared `factory_app/app/workflows/` second
+- shared `factory_app/workflows/` second
 - `MOZAIKS_WORKFLOW_ROOTS` may override that order explicitly
 
 That is what lets App Zero keep product workflows under
@@ -305,7 +310,7 @@ builder logic into `mozaiks-platform/`:
 - the active app workspace is resolved from `PLATFORM_PATH` or
   `MOZAIKS_APP_WORKSPACE_PATH` when provided
 - the active app root's `workflows/` load first
-- `factory_app/app/workflows/` loads second as the shared builder layer
+- `factory_app/workflows/` loads second as the shared builder layer
 - App Zero keeps only its product-owned overlay registry and product workflows
 
 - `AppGenerator` owns deterministic app bundle artifacts: `app.json`,

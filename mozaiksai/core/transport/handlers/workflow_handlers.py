@@ -162,9 +162,9 @@ async def handle_switch_workflow(
                         "replay": event_dict.get("replay", True),
                         "timestamp": event_dict.get("timestamp"),
                         "metadata": event_dict.get("metadata"),
-                        "uiToolEvent": event_dict.get("uiToolEvent"),
-                        "ui_tool_completed": event_dict.get("ui_tool_completed"),
-                        "ui_tool_status": event_dict.get("ui_tool_status"),
+                        "toolCall": event_dict.get("toolCall"),
+                        "tool_call_completed": event_dict.get("tool_call_completed"),
+                        "tool_call_status": event_dict.get("tool_call_status"),
                     }
                     envelope = {
                         "type": "chat.text",

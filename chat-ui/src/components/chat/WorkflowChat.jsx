@@ -191,7 +191,15 @@ function WorkflowChat({
         return;
       case 'run_complete':
       case 'workflow_complete':
-        onComplete?.(event);
+        if (
+          event?.status === 1 ||
+          String(event?.status ?? '').trim().toLowerCase() === '1' ||
+          ['completed', 'complete', 'success', 'succeeded', 'done', 'ok'].includes(
+            String(event?.status ?? '').trim().toLowerCase()
+          )
+        ) {
+          onComplete?.(event);
+        }
         return;
       case 'error':
         setError(event.message || 'Workflow error');

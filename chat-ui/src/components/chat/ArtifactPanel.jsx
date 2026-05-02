@@ -77,13 +77,13 @@ const ArtifactPanel = ({
             ) : (
               <div className={contentStackClass}>
                 {messages.map((m, idx) => {
-                  // If message has uiToolEvent, render the actual UI component
-                  if (m.uiToolEvent && m.uiToolEvent.ui_tool_id) {
-                    const payload = m.uiToolEvent.payload || {};
+                  // If message has a workflow tool_call, render the actual UI component
+                  if (m.toolCall && m.toolCall.tool_name) {
+                    const payload = m.toolCall.payload || {};
                     const actions = Array.isArray(payload.actions)
                       ? payload.actions.filter(action => (action?.scope || 'artifact') !== 'row')
                       : [];
-                    const isCoreArtifact = isCoreArtifactPayload(payload, m.uiToolEvent.ui_tool_id);
+                    const isCoreArtifact = isCoreArtifactPayload(payload, m.toolCall.tool_name);
                     const wrapperClass = isViewSurface
                       ? 'app-component-wrapper flex-1 min-h-0 flex flex-col'
                       : 'app-component-wrapper';
@@ -93,8 +93,8 @@ const ArtifactPanel = ({
                     return (
                       <div key={m.id || idx} className={wrapperClass}>
                         <UIToolRenderer
-                          event={m.uiToolEvent}
-                          onResponse={m.uiToolEvent.onResponse}
+                          event={m.toolCall}
+                          onResponse={m.toolCall.onResponse}
                           onArtifactAction={onArtifactAction}
                           actionStatusMap={actionStatusMap}
                           className={rendererClass}

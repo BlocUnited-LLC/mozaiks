@@ -72,7 +72,6 @@ reacts to event classes:
 | Event family | Effect on surface |
 | --- | --- |
 | `chat.tool_call` with `display=artifact|view|fullscreen` | opens artifact surface |
-| legacy `ui_tool_event` with artifact/view display | same as above, compatibility path |
 
 This mapping lives in `mapSurfaceEventToAction(...)`.
 

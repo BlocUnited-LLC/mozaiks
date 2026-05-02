@@ -83,7 +83,7 @@ def test_python_app_backend_admin_contract_rejects_builtin_without_builtin_panel
 
 def test_appgenerator_structured_output_contract_matches_runtime_schema_version_and_section_ids() -> None:
     structured_outputs = yaml.safe_load(
-        (_workspace() / "factory_app/app/workflows/AppGenerator/structured_outputs.yaml").read_text(encoding="utf-8")
+        (_workspace() / "factory_app/workflows/AppGenerator/structured_outputs.yaml").read_text(encoding="utf-8")
     )
     models = structured_outputs["models"]
 

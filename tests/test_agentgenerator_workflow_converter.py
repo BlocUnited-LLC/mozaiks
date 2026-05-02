@@ -28,7 +28,7 @@ class _Context:
 
 def _load_workflow_converter_module():
     workspace = Path(__file__).resolve().parents[1]
-    file_path = workspace / "factory_app" / "app" / "workflows" / "AgentGenerator" / "tools" / "workflow_converter.py"
+    file_path = workspace / "factory_app" / "workflows" / "AgentGenerator" / "tools" / "workflow_converter.py"
     module_name = "tests.workflow_converter_direct"
     spec = importlib.util.spec_from_file_location(module_name, file_path)
     if spec is None or spec.loader is None:

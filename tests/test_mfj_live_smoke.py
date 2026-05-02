@@ -18,7 +18,7 @@ def _live_smoke_enabled() -> bool:
 def test_live_mfj_smoke_workflow() -> None:
     module = import_module_directly("scripts.run_live_mfj_smoke")
     repo_root = Path(__file__).resolve().parents[1]
-    workflows_root = repo_root / "platform" / "workflows"
+    workflows_root = repo_root / "factory_app" / "workflows"
     result = asyncio.run(
         module.run_live_mfj_smoke(
             workflow_name="RuntimeSmoke",

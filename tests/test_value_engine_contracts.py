@@ -6,7 +6,7 @@ import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-VALUE_ENGINE_DIR = REPO_ROOT / "factory_app" / "app" / "workflows" / "ValueEngine"
+VALUE_ENGINE_DIR = REPO_ROOT / "factory_app" / "workflows" / "ValueEngine"
 
 
 def test_value_engine_interview_agent_uses_bare_next_completion_contract() -> None:

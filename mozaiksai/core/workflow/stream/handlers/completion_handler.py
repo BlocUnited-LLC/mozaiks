@@ -21,6 +21,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any, Dict, Optional, Set, Type
 
 from .base import BaseEventHandler
+from mozaiksai.core.data.models import WorkflowStatus
 
 if TYPE_CHECKING:
     from ..context import StreamContext, StreamState
@@ -92,14 +93,18 @@ class CompletionHandler(BaseEventHandler):
         except Exception as diag_err:
             ctx.wf_logger.debug(f"Early termination diagnostics failed: {diag_err}")
 
+        awaiting_user_input = bool(state.pending_input_requests)
+        workflow_complete = not awaiting_user_input
+
         # Log completion summary
         ctx.wf_logger.info(
             f" [{ctx.workflow_name_upper}] Run complete chat_id={ctx.chat_id} "
-            f"events={state.sequence_counter} executed_agents={sorted(state.executed_agents)}"
+            f"events={state.sequence_counter} executed_agents={sorted(state.executed_agents)} "
+            f"workflow_complete={workflow_complete}"
         )
 
         # Mark stream state
-        state.run_completed = True
+        state.run_completed = workflow_complete
         # Dispatch webhook callback if configured (fire-and-forget)
         asyncio.create_task(self._dispatch_webhook(ctx, state))
 
@@ -110,6 +115,13 @@ class CompletionHandler(BaseEventHandler):
             "chat_id": ctx.chat_id,
             "sequence": state.sequence_counter,
             "executed_agents": list(state.executed_agents),
+            "status": int(
+                WorkflowStatus.COMPLETED
+                if workflow_complete
+                else WorkflowStatus.IN_PROGRESS
+            ),
+            "reason": "finished" if workflow_complete else "awaiting_user_input",
+            "awaiting_user_input": awaiting_user_input,
         }
 
     async def _dispatch_webhook(
@@ -118,6 +130,8 @@ class CompletionHandler(BaseEventHandler):
         state: "StreamState",
     ) -> None:
         """Dispatch webhook callback if chat session has webhook_url configured."""
+        if not state.run_completed:
+            return
         try:
             from mozaiksai.core.transport.webhook_dispatcher import dispatch_completion_webhook
 

@@ -219,6 +219,8 @@ Current frontend delivery:
 - consumed by `chat-ui/src/ui/hooks/useAppEventBus.js`
 
 These are primitive update commands, not workflow artifact surfaces.
+Persistent page launches of workflow sessions are not `ui.*` events either; they
+use declarative page actions with `action_type: workflow`.
 
 ### `notification.*`
 
@@ -436,26 +438,39 @@ Current payload shape:
 ```yaml
 type: chat.tool_call
 data:
+  tool_call_id: evt_123
+  corr: evt_123
   tool_name: save_plan
   component_type: AppWorkbench
+  workflow_name: AppGenerator
+  interaction_type: ui_tool
   awaiting_response: true
-  corr: evt_123
   display: artifact
   display_type: artifact
   payload:
     workflow_name: AppGenerator
+    interaction_type: ui_tool
     structured_output: {}
 ```
 
 Key rules:
 
 - `component_type` selects the workflow UI component
+- `tool_call_id` is the primary UI interaction identifier
+- `corr` remains the compatibility alias for existing consumers
+- `workflow_name` should be available at the envelope level and inside `payload`
+- `interaction_type` distinguishes `ui_tool`, `ui_surface`, and `auto_tool`
 - `display` controls whether the surface is `inline`, `artifact`, or `view`
 - `corr` / event id is the response correlation key
 - this lane is session-scoped and may persist artifact state for resume
+- generic `chat.tool_call` events without `component_type` are not workflow UI
+  mount requests
 
-Legacy `ui_tool_event` handling still exists in the frontend as a compatibility
-bridge, but it is not the preferred contract for new work.
+The frontend stores render metadata in `toolCall` message/artifact state, but
+the transport contract is `chat.tool_call`.
+
+For the exact runtime-to-frontend lifecycle and the AG-UI/CopilotKit mapping,
+see [Tool Event Lifecycle](../frontend/tool-event-lifecycle.md).
 
 ### Primitive UI transport
 

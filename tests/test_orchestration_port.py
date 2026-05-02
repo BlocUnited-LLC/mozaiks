@@ -139,6 +139,21 @@ class TestOrchestrationPortProtocol:
         r = adapter._interpret_result(req, {"run_completed": True})
         assert r.status == RunStatus.COMPLETED
 
+    def test_interpret_result_paused_when_awaiting_user_input(self):
+        from mozaiksai.core.adapters.ag2_orchestration import AG2OrchestrationAdapter
+
+        adapter = AG2OrchestrationAdapter()
+        req = RunRequest(workflow_name="W", app_id="a", chat_id="c", user_id="u")
+        r = adapter._interpret_result(
+            req,
+            {
+                "run_completed": False,
+                "awaiting_user_input": True,
+                "run_status": 0,
+            },
+        )
+        assert r.status == RunStatus.PAUSED
+
     def test_interpret_result_none(self):
         from mozaiksai.core.adapters.ag2_orchestration import AG2OrchestrationAdapter
 

@@ -40,8 +40,8 @@ Transition declaration example:
   "transition_type": "user_choice_context",
   "ui": { "component": "AppTypeSelector", "mode": "screen" },
   "options": [
-    { "id": "new_app", "route_to": "ValueEngine", "context_variables": { "app_type": "new" } },
-    { "id": "existing_app", "route_to": "ValueEngine", "context_variables": { "app_type": "existing" } }
+    { "id": "greenfield_app", "route_to": "ValueEngine", "context_variables": { "app_type": "greenfield_app" } },
+    { "id": "brownfield_app", "route_to": "ExistingAppDiscovery", "context_variables": { "app_type": "brownfield_app" } }
   ]
 }
 ```
@@ -50,7 +50,7 @@ Rules:
 
 - Keep transition routing semantic in `extension_registry.json`.
 - For branded transition visuals, add file-backed transition components under
-  `factory_app/app/workflows/extended_orchestration/ui/` and export through
+  `factory_app/workflows/extended_orchestration/ui/` and export through
   `ui/index.js`.
 - Do not use workflow sequence declarations (`workflow_sequences[]`) for entry UI.
 - Use `transitions[]` for choice/confirm/silent routing and deterministic context seeds.
@@ -97,24 +97,32 @@ contract.
 Python producer:
 
 ```python
-await transport.send_ui_tool_event(
-    component_name="ApprovalCard",
-    display_type="artifact",
-    payload={"title": "Approve this plan"}
+from mozaiksai.core.workflow.ui_tools import use_ui_tool
+
+await use_ui_tool(
+    "ApprovalCard",
+    {"title": "Approve this plan"},
+    chat_id=chat_id,
+    workflow_name=workflow_name,
+    display="artifact",
 )
 ```
 
 React surface:
 
 ```jsx
-import { useState } from 'react'
-import { useAppEventBus } from '../../../chat-ui/src/hooks/useAppEventBus'
-
-export default function ApprovalCard() {
-  const [data, setData] = useState(null)
-  useAppEventBus('ui.tool.ApprovalCard', payload => setData(payload))
-  if (!data) return null
-  return <div className="bg-card border border-border rounded-xl p-4 text-foreground">{data.title}</div>
+export default function ApprovalCard({ payload, onResponse, toolCallId }) {
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 text-foreground">
+      <h2 className="font-semibold">{payload.title}</h2>
+      <button
+        type="button"
+        onClick={() => onResponse({ status: 'approved', tool_call_id: toolCallId })}
+      >
+        Approve
+      </button>
+    </div>
+  )
 }
 ```
 
@@ -123,6 +131,7 @@ Rules:
 - AgentGenerator owns workflow UI tools.
 - Every interactive tool has an explicit Python tool contract.
 - React components live under the workflow `ui/{WorkflowName}/` folder.
+- Workflow UI renders through `chat.tool_call` and answers through `tool_call_response`.
 - Components use `--mz-*` Tailwind semantic tokens — no inline styles, no hardcoded colors.
 - Named React imports only (`import { useState } from 'react'`), not the default import.
 - Shared bridge helpers live in `chat-ui/src/platform`, not in workflow folders.
@@ -201,6 +210,5 @@ Rules:
 | User is choosing where to go or seeding context before a workflow starts | Transition UI |
 | Content is a generated persistent page (data table, form, stat grid) | App UI (`ui/pages/*.yaml`) |
 | A running agent needs to show data, collect approval, or emit an artifact | Agent UI tool |
+| A persistent page needs to open a workflow session | App UI action with `action_type: workflow` |
 | Complex page with dynamic data or layout AppPageSchema cannot express | Custom Route UI (`app/ui/route_manifest.json` + `app/ui/pages/custom/*.jsx`) |
-
-

@@ -89,6 +89,7 @@ Rules:
 - header/profile/notifications/footer content belongs in `shell_config`, not `theme_config_patch`
 - reusable media inventory belongs in `asset_manifest`, not in `theme_config_patch` or `shell_config`
 - custom routes must be owned exclusively by `custom_route_bundle` (`ui/route_manifest.json` + `ui/pages/custom/*.jsx`) and must not duplicate any `ui/pages/*.yaml` route
+- declarative pages may launch workflow sessions through typed page actions (`action_type: workflow`), but workflow-local React still belongs to AgentGenerator and `chat.tool_call`
 
 ### 3. save_app_schema
 
@@ -210,5 +211,4 @@ Do not:
 
 Without this split, AppGenerator either under-specifies visual/media control or mixes styling, shell behavior, and asset inventory.
 The contract above keeps bundle generation deterministic, keeps ThemeCapture reusable, and gives the runtime a stable set of artifacts to consume.
-
 

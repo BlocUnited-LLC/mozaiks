@@ -9,7 +9,7 @@ Put the workflow in the root that owns its behavior.
 
 ### Shared Builder Workflow
 
-Use `factory_app/app/workflows/{WorkflowName}/` when the workflow belongs to the
+Use `factory_app/workflows/{WorkflowName}/` when the workflow belongs to the
 shared generation/control-plane layer.
 
 Examples:

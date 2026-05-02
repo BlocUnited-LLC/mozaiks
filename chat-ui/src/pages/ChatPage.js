@@ -560,8 +560,6 @@ const ChatPage = () => {
   const viewArtifactSnapshotRef = useRef(null);
   // Track the most recent artifact-mode UI event id to manage auto-collapse
   const lastArtifactEventRef = useRef(null);
-  // Track pending AG2 input request (when user should respond via submitInputRequest)
-  const [pendingInputRequestId, setPendingInputRequestId] = useState(null);
   // Prevent duplicate restores per connection
   const artifactRestoredOnceRef = useRef(false);
   const artifactCacheValidRef = useRef(false);
@@ -603,30 +601,30 @@ const ChatPage = () => {
       const cachedCurrent = readStoredCurrentArtifact(chatId);
       const cachedLast = readStoredLastArtifact(chatId);
       const cached = cachedCurrent || cachedLast;
-      if (!cached?.ui_tool_id) {
+      if (!cached?.tool_name) {
         return false;
       }
 
       const shouldOpen = getStoredArtifactPanelOpen(chatId);
-      const restoredMsg = {
-        id: `ui-restored-${Date.now()}`,
-        sender: 'agent',
-        agentName: cached.payload?.agentName || cached.payload?.agent_name || cached.agentName || cached.agent_name || 'Agent',
-        content: cached.payload?.structured_output || cached.payload || {},
-        isStreaming: false,
-        uiToolEvent: {
-          ui_tool_id: cached.ui_tool_id,
-          payload: cached.payload || {},
-          eventId: cached.eventId || null,
-          workflow_name: cached.workflow_name || fallbackWorkflowName || currentWorkflowName,
-          onResponse: undefined,
-          display: cached.display || 'artifact',
-          restored: true,
-        },
-      };
+        const restoredMsg = {
+          id: `ui-restored-${Date.now()}`,
+          sender: 'agent',
+          agentName: cached.payload?.agentName || cached.payload?.agent_name || cached.agentName || cached.agent_name || 'Agent',
+          content: cached.payload?.structured_output || cached.payload || {},
+          isStreaming: false,
+          toolCall: {
+            tool_name: cached.tool_name,
+            payload: cached.payload || {},
+            tool_call_id: cached.tool_call_id || null,
+            workflow_name: cached.workflow_name || fallbackWorkflowName || currentWorkflowName,
+            onResponse: undefined,
+            display: cached.display || 'artifact',
+            restored: true,
+          },
+        };
 
       setCurrentArtifactMessages([restoredMsg]);
-      lastArtifactEventRef.current = cached.eventId || restoredMsg.id;
+      lastArtifactEventRef.current = cached.tool_call_id || restoredMsg.id;
       artifactCacheValidRef.current = true;
       artifactRestoredOnceRef.current = true;
 
@@ -652,17 +650,17 @@ const ChatPage = () => {
       setCurrentArtifactContext(null);
       return;
     }
-    const artifactMsg = currentArtifactMessages.find(m => m?.uiToolEvent?.ui_tool_id) || currentArtifactMessages[0];
-    const uiToolEvent = artifactMsg?.uiToolEvent;
-    if (!uiToolEvent) {
+    const artifactMsg = currentArtifactMessages.find(m => m?.toolCall?.tool_name) || currentArtifactMessages[0];
+    const toolCall = artifactMsg?.toolCall;
+    if (!toolCall) {
       setCurrentArtifactContext(null);
       return;
     }
     setCurrentArtifactContext({
-      id: uiToolEvent.eventId || artifactMsg.id || null,
-      type: uiToolEvent.ui_tool_id,
-      payload: uiToolEvent.payload || null,
-      artifact_id: deriveArtifactId(uiToolEvent.payload, uiToolEvent.eventId || artifactMsg.id || null),
+      id: toolCall.tool_call_id || artifactMsg.id || null,
+      type: toolCall.tool_name,
+      payload: toolCall.payload || null,
+      artifact_id: deriveArtifactId(toolCall.payload, toolCall.tool_call_id || artifactMsg.id || null),
       chat_id: currentChatId,
       workflow_name: currentWorkflowName,
     });
@@ -678,24 +676,24 @@ const ChatPage = () => {
   useEffect(() => {
     if (!currentChatId) return;
     if (!Array.isArray(currentArtifactMessages) || currentArtifactMessages.length === 0) return;
-    const artifactMsg = currentArtifactMessages.find(m => m?.uiToolEvent?.payload) || currentArtifactMessages[0];
-    const uiToolEvent = artifactMsg?.uiToolEvent;
-    if (!uiToolEvent) return;
+    const artifactMsg = currentArtifactMessages.find(m => m?.toolCall?.payload) || currentArtifactMessages[0];
+    const toolCall = artifactMsg?.toolCall;
+    if (!toolCall) return;
 
-    const payload = uiToolEvent.payload || {};
-    const displayMode = uiToolEvent.display || payload.display || payload.mode || 'artifact';
+    const payload = toolCall.payload || {};
+    const displayMode = toolCall.display || payload.display || payload.mode || 'artifact';
     if (displayMode !== 'artifact') return;
 
     const artifactPayload = {
       ...payload,
-      artifact_id: deriveArtifactId(payload, uiToolEvent.eventId || artifactMsg?.id || null),
+      artifact_id: deriveArtifactId(payload, toolCall.tool_call_id || artifactMsg?.id || null),
     };
 
     try {
       const serializableArtifact = {
         ...artifactMsg,
-        uiToolEvent: {
-          ...uiToolEvent,
+        toolCall: {
+          ...toolCall,
           payload: artifactPayload,
           onResponse: null,
         },
@@ -703,9 +701,9 @@ const ChatPage = () => {
       writeStoredCurrentArtifact(currentChatId, serializableArtifact);
 
       writeStoredLastArtifact(currentChatId, {
-        ui_tool_id: uiToolEvent.ui_tool_id || 'core.state',
-        eventId: uiToolEvent.eventId || null,
-        workflow_name: uiToolEvent.workflow_name || currentWorkflowName,
+        tool_name: toolCall.tool_name || 'core.state',
+        tool_call_id: toolCall.tool_call_id || null,
+        workflow_name: toolCall.workflow_name || currentWorkflowName,
         payload: artifactPayload,
         display: displayMode || 'artifact',
         ts: Date.now(),
@@ -718,7 +716,7 @@ const ChatPage = () => {
     try {
       const navCache = navCacheContextRef.current;
       if (navCache?.cache_ttl && artifactPayload) {
-        const artifactWorkflow = uiToolEvent.workflow_name || currentWorkflowName;
+        const artifactWorkflow = toolCall.workflow_name || currentWorkflowName;
         if (!navCache.workflow || navCache.workflow === artifactWorkflow) {
           const cacheWorkflow = navCache.workflow || artifactWorkflow;
           if (cacheWorkflow) {
@@ -726,8 +724,8 @@ const ChatPage = () => {
               cacheWorkflow,
               navCache?.input ?? null,
               {
-                ui_tool_id: uiToolEvent.ui_tool_id || 'core.state',
-                eventId: uiToolEvent.eventId || null,
+                tool_name: toolCall.tool_name || 'core.state',
+                tool_call_id: toolCall.tool_call_id || null,
                 workflow_name: cacheWorkflow,
                 payload: artifactPayload,
                 display: displayMode || 'artifact',
@@ -931,7 +929,7 @@ const ChatPage = () => {
         const cachedEvent = cached.artifact;
         const cachedPayload = {
           ...(cachedEvent?.payload || {}),
-          artifact_id: deriveArtifactId(cachedEvent?.payload || {}, cachedEvent?.eventId || null),
+          artifact_id: deriveArtifactId(cachedEvent?.payload || {}, cachedEvent?.tool_call_id || null),
         };
         const artifactMsg = {
           id: `nav-cache-${Date.now()}`,
@@ -939,10 +937,10 @@ const ChatPage = () => {
           agentName: cachedEvent?.agentName || cachedEvent?.agent_name || 'Agent',
           content: cachedPayload.structured_output || cachedPayload.content || cachedPayload || {},
           isStreaming: false,
-          uiToolEvent: {
-            ui_tool_id: cachedEvent?.ui_tool_id || cachedEvent?.uiToolId || cachedEvent?.tool || 'core.cached',
+          toolCall: {
+            tool_name: cachedEvent?.tool_name || cachedEvent?.tool || 'core.cached',
             payload: cachedPayload,
-            eventId: cachedEvent?.eventId || cachedEvent?.event_id || null,
+            tool_call_id: cachedEvent?.tool_call_id || null,
             workflow_name: cachedEvent?.workflow_name || nextWorkflow,
             onResponse: null,
             display: cachedEvent?.display || 'artifact',
@@ -1247,7 +1245,7 @@ const ChatPage = () => {
       return;
     }
     
-    // Default to configured chat_startup_mode (from platform/config/ai.json)
+    // Default to configured chat_startup_mode (from app/config/ai.json)
     // "ask" = start in Ask mode, "workflow" = go directly to entry_point workflow
     const startupDefault = configuredStartupMode;
     if (startupDefault === 'ask') {
@@ -1338,16 +1336,16 @@ const ChatPage = () => {
       if (!Array.isArray(prev) || prev.length === 0) return prev;
       let updated = false;
       const next = prev.map((msg) => {
-        const payload = msg?.uiToolEvent?.payload;
-        if (!msg?.uiToolEvent) return msg;
-        const resolvedId = deriveArtifactId(payload, msg?.uiToolEvent?.eventId || msg?.id);
+        const payload = msg?.toolCall?.payload;
+        if (!msg?.toolCall) return msg;
+        const resolvedId = deriveArtifactId(payload, msg?.toolCall?.tool_call_id || msg?.id);
         if (artifactId && resolvedId !== artifactId) return msg;
         updated = true;
         const nextPayload = updateFn(payload || {});
         return {
           ...msg,
-          uiToolEvent: {
-            ...msg.uiToolEvent,
+          toolCall: {
+            ...msg.toolCall,
             payload: nextPayload,
           },
         };
@@ -1356,13 +1354,13 @@ const ChatPage = () => {
       // Fallback: apply to most recent artifact if id mismatch
       const lastIdx = prev.length - 1;
       const last = prev[lastIdx];
-      if (last?.uiToolEvent) {
-        const nextPayload = updateFn(last.uiToolEvent.payload || {});
+      if (last?.toolCall) {
+        const nextPayload = updateFn(last.toolCall.payload || {});
         const fallback = [...prev];
         fallback[lastIdx] = {
           ...last,
-          uiToolEvent: {
-            ...last.uiToolEvent,
+          toolCall: {
+            ...last.toolCall,
             payload: nextPayload,
           },
         };
@@ -1410,14 +1408,12 @@ const ChatPage = () => {
       if (initSpinnerShownRef.current && !initSpinnerHiddenOnceRef.current) {
         const outerType = data.type || '';
         const isText = outerType === 'chat.text';
-        const isInputRequest = outerType === 'chat.input_request';
         const isMeta = outerType === 'chat_meta' || outerType === 'chat.chat_meta';
         const isStreamChunk = outerType === 'chat.stream_chunk';
-        const serializedText = !isText && !isInputRequest && typeof data.content === 'string' && 
-          (data.content.includes('"type":"chat.text"') || data.content.includes('"type":"chat.input_request"'));
-        if (isText || isInputRequest || isMeta || isStreamChunk || serializedText) {
+        const serializedText = !isText && typeof data.content === 'string' && data.content.includes('"type":"chat.text"');
+        if (isText || isMeta || isStreamChunk || serializedText) {
           initSpinnerHiddenOnceRef.current = true;
-          if (showInitSpinner) console.log('🧹 [SPINNER] Hiding spinner (ready event). text?', isText, 'input?', isInputRequest, 'meta?', isMeta, 'serialized?', serializedText);
+          if (showInitSpinner) console.log('🧹 [SPINNER] Hiding spinner (ready event). text?', isText, 'meta?', isMeta, 'serialized?', serializedText);
           setShowInitSpinner(false);
         }
       }
@@ -1437,48 +1433,6 @@ const ChatPage = () => {
       }
     }
 
-    // Minimal passthrough for still-emitted dynamic UI events until backend fully migrated
-    if (data.type === 'ui_tool_event' || data.type === 'UI_TOOL_EVENT') {
-      // Create a response callback that uses the WebSocket connection
-      const sendResponse = (responseData) => {
-        console.log('🔌 ChatPage: Sending WebSocket response:', responseData);
-        const activeWs = wsRef.current;
-        if (activeWs && activeWs.send) {
-          return activeWs.send(responseData);
-        } else {
-          console.warn('⚠️ No WebSocket connection available for UI tool response');
-          return false;
-        }
-      };
-      
-      console.debug('🔌 ChatPage: Passing sendResponse callback type:', typeof sendResponse, 'event:', data);
-      // Surface artifact for mobile drawer; desktop layout is handled by surface reducer.
-      try {
-        const displayMode = data.display || data.display_type || data.mode;
-        if (displayMode === 'artifact' || displayMode === 'view' || displayMode === 'fullscreen') {
-          console.log('📊 [TELEMETRY] Auto-opening artifact panel for ui_tool_event:', {
-            ui_tool_id: data.ui_tool_id,
-            display: displayMode,
-            workflow: currentWorkflowName,
-            chat_id: currentChatId,
-            isMobile: isMobileView
-          });
-          
-          if (isMobileView) {
-            // Mobile: surface the bottom drawer and clear artifact badge
-            setMobileDrawerState('expanded');
-            setHasUnseenArtifact(false);
-          }
-        }
-      } catch (e) { /* ignore if not available */ }
-      try {
-        dynamicUIHandler.processUIEvent(data, sendResponse);
-      } catch (err) {
-        console.error('🔌 ChatPage: dynamicUIHandler.processUIEvent threw', err, data);
-      }
-      return;
-    }
-    
     // Handle chat_meta events (which may not have chat. prefix)
     if (data.type === 'chat_meta' || data.type === 'chat.chat_meta') {
       // Initial metadata handshake from backend
@@ -1504,7 +1458,7 @@ const ChatPage = () => {
       } else if (data.chat_exists === true) {
         setChatExists(true);
         console.log('🧬 [META] Backend confirms chat exists. Artifact restore allowed.');
-        if (!data.last_artifact || !data.last_artifact.ui_tool_id) {
+        if (!data.last_artifact || !data.last_artifact.tool_name) {
           clearStoredArtifactState(currentChatId);
           setCurrentArtifactMessages([]);
           lastArtifactEventRef.current = null;
@@ -1513,11 +1467,11 @@ const ChatPage = () => {
         }
 
         // If backend already sent last_artifact and we have not restored yet, cache it for restore effect
-        if (!artifactRestoredOnceRef.current && data.last_artifact && data.last_artifact.ui_tool_id) {
+        if (!artifactRestoredOnceRef.current && data.last_artifact && data.last_artifact.tool_name) {
           try {
             writeStoredLastArtifact(currentChatId, {
-              ui_tool_id: data.last_artifact.ui_tool_id,
-              eventId: data.last_artifact.event_id || null,
+              tool_name: data.last_artifact.tool_name,
+              tool_call_id: data.last_artifact.tool_call_id || null,
               workflow_name: data.last_artifact.workflow_name || currentWorkflowName,
               payload: data.last_artifact.payload || {},
               display: data.last_artifact.display || 'artifact',
@@ -1564,18 +1518,18 @@ const ChatPage = () => {
             } else if (metaData.chat_exists === true) {
               setChatExists(true);
               console.log('🧬 [META] Backend confirms chat exists. Artifact restore allowed.');
-              if (!metaData.last_artifact || !metaData.last_artifact.ui_tool_id) {
+              if (!metaData.last_artifact || !metaData.last_artifact.tool_name) {
                 clearStoredArtifactState(currentChatId);
                 setCurrentArtifactMessages([]);
                 lastArtifactEventRef.current = null;
                 artifactRestoredOnceRef.current = false;
                 artifactCacheValidRef.current = false;
               }
-              if (!artifactRestoredOnceRef.current && metaData.last_artifact && metaData.last_artifact.ui_tool_id) {
+              if (!artifactRestoredOnceRef.current && metaData.last_artifact && metaData.last_artifact.tool_name) {
                 try {
                   writeStoredLastArtifact(currentChatId, {
-                    ui_tool_id: metaData.last_artifact.ui_tool_id,
-                    eventId: metaData.last_artifact.event_id || null,
+                    tool_name: metaData.last_artifact.tool_name,
+                    tool_call_id: metaData.last_artifact.tool_call_id || null,
                     workflow_name: metaData.last_artifact.workflow_name || currentWorkflowName,
                     payload: metaData.last_artifact.payload || {},
                     display: metaData.last_artifact.display || 'artifact',
@@ -1624,8 +1578,7 @@ const ChatPage = () => {
       if (debugFlag('mozaiks.debug_pipeline')) console.warn('[PIPELINE] failed to unwrap nested envelope', e);
     }
     
-    // Allow chat.* events and other known event types (like input_request, unknown, etc.)
-    if (!data.type.startsWith('chat.') && !['input_request', 'unknown'].includes(data.type)) return; // ignore unrecognized event types
+    if (!data.type.startsWith('chat.') && data.type !== 'unknown') return;
 
     // Some events may arrive already as { type:'chat.text', data:{ ...actualFields... } } (no double-serialization)
     // or after the above unwrap we can still retain an inner data object we need to promote.
@@ -1653,7 +1606,7 @@ const ChatPage = () => {
         if (inner.structured_output !== undefined && data.structured_output === undefined) data.structured_output = inner.structured_output;
         if (inner.structured_schema !== undefined && data.structured_schema === undefined) data.structured_schema = inner.structured_schema;
         // UI tool / component hints (input_request etc.) + error messages
-        ['component_type','ui_tool_id','tool_name','tool_call_id','request_id','progress_percent','prompt','success','interaction_type','status','corr','call_id','payload','message','error_code','ui_visibility','trace_reason','trace_agent','sequence','stream_id','full_content','metadata'].forEach(f => {
+        ['component_type','tool_name','tool_call_id','request_id','progress_percent','prompt','success','interaction_type','status','corr','call_id','payload','message','error_code','ui_visibility','trace_reason','trace_agent','sequence','stream_id','full_content','metadata'].forEach(f => {
           if (inner[f] !== undefined && data[f] === undefined) data[f] = inner[f];
         });
       }
@@ -2209,48 +2162,11 @@ const ChatPage = () => {
         } catch (e) {}
         return;
       }
-      case 'input_request': {
-        console.log('📥 [INPUT_REQUEST] Received input_request event:', data);
-        // Clear thinking bubbles - we're now waiting for user input, not agent thinking
-        setMessagesWithLogging(prev => prev.filter(m => !m.isThinking));
-        // Hide spinner since we're waiting for user, not processing
-        if (showInitSpinner) setShowInitSpinner(false);
-        initSpinnerHiddenOnceRef.current = true;
-
-        if (data.request_id) {
-          console.log('🔖 [INPUT_REQUEST] Storing pending request_id:', data.request_id);
-          setPendingInputRequestId(data.request_id);
-        }
-        const componentType = data.component_type || data.ui_tool_id || null;
-        if (componentType) {
-          const payload = {
-            type: 'user_input_request',
-            data: {
-              input_request_id: data.request_id,
-              chat_id: currentChatId,
-              payload: {
-                prompt: data.prompt,
-                ui_tool_id: componentType,
-                workflow_name: currentWorkflowName
-              }
-            }
-          };
-          console.debug('🧩 [UI_EVENT] input_request -> processUIEvent payload:', payload);
-          try {
-            dynamicUIHandler.processUIEvent(payload);
-          } catch (err) {
-            console.error('🧩 [UI_EVENT] dynamicUIHandler.processUIEvent threw for input_request', err, data);
-          }
-        } else if (data.prompt) {
-          console.log('📝 [INPUT_REQUEST] Simple input request:', data.prompt);
-        }
-        return;
-      }
       case 'tool_call': {
         if (data.component_type || (data.data && data.data.component_type)) {
           const envelope = data || {};
           const detail = envelope.data || {};
-          const toolName = envelope.tool_name || detail.tool_name || detail.tool || envelope.ui_tool_id || 'UnknownTool';
+          const toolName = envelope.tool_name || detail.tool_name || detail.tool || 'UnknownTool';
           const componentType = envelope.component_type || detail.component_type || detail.component || toolName;
           const basePayload = detail.payload || envelope.payload || {};
           const payloadKeys = Object.keys(basePayload);
@@ -2258,8 +2174,10 @@ const ChatPage = () => {
           console.log('🛠️ [TOOL_CALL] Raw tool_call data:', envelope);
           console.log('🛠️ [TOOL_CALL] Payload keys received:', payloadKeys);
           const derivedDisplay = envelope.display || envelope.display_type || envelope.mode || detail.display || detail.display_type || detail.mode || basePayload.display || basePayload.mode || null;
-          const eventId = envelope.tool_call_id || envelope.corr || detail.tool_call_id || detail.corr || null;
+          const toolCallId = envelope.tool_call_id || envelope.corr || detail.tool_call_id || detail.corr || null;
           const awaiting = envelope.awaiting_response !== undefined ? envelope.awaiting_response : detail.awaiting_response;
+          const resolvedWorkflowName = envelope.workflow_name || detail.workflow_name || basePayload.workflow_name || currentWorkflowName;
+          const interactionType = envelope.interaction_type || detail.interaction_type || basePayload.interaction_type || (awaiting ? 'ui_tool' : 'ui_surface');
           const sendResponse = (responseData) => {
             console.log('dY"O ChatPage: Sending WebSocket response for tool_call:', responseData);
             const activeWs = wsRef.current;
@@ -2270,10 +2188,11 @@ const ChatPage = () => {
             return false;
           };
           dynamicUIHandler.processUIEvent({
-            type: 'ui_tool_event',
-            ui_tool_id: toolName,
-            eventId: eventId || undefined,
-            workflow_name: currentWorkflowName,
+            type: 'tool_call',
+            tool_name: toolName,
+            tool_call_id: toolCallId || undefined,
+            component_type: componentType,
+            workflow_name: resolvedWorkflowName,
             display: derivedDisplay,
             agent: envelope.agent || detail.agent || envelope.agent_name || detail.agent_name,
             agentName: envelope.agent || detail.agent || envelope.agent_name || detail.agent_name,
@@ -2281,8 +2200,9 @@ const ChatPage = () => {
               ...basePayload,
               tool_name: toolName,
               component_type: componentType,
-              workflow_name: currentWorkflowName,
+              workflow_name: resolvedWorkflowName,
               awaiting_response: awaiting,
+              interaction_type: interactionType,
               ...(derivedDisplay ? { display: derivedDisplay } : {})
             }
           }, sendResponse);
@@ -2307,12 +2227,12 @@ const ChatPage = () => {
         }
         return;
       }
-      case 'ui_tool_complete':
-      case 'chat.ui_tool_complete': {
+      case 'tool_call_complete':
+      case 'chat.tool_call_complete': {
         const envelope = data || {};
         const detail = envelope.data || {};
-        const completedId = detail.event_id || envelope.event_id || detail.eventId || envelope.eventId || null;
-        const completedTool = detail.ui_tool_id || envelope.ui_tool_id || detail.tool_name || envelope.tool_name || null;
+        const completedId = detail.tool_call_id || envelope.tool_call_id || null;
+        const completedTool = detail.tool_name || envelope.tool_name || null;
         const status = detail.status || envelope.status || 'completed';
         
         console.log('✓ [UI_COMPLETE] Inline tool completed:', { completedId, completedTool, status });
@@ -2321,12 +2241,12 @@ const ChatPage = () => {
           // Mark the message as completed so it renders as a collapsed badge
           setMessagesWithLogging((prev) =>
             prev.map((msg) => {
-              if (msg?.metadata?.eventId === completedId && msg?.metadata?.display === 'inline') {
+              if (msg?.metadata?.toolCallId === completedId && msg?.metadata?.display === 'inline') {
                 return {
                   ...msg,
-                  ui_tool_completed: true,
-                  ui_tool_status: status,
-                  ui_tool_summary: `${completedTool || 'Tool'} completed`
+                  tool_call_completed: true,
+                  tool_call_status: status,
+                  tool_call_summary: `${completedTool || 'Tool'} completed`
                 };
               }
               return msg;
@@ -2335,18 +2255,18 @@ const ChatPage = () => {
         }
         return;
       }
-      case 'ui_tool_dismiss':
-      case 'chat.ui_tool_dismiss': {
+      case 'tool_call_dismiss':
+      case 'chat.tool_call_dismiss': {
         const envelope = data || {};
         const detail = envelope.data || {};
-        const dismissedId = detail.event_id || envelope.event_id || detail.eventId || envelope.eventId || null;
-        const dismissedTool = detail.ui_tool_id || envelope.ui_tool_id || detail.tool_name || envelope.tool_name || null;
-        console.log('🧩 [UI] Received ui_tool_dismiss event:', { dismissedId, dismissedTool });
+        const dismissedId = detail.tool_call_id || envelope.tool_call_id || null;
+        const dismissedTool = detail.tool_name || envelope.tool_name || null;
+        console.log('🧩 [UI] Received tool_call_dismiss event:', { dismissedId, dismissedTool });
 
         if (dismissedId) {
           setMessagesWithLogging((prev) =>
             prev.filter(
-              (msg) => !(msg?.metadata?.eventId === dismissedId && msg?.metadata?.type === 'ui_tool_agent_message')
+              (msg) => !(msg?.metadata?.toolCallId === dismissedId && msg?.metadata?.type === 'tool_call_agent_message')
             )
           );
         }
@@ -2698,7 +2618,17 @@ const ChatPage = () => {
         
         // Extract completion metadata
         const reason = data.reason || data.data?.reason || 'finished';
-        const status = data.status || data.data?.status || 1;
+        const status = data.status ?? data.data?.status ?? 1;
+        const normalizedStatus = String(status).trim().toLowerCase();
+        const isTerminalCompletion = (
+          status === 1 ||
+          normalizedStatus === '1' ||
+          ['completed', 'complete', 'success', 'succeeded', 'done', 'ok'].includes(normalizedStatus)
+        );
+        if (!isTerminalCompletion) {
+          setLoading(false);
+          return;
+        }
         const duration = data.duration_sec || data.data?.duration_sec;
         const tokensUsed = data.total_tokens || data.data?.total_tokens;
         
@@ -2739,7 +2669,6 @@ const ChatPage = () => {
         return;
       }
       case 'input_ack':
-        // Acknowledgment: no UI mutation needed
         return;
       case 'resume_boundary':
         if (workflowReplayPendingRef.current) {
@@ -3278,19 +3207,19 @@ useEffect(() => {
     }, 1000);
   }, [currentChatId, workflowConfigLoaded]);
 
-  // Subscribe to DynamicUIHandler updates and insert UI tool events into chat messages
+  // Subscribe to DynamicUIHandler updates and insert tool_call render events into chat messages
   useEffect(() => {
-    // Bridge dynamic UI events into the chat message stream
+    // Bridge workflow UI tool calls into the chat message stream
     const unsubscribe = dynamicUIHandler.onUIUpdate((update) => {
       try {
         if (!update || !update.type) return;
-        // Only handle ui_tool_event here; other updates (status/component updates) are ignored for now
-        if (update.type === 'ui_tool_event') {
+        // Only handle tool_call here; other updates (status/component updates) are ignored for now
+        if (update.type === 'tool_call') {
           if (dispatchSurfaceEvent) {
             dispatchSurfaceEvent(update);
           }
-          const { ui_tool_id, payload = {}, eventId, workflow_name, onResponse, display } = update;
-          console.log('🧩 [UI] ChatPage received ui_tool_event -> inserting into messages', { ui_tool_id, eventId, workflow_name });
+          const { tool_name, payload = {}, tool_call_id, workflow_name, onResponse, display } = update;
+          console.log('🧩 [UI] ChatPage received tool_call -> inserting into messages', { tool_name, tool_call_id, workflow_name });
           // If this UI tool requests artifact display, auto-open the ArtifactPanel like OpenAI/Claude canvases
           const displayMode = (display || payload.display || payload.mode);
           const isViewDisplay = displayMode === 'view' || displayMode === 'fullscreen';
@@ -3319,17 +3248,17 @@ useEffect(() => {
             if (agentText) {
               setMessagesWithLogging((prev) => {
                 const withoutThinking = prev.filter(msg => !msg.isThinking);
-                const hasExisting = withoutThinking.some(msg => msg?.metadata?.eventId === (eventId || ui_tool_id) && msg?.metadata?.type === 'ui_tool_agent_message');
+                const hasExisting = withoutThinking.some(msg => msg?.metadata?.toolCallId === (tool_call_id || tool_name) && msg?.metadata?.type === 'tool_call_agent_message');
                 if (hasExisting) return withoutThinking;
                 return [
                   ...withoutThinking,
                   {
-                    id: `ui-msg-${eventId || Date.now()}`,
+                    id: `tool-call-msg-${tool_call_id || Date.now()}`,
                     sender: 'agent',
                     agentName: payload.agentName || payload.agent_name || update.agent_name || update.agent || 'Agent',
                     content: agentText,
                     isStreaming: false,
-                    metadata: { type: 'ui_tool_agent_message', eventId: eventId || ui_tool_id, ui_tool_id }
+                    metadata: { type: 'tool_call_agent_message', toolCallId: tool_call_id || tool_name, tool_name }
                   }
                 ];
               });
@@ -3339,15 +3268,15 @@ useEffect(() => {
             try {
               artifactPayload = {
                 ...payload,
-                artifact_id: deriveArtifactId(payload, eventId || ui_tool_id || null),
+                artifact_id: deriveArtifactId(payload, tool_call_id || tool_name || null),
               };
               const artifactMsg = {
-                id: `ui-artifact-${eventId || Date.now()}`,
+                id: `tool-call-artifact-${tool_call_id || Date.now()}`,
                 sender: 'agent',
                 agentName: payload.agentName || payload.agent_name || update.agent_name || update.agent || 'Agent',
                 content: artifactPayload.structured_output || artifactPayload.content || artifactPayload || {},
                 isStreaming: false,
-                uiToolEvent: { ui_tool_id, payload: artifactPayload, eventId, workflow_name, onResponse, display: displayMode }
+                toolCall: { tool_name, payload: artifactPayload, tool_call_id, workflow_name, onResponse, display: displayMode, component_type: update.component_type || payload.component_type || tool_name }
               };
               console.log('🖼️ [UI] Setting currentArtifactMessages', artifactMsg.id);
               setCurrentArtifactMessages([artifactMsg]);
@@ -3359,8 +3288,8 @@ useEffect(() => {
                   // Create a serializable version without the function
                   const serializableArtifact = {
                     ...artifactMsg,
-                    uiToolEvent: {
-                      ...artifactMsg.uiToolEvent,
+                    toolCall: {
+                      ...artifactMsg.toolCall,
                       onResponse: null // Functions can't be serialized, will be reconstructed on restore
                     }
                   };
@@ -3370,13 +3299,13 @@ useEffect(() => {
               } catch (e) { console.warn('Failed to cache artifact', e); }
             } catch (e) { console.warn('Failed to set artifact message', e); }
             // Remember this artifact to collapse on next sequence
-            lastArtifactEventRef.current = eventId || ui_tool_id || 'artifact';
+            lastArtifactEventRef.current = tool_call_id || tool_name || 'artifact';
             // Persist minimal artifact session state for graceful refresh restore
             try {
               if (currentChatId) {
                 const cache = {
-                  ui_tool_id,
-                  eventId: eventId || null,
+                  tool_name,
+                  tool_call_id: tool_call_id || null,
                   workflow_name,
                   payload: artifactPayload || payload,
                   display: displayMode || 'artifact',
@@ -3399,8 +3328,8 @@ useEffect(() => {
                     cacheWorkflow,
                     navCache?.input ?? null,
                     {
-                      ui_tool_id,
-                      eventId: eventId || null,
+                      tool_name,
+                      tool_call_id: tool_call_id || null,
                       workflow_name: cacheWorkflow,
                       payload: artifactPayload,
                       display: displayMode || 'artifact',
@@ -3425,19 +3354,20 @@ useEffect(() => {
             return [
               ...withoutThinking,
               {
-                id: `ui-${eventId || Date.now()}`,
+                id: `tool-call-${tool_call_id || Date.now()}`,
                 sender: 'agent',
                 agentName: payload.agentName || payload.agent_name || update.agent_name || update.agent || 'Agent',
                 content: (payload.agent_message || payload.description || ''), // Surface agent context alongside inline UI
                 isStreaming: false,
-                uiToolEvent: {
-                  ui_tool_id,
+                toolCall: {
+                  tool_name,
                   payload,
-                  eventId,
+                  tool_call_id,
                   workflow_name,
                   onResponse,
                   // Surface display mode for inline Completed chip logic
                   display: displayMode || 'inline',
+                  component_type: update.component_type || payload.component_type || tool_name,
                 },
               },
             ];
@@ -3450,31 +3380,46 @@ useEffect(() => {
     return () => {
       if (typeof unsubscribe === 'function') unsubscribe();
     };
-  }, [setMessagesWithLogging, currentChatId]);
+    }, [setMessagesWithLogging, currentChatId]);
+
+  const findPendingInputRequestToolCall = (messageList) => {
+    if (!Array.isArray(messageList) || messageList.length === 0) {
+      return null;
+    }
+    for (let index = messageList.length - 1; index >= 0; index -= 1) {
+      const message = messageList[index];
+      const toolCall = message?.toolCall;
+      if (!toolCall?.tool_call_id || message?.tool_call_completed) {
+        continue;
+      }
+      const payload = toolCall.payload || {};
+      const interactionType = String(
+        toolCall.interaction_type || payload.interaction_type || ''
+      ).trim().toLowerCase();
+      const componentType = String(
+        toolCall.component_type || payload.component_type || ''
+      ).trim().toLowerCase();
+      const toolName = String(toolCall.tool_name || '').trim().toLowerCase();
+      if (
+        interactionType === 'input_request'
+        || componentType === 'userinputrequest'
+        || toolName === 'userinputrequest'
+      ) {
+        return toolCall;
+      }
+    }
+    return null;
+  };
 
   const sendMessage = async (messageContent) => {
     console.log('🚀 [SEND] Sending message:', messageContent);
     console.log('🚀 [SEND] Current chat ID:', currentChatId);
-    console.log('🚀 [SEND] Pending input request ID:', pendingInputRequestId);
     console.log('🚀 [SEND] Transport type:', transportType);
     console.log('🚀 [SEND] App ID:', currentAppId);
     console.log('🚀 [SEND] User ID:', currentUserId);
     console.log('🚀 [SEND] Workflow name:', currentWorkflowName);
 
     const artifactContextPayload = messageContent?.artifactContext || currentArtifactContext || null;
-    
-    // If there's a pending input request, route to submitInputRequest instead of regular message flow
-    if (pendingInputRequestId) {
-      console.log('🎯 [SEND] Routing to submitInputRequest for pending request:', pendingInputRequestId);
-      const success = submitInputRequest(pendingInputRequestId, messageContent.content);
-      if (success) {
-        setPendingInputRequestId(null); // Clear pending request after submission
-        console.log('✅ [SEND] Input request submitted successfully');
-      } else {
-        console.error('❌ [SEND] Failed to submit input request');
-      }
-      return;
-    }
     
     // Create a properly structured user message
     const userMessage = {
@@ -3535,12 +3480,33 @@ useEffect(() => {
         console.error('❌ [SEND] Failed to send ask-mode message (socket unavailable)');
       } else {
         setLoading(true);
+        }
+        return;
       }
-      return;
-    }
 
-    // Send directly to backend workflow via WebSocket
-    try {
+      const pendingInputRequestToolCall = findPendingInputRequestToolCall(messagesRef.current);
+      if (pendingInputRequestToolCall?.tool_call_id) {
+        console.log(
+          '📤 [SEND] Routing workflow reply through tool_call_response:',
+          pendingInputRequestToolCall.tool_call_id
+        );
+        await handleAgentAction({
+          type: 'tool_call_response',
+          tool_name: pendingInputRequestToolCall.tool_name,
+          tool_call_id: pendingInputRequestToolCall.tool_call_id,
+          response: {
+            status: 'submitted',
+            text: messageContent.content,
+            user_input: messageContent.content,
+            user_response: messageContent.content,
+          },
+        });
+        setLoading(true);
+        return;
+      }
+
+      // Send directly to backend workflow via WebSocket
+      try {
       if (!currentChatId) {
         console.error('❌ [SEND] No chat ID available for sending message');
         return;
@@ -3564,32 +3530,6 @@ useEffect(() => {
     }
   };
 
-  // Submit a pending input request via WebSocket control message
-  const submitInputRequest = useCallback((input_request_id, text) => {
-    const activeWs = wsRef.current;
-    const targetChatId = currentChatId || activeGeneralChatId;
-    if (!activeWs || !activeWs.socket || activeWs.socket.readyState !== WebSocket.OPEN) {
-      console.warn('⚠️ Cannot submit input request; socket not open');
-      return false;
-    }
-    if (!targetChatId) {
-      console.warn('⚠️ Cannot submit input request; no active chat id');
-      return false;
-    }
-    return activeWs.send({
-      type: 'user.input.submit',
-      chat_id: targetChatId,
-      input_request_id,
-      text,
-      context: {
-        source: 'chat_interface',
-        conversation_mode: conversationMode,
-        general_chat_id: activeGeneralChatId || undefined,
-        ...(currentArtifactContext ? { artifact_context: currentArtifactContext } : {}),
-      },
-    });
-  }, [currentChatId, activeGeneralChatId, conversationMode]);
-
   const sendWsMessage = useCallback((payload) => {
     const activeWs = wsRef.current;
     if (!activeWs || typeof activeWs.send !== 'function') {
@@ -3606,11 +3546,11 @@ useEffect(() => {
   }, []);
 
   const isViewArtifactMessage = useCallback((msg) => {
-    const uiEvent = msg?.uiToolEvent;
-    if (!uiEvent) return false;
-    const display = uiEvent.display || uiEvent?.payload?.display || uiEvent?.payload?.mode;
+    const toolCall = msg?.toolCall;
+    if (!toolCall) return false;
+    const display = toolCall.display || toolCall?.payload?.display || toolCall?.payload?.mode;
     if (display === 'view' || display === 'fullscreen') return true;
-    if (uiEvent?.payload?.page && uiEvent?.payload?.presentation === 'artifact') return true;
+    if (toolCall?.payload?.page && toolCall?.payload?.presentation === 'artifact') return true;
     return false;
   }, []);
 
@@ -3675,8 +3615,6 @@ useEffect(() => {
     // Close artifact panel when entering Ask mode
     setIsSidePanelOpen(false);
     setCurrentArtifactMessages([]);
-    setPendingInputRequestId(null); // Clear any pending workflow input requests
-    
     // Restore cached general messages if available (prefer shared askMessages)
     if (askMessages && askMessages.length > 0) {
       console.log(`📦 [MODE_TOGGLE] Restoring ${askMessages.length} cached ask-mode messages (shared)`);
@@ -4529,11 +4467,11 @@ useEffect(() => {
     
     try {
       // Handle UI tool responses for the dynamic UI system
-      if (action.type === 'ui_tool_response') {
+      if (action.type === 'tool_call_response') {
         console.log('🎯 Processing UI tool response:', action);
 
         // If this response corresponds to the most recent artifact event, close the panel immediately
-        if (lastArtifactEventRef.current && (!action.eventId || action.eventId === lastArtifactEventRef.current)) {
+        if (lastArtifactEventRef.current && (!action.tool_call_id || action.tool_call_id === lastArtifactEventRef.current)) {
           try { console.log('🧹 [UI] Artifact response received; collapsing ArtifactPanel now'); } catch {}
           setIsSidePanelOpen(false);
           if (dispatchSurfaceAction) {
@@ -4547,20 +4485,20 @@ useEffect(() => {
             clearStoredArtifactState(currentChatId);
           }
         }
-        // If we lack a real eventId (e.g., restored artifact), don't submit to backend; just close locally
-        if (!action.eventId) {
-          console.log('ℹ️ Skipping backend submission for restored UI tool response (no eventId)');
+        // If we lack a real tool_call_id (e.g., restored artifact), don't submit to backend; just close locally
+        if (!action.tool_call_id) {
+          console.log('ℹ️ Skipping backend submission for restored UI tool response (no tool_call_id)');
           return;
         }
 
         const payload = {
-          event_id: action.eventId,
+          event_id: action.tool_call_id,
           response_data: action.response
         };
 
         // Send the UI tool response to the backend
         try {
-          const submitPath = '/api/ui-tool/submit';
+          const submitPath = '/api/tool-call/respond';
           const baseUrl = api && typeof api.getHttpBaseUrl === 'function'
             ? api.getHttpBaseUrl()
             : null;
@@ -4609,7 +4547,7 @@ useEffect(() => {
 
   const emitLocalArtifactEvent = useCallback((event) => {
     try {
-      if (!event || !event.ui_tool_id) {
+      if (!event || !event.tool_name) {
         return;
       }
       dynamicUIHandler.notifyUIUpdate(event);
@@ -4641,7 +4579,7 @@ useEffect(() => {
         await handleConversationModeChange('workflow');
       }
 
-      const eventId = `embedded-view-${Date.now()}`;
+      const toolCallId = `embedded-view-${Date.now()}`;
       const payload = {
         embedded: true,
         presentation: 'artifact',
@@ -4652,9 +4590,10 @@ useEffect(() => {
       };
 
       emitLocalArtifactEvent({
-        type: 'ui_tool_event',
-        ui_tool_id: resolvedViewId,
-        eventId,
+        type: 'tool_call',
+        tool_name: resolvedViewId,
+        tool_call_id: toolCallId,
+        component_type: resolvedViewId,
         workflow_name: 'core',
         display: 'view',
         payload,
@@ -4798,8 +4737,8 @@ useEffect(() => {
         try {
           const artifactMsg = readStoredCurrentArtifact(currentChatId);
           if (artifactMsg) {
-            if (artifactMsg.uiToolEvent && !artifactMsg.uiToolEvent.onResponse) {
-              artifactMsg.uiToolEvent.onResponse = (response) => {
+            if (artifactMsg.toolCall && !artifactMsg.toolCall.onResponse) {
+              artifactMsg.toolCall.onResponse = (response) => {
                 console.log('🔌 [UI] Cached artifact response (no longer functional):', response);
                 console.warn('⚠️ This is a restored artifact - responses may not work until next interaction');
               };
@@ -4807,7 +4746,7 @@ useEffect(() => {
 
             console.log('🖼️ [UI] Restored artifact from cache on panel open');
             setCurrentArtifactMessages([artifactMsg]);
-            lastArtifactEventRef.current = artifactMsg.uiToolEvent?.eventId || 'cached';
+            lastArtifactEventRef.current = artifactMsg.toolCall?.tool_call_id || 'cached';
           } else {
             artifactCacheValidRef.current = false;
           }
@@ -4826,7 +4765,7 @@ useEffect(() => {
 
   // Simplified artifact restore effect: only restore when chatExists === true and connection is open
   // last_artifact semantics:
-  //   - Cached locally on each artifact-mode ui_tool_event
+  //   - Cached locally on each artifact-mode tool_call
   //   - Server persists ONLY the most recent artifact (overwrite strategy)
   //   - On refresh / second user: websocket chat_meta may include last_artifact; if not, we fetch /api/chats/meta
   //   - We avoid speculative restores for brand new chats (chat_exists === false)
@@ -4840,9 +4779,9 @@ useEffect(() => {
 
     try {
       const cached = readStoredLastArtifact(currentChatId);
-      if (!cached || !cached.ui_tool_id) return;
+      if (!cached || !cached.tool_name) return;
 
-      console.log('[RESTORE] Restoring cached artifact for chat', currentChatId, cached.ui_tool_id);
+      console.log('[RESTORE] Restoring cached artifact for chat', currentChatId, cached.tool_name);
       restoreStoredArtifactForChat(currentChatId, currentWorkflowName);
     } catch (e) {
       console.warn('[RESTORE] Failed to restore artifact:', e);
@@ -5052,7 +4991,6 @@ useEffect(() => {
                   : workflowConfig?.getWorkflowConfig(currentWorkflowName)?.initial_message_to_user
               }
               onRetry={retryConnection}
-              submitInputRequest={submitInputRequest}
               conversationMode={conversationMode}
               onConversationModeChange={handleConversationModeChange}
               onStartGeneralChat={handleStartGeneralChat}
@@ -5205,7 +5143,6 @@ useEffect(() => {
         startupMode={uiStartupMode}
         initialMessageToUser={headerInitialMessageToUser}
         onRetry={retryConnection}
-        submitInputRequest={submitInputRequest}
         onBrandClick={undefined}
         conversationMode={conversationMode}
         onConversationModeChange={handleConversationModeChange}

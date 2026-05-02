@@ -1,0 +1,11 @@
+tools:
+- agent: RuntimeToolCallSmokeAgent
+  file: runtime_confirmation.py
+  function: collect_runtime_confirmation
+  description: Emit a generic response-required UI tool call and wait for the submitted response text.
+  tool_type: UI_Tool
+  auto_tool_call: false
+  ui:
+    component: UserInputRequest
+    mode: inline
+lifecycle_tools: []

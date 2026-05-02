@@ -75,7 +75,7 @@ function resolveWorkflowRoots(platformAppDir, platformInputPath, workflowRootsEn
   } else {
     add(path.resolve(platformAppDir, 'workflows'));
     add(path.resolve(platformInputPath, 'workflows'));
-    add(path.resolve(projectRoot, 'factory_app/app/workflows'));
+    add(path.resolve(projectRoot, 'factory_app/workflows'));
   }
 
   const withDefinitions = roots.filter((candidate) => hasWorkflowDefinitions(candidate));
@@ -214,11 +214,8 @@ export default defineConfig(({ mode }) => {
 
       // ── Platform extension alias (PLATFORM_PATH-driven) ─────────────────
       // App.jsx imports: import { register } from '@platform/extensions'
-      // Resolved to: PLATFORM_PATH/../ui/index.js  (product platforms)
-      //          or: PLATFORM_PATH/../extensions.js (standard OSS app bundles)
-      //
-      // Never hardcodes a product name. Change PLATFORM_PATH in .env to switch.
-      '@studio/extensions': path.resolve(__dirname, '../factory_app/app/ui/studio/index.js'),
+      // Resolved to the active app root UI barrel, which owns any declared
+      // custom routes and management surfaces for that app.
       '@platform/extensions': platformExtensionsFile,
     },
   },

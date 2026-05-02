@@ -1,0 +1,127 @@
+# ValueEngine Context Variables
+# Follows AgentGenerator pattern: definitions[] + agents[]
+
+definitions:
+# ============================================================================
+# CONFIG - Deployment settings (env vars)
+# ============================================================================
+  app_type:
+    type: string
+    description: App path for ValueEngine. Greenfield app generation defaults to "greenfield_app".
+    source:
+      type: state
+      default: "greenfield_app"
+
+  context_aware:
+    type: boolean
+    description: Flag indicating if the application is opensource (LLM asks for context) or part of an existing product with seeded context.
+    source:
+      type: config
+      env_var: CONTEXT_AWARE
+      default: true
+  monetization_enabled:
+    type: boolean
+    description: Flag indicating if monetization features are enabled for this workflow.
+    source:
+      type: config
+      env_var: MONETIZATION_ENABLED
+      default: false
+
+# ============================================================================
+# STATE - Workflow orchestration triggers
+# ============================================================================
+  interview_complete:
+    type: boolean
+    description: True when ValueInterviewAgent signals completion (NEXT).
+    source:
+      type: state
+      default: false
+      triggers:
+      - type: agent_text
+        agent: ValueInterviewAgent
+        ui_hidden: true
+        match:
+          equals: NEXT
+  concept_presented:
+    type: boolean
+    description: True once GapAnalysisAgent has persisted and surfaced the ConceptBlueprint artifact.
+    source:
+      type: state
+      default: false
+
+# ============================================================================
+# COMPUTED - Values set by tools/agents
+# ============================================================================
+  concept_blueprint:
+    type: object
+    description: The structured Concept Blueprint created by GapAnalysisAgent and saved via save_value_manifest.
+    source:
+      type: computed
+      default: null
+  concept_overview:
+    type: string
+    description: The 6-12 sentence concept overview usable by downstream workflows (AgentGenerator, AppGenerator).
+    source:
+      type: computed
+      default: null
+  api_endpoints:
+    type: array
+    description: List of API endpoints extracted from the concept blueprint.
+    source:
+      type: computed
+      default: []
+  generation_status:
+    type: object
+    description: Status of multi-pass feature generation (features_total, features_completed, current_feature, errors).
+    source:
+      type: computed
+      default: null
+  build_plan:
+    type: object
+    description: Capability-pack-aware build decomposition derived from the approved concept.
+    source:
+      type: computed
+      default: null
+  capability_packs:
+    type: array
+    description: Canonical capability packs currently selected for the concept.
+    source:
+      type: computed
+      default: []
+  surface_candidate_hints:
+    type: array
+    description: Coarse realization hints carried from the approved concept into downstream planning.
+    source:
+      type: computed
+      default: []
+  build_registry_id:
+    type: string
+    description: ID of the hosted product build or app registry record created at pipeline start.
+    source:
+      type: computed
+      default: null
+
+# ============================================================================
+# AGENT VARIABLE INJECTION
+# ============================================================================
+agents:
+  ValueInterviewAgent:
+    variables:
+    - app_type
+    - context_aware
+    - monetization_enabled
+    - interview_complete
+  ResearchAgent:
+    variables:
+    - interview_complete
+    - concept_presented
+    - app_type
+  GapAnalysisAgent:
+    variables:
+    - concept_presented
+    - concept_blueprint
+    - concept_overview
+    - api_endpoints
+    - feature_decomposition
+    - generation_status
+    - app_type

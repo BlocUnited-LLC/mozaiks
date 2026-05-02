@@ -64,7 +64,7 @@ use different naming conventions for the same packages:
 | **Executor** | Interface that packages implement (WorkflowExecutor, ModuleExecutor). |
 | **Event** | Normalized message with type, payload, tenant context. |
 | **Page** | YAML-defined UI layout composed of primitives. |
-| **App** | A complete application defined by app.yaml. |
+| **App** | A complete application workspace rooted at `app/`, with `app.json` plus pages, modules, workflows, config, and brand assets. |
 
 ---
 
@@ -106,14 +106,13 @@ use different naming conventions for the same packages:
 
 ### [MODULAR_ARCHITECTURE_V2.md](./MODULAR_ARCHITECTURE_V2.md) (Future Packaging Proposal)
 
-The current architecture specification based on the real system state:
+A future package-splitting proposal aligned to the current layered-host system:
 
 - **Design Philosophy:** Composition, not merging
 - **Package Structure:** core, ai, modules, runtime, ui, cli
 - **Core Interfaces:** EventBus, Executor, RequestContext, Storage protocols
-- **App Runtime:** How the composition layer orchestrates AI + modules
-- **App Definition:** app.yaml schema for declaring capabilities
-- **Request Lifecycle:** How requests flow through the system
+- **Layered Hosts:** runtime, platform, Studio, and hosted-product boundaries
+- **App Contract:** canonical app-root bundle built around `app/app.json`
 - **Execution Modes:** ai-only, modules-only, full
 - **Dependency Rules:** Strict boundaries (ai ❌ modules)
 - **Migration Plan:** From current state to new architecture
@@ -162,7 +161,7 @@ Comprehensive prompt for coding agents to begin implementation:
 
 Comprehensive implementation checklist for the modular architecture:
 
-- **What exists in mozaiks today:** mozaiksai/, chat-ui/, mozaiks_cli/, factory_app/app/workflows/
+- **What exists in mozaiks today:** mozaiksai/, chat-ui/, mozaiks_cli/, factory_app/workflows/
 - **What needs to be created:** packages/core/, packages/modules/, packages/runtime/
 - **Implementation order:** 6 phases (core → ai → modules → runtime → ui → cli)
 - **Key files to create:** Priority-ordered file lists for each package
@@ -629,14 +628,14 @@ FORBIDDEN:
 ### For Implementers
 
 1. Read [MODULAR_ARCHITECTURE_V2.md](./MODULAR_ARCHITECTURE_V2.md) for the architecture
-2. Copy [AGENTS_MD_V2.md](./AGENTS_MD_V2.md) to `mozaiks/.claude/AGENTS.md`
+2. Use the active repo guidance in [../../../AGENTS.md](../../../AGENTS.md)
 3. Implement events per [Event Contracts](../foundations/event-contracts.md)
 4. Build SDK per [PLATFORM_SDK_SPEC.md](./PLATFORM_SDK_SPEC.md)
 5. Build admin per [ADMIN_DASHBOARD_SPEC.md](./ADMIN_DASHBOARD_SPEC.md)
 
 ### For AI Coding Agents
 
-1. Read [AGENTS_MD_V2.md](./AGENTS_MD_V2.md) - this is your operating guide
+1. Read the active repo guidance in [../../../AGENTS.md](../../../AGENTS.md)
 2. **NEVER** import between `ai` and `modules` packages
 3. Use runtime composition for cross-system calls
 4. Use events for async communication
@@ -705,7 +704,7 @@ All monetization and analytics data flows to mozaiks-platform via platform-route
 
 ### Phase 4: Runtime Package
 - [ ] Create `packages/runtime/` structure
-- [ ] Implement AppLoader (reads app.yaml)
+- [ ] Implement AppLoader (reads `app/app.json` and discovers bundle families)
 - [ ] Implement ExecutorRegistry
 - [ ] Implement request router
 - [ ] Implement context injection middleware

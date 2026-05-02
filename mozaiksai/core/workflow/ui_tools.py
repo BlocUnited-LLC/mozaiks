@@ -7,6 +7,7 @@
 # ==============================================================================
 
 from __future__ import annotations
+import asyncio
 import uuid
 import logging
 from typing import Dict, Any, Optional
@@ -57,7 +58,7 @@ def is_ui_tool(tool_id: str) -> bool:
         return False
     return False
 
-async def _emit_ui_tool_event_core(
+async def _emit_tool_call_core(
     tool_id: str,
     payload: Dict[str, Any],
     display: str = "inline",
@@ -67,7 +68,7 @@ async def _emit_ui_tool_event_core(
     awaiting_response: bool = True,
 ) -> str:
     """
-    Core function to emit a UI tool event to the frontend.
+    Core function to emit a response-aware tool_call to the frontend.
 
     This function is the standardized way for any agent tool to request
     that a UI component be rendered.
@@ -93,7 +94,13 @@ async def _emit_ui_tool_event_core(
         wf_logger.error(f"❌ [UI_TOOLS] Transport unavailable: {e}")
         raise UIToolError(f"SimpleTransport not available: {e}")
 
-    payload_to_send = {**payload, "workflow_name": workflow_name, "display": display, "mode": payload.get("mode") or display}
+    payload_to_send = {
+        **payload,
+        "workflow_name": workflow_name,
+        "display": display,
+        "mode": payload.get("mode") or display,
+        "interaction_type": payload.get("interaction_type") or ("ui_tool" if awaiting_response else "ui_surface"),
+    }
     chat_logger.info(
         f"🎯 UI tool event: {tool_id} (event={event_id}, display={display}, payload_keys={list(payload_to_send.keys())[:12]})"
     )
@@ -103,7 +110,7 @@ async def _emit_ui_tool_event_core(
         agent_name = payload_to_send.get("agent_name")
     
     try:
-        await transport.send_ui_tool_event(
+        await transport.send_tool_call_event(
             event_id=event_id,
             chat_id=chat_id,
             tool_name=tool_id,  # use actual tool id
@@ -122,13 +129,13 @@ async def _emit_ui_tool_event_core(
         )
         raise UIToolError(f"Failed to emit UI tool event: {e}")
 
-async def _wait_for_ui_tool_response_internal(event_id: str, timeout: Optional[float] = None) -> Dict[str, Any]:
+async def _wait_for_tool_call_response_internal(event_id: str, timeout: Optional[float] = None) -> Dict[str, Any]:
     from mozaiksai.core.transport.simple_transport import SimpleTransport  # local import
     transport = await SimpleTransport.get_instance()
     try:
         # Always wait indefinitely for user/UI response; ignore provided timeout to avoid premature cancellations.
         # Explicitly pass timeout=None to ensure no default timeout is applied in the transport layer.
-        fut = transport.wait_for_ui_tool_response(event_id, timeout=None)  # type: ignore[attr-defined]
+        fut = transport.wait_for_tool_call_response(event_id, timeout=None)  # type: ignore[attr-defined]
         return await fut
     except Exception as e:  # pragma: no cover
         raise UIToolError(f"UI tool response failure for {event_id}: {e}")
@@ -173,6 +180,19 @@ def _resolve_ui_display(
             wf_logger.warning(f"⚠️ Failed to resolve display mode for '{tool_id}': {e}, using default: inline")
     return str(resolved_display or "inline")
 
+
+async def _await_on_transport_loop(transport: Any, coro: Any) -> Any:
+    owner_loop = getattr(transport, "_owner_loop", None)
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+
+    if owner_loop is not None and current_loop is not None and owner_loop is not current_loop:
+        return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(coro, owner_loop))
+
+    return await coro
+
 async def use_ui_tool(
     tool_id: str,
     payload: Dict[str, Any],
@@ -195,7 +215,7 @@ async def use_ui_tool(
     agent_name = _resolve_ui_tool_owner(tool_id, payload, wf_logger)
     resolved_display = _resolve_ui_display(tool_id, display, wf_logger)
     
-    event_id = await _emit_ui_tool_event_core(
+    event_id = await _emit_tool_call_core(
         tool_id=tool_id,
         payload=payload,
         display=resolved_display,
@@ -224,18 +244,24 @@ async def use_ui_tool(
                 app_id = None
 
             if pm and app_id:
-                await pm.attach_ui_tool_metadata(
-                    chat_id=chat_id,
-                    app_id=str(app_id),
-                    event_id=event_id,
-                    metadata={
-                        "ui_tool_id": tool_id,
-                        "event_id": event_id,
-                        "display": resolved_display,
-                        "ui_tool_completed": False,
-                        "payload": payload,
-                        "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
-                    },
+                await _await_on_transport_loop(
+                    transport,
+                    pm.attach_tool_call_metadata(
+                        chat_id=chat_id,
+                        app_id=str(app_id),
+                        event_id=event_id,
+                        metadata={
+                            "tool_name": tool_id,
+                            "tool_call_id": event_id,
+                            "component_type": tool_id,
+                            "display": resolved_display,
+                            "tool_call_completed": False,
+                            "tool_call_status": "pending",
+                            "awaiting_response": True,
+                            "payload": payload,
+                            "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                        },
+                    ),
                 )
                 wf_logger.debug(f"📌 Attached UI tool metadata for {tool_id} (event={event_id})")
         except Exception as meta_err:
@@ -250,7 +276,7 @@ async def use_ui_tool(
         pass
     try:
         # Ignore the timeout parameter to prevent user feedback from timing out; wait until the UI responds
-        resp = await _wait_for_ui_tool_response_internal(event_id, timeout=None)
+        resp = await _wait_for_tool_call_response_internal(event_id, timeout=None)
         duration_ms = (_dt.datetime.now(_dt.timezone.utc) - start).total_seconds() * 1000.0
         # Assemble log message to keep line length under linter limits
         round_trip_msg = (
@@ -274,10 +300,10 @@ async def use_ui_tool(
 
                 transport = await SimpleTransport.get_instance()
                 completion_event = {
-                    "type": "chat.ui_tool_complete",
+                    "type": "chat.tool_call_complete",
                     "data": {
-                        "eventId": event_id,
-                        "ui_tool_id": tool_id,
+                        "tool_call_id": event_id,
+                        "tool_name": tool_id,
                         "display": "inline",
                         "status": resp.get("status", "completed"),
                         "summary": f"{tool_id} completed",
@@ -301,12 +327,15 @@ async def use_ui_tool(
                         conn = transport.connections.get(chat_id) or {}  # type: ignore[attr-defined]
                         app_id = conn.get("app_id")
                 if pm and app_id:
-                    await pm.update_ui_tool_completion(
-                        chat_id=chat_id,
-                        app_id=str(app_id),
-                        event_id=event_id,
-                        completed=True,
-                        status=resp.get("status", "completed"),
+                    await _await_on_transport_loop(
+                        transport,
+                        pm.update_tool_call_state(
+                            chat_id=chat_id,
+                            app_id=str(app_id),
+                            event_id=event_id,
+                            status=resp.get("status", "completed"),
+                            completed=True,
+                        ),
                     )
                     wf_logger.debug(f"✅ Updated UI tool completion status for {tool_id} (event={event_id})")
             except Exception as persist_err:
@@ -341,7 +370,7 @@ async def emit_ui_surface(
     resolved_agent_name = agent_name or _resolve_ui_tool_owner(tool_id, payload, wf_logger)
     resolved_display = _resolve_ui_display(tool_id, display, wf_logger)
 
-    event_id = await _emit_ui_tool_event_core(
+    event_id = await _emit_tool_call_core(
         tool_id=tool_id,
         payload=payload,
         display=resolved_display,
@@ -437,7 +466,7 @@ async def handle_tool_call_for_ui_interaction(tool_call_event: Any, chat_id: str
     wf_logger = get_workflow_logger(workflow_name="tool_interaction", chat_id=chat_id)
     
     # Use configuration-driven detection
-    requires_ui, tool_config = workflow_manager.detect_ui_tool_event(tool_call_event)
+    requires_ui, tool_config = workflow_manager.detect_ui_tool_call(tool_call_event)
 
     # Only orchestrator-manage UI emission when explicitly flagged in tool config.
     # By default, UI tools emit their own UI from within the tool function via use_ui_tool().
@@ -471,7 +500,7 @@ async def handle_tool_call_for_ui_interaction(tool_call_event: Any, chat_id: str
     # Use configuration-driven component type and display mode
     component_type = effective_component
     display_mode = tool_config.get('mode', 'inline')
-    ui_tool_id = tool_config.get('tool_id', str(tool_name))
+    tool_call_component = tool_config.get('tool_id', str(tool_name))
     
     # Prepare UI tool payload
     payload = {
@@ -484,18 +513,18 @@ async def handle_tool_call_for_ui_interaction(tool_call_event: Any, chat_id: str
     }
     
     try:
-        event_id = await _emit_ui_tool_event_core(
-            tool_id=ui_tool_id,
+        event_id = await _emit_tool_call_core(
+            tool_id=tool_call_component,
             payload=payload,
             display=display_mode,
             chat_id=chat_id,
             workflow_name=tool_config.get('workflow_name', 'tool_interaction')
         )
-        wf_logger.info(f"⏳ Waiting for user interaction on UI tool '{ui_tool_id}'")
+        wf_logger.info(f"⏳ Waiting for user interaction on tool_call '{tool_call_component}'")
 
         # Wait for user response using internal primitive
-        response = await _wait_for_ui_tool_response_internal(event_id)
-        wf_logger.info(f"✅ Received user response for tool '{ui_tool_id}'")
+        response = await _wait_for_tool_call_response_internal(event_id)
+        wf_logger.info(f"✅ Received user response for tool_call '{tool_call_component}'")
 
         if isinstance(response, dict) and 'ui_event_id' not in response:
             response['ui_event_id'] = event_id

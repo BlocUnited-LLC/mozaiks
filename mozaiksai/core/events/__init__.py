@@ -13,10 +13,10 @@ This package handles THREE separate event systems, each with different purposes:
    - Purpose: Application lifecycle, performance, monitoring
    - Usage: emit_business_event("SERVER_STARTUP_COMPLETED", "Server ready")
 
-2. UI TOOL EVENTS (Agent-to-UI Communication) 
-   - Field: ui_tool_id
+2. TOOL CALL REQUEST EVENTS (Agent-to-UI Communication)
+   - Field: tool_name
    - Purpose: Interactive components, user input requests, dynamic UI
-    - Usage: emit_ui_tool_event("agent_api_key_input", {...}, workflow_name="SomeWorkflow")
+    - Usage: emit_tool_call_request("agent_api_key_input", {...}, workflow_name="SomeWorkflow")
 
 3. AG2 RUNTIME EVENTS (AutoGen Workflow Events)
    - Field: kind (internal) -> type (WebSocket)  
@@ -29,9 +29,9 @@ Usage Examples:
     from mozaiksai.core.events import emit_business_event
     await emit_business_event("WORKFLOW_STARTED", "Workflow initialized")
 
-    # UI tool events (agent-UI interaction)
-    from mozaiksai.core.events import emit_ui_tool_event  
-    await emit_ui_tool_event("api_key_input", {"service": "openai"}, "SomeWorkflow")
+    # Tool call request events (agent-UI interaction)
+    from mozaiksai.core.events import emit_tool_call_request
+    await emit_tool_call_request("api_key_input", {"service": "openai"}, "SomeWorkflow")
 
     # AG2 runtime events are handled automatically by the orchestration layer
     # via event_serialization.py - no direct API needed
@@ -48,17 +48,17 @@ from .unified_event_dispatcher import (
     EventCategory,
     EventType,
     BusinessLogEvent,
-    UIToolEvent,
+    ToolCallRequestEvent,
     
     # Event handlers
     EventHandler,
     BusinessLogHandler,
-    UIToolHandler,
+    ToolCallRequestHandler,
     
     # Main functions
     get_event_dispatcher,
     emit_business_event,
-    emit_ui_tool_event
+    emit_tool_call_request
 )
 
 from .handoff_events import emit_handoff_event, HANDOFF_EVENT_TYPE
@@ -75,7 +75,7 @@ from .ag2_events import (
     StructuredOutputEvent,
     ArtifactUpdatedEvent,
     ArtifactReadyEvent,
-    UIToolRequestedEvent,
+    ToolCallRequestedEvent,
     ContextUpdatedEvent,
     # Journey events
     JourneyStartedEvent,
@@ -86,7 +86,7 @@ from .ag2_events import (
     emit_structured_output,
     emit_artifact_ready,
     emit_artifact_updated,
-    emit_ui_tool_requested,
+    emit_tool_call_requested,
     # Event registries
     MOZAIKSAI_CONTROL_EVENTS,
     MOZAIKSAI_RUNTIME_EVENTS,
@@ -103,16 +103,16 @@ __all__ = [
     "EventCategory", 
     "EventType",
     "BusinessLogEvent",
-    "UIToolEvent",
+    "ToolCallRequestEvent",
     
     # Handlers
     "EventHandler",
     "BusinessLogHandler", 
-    "UIToolHandler",
+    "ToolCallRequestHandler",
     
     # Convenience functions
     "emit_business_event",
-    "emit_ui_tool_event",
+    "emit_tool_call_request",
     "emit_handoff_event",
     "HANDOFF_EVENT_TYPE",
 
@@ -125,7 +125,7 @@ __all__ = [
     "StructuredOutputEvent",
     "ArtifactUpdatedEvent",
     "ArtifactReadyEvent",
-    "UIToolRequestedEvent",
+    "ToolCallRequestedEvent",
     "ContextUpdatedEvent",
     "JourneyStartedEvent",
     "JourneyCompletedEvent",
@@ -136,7 +136,7 @@ __all__ = [
     "emit_structured_output",
     "emit_artifact_ready",
     "emit_artifact_updated",
-    "emit_ui_tool_requested",
+    "emit_tool_call_requested",
 
     # Event registries (for yield_on)
     "MOZAIKSAI_CONTROL_EVENTS",

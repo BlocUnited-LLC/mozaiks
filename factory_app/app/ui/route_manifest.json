@@ -1,3 +1,40 @@
 {
-  "pages": []
+  "pages": [
+    {
+      "path": "/studio",
+      "component": "StudioHomePage",
+      "label": "Studio",
+      "order": 5,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "Studio Home",
+        "appShell": true
+      }
+    },
+    {
+      "path": "/studio/create",
+      "component": "StudioCreatePage",
+      "label": "Create",
+      "order": 6,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "Studio Create",
+        "appShell": true
+      }
+    },
+    {
+      "path": "/studio/adapters",
+      "component": "StudioAdaptersPage",
+      "label": "Adapters",
+      "order": 7,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "Studio Adapters",
+        "appShell": true
+      }
+    }
+  ]
 }

@@ -25,9 +25,8 @@ const WorkflowUIRouter = ({
   payload, 
   onResponse, 
   onCancel,
-  submitInputRequest,
-  ui_tool_id,
-  eventId
+  toolName,
+  toolCallId
 }) => {
   // 🎯 ALL HOOKS MUST BE AT THE TOP - React Hooks Rules Compliance
   const [Component, setComponent] = React.useState(null);
@@ -49,19 +48,19 @@ const WorkflowUIRouter = ({
   const loadWorkflowComponent = React.useCallback(async (workflow, component) => {
     setIsLoading(true);
     setError(null);
-    console.log('🛰️ WorkflowUIRouter: Loading component', { workflow, component, ui_tool_id, eventId });
+    console.log('🛰️ WorkflowUIRouter: Loading component', { workflow, component, toolName, toolCallId });
 
     try {
       // Deterministic resolution order:
       // 1. workflow-scoped component name
-      // 2. workflow-scoped ui_tool_id (legacy payload fallback)
+      // 2. workflow-scoped tool_name
       // 3. plain component name
-      // 4. plain ui_tool_id
+      // 4. plain tool_name
       const candidates = [
         workflow && component ? `${workflow}:${component}` : null,
-        workflow && ui_tool_id ? `${workflow}:${ui_tool_id}` : null,
+        workflow && toolName ? `${workflow}:${toolName}` : null,
         component || null,
-        ui_tool_id || null,
+        toolName || null,
       ].filter(Boolean);
 
       for (const candidate of candidates) {
@@ -70,7 +69,7 @@ const WorkflowUIRouter = ({
           console.log('✅ WorkflowUIRouter: Using registered component', {
             resolved: candidate,
             requested_component: component,
-            requested_tool: ui_tool_id,
+            requested_tool: toolName,
             workflow,
           });
           setComponent(() => matched);
@@ -83,11 +82,10 @@ const WorkflowUIRouter = ({
         const coreModule = await import('./ui/index.js');
         const coreComponents = {
           UserInputRequest: coreModule.UserInputRequest,
-          user_input: coreModule.UserInputRequest,
         };
-        const coreComponent = coreComponents[component] || coreComponents[ui_tool_id];
+        const coreComponent = coreComponents[component] || coreComponents[toolName];
         if (coreComponent) {
-          console.log(`✅ WorkflowUIRouter: Using core component ${component || ui_tool_id}`);
+          console.log(`✅ WorkflowUIRouter: Using core component ${component || toolName}`);
           setComponent(() => coreComponent);
           return;
         }
@@ -99,30 +97,30 @@ const WorkflowUIRouter = ({
         type: 'component_not_found',
         workflow,
         component,
-        message: `No registered component matched ${workflow}:${component || ui_tool_id}`,
+        message: `No registered component matched ${workflow}:${component || toolName}`,
       });
     } finally {
       setIsLoading(false);
     }
-  }, [eventId, ui_tool_id]);
+  }, [toolCallId, toolName]);
 
   React.useEffect(() => {
     loadWorkflowComponent(sourceWorkflowName, componentType);
-  }, [sourceWorkflowName, componentType, eventId, loadWorkflowComponent]); // Include eventId to reload on new events
+  }, [sourceWorkflowName, componentType, toolCallId, loadWorkflowComponent]); // Include toolCallId to reload on new events
 
   // 🛡️ DEFENSIVE PAYLOAD VALIDATION - After all hooks, before rendering
   if (!payload || typeof payload !== 'object') {
     console.error('🚨 [WorkflowUIRouter] Invalid or missing payload', { 
       payload, 
       payloadType: typeof payload, 
-      ui_tool_id,
-      eventId 
+      toolName,
+      toolCallId 
     });
     return (
       <div className="bg-[rgba(var(--color-error-rgb),0.2)] border border-[var(--color-error)] rounded p-4">
         <h3 className="text-[var(--color-error)] font-semibold mb-2">Invalid Artifact Data</h3>
         <p className="text-[var(--color-error)] text-sm mb-2">The artifact payload is missing or corrupted.</p>
-        <p className="text-xs text-gray-400">Event ID: {eventId || 'unknown'}</p>
+        <p className="text-xs text-gray-400">Event ID: {toolCallId || 'unknown'}</p>
         <button 
           onClick={() => onCancel?.({ status: 'error', error: 'Invalid payload' })}
           className="mt-3 px-3 py-1 bg-[var(--color-error)] hover:bg-[var(--color-error)] rounded text-sm"
@@ -197,16 +195,15 @@ const WorkflowUIRouter = ({
       <div className="workflow-ui-container">
         
         {/* Render the dynamically loaded workflow component */}
-        {/* CRITICAL: Use eventId as key to force remount on new artifact events (prevents state collision on revisions) */}
+        {/* CRITICAL: Use toolCallId as key to force remount on new artifact events (prevents state collision on revisions) */}
         {Component && typeof Component === 'function' ? (
           <Component
-            key={eventId || `${sourceWorkflowName}-${componentType}`}
+            key={toolCallId || `${sourceWorkflowName}-${componentType}`}
             payload={payload || {}}
             onResponse={onResponse}
             onCancel={onCancel}
-            submitInputRequest={submitInputRequest}
-            ui_tool_id={ui_tool_id}
-            eventId={eventId}
+            toolName={toolName}
+            toolCallId={toolCallId}
             sourceWorkflowName={sourceWorkflowName}
             generatedWorkflowName={generatedWorkflowName}
             // Shared workflow identifier prop for UI components
@@ -262,7 +259,7 @@ export default WorkflowUIRouter;
  *      mode: inline|artifact
  * 
  * 4. COMPONENT RECEIVES STANDARD PROPS:
- *    const YourComponent = ({ payload, onResponse, onCancel, ui_tool_id, eventId }) => {
+ *    const YourComponent = ({ payload, onResponse, onCancel, toolName, toolCallId }) => {
  *      // Your component logic
  *    };
  * 

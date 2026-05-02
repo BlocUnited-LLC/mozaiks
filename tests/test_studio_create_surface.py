@@ -28,20 +28,21 @@ def test_runtime_exposes_studio_create_summary_helper() -> None:
 
 def test_studio_app_exposes_studio_create_endpoint_and_route() -> None:
     studio_source = _read("mozaiksai/hosts/studio.py")
-    platform_source = _read("mozaiksai/hosts/platform.py")
+    manifest_source = _read("factory_app/app/ui/route_manifest.json")
     assert '@app.get("/api/studio/create")' in studio_source
     assert '@app.put("/api/studio/create")' in studio_source
-    assert '"path": "/studio/create"' in platform_source
-    assert '"component": "StudioCreatePage"' in platform_source
-    assert '"requiresRole": "admin"' in platform_source
-    assert '_inject_header_page(result, path="/studio/create"' not in platform_source
+    assert 'build_shell_config(surface="studio")' in studio_source
+    assert '"path": "/studio/create"' in manifest_source
+    assert '"component": "StudioCreatePage"' in manifest_source
+    assert '"surfaces": ["studio"]' in manifest_source
+    assert '"requiresRole": "admin"' in manifest_source
 
 
-def test_studio_extension_registers_studio_create_page() -> None:
-    source = _read("factory_app/app/ui/studio/index.js")
+def test_factory_app_ui_barrel_registers_studio_create_page() -> None:
+    source = _read("factory_app/app/ui/index.js")
     assert "StudioCreatePage" in source
     assert "registerComponent('StudioCreatePage'" in source
-    assert "../pages/custom/StudioCreatePage.jsx" in source
+    assert "./pages/custom/StudioCreatePage.jsx" in source
 
 
 def test_core_components_do_not_register_studio_create_page() -> None:
@@ -91,7 +92,7 @@ def test_factory_app_refinement_controls_are_live_and_controlled() -> None:
 
 
 def test_studio_home_links_to_create_surface() -> None:
-    source = _read("factory_app/app/ui/studio/pages/StudioHomePage.jsx")
+    source = _read("factory_app/app/ui/pages/custom/studio/StudioHomePage.jsx")
     assert 'to="/studio/create"' in source
 
 
@@ -117,6 +118,6 @@ def test_admin_workspace_layout_links_admin_studio_and_create() -> None:
 
 
 def test_studio_adapters_page_uses_studio_eyebrow() -> None:
-    source = _read("factory_app/app/ui/studio/pages/StudioAdaptersPage.jsx")
+    source = _read("factory_app/app/ui/pages/custom/studio/StudioAdaptersPage.jsx")
     assert 'eyebrow="Studio"' in source
     assert 'eyebrow="Builder"' not in source

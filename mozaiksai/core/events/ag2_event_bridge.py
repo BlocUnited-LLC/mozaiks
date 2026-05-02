@@ -58,7 +58,7 @@ from .ag2_events import (
     DecompositionPlannedEvent,
     ArtifactUpdatedEvent,
     ArtifactReadyEvent,
-    UIToolRequestedEvent,
+    ToolCallRequestedEvent,
     ContextUpdatedEvent,
     # Journey events
     JourneyStartedEvent,
@@ -112,7 +112,7 @@ class AG2EventBridge:
         DecompositionPlannedEvent: RUNTIME_DECOMPOSITION_PLANNED,
         ArtifactUpdatedEvent: ARTIFACT_EVENT_UPDATED,
         ArtifactReadyEvent: ARTIFACT_EVENT_READY,
-        UIToolRequestedEvent: "runtime.ui_tool_requested",
+        ToolCallRequestedEvent: "runtime.tool_call_requested",
         ContextUpdatedEvent: "runtime.context_updated",
         # Journey events
         JourneyStartedEvent: "mfj.journey_started",

@@ -29,7 +29,7 @@ Current repo layout:
 
 - `web_shell/` - local Vite shell host source
 - `mozaiks-platform/app/` - repo-local App Zero app workspace
-- `factory_app/app/workflows/` - shared builder workflow root
+- `factory_app/workflows/` - shared builder workflow root
 
 ---
 

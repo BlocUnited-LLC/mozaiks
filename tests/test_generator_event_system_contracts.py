@@ -18,7 +18,7 @@ def _read_yaml(relative_path: str):
 
 
 def test_designdocs_defines_event_architecture_before_generation() -> None:
-    source = _read("factory_app/app/workflows/DesignDocs/agents.yaml")
+    source = _read("factory_app/workflows/DesignDocs/agents.yaml")
 
     assert "[EVENT ARCHITECTURE]" in source
     assert "[CONTRACT DISCIPLINE]" in source
@@ -31,20 +31,20 @@ def test_designdocs_defines_event_architecture_before_generation() -> None:
 
 
 def test_appgenerator_build_plan_preserves_event_flows() -> None:
-    config = _read_yaml("factory_app/app/workflows/AppGenerator/structured_outputs.yaml")
+    config = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
     models = config["models"]
 
     assert "AppEventFlow" in models
     assert models["AppBuildPlan"]["fields"]["event_flows"]["items"] == "AppEventFlow"
 
-    source = _read("factory_app/app/workflows/AppGenerator/agents.yaml")
+    source = _read("factory_app/workflows/AppGenerator/agents.yaml")
     assert "11c. **event architecture rule**" in source
     assert "`event_flows[].event_type` must be a namespaced `domain.{module_id}.{event_name}`" in source
     assert "Workflow reactions must reference `workflow_capability_ids`; do not put raw workflow names" in source
 
 
 def test_appgenerator_page_schema_limits_page_events_to_ui_namespace() -> None:
-    source = _read("factory_app/app/workflows/AppGenerator/agents.yaml")
+    source = _read("factory_app/workflows/AppGenerator/agents.yaml")
 
     assert "Page actions that mutate durable app state should submit to module actions/API endpoints" in source
     assert "Use `ui.*` events only for transient browser reactions" in source
@@ -52,7 +52,7 @@ def test_appgenerator_page_schema_limits_page_events_to_ui_namespace() -> None:
 
 
 def test_agentgenerator_structured_outputs_include_workflow_event_boundary() -> None:
-    config = _read_yaml("factory_app/app/workflows/AgentGenerator/structured_outputs.yaml")
+    config = _read_yaml("factory_app/workflows/AgentGenerator/structured_outputs.yaml")
     models = config["models"]
 
     for model_name in [
@@ -70,7 +70,7 @@ def test_agentgenerator_structured_outputs_include_workflow_event_boundary() -> 
 
 
 def test_agentgenerator_prompts_enforce_workflow_domain_event_boundary() -> None:
-    source = _read("factory_app/app/workflows/AgentGenerator/agents.yaml")
+    source = _read("factory_app/workflows/AgentGenerator/agents.yaml")
 
     assert "9. **Derive `event_boundary`**" in source
     assert "This workflow does not publish domain.* directly; modules publish domain.* after state commits." in source

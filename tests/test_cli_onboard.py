@@ -17,7 +17,7 @@ def test_onboard_parser_accepts_guided_setup_flags() -> None:
             "--dir",
             "sample-app",
             "--journey",
-            "existing_app",
+            "brownfield_app",
             "--provider",
             "anthropic",
             "--theme-primary",
@@ -28,7 +28,7 @@ def test_onboard_parser_accepts_guided_setup_flags() -> None:
 
     assert args.command == "onboard"
     assert args.directory == "sample-app"
-    assert args.journey == "existing_app"
+    assert args.journey == "brownfield_app"
     assert args.provider == "anthropic"
     assert args.theme_primary == "blue"
     assert args.non_interactive is True
@@ -42,7 +42,7 @@ def test_onboard_command_updates_scaffold_surfaces_non_interactively(tmp_path) -
         Namespace(
             directory=str(target_dir),
             name="Atlas CRM",
-            journey="existing_app",
+            journey="brownfield_app",
             goal="Bridge lead intake before building anything else",
             provider="anthropic",
             model="claude-sonnet-4-5",
@@ -62,7 +62,7 @@ def test_onboard_command_updates_scaffold_surfaces_non_interactively(tmp_path) -
     admin_json = _load_json(target_dir / "app" / "config" / "admin.json")
 
     assert app_json["appName"] == "Atlas CRM"
-    assert app_json["onboarding"]["journey"] == "existing_app"
+    assert app_json["onboarding"]["journey"] == "brownfield_app"
     assert app_json["onboarding"]["first_goal"] == "Bridge lead intake before building anything else"
     assert app_json["onboarding"]["existing_app_url"] == "https://example.com"
     assert app_json["admins"] == ["founder@example.com"]
@@ -72,7 +72,7 @@ def test_onboard_command_updates_scaffold_surfaces_non_interactively(tmp_path) -
         "model": "claude-sonnet-4-5",
     }
     assert "augment an existing app safely" in ai_json["ask"]["ask_mode_prompt"]
-    assert ai_json["app_context"]["journey"] == "existing_app"
+    assert ai_json["app_context"]["journey"] == "brownfield_app"
 
     assert shell_json["header"]["logo"]["alt"] == "Atlas CRM logo"
     assert theme_json["theme"]["primary"] == "blue"
@@ -128,7 +128,7 @@ def test_onboard_command_prompts_when_values_are_missing(monkeypatch, tmp_path) 
     admin_json = _load_json(target_dir / "app" / "config" / "admin.json")
 
     assert app_json["appName"] == "Atlas Prime"
-    assert app_json["onboarding"]["journey"] == "new_app"
+    assert app_json["onboarding"]["journey"] == "greenfield_app"
     assert app_json["onboarding"]["first_goal"] == "Build the first customer intake workflow"
     assert ai_json["llm"]["provider"] == "openai"
     assert ai_json["llm"]["model"] == "gpt-4.1"

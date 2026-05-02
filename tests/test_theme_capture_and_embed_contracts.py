@@ -29,9 +29,9 @@ def _load_module(relative_path: str, module_name: str):
 
 
 def test_theme_capture_uses_canonical_context_and_handoffs() -> None:
-    context_vars = _read_yaml("factory_app/app/workflows/ThemeCapture/context_variables.yaml")
-    handoffs = _read_yaml("factory_app/app/workflows/ThemeCapture/handoffs.yaml")
-    tools = _read_yaml("factory_app/app/workflows/ThemeCapture/tools.yaml")
+    context_vars = _read_yaml("factory_app/workflows/ThemeCapture/context_variables.yaml")
+    handoffs = _read_yaml("factory_app/workflows/ThemeCapture/handoffs.yaml")
+    tools = _read_yaml("factory_app/workflows/ThemeCapture/tools.yaml")
 
     assert "definitions" in context_vars
     assert "agents" in context_vars
@@ -61,7 +61,7 @@ def test_theme_capture_uses_canonical_context_and_handoffs() -> None:
 
 def test_theme_capture_preload_collects_parent_theme_evidence() -> None:
     module = _load_module(
-        "factory_app/app/workflows/ThemeCapture/tools/preload_theme_capture_context.py",
+        "factory_app/workflows/ThemeCapture/tools/preload_theme_capture_context.py",
         "tests.preload_theme_capture_context",
     )
 
@@ -95,7 +95,7 @@ def test_theme_capture_preload_collects_parent_theme_evidence() -> None:
 
 def test_theme_capture_preload_reads_theme_and_shell_files(tmp_path) -> None:
     module = _load_module(
-        "factory_app/app/workflows/ThemeCapture/tools/preload_theme_capture_context.py",
+        "factory_app/workflows/ThemeCapture/tools/preload_theme_capture_context.py",
         "tests.preload_theme_capture_context_paths",
     )
 
@@ -142,7 +142,7 @@ def test_theme_capture_preload_reads_theme_and_shell_files(tmp_path) -> None:
 
 def test_theme_capture_preload_parses_css_snapshot_tokens() -> None:
     module = _load_module(
-        "factory_app/app/workflows/ThemeCapture/tools/preload_theme_capture_context.py",
+        "factory_app/workflows/ThemeCapture/tools/preload_theme_capture_context.py",
         "tests.preload_theme_capture_context_css",
     )
 
@@ -181,7 +181,7 @@ def test_theme_capture_preload_parses_css_snapshot_tokens() -> None:
 
 def test_theme_capture_saver_persists_context_and_emits_preview(monkeypatch) -> None:
     module = _load_module(
-        "factory_app/app/workflows/ThemeCapture/tools/save_captured_theme.py",
+        "factory_app/workflows/ThemeCapture/tools/save_captured_theme.py",
         "tests.save_captured_theme",
     )
 
@@ -228,10 +228,10 @@ def test_theme_capture_saver_persists_context_and_emits_preview(monkeypatch) -> 
 
 
 def test_theme_capture_contract_targets_visual_tokens_not_shell_content() -> None:
-    structured_outputs = _read_text("factory_app/app/workflows/ThemeCapture/structured_outputs.yaml")
-    agents = _read_text("factory_app/app/workflows/ThemeCapture/agents.yaml")
-    saver = _read_text("factory_app/app/workflows/ThemeCapture/tools/save_captured_theme.py")
-    preview = _read_text("factory_app/app/workflows/ThemeCapture/ui/ThemeCapture/components/ThemePreviewCard.js")
+    structured_outputs = _read_text("factory_app/workflows/ThemeCapture/structured_outputs.yaml")
+    agents = _read_text("factory_app/workflows/ThemeCapture/agents.yaml")
+    saver = _read_text("factory_app/workflows/ThemeCapture/tools/save_captured_theme.py")
+    preview = _read_text("factory_app/workflows/ThemeCapture/ui/ThemeCapture/components/ThemePreviewCard.js")
 
     assert "ThemePrimitives" in structured_outputs
     assert "ShellUi" in structured_outputs

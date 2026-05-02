@@ -102,7 +102,7 @@ Existing-app discovery should produce these artifacts:
 
 These artifacts then join the main planning path:
 
-`RequestIntent(existing_app) -> ExistingProductSpec -> CapabilitySpec[] -> ExperienceSpec + AgentAugmentationPlan -> BuildGraph`
+`RequestIntent(brownfield_app) -> ExistingProductSpec -> CapabilitySpec[] -> ExperienceSpec + AgentAugmentationPlan -> BuildGraph`
 
 ### ExistingProductSpec
 
@@ -164,12 +164,16 @@ ExistingAppDiscovery should not imply:
 
 That is a migration problem, not a discovery problem.
 
-## Mozaiks Dogfood Case
+## Workspace-App Preset
 
-Mozaiks itself should be treated as the first real existing-app augmentation case:
+Mozaiks itself was the first internal brownfield reference case, but the runtime
+contract should expose that as a generic workspace-app preset rather than a
+product-specific dogfood shortcut.
 
-- host frontend: `MOZ-UI`
-- host backend: `mozaiks-platform/services`
+The canonical local preset is:
+
+- a workspace app repo such as `mozaiks-app`
+- optional backend base URL or OpenAPI URL supplied alongside that repo
 
 That system already has:
 
@@ -180,28 +184,27 @@ That system already has:
 - discovery/marketplace surfaces
 - hosting and governance capabilities
 
-So the first internal dogfood objective is not “rebuild Mozaiks inside Mozaiks.”
+So the first internal objective is not “rebuild Mozaiks inside Mozaiks.”
 It is:
 
 - identify the real existing product surfaces
 - bridge them cleanly
 - attach Mozaiks agentic capabilities where they create leverage
 
-The first-class onboarding shortcut for this case should be a generic host-source seed:
+The first-class onboarding shortcut for this case should be a generic workspace-app preset:
 
-- `host_app_source = "workspace_host"`
-- frontend repo defaults to `MOZ-UI`
-- backend repo defaults to `mozaiks-platform/services`
+- `host_app_source = "workspace_app"`
+- repo path defaults to a local sibling app repo such as `mozaiks-app` when available
 - discovery mode defaults to `guided`
 
-That source should also preload host-brand evidence from the MOZ-UI repo itself:
+That source should also preload host-brand evidence from the workspace app repo itself:
 
 - `theme_config.json` if the host already has one
 - otherwise deterministic CSS/Tailwind signals such as fonts, colors, gradients, and shell-layout hints
 
-The resulting augmentation artifact should say whether Mozaiks can already theme an embedded surface faithfully enough to dogfood inside MOZ-UI, or whether ThemeCapture refinement is still required.
+The resulting augmentation artifact should say whether Mozaiks can already theme an embedded surface faithfully enough for the current workspace app, or whether ThemeCapture refinement is still required.
 
-That workspace-host path exists to prove the real onboarding path on a complex host product before asking outside users to trust it.
+That workspace-app preset exists to prove the real onboarding path on a complex local host product before asking outside users to trust it.
 
 ## Recommended First Functional Goal
 

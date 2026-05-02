@@ -87,10 +87,15 @@ If something is mostly optional operator tooling, make it an adapter.
 Workflow files live under:
 
 - `app/workflows/*` — workflows owned by one app workspace
-- shared factory workflows — owned by the builder system, not by individual app workspaces
+- `factory_app/workflows/*` — shared factory workflows owned by the builder system, not by individual app workspaces
 - `mozaiks-platform/app/workflows/*` — current App Zero product-owned workflow implementations during transition
-- `factory_app/app/workflows/extended_orchestration/` — shared build launcher, journeys, and transition UI
+- `factory_app/workflows/extended_orchestration/` — shared build launcher, journeys, and transition UI
 - `mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json` — App Zero product overlay on top of that shared routing layer
+
+For the factory dogfood workspace specifically, `factory_app/app/workflows/*`
+is only an app-local overlay seam. It is not the canonical location for shared
+generation-core workflows and may remain empty until the app workspace owns a
+workflow that is not part of the shared builder layer.
 
 Workflow resolution is multi-root:
 
@@ -103,8 +108,12 @@ factory workflows through the same runtime and launcher graph.
 
 That is the current composition contract between `mozaiks-platform` and
 `factory_app`: App Zero owns its product workflows and overlay registry, while
-`factory_app/app/workflows/` remains the shared builder layer loaded alongside
+`factory_app/workflows/` remains the shared builder layer loaded alongside
 the active app root.
+
+The same contract applies when the active app root is `factory_app/app`: any
+workflow placed in that app root is app-owned overlay behavior, while the
+shared generation-core implementations still resolve from `factory_app/workflows/`.
 
 Builder workflows may generate new workflow bundles, but generated output is
 staged under `MOZAIKS_GENERATED_ARTIFACTS_PATH` and is not runtime-loaded until

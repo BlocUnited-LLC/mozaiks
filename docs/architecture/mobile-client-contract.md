@@ -62,14 +62,8 @@ Auth-disabled local mode (`AUTH_ENABLED=false`) is supported for local developme
   - `message`
   - `workflow_name`
 
-## Input request response (`chat.input_request` flow)
-- `POST /api/user-input/submit`
-- Body:
-  - `input_request_id`
-  - `user_input`
-
 ## UI tool response
-- `POST /api/ui-tool/submit`
+- `POST /api/tool-call/respond`
 - Body:
   - `event_id`
   - `response_data`
@@ -105,13 +99,13 @@ After connection, runtime emits initial chat metadata event so clients can align
 ```
 
 Optional fields:
-- `input_request_id` or `request_id` for answering pending input requests.
+- none
 
 ## UI tool response
 ```json
 {
-  "type": "ui_tool_response",
-  "eventId": "<event_id>",
+  "type": "tool_call_response",
+  "tool_call_id": "<tool_call_id>",
   "response": {}
 }
 ```
@@ -146,9 +140,10 @@ Runtime streams JSON envelopes of this form:
 Common `type` values:
 - `chat.text`
 - `chat.print`
-- `chat.input_request`
 - `chat.input_ack`
 - `chat.tool_call`
+- `chat.tool_call_complete`
+- `chat.tool_call_dismiss`
 - `chat.tool_response`
 - `chat.usage_delta`
 - `chat.usage_summary`
@@ -157,10 +152,13 @@ Common `type` values:
 - `chat.custom_event`
 - `chat.error`
 - `chat.attachment_uploaded`
-- Control/ack events such as `ack.input`, `ack.ui_tool_response`, `chat.mode_changed`, `chat.workflow_started`
+- Control/ack events such as `ack.input`, `ack.tool_call_response`, `chat.mode_changed`, `chat.workflow_started`
 
 Note:
 - A `chat_meta` event type is currently emitted (not namespaced as `chat.chat_meta`).
+- Response-required runtime UI should expect `chat.tool_call` with
+  `awaiting_response=true` and possibly `interaction_type=input_request`, and
+  should answer with `tool_call_response`.
 
 ## 5) Resume and Replay Contract
 
@@ -282,4 +280,3 @@ Mobile code does not need a separate backend repo. You have two common options:
 Recommended default for Mozaiks right now:
 - Keep runtime + web + mobile in one repo first.
 - Split only when release or ownership boundaries force it.
-

@@ -30,6 +30,7 @@ def _build_ctx(transport: _FakeTransport, persistence_manager: _FakePersistenceM
     return SimpleNamespace(
         chat_id="chat-1",
         app_id="app-1",
+        workflow_name="Workflow",
         transport=transport,
         persistence_manager=persistence_manager,
         wf_logger=logging.getLogger("test.input_request_handler"),
@@ -38,7 +39,7 @@ def _build_ctx(transport: _FakeTransport, persistence_manager: _FakePersistenceM
 
 
 @pytest.mark.asyncio
-async def test_input_handler_suppresses_generic_group_feedback_prompt() -> None:
+async def test_input_handler_suppresses_generic_group_feedback_prompt_text() -> None:
     handler = InputRequestHandler()
     transport = _FakeTransport()
     persistence_manager = _FakePersistenceManager()
@@ -60,12 +61,13 @@ async def test_input_handler_suppresses_generic_group_feedback_prompt() -> None:
     payload = await handler.handle(event, ctx, state)
 
     assert payload is not None
-    assert payload["prompt"] == ""
-    assert payload["agent"] == "ValueInterviewAgent"
+    assert payload["kind"] == "tool_call"
+    assert payload["payload"]["prompt"] == ""
     assert payload["metadata"]["source"] == "ag2_group_feedback_compat"
     assert payload["metadata"]["generic_feedback_prompt_suppressed"] is True
-    assert payload["request_id"] in state.pending_input_requests
-    assert transport.calls == [("chat-1", payload["request_id"], _respond)]
+    assert state.awaiting_user_input is True
+    assert payload["tool_call_id"] in state.pending_input_requests
+    assert transport.calls == [("chat-1", payload["tool_call_id"], _respond)]
     assert persistence_manager.saved[0]["prompt"] == ""
 
 
@@ -89,7 +91,11 @@ async def test_input_handler_preserves_non_generic_prompt_text() -> None:
     payload = await handler.handle(event, ctx, state)
 
     assert payload is not None
-    assert payload["prompt"] == prompt
+    assert payload["kind"] == "tool_call"
+    assert payload["payload"]["prompt"] == prompt
+    assert payload["interaction_type"] == "input_request"
     assert payload["metadata"]["source"] == "input_request_event"
     assert payload["metadata"]["generic_feedback_prompt_suppressed"] is False
+    assert payload["tool_call_id"] in state.pending_input_requests
+    assert transport.calls == [("chat-1", payload["tool_call_id"], _respond)]
     assert persistence_manager.saved[0]["prompt"] == prompt

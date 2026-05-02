@@ -1,8 +1,8 @@
 // Lightweight tools logger for frontend UI tools/components
 // Provides consistent console logging with context. Avoids leaking secrets.
 
-export function createToolsLogger({ tool, eventId, workflowName, agentMessageId } = {}) {
-  const base = { tool: tool || 'unknown', eventId, workflowName, agentMessageId };
+export function createToolsLogger({ tool, toolCallId, workflowName, agentMessageId } = {}) {
+  const base = { tool: tool || 'unknown', toolCallId, workflowName, agentMessageId };
   const stamp = () => new Date().toISOString();
 
   const withCtx = (level, msg, extra) => {

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+from collections import deque
 import json
 import os
 import socket
@@ -24,10 +25,17 @@ if str(REPO_ROOT) not in sys.path:
     # Ensure this script always imports local repository modules.
     sys.path.insert(0, str(REPO_ROOT))
 
-DEFAULT_WORKFLOWS_ROOT = REPO_ROOT / "platform" / "workflows"
-_app_workspace = os.environ.get("MOZAIKS_APP_WORKSPACE_PATH", "")
-APP_ZERO_WORKFLOWS_ROOT = (Path(_app_workspace) / "app" / "workflows") if _app_workspace else Path("/dev/null")
 DEFAULT_ACTIVE_WORKFLOW = "RuntimeSmoke"
+DEFAULT_FACTORY_WORKFLOWS_ROOT = REPO_ROOT / "factory_app" / "workflows"
+
+
+def _configure_event_loop_policy() -> None:
+    if os.name != "nt":
+        return
+    selector_policy = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
+    if selector_policy is None:
+        return
+    asyncio.set_event_loop_policy(selector_policy())
 
 
 def _has_workflow_definitions(workflows_root: Path) -> bool:
@@ -42,18 +50,19 @@ def _has_workflow_definitions(workflows_root: Path) -> bool:
 
 
 def _resolve_default_workflows_root() -> Path:
-    override = str(os.getenv("MOZAIKS_WORKFLOWS_PATH") or "").strip()
-    if override:
-        candidate = Path(override)
-        if not candidate.is_absolute():
-            candidate = (REPO_ROOT / candidate).resolve()
-        return candidate
-    if _has_workflow_definitions(APP_ZERO_WORKFLOWS_ROOT):
-        return APP_ZERO_WORKFLOWS_ROOT
-    return DEFAULT_WORKFLOWS_ROOT
+    from mozaiksai.core.workflow.paths import normalize_workflow_roots
+    from mozaiksai.hosts.bootstrap import configure_repo_host_defaults
 
+    configure_repo_host_defaults("studio")
 
-DEFAULT_ACTIVE_WORKFLOWS_ROOT = _resolve_default_workflows_root()
+    for candidate in normalize_workflow_roots():
+        if _has_workflow_definitions(candidate):
+            return candidate
+
+    if _has_workflow_definitions(DEFAULT_FACTORY_WORKFLOWS_ROOT):
+        return DEFAULT_FACTORY_WORKFLOWS_ROOT.resolve()
+
+    return DEFAULT_FACTORY_WORKFLOWS_ROOT.resolve()
 
 
 def _json_safe(value: Any) -> Any:
@@ -177,6 +186,35 @@ def _resolve_assistant_message(events: List[Dict[str, Any]], structured_output: 
     return None
 
 
+def _build_tool_call_response_payload(response_text: str) -> Dict[str, Any]:
+    normalized = str(response_text or "")
+    return {
+        "status": "submitted",
+        "text": normalized,
+        "user_input": normalized,
+        "user_response": normalized,
+    }
+
+
+def _is_input_request_tool_call(data: Dict[str, Any]) -> bool:
+    interaction_type = str(data.get("interaction_type") or "").strip().lower()
+    component_type = str(data.get("component_type") or "").strip().lower()
+    tool_name = str(data.get("tool_name") or "").strip().lower()
+    payload = data.get("payload") or {}
+    payload_interaction_type = ""
+    payload_component_type = ""
+    if isinstance(payload, dict):
+        payload_interaction_type = str(payload.get("interaction_type") or "").strip().lower()
+        payload_component_type = str(payload.get("component_type") or "").strip().lower()
+    return (
+        interaction_type == "input_request"
+        or payload_interaction_type == "input_request"
+        or component_type == "userinputrequest"
+        or payload_component_type == "userinputrequest"
+        or tool_name == "userinputrequest"
+    )
+
+
 async def _wait_for_completed_document(
     coll: Any,
     *,
@@ -198,9 +236,14 @@ async def _wait_for_completed_document(
 async def _collect_events(
     websocket: Any,
     *,
+    chat_id: str,
     timeout_seconds: float,
+    tool_response_text: Optional[str] = None,
+    user_replies: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     events: List[Dict[str, Any]] = []
+    responded_tool_calls: set[str] = set()
+    reply_queue = deque(str(reply).strip() for reply in (user_replies or []) if str(reply).strip())
 
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     completion_grace_deadline: Optional[float] = None
@@ -236,16 +279,67 @@ async def _collect_events(
         event_type = str(event.get("type") or "")
         data = event.get("data") or {}
 
+        if event_type in {"error", "chat.error"}:
+            error_code = data.get("code") if isinstance(data, dict) else None
+            error_message = data.get("message") if isinstance(data, dict) else None
+            raise RuntimeError(
+                f"Workflow websocket reported {event_type}"
+                f"{f' [{error_code}]' if error_code else ''}: {error_message or event}"
+            )
+
+        if event_type == "chat.tool_call" and isinstance(data, dict):
+            tool_call_id = str(data.get("tool_call_id") or "").strip()
+            awaiting_response = bool(data.get("awaiting_response"))
+            input_request_response = None
+            if reply_queue and _is_input_request_tool_call(data):
+                input_request_response = reply_queue[0]
+            fallback_response = tool_response_text
+            response_text = input_request_response or fallback_response
+            if tool_call_id and awaiting_response and response_text is not None and tool_call_id not in responded_tool_calls:
+                responded_tool_calls.add(tool_call_id)
+                if input_request_response is not None:
+                    reply_queue.popleft()
+                await websocket.send(
+                    json.dumps(
+                        {
+                            "type": "tool_call_response",
+                            "tool_call_id": tool_call_id,
+                            "response": _build_tool_call_response_payload(response_text),
+                        }
+                    )
+                )
+                if not reply_queue:
+                    completion_grace_deadline = None
+            continue
+
+        assistant_name = str(data.get("agent") or data.get("sender") or data.get("name") or "").strip()
+        assistant_name_normalized = assistant_name.lower()
+        assistant_content = data.get("full_content") or data.get("content")
+        is_visible_assistant_message = (
+            event_type in {"chat.text", "chat.stream_end"}
+            and assistant_name_normalized not in {"", "user", "userproxy", "chat_manager", "manager"}
+            and isinstance(assistant_content, str)
+            and assistant_content.strip()
+            and str(data.get("ui_visibility") or "").strip().lower() != "trace"
+        )
+
         if event_type in {"chat.text", "chat.stream_end"}:
-            sender = str(data.get("agent") or data.get("sender") or data.get("name") or "").strip().lower()
-            content = data.get("content") or data.get("full_content")
+            sender = assistant_name_normalized
+            content = assistant_content
             if sender not in {"", "user", "userproxy", "chat_manager", "manager"} and isinstance(content, str) and content.strip():
                 saw_assistant_message = True
-                completion_grace_deadline = now + 2.0
+                if not reply_queue:
+                    completion_grace_deadline = now + 2.0
+
+        if event_type == "chat.input_ack" and not reply_queue:
+            completion_grace_deadline = max(
+                completion_grace_deadline or 0.0,
+                now + 10.0,
+            )
 
         if event_type in {"chat.workflow_complete", "chat.workflow_completed", "chat.completed"}:
             completion_grace_deadline = now + 1.0
-        elif saw_assistant_message and completion_grace_deadline is None:
+        elif saw_assistant_message and completion_grace_deadline is None and not reply_queue:
             completion_grace_deadline = now + 2.0
 
 
@@ -255,14 +349,17 @@ async def run_live_mfj_smoke(
     timeout_seconds: float = 180.0,
     workflow_name: str = DEFAULT_ACTIVE_WORKFLOW,
     workflows_root: Optional[Path] = None,
+    tool_response_text: Optional[str] = None,
+    user_replies: Optional[List[str]] = None,
 ) -> SmokeResult:
     load_dotenv(REPO_ROOT / ".env")
     _require_env()
 
-    effective_root = (workflows_root or DEFAULT_ACTIVE_WORKFLOWS_ROOT).resolve()
+    effective_root = (workflows_root or _resolve_default_workflows_root()).resolve()
     _ensure_workflow_exists(effective_root, workflow_name)
 
     # Force the smoke run to target the intended workflows root regardless of caller env.
+    os.environ["MOZAIKS_WORKFLOW_ROOTS"] = str(effective_root)
     os.environ["MOZAIKS_WORKFLOWS_PATH"] = str(effective_root)
     os.environ["WORKFLOW_DIR"] = str(effective_root)
 
@@ -294,6 +391,7 @@ async def run_live_mfj_smoke(
     chat_id = f"chat_{workflow_name.lower()}_{uuid.uuid4().hex[:8]}"
     events: List[Dict[str, Any]] = []
     completed_successfully = False
+    workflow_result: Optional[Dict[str, Any]] = None
 
     try:
         await _wait_for_server(server)
@@ -322,35 +420,58 @@ async def run_live_mfj_smoke(
                     initial_message=prompt,
                 )
             )
-            events = await _collect_events(
-                websocket,
+            collect_task = asyncio.create_task(
+                _collect_events(
+                    websocket,
+                    chat_id=chat_id,
+                    timeout_seconds=timeout_seconds,
+                    tool_response_text=tool_response_text,
+                    user_replies=user_replies,
+                )
+            )
+            workflow_wait_task = asyncio.create_task(asyncio.wait_for(run_task, timeout=timeout_seconds))
+            done, _ = await asyncio.wait(
+                {collect_task, workflow_wait_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            if collect_task in done:
+                events = collect_task.result()
+                workflow_result = await workflow_wait_task
+            else:
+                workflow_result = await workflow_wait_task
+                if not collect_task.done():
+                    with contextlib.suppress(Exception):
+                        await websocket.close()
+                events = await asyncio.wait_for(collect_task, timeout=15.0)
+
+        run_status = str((workflow_result or {}).get("run_status") or "completed").strip().lower() or "completed"
+        if run_status != "completed":
+            raise RuntimeError(f"Workflow ended without terminal completion (run_status={run_status})")
+
+        structured_output: Dict[str, Any] = {}
+        try:
+            coll = await pm._coll()
+            doc = await _wait_for_completed_document(
+                coll,
+                chat_id=chat_id,
+                app_id=app_id,
                 timeout_seconds=timeout_seconds,
             )
-            try:
-                await asyncio.wait_for(run_task, timeout=timeout_seconds)
-            except TimeoutError as task_timeout:
-                raise TimeoutError(
-                    f"Background workflow task did not finish within {timeout_seconds}s"
-                ) from task_timeout
+            structured_output = _extract_latest_structured_output(doc)
+        except Exception:
+            structured_output = {}
 
-        coll = await pm._coll()
-        doc = await _wait_for_completed_document(
-            coll,
-            chat_id=chat_id,
-            app_id=app_id,
-            timeout_seconds=timeout_seconds,
-        )
-
-        structured_output = _extract_latest_structured_output(doc)
         observed_event_types = [str(event.get("type") or "") for event in events]
-        completed_successfully = True
+        assistant_message = _resolve_assistant_message(events, structured_output)
+        completed_successfully = bool(structured_output) or bool(assistant_message)
         return SmokeResult(
-            success=True,
+            success=completed_successfully,
             app_id=app_id,
             chat_id=chat_id,
             workflow_name=workflow_name,
             prompt=prompt,
-            assistant_message=_resolve_assistant_message(events, structured_output),
+            assistant_message=assistant_message,
             structured_output=structured_output,
             event_count=len(events),
             observed_event_types=observed_event_types,
@@ -363,15 +484,35 @@ async def run_live_mfj_smoke(
             except Exception:
                 pass
         server.should_exit = True
+        if hasattr(server, "force_exit"):
+            server.force_exit = True
         try:
             await asyncio.wait_for(serve_task, timeout=15)
         except BaseException:
             serve_task.cancel()
             with contextlib.suppress(BaseException):
                 await serve_task
+        try:
+            from mozaiksai.core.core_config import close_mongo_client
+
+            close_mongo_client()
+        except Exception:
+            pass
+        current_task = asyncio.current_task()
+        pending_tasks = [
+            task
+            for task in asyncio.all_tasks()
+            if task is not current_task and not task.done()
+        ]
+        for task in pending_tasks:
+            task.cancel()
+        if pending_tasks:
+            with contextlib.suppress(BaseException):
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
 
 
 def main() -> int:
+    _configure_event_loop_policy()
     parser = argparse.ArgumentParser(description="Run live AG2 runtime smoke against a real workflow + LLM")
     parser.add_argument(
         "--workflow",
@@ -385,7 +526,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--workflows-root",
-        default=str(DEFAULT_ACTIVE_WORKFLOWS_ROOT),
+        default=str(_resolve_default_workflows_root()),
         help="Root directory containing workflow folders.",
     )
     parser.add_argument(
@@ -393,6 +534,17 @@ def main() -> int:
         type=float,
         default=180.0,
         help="Maximum time to wait for completion.",
+    )
+    parser.add_argument(
+        "--tool-response-text",
+        default=None,
+        help="If set, automatically answer every chat.tool_call with this text.",
+    )
+    parser.add_argument(
+        "--user-reply",
+        action="append",
+        default=[],
+        help="Optional scripted user reply for after-work user handoffs. Repeat for multi-turn workflows.",
     )
     args = parser.parse_args()
 
@@ -402,10 +554,24 @@ def main() -> int:
             timeout_seconds=args.timeout_seconds,
             workflow_name=args.workflow,
             workflows_root=Path(args.workflows_root),
+            tool_response_text=args.tool_response_text,
+            user_replies=args.user_reply or None,
         )
     )
-    print(json.dumps(result.as_dict(), indent=2))
-    return 0 if result.success else 1
+    exit_code = 0 if result.success else 1
+    print(json.dumps(result.as_dict(), indent=2), flush=True)
+    try:
+        from mozaiksai.core.core_config import close_mongo_client
+
+        close_mongo_client()
+    except Exception:
+        pass
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    finally:
+        # AG2 + Mongo can leave non-daemon background threads behind in local smoke runs.
+        os._exit(exit_code)
 
 
 if __name__ == "__main__":

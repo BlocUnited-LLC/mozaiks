@@ -17,7 +17,7 @@ list_workflow_sequences = _config.list_workflow_sequences
 
 def _use_repo_factory_workflows(monkeypatch) -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    workflows_root = repo_root / "factory_app" / "app" / "workflows"
+    workflows_root = repo_root / "factory_app" / "workflows"
     monkeypatch.setenv("PLATFORM_PATH", str(repo_root / "__no_active_app__"))
     monkeypatch.delenv("MOZAIKS_WORKFLOW_ROOTS", raising=False)
     monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(workflows_root))
@@ -84,7 +84,7 @@ def test_active_app_root_registry_overlays_shared_registry(monkeypatch, tmp_path
     monkeypatch.setenv("PLATFORM_PATH", str(app_root))
     monkeypatch.setenv(
         "MOZAIKS_WORKFLOW_ROOTS",
-        f"{app_root / 'workflows'}{os.pathsep}{Path(__file__).resolve().parents[1] / 'factory_app' / 'app' / 'workflows'}",
+        f"{app_root / 'workflows'}{os.pathsep}{Path(__file__).resolve().parents[1] / 'factory_app' / 'workflows'}",
     )
     monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
     _config._GLOBAL_CACHE = None
@@ -168,3 +168,29 @@ def test_single_root_override_does_not_inject_factory_fallback(monkeypatch, tmp_
     assert roots
     assert roots[0] == local_root.resolve()
     assert roots == [local_root.resolve()]
+
+
+def test_default_roots_use_repo_factory_workflows_when_no_active_app(monkeypatch) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    monkeypatch.chdir(repo_root)
+    monkeypatch.delenv("MOZAIKS_WORKFLOW_ROOTS", raising=False)
+    monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+    monkeypatch.delenv("PLATFORM_PATH", raising=False)
+
+    roots = _paths.normalize_workflow_roots()
+
+    assert roots
+    assert (repo_root / "factory_app" / "workflows").resolve() in roots
+    assert all("__no_active_app__" not in str(root) for root in roots)
+
+
+def test_active_app_root_uses_workspace_env_when_platform_path_missing(monkeypatch, tmp_path: Path) -> None:
+    workspace_root = tmp_path / "external-workspace"
+    app_root = workspace_root / "app"
+    app_root.mkdir(parents=True)
+    (app_root / "app.json").write_text('{"appName":"External Workspace"}', encoding="utf-8")
+
+    monkeypatch.delenv("PLATFORM_PATH", raising=False)
+    monkeypatch.setenv("MOZAIKS_APP_WORKSPACE_PATH", str(workspace_root))
+
+    assert _paths.resolve_active_app_root() == app_root.resolve()

@@ -100,8 +100,8 @@ def test_runtime_admin_config_discovers_module_admin_yaml(tmp_path) -> None:
     import importlib
     from mozaiksai.hosts import runtime as runtime_app  # noqa: F401 - initializes persistence dependencies before admin imports
 
-    platform_root = tmp_path / "platform"
-    module_root = platform_root / "modules" / "crm"
+    app_root = tmp_path / "platform"
+    module_root = app_root / "modules" / "crm"
     module_root.mkdir(parents=True)
     (module_root / "admin.yaml").write_text(
         yaml.safe_dump(
@@ -134,7 +134,7 @@ def test_runtime_admin_config_discovers_module_admin_yaml(tmp_path) -> None:
     admin_router = importlib.import_module("mozaiksai.core.admin.router")
     config = admin_router._merge_module_admin_panels(
         {"enabled": True, "sections": {}, "runtime_panels": [], "module_panels": []},
-        platform_root,
+        app_root,
     )
 
     panels = config["module_panels"]

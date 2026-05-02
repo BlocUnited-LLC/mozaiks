@@ -165,7 +165,7 @@ class WorkflowBridgeMixin:
                 and not (isinstance(message, str) and message.strip())
             )
             if is_resume_request:
-                await adapter.resume(ResumeRequest(
+                run_result = await adapter.resume(ResumeRequest(
                     workflow_name=workflow_name,
                     app_id=app_id,
                     chat_id=chat_id,
@@ -173,7 +173,7 @@ class WorkflowBridgeMixin:
                     resume_agent=initial_agent_name_override,
                 ))
             else:
-                await adapter.run(RunRequest(
+                run_result = await adapter.run(RunRequest(
                     workflow_name=workflow_name,
                     app_id=app_id,
                     chat_id=chat_id,
@@ -182,7 +182,10 @@ class WorkflowBridgeMixin:
                     initial_agent_name_override=initial_agent_name_override,
                 ))
 
-            if _emit_execution_completed is not None:
+            run_status = getattr(run_result, "status", None)
+            run_status_value = str(getattr(run_status, "value", run_status or "completed"))
+
+            if _emit_execution_completed is not None and run_status_value == "completed":
                 try:
                     asyncio.create_task(
                         _emit_execution_completed(
@@ -198,7 +201,13 @@ class WorkflowBridgeMixin:
 
             route = "workflow_resume" if is_resume_request else "new_workflow"
             message_text = "Workflow resumed successfully." if is_resume_request else "Workflow started successfully."
-            return {"status": "success", "chat_id": chat_id, "message": message_text, "route": route}
+            return {
+                "status": "success",
+                "chat_id": chat_id,
+                "message": message_text,
+                "route": route,
+                "run_status": run_status_value,
+            }
 
         except Exception as e:
             logger.error(f"User input handling failed for chat {chat_id}: {e}\n{traceback.format_exc()}")
@@ -256,6 +265,7 @@ class WorkflowBridgeMixin:
                         app_id=app_id,
                         initial_agent_name_override=initial_agent_name_override,
                     )
+                    run_status = str(result.get("run_status") or "completed").strip().lower() or "completed"
                     # Emit run_complete success asynchronously to dispatcher
                     try:
                         from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
@@ -269,12 +279,13 @@ class WorkflowBridgeMixin:
                                     "workflow_name": workflow_name,
                                     "app_id": app_id,
                                     "user_id": user_id,
-                                    "status": "completed",
+                                    "status": run_status,
                                 },
                             )
                         )
                     except Exception:
                         pass
+                    return result
                 except Exception:
                     # Emit failed run_complete before re-raising so listeners can react
                     try:

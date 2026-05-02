@@ -90,7 +90,7 @@ Canonical target:
 Current implementation state:
 
 - `factory_app/app/` is the current first-party factory workspace
-- shared builder workflows live under `factory_app/app/workflows/`
+- shared builder workflows live under `factory_app/workflows/`
 - App Zero consumes that factory layer through multi-root workflow loading and
    a product-owned overlay registry at
    `mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`
@@ -172,7 +172,7 @@ Current composition rule in this repo:
 
 - the active app workspace is resolved first
 - that app root's `workflows/` load first
-- `factory_app/app/workflows/` loads second as the shared builder layer
+- `factory_app/workflows/` loads second as the shared builder layer
 - App Zero keeps product-owned workflow definitions under
    `mozaiks-platform/app/workflows/`, with its overlay registry at
    `mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`

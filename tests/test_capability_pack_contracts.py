@@ -45,7 +45,7 @@ class _Context:
 
 def test_valueengine_structured_outputs_define_capability_pack_contract() -> None:
     structured_outputs = _read_yaml(
-        "factory_app/app/workflows/ValueEngine/structured_outputs.yaml"
+        "factory_app/workflows/ValueEngine/structured_outputs.yaml"
     )
     models = structured_outputs["models"]
 
@@ -67,7 +67,7 @@ def test_valueengine_structured_outputs_define_capability_pack_contract() -> Non
 
 def test_appgenerator_structured_outputs_define_capability_first_build_plan() -> None:
     structured_outputs = _read_yaml(
-        "factory_app/app/workflows/AppGenerator/structured_outputs.yaml"
+        "factory_app/workflows/AppGenerator/structured_outputs.yaml"
     )
     models = structured_outputs["models"]
 
@@ -83,7 +83,7 @@ def test_appgenerator_structured_outputs_define_capability_first_build_plan() ->
 
 
 def test_app_plan_agent_prompt_requires_capability_first_planning() -> None:
-    content = _read_text("factory_app/app/workflows/AppGenerator/agents.yaml")
+    content = _read_text("factory_app/workflows/AppGenerator/agents.yaml")
 
     assert "Decompose into product capability packs first" in content
     assert "capability_pack_hints" in content
@@ -98,7 +98,7 @@ def test_app_plan_agent_prompt_requires_capability_first_planning() -> None:
 
 
 def test_appgenerator_context_exposes_current_experience_spec_alias() -> None:
-    context_vars = _read_yaml("factory_app/app/workflows/AppGenerator/context_variables.yaml")
+    context_vars = _read_yaml("factory_app/workflows/AppGenerator/context_variables.yaml")
     definitions = context_vars["definitions"]
     agents = context_vars["agents"]
 
@@ -109,7 +109,7 @@ def test_appgenerator_context_exposes_current_experience_spec_alias() -> None:
 
 def test_app_build_plan_tool_preserves_capability_packs_theme_preferences_and_brand_intent() -> None:
     module = _load_module(
-        "factory_app/app/workflows/AppGenerator/tools/app_build_plan.py",
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
         "tests.app_build_plan_tool_direct",
     )
     context = _Context()
@@ -171,7 +171,7 @@ def test_app_build_plan_tool_preserves_capability_packs_theme_preferences_and_br
 
 def test_app_build_plan_tool_rejects_non_schema_page_bundles() -> None:
     module = _load_module(
-        "factory_app/app/workflows/AppGenerator/tools/app_build_plan.py",
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
         "tests.app_build_plan_tool_schema_guard",
     )
 
@@ -221,7 +221,7 @@ def test_app_build_plan_tool_rejects_non_schema_page_bundles() -> None:
 
 def test_app_build_plan_tool_rejects_raw_frontend_source_outputs() -> None:
     module = _load_module(
-        "factory_app/app/workflows/AppGenerator/tools/app_build_plan.py",
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
         "tests.app_build_plan_tool_frontend_source_guard",
     )
 
@@ -271,7 +271,7 @@ def test_app_build_plan_tool_rejects_raw_frontend_source_outputs() -> None:
 
 def test_app_build_plan_tool_rejects_admin_config_with_wrong_owner() -> None:
     module = _load_module(
-        "factory_app/app/workflows/AppGenerator/tools/app_build_plan.py",
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
         "tests.app_build_plan_tool_admin_config_guard",
     )
 
@@ -313,7 +313,7 @@ def test_app_build_plan_tool_rejects_admin_config_with_wrong_owner() -> None:
 
 def test_app_build_plan_tool_rejects_host_admin_config_hidden_in_backend_foundation() -> None:
     module = _load_module(
-        "factory_app/app/workflows/AppGenerator/tools/app_build_plan.py",
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
         "tests.app_build_plan_tool_host_admin_path_guard",
     )
 
@@ -355,7 +355,7 @@ def test_app_build_plan_tool_rejects_host_admin_config_hidden_in_backend_foundat
 
 def test_app_build_plan_tool_rejects_split_admin_api_with_wrong_task_type() -> None:
     module = _load_module(
-        "factory_app/app/workflows/AppGenerator/tools/app_build_plan.py",
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
         "tests.app_build_plan_tool_split_admin_api_guard",
     )
 
@@ -397,7 +397,7 @@ def test_app_build_plan_tool_rejects_split_admin_api_with_wrong_task_type() -> N
 
 def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators() -> None:
     module = _load_module(
-        "factory_app/app/workflows/ValueEngine/tools/manifest.py",
+        "factory_app/workflows/ValueEngine/tools/manifest.py",
         "tests.valueengine_manifest_direct",
     )
     module._HAS_PERSISTENCE = False
@@ -452,7 +452,7 @@ def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators()
 
 def test_valueengine_save_build_plan_preserves_capability_packs_and_concept_blueprint() -> None:
     module = _load_module(
-        "factory_app/app/workflows/ValueEngine/tools/decompose.py",
+        "factory_app/workflows/ValueEngine/tools/decompose.py",
         "tests.valueengine_decompose_direct",
     )
     module._HAS_PERSISTENCE = False

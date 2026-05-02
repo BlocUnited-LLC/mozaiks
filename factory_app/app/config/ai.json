@@ -7,7 +7,7 @@
     "chat_startup_mode": "ask"
   },
   "workflows": {
-    "entry_point": "CreateLauncher",
+    "entry_point": "ValueEngine",
     "resume_policy": "last_active_then_oldest_then_entry_point"
   }
 }

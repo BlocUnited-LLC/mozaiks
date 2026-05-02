@@ -22,7 +22,7 @@ def _read_yaml(relative_path: str):
 def _workflow_manifest_paths() -> list[Path]:
     from conftest import _resolve_active_app_root
     workspace = _workspace()
-    roots = ["factory_app/app/workflows"]
+    roots = ["factory_app/workflows"]
     app_root = _resolve_active_app_root()
     if app_root is not None:
         roots.insert(0, str(app_root / "workflows"))
@@ -75,9 +75,9 @@ def _resolve_export_target(index_file: Path, module_path: str) -> Path | None:
 
 def test_repo_owned_interactive_ui_tools_use_canonical_helper_import() -> None:
     files = [
-        "factory_app/app/workflows/AppGenerator/tools/generate_and_download.py",
-        "factory_app/app/workflows/AgentGenerator/tools/generate_and_download.py",
-        "factory_app/app/workflows/AgentGenerator/tools/request_api_key.py",
+        "factory_app/workflows/AppGenerator/tools/generate_and_download.py",
+        "factory_app/workflows/AgentGenerator/tools/generate_and_download.py",
+        "factory_app/workflows/AgentGenerator/tools/request_api_key.py",
     ]
 
     for relative_path in files:
@@ -88,8 +88,8 @@ def test_repo_owned_interactive_ui_tools_use_canonical_helper_import() -> None:
 
 
 def test_agent_generator_runtime_helpers_are_yaml_first() -> None:
-    generate_download = _read("factory_app/app/workflows/AgentGenerator/tools/generate_and_download.py")
-    export_helper = _read("factory_app/app/workflows/AgentGenerator/tools/export_agent_workflow.py")
+    generate_download = _read("factory_app/workflows/AgentGenerator/tools/generate_and_download.py")
+    export_helper = _read("factory_app/workflows/AgentGenerator/tools/export_agent_workflow.py")
 
     assert "tools.json" not in generate_download
     assert "agents.json" not in generate_download
@@ -120,7 +120,7 @@ def test_repo_workflow_tools_do_not_import_global_shared_workflow_bucket() -> No
 
 
 def test_request_api_key_exposes_current_runtime_contract() -> None:
-    source = _read("factory_app/app/workflows/AgentGenerator/tools/request_api_key.py")
+    source = _read("factory_app/workflows/AgentGenerator/tools/request_api_key.py")
     module = ast.parse(source)
     function_def = next(
         node for node in module.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "request_api_key"
@@ -134,9 +134,9 @@ def test_request_api_key_exposes_current_runtime_contract() -> None:
 
 
 def test_app_generator_page_contract_stays_declarative() -> None:
-    content = _read("factory_app/app/workflows/AppGenerator/agents.yaml")
-    agents = _read_yaml("factory_app/app/workflows/AppGenerator/agents.yaml")
-    handoffs = _read_yaml("factory_app/app/workflows/AppGenerator/handoffs.yaml")
+    content = _read("factory_app/workflows/AppGenerator/agents.yaml")
+    agents = _read_yaml("factory_app/workflows/AppGenerator/agents.yaml")
+    handoffs = _read_yaml("factory_app/workflows/AppGenerator/handoffs.yaml")
 
     agent_names = {agent["name"] for agent in agents["agents"]}
     expected_agents = {
@@ -205,7 +205,7 @@ def test_architecture_index_references_appgenerator_output_contract() -> None:
 
 
 def test_generated_workflow_ui_contract_is_co_located_with_workflow_pack() -> None:
-    converter = _read("factory_app/app/workflows/AgentGenerator/tools/workflow_converter.py")
+    converter = _read("factory_app/workflows/AgentGenerator/tools/workflow_converter.py")
     registry = _read("chat-ui/src/@chat-workflows/index.js")
     app_vite = _read("web_shell/vite.config.js")
     embed_vite = _read("chat-ui/vite.embed.config.js")
@@ -226,21 +226,21 @@ def test_generated_workflow_ui_contract_is_co_located_with_workflow_pack() -> No
     assert "../mozaiks-platform/" not in tailwind
     assert "`@chat-workflows/${workflow}/components/index.js`" not in router
     assert "workflow && component ? `${workflow}:${component}` : null" in router
-    assert "workflow && ui_tool_id ? `${workflow}:${ui_tool_id}` : null" in router
+    assert "workflow && toolName ? `${workflow}:${toolName}` : null" in router
 
 
 def test_repo_owned_workflow_ui_surfaces_use_shared_bridges() -> None:
     style_files = [
-        "factory_app/app/workflows/AgentGenerator/ui/AgentAPIKeysBundleInput.js",
-        "factory_app/app/workflows/AgentGenerator/ui/FileDownloadCenter.js",
-        "factory_app/app/workflows/AgentGenerator/ui/MermaidSequenceDiagram.js",
-        "factory_app/app/workflows/AppGenerator/ui/AppWorkbench.js",
-        "factory_app/app/workflows/ValueEngine/ui/ValueEngine/components/ConceptBlueprint.js",
+        "factory_app/workflows/AgentGenerator/ui/AgentAPIKeysBundleInput.js",
+        "factory_app/workflows/AgentGenerator/ui/FileDownloadCenter.js",
+        "factory_app/workflows/AgentGenerator/ui/MermaidSequenceDiagram.js",
+        "factory_app/workflows/AppGenerator/ui/AppWorkbench.js",
+        "factory_app/workflows/ValueEngine/ui/ValueEngine/components/ConceptBlueprint.js",
     ]
     runtime_files = [
-        "factory_app/app/workflows/AgentGenerator/ui/ActionPlan.js",
-        "factory_app/app/workflows/AgentGenerator/ui/AgentAPIKeysBundleInput.js",
-        "factory_app/app/workflows/AgentGenerator/ui/FileDownloadCenter.js",
+        "factory_app/workflows/AgentGenerator/ui/ActionPlan.js",
+        "factory_app/workflows/AgentGenerator/ui/AgentAPIKeysBundleInput.js",
+        "factory_app/workflows/AgentGenerator/ui/FileDownloadCenter.js",
     ]
 
     for relative_path in style_files:
@@ -255,11 +255,11 @@ def test_repo_owned_workflow_ui_surfaces_use_shared_bridges() -> None:
 
 
 def test_repo_owned_workflow_ui_barrels_register_top_level_surfaces() -> None:
-    agent_index = _read("factory_app/app/workflows/AgentGenerator/ui/index.js")
-    app_index = _read("factory_app/app/workflows/AppGenerator/ui/index.js")
-    value_index = _read("factory_app/app/workflows/ValueEngine/ui/index.js")
-    app_workbench = _read("factory_app/app/workflows/AppGenerator/ui/AppWorkbench.js")
-    export_actions = _read("factory_app/app/workflows/AppGenerator/ui/ExportActions.js")
+    agent_index = _read("factory_app/workflows/AgentGenerator/ui/index.js")
+    app_index = _read("factory_app/workflows/AppGenerator/ui/index.js")
+    value_index = _read("factory_app/workflows/ValueEngine/ui/index.js")
+    app_workbench = _read("factory_app/workflows/AppGenerator/ui/AppWorkbench.js")
+    export_actions = _read("factory_app/workflows/AppGenerator/ui/ExportActions.js")
 
     assert "AgentAPIKeysBundleInput" in agent_index
     assert "FileDownloadCenter" in agent_index
@@ -274,9 +274,9 @@ def test_repo_owned_workflow_ui_barrels_register_top_level_surfaces() -> None:
 
 def test_repo_owned_one_way_ui_emitters_use_canonical_surface_helper() -> None:
     files = [
-        "factory_app/app/workflows/AgentGenerator/tools/mermaid_sequence_diagram.py",
-        "factory_app/app/workflows/ValueEngine/tools/manifest.py",
-        "factory_app/app/workflows/ExistingAppDiscovery/tools/save_existing_app_artifacts.py",
+        "factory_app/workflows/AgentGenerator/tools/mermaid_sequence_diagram.py",
+        "factory_app/workflows/ValueEngine/tools/manifest.py",
+        "factory_app/workflows/ExistingAppDiscovery/tools/save_existing_app_artifacts.py",
     ]
 
     for relative_path in files:
@@ -296,10 +296,10 @@ def test_ui_system_spec_documents_interactive_vs_one_way_producer_contracts() ->
 
 def test_workflow_manifests_use_explicit_ui_surface_types() -> None:
     files = [
-        "factory_app/app/workflows/AgentGenerator/tools.yaml",
-        "factory_app/app/workflows/AppGenerator/tools.yaml",
-        "factory_app/app/workflows/DesignDocs/tools.yaml",
-        "factory_app/app/workflows/ValueEngine/tools.yaml",
+        "factory_app/workflows/AgentGenerator/tools.yaml",
+        "factory_app/workflows/AppGenerator/tools.yaml",
+        "factory_app/workflows/DesignDocs/tools.yaml",
+        "factory_app/workflows/ValueEngine/tools.yaml",
     ]
 
     for relative_path in files:
@@ -352,9 +352,9 @@ def test_ui_manifest_components_are_exported_by_resolvable_workflow_barrels() ->
 
 def test_workflow_ui_components_use_payload_prop_contract() -> None:
     files = [
-        "factory_app/app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",
-        "factory_app/app/workflows/AppGenerator/ui/AppWorkbench.js",
-        "factory_app/app/workflows/AgentGenerator/ui/ActionPlan.js",
+        "factory_app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",
+        "factory_app/workflows/AppGenerator/ui/AppWorkbench.js",
+        "factory_app/workflows/AgentGenerator/ui/ActionPlan.js",
     ]
     for relative_path in files:
         content = _read(relative_path)
@@ -377,9 +377,9 @@ def test_transition_shell_screens_stay_workflow_agnostic() -> None:
 
 
 def test_frontend_prompts_enforce_theme_shell_ownership_boundaries() -> None:
-    app_generator = _read("factory_app/app/workflows/AppGenerator/agents.yaml")
-    design_docs = _read("factory_app/app/workflows/DesignDocs/agents.yaml")
-    agent_generator = _read("factory_app/app/workflows/AgentGenerator/agents.yaml")
+    app_generator = _read("factory_app/workflows/AppGenerator/agents.yaml")
+    design_docs = _read("factory_app/workflows/DesignDocs/agents.yaml")
+    agent_generator = _read("factory_app/workflows/AgentGenerator/agents.yaml")
 
     assert "theme_config_patch` owns visual tokens only" in app_generator
     assert "shell_config` owns shell content/behavior only" in app_generator
@@ -403,7 +403,7 @@ def test_frontend_prompts_enforce_theme_shell_ownership_boundaries() -> None:
 
 
 def test_agent_generator_primitive_reference_matches_runtime_contract() -> None:
-    content = _read("factory_app/app/workflows/AgentGenerator/agents.yaml")
+    content = _read("factory_app/workflows/AgentGenerator/agents.yaml")
 
     # Canonical runtime-aligned props
     assert "`DataTable`  — `id`, `columns[]`, `data[]`" in content
@@ -428,11 +428,12 @@ def test_form_primitive_uses_static_tailwind_grid_column_classes() -> None:
 
 
 def test_extended_orchestration_transition_components_are_file_backed() -> None:
-    index_content = _read("factory_app/app/workflows/extended_orchestration/ui/index.js")
-    registry = _read_yaml("factory_app/app/workflows/extended_orchestration/extension_registry.json")
+    index_content = _read("factory_app/workflows/extended_orchestration/ui/index.js")
+    registry = _read_yaml("factory_app/workflows/extended_orchestration/extension_registry.json")
 
     assert "CodingJourneySelector" in index_content
     assert "AppTypeSelector" in index_content
+    assert "DatabaseSetupSelector" in index_content
 
     transition_components = {
         entry["ui"]["component"]
@@ -442,6 +443,7 @@ def test_extended_orchestration_transition_components_are_file_backed() -> None:
     assert {
         "CodingJourneySelector",
         "AppTypeSelector",
+        "DatabaseSetupSelector",
     }.issubset(transition_components)
 
     # Transition routing stays semantic; visual copy/images live in the React stubs.

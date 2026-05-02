@@ -451,6 +451,8 @@ class AutoToolEventHandler:
             )
         except Exception:
             logger.debug("[AUTO_TOOL] Failed to emit select_speaker for agent=%s", agent_name)
+        display_mode = binding.ui_config.get("mode") or "inline"
+        workflow_name = binding.ui_config.get("workflow_name")
         event_payload = {
             "kind": "tool_call",
             "agent": agent_name,
@@ -459,11 +461,17 @@ class AutoToolEventHandler:
             "corr": turn_key,
             "awaiting_response": False,
             "component_type": binding.ui_config.get("component"),
+            "workflow_name": workflow_name,
+            "interaction_type": "auto_tool",
+            "display": display_mode,
+            "display_type": display_mode,
             "payload": {
                 "tool_args": arg_payload,
                 "agent_name": agent_name,
                 "interaction_type": "auto_tool",
-                "workflow_name": binding.ui_config.get("workflow_name"),
+                "workflow_name": workflow_name,
+                "display": display_mode,
+                "mode": display_mode,
             },
         }
         agent_message = kwargs.get("agent_message")

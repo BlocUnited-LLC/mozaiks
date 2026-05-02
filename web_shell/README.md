@@ -24,7 +24,7 @@ npm run dev
 | `brand/public/brand.json` | Colors, fonts, shadows, asset filenames |
 | `brand/public/ui.json` | Header, profile menu, notifications, footer |
 | `mozaiks-platform/app/ui/route_manifest.json` | App Zero custom React page route ownership |
-| `factory_app/app/workflows/*/extended_orchestration/extension_registry.json` | Workflow entrypoints and transitions |
+| `factory_app/workflows/*/extended_orchestration/extension_registry.json` | Workflow entrypoints and transitions |
 | `mozaiks-platform/app/config/shell.json` | App Zero shell chrome |
 | `brand/public/auth.json` | Auth provider config (Keycloak), roles, admin emails |
 | `brand/public/assets/` | SVG icons and images |
@@ -38,7 +38,7 @@ app.json                      ← start here: appName, targets, startup landing 
 brand/public/brand.json       ← colors, fonts, shadows, asset filenames
 brand/public/ui.json          ← header actions, profile menu, notifications, footer
 mozaiks-platform/app/ui/route_manifest.json    ← custom React page routes
-factory_app/app/workflows/.../extension_registry.json ← workflow entrypoints and transitions
+factory_app/workflows/.../extension_registry.json ← workflow entrypoints and transitions
 mozaiks-platform/app/config/shell.json    ← header/profile/notification/footer chrome
 brand/public/auth.json        ← auth provider, roles, admin emails
 brand/public/assets/          ← drop SVG icons and images here

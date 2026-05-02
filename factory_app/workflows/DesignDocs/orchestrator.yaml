@@ -1,0 +1,12 @@
+workflow_name: DesignDocs
+max_turns: 8
+human_in_the_loop: false
+workflow_startup_mode: BackendOnly
+orchestration_pattern: DefaultPattern
+initial_message_to_user: null
+initial_message: 'DesignDocsAgent: concept_overview is provided via context variables
+  (data_reference) for this app_id. Generate one DesignDocsBundle structured output
+  containing frontend, backend, and database Markdown docs, a ui_schema YAML document,
+  and the canonical typed surface_map contract. The runtime auto-persists the bundle
+  after validation.'
+initial_agent: DesignDocsAgent

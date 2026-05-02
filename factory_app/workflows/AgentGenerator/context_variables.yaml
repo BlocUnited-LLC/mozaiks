@@ -1,0 +1,345 @@
+definitions:
+  refinement_mode:
+    type: boolean
+    description: >
+      True when this AgentGenerator session is refining an existing workflow bundle
+      rather than generating from scratch. Seeded by the refinement control plane
+      via the trigger endpoint. Agents must check this flag — when true, read the
+      existing artifact_version_id and scope changes to owned_paths only.
+    source:
+      type: state
+      default: false
+  change_class:
+    type: string
+    description: >
+      Refinement change class: patch | design | feature | core.
+      Seeded by the refinement control plane. Agents use this to calibrate scope
+      — patch stays inside owned files, feature may widen scope, core is a restart.
+    source:
+      type: state
+      default: null
+  artifact_version_id:
+    type: string
+    description: >
+      Version id of the workflow bundle artifact being refined. Null for initial
+      generation runs. Agents use this to load the correct artifact version from
+      persistence when refinement_mode is true.
+    source:
+      type: state
+      default: null
+  refinement_request:
+    type: string
+    description: >
+      Raw user-supplied refinement request text, passed through from the
+      ChangeRequest. Agents read this instead of re-interviewing when
+      refinement_mode is true.
+    source:
+      type: state
+      default: null
+  context_aware:
+    type: boolean
+    description: Flag indicating if the application is opensource (in which the llm
+      will ask for context) or part of an existing product in which the agent will be
+      seeded with initial context
+    source:
+      type: config
+      env_var: CONTEXT_AWARE
+      default: true
+  concept_overview:
+    type: string
+    description: Main project description and overview from the database
+    source:
+      type: data_reference
+      database_name: autogen_ai_agents
+      collection: Concepts
+      query_template:
+        app_id: '{{runtime.app_id}}'
+      fields:
+      - ConceptOverview
+  concept_api_endpoints:
+    type: array
+    description: Optional API endpoints blueprint from the Concepts collection (produced
+      by ValueEngine).
+    source:
+      type: data_reference
+      database_name: autogen_ai_agents
+      collection: Concepts
+      query_template:
+        app_id: '{{runtime.app_id}}'
+      fields:
+      - ApiEndpoints
+      default: []
+  concept_blueprint:
+    type: object
+    description: Optional structured blueprint from the Concepts collection (produced
+      by ValueEngine).
+    source:
+      type: data_reference
+      database_name: autogen_ai_agents
+      collection: Concepts
+      query_template:
+        app_id: '{{runtime.app_id}}'
+      fields:
+      - Blueprint
+      default: null
+  backend_design_document:
+    type: string
+    description: >
+      Canonical backend design doc from DesignDocs. Human-readable reference for
+      workflow/event rationale and API intent.
+    source:
+      type: data_reference
+      database_name: MozaiksAI
+      collection: DesignDocuments
+      query_template:
+        app_id: '{{runtime.app_id}}'
+        kind: backend
+        status: succeeded
+      fields:
+      - content
+      default: null
+  experience_spec_document:
+    type: string
+    description: >
+      Canonical persistent UI intent document from DesignDocs (saved as
+      `ui_schema`). Human-readable reference for persistent UI ownership and
+      workflow touchpoints.
+    source:
+      type: data_reference
+      database_name: MozaiksAI
+      collection: DesignDocuments
+      query_template:
+        app_id: '{{runtime.app_id}}'
+        kind: ui_schema
+        status: succeeded
+      fields:
+      - content
+      default: null
+  design_surface_map:
+    type: object
+    description: >
+      Canonical typed surface realization contract persisted by DesignDocs.
+      This is the primary machine-readable source for deciding which surfaces
+      are workflows versus modules, control-plane concerns, integrations, or UI-only.
+    source:
+      type: data_reference
+      database_name: MozaiksAI
+      collection: DesignDocuments
+      query_template:
+        app_id: '{{runtime.app_id}}'
+        kind: backend
+        status: succeeded
+      fields:
+      - surface_map
+      default: null
+  monetization_enabled:
+    type: boolean
+    description: Flag indicating if monetization features are enabled
+    source:
+      type: config
+      env_var: MONETIZATION_ENABLED
+      default: false
+  context_include_schema:
+    type: boolean
+    description: Flag indicating if database schema access is enabled for this workflow
+    source:
+      type: config
+      env_var: CONTEXT_INCLUDE_SCHEMA
+      default: false
+  context_schema_db:
+    type: string
+    description: Name of the database this workflow has schema access to
+    source:
+      type: config
+      env_var: CONTEXT_SCHEMA_DB
+      default: null
+  interview_complete:
+    type: boolean
+    description: True once InterviewAgent has enough context to proceed to the next
+      stage
+    source:
+      type: state
+      default: false
+      triggers:
+      - type: agent_text
+        agent: InterviewAgent
+        ui_hidden: true
+        match:
+          equals: NEXT
+  action_plan_acceptance:
+    type: string
+    description: 'User''s response to the tool and UX plan: ''accepted'', ''adjustments_requested'',
+      or ''pending''. Set after user reviews and approves the ToolPlanningAgent output.'
+    source:
+      type: state
+      default: pending
+  action_plan:
+    type: object
+    description: The complete workflow-stage-based Action Plan workflow object used
+      for revision handling and downstream UI updates.
+    source:
+      type: computed
+      default: null
+  workflow_strategy:
+    type: object
+    description: High-level workflow strategy (workflow_stages) generated by WorkflowStrategyAgent
+      for downstream implementation.
+    source:
+      type: computed
+      default: null
+  strategy_ready:
+    type: boolean
+    description: True when WorkflowStrategyAgent has stored the high-level plan for
+      downstream agents.
+    source:
+      type: state
+      default: false
+  download_complete:
+    type: boolean
+    description: True when user accepts workflow download and completes the session.
+      Triggers workflow termination.
+    source:
+      type: state
+      default: false
+      triggers:
+      - type: ui_response
+        tool: generate_and_download
+        response_key: download_accepted
+  attachments_allow_bundling:
+    type: boolean
+    description: Workflow-level flag. When true, attachments tagged as bundle/deliverable
+      may be included in the generated deliverable. When false, uploads remain context-only.
+    source:
+      type: config
+      env_var: AGENTGEN_ATTACHMENTS_ALLOW_BUNDLING
+      default: false
+  chat_attachments:
+    type: array
+    description: List of uploaded attachments persisted on the current ChatSessions
+      document (metadata only). Used by InterviewAgent to ask whether uploads are context-only
+      vs bundled, and by downstream agents to tag intent/bundle_path.
+    source:
+      type: data_reference
+      database_name: MozaiksAI
+      collection: ChatSessions
+      query_template:
+        app_id: '{{runtime.app_id}}'
+        _id: '{{runtime.chat_id}}'
+      fields:
+      - attachments
+  is_multi_workflow:
+    type: boolean
+    description: True if PatternAgent determined the solution requires multiple workflows
+      (a workflow pack). Set by PatternAgent based on complexity heuristics. Drives
+      iterative pack generation.
+    source:
+      type: computed
+      default: false
+  pack_name:
+    type: string
+    description: Name of the workflow pack (e.g., 'ecommerce-pack'). Set by PatternAgent.
+      Used for extended_orchestration/ metadata generation and folder naming.
+    source:
+      type: computed
+      default: null
+  current_workflow_index:
+    type: integer
+    description: Zero-based index of the workflow currently being generated within a
+      multi-workflow pack. Updated by runtime iteration loop. Allows WorkflowStrategyAgent
+      and downstream agents to know which workflow they are building.
+    source:
+      type: state
+      default: 0
+  workflows_spec:
+    type: array
+    description: 'Array of workflow specs from PatternAgent''s PatternSelection output.
+      Each item contains: name, role, pattern_type, description. Drives pack iteration.'
+    source:
+      type: computed
+      default: []
+  macro_workflow_graph:
+    type: object
+    description: Cross-workflow registry loaded from workflows/extended_orchestration/extension_registry.json.
+      Used by PatternAgent to align decomposition decisions with the runtime's pack
+      orchestration graph.
+    source:
+      type: file
+      path: workflows/extended_orchestration/extension_registry.json
+      format: json
+      default: null
+  generated_workflows:
+    type: array
+    description: Array of completed workflow outputs accumulated during pack generation.
+      Each entry contains the full workflow JSON for one workflow. Used by PackMetadataAgent
+      to derive cross-workflow state.
+    source:
+      type: state
+      default: []
+  pack_generation_complete:
+    type: boolean
+    description: 'True when all workflows in a multi-workflow pack have been generated.
+      Set by pack_loop_check lifecycle tool. Used by handoffs to decide: loop back to
+      WorkflowStrategyAgent (false) or proceed to PackMetadataAgent (true).'
+    source:
+      type: state
+      default: false
+
+agents:
+  InterviewAgent:
+    variables:
+    - refinement_mode
+    - change_class
+    - artifact_version_id
+    - refinement_request
+    - context_aware
+    - concept_overview
+    - concept_api_endpoints
+    - concept_blueprint
+    - monetization_enabled
+  PatternAgent:
+    variables:
+    - concept_overview
+    - concept_api_endpoints
+    - concept_blueprint
+    - design_surface_map
+    - backend_design_document
+    - experience_spec_document
+    - monetization_enabled
+    - macro_workflow_graph
+    - is_multi_workflow
+    - pack_name
+    - workflows_spec
+  ProjectOverviewAgent:
+    variables:
+    - concept_overview
+    - workflow_strategy
+  DownloadAgent:
+    variables:
+    - action_plan
+    - is_multi_workflow
+    - pack_name
+    - workflows_spec
+    - generated_workflows
+  WorkflowStrategyAgent:
+    variables:
+    - concept_overview
+    - concept_api_endpoints
+    - concept_blueprint
+    - design_surface_map
+    - backend_design_document
+    - experience_spec_document
+    - interview_complete
+    - workflow_strategy
+    - strategy_ready
+    - is_multi_workflow
+    - workflows_spec
+    - current_workflow_index
+  PackMetadataAgent:
+    variables:
+    - refinement_mode
+    - change_class
+    - artifact_version_id
+    - is_multi_workflow
+    - pack_name
+    - workflows_spec
+    - generated_workflows

@@ -38,6 +38,17 @@ from mozaiksai.core.workflow.runtime_signals import SYSTEM_RESUME_SIGNAL
 logger = get_core_logger("workflow_pack_coordinator")
 
 
+def _is_terminal_child_status(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return bool(value)
+    if isinstance(value, int):
+        return int(value) == int(WorkflowStatus.COMPLETED)
+    normalized = str(value).strip().lower()
+    return normalized in {"completed", "complete", "success", "succeeded", "failed", "error", "cancelled"}
+
+
 @dataclass
 class _ChildRunState:
     """State for a single MFJ child task across retries."""
@@ -365,6 +376,9 @@ class WorkflowPackCoordinator:
         if not chat_id:
             return
 
+        if not _is_terminal_child_status(payload.get("status")):
+            return
+
         parent_chat_id = self._active_by_child.get(chat_id)
         if not parent_chat_id:
             return
@@ -662,9 +676,19 @@ class WorkflowPackCoordinator:
         wf = str(workflow_name or "").strip()
         if not wf:
             return False
+        try:
+            from mozaiksai.core.workflow.paths import normalize_workflow_roots
+
+            for root in normalize_workflow_roots():
+                candidate = Path(root) / wf
+                if candidate.exists() and candidate.is_dir():
+                    return True
+        except Exception:
+            pass
+
         root = Path(__file__).resolve()
         for parent in [root] + list(root.parents):
-            candidate = parent / "platform" / "workflows" / wf
+            candidate = parent / "factory_app" / "workflows" / wf
             if candidate.exists() and candidate.is_dir():
                 return True
         return False

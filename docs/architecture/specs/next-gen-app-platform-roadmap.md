@@ -34,7 +34,7 @@
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  1. SCHEMA-DRIVEN GENERATION                                                 │
-│     Agent outputs a structured schema (app.yaml + ui/pages/*.yaml)              │
+│     Agent outputs a structured schema (app/app.json + ui/pages/*.yaml)     │
 │     Runtime renders it using pre-built primitives                            │
 │     → Design system survives generation. No frozen raw code.                 │
 │                                                                              │
@@ -97,7 +97,7 @@
 │  ┌──────────────────────────────────────────────────────────────────────┐   │
 │  │  AppGenerator workflow                                                 │   │
 │  │  InterviewAgent → AppPlanAgent → AppSchemaAgent → AssemblyAgent      │   │
-│  │  Output: app.yaml + ui/pages/*.yaml (primitive schemas) + modules/       │   │
+│  │  Output: app/app.json + ui/pages/*.yaml (primitive schemas) + modules/ │   │
 │  │  NOT raw React code — declarative schemas only                        │   │
 │  │  AppSchemaAgent outputs AppSchemaOutput (manifest + pages + theme)    │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
@@ -115,7 +115,7 @@
 │  │  Page Renderer reads ui/pages/*.yaml                                      │   │
 │  │  Resolves data bindings (module:contacts:list → API call → data)      │   │
 │  │  Maps primitive types → pre-built React components                    │   │
-│  │  Applies theme tokens from app.yaml                                   │   │
+│  │  Applies theme tokens from brand/theme_config.json                    │   │
 │  │  Primitives subscribe to agent event bus                              │   │
 │  │                                                                        │   │
 │  │  ui.datatable.refresh → DataTable re-fetches data                    │   │
@@ -187,11 +187,11 @@ pages:
 
 Currently: gathers CRUD/page/auth/integration requirements, then generates… presumably raw app code.
 
-**Needs to become:** outputs `app.yaml` + `ui/pages/*.yaml` using primitive schemas. The E2B sandbox then validates the schema renders correctly without needing npm install.
+**Needs to become:** outputs `app/app.json` + `ui/pages/*.yaml` using primitive schemas. The E2B sandbox then validates the schema renders correctly without needing npm install.
 
 Agent roster change needed:
 - `InterviewAgent` — stays: gathers requirements
-- Add `SchemaAgent` — translates requirements into `app.yaml` (theme, navigation, module declarations)
+- Add `SchemaAgent` — translates requirements into `app/app.json` plus shell/theme/module declarations
 - Add `PageDefinitionAgent` — translates page requirements into `ui/pages/*.yaml` primitive schemas
 - `ModuleAgent` — stays: generates Python module actions (CRUD handlers)
 
@@ -328,8 +328,8 @@ Already outputs the correct declarative YAML format (orchestrator.yaml, agents.y
 ### Layer 7 — CLI
 
 - [ ] `mozaiks add page <name>` — scaffolds `ui/pages/<name>.yaml` with starter schema
-- [ ] `mozaiks validate` — validates `app.yaml` + all `ui/pages/*.yaml` against primitive schemas
-- [ ] `mozaiks build` — packages `app.yaml` + `pages/` + `modules/` → deployable bundle
+- [ ] `mozaiks validate` — validates `app/app.json` + all `ui/pages/*.yaml` against primitive schemas
+- [ ] `mozaiks build` — packages `app/app.json` + `ui/pages/` + `modules/` → deployable bundle
 - [ ] `mozaiks doctor` — checks Python/Node versions, DB, primitives installed
 
 ---
@@ -386,11 +386,10 @@ Week 5 — E2B + polish
 2. **Data binding protocol**: does `module:contacts:list` call the Python module directly via API, or go through a GraphQL/REST adapter?
    - Recommendation: HTTP to `/api/operations/{name}/{action}` — already the pattern in `mozaiksai/hosts/platform.py`
 
-3. **AppGenerator output format**: page schemas as `.yaml` files or inline in `app.yaml`?
+3. **AppGenerator output format**: page schemas as `.yaml` files or inline in app-owned manifest/config artifacts?
    - Recommendation: separate `ui/pages/*.yaml` files per spec — easier for agents to output incrementally
 
 4. **Event bus transport**: do App UI events share the workflow WebSocket or get a separate connection?
    - Recommendation: share the workflow WebSocket — same bus, different event namespace (`ui.*` vs workflow events)
-
 
 

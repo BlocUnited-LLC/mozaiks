@@ -49,42 +49,42 @@ DEFAULT_STUDIO_CREATE_STATE = {
 STUDIO_CREATE_STATE_COLLECTION = "StudioCreateState"
 
 
-def get_missing_studio_surfaces(platform_root: Path) -> list[str]:
+def get_missing_studio_surfaces(app_root: Path) -> list[str]:
     app_prefix = "app"
     theme_rel = f"{app_prefix}/brand/theme_config.json"
     ui_rel = f"{app_prefix}/ui/route_manifest.json"
     checks = {
-        f"{app_prefix}/app.json": platform_root / "app.json",
-        f"{app_prefix}/config/ai.json": platform_root / "config" / "ai.json",
-        f"{app_prefix}/config/shell.json": platform_root / "config" / "shell.json",
-        theme_rel: _resolve_theme_config_path(platform_root),
-        ui_rel: _resolve_ui_route_manifest_path(platform_root),
+        f"{app_prefix}/app.json": app_root / "app.json",
+        f"{app_prefix}/config/ai.json": app_root / "config" / "ai.json",
+        f"{app_prefix}/config/shell.json": app_root / "config" / "shell.json",
+        theme_rel: _resolve_theme_config_path(app_root),
+        ui_rel: _resolve_ui_route_manifest_path(app_root),
     }
     return [rel_path for rel_path, path in checks.items() if not path.exists()]
 
 
 def build_studio_home_summary(
-    platform_root: Path,
+    app_root: Path,
     *,
     surface: str = "cli-home",
     local_only: bool = True,
 ) -> dict:
-    app_config = _read_json(platform_root / "app.json")
-    ai_config = _read_json(platform_root / "config" / "ai.json")
-    shell_config = _read_json(platform_root / "config" / "shell.json")
-    theme_config = _read_json(_resolve_theme_config_path(platform_root))
-    ui_route_manifest = _read_json(_resolve_ui_route_manifest_path(platform_root))
+    app_config = _read_json(app_root / "app.json")
+    ai_config = _read_json(app_root / "config" / "ai.json")
+    shell_config = _read_json(app_root / "config" / "shell.json")
+    theme_config = _read_json(_resolve_theme_config_path(app_root))
+    ui_route_manifest = _read_json(_resolve_ui_route_manifest_path(app_root))
 
-    admin_json_path = platform_root / "config" / "admin.json"
+    admin_json_path = app_root / "config" / "admin.json"
     admin_config = _read_json(admin_json_path) if admin_json_path.exists() else {}
 
     onboarding = app_config.get("onboarding") or {}
     llm = ai_config.get("llm") or {}
     identity = theme_config.get("identity") or {}
-    workflow_names = _list_workflows(platform_root)
+    workflow_names = _list_workflows(app_root)
     workflow_count = len(workflow_names)
     custom_page_count = len(ui_route_manifest.get("pages") or [])
-    schema_page_count = _count_schema_pages(platform_root)
+    schema_page_count = _count_schema_pages(app_root)
     entry_point = (ai_config.get("workflows") or {}).get("entry_point")
     admin_emails = _resolve_admin_emails(app_config, admin_config)
 
@@ -92,11 +92,11 @@ def build_studio_home_summary(
         "studio": {
             "surface": surface,
             "local_only": local_only,
-            "workspace_root": str(platform_root),
+            "workspace_root": str(app_root),
             "route": "/studio",
         },
         "app": {
-            "name": app_config.get("appName") or platform_root.name,
+            "name": app_config.get("appName") or app_root.name,
             "preset": app_config.get("preset") or "unknown",
             "journey": onboarding.get("journey"),
             "first_goal": onboarding.get("first_goal"),
@@ -197,13 +197,13 @@ def build_create_section(home_summary: dict, create_state: dict) -> dict:
 
 
 def build_studio_create_summary(
-    platform_root: Path,
+    app_root: Path,
     *,
     surface: str = "shell-create",
     local_only: bool = True,
 ) -> dict:
     """CLI diagnostic path for workspace readiness and available build workflows."""
-    summary = build_studio_home_summary(platform_root, surface=surface, local_only=local_only)
+    summary = build_studio_home_summary(app_root, surface=surface, local_only=local_only)
     create_state = _normalize_create_state({})
     summary["studio"] = {**summary["studio"], "surface": surface, "route": "/studio/create"}
     summary["create"] = build_create_section(summary, create_state)
@@ -412,16 +412,16 @@ def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _resolve_theme_config_path(platform_root: Path) -> Path:
+def _resolve_theme_config_path(app_root: Path) -> Path:
     candidates = [
-        platform_root / "brand" / "theme_config.json",
+        app_root / "brand" / "theme_config.json",
     ]
     return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
 
 
-def _resolve_ui_route_manifest_path(platform_root: Path) -> Path:
+def _resolve_ui_route_manifest_path(app_root: Path) -> Path:
     candidates = [
-        platform_root / "ui" / "route_manifest.json",
+        app_root / "ui" / "route_manifest.json",
     ]
     return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
 
@@ -430,7 +430,7 @@ def _normalize_request_kind(value: object) -> str | None:
     if not isinstance(value, str):
         return None
     normalized = value.strip()
-    return normalized if normalized in {"new_app", "existing_app", "refinement"} else None
+    return normalized if normalized in {"greenfield_app", "brownfield_app", "refinement"} else None
 
 
 def _normalize_change_class(value: object) -> str | None:
@@ -552,9 +552,9 @@ def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _list_workflows(platform_root: Path) -> list[str]:
+def _list_workflows(app_root: Path) -> list[str]:
     discovered: list[str] = []
-    workflows_dir = platform_root / "workflows"
+    workflows_dir = app_root / "workflows"
     if workflows_dir.exists():
         for child in workflows_dir.iterdir():
             if child.is_dir() and child.name != "extended_orchestration" and child.name not in discovered:
@@ -572,12 +572,12 @@ def _list_workflows(platform_root: Path) -> list[str]:
     return sorted(discovered, key=str.lower)
 
 
-def _count_workflows(platform_root: Path) -> int:
-    return len(_list_workflows(platform_root))
+def _count_workflows(app_root: Path) -> int:
+    return len(_list_workflows(app_root))
 
 
-def _count_schema_pages(platform_root: Path) -> int:
-    pages_dir = platform_root / "ui" / "pages"
+def _count_schema_pages(app_root: Path) -> int:
+    pages_dir = app_root / "ui" / "pages"
     if not pages_dir.exists():
         return 0
 
@@ -621,7 +621,7 @@ def _recommend_next_step(
     if not admin_emails:
         return "Add a local admin email with 'mozaiks onboard --admin-email <email>' before opening admin workflows."
     if workflow_count == 0:
-        if onboarding.get("journey") == "existing_app":
+        if onboarding.get("journey") == "brownfield_app":
             return "Connect the first host-owned surface or submit the first build request from this workspace."
         return "Submit the first build request or add the first workflow before you expand the app surface."
     return "Review the current workspace state and make the next approved build request from Studio Home."

@@ -35,7 +35,7 @@ from mozaiksai.core.session.launcher import launch_prepared_workflow, prepare_ro
 from mozaiksai.core.session.router import configure_session_router
 from mozaiksai.hosts.platform import (
     build_shell_config,
-    resolve_platform_path,
+    resolve_app_root,
     resolve_scope_from_principal,
 )
 from mozaiksai.core.artifacts import ChangeClassification, get_artifact_store
@@ -85,7 +85,7 @@ def _resolve_studio_scope(
 
 @app.get("/api/shell-config")
 async def get_studio_shell_config():
-    return await build_shell_config(include_studio=True)
+    return await build_shell_config(surface="studio")
 
 
 @app.get("/api/studio/home")
@@ -93,8 +93,8 @@ async def get_studio_home(
     principal: UserPrincipal = Depends(require_any_auth),
 ):
     _ = principal
-    platform_root = resolve_platform_path()
-    missing_surfaces = get_missing_studio_surfaces(platform_root)
+    app_root = resolve_app_root()
+    missing_surfaces = get_missing_studio_surfaces(app_root)
     if missing_surfaces:
         raise HTTPException(
             status_code=500,
@@ -102,7 +102,7 @@ async def get_studio_home(
         )
 
     try:
-        return build_studio_home_summary(platform_root, surface="shell-home", local_only=True)
+        return build_studio_home_summary(app_root, surface="shell-home", local_only=True)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to build Studio Home summary: {exc}") from exc
 
@@ -186,13 +186,13 @@ async def revert_to_artifact_version(
             detail=f"Artifact file no longer exists on disk: {artifact_path}",
         )
 
-    platform_root = resolve_platform_path()
+    app_root = resolve_app_root()
 
     if version.artifact_kind == "workflow_bundle":
-        target_dir = platform_root / "workflows"
+        target_dir = app_root / "workflows"
         target_dir.mkdir(parents=True, exist_ok=True)
     elif version.artifact_kind == "app_bundle":
-        target_dir = platform_root
+        target_dir = app_root
     else:
         raise HTTPException(status_code=400, detail=f"Cannot revert artifact kind: {version.artifact_kind}")
 
@@ -225,8 +225,8 @@ async def get_studio_create(
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     app_id, _ = _resolve_studio_scope(principal)
-    platform_root = resolve_platform_path()
-    missing_surfaces = get_missing_studio_surfaces(platform_root)
+    app_root = resolve_app_root()
+    missing_surfaces = get_missing_studio_surfaces(app_root)
     if missing_surfaces:
         raise HTTPException(
             status_code=500,
@@ -235,7 +235,7 @@ async def get_studio_create(
 
     try:
         create_state = await load_studio_create_state_from_db(app_id)
-        home_summary = build_studio_home_summary(platform_root, surface="shell-create", local_only=True)
+        home_summary = build_studio_home_summary(app_root, surface="shell-create", local_only=True)
         home_summary["studio"] = {**home_summary["studio"], "surface": "shell-create", "route": "/studio/create"}
         return {
             **home_summary,
@@ -247,7 +247,7 @@ async def get_studio_create(
 
 class StudioCreateSaveRequest(BaseModel):
     request_text: str = Field(..., description="Persisted Studio create request text")
-    request_kind: Optional[Literal["new_app", "existing_app", "refinement"]] = Field(
+    request_kind: Optional[Literal["greenfield_app", "brownfield_app", "refinement"]] = Field(
         None,
         description="High-level request kind for the current create draft",
     )
@@ -266,8 +266,8 @@ async def save_studio_create(
     if request.change_class and request.request_kind != "refinement":
         raise HTTPException(status_code=400, detail="change_class is only valid when request_kind is 'refinement'")
 
-    platform_root = resolve_platform_path()
-    missing_surfaces = get_missing_studio_surfaces(platform_root)
+    app_root = resolve_app_root()
+    missing_surfaces = get_missing_studio_surfaces(app_root)
     if missing_surfaces:
         raise HTTPException(
             status_code=500,
@@ -281,7 +281,7 @@ async def save_studio_create(
             request_kind=request.request_kind,
             change_class=request.change_class,
         )
-        home_summary = build_studio_home_summary(platform_root, surface="shell-create", local_only=True)
+        home_summary = build_studio_home_summary(app_root, surface="shell-create", local_only=True)
         home_summary["studio"] = {**home_summary["studio"], "surface": "shell-create", "route": "/studio/create"}
         return {
             **home_summary,

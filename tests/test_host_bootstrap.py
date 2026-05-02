@@ -33,14 +33,13 @@ def test_studio_host_without_workspace_leaves_platform_path_unset(monkeypatch) -
 
     assert os.getenv("PLATFORM_PATH") is None
 
-    # Factory workflows root is still injected when in the repo checkout
+    # Shared factory workflows root is still injected when in the repo checkout
     workflow_roots_str = os.getenv("MOZAIKS_WORKFLOW_ROOTS") or ""
     if workflow_roots_str:
         workflow_roots = [Path(p).resolve() for p in workflow_roots_str.split(os.pathsep) if p]
         assert any(
             path.name == "workflows"
-            and path.parent.name == "app"
-            and path.parent.parent.name == "factory_app"
+            and path.parent.name == "factory_app"
             for path in workflow_roots
         )
 

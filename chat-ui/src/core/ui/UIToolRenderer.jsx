@@ -11,23 +11,23 @@ import { isCoreArtifact } from '../../primitives/utils';
  *
  * This avoids coupling @mozaiks/chat-ui to any workflow registry implementation.
  */
-const UIToolRenderer = ({ event, onResponse, submitInputRequest, className = '', onArtifactAction, actionStatusMap }) => {
+const UIToolRenderer = ({ event, onResponse, className = '', onArtifactAction, actionStatusMap }) => {
   const { uiToolRenderer } = useChatUI();
 
-  if (!event || !event.ui_tool_id) {
+  if (!event || !event.tool_name) {
     return null;
   }
 
   const payload = event.payload || {};
-  const isCore = isCoreArtifact(payload) || (typeof event.ui_tool_id === 'string' && event.ui_tool_id.startsWith('core.'));
+  const isCore = isCoreArtifact(payload) || (typeof event.tool_name === 'string' && event.tool_name.startsWith('core.'));
   const hasArtifactType = payload?.artifact_type || payload?.data?.artifact_type;
   const corePayload = isCore && !hasArtifactType
-    ? { ...payload, artifact_type: event.ui_tool_id }
+    ? { ...payload, artifact_type: event.tool_name }
     : payload;
 
   if (typeof uiToolRenderer === 'function') {
     try {
-      const rendered = uiToolRenderer(event, onResponse, submitInputRequest, {
+      const rendered = uiToolRenderer(event, onResponse, {
         onArtifactAction,
         actionStatusMap,
       });
@@ -49,9 +49,9 @@ const UIToolRenderer = ({ event, onResponse, submitInputRequest, className = '',
         );
       }
       return (
-        <div className={className}>
-          <div className="text-xs text-[var(--color-warning)]">
-            UI tool renderer error: {event.ui_tool_id}
+          <div className={className}>
+            <div className="text-xs text-[var(--color-warning)]">
+            UI tool renderer error: {event.tool_name}
           </div>
         </div>
       );

@@ -97,6 +97,7 @@ def create_mozaiks_app(
     # Import routes after env vars are set
     # This deferred import ensures the runtime picks up the configuration
     from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+    from mozaiksai.core.core_config import close_mongo_client
     from mozaiksai.core.transport.simple_transport import SimpleTransport
     from mozaiksai.core.workflow.workflow_manager import workflow_status_summary
     from mozaiksai.core.multitenant import coalesce_app_id
@@ -112,6 +113,12 @@ def create_mozaiks_app(
     runtime_subapp.state.persistence = persistence_manager
     runtime_subapp.state.transport = transport
     runtime_subapp.state.workflow_dir = workflow_path
+
+    @runtime_subapp.on_event("shutdown")
+    async def _shutdown_runtime_subapp() -> None:
+        """Release process-scoped runtime resources for smoke/tests."""
+        SimpleTransport._instance = None
+        close_mongo_client()
 
     # ----- Health endpoint -----
     @runtime_subapp.get("/health")

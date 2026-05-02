@@ -18,7 +18,7 @@ def _read_yaml(relative_path: str):
 
 
 def test_appgenerator_structured_outputs_include_canonical_module_contract_models() -> None:
-    config = _read_yaml("factory_app/app/workflows/AppGenerator/structured_outputs.yaml")
+    config = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
     models = config["models"]
     registry = config["registry"]
 
@@ -123,8 +123,8 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
 
 
 def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations_contract() -> None:
-    source = _read("factory_app/app/workflows/AppGenerator/agents.yaml")
-    handoffs = _read_yaml("factory_app/app/workflows/AppGenerator/handoffs.yaml")
+    source = _read("factory_app/workflows/AppGenerator/agents.yaml")
+    handoffs = _read_yaml("factory_app/workflows/AppGenerator/handoffs.yaml")
 
     assert "task_type: module_contract" in source
     assert "task_type: admin_config" in source
@@ -191,13 +191,13 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
     assert "backend/routes/api_router.py" not in source
     assert "RouteAgent" not in source
     assert "EntryPointAgent" not in source
-    assert "page_component" not in _read("factory_app/app/workflows/AppGenerator/structured_outputs.yaml")
-    assert "shell_extension" not in _read("factory_app/app/workflows/AppGenerator/structured_outputs.yaml")
+    assert "page_component" not in _read("factory_app/workflows/AppGenerator/structured_outputs.yaml")
+    assert "shell_extension" not in _read("factory_app/workflows/AppGenerator/structured_outputs.yaml")
 
 
 def test_appgenerator_download_tool_does_not_inject_legacy_admin_surfaces() -> None:
-    source = _read("factory_app/app/workflows/AppGenerator/tools/generate_and_download.py")
-    assembly = _read("factory_app/app/workflows/AppGenerator/tools/assembly_phase.py")
+    source = _read("factory_app/workflows/AppGenerator/tools/generate_and_download.py")
+    assembly = _read("factory_app/workflows/AppGenerator/tools/assembly_phase.py")
 
     assert "admin_surfaces" not in source
     assert "_inject_admin_surfaces(files_map)" not in source

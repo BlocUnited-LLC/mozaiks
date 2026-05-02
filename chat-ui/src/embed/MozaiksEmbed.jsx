@@ -665,6 +665,15 @@ const MozaiksEmbed = ({
             case 'run_complete':
             case 'workflow_complete':
               setIsTyping(false);
+              if (
+                event?.status === 1 ||
+                String(event?.status ?? '').trim().toLowerCase() === '1' ||
+                ['completed', 'complete', 'success', 'succeeded', 'done', 'ok'].includes(
+                  String(event?.status ?? '').trim().toLowerCase()
+                )
+              ) {
+                onComplete?.(event);
+              }
               return;
             case 'error': {
               const message = event.message || 'Workflow error';

@@ -1,0 +1,18 @@
+agents:
+- name: RuntimeSmokeAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: You are the Runtime Smoke Agent for production pipeline validation.
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |
+      Return valid JSON matching RuntimeSmokeResult.
+      Keep `agent_message` to one short sentence.
+      Keep `result` to one sentence confirming runtime orchestration worked.
+      Keep `confidence` between 0.0 and 1.0.
+  - id: output_format
+    heading: '[OUTPUT FORMAT]'
+    content: Respond with ONLY valid JSON and no markdown fences.
+  max_consecutive_auto_reply: 2
+  structured_outputs_required: true

@@ -150,8 +150,10 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         self._scheduled_flush_tasks: Dict[str, asyncio.Task] = {}
 
         # UI tool response correlation
-        self.pending_ui_tool_responses: Dict[str, asyncio.Future] = {}
+        self.pending_tool_call_responses: Dict[str, asyncio.Future] = {}
+        self._buffered_tool_call_responses: Dict[str, Dict[str, Any]] = {}
         self._ui_tool_metadata: Dict[str, Dict[str, Any]] = {}
+        self._owner_loop = None
 
         # Runtime context trigger managers (per chat)
         # Used to apply declarative ui_response triggers without bespoke agents.
@@ -541,7 +543,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         This is the primary method for forwarding AG2 native events.
         """
         try:
-            # Allow callers to provide a fully-formed transport envelope (e.g., ack.ui_tool_response)
+            # Allow callers to provide a fully-formed transport envelope (e.g., ack.tool_call_response)
             # without forcing another serialization pass through the dispatcher.
             if isinstance(event, dict) and 'type' in event and 'data' in event and 'kind' not in event:
                 logger.info(
@@ -622,18 +624,14 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 # UI tool events have awaiting_response=True and component_type
                 is_ui_tool_event = data_payload.get('awaiting_response') and data_payload.get('component_type')
             
-            # Skip visibility filtering for select_speaker, input_request, and UI tool events
-            is_input_request_event = envelope_type == 'chat.input_request'
+            # Skip visibility filtering for select_speaker and response-required UI tool events
             skip_visibility_filter = (
                 envelope_type == 'chat.select_speaker'
                 or is_ui_tool_event
-                or is_input_request_event
             )
             
             if is_ui_tool_event:
                 logger.info(f"🎯 [TRANSPORT] UI tool event detected - bypassing agent visibility filter (component={envelope.get('data', {}).get('component_type')})")
-            elif is_input_request_event:
-                logger.info("🎯 [TRANSPORT] Input request event detected - bypassing agent visibility filter")
 
             # Additional filtering (agent visibility) only for BaseEvent path where needed
             agent_name = None
@@ -1242,10 +1240,10 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             # request_id optional (only when responding to InputRequestEvent)
             return True
         
-        elif msg_type == "ui_tool_response":
-            # UI tool response from frontend (Approve/Cancel/Submit buttons)
-            # Must have ui_tool_id or eventId to correlate with pending wait_for_ui_tool_response
-            return ("ui_tool_id" in message_data or "eventId" in message_data)
+        elif msg_type == "tool_call_response":
+            # Tool call response from frontend (Approve/Cancel/Submit buttons)
+            # Must have tool_call_id to correlate with pending wait_for_tool_call_response
+            return "tool_call_id" in message_data
         
         elif msg_type == "client.resume":
             # Canonical resume field: lastClientIndex (0-based index of last message the client has)
@@ -1306,6 +1304,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         ws_id: Optional[int] = None
     ) -> None:
         """Handle WebSocket connection for real-time communication with multi-workflow session support"""
+        if self._owner_loop is None:
+            self._owner_loop = asyncio.get_running_loop()
         await websocket.accept()
         
         # Store ws_id for session registry lookups
@@ -1480,8 +1480,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
     #   send_chat_message
     # - GeneralModeMixin: _ensure_general_chat_context, _handle_general_agent_exchange,
     #   _persist_general_message
-    # - UIToolsMixin: _persist_ui_tool_state, send_ui_tool_event, wait_for_ui_tool_response,
-    #   submit_ui_tool_response, register_derived_context_manager, unregister_derived_context_manager
+    # - UIToolsMixin: _persist_ui_tool_state, send_tool_call_event, wait_for_tool_call_response,
+    #   submit_tool_call_response, register_derived_context_manager, unregister_derived_context_manager
     
 
 

@@ -128,6 +128,8 @@ nav:
           - UI Surface Model: architecture/frontend/ui-surface-model.md
           - Conversation Modes: architecture/frontend/conversation-modes.md
           - Layout Modes: architecture/frontend/layout-modes.md
+          - Generated Frontend Surface Contract: architecture/frontend/generated-frontend-surface-contract.md
+          - Tool Event Lifecycle: architecture/frontend/tool-event-lifecycle.md
           - AG-UI Comparison: architecture/frontend/ag-ui-copilotkit-comparison.md
   - Reference:
       - Overview: reference/index.md

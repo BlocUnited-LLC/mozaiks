@@ -24,7 +24,7 @@ This folder closes that gap by defining:
 
 These development specs were derived from:
 
-- planning models in shared builder workflow `structured_outputs.yaml` files under `factory_app/app/workflows/`
+- planning models in shared builder workflow `structured_outputs.yaml` files under `factory_app/workflows/`
 - current app-bundle shape under the active app root
 - archived planning logic:
   - `ARCHIVED_mozaiks-core/docs/archive/architecture-specs/ai-agent-codebase-8-part-audit.md`

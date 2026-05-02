@@ -18,15 +18,16 @@ const normalizeSnapshotMessage = (msg, index) => {
   const agentName =
     msg.agent || msg.agent_name || msg.name || (role === 'assistant' ? 'assistant' : 'user');
   const metadata = msg.metadata || null;
-  const uiToolMeta = metadata?.ui_tool;
-  const uiToolEvent =
-    uiToolMeta && typeof uiToolMeta === 'object'
+  const toolCallMeta = metadata?.tool_call;
+  const toolCall =
+    toolCallMeta && typeof toolCallMeta === 'object'
       ? {
-          ui_tool_id: uiToolMeta.ui_tool_id,
-          eventId: uiToolMeta.event_id,
-          payload: uiToolMeta.payload || {},
-          display: uiToolMeta.display || 'inline',
-          workflow_name: msg.workflow_name || uiToolMeta.workflow_name,
+          tool_name: toolCallMeta.tool_name,
+          tool_call_id: toolCallMeta.tool_call_id,
+          payload: toolCallMeta.payload || {},
+          display: toolCallMeta.display || 'inline',
+          workflow_name: msg.workflow_name || toolCallMeta.workflow_name,
+          component_type: toolCallMeta.component_type || toolCallMeta.tool_name,
         }
       : null;
 
@@ -38,9 +39,9 @@ const normalizeSnapshotMessage = (msg, index) => {
     isStreaming: false,
     structuredOutput: msg.structured_output,
     structuredSchema: msg.structured_schema,
-    uiToolEvent,
-    ui_tool_completed: uiToolMeta?.ui_tool_completed || false,
-    ui_tool_status: uiToolMeta?.ui_tool_status || null,
+    toolCall,
+    tool_call_completed: toolCallMeta?.tool_call_completed || false,
+    tool_call_status: toolCallMeta?.tool_call_status || null,
     metadata,
     timestamp: msg.timestamp || null,
   };
@@ -88,7 +89,6 @@ export function useConversation({
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showInitSpinner, setShowInitSpinner] = useState(false);
-  const [pendingInputRequestId, setPendingInputRequestId] = useState(null);
 
   // Refs
   const messagesRef = useRef([]);
@@ -254,12 +254,9 @@ export function useConversation({
     messagesRef,
     loading,
     showInitSpinner,
-    pendingInputRequestId,
-
     // Setters
     setMessages: setMessagesWithLogging,
     setLoading,
-    setPendingInputRequestId,
 
     // Actions
     addMessage,

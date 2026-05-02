@@ -3,10 +3,10 @@
 **Status:** CANONICAL — describes what actually exists
 **Last verified:** 2026-04-08
 **Source files:**
-- `factory_app/app/workflows/AgentGenerator/tools/workflow_converter.py`
-- `factory_app/app/workflows/AgentGenerator/tools/generate_and_download.py`
-- `factory_app/app/workflows/AgentGenerator/structured_outputs.yaml`
-- `factory_app/app/workflows/AgentGenerator/agents.yaml`
+- `factory_app/workflows/AgentGenerator/tools/workflow_converter.py`
+- `factory_app/workflows/AgentGenerator/tools/generate_and_download.py`
+- `factory_app/workflows/AgentGenerator/structured_outputs.yaml`
+- `factory_app/workflows/AgentGenerator/agents.yaml`
 
 > **Related:** [`structured-output-extraction-contract.md`](structured-output-extraction-contract.md) —
 > the general runtime contract for structured outputs and auto-tool-call.
@@ -304,6 +304,6 @@ each generation run.
 
 - [structured-output-extraction-contract.md](structured-output-extraction-contract.md) — general auto-tool-call pattern
 - [workflow-authoring-contracts.md](../foundations/workflow-authoring-contracts.md) — `extended_orchestration/mfj_extension.json` format
-- `factory_app/app/workflows/AgentGenerator/tools/workflow_converter.py` — assembly implementation
-- `factory_app/app/workflows/AgentGenerator/tools/generate_and_download.py` — collection + trigger
-- `factory_app/app/workflows/AgentGenerator/` — current working MFJ-enabled workflow example
+- `factory_app/workflows/AgentGenerator/tools/workflow_converter.py` — assembly implementation
+- `factory_app/workflows/AgentGenerator/tools/generate_and_download.py` — collection + trigger
+- `factory_app/workflows/AgentGenerator/` — current working MFJ-enabled workflow example

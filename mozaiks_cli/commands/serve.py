@@ -35,6 +35,22 @@ def run(args) -> None:
     os.environ["MOZAIKS_APP_WORKSPACE_PATH"] = str(workspace)
     os.environ.setdefault("MOZAIKS_HOST", host)
 
+    # Load .env from the workspace directory so the app bundle owns its config,
+    # regardless of which directory the CLI is invoked from.
+    # If .env doesn't exist but .env.example does, create it automatically.
+    try:
+        from dotenv import load_dotenv
+        import shutil
+        env_file = workspace / ".env"
+        env_example = workspace / ".env.example"
+        if not env_file.exists() and env_example.exists():
+            shutil.copy(env_example, env_file)
+            print(f"Created {env_file} from .env.example — fill in your OPENAI_API_KEY and MONGO_URI before use.")
+        if env_file.exists():
+            load_dotenv(dotenv_path=env_file, override=False)
+    except ImportError:
+        pass
+
     try:
         import uvicorn
     except ImportError:

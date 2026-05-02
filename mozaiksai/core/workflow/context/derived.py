@@ -351,8 +351,8 @@ class DerivedContextManager:
         # Back-compat method name: treat any trigger binding as active.
         return bool(self.variables or self.ui_response_bindings)
 
-    def apply_ui_tool_response(self, *, tool_name: str, response_data: Dict[str, Any]) -> List[str]:
-        """Apply declarative ui_response triggers based on a completed UI tool response.
+    def apply_tool_call_response(self, *, tool_name: str, response_data: Dict[str, Any]) -> List[str]:
+        """Apply declarative ui_response triggers based on a completed tool call response.
 
         This updates AG2 ContextVariables providers (group manager, pattern context, etc.)
         so context-based handoffs can proceed immediately after the user interacts.

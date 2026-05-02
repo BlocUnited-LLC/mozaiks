@@ -9,7 +9,7 @@ depends_on: ui-systems.md, session-router.md
 # Workflow Routing Transitions
 
 The global workflow routing layer lives in
-`factory_app/app/workflows/extended_orchestration/extension_registry.json`.
+`factory_app/workflows/extended_orchestration/extension_registry.json`.
 App/workspace roots may overlay it with their own
 `workflows/extended_orchestration/extension_registry.json`.
 
@@ -40,7 +40,7 @@ Do not put MFJ graphs in the global registry.
 
 ## Hard Rules
 
-- For shared build transition visuals, place transition components in `factory_app/app/workflows/extended_orchestration/ui/` and export them from `ui/index.js`.
+- For shared build transition visuals, place transition components in `factory_app/workflows/extended_orchestration/ui/` and export them from `ui/index.js`.
 - Keep transition UI files focused on transition screens only; keep shared runtime helpers in `chat-ui/src/platform`.
 - Do not put top-level `component`, `config`, title, background, option label, or option description fields in product transition declarations.
 - Do not put `entry_transition` on workflow sequence declarations.
@@ -63,14 +63,14 @@ semantic and workflow-agnostic.
   },
   "options": [
     {
-      "id": "new_app",
+      "id": "greenfield_app",
       "route_to": "ValueEngine",
-      "context_variables": { "app_type": "new" }
+      "context_variables": { "app_type": "greenfield_app" }
     },
     {
-      "id": "existing_app",
-      "route_to": "ValueEngine",
-      "context_variables": { "app_type": "existing" }
+      "id": "brownfield_app",
+      "route_to": "ExistingAppDiscovery",
+      "context_variables": { "app_type": "brownfield_app" }
     }
   ]
 }
@@ -97,7 +97,7 @@ registry key, not a file path. Built-in screens such as `LauncherScreen` and
 create a workflow-local transition component and export it via:
 
 ```text
-factory_app/app/workflows/extended_orchestration/ui/index.js
+factory_app/workflows/extended_orchestration/ui/index.js
 ```
 
 The registry owns routing and context semantics (`transition_type`, single-route

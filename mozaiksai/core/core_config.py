@@ -13,6 +13,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 load_dotenv()
 logger = get_core_logger("core_config")
+_mongo_client: Optional[AsyncIOMotorClient] = None
+_mongo_client_conn_str: Optional[str] = None
 
 # -----------------------------
 # Azure Key Vault utilities (lazy, optional)
@@ -85,13 +87,29 @@ def get_mongo_client() -> AsyncIOMotorClient:
 
     Avoids defaulting to localhost, to prevent accidental local fallbacks.
     """
+    global _mongo_client, _mongo_client_conn_str
     conn_str = os.getenv("MONGO_URI")
     if not conn_str:
         # Fall back to KV only if env is missing
         conn_str = get_secret("MongoURI")
     if not conn_str:
         raise ValueError("MONGO_URI is not configured")
-    return AsyncIOMotorClient(conn_str)
+    if _mongo_client is not None and _mongo_client_conn_str == conn_str:
+        return _mongo_client
+    if _mongo_client is not None:
+        _mongo_client.close()
+    _mongo_client = AsyncIOMotorClient(conn_str)
+    _mongo_client_conn_str = conn_str
+    return _mongo_client
+
+
+def close_mongo_client() -> None:
+    """Close the process-scoped Mongo client and clear the cached handle."""
+    global _mongo_client, _mongo_client_conn_str
+    if _mongo_client is not None:
+        _mongo_client.close()
+    _mongo_client = None
+    _mongo_client_conn_str = None
 
 
 # MongoDB Collections are obtained via PersistenceManager to avoid early initialization
@@ -140,6 +158,7 @@ INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "").strip()
 __all__ = [
     "get_secret",
     "get_mongo_client",
+    "close_mongo_client",
     "get_app_id_from_chat_or_context",
     "MOZAIKS_BACKEND_URL",
     "INTERNAL_API_KEY",

@@ -1,0 +1,19 @@
+registry:
+  RuntimeToolCallSmokeAgent: RuntimeToolCallSmokeResult
+
+models:
+  RuntimeToolCallSmokeResult:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: User-facing confirmation message.
+      result:
+        type: str
+        description: One-sentence tool-call smoke status.
+      response_text:
+        type: str
+        description: Text returned through the tool-call response path.
+      confirmed:
+        type: bool
+        description: Whether the response matched the expected confirmation text.

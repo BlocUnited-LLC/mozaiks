@@ -1,0 +1,1882 @@
+models:
+  AppBuildPage:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Human-readable page name.
+      route:
+        type: str
+        description: Primary route path for the page.
+      purpose:
+        type: str
+        description: What the page exists to let the user do.
+      primary_entities:
+        type: optional_list
+        items: str
+        description: Entities or records primarily manipulated on the page.
+      primary_actions:
+        type: optional_list
+        items: str
+        description: CRUD or workflow actions supported by the page.
+      ui_layout:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: "Preferred layout hint for AppSchemaAgent: grid | sidebar | full-width | split."
+      sections_hint:
+        type: optional_list
+        items: str
+        description: "Primitive section types needed on this page (e.g. DataTable, Form, Stat). Used by AppSchemaAgent to scaffold page sections."
+  AppBuildEntity:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Entity name.
+      operations:
+        type: optional_list
+        items: str
+        description: Required operations for this entity.
+      notes:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional implementation note.
+  AppBuildIntegration:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Integration name.
+      kind:
+        type: str
+        description: Integration type such as payments, email, analytics, agent-backend,
+          storage, or external-api.
+      purpose:
+        type: str
+        description: Why the integration exists in the product.
+  AppEventFlow:
+    type: model
+    fields:
+      event_type:
+        type: str
+        description: Canonical event type. Generic generated app facts must use domain.{module_id}.{event_name}.
+      producer_pack_id:
+        type: str
+        description: Capability pack/module that owns and publishes this event after committing state.
+      producing_action:
+        type: str
+        description: Module action that commits the state change before emitting this event.
+      subscriber_intents:
+        type: optional_list
+        items: str
+        description: Notification, subscription, integration, or workflow reactions caused by this event.
+      workflow_capability_ids:
+        type: optional_list
+        items: str
+        description: Capability ids invoked from this event, never raw workflow names.
+  AppWorkflowTouchpoint:
+    type: model
+    fields:
+      page_name:
+        type: str
+        description: Generated persistent page that should expose the workflow launch affordance.
+      section_id_hint:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional section id or placement hint for where the workflow launch action belongs.
+      action_id:
+        type: str
+        description: Stable action id the page schema should use for this launch affordance.
+      label:
+        type: str
+        description: User-facing CTA label for the workflow launch action.
+      workflow_id:
+        type: str
+        description: Runtime workflow registry id to launch from the page surface. This is not a workflow capability id.
+      placement:
+        type: literal
+        values:
+        - primary_button
+        - section_action
+        - row_action
+        - empty_state
+        description: Preferred placement of the workflow launch affordance in the page schema.
+      context_variables:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: Optional deterministic context_variables payload for the workflow launch. Keys must belong to the target workflow context contract.
+      purpose:
+        type: str
+        description: Why this page should launch the workflow.
+  BrandIntent:
+    type: model
+    fields:
+      style_summary:
+        type: str
+        description: Short description of the desired brand or visual direction.
+      brand_keywords:
+        type: optional_list
+        items: str
+        description: Keywords that should remain true when deriving theme overrides and page presentation.
+      experience_goals:
+        type: optional_list
+        items: str
+        description: Desired experiential qualities such as premium, efficient, trustworthy, or playful.
+      appearance_hint:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional shell appearance hint such as light, dark, or system.
+  AppSurface:
+    type: model
+    fields:
+      surface_id:
+        type: str
+        description: Stable realization-surface identifier copied from DesignDocs surface_map when available.
+      surface_kind:
+        type: literal
+        values:
+        - module
+        - workflow
+        - control_plane
+        - external_integration
+        - ui_only
+        description: Concrete realization boundary for this surface.
+      source_pack_id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Capability pack most directly associated with this surface, or null when cross-cutting.
+      label:
+        type: str
+        description: Human-readable surface label.
+      summary:
+        type: str
+        description: Brief description of what this surface owns.
+      primary_entities:
+        type: optional_list
+        items: str
+        description: Domain entities primarily owned by this surface.
+      primary_pages:
+        type: optional_list
+        items: str
+        description: Persistent pages or screens associated with this surface.
+      dependencies:
+        type: optional_list
+        items: str
+        description: Other surface ids this surface depends on.
+  AppSurfaceMap:
+    type: model
+    fields:
+      surfaces:
+        type: list
+        items: AppSurface
+        description: Realization boundaries for the app, derived from DesignDocs surface_map when present.
+  AppCapabilityPack:
+    type: model
+    fields:
+      capability_pack_id:
+        type: str
+        description: Stable identifier for the capability pack.
+      surface_id:
+        type: str
+        description: Realization surface this capability pack maps to.
+      surface_kind:
+        type: literal
+        values:
+        - module
+        - workflow
+        - control_plane
+        - external_integration
+        - ui_only
+        description: Surface kind this capability pack realizes. Do not assume every pack becomes a module.
+      pack_type:
+        type: literal
+        values:
+        - crud_pack
+        - admin_pack
+        - messaging_pack
+        - marketplace_pack
+        - campaigns_pack
+        - billing_pack
+        - notifications_pack
+        - analytics_pack
+        - agent_backend_integration
+        - custom_domain
+        description: Canonical pack family selected for the product.
+      label:
+        type: str
+        description: Human-readable pack name.
+      summary:
+        type: str
+        description: Brief description of what this pack contributes to the product.
+      implementation_mode:
+        type: literal
+        values:
+        - declarative_module
+        - agentic_workflow
+        - hybrid
+        - external_integration
+        description: How this pack should be realized at build time. This complements surface_kind; it does not replace it.
+      primary_entities:
+        type: optional_list
+        items: str
+        description: Domain entities primarily owned by this pack.
+      primary_pages:
+        type: optional_list
+        items: str
+        description: Pages or screens the pack is expected to drive.
+      operations:
+        type: optional_list
+        items: str
+        description: Primary actions and behaviors supplied by the pack.
+      required_integrations:
+        type: optional_list
+        items: str
+        description: External systems or platform services required by the pack.
+      agentic_extensions:
+        type: optional_list
+        items: str
+        description: Optional AI-driven behaviors layered on top of the pack.
+  AppBuildTask:
+    type: model
+    fields:
+      task_id:
+        type: str
+        description: Stable task identifier for the build unit.
+      task_type:
+        type: literal
+        values:
+        - backend_foundation
+        - module_contract
+        - data_models
+        - business_services
+        - api_surface
+        - page_bundle
+        - agent_backend_integration
+        - admin_config
+        description: >
+          Explicit build-task type used for downstream execution planning. Persistent
+          app pages use the declarative AppSchemaAgent path. `page_bundle` means a
+          declarative page/schema bundle and must be paired with AppSchemaAgent.
+      capability_pack_id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Capability pack this task belongs to. Null only for truly cross-cutting setup work.
+      surface_id:
+        type: str
+        description: Realization surface this task belongs to.
+      surface_kind:
+        type: literal
+        values:
+        - module
+        - workflow
+        - control_plane
+        - external_integration
+        - ui_only
+        description: Surface kind this task serves.
+      execution_target:
+        type: literal
+        values:
+        - AppGenerator
+        description: Workflow expected to execute the task.
+      initial_agent:
+        type: str
+        description: Agent best suited to start this task when parallel execution is introduced.
+      description:
+        type: str
+        description: Human-readable summary of the build unit.
+      initial_message:
+        type: str
+        description: Seed message for future child-run execution.
+      owned_paths:
+        type: optional_list
+        items: str
+        description: Files or folders this task is responsible for producing or updating.
+      depends_on:
+        type: optional_list
+        items: str
+        description: Other task ids that must complete first.
+      acceptance_criteria:
+        type: optional_list
+        items: str
+        description: Deterministic checks the generated output must satisfy.
+  AppChildWorkflowSpec:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Child workflow name to run. Use AppGenerator for app-task execution.
+      description:
+        type: str
+        description: Short summary of the child task.
+      initial_agent:
+        type: str
+        description: Agent that should start the child run.
+      initial_message:
+        type: str
+        description: Seed message instructing the child run on exactly what to generate.
+      context_variables:
+        type: dict
+        description: Context variables seeded into the child run before execution.
+  AppBuildPlan:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: Short planning summary for the build plan.
+      app_kind:
+        type: str
+        description: Short label for the product type being generated.
+      pages:
+        type: list
+        items: AppBuildPage
+        description: Canonical pages or screens that must exist in the generated app.
+      entities:
+        type: optional_list
+        items: AppBuildEntity
+        description: Canonical entities and required operations.
+      roles:
+        type: optional_list
+        items: str
+        description: User roles that influence auth or visibility.
+      auth_strategy:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Auth approach such as public, basic-login, role-based, or third-party auth.
+      backend_scope:
+        type: optional_list
+        items: str
+        description: Backend capabilities that must be generated.
+      frontend_scope:
+        type: optional_list
+        items: str
+        description: >
+          Frontend capabilities that must be generated. Persistent page routes compile
+          declaratively through AppSchemaAgent; AppGenerator does not support a raw
+          frontend page/component generation lane.
+      theme_preferences:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: >
+          Raw user-expressed style preference captured during the intake interview
+          (e.g. "dark, minimal", "corporate blue", "techy sci-fi feel"). Null if the
+          user expressed no visual preference. Read by AppSchemaAgent to infer
+          theme_config_patch, shell_config, and asset_manifest — no mapping is done
+          here, the agent reasons directly.
+      brand_intent:
+        type: union
+        variants:
+        - BrandIntent
+        - 'null'
+        description: >
+          Structured brand and experience direction preserved from upstream planning.
+          This is the durable design context AppSchemaAgent should consult before
+          defaulting to platform styling.
+      surface_map:
+        type: union
+        variants:
+        - AppSurfaceMap
+        - 'null'
+        description: Explicit realization boundaries for the app, preserved from DesignDocs and refined by AppPlanAgent.
+      capability_packs:
+        type: optional_list
+        items: AppCapabilityPack
+        description: Canonical product capability packs selected before deriving pages, entities, and build tasks.
+      external_integrations:
+        type: optional_list
+        items: AppBuildIntegration
+        description: External integrations required by the product.
+      event_flows:
+        type: optional_list
+        items: AppEventFlow
+        description: "Cross-pack event flow map: module-owned domain events, producing actions, and downstream reactions."
+      workflow_touchpoints:
+        type: optional_list
+        items: AppWorkflowTouchpoint
+        description: Persistent page entry points that launch or resume workflow sessions from the app UI.
+      agent_backend_required:
+        type: bool
+        description: Whether this app must integrate with an upstream generated agent backend.
+      build_tasks:
+        type: list
+        items: AppBuildTask
+        description: Explicit execution-oriented build tasks derived from the plan.
+      generation_order:
+        type: optional_list
+        items: str
+        description: Recommended ordered phases for downstream generation.
+  AppBuildPlanOutput:
+    type: model
+    fields:
+      AppBuildPlan:
+        type: AppBuildPlan
+        description: Canonical app build plan persisted for downstream agents.
+      workflows:
+        type: list
+        items: AppChildWorkflowSpec
+        description: Child run specs used by MFJ fan-out for task execution.
+  CodeFileEntry:
+    type: model
+    fields:
+      filename:
+        type: str
+        description: Relative generated file path.
+      content:
+        type: str
+        description: File content.
+  CodeFilesOutput:
+    type: model
+    fields:
+      code_files:
+        type: list
+        items: CodeFileEntry
+        description: Generated or assembled code files.
+      agent_message:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional summary message.
+  DatabaseArtifactFile:
+    type: model
+    fields:
+      path:
+        type: str
+        description: Concrete database artifact path such as backend/database/schema.json.
+      kind:
+        type: literal
+        values:
+        - schema_json
+        - seed_json
+        description: Deterministic database artifact kind.
+      purpose:
+        type: str
+        description: Why this database artifact exists.
+      entity_refs:
+        type: optional_list
+        items: str
+        description: Entities or concepts primarily represented by this artifact.
+      content:
+        type: str
+        description: Complete JSON text for this artifact.
+  DatabaseOutput:
+    type: model
+    fields:
+      database_files:
+        type: list
+        items: DatabaseArtifactFile
+        description: Typed database artifacts emitted by DatabaseAgent.
+      code_files:
+        type: list
+        items: CodeFileEntry
+        description: Serialized file mirror. Extraction may rebuild canonical files from database_files.
+      agent_message:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional summary message.
+  DownloadRequest:
+    type: model
+    fields:
+      confirmation_only:
+        type: bool
+        description: If true, show confirmation UI first and create files after
+          user confirms.
+        default: false
+      storage_backend:
+        type: str
+        description: Storage target ('none', 'local', 's3').
+        default: none
+      description:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional description text (reserved).
+  DownloadRequestCall:
+    type: model
+    fields:
+      DownloadRequest:
+        type: DownloadRequest
+        description: Download configuration.
+      agent_message:
+        type: str
+        description: Concise message (<=140 chars) shown in download UI.
+  ValidationErrorEntry:
+    type: model
+    fields:
+      file:
+        type: str
+        description: Relative file path.
+      line:
+        type: int
+        description: 1-based line number.
+      column:
+        type: union
+        variants:
+        - int
+        - 'null'
+        description: 1-based column number when available.
+      message:
+        type: str
+        description: Error message.
+  AppValidation:
+    type: model
+    fields:
+      validation_strategy:
+        type: literal
+        values:
+        - e2b
+        - local
+        - skip
+        description: Validation strategy requested or resolved for this run.
+      validation_status:
+        type: literal
+        values:
+        - passed
+        - failed
+        - skipped
+        description: Outcome of the validation strategy. `skipped` is explicit and not a failure.
+      preview_url:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Preview URL to the running app (if started).
+      errors:
+        type: list
+        items: ValidationErrorEntry
+        description: Build/test errors with file/line info.
+      fix_suggestions:
+        type: optional_list
+        items: str
+        description: Suggested fixes for any errors.
+      next_action:
+        type: literal
+        values:
+        - export
+        - fix_and_retry
+        - manual_review
+        description: Recommended next step.
+  AppValidationOutput:
+    type: model
+    fields:
+      AppValidation:
+        type: AppValidation
+        description: App validation results.
+  BackendFoundationFile:
+    type: model
+    fields:
+      path:
+        type: str
+        description: Concrete backend foundation file path such as backend/config.py.
+      kind:
+        type: literal
+        values:
+        - scaffold
+        - config
+        - database_connection
+        - middleware
+        - integration_helper
+        - tooling
+        description: Backend foundation file family.
+      purpose:
+        type: str
+        description: Why this backend foundation file exists.
+      contract_refs:
+        type: optional_list
+        items: str
+        description: Build-plan paths or contract surfaces this file satisfies.
+      content:
+        type: str
+        description: Complete source for this backend foundation file.
+  BackendFoundationBundle:
+    type: model
+    fields:
+      files:
+        type: list
+        items: BackendFoundationFile
+        description: Typed backend foundation files emitted in ConfigMiddleware backend_foundation mode.
+  ModelFile:
+    type: model
+    fields:
+      path:
+        type: str
+        description: Concrete model file path such as backend/models/user.py.
+      entity_name:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Primary entity this model file represents when known.
+      purpose:
+        type: str
+        description: Why this model file exists.
+      content:
+        type: str
+        description: Complete source for this model file.
+  ModelOutput:
+    type: model
+    fields:
+      model_files:
+        type: list
+        items: ModelFile
+        description: Typed model files emitted by ModelAgent.
+      code_files:
+        type: list
+        items: CodeFileEntry
+        description: Serialized file mirror. Extraction may rebuild canonical files from model_files.
+      agent_message:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional summary message.
+  # ===========================================================================
+  # CANONICAL MODULE CONTRACT MODELS
+  # ConfigMiddlewareAgent emits these typed objects before serializing them to
+  # modules/{module_id}/{module.yaml,events.yaml,subscriptions.yaml,
+  # notifications.yaml,settings.yaml,admin.yaml}. YAML declares the contract; Python files
+  # implement behavior through referenced handlers/hooks.
+  # ===========================================================================
+
+  ModuleIdentity:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable module id matching the folder name under modules/{module_id}.
+      display_name:
+        type: str
+        description: Human-facing module name.
+      version:
+        type: str
+        description: Semantic version string.
+      description:
+        type: str
+        description: Short module summary.
+      owner:
+        type: str
+        description: Owning surface, typically app or hosted.
+      visibility:
+        type: str
+        description: Visibility hint for discovery and invocation.
+      handler:
+        type: str
+        description: Canonical Python entrypoint in module-local form backend.handler:ModuleClass.
+
+  ModulePermission:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable permission id (e.g. contacts.read).
+      description:
+        type: str
+        description: Human-readable permission purpose.
+
+  ModuleAction:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable action id exposed through the module executor.
+      description:
+        type: str
+        description: What the action does.
+      handler_method:
+        type: str
+        description: Method exposed by backend/handler.py for this action. The handler may delegate to service, policy, repo, and schema layers.
+      input_schema:
+        type: dict
+        description: JSON-schema-like input contract.
+      output_schema:
+        type: dict
+        description: JSON-schema-like output contract.
+      permissions:
+        type: optional_list
+        items: str
+        description: Permission ids required to invoke this action.
+      emits:
+        type: optional_list
+        items: str
+        description: Event types declared in events.yaml that this action may publish.
+
+  ModuleCapability:
+    type: model
+    fields:
+      capability_id:
+        type: str
+        description: Public capability id clients/workflows invoke instead of raw action or workflow ids.
+      kind:
+        type: literal
+        values:
+        - action
+        - workflow
+        - page
+        - transition
+        - hosted
+        description: Target family resolved by platform_app.
+      target:
+        type: str
+        description: Action id, workflow id, route path, transition id, or hosted target id.
+      title:
+        type: str
+        description: Human-facing label.
+      permissions:
+        type: optional_list
+        items: str
+        description: Permission ids required to invoke this capability.
+      input_schema:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: Optional input schema for workflow/hosted/page capability invocation.
+
+  ModuleAdminPanel:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable panel id. Use module-scoped ids such as campaigns.overview.
+      label:
+        type: str
+        description: Human-facing panel label shown inside the unified /admin shell.
+      description:
+        type: str
+        description: What an app owner can manage or inspect in this panel.
+      section:
+        type: literal
+        values:
+        - overview
+        - users
+        - billing
+        - usage
+        - activity
+        - settings
+        - integrations
+        - support
+        description: User-facing admin section where this panel appears. Do not use modules/plugins/tools as section names.
+      order:
+        type: int
+        description: Sort order within the selected admin section.
+      renderer:
+        type: literal
+        values:
+        - schema
+        - custom_component
+        description: schema reuses the shipped page primitive contract inside AdminPortal; custom_component requires ui/admin registration.
+      layout:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Layout hint for schema-rendered admin panels. Use grid, sidebar, full-width, or split. Null only for custom_component panels.
+      sections:
+        type: optional_list
+        items: AppPageSection
+        description: Declarative primitive sections rendered inside the admin panel when renderer=schema. Reuse the same section contract as ui/pages/*.yaml and bind data with config.api_endpoint.
+      component:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Component registry id when renderer=custom_component; null for schema renderer. Custom components require a matching js_stubs entry.
+      permissions:
+        type: optional_list
+        items: str
+        description: Permission ids or roles required to see or use this panel.
+
+  ModuleManifest:
+    type: model
+    fields:
+      schema_version:
+        type: str
+        description: Must be mozaiks.module.v1.
+      module:
+        type: ModuleIdentity
+        description: Typed module identity object. Do not emit freeform keys.
+      permissions:
+        type: list
+        items: ModulePermission
+        description: Permission declarations owned by the module.
+      actions:
+        type: list
+        items: ModuleAction
+        description: Deterministic backend actions exposed through backend/handler.py and backed by the module service layer.
+      capabilities:
+        type: list
+        items: ModuleCapability
+        description: Public invocation surfaces resolved by platform_app.
+
+  ModuleEvent:
+    type: model
+    fields:
+      type:
+        type: str
+        description: Namespaced event type. Generic modules may declare only domain.* events.
+      version:
+        type: int
+        description: Event schema version.
+      description:
+        type: str
+        description: Event meaning as an immutable business fact.
+      producer:
+        type: str
+        description: Module id expected to publish this event.
+      payload_schema:
+        type: dict
+        description: JSON-schema-like payload contract.
+
+  ModuleEventsManifest:
+    type: model
+    fields:
+      schema_version:
+        type: str
+        description: Must be mozaiks.events.v1.
+      events:
+        type: list
+        items: ModuleEvent
+        description: Events this module is allowed to publish.
+
+  ModuleSubscriptionTarget:
+    type: model
+    fields:
+      kind:
+        type: literal
+        values:
+        - handler
+        - capability
+        - notification
+        description: Subscription target family.
+      handler:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Module-local Python entrypoint such as backend.subscriptions:on_account_archived. Use only when kind=handler and mirror it in python_stubs.
+      capability_id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Capability id to invoke when kind=capability.
+      notification_id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Notification rule id when kind=notification.
+
+  ModuleSubscription:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable subscription id.
+      event_type:
+        type: str
+        description: Namespaced event type this module reacts to.
+      target:
+        type: ModuleSubscriptionTarget
+        description: Handler, capability, or notification target.
+      filters:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: Optional declarative filters based on event envelope/payload.
+      idempotency_key:
+        type: str
+        description: Template used to prevent duplicate subscription execution.
+      permissions:
+        type: optional_list
+        items: str
+        description: Permission ids required for the reaction when applicable.
+
+  ModuleSubscriptionsManifest:
+    type: model
+    fields:
+      schema_version:
+        type: str
+        description: Must be mozaiks.subscriptions.v1.
+      subscriptions:
+        type: list
+        items: ModuleSubscription
+        description: Event reactions declared by this module.
+
+  ModuleNotificationAudience:
+    type: model
+    fields:
+      roles:
+        type: optional_list
+        items: str
+        description: Roles that receive the notification.
+      permissions:
+        type: optional_list
+        items: str
+        description: Permissions that qualify users for the notification.
+      resolver:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional module-local Python resolver hook for dynamic audiences. Must be mirrored in python_stubs.
+
+  ModuleNotification:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable notification rule id.
+      event_type:
+        type: str
+        description: Event type that creates the notification intent.
+      title:
+        type: str
+        description: Notification title template.
+      body:
+        type: str
+        description: Notification body template.
+      channels:
+        type: list
+        items: str
+        description: Delivery channels such as in_app or email.
+      audience:
+        type: ModuleNotificationAudience
+        description: Audience declaration or resolver hook.
+      preference_key:
+        type: str
+        description: User preference key controlling this notification.
+      default_enabled:
+        type: bool
+        description: Whether the notification is enabled by default.
+      renderer:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional module-local Python renderer hook for complex message content. Must be mirrored in python_stubs.
+
+  ModuleNotificationsManifest:
+    type: model
+    fields:
+      schema_version:
+        type: str
+        description: Must be mozaiks.notifications.v1.
+      notifications:
+        type: list
+        items: ModuleNotification
+        description: Event-to-notification intent mappings.
+
+  ModuleSetting:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable setting id.
+      label:
+        type: str
+        description: Human-facing setting label.
+      type:
+        type: literal
+        values:
+        - string
+        - integer
+        - boolean
+        - select
+        - secret_ref
+        - object
+        description: Setting value type.
+      required:
+        type: bool
+        description: Whether the setting must be provided.
+      scope:
+        type: literal
+        values:
+        - app
+        - user
+        - tenant
+        description: Setting scope.
+      default:
+        type: union
+        variants:
+        - str
+        - int
+        - bool
+        - dict
+        - 'null'
+        description: Default value, or null for no default.
+      allowed_values:
+        type: optional_list
+        items: str
+        description: Allowed values for select/string enum settings.
+      validator:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional module-local Python validation hook such as backend.settings:validate_api_key. Must be mirrored in python_stubs.
+      on_change:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional module-local Python hook invoked after setting changes. Must be mirrored in python_stubs.
+
+  ModuleFeatureFlag:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable feature flag id.
+      label:
+        type: str
+        description: Human-facing label.
+      type:
+        type: literal
+        values:
+        - boolean
+        description: Feature flag type.
+      default:
+        type: bool
+        description: Default enabled state.
+      scope:
+        type: literal
+        values:
+        - app
+        - user
+        - tenant
+        description: Feature flag scope.
+
+  ModuleSettingsManifest:
+    type: model
+    fields:
+      schema_version:
+        type: str
+        description: Must be mozaiks.settings.v1.
+      settings:
+        type: list
+        items: ModuleSetting
+        description: Module-local setting declarations.
+      features:
+        type: list
+        items: ModuleFeatureFlag
+        description: Module-local feature flags.
+
+  ModuleAdminManifest:
+    type: model
+    fields:
+      schema_version:
+        type: str
+        description: Must be mozaiks.admin.v2.
+      panels:
+        type: list
+        items: ModuleAdminPanel
+        description: Module-owned panels mounted into the unified /admin shell.
+      hooks:
+        type: optional_list
+        items: str
+        description: Optional module-local Python hooks such as backend.admin:resolve_campaign_metrics for custom panel data. Every hook must be mirrored in python_stubs.
+
+  ModulePythonStub:
+    type: model
+    fields:
+      path:
+        type: str
+        description: Module-local Python stub path such as backend/handler.py, backend/service.py, backend/repo.py, backend/policy.py, backend/schemas.py, or backend/settings.py.
+      kind:
+        type: literal
+        values:
+        - handler
+        - service
+        - repo
+        - policy
+        - schemas
+        - settings_hook
+        - subscriptions_hook
+        - notifications_hook
+        - admin_hook
+        - helper
+        description: Stub family. Keep this finite and contract-driven. Layered module backends should declare handler, service, repo, policy, and schemas when a durable module is generated.
+      purpose:
+        type: str
+        description: Why this stub exists and what contract surface it implements.
+      contract_refs:
+        type: optional_list
+        items: str
+        description: Contract fields or entrypoints this stub satisfies, e.g. settings_yaml.settings[api_key].validator.
+
+  ModuleJsStub:
+    type: model
+    fields:
+      path:
+        type: str
+        description: Frontend stub path relative to the app bundle, e.g. ui/admin/CampaignMetricsPanel.jsx.
+      surface:
+        type: literal
+        values:
+        - admin_component
+        description: Declared frontend customization surface. AppGenerator emits only bounded admin custom components in this module lane; persistent pages remain declarative and app-level custom full-page routes live in AppSchemaOutput.custom_route_bundle.
+      registry_key:
+        type: str
+        description: Runtime/component registry key referenced by the YAML contract.
+      purpose:
+        type: str
+        description: Why this frontend customization stub exists.
+      contract_refs:
+        type: optional_list
+        items: str
+        description: Contract fields that reference this component, e.g. admin_yaml.panels[campaigns.overview].component.
+
+  ModuleContractBundle:
+    type: model
+    fields:
+      module_id:
+        type: str
+        description: Module folder id under modules/{module_id}.
+      module_yaml:
+        type: ModuleManifest
+        description: module.yaml contract object.
+      events_yaml:
+        type: ModuleEventsManifest
+        description: events.yaml contract object.
+      subscriptions_yaml:
+        type: ModuleSubscriptionsManifest
+        description: subscriptions.yaml contract object.
+      notifications_yaml:
+        type: ModuleNotificationsManifest
+        description: notifications.yaml contract object.
+      settings_yaml:
+        type: ModuleSettingsManifest
+        description: settings.yaml contract object.
+      admin_yaml:
+        type: ModuleAdminManifest
+        description: admin.yaml contract object for feature panels mounted inside semantic /admin sections.
+      python_stubs:
+        type: optional_list
+        items: ModulePythonStub
+        description: Python implementation stubs required by the contract. Durable module surfaces should normally declare backend/handler.py, backend/service.py, backend/repo.py, backend/policy.py, and backend/schemas.py, plus any bounded hook files referenced by YAML.
+      js_stubs:
+        type: optional_list
+        items: ModuleJsStub
+        description: Optional JS/TS frontend customization stubs required by declared admin custom components.
+
+  HostAdminRuntimePanel:
+    type: model
+    fields:
+      id:
+        type: literal
+        values:
+        - stats
+        - runs
+        - sessions
+        description: Stable host runtime panel id.
+      label:
+        type: str
+        description: Human-facing label shown in the unified /admin shell.
+      section:
+        type: literal
+        values:
+        - overview
+        - users
+        - billing
+        - usage
+        - activity
+        - settings
+        - integrations
+        - support
+        description: Semantic admin section where this runtime panel appears.
+
+  HostAdminConfig:
+    type: model
+    fields:
+      schema_version:
+        type: literal
+        values:
+        - mozaiks.admin.host.v1
+        description: Must be mozaiks.admin.host.v1.
+      enabled:
+        type: bool
+        description: Whether the host-owned /admin shell is enabled for the app.
+      admin_emails:
+        type: list
+        items: str
+        description: Email allowlist promoted to admin access by the host.
+      sections:
+        type: dict
+        description: >
+          Object keyed by semantic admin section id (`overview`, `users`, `billing`,
+          `usage`, `activity`, `settings`, `integrations`, `support`). Each value must
+          include `label`, `enabled`, and `order`.
+      runtime_panels:
+        type: list
+        items: HostAdminRuntimePanel
+        description: Host/runtime panels visible in the unified /admin shell.
+
+  ConfigMiddlewareOutput:
+    type: model
+    fields:
+      mode:
+        type: literal
+        values:
+        - module_contract_bundle
+        - admin_config_bundle
+        - backend_foundation
+        description: Output mode selected from current_build_task_type.
+      module_contract:
+        type: union
+        variants:
+        - ModuleContractBundle
+        - 'null'
+        description: Required in module_contract mode; null for admin_config or backend_foundation modes.
+      host_admin_config:
+        type: union
+        variants:
+        - HostAdminConfig
+        - 'null'
+        description: Required in admin_config mode; null for module_contract and backend_foundation modes.
+      backend_foundation_bundle:
+        type: union
+        variants:
+        - BackendFoundationBundle
+        - 'null'
+        description: Required in backend_foundation mode; null for module_contract and admin_config modes.
+      code_files:
+        type: list
+        items: CodeFileEntry
+        description: Serialized files. In module_contract mode, these are the YAML files generated from module_contract.
+      agent_message:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional concise summary.
+  # ===========================================================================
+  # SCHEMA-DRIVEN UI GENERATION MODELS (v2 primitive system)
+  # Agents output these typed schemas; tools serialize them to YAML/JSON files.
+  # Persistent app UI is declarative by default, with a rare bounded custom_route_bundle
+  # for full-page React escapes when the shipped primitive system cannot express a route.
+  # ===========================================================================
+
+  AppPageAction:
+    type: model
+    fields:
+      id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional stable action id. Recommended when the action may be referenced by selection or empty-state handling.
+      label:
+        type: str
+        description: Display label for the action.
+      variant:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional visual variant hint for Button-backed actions.
+      action_type:
+        type: literal
+        values:
+        - navigate
+        - event
+        - workflow
+        - submit
+        - delete
+        description: How this action behaves.
+      href:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Route to navigate to (navigate actions only; supports {field} interpolation).
+      event_type:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: "Event emitted on click (event actions only, e.g. ui.modal.open)."
+      workflow_id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Runtime workflow registry id to launch when action_type=workflow. Never use workflow capability ids here.
+      context_variables:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: Optional deterministic context_variables payload for workflow actions. Values may use interpolation placeholders like {id}.
+      payload:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: Generic payload used by event, submit, or delete actions.
+      event_payload:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: Deprecated alias for payload. Additional payload merged into the event or request body.
+      requires_selection:
+        type: bool
+        description: Whether a row/item must be selected before this action is enabled.
+        default: false
+      closes_modal:
+        type: bool
+        description: Whether modal-backed action execution should close the modal automatically.
+        default: true
+
+  AppPageSection:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable section identifier within the page (kebab-case).
+      primitive:
+        type: literal
+        values:
+        - DataTable
+        - Form
+        - Stat
+        - Grid
+        - Card
+        - Button
+        - Modal
+        - Alert
+        - Badge
+        - Skeleton
+        - Empty
+        description: UI primitive type from the shipped chat-ui primitive system.
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional section heading displayed above the primitive.
+      config:
+        type: dict
+        description: >
+          Primitive-specific configuration object. Shape depends on primitive type:
+          DataTable: { columns, api_endpoint?, data?, selection?, pagination?, page_size?, search?, actions?, empty? }
+          Form: { fields, layout?, columns?, submit_label?, submit_action?, cancel_action?, disabled? }
+          Stat: { label, value?|value_key, format?, trend?|trend_key?, trend_direction?, color? }
+          Grid: { columns, gap, children: [{ id?, primitive, config }] }
+          Card: { title?, subtitle?, actions?, children? }
+          Button: { label, variant?, size?, action? }
+          Modal: { title?, description?, size?, actions?, children? } — section.id is the default modal target
+          Alert: { title?, message, variant?, dismissible? }
+          Badge: { label, variant? }
+          Skeleton: { rows?, height? }
+          Empty: { title?, message?, action?, icon? }
+          Legacy aliases such as toolbar_actions, submit_endpoint, field_type, cols, modal_id, and event_payload are tolerated by the runtime adapter but should not be emitted in new schemas.
+      event_triggers:
+        type: optional_list
+        items: str
+        description: "Event types this section subscribes to (e.g. ui.datatable.refresh, ui.form.set_field)."
+      roles:
+        type: optional_list
+        items: str
+        description: Roles that can see this section. Null means visible to all page roles.
+
+  AppPageSchema:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Page name in PascalCase — used as the component registration key.
+      route:
+        type: str
+        description: URL route path (e.g. /dashboard).
+      title:
+        type: str
+        description: Display title shown in the page header.
+      layout:
+        type: literal
+        values:
+        - grid
+        - sidebar
+        - full-width
+        - split
+        description: Page layout strategy.
+      roles:
+        type: optional_list
+        items: str
+        description: Roles that can access this page. Null means all authenticated users.
+      sections:
+        type: list
+        items: AppPageSection
+        description: Ordered primitive sections composing the page.
+
+  AppBackendAdminPanel:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable app-backend admin panel id.
+      label:
+        type: str
+        description: Human-facing admin panel label.
+      description:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional supporting description.
+      section:
+        type: literal
+        values:
+        - overview
+        - users
+        - billing
+        - usage
+        - activity
+        - settings
+        - integrations
+        - support
+        description: Semantic admin section where this app-backend panel appears.
+      order:
+        type: int
+        description: Sort order within the section.
+      renderer:
+        type: literal
+        values:
+        - builtin
+        - schema
+        - custom_component
+        description: >
+          Panel rendering mode. `schema` is the normal deterministic path, `builtin`
+          mounts a shipped panel, and `custom_component` is the bounded escape hatch.
+      builtin_panel:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Built-in panel id when renderer=builtin. Must be one of stats, users, subscriptions.
+      layout:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional admin panel layout when renderer=schema. One of grid, sidebar, full-width, split.
+      sections:
+        type: list
+        items: AppPageSection
+        description: >
+          Declarative panel sections when renderer=schema. Reuses the same primitive
+          section contract as ui/pages/*.yaml inside the admin shell.
+      component:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Registered component key when renderer=custom_component.
+      permissions:
+        type: optional_list
+        items: str
+        description: Optional backend-enforced permissions or role ids for this panel.
+
+  AppBackendAdminConfig:
+    type: model
+    fields:
+      schema_version:
+        type: literal
+        values:
+        - mozaiks.admin.app_backend.v1
+        description: Must be mozaiks.admin.app_backend.v1.
+      panels:
+        type: list
+        items: AppBackendAdminPanel
+        description: App-business admin panels exposed through GET /api/admin/config.
+
+  AppCustomRouteEntry:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable route identifier written to ui/route_manifest.json.
+      label:
+        type: str
+        description: Human-facing label for navigation or route discovery.
+      path:
+        type: str
+        description: Browser route path for the custom full-page React surface.
+      component:
+        type: str
+        description: Component registry key that ui/index.js will register for this route.
+      requiresAuth:
+        type: bool
+        description: Whether the route requires an authenticated user.
+      order:
+        type: union
+        variants:
+        - int
+        - 'null'
+        description: Optional sort order hint for shell navigation.
+      meta:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: Optional route metadata such as title or shell flags.
+      purpose:
+        type: str
+        description: Why this route cannot be represented cleanly as a declarative AppPageSchema.
+
+  AppCustomPageFile:
+    type: model
+    fields:
+      route_id:
+        type: str
+        description: Route id from AppCustomRouteEntry.id that owns this page file.
+      path:
+        type: str
+        description: Custom page file path under ui/pages/custom/, e.g. ui/pages/custom/InvestorDealRoom.jsx.
+      component_name:
+        type: str
+        description: Default exported React component name used by the generated file.
+      registry_key:
+        type: str
+        description: Component registry key that must match the route entry's component field.
+      purpose:
+        type: str
+        description: Why this custom page file exists and what interaction/layout gap it satisfies.
+      contract_refs:
+        type: optional_list
+        items: str
+        description: Contract fields or upstream design references this file satisfies.
+      content:
+        type: str
+        description: Complete React source for the custom page file.
+
+  AppCustomRouteBundle:
+    type: model
+    fields:
+      route_manifest:
+        type: list
+        items: AppCustomRouteEntry
+        description: Exact pages[] entries to persist into ui/route_manifest.json.
+      page_files:
+        type: list
+        items: AppCustomPageFile
+        description: Full-page React files owned by the custom route manifest.
+
+  AppManifest:
+    type: model
+    fields:
+      app_name:
+        type: str
+        description: Human-readable application name.
+      version:
+        type: str
+        description: Semantic version string (e.g. 1.0.0).
+      auth_strategy:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: "Auth approach: public | basic-login | role-based | third-party."
+      roles:
+        type: optional_list
+        items: str
+        description: All roles defined in the application.
+      default_route:
+        type: str
+        description: Route to redirect to after login (e.g. /dashboard).
+      pages:
+        type: list
+        items: str
+        description: List of declarative page names (matching AppPageSchema.name) registered in this manifest.
+      custom_routes:
+        type: optional_list
+        items: str
+        description: Optional list of custom route ids (matching AppCustomRouteEntry.id) owned by the app.
+
+  AppAssetEntry:
+    type: model
+    fields:
+      asset_id:
+        type: str
+        description: Stable identifier used by ui/pages schemas and shell config to reference this asset.
+      kind:
+        type: str
+        description: Asset category such as logo, icon, hero_image, illustration, or video.
+      source:
+        type: literal
+        values:
+        - local
+        - remote
+        - uploaded
+        - generated
+        - stock
+        description: Origin of the asset payload.
+      path:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Relative file path inside the app bundle when source is local/uploaded.
+      url:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Absolute URL when source is remote.
+      alt:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Accessibility alt text for user-facing visual assets.
+      usage:
+        type: optional_list
+        items: str
+        description: Surfaces where this asset is expected to appear (page ids, shell slots, etc.).
+      license:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional license string or provenance note.
+      tags:
+        type: optional_list
+        items: str
+        description: Optional search tags for future asset retrieval.
+
+  AppAssetManifest:
+    type: model
+    fields:
+      version:
+        type: str
+        description: Asset manifest schema version.
+      assets:
+        type: list
+        items: AppAssetEntry
+        description: Canonical list of app assets referenced by page and shell contracts.
+
+  AppSchemaOutput:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: Short summary of the schema produced.
+      manifest:
+        type: AppManifest
+        description: >
+          App metadata used to persist app.json startup and validate page routes.
+          Persistent routes are derived from the emitted ui/pages/*.yaml schemas.
+      pages:
+        type: list
+        items: AppPageSchema
+        description: >
+          One AppPageSchema per page. Each is persisted as ui/pages/{name}.yaml and
+          rendered by the platform shell's RouteRenderer using the primitive system.
+          Prefer this declarative lane by default; emit an empty list only when every
+          persistent page is owned by custom_route_bundle.
+      custom_route_bundle:
+        type: union
+        variants:
+        - AppCustomRouteBundle
+        - 'null'
+        description: >
+          Rare bounded custom full-page React escape hatch. When present, save_app_schema
+          persists ui/route_manifest.json, ui/pages/custom/*.jsx, and a deterministic
+          ui/index.js registry barrel. Use only for persistent pages that the shipped
+          declarative primitives cannot express cleanly.
+      theme_config_patch:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: >
+          Partial brand/theme artifact patch merged into brand/theme_config.json by
+          save_app_schema. This may include `theme`, `primitives`, and semantic
+          `ui.chat` / `ui.shell` / `ui.page` visual tokens. Null to inherit the
+          platform default brand.
+      shell_config:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: >
+          Optional shell content/behavior config persisted as config/shell.json.
+          This owns header/profile/notifications/footer content and visibility, but
+          must not contain raw spacing, padding, or density tokens.
+      asset_manifest:
+        type: union
+        variants:
+        - AppAssetManifest
+        - 'null'
+        description: >
+          Optional asset inventory persisted as config/asset_manifest.json. Use this
+          for non-token media metadata (logos/icons/hero imagery) and asset
+          provenance; do not use theme_config_patch or shell_config as a media dump.
+
+  ControllerOutput:
+    type: model
+    fields:
+      mode:
+        type: literal
+        values:
+        - module_api_adapter
+        - app_backend_admin_surface
+        description: Whether ControllerAgent emitted a module API adapter or the app-backend admin surface.
+      app_backend_admin_config:
+        type: union
+        variants:
+        - AppBackendAdminConfig
+        - 'null'
+        description: >
+          Typed split app-backend admin config. Required in app_backend_admin_surface
+          mode and null for normal module API adapter output.
+      code_files:
+        type: list
+        items: CodeFileEntry
+        description: >
+          Serialized code files for the bounded API surface. The download/assembly
+          path may regenerate canonical split admin files from app_backend_admin_config.
+      agent_message:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional summary message.
+
+  ImplementedPythonStub:
+    type: model
+    fields:
+      path:
+        type: str
+        description: Concrete module-local Python file path to write, such as modules/task_manager/backend/handler.py.
+      kind:
+        type: literal
+        values:
+        - handler
+        - service
+        - repo
+        - policy
+        - schemas
+        - settings_hook
+        - subscriptions_hook
+        - notifications_hook
+        - admin_hook
+        - helper
+        description: Stub family. Must match the declared module_contract.python_stubs entry.
+      purpose:
+        type: str
+        description: Why this implemented Python stub exists.
+      contract_refs:
+        type: optional_list
+        items: str
+        description: Contract fields or entrypoints this file satisfies.
+      content:
+        type: str
+        description: Complete Python source for this stub file.
+
+  ServiceOutput:
+    type: model
+    fields:
+      python_files:
+        type: list
+        items: ImplementedPythonStub
+        description: >
+          Implemented module backend stub files. These are the typed source of truth
+          for ServiceAgent-owned Python outputs and must align with module_contract.python_stubs.
+      code_files:
+        type: list
+        items: CodeFileEntry
+        description: Serialized file mirror. Extraction may rebuild canonical files from python_files.
+      agent_message:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional summary message.
+
+  ImplementedJsStub:
+    type: model
+    fields:
+      path:
+        type: str
+        description: Concrete frontend stub file path to write, such as ui/admin/CampaignMetricsPanel.jsx.
+      surface:
+        type: literal
+        values:
+        - admin_component
+        description: Declared frontend customization surface. Must match the declared module_contract.js_stubs entry.
+      registry_key:
+        type: str
+        description: Component registry key consumed by the app-level registration barrel.
+      purpose:
+        type: str
+        description: Why this implemented JS stub exists.
+      contract_refs:
+        type: optional_list
+        items: str
+        description: Contract fields that reference this file or registry key.
+      content:
+        type: str
+        description: Complete JS/JSX source for this stub file.
+
+  FrontendStubOutput:
+    type: model
+    fields:
+      js_files:
+        type: list
+        items: ImplementedJsStub
+        description: >
+          Implemented frontend customization files. These are the typed source of truth
+          for FrontendStubAgent-owned JS/JSX outputs and must align with module_contract.js_stubs.
+      registration_barrel:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Deterministic ui/index.js registration barrel content. Null only when no-op barrel is intentionally omitted.
+      code_files:
+        type: list
+        items: CodeFileEntry
+        description: Serialized file mirror. Extraction may rebuild canonical files from js_files + registration_barrel.
+      agent_message:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional summary message.
+
+registry:
+  InterviewAgent: null
+  AppPlanAgent: AppBuildPlanOutput
+  AppSchemaAgent: AppSchemaOutput
+  DatabaseAgent: DatabaseOutput
+  ConfigMiddlewareAgent: ConfigMiddlewareOutput
+  ModelAgent: ModelOutput
+  ServiceAgent: ServiceOutput
+  FrontendStubAgent: FrontendStubOutput
+  ControllerAgent: ControllerOutput
+  AssemblyAgent: CodeFilesOutput
+  AppValidationAgent: AppValidationOutput
+  DownloadAgent: DownloadRequestCall

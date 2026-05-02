@@ -1,0 +1,93 @@
+registry:
+  DesignDocsAgent: DesignDocsBundle
+
+models:
+  DesignSurface:
+    type: model
+    fields:
+      surface_id:
+        type: str
+        description: Stable snake_case id for the realization surface.
+      label:
+        type: str
+        description: Human-readable label for the surface.
+      surface_kind:
+        type: literal
+        values:
+        - module
+        - workflow
+        - control_plane
+        - external_integration
+        - ui_only
+        description: Concrete realization boundary for the surface.
+      owner:
+        type: literal
+        values:
+        - app
+        - hosted
+        - platform
+        description: Runtime owner responsible for this surface.
+      source_capability_packs:
+        type: optional_list
+        items: str
+        description: Capability-pack hints this surface realizes.
+      primary_entities:
+        type: optional_list
+        items: str
+        description: Durable entities or records owned by the surface.
+      owned_pages:
+        type: optional_list
+        items: str
+        description: Persistent pages primarily owned by the surface.
+      owned_mutations:
+        type: optional_list
+        items: str
+        description: Deterministic mutations or actions owned by the surface.
+      events_emitted:
+        type: optional_list
+        items: str
+        description: Domain, platform, or hosted events this surface may emit.
+      workflow_triggers:
+        type: optional_list
+        items: str
+        description: Workflow capability ids or trigger intents this surface may start.
+      integrations:
+        type: optional_list
+        items: str
+        description: Third-party systems directly owned by the surface.
+      notes:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Null or short bounded rationale.
+
+  DesignSurfaceMap:
+    type: model
+    fields:
+      surfaces:
+        type: list
+        items: DesignSurface
+        description: Realization surfaces declared for the app.
+
+  DesignDocsBundle:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: Short summary of the completed design pass.
+      frontend_markdown:
+        type: str
+        description: Complete frontend design document in Markdown.
+      backend_markdown:
+        type: str
+        description: Complete backend design document in Markdown.
+      database_markdown:
+        type: str
+        description: Complete database design document in Markdown.
+      ui_schema_yaml:
+        type: str
+        description: Complete persistent UI schema document in YAML.
+      surface_map:
+        type: DesignSurfaceMap
+        description: Canonical typed surface realization contract mirrored into the saved backend and ui_schema docs.

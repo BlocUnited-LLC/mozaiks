@@ -3,30 +3,15 @@ import {
   WebSocketApiAdapter,
   componentRegistry,
 } from '@mozaiks/chat-ui';
-import { registerStudioComponents } from '@studio/extensions';
 
-// Product UI extension — resolved at build time via @platform/extensions alias.
-// Default local app root: mozaiks-platform/app/ui/index.js (hosted-only surfaces).
-// Switch by changing PLATFORM_PATH in .env. Do not import product components here.
+// Active app UI barrel — resolved at build time via @platform/extensions.
+// The selected app root owns custom route components, including any
+// management surfaces it declares in its route manifest.
 import { register } from '@platform/extensions';
 
-// Register product UI extensions (Mozaiks App hosted surfaces).
-// Studio components are registered separately below via registerStudioComponents.
+// Register active app UI extensions once.
 // Core substrate components are always loaded from coreComponents.js.
 register(componentRegistry.registerComponent.bind(componentRegistry));
-
-const hostMode = (
-  import.meta.env.VITE_MOZAIKS_HOST ||
-  import.meta.env.MOZAIKS_HOST ||
-  ''
-).toLowerCase();
-
-// Register Studio management components when running in studio or mozaiks host mode.
-// Studio is the shared management interface. Mozaiks App extends Studio —
-// it does not get a separate set of management components.
-if (hostMode === 'studio' || hostMode === 'mozaiks') {
-  registerStudioComponents(componentRegistry.registerComponent.bind(componentRegistry));
-}
 
 // ── API adapter ────────────────────────────────────────────────────────────
 // apiUrl and wsUrl come from the platform's app.json or env vars.

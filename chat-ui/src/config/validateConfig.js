@@ -41,7 +41,7 @@ function validateThemeConfig(config) {
     if (!config.assets.logo) {
       issues.push({ level: 'warn', file, message: 'Missing "assets.logo". The header will have no logo image.' });
     } else if (!ICON_FILE_RE.test(config.assets.logo) && !URL_RE.test(config.assets.logo)) {
-      issues.push({ level: 'error', file, message: `assets.logo="${config.assets.logo}" doesn't look like a file. Use a filename like "logo.svg" (placed in platform/brand/assets/).` });
+        issues.push({ level: 'error', file, message: `assets.logo="${config.assets.logo}" doesn't look like a file. Use a filename like "logo.svg" (placed in brand/assets/ within the active app root).` });
     }
     if (!config.assets.chatbackgroundImage) {
       issues.push({ level: 'info', file, message: 'No "assets.chatbackgroundImage" set. The chat background will be a solid color.' });
@@ -281,7 +281,7 @@ export async function validateAllConfigs() {
   );
 
   if (themeResult.data) results.push(...validateThemeConfig(themeResult.data));
-  else if (themeResult.missing) results.push({ level: 'error', file: 'theme_config.json', message: 'Not found. This is the core visual identity config — your app needs it. Create platform/config/theme_config.json.' });
+  else if (themeResult.missing) results.push({ level: 'error', file: 'theme_config.json', message: 'Not found. This is the core visual identity config — your app needs it. Create brand/theme_config.json.' });
 
   const shellResult = await safeLoad(
     baseUrl ? `${baseUrl}/api/shell-config` : '/api/shell-config',

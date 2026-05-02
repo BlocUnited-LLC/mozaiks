@@ -85,7 +85,7 @@ Choose the path that matches what you need to do.
 
     ---
 
-    Add agents, tools, handoffs, UI tools, and testing to a new workflow under `factory_app/app/workflows/`.
+    Add agents, tools, handoffs, UI tools, and testing to a new workflow under `factory_app/workflows/`.
 
     [:octicons-arrow-right-24: Workflow Guide](guides/adding-workflows/01-overview.md)
 

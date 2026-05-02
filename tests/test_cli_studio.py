@@ -39,7 +39,7 @@ def test_studio_command_outputs_json_summary_for_onboarded_workspace(tmp_path, c
         Namespace(
             directory=str(target_dir),
             name="Atlas CRM",
-            journey="existing_app",
+            journey="brownfield_app",
             goal="Bridge lead intake before building anything else",
             provider="anthropic",
             model="claude-sonnet-4-5",
@@ -60,7 +60,7 @@ def test_studio_command_outputs_json_summary_for_onboarded_workspace(tmp_path, c
     assert summary["studio"]["surface"] == "cli-home"
     assert summary["studio"]["local_only"] is True
     assert summary["app"]["name"] == "Atlas CRM"
-    assert summary["app"]["journey"] == "existing_app"
+    assert summary["app"]["journey"] == "brownfield_app"
     assert summary["ai"]["provider"] == "anthropic"
     assert summary["ai"]["model"] == "claude-sonnet-4-5"
     assert summary["theme"]["primary"] == "blue"

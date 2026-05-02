@@ -279,7 +279,7 @@ class UnifiedWorkflowManager:
     def iter_ui_tools(self) -> List[Dict[str, Any]]:
         return list(self._ui_registry.values())
 
-    def detect_ui_tool_event(self, event: Any) -> Tuple[bool, Dict[str, Any]]:
+    def detect_ui_tool_call(self, event: Any) -> Tuple[bool, Dict[str, Any]]:
         name = getattr(event, "tool_name", None)
         if not isinstance(name, str) or not name:
             return False, {}

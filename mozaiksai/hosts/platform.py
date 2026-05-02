@@ -75,8 +75,13 @@ except Exception as exc:  # pragma: no cover
     logger.debug("ADMIN_ROUTER_MOUNT_FAILED: %s", exc)
 
 
-def resolve_platform_path() -> Path:
+def resolve_app_root() -> Path:
     return resolve_active_app_root()
+
+
+def resolve_platform_path() -> Path:
+    """Backward-compatible alias for resolve_app_root()."""
+    return resolve_app_root()
 
 
 _NON_RUNNABLE_WORKFLOW_IDS = {"extended_orchestration"}
@@ -89,10 +94,8 @@ def _get_ordered_workflow_names() -> List[str]:
 
 
 def _get_configured_entry_point() -> Optional[str]:
-    platform_root = resolve_platform_path()
-    ai_path = platform_root / "config" / "ai.json"
-    if not ai_path.exists():
-        ai_path = Path(__file__).parent / "platform" / "config" / "ai.json"
+    app_root = resolve_app_root()
+    ai_path = app_root / "config" / "ai.json"
     if not ai_path.exists():
         return None
 
@@ -143,14 +146,14 @@ async def _platform_startup() -> None:
     except Exception as exc:
         logger.debug("RUNTIME_EXTENSIONS_SERVICES_NOT_STARTED: %s", exc)
 
-    platform_root = resolve_platform_path()
+    app_root = resolve_app_root()
     try:
-        load_result = await AppLoader.load(str(platform_root))
+        load_result = await AppLoader.load(str(app_root))
         if load_result.modules:
             from mozaiksai.core.events import get_event_dispatcher
 
             dispatcher = get_event_dispatcher()
-            workflow_capability_routes = _load_workflow_capability_routes(platform_root)
+            workflow_capability_routes = _load_workflow_capability_routes(app_root)
             app.state.workflow_capability_routes = workflow_capability_routes
 
             async def invoke_capability(
@@ -217,31 +220,6 @@ async def platform_lifespan(_: FastAPI) -> AsyncIterator[None]:
 runtime_app.register_app_lifespan(app, platform_lifespan)
 
 
-STUDIO_SHELL_ROUTES: tuple[dict[str, Any], ...] = (
-    {
-        "path": "/studio",
-        "component": "StudioHomePage",
-        "label": "Studio",
-        "order": 5,
-        "title": "Studio Home",
-    },
-    {
-        "path": "/studio/create",
-        "component": "StudioCreatePage",
-        "label": "Create",
-        "order": 6,
-        "title": "Studio Create",
-    },
-    {
-        "path": "/studio/adapters",
-        "component": "StudioAdaptersPage",
-        "label": "Adapters",
-        "order": 7,
-        "title": "Studio Adapters",
-    },
-)
-
-
 PROFILE_SHELL_ROUTE = {
     "path": "/profile",
     "component": "ProfilePage",
@@ -258,13 +236,36 @@ def _append_page_once(pages: List[dict], page: dict) -> None:
     pages.append(page)
 
 
-async def build_shell_config(*, include_studio: bool = False) -> dict:
-    """Compose app-shell config from platform-owned manifests."""
-    platform_root = resolve_platform_path()
-    ai_path = platform_root / "config" / "ai.json"
-    if not ai_path.exists():
-        ai_path = Path(__file__).parent / "platform" / "config" / "ai.json"
+def _normalize_shell_surface(surface: Optional[str]) -> str:
+    candidate = str(surface or "platform").strip().lower()
+    return candidate if candidate in {"platform", "studio"} else "platform"
 
+
+def _page_targets_surface(page: dict, *, surface: str) -> bool:
+    meta = page.get("meta") if isinstance(page.get("meta"), dict) else {}
+    declared_surfaces = meta.get("surfaces", meta.get("surface"))
+
+    normalized_surfaces: list[str] = []
+    if isinstance(declared_surfaces, str):
+        value = declared_surfaces.strip().lower()
+        if value:
+            normalized_surfaces.append(value)
+    elif isinstance(declared_surfaces, list):
+        for item in declared_surfaces:
+            if isinstance(item, str) and item.strip():
+                normalized_surfaces.append(item.strip().lower())
+
+    if not normalized_surfaces:
+        return True
+    return surface in normalized_surfaces
+
+
+async def build_shell_config(*, surface: str = "platform") -> dict:
+    """Compose app-shell config from platform-owned manifests."""
+    app_root = resolve_app_root()
+    ai_path = app_root / "config" / "ai.json"
+
+    shell_surface = _normalize_shell_surface(surface)
     result: dict = {"chat_startup_mode": "ask", "landing_spot": "/"}
 
     try:
@@ -307,12 +308,14 @@ async def build_shell_config(*, include_studio: bool = False) -> dict:
         (_load_workflow_entrypoint_pages, "workflow entrypoint routes"),
     ):
         try:
-            pages.extend(loader(platform_root))
+            pages.extend(loader(app_root))
         except Exception as exc:
             logger.warning("[shell-config] Could not read %s: %s", label, exc)
 
     if pages:
-        result["pages"] = _dedupe_and_sort_pages(pages)
+        result["pages"] = _dedupe_and_sort_pages([
+            page for page in pages if _page_targets_surface(page, surface=shell_surface)
+        ])
 
     pages = result.get("pages", [])
     _append_page_once(
@@ -331,7 +334,7 @@ async def build_shell_config(*, include_studio: bool = False) -> dict:
     )
     result["pages"] = _dedupe_and_sort_pages(pages)
 
-    admin_config_path = platform_root / "config" / "admin.json"
+    admin_config_path = app_root / "config" / "admin.json"
     if admin_config_path.exists():
         try:
             admin_cfg = json.loads(admin_config_path.read_text(encoding="utf-8"))
@@ -355,29 +358,12 @@ async def build_shell_config(*, include_studio: bool = False) -> dict:
         except Exception as exc:
             logger.warning("[shell-config] Could not read admin.json: %s", exc)
 
-    if include_studio:
-        pages = result.get("pages", [])
-        for route in STUDIO_SHELL_ROUTES:
-            _append_page_once(pages, {
-                "path": route["path"],
-                "component": route["component"],
-                "label": route["label"],
-                "order": route["order"],
-                "meta": {
-                    "requiresAuth": True,
-                    "requiresRole": "admin",
-                    "title": route["title"],
-                    "appShell": True,
-                },
-            })
-        result["pages"] = _dedupe_and_sort_pages(pages)
-
     return result
 
 
 @app.get("/api/shell-config")
 async def get_shell_config():
-    return await build_shell_config(include_studio=False)
+    return await build_shell_config(surface="platform")
 
 
 @app.get("/api/me")
@@ -485,8 +471,8 @@ def _normalize_shell_page_entry(entry: dict, *, order_fallback: int) -> Optional
     return page
 
 
-def _load_ui_route_manifest_pages(platform_root: Path) -> List[dict]:
-    manifest_path = (platform_root / "ui" / "route_manifest.json").resolve()
+def _load_ui_route_manifest_pages(app_root: Path) -> List[dict]:
+    manifest_path = (app_root / "ui" / "route_manifest.json").resolve()
     if manifest_path is None:
         return []
     if not manifest_path.exists():
@@ -503,8 +489,8 @@ def _load_ui_route_manifest_pages(platform_root: Path) -> List[dict]:
     return pages
 
 
-def _load_page_schema_routes(platform_root: Path) -> List[dict]:
-    pages_dir = platform_root / "ui" / "pages"
+def _load_page_schema_routes(app_root: Path) -> List[dict]:
+    pages_dir = app_root / "ui" / "pages"
     if not pages_dir.exists():
         return []
 
@@ -545,10 +531,10 @@ def _load_page_schema_routes(platform_root: Path) -> List[dict]:
     return pages
 
 
-def _load_workflow_entrypoint_pages(platform_root: Path) -> List[dict]:
+def _load_workflow_entrypoint_pages(app_root: Path) -> List[dict]:
     from mozaiksai.core.workflow.pack.config import list_entrypoints, load_global_pack_graph
 
-    _ = platform_root
+    _ = app_root
     pack = load_global_pack_graph()
     if pack is None:
         return []
@@ -574,18 +560,18 @@ def _dedupe_and_sort_pages(pages: List[dict]) -> List[dict]:
 
 
 def _resolve_theme_config_path() -> Path:
-    platform_root = resolve_platform_path()
-    return (platform_root / "brand" / "theme_config.json").resolve()
+    app_root = resolve_app_root()
+    return (app_root / "brand" / "theme_config.json").resolve()
 
 
 def _resolve_shell_config_path() -> Path:
-    platform_root = resolve_platform_path()
-    return (platform_root / "config" / "shell.json").resolve()
+    app_root = resolve_app_root()
+    return (app_root / "config" / "shell.json").resolve()
 
 
 def _resolve_app_manifest_path() -> Path:
-    platform_root = resolve_platform_path()
-    return (platform_root / "app.json").resolve()
+    app_root = resolve_app_root()
+    return (app_root / "app.json").resolve()
 
 
 def _resolve_default_app_id() -> str:
@@ -719,7 +705,7 @@ class ProfilePreferencesUpdateRequest(BaseModel):
 
 
 def _resolve_pages_dir() -> Path:
-    return (resolve_platform_path() / "ui" / "pages").resolve()
+    return (resolve_app_root() / "ui" / "pages").resolve()
 
 
 def _resolve_page_schema_path(name: str) -> Path:
@@ -782,9 +768,9 @@ def _load_pack_graph_or_404():
     return pack
 
 
-def _load_workflow_capability_routes(platform_root: Path) -> Dict[str, List[Dict[str, Any]]]:
+def _load_workflow_capability_routes(app_root: Path) -> Dict[str, List[Dict[str, Any]]]:
     """Index workflow trigger declarations by public capability id."""
-    workflows_dir = platform_root / "workflows"
+    workflows_dir = app_root / "workflows"
     if not workflows_dir.exists():
         return {}
 

@@ -10,7 +10,7 @@
 This module handles the THIRD type of event in mozaiksai's event system:
 
 1. Business Events: emit_business_event(log_event_type=...) -> UnifiedEventDispatcher  
-2. UI Tool Events: emit_ui_tool_event(ui_tool_id=...) -> UnifiedEventDispatcher
+2. Tool call request events: emit_tool_call_request(tool_name=...) -> UnifiedEventDispatcher
 3. AG2 Runtime Events: AutoGen events with 'kind' field -> THIS MODULE -> WebSocket
 
 This module centralizes logic for transforming raw AutoGen (AG2) runtime events  
@@ -269,14 +269,17 @@ def build_ui_event_payload(*, ev: Any, ctx: EventBuildContext) -> Optional[Dict[
 						prompt_text = getattr(request_obj, "prompt")
 					elif isinstance(request_obj, dict):
 						prompt_text = request_obj.get("prompt") or request_obj.get("message")
-				if hasattr(request_obj, "ui_tool_id"):
-					component_hint = getattr(request_obj, "ui_tool_id")
+				if hasattr(request_obj, "tool_name"):
+					component_hint = getattr(request_obj, "tool_name")
 				elif isinstance(request_obj, dict):
-					component_hint = request_obj.get("ui_tool_id") or request_obj.get("component") or request_obj.get("component_type")
+					component_hint = request_obj.get("tool_name") or request_obj.get("component") or request_obj.get("component_type")
 				if hasattr(request_obj, "model_dump"):
 					raw_payload = request_obj.model_dump()  # type: ignore[attr-defined]
 				elif isinstance(request_obj, dict):
 					raw_payload = request_obj
+				if isinstance(raw_payload, dict):
+					raw_payload = dict(raw_payload)
+					raw_payload.pop("respond", None)
 			except Exception as prompt_err:
 				ctx.wf_logger.debug(f"InputRequest prompt extraction failed: {prompt_err}")
 		request_id = getattr(ev, "_mozaiks_request_id", None)
@@ -284,17 +287,34 @@ def build_ui_event_payload(*, ev: Any, ctx: EventBuildContext) -> Optional[Dict[
 			request_id = getattr(ev, "uuid", None) or getattr(ev, "id", None)
 		if request_id:
 			request_id = str(request_id)
-		payload.update({
-			"kind": "input_request",
-			"agent": agent_name,
+		component_type = component_hint or "UserInputRequest"
+		display_mode = "inline"
+		normalized_payload = {}
+		if isinstance(raw_payload, dict):
+			normalized_payload.update(raw_payload)
+		normalized_payload.update({
+			"input_request_id": request_id,
 			"request_id": request_id,
 			"prompt": (prompt_text or ""),
+			"password": bool(getattr(ev, "password", False)),
+			"component_type": component_type,
+			"display": display_mode,
+			"mode": display_mode,
+			"interaction_type": "input_request",
 		})
-		payload["password"] = bool(getattr(ev, "password", False))
-		if component_hint:
-			payload["component_type"] = component_hint
-		if raw_payload is not None:
-			payload["raw_payload"] = raw_payload
+		payload.update({
+			"kind": "tool_call",
+			"agent": agent_name,
+			"tool_call_id": request_id,
+			"corr": request_id,
+			"tool_name": component_hint or component_type,
+			"component_type": component_type,
+			"interaction_type": "input_request",
+			"awaiting_response": True,
+			"display": display_mode,
+			"display_type": display_mode,
+			"payload": normalized_payload,
+		})
 		return payload
 
 

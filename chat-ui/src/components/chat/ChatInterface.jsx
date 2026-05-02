@@ -7,9 +7,9 @@ import {
   getBrandLogoSrc,
 } from "../../styles/brandAssets";
 
-// UI Tool Renderer - handles workflow-agnostic UI tool events
+// Tool-call renderer for workflow-agnostic UI surfaces
 // NOTE: Hooks must run unconditionally; define state first, then early-return.
-const UIToolEventRenderer = React.memo(({ uiToolEvent, onResponse, submitInputRequest, isCompleted, onArtifactAction, actionStatusMap }) => {
+const ToolCallRenderer = React.memo(({ toolCall, onResponse, isCompleted, onArtifactAction, actionStatusMap }) => {
   const [completed, setCompleted] = React.useState(isCompleted || false);
   const [hasInteracted, setHasInteracted] = React.useState(false);
   const rootRef = React.useRef(null);
@@ -68,16 +68,16 @@ const UIToolEventRenderer = React.memo(({ uiToolEvent, onResponse, submitInputRe
     } catch (e) {
       // swallow errors - non-critical UI behavior
     }
-  }, [completed, hasInteracted, uiToolEvent?.ui_tool_id]);
+  }, [completed, hasInteracted, toolCall?.tool_name]);
 
-  if (!uiToolEvent || !uiToolEvent.ui_tool_id) {
+  if (!toolCall || !toolCall.tool_name) {
     return null;
   }
 
   const displayMode =
-    uiToolEvent.display ||
-    uiToolEvent.payload?.display ||
-    uiToolEvent.payload?.mode ||
+    toolCall.display ||
+    toolCall.payload?.display ||
+    toolCall.payload?.mode ||
     'inline';
 
   const handleResponse = async (resp) => {
@@ -107,7 +107,7 @@ const UIToolEventRenderer = React.memo(({ uiToolEvent, onResponse, submitInputRe
               aria-label="Completed"
               className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full bg-[rgba(var(--color-success-rgb),0.15)] text-[var(--color-success)] border border-[rgba(var(--color-success-rgb),0.3)] select-none"
             >
-              ✓ {uiToolEvent?.ui_tool_id || 'UI Tool'} completed
+              ✓ {toolCall?.tool_name || 'UI Tool'} completed
             </span>
           )}
           {/* Hide the component when completed (auto-vanish effect) */}
@@ -120,9 +120,8 @@ const UIToolEventRenderer = React.memo(({ uiToolEvent, onResponse, submitInputRe
               onKeyDown={handleUserInteraction}
             >
               <UIToolRenderer
-                event={uiToolEvent}
+                event={toolCall}
                 onResponse={handleResponse}
-                submitInputRequest={submitInputRequest}
                 onArtifactAction={onArtifactAction}
                 actionStatusMap={actionStatusMap}
                 className="ui-tool-in-chat"
@@ -162,7 +161,6 @@ const ModernChatInterface = ({
   startupMode,
   initialMessageToUser,
   onRetry,
-  submitInputRequest,
   onBrandClick, // Optional callback when brand/logo clicked
   isOnChatPage = true, // Whether we're on the primary chat page (not discovery/workflows)
   hideHeader = false, // Hide the header (used when widget has its own header)
@@ -360,11 +358,11 @@ const ModernChatInterface = ({
 
       const isEmptyContent = !(chat.content && String(chat.content).trim().length);
       const hasStructured = !!(chat.structuredOutput && typeof chat.structuredOutput === 'object');
-      const hasUITool = !!chat.uiToolEvent;
+      const hasToolCall = !!chat.toolCall;
       const hasAttachment = !!chat.attachment;
       const hasTrace = Array.isArray(chat.trace) && chat.trace.length > 0;
       const isSystem = chat.isTokenMessage || chat.isWarningMessage;
-      if (isEmptyContent && !chat.isThinking && !hasStructured && !hasUITool && !hasAttachment && !hasTrace && !isSystem) {
+      if (isEmptyContent && !chat.isThinking && !hasStructured && !hasToolCall && !hasAttachment && !hasTrace && !isSystem) {
         return null;
       }
 
@@ -403,18 +401,17 @@ const ModernChatInterface = ({
             trace={chat.trace}
           />
 
-          {chat.uiToolEvent && (
-            <UIToolEventRenderer
-              uiToolEvent={chat.uiToolEvent}
-              submitInputRequest={submitInputRequest}
-              isCompleted={chat.ui_tool_completed || false}
+          {chat.toolCall && (
+            <ToolCallRenderer
+              toolCall={chat.toolCall}
+              isCompleted={chat.tool_call_completed || false}
               onArtifactAction={onArtifactAction}
               actionStatusMap={actionStatusMap}
               onResponse={(response) => {
                 handleAgentAction({
-                  type: 'ui_tool_response',
-                  ui_tool_id: chat.uiToolEvent.ui_tool_id,
-                  eventId: chat.uiToolEvent.eventId,
+                  type: 'tool_call_response',
+                  tool_name: chat.toolCall.tool_name,
+                  tool_call_id: chat.toolCall.tool_call_id,
                   response: response
                 });
               }}

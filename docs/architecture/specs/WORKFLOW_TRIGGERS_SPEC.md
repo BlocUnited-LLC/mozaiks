@@ -514,7 +514,7 @@ triggers:
 │                                                                              │
 │  Resolution Order:                                                          │
 │                                                                              │
-│  1. Explicit routes in app.yaml                                             │
+│  1. Explicit custom routes in app/ui/route_manifest.json                    │
 │       routes:                                                               │
 │         - path: /api/contacts                                               │
 │           handler: workflow:contact_enricher    ← If defined, workflow wins │
@@ -779,7 +779,7 @@ class RequestDispatcher:
         if trigger_result:
             return JSONResponse(trigger_result.data)
 
-        # 2. Check explicit routes in app.yaml
+        # 2. Check explicit custom routes in app/ui/route_manifest.json
         route = self._match_explicit_route(path, method)
         if route:
             return await self._dispatch_route(route, request, context)
@@ -832,49 +832,41 @@ payload:
 
 ---
 
-## 9. Trigger Configuration in app.yaml
+## 9. Trigger Configuration in Workflow Bundles
 
 ### Complete Example
 
 ```yaml
-# app.yaml
+# app/workflows/lead_scorer/orchestrator.yaml
 
-name: my-crm
-version: 1.0.0
+workflow_name: lead_scorer
 
-capabilities:
-  ai: true
-  modules: true
+triggers:
+  - type: event
+    event: domain.deals.created
+    condition: "payload.value > 10000"
 
-modules:
-  - name: contacts
-  - name: deals
-  - name: notes
+---
+# app/workflows/daily_summary/orchestrator.yaml
 
-workflows:
-  - name: sales_assistant
-    triggers:
-      - type: chat          # Manual via chat UI
+workflow_name: daily_summary
 
-  - name: lead_scorer
-    triggers:
-      - type: event
-        event: module.deals.created
-        condition: "payload.value > 10000"
+triggers:
+  - type: schedule
+    cron: "0 17 * * 1-5"
 
-  - name: daily_summary
-    triggers:
-      - type: schedule
-        cron: "0 17 * * 1-5"  # 5 PM weekdays
+---
+# app/workflows/contact_enricher/orchestrator.yaml
 
-  - name: contact_enricher
-    triggers:
-      - type: action
-        action_id: enrich_contacts
-        source: contacts_page
-      - type: route
-        path: /api/enrich
-        method: POST
+workflow_name: contact_enricher
+
+triggers:
+  - type: action
+    action_id: enrich_contacts
+    source: contacts_page
+  - type: route
+    path: /api/enrich
+    method: POST
 ```
 
 ---

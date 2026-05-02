@@ -42,7 +42,7 @@ from mozaiksai.core.events.ag2_events import (
     PlanCreatedEvent,
     PrerequisitesRequiredEvent,
     StructuredOutputEvent,
-    UIToolRequestedEvent,
+    ToolCallRequestedEvent,
     WorkflowTriggeredEvent,
 )
 from mozaiksai.core.events.ag2_event_bridge import AG2EventBridge
@@ -63,7 +63,7 @@ class MozaiksaiEventHandler(BaseEventHandler):
         - AgentThinkingEvent
         - StructuredOutputEvent
         - ArtifactUpdatedEvent
-        - UIToolRequestedEvent
+        - ToolCallRequestedEvent
         - ContextUpdatedEvent
         - JourneyStartedEvent
         - JourneyCompletedEvent
@@ -154,12 +154,12 @@ class MozaiksaiEventHandler(BaseEventHandler):
                 "chat_id": ctx.chat_id,
             }
 
-        if isinstance(event, UIToolRequestedEvent):
+        if isinstance(event, ToolCallRequestedEvent):
             return {
-                "kind": "ui_tool_requested",
-                "ui_tool_id": getattr(event.content, "ui_tool_id", None) if hasattr(event, "content") else getattr(event, "ui_tool_id", None),
+                "kind": "tool_call",
+                "tool_name": getattr(event.content, "tool_name", None) if hasattr(event, "content") else getattr(event, "tool_name", None),
                 "agent": getattr(event.content, "agent_name", None) if hasattr(event, "content") else getattr(event, "agent_name", None),
-                "display_mode": getattr(event.content, "display_mode", "inline") if hasattr(event, "content") else getattr(event, "display_mode", "inline"),
+                "display": getattr(event.content, "display_mode", "inline") if hasattr(event, "content") else getattr(event, "display_mode", "inline"),
                 "payload": getattr(event.content, "payload", {}) if hasattr(event, "content") else getattr(event, "payload", {}),
                 "chat_id": ctx.chat_id,
             }

@@ -1183,37 +1183,27 @@ user_menu:
 
 The platform admin is defined as a mozaiks app.
 
+```json
+// app/app.json - Platform Admin App
+{
+  "appName": "mozaiks-platform-admin",
+  "version": "1.0",
+  "description": "Mozaiks Platform Administration Dashboard",
+  "targets": {
+    "web": true
+  },
+  "startup": {
+    "landing_spot": "/admin"
+  },
+  "authRequired": true
+}
+```
+
 ```yaml
-# app.yaml - Platform Admin App
-name: mozaiks-platform-admin
-version: "1.0"
-description: Mozaiks Platform Administration Dashboard
-
-# ============================================================================
-# CAPABILITIES
-# ============================================================================
-capabilities:
-  ai: true          # AI workflows for complex operations
-  modules: true     # Platform modules for data operations
-
-# ============================================================================
-# THEME
-# ============================================================================
-theme:
-  primary: indigo
-  variant: modern
-  radius: medium
-  appearance: system
-  font: inter
-
-# ============================================================================
-# MODULES
-# ============================================================================
-modules:
-  # Platform modules (external API wrappers)
-  - platform.users
-  - platform.apps
-  - platform.governance
+# app/brand/theme_config.json or app/config/admin.json own the visual/admin
+# surface details; modules and workflows are discovered from app/modules/* and
+# app/workflows/*.
+```
   - platform.billing
   - platform.hosting
   - platform.discovery
@@ -1373,18 +1363,20 @@ Create the admin page definitions:
 ```
 apps/
 └── platform-admin/
-    ├── app.yaml
-    ├── pages/
-    │   ├── navigation.yaml
-    │   └── admin/
-    │       ├── dashboard.yaml
-    │       ├── users.yaml
-    │       └── ...
-    ├── modules/
-    │   └── (uses platform-modules package)
-    └── workflows/
-        ├── AppApproval/
-        └── ...
+    └── app/
+        ├── app.json
+        ├── config/
+        ├── ui/
+        │   └── pages/
+        │       └── admin/
+        │           ├── dashboard.yaml
+        │           ├── users.yaml
+        │           └── ...
+        ├── modules/
+        │   └── (uses platform-modules package)
+        └── workflows/
+            ├── AppApproval/
+            └── ...
 ```
 
 ### Phase 4: Deployment

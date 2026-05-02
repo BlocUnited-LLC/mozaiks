@@ -65,7 +65,7 @@ If a phase is not complete, do not pretend later phases are solved by adding one
 - [ ] `ExistingAppDiscovery` is reframed as existing-product discovery into the same planning path
 - [ ] `ExistingAppDiscovery` outputs `ExistingProductSpec`, `CapabilitySpec[]`, and `AgentAugmentationPlan`
 - [ ] `ExistingAppDiscovery` supports guided plain-language intake by default and advanced operator inputs second
-- [ ] `ExistingAppDiscovery` includes a first-class Mozaiks workspace-host dogfood path for `MOZ-UI + mozaiks-platform/services`
+- [ ] `ExistingAppDiscovery` includes a first-class workspace-app preset for local brownfield onboarding such as `mozaiks-app`
 - [ ] `DesignDocs` is reframed as internal design elaboration for `ExperienceSpec`
 - [ ] `AppGenerator` is reframed as deterministic product bundle compiler
 - [ ] `AgentGenerator` is reframed as agent augmentation compiler

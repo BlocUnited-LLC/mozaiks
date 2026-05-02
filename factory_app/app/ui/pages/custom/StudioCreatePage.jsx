@@ -10,14 +10,14 @@ import {
   ActionButton,
   StudioLoadingState,
   StudioErrorState,
-} from '../../../../studio/StudioPrimitives.jsx'
+} from './studio/StudioPrimitives.jsx'
 import { RefinementControls } from './studio/RefinementControls.jsx'
 import { buildRefinementTriggerPayload } from './studio/refinement.js'
 
 
 const REQUEST_KIND_OPTIONS = [
-  { value: 'existing_app', label: 'Existing App' },
-  { value: 'new_app', label: 'New App' },
+  { value: 'greenfield_app', label: 'Greenfield App' },
+  { value: 'brownfield_app', label: 'Brownfield App' },
   { value: 'refinement', label: 'Refinement' },
 ]
 
@@ -300,7 +300,7 @@ export default function StudioCreatePage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [draft, setDraft] = useState('')
-  const [requestKind, setRequestKind] = useState('existing_app')
+  const [requestKind, setRequestKind] = useState('greenfield_app')
   const [localError, setLocalError] = useState(null)
   const [saving, setSaving] = useState(false)
   const [history, setHistory] = useState(null)
@@ -314,7 +314,7 @@ export default function StudioCreatePage() {
     setSummary(payload)
     const req = payload?.create?.current_request || {}
     setDraft(req.text || '')
-    setRequestKind(req.request_kind || payload?.app?.journey || 'existing_app')
+    setRequestKind(req.request_kind || payload?.app?.journey || 'greenfield_app')
     setSelectedRefinementClass(req.change_class || null)
   }
 
@@ -418,7 +418,7 @@ export default function StudioCreatePage() {
   const handleInitialCreate = async () => {
     setLocalError(null)
     if (requestKind === 'refinement') {
-      setLocalError('Switch Request Mode to New App or Existing App for a create conversation.')
+      setLocalError('Switch Request Mode to Greenfield App or Brownfield App for a create conversation.')
       return
     }
     if (!draft.trim()) {
@@ -488,7 +488,7 @@ export default function StudioCreatePage() {
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <StatusPill tone="primary">
-                  {app.journey === 'existing_app' ? 'Existing App' : app.journey === 'new_app' ? 'New App' : 'Not Configured'}
+                  {app.journey === 'brownfield_app' ? 'Brownfield App' : app.journey === 'greenfield_app' ? 'Greenfield App' : 'Not Configured'}
                 </StatusPill>
                 <StatusPill tone="success">{studio.local_only ? 'Local Only' : 'Shared Surface'}</StatusPill>
                 <StatusPill tone={createData.supports_initial_compile ? 'success' : 'warning'}>

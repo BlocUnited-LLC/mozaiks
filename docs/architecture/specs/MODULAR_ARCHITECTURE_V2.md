@@ -5,6 +5,12 @@
 **Based on:** Legacy modularization analysis; current canonical hosts are
 `mozaiksai/hosts/runtime.py`, `mozaiksai/hosts/platform.py`, `mozaiksai/hosts/studio.py`, and `mozaiksai/hosts/mozaiks.py`.
 
+This document is a future package-splitting proposal only. The canonical
+greenfield app contract is the app-root bundle defined in
+`docs/architecture/foundations/canonical-app-structure.md`, not the older
+single-file manifest and backend-file examples that originally informed this
+proposal.
+
 ---
 
 ## Design Philosophy
@@ -807,7 +813,7 @@ class AppCapabilities(BaseModel):
 class AppDefinition(BaseModel):
     """
     Complete app definition.
-    Loaded from app.yaml in app root.
+    Loaded from app/app.json plus discovered bundle parts in the app root.
     """
     # Identity
     name: str
@@ -839,133 +845,55 @@ class AppDefinition(BaseModel):
 
 ```
 my-app/
-├── app.yaml                     # App definition (REQUIRED)
-├── .env                         # Environment variables
-├── operations/                  # Operations implementations
-│   ├── notes/
-│   │   ├── module.yaml          # Module config
-│   │   ├── logic.py             # Backend logic
-│   │   └── frontend/            # Frontend components (optional)
-│   │       ├── index.js
-│   │       └── components/
-│   └── tasks/
-│       ├── module.yaml
-│       └── logic.py
-├── workflows/                   # AI workflows (optional)
-│   └── assistant/
-│       ├── orchestrator.yaml
-│       ├── agents.yaml
-│       ├── tools.yaml
-│       └── tools/
-│           └── search.py
-├── pages/                       # Custom pages (optional)
-│   └── dashboard.yaml
-└── frontend/                    # Custom frontend (optional)
-    ├── src/
-    └── package.json
+└── app/
+    ├── app.json                 # App definition (required)
+    ├── config/
+    │   ├── ai.json
+    │   ├── shell.json
+    │   └── admin.json
+    ├── ui/
+    │   ├── pages/
+    │   │   └── dashboard.yaml
+    │   └── index.js             # Optional bounded UI registration barrel
+    ├── modules/
+    │   └── tasks/
+    │       ├── module.yaml
+    │       ├── events.yaml
+    │       ├── subscriptions.yaml
+    │       ├── notifications.yaml
+    │       ├── settings.yaml
+    │       ├── admin.yaml
+    │       └── backend/
+    │           └── handler.py
+    ├── workflows/
+    │   └── assistant/
+    │       ├── orchestrator.yaml
+    │       ├── agents.yaml
+    │       ├── tools.yaml
+    │       └── tools/
+    │           └── search.py
+    └── brand/
+        └── theme_config.json
 ```
 
-### Example app.yaml
+### Example app/app.json
 
-```yaml
-# app.yaml - Complete app definition
-
-name: my-crm
-version: 1.0.0
-description: A simple CRM with AI assistant
-
-# What's enabled
-capabilities:
-  ai: true
-  modules: true
-  ui: true
-
-# Modules to load
-modules:
-  - name: contacts
-    config:
-      max_per_user: 10000
-  - name: deals
-  - name: notes
-  - name: settings
-    # Built-in module, no path needed
-
-# Workflows to load
-workflows:
-  - name: sales_assistant
-    config:
-      model: gpt-4
-      max_turns: 50
-
-# API routes
-routes:
-  # Module routes (auto-generated from modules, but can override)
-  - path: /api/contacts
-    handler: module:contacts:list
-    method: GET
-  - path: /api/contacts
-    handler: module:contacts:create
-    method: POST
-  - path: /api/contacts/{id}
-    handler: module:contacts:get
-    method: GET
-
-  # AI routes
-  - path: /api/chat
-    handler: workflow:sales_assistant
-    method: POST
-
-# Pages
-pages:
-  - path: /
-    title: Dashboard
-    component: DashboardPage
-    nav:
-      label: Home
-      icon: home
-      order: 0
-
-  - path: /contacts
-    title: Contacts
-    module: contacts
-    nav:
-      label: Contacts
-      icon: users
-      order: 10
-
-  - path: /deals
-    title: Deals
-    module: deals
-    nav:
-      label: Deals
-      icon: briefcase
-      order: 20
-
-  - path: /assistant
-    title: AI Assistant
-    component: ChatPage
-    nav:
-      label: Assistant
-      icon: message-circle
-      order: 30
-
-# Auth configuration
-auth:
-  mode: local                    # local | external | platform
-  jwt_secret: ${JWT_SECRET}
-  session_expire_minutes: 60
-
-# Database
-database:
-  provider: mongodb
-  uri: ${DATABASE_URI}
-  name: ${DATABASE_NAME}
-
-# Feature flags
-features:
-  dark_mode: true
-  notifications: true
-  export: false
+```json
+{
+  "appName": "my-crm",
+  "version": "1.0.0",
+  "description": "A simple CRM with AI assistant",
+  "targets": {
+    "web": true
+  },
+  "startup": {
+    "landing_spot": "/dashboard"
+  },
+  "authRequired": true,
+  "admins": [
+    "owner@example.com"
+  ]
+}
 ```
 
 ### Request Lifecycle
@@ -1209,37 +1137,17 @@ def create_app() -> FastAPI:
     async def health():
         return {"status": "ok"}
 
-    # Config endpoint
-    @app.get("/api/config")
-    async def get_config(request: Request):
+    # Shell config endpoint
+    @app.get("/api/shell-config")
+    async def get_shell_config(request: Request):
         app_def = request.app.state.app_definition
         return {
-            "name": app_def.name,
-            "capabilities": app_def.capabilities.model_dump(),
-            "features": app_def.features,
+            "landing_spot": app_def.config.get("startup", {}).get("landing_spot", "/"),
+            "pages": [],
         }
 
-    # Navigation endpoint
-    @app.get("/api/navigation")
-    async def get_navigation(request: Request):
-        app_def = request.app.state.app_definition
-        nav_items = [
-            {
-                "path": page.path,
-                "label": page.nav.get("label", page.title) if page.nav else page.title,
-                "icon": page.nav.get("icon") if page.nav else None,
-                "order": page.nav.get("order", 99) if page.nav else 99,
-            }
-            for page in app_def.pages
-            if page.nav
-        ]
-        return {"navigation": sorted(nav_items, key=lambda x: x["order"])}
-
-    # Dynamic module routes
-    @app.api_route(
-        "/api/{module_name}/{action}",
-        methods=["GET", "POST", "PUT", "DELETE"],
-    )
+    # Generic module action API
+    @app.api_route("/api/modules/{module_name}/{action}", methods=["GET", "POST"])
     async def module_route(
         request: Request,
         module_name: str,
@@ -1323,21 +1231,18 @@ app = create_app()
 - Module routes return 404
 - No module-based pages
 
-**app.yaml:**
-```yaml
-name: my-assistant
-capabilities:
-  ai: true
-  modules: false
-  ui: true
-
-workflows:
-  - name: assistant
-
-pages:
-  - path: /
-    title: Chat
-    component: ChatPage
+**app/app.json:**
+```json
+{
+  "appName": "my-assistant",
+  "targets": {
+    "web": true
+  },
+  "startup": {
+    "landing_spot": "/"
+  },
+  "authRequired": true
+}
 ```
 
 **Detection:**
@@ -1372,22 +1277,18 @@ def detect_mode(app_def: AppDefinition) -> str:
 - No workflow routes
 - No WebSocket chat
 
-**app.yaml:**
-```yaml
-name: my-crm
-capabilities:
-  ai: false
-  modules: true
-  ui: true
-
-modules:
-  - name: contacts
-  - name: deals
-  - name: notes
-
-pages:
-  - path: /contacts
-    module: contacts
+**app/app.json:**
+```json
+{
+  "appName": "my-crm",
+  "targets": {
+    "web": true
+  },
+  "startup": {
+    "landing_spot": "/contacts"
+  },
+  "authRequired": true
+}
 ```
 
 ### Mode C: Full System
@@ -1863,7 +1764,7 @@ event_bus.publish(Event.create(
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
 │   │                         APP RUNTIME                                  │   │
 │   │                                                                      │   │
-│   │   Load app.yaml → Route requests → Compose executors → Serve        │   │
+│   │   Load app/app.json → Route requests → Compose executors → Serve    │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 │                                    │                                         │
 │              ┌─────────────────────┼─────────────────────┐                  │
@@ -1899,7 +1800,9 @@ event_bus.publish(Event.create(
 1. **NO bridge layer** - Runtime orchestrates, doesn't translate
 2. **Optional dependencies** - Each package works alone
 3. **Shared interfaces** - Core defines, others implement
-4. **app.yaml as contract** - Single definition for entire app
+4. **app/app.json as manifest** - Small manifest for identity, startup, and
+   auth intent; deeper behavior is discovered from pages, modules, workflows,
+   and config files
 5. **Three modes** - AI-only, modules-only, full
 6. **Direct tool calls** - Simpler than event-based for v1
 

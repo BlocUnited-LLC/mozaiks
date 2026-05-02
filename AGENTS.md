@@ -170,7 +170,7 @@ contract.
 
 ## Generator Output Rule
 
-Shared factory workflows live in `factory_app/app/workflows/`. App Zero currently consumes the shared workflows
+Shared factory workflows live in `factory_app/workflows/`. App Zero currently consumes the shared workflows
 through a local product overlay under
 `mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`. Generator output must
 not land directly in active runtime paths.
@@ -178,7 +178,7 @@ not land directly in active runtime paths.
 Workflow loading is multi-root by contract:
 
 - active app root `workflows/` first
-- shared `factory_app/app/workflows/` second
+- shared `factory_app/workflows/` second
 - `MOZAIKS_WORKFLOW_ROOTS` may override that order explicitly
 
 App Zero's local extended-orchestration overlay may reference both shared factory

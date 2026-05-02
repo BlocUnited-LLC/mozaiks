@@ -254,6 +254,13 @@ class GroupChatResumer:
                             agent=pending.get("agent", "Agent"),
                             prompt=pending.get("prompt", ""),
                             chat_id=chat_id,
+                            component_type=pending.get("component_type"),
+                            workflow_name=pending.get("workflow_name"),
+                            tool_name=pending.get("tool_name"),
+                            display=pending.get("display") or "inline",
+                            interaction_type=pending.get("interaction_type") or "input_request",
+                            password=bool(pending.get("password", False)),
+                            raw_payload=pending.get("raw_payload") if isinstance(pending.get("raw_payload"), dict) else None,
                         ),
                         chat_id,
                     )
@@ -301,28 +308,25 @@ class GroupChatResumer:
         if metadata:
             normalized["metadata"] = self._json_safe(metadata)
             
-            # Restore UI tool state if message has ui_tool metadata
-            ui_tool_meta = metadata.get("ui_tool")
-            if ui_tool_meta and isinstance(ui_tool_meta, dict):
-                # Reconstruct uiToolEvent object for frontend UIToolEventRenderer
-                normalized["uiToolEvent"] = {
-                    "ui_tool_id": ui_tool_meta.get("ui_tool_id"),
-                    "eventId": ui_tool_meta.get("event_id"),
-                    "payload": ui_tool_meta.get("payload", {}),
-                    "display": ui_tool_meta.get("display", "inline"),
-                    "workflow_name": message.get("workflow_name"),  # May be in top-level or metadata
+            tool_call_meta = metadata.get("tool_call")
+            if tool_call_meta and isinstance(tool_call_meta, dict):
+                normalized["toolCall"] = {
+                    "tool_name": tool_call_meta.get("tool_name"),
+                    "tool_call_id": tool_call_meta.get("tool_call_id"),
+                    "payload": tool_call_meta.get("payload", {}),
+                    "display": tool_call_meta.get("display", "inline"),
+                    "workflow_name": message.get("workflow_name") or tool_call_meta.get("workflow_name"),
+                    "component_type": tool_call_meta.get("component_type") or tool_call_meta.get("tool_name"),
                 }
-                # CRITICAL: Surface completion state to frontend
-                # Frontend UIToolEventRenderer checks these flags to show "Completed" chip vs interactive component
-                normalized["ui_tool_completed"] = ui_tool_meta.get("ui_tool_completed", False)
-                normalized["ui_tool_status"] = ui_tool_meta.get("ui_tool_status", "pending")
+                normalized["tool_call_completed"] = tool_call_meta.get("tool_call_completed", False)
+                normalized["tool_call_status"] = tool_call_meta.get("tool_call_status", "pending")
                 
                 self.logger.debug(
-                    "[RESUME] Restored UI tool state: tool=%s event=%s completed=%s display=%s",
-                    ui_tool_meta.get("ui_tool_id"),
-                    ui_tool_meta.get("event_id"),
-                    ui_tool_meta.get("ui_tool_completed", False),
-                    ui_tool_meta.get("display", "inline")
+                    "[RESUME] Restored tool call state: tool=%s event=%s completed=%s display=%s",
+                    tool_call_meta.get("tool_name"),
+                    tool_call_meta.get("tool_call_id"),
+                    tool_call_meta.get("tool_call_completed", False),
+                    tool_call_meta.get("display", "inline")
                 )
         return normalized
 
@@ -451,14 +455,44 @@ class GroupChatResumer:
         agent: str,
         prompt: str,
         chat_id: str,
+        component_type: Optional[str] = None,
+        workflow_name: Optional[str] = None,
+        tool_name: Optional[str] = None,
+        display: str = "inline",
+        interaction_type: str = "input_request",
+        password: bool = False,
+        raw_payload: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Build an input_request event payload for UI."""
-        return {
-            "kind": "input_request",
+        """Build a response-required tool_call payload for UI resume."""
+        resolved_component = component_type or "UserInputRequest"
+        resolved_tool_name = tool_name or component_type or resolved_component
+        resolved_display = display or "inline"
+        payload = {
+            **(raw_payload if isinstance(raw_payload, dict) else {}),
+            "input_request_id": request_id,
             "request_id": request_id,
-            "agent": agent,
             "prompt": prompt,
+            "password": bool(password),
+            "workflow_name": workflow_name,
+            "component_type": resolved_component,
+            "display": resolved_display,
+            "mode": resolved_display,
+            "interaction_type": interaction_type or "input_request",
+        }
+        return {
+            "kind": "tool_call",
+            "tool_call_id": request_id,
+            "corr": request_id,
+            "tool_name": resolved_tool_name,
+            "component_type": resolved_component,
+            "workflow_name": workflow_name,
+            "interaction_type": interaction_type or "input_request",
+            "awaiting_response": True,
+            "display": resolved_display,
+            "display_type": resolved_display,
+            "agent": agent,
             "chat_id": chat_id,
+            "payload": payload,
             "replay": True,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "metadata": {

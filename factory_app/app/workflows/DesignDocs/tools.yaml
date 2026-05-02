@@ -1,8 +1,0 @@
-tools:
-- agent: DesignDocsAgent
-  file: save_design_doc.py
-  function: save_design_doc
-  description: Persist a single design doc (frontend|backend|database|ui_schema) for the current app_id.
-  tool_type: Agent_Tool
-  auto_tool_call: false
-lifecycle_tools: []

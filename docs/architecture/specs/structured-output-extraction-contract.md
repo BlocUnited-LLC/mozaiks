@@ -283,7 +283,7 @@ The following do NOT exist in the mozaiks runtime:
 ## Complete Example
 
 Below is a schematic workflow bundle showing the complete contract shape.
-Use live production workflows under `factory_app/app/workflows/*` or an active
+Use live production workflows under `factory_app/workflows/*` or an active
 app root's `app/workflows/*` for implementation references:
 
 ```

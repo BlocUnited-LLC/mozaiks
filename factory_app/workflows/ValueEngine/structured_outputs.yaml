@@ -1,0 +1,406 @@
+# ValueEngine Structured Outputs
+# Planning schemas for app concept, capability mapping, and build decomposition
+
+registry:
+  # Interview and Research use free-form conversational output
+  ValueInterviewAgent: null
+  ResearchAgent: null
+  # GapAnalysisAgent outputs structured ConceptBlueprint for UI artifact
+  GapAnalysisAgent: ConceptBlueprint
+
+models:
+  # =========================================================================
+  # INTENT & CONCEPT MODELS
+  # =========================================================================
+
+  IntentBrief:
+    type: model
+    fields:
+      source_request:
+        type: str
+        description: Original user request text.
+      product_summary:
+        type: str
+        description: Brief summary of what the user wants to build.
+      user_personas:
+        type: optional_list
+        items: str
+        description: Target user types for the product.
+      bounded_contexts:
+        type: optional_list
+        items: str
+        description: Domain boundaries identified in the request.
+      business_entities:
+        type: optional_list
+        items: str
+        description: Core business objects mentioned.
+      constraints:
+        type: optional_list
+        items: str
+        description: Technical or business constraints.
+      non_goals:
+        type: optional_list
+        items: str
+        description: Explicitly out of scope items.
+      success_criteria:
+        type: optional_list
+        items: str
+        description: How success will be measured.
+      open_questions:
+        type: optional_list
+        items: str
+        description: Unresolved questions to clarify.
+
+  BrandIntent:
+    type: model
+    fields:
+      style_summary:
+        type: str
+        description: Short description of the intended brand or visual direction.
+      brand_keywords:
+        type: optional_list
+        items: str
+        description: Keywords that should remain true in future theme and UI decisions.
+      experience_goals:
+        type: optional_list
+        items: str
+        description: Desired experiential qualities such as trustworthy, energetic, premium, or playful.
+      appearance_hint:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional shell appearance hint such as light, dark, or system.
+
+  SurfaceCandidateHint:
+    type: model
+    fields:
+      surface_id:
+        type: str
+        description: Stable snake_case identifier for a likely downstream surface.
+      label:
+        type: str
+        description: Human-readable label for the surface.
+      source_capability_packs:
+        type: optional_list
+        items: str
+        description: Capability-pack hints this surface appears to depend on.
+      likely_surface_kind:
+        type: literal
+        values:
+        - module
+        - workflow
+        - control_plane
+        - external_integration
+        - ui_only
+        description: Coarse realization hint only. Not a final contract.
+      confidence:
+        type: literal
+        values:
+        - low
+        - medium
+        - high
+        description: Confidence in the realization hint based on the concept detail level.
+      rationale:
+        type: str
+        description: One-sentence explanation for why this surface is likely needed.
+
+  ConceptBlueprint:
+    type: model
+    description: Structured output for the ConceptBlueprint UI artifact
+    fields:
+      agent_message:
+        type: str
+        description: User-facing message summarizing the concept.
+      app_name:
+        type: str
+        description: Name of the application.
+      concept_overview:
+        type: str
+        description: High-level summary of the concept (displayed in UI Overview section).
+      value_proposition:
+        type: str
+        description: Core value the product delivers to users.
+      target_user:
+        type: str
+        description: Primary target user persona (single sentence).
+      target_users:
+        type: optional_list
+        items: str
+        description: List of target user personas.
+      core_jobs:
+        type: optional_list
+        items: str
+        description: Jobs-to-be-done this app addresses.
+      core_features:
+        type: optional_list
+        items: str
+        description: Features approved for MVP (displayed as Core features).
+      deferred_features:
+        type: optional_list
+        items: str
+        description: Features deferred to later (displayed as Deferred features).
+      unique_differentiators:
+        type: optional_list
+        items: str
+        description: What makes this concept unique vs competitors.
+      brand_intent:
+        type: union
+        variants:
+        - BrandIntent
+        - 'null'
+        description: >
+          Explicit brand and experience direction for downstream page/theme planning.
+          Capture this when the concept clearly implies a visual identity or user
+          experience posture. Null is acceptable when the product direction is still generic.
+      constraints:
+        type: optional_list
+        items: str
+        description: Technical or business constraints.
+      api_endpoints:
+        type: optional_list
+        items: ApiEndpointSpec
+        description: Planned API endpoints for the MVP.
+      app_ui_requirements:
+        type: optional_list
+        items: str
+        description: >
+          UI capability requirements for the app — passed to AppSchemaAgent to
+          inform primitive selection and page layout choices. Each entry is a
+          natural-language statement about a UI need, e.g.
+          "needs a sortable data table for managing users",
+          "dashboard requires KPI stat cards with trend indicators",
+          "user onboarding requires a multi-step form".
+      capability_pack_hints:
+        type: optional_list
+        items: str
+        description: >
+          High-level capability pack recommendations inferred from the concept.
+          Examples: "messaging_pack", "marketplace_pack", "campaigns_pack",
+          "billing_pack", "crud_pack". These are planning hints for AppPlanAgent,
+          not executable tasks.
+      surface_candidate_hints:
+        type: optional_list
+        items: SurfaceCandidateHint
+        description: >
+          Coarse realization hints for downstream design/planning. These do not
+          finalize module, workflow, or control-plane boundaries.
+      agentic_capabilities:
+        type: optional_list
+        items: str
+        description: >
+          Capabilities that likely require agentic augmentation rather than pure
+          CRUD/module behavior. Examples: "campaign optimization", "thread summary",
+          "proposal review", "workflow recommendation".
+
+  ApiEndpointSpec:
+    type: model
+    fields:
+      method:
+        type: literal
+        values: [GET, POST, PUT, PATCH, DELETE]
+        description: HTTP method.
+      path:
+        type: str
+        description: API path (e.g., /api/users).
+      description:
+        type: str
+        description: What this endpoint does.
+
+  # =========================================================================
+  # CAPABILITY & DECOMPOSITION MODELS
+  # =========================================================================
+
+  CapabilityPackSpec:
+    type: model
+    fields:
+      capability_pack_id:
+        type: str
+        description: Stable identifier for the capability pack.
+      pack_type:
+        type: literal
+        values:
+          - crud_pack
+          - admin_pack
+          - messaging_pack
+          - marketplace_pack
+          - campaigns_pack
+          - billing_pack
+          - notifications_pack
+          - analytics_pack
+          - agent_backend_integration
+          - custom_domain
+        description: Canonical pack family selected for the product.
+      label:
+        type: str
+        description: Human-readable pack name.
+      summary:
+        type: str
+        description: Brief description of what this pack contributes to the product.
+      implementation_mode:
+        type: literal
+        values:
+          - declarative_module
+          - agentic_workflow
+          - hybrid
+          - external_integration
+        description: How this pack should be realized at build time.
+      primary_entities:
+        type: optional_list
+        items: str
+        description: Domain entities primarily owned by this pack.
+      primary_pages:
+        type: optional_list
+        items: str
+        description: Pages or screens the pack is expected to drive.
+      operations:
+        type: optional_list
+        items: str
+        description: Primary actions/behaviors supplied by the pack.
+      required_integrations:
+        type: optional_list
+        items: str
+        description: External systems or platform services required by the pack.
+      agentic_extensions:
+        type: optional_list
+        items: str
+        description: Optional AI-driven behaviors layered on top of the pack.
+
+  EntityFieldSpec:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Field name.
+      field_type:
+        type: str
+        description: Field type (str, int, bool, datetime, etc).
+
+  EntitySpec:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Entity name in PascalCase.
+      purpose:
+        type: str
+        description: What this entity represents.
+      key_fields:
+        type: optional_list
+        items: EntityFieldSpec
+        description: Core fields for this entity.
+      relations:
+        type: optional_list
+        items: str
+        description: Related entities (e.g., "belongs_to:User").
+
+  AppSpec:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Application name.
+      summary:
+        type: str
+        description: Brief description of the application.
+      user_personas:
+        type: optional_list
+        items: str
+        description: Target user types.
+      core_jobs:
+        type: optional_list
+        items: str
+        description: Core jobs-to-be-done the app addresses.
+      constraints:
+        type: optional_list
+        items: str
+        description: Technical or business constraints.
+
+  # =========================================================================
+  # MFJ BUILD TASK MODELS (for parallel decomposition)
+  # =========================================================================
+
+  BuildTaskSpec:
+    type: model
+    fields:
+      task_id:
+        type: str
+        description: Stable task identifier for the child run.
+      task_type:
+        type: literal
+        values:
+          - agent_workflow
+          - app_module
+          - api_endpoint
+          - entity_crud
+        description: What type of artifact this task generates.
+      capability_pack_id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Capability pack this task belongs to. Null only for truly cross-cutting setup work.
+      child_workflow:
+        type: literal
+        values:
+          - AgentGenerator
+          - AppGenerator
+        description: Which generator workflow handles this task.
+      description:
+        type: str
+        description: Short description of the child engineering task.
+      initial_message:
+        type: str
+        description: Seed message passed to the child workflow.
+      depends_on:
+        type: optional_list
+        items: str
+        description: Task IDs this task depends on (for sequencing).
+      requires_input:
+        type: optional_list
+        items: str
+        description: User inputs required before this task (e.g., api_keys).
+
+  BuildPlan:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: Short status message shown to the user.
+      concept_blueprint:
+        type: ConceptBlueprint
+        description: The approved concept being built.
+      capability_packs:
+        type: optional_list
+        items: CapabilityPackSpec
+        description: Canonical capability packs selected for the product before task fan-out begins.
+      tasks:
+        type: list
+        items: BuildTaskSpec
+        description: Child workflow tasks to run (parallel where possible).
+      required_inputs:
+        type: optional_list
+        items: str
+        description: User inputs needed before build starts (e.g., api_keys).
+
+  BuildSynthesis:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: Final user-facing status message after fan-in.
+      completed_tasks:
+        type: optional_list
+        items: str
+        description: Task ids completed successfully.
+      blocked_tasks:
+        type: optional_list
+        items: str
+        description: Task ids that are blocked or need user input.
+      artifacts:
+        type: optional_list
+        items: str
+        description: Generated artifact paths/URLs.
+      next_step:
+        type: str
+        description: Recommended next action after build.

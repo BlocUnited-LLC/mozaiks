@@ -78,15 +78,20 @@ Used for logging, metrics, system lifecycle.
 
 ### 2. UI Tool Events (Agent → UI)
 ```python
-emit_ui_tool_event("api_key_input", payload={...}, workflow_name="...")
+emit_tool_call_request("api_key_input", payload={...}, workflow_name="...")
 ```
 Used for interactive UI components triggered by agents.
 
 ### 3. AG2 Runtime Events (Workflow Execution)
 ```
-chat.text, chat.input_request, chat.tool_call, chat.run_complete
+chat.text, chat.tool_call, chat.run_complete
 ```
 Streamed via WebSocket during workflow execution.
+
+`chat.run_complete` is the end-of-slice event, not blindly terminal completion.
+Its payload status is authoritative:
+- `status=1` means the workflow finished and the chat is completed
+- `status=0` means the workflow paused awaiting another human turn and remains resumable
 
 ## How Execution Works
 
@@ -97,7 +102,7 @@ SimpleTransport.receive() parses message
     ↓
 run_workflow_orchestration(workflow_name, chat_id, ...)
     ↓
-Load workflow config from factory_app/app/workflows/{name}/
+Load workflow config from factory_app/workflows/{name}/
     ↓
 Create AG2 pattern (agents, handoffs, tools)
     ↓
@@ -128,7 +133,7 @@ class OrchestrationPort(Protocol):
 
 ## Workflows Are Declarative
 
-Workflows are defined in `factory_app/app/workflows/{name}/`:
+Workflows are defined in `factory_app/workflows/{name}/`:
 - `orchestrator.yaml` — Workflow metadata and triggers
 - `agents.yaml` — Agent definitions
 - `handoffs.yaml` — Agent routing rules
@@ -137,4 +142,42 @@ Workflows are defined in `factory_app/app/workflows/{name}/`:
 - `tools/*.py` — Tool implementations
 
 Don't hardcode workflow behavior in this runtime.
+When running from the canonical repo checkout without an active app workspace,
+workflow discovery falls back to the shared `factory_app/workflows/` root.
 
+## Live Smoke Workflows
+
+For real AG2 acceptance coverage without running the full app build sequence, use
+the shared smoke workflows under `factory_app/workflows/`:
+
+- `RuntimeSmoke` validates base orchestration, streaming, persistence, and structured output.
+- `RuntimeToolCallSmoke` validates the response-required workflow UI lane:
+  `chat.tool_call -> tool_call_response`.
+
+Run them through the live harness:
+
+```bash
+python scripts/run_live_mfj_smoke.py --workflow RuntimeSmoke --workflows-root factory_app/workflows
+python scripts/run_live_mfj_smoke.py --workflow RuntimeToolCallSmoke --workflows-root factory_app/workflows --tool-response-text approved
+```
+
+For real multi-turn workflows that pause on AG2 input requests, the same
+harness can answer the canonical response-required lane with scripted replies:
+
+```bash
+python scripts/run_live_mfj_smoke.py --workflow ValueEngine --workflows-root factory_app/workflows ^
+  --prompt "I want to build a task prioritization app for independent consultants." ^
+  --user-reply "Independent consultants juggling multiple client deadlines." ^
+  --user-reply "The biggest pain is deciding what to work on each morning." ^
+  --user-reply "Current tools are Notion, spreadsheets, and Slack reminders." ^
+  --user-reply "Approved. Proceed."
+```
+
+`--user-reply` values are consumed by pending `chat.tool_call` events with
+`interaction_type=input_request`. They do not send speculative free-form
+workflow chat messages. AG2 compatibility prompts such as
+`Please give feedback to chat_manager...` still use that same pending
+input-request lane; the runtime suppresses the raw prompt text, but the harness
+or frontend still needs to answer the pending interaction.
+
+Both require a working `.env` with `OPENAI_API_KEY` and `MONGO_URI`, plus a reachable MongoDB instance.

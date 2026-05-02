@@ -30,6 +30,13 @@ const ADMIN_NAV_DEFS = [
 
 const STUDIO_NAV_ITEMS = [
   {
+    id: 'hub',
+    label: 'My Apps',
+    path: '/hub',
+    icon: RiAppsFill,
+    exact: true,
+  },
+  {
     id: 'studio',
     label: 'Studio',
     path: '/studio',

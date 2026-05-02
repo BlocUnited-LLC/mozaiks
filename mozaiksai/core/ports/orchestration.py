@@ -84,7 +84,7 @@ class DomainEvent:
     DomainEvents without importing any AG2 type.
 
     Fields:
-        kind       — namespaced event type  (e.g. "chat.text", "chat.input_request")
+        kind       — namespaced event type  (e.g. "chat.text", "chat.tool_call")
         payload    — serializable event data (keys depend on kind)
         chat_id    — the owning chat session
         timestamp  — UTC ISO-8601

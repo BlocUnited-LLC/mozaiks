@@ -57,7 +57,7 @@ import path from 'path';
 export default defineConfig({
   resolve: {
     alias: {
-      '@chat-workflows-root': path.resolve(__dirname, '../factory_app/app/workflows'),
+      '@chat-workflows-root': path.resolve(__dirname, '../factory_app/workflows'),
     },
   },
 });

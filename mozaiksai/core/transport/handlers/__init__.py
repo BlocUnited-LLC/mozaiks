@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine, Dict
 from fastapi import WebSocket
 
 from .base import ERROR_CODES, utc_timestamp
-from .input_handlers import handle_ui_tool_response, handle_user_input_submit
+from .input_handlers import handle_tool_call_response, handle_user_input_submit
 from .mode_handlers import handle_enter_general_mode, handle_start_general_chat
 from .session_handlers import handle_artifact_action, handle_client_resume
 from .workflow_handlers import (
@@ -44,7 +44,7 @@ HandlerFunc = Callable[
 MESSAGE_HANDLERS: Dict[str, HandlerFunc] = {
     "user.input.submit": handle_user_input_submit,
     "user_input_submit": handle_user_input_submit,
-    "ui_tool_response": handle_ui_tool_response,
+    "tool_call_response": handle_tool_call_response,
     "chat.artifact_action": handle_artifact_action,
     "chat.switch_workflow": handle_switch_workflow,
     "chat.enter_general_mode": handle_enter_general_mode,
@@ -62,7 +62,7 @@ __all__ = [
     "utc_timestamp",
     # Individual handlers (for direct import if needed)
     "handle_user_input_submit",
-    "handle_ui_tool_response",
+    "handle_tool_call_response",
     "handle_switch_workflow",
     "handle_enter_general_mode",
     "handle_start_general_chat",

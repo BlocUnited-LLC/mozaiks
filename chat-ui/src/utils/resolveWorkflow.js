@@ -4,7 +4,7 @@
 //
 // Priority chain (first non-null wins):
 //   1. explicit   — caller-provided name (URL path, resume target, user selection)
-//   2. entryPoint — backend-declared entry_point projected from platform/config/ai.json
+//   2. entryPoint — backend-declared entry_point projected from app/config/ai.json
 //   3. singleton  — auto-select when exactly one workflow exists
 //   4. null       — no resolution (caller should enter ask-mode or show picker)
 // ==============================================================================

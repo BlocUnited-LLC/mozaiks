@@ -64,7 +64,7 @@ Mozaiks has three distinct producer-side UI contracts. They share primitives, bu
    - Backend producer uses `mozaiksai.core.workflow.ui_tools.use_ui_tool(...)`
    - Declarative manifest type is `UI_Tool`
    - Frontend surface is mounted by `WorkflowUIRouter`
-   - React component receives shell props like `payload`, `onResponse`, `onCancel`, `ui_tool_id`, `eventId`, `workflowName`, `componentId`
+   - React component receives shell props like `payload`, `onResponse`, `onCancel`, `toolName`, `toolCallId`, `workflowName`, `componentId`
 
 2. **One-way artifact/status emitters**
    - Backend producer uses `mozaiksai.core.workflow.ui_tools.emit_ui_surface(...)` when no user response is required
@@ -100,7 +100,7 @@ Persistent app pages should stay declarative by default. The intended customizat
 1. **Define `ExperienceSpec` using page archetypes**
    - Start from higher-level page types such as dashboard, entity-list, entity-detail, feed, thread, or analytics overview.
 2. **Compile archetypes into shipped primitives**
-   - Use richer primitive config, better layout choices, and theme overrides in `app.yaml` + `ui/pages/*.yaml`.
+   - Use richer primitive config, better layout choices, and theme/config artifacts such as `app/app.json`, `brand/theme_config.json`, and `ui/pages/*.yaml`.
 3. **Add a platform-owned primitive, page pattern, or explicit custom slot**
    - If the shipped page registry is insufficient, developers extend `PrimitiveRegistry` and the generator/validator contracts once, then future apps can use that new surface declaratively.
 4. **Use React only for non-page surfaces**
@@ -660,7 +660,7 @@ def register_component(type_name: str, component_class: Type):
 ### Navigation Schema
 
 ```yaml
-# In app.yaml or separate navigation.yaml
+# In config/shell.json or a derived shell projection
 
 navigation:
   # Main navigation items (from pages)
@@ -1110,4 +1110,3 @@ payload:
 | Actions | Button, ActionMenu, Toolbar |
 | Feedback | Alert, Toast, Progress, Skeleton, Empty |
 | Navigation | NavBar, Sidebar, Breadcrumb |
-

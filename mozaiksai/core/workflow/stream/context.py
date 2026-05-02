@@ -112,6 +112,7 @@ class StreamState:
     # Input request tracking
     # Maps request_id -> respond callback
     pending_input_requests: Dict[str, Any] = field(default_factory=dict)
+    awaiting_user_input: bool = False
 
     # Execution tracking
     executed_agents: Set[str] = field(default_factory=set)
@@ -200,4 +201,5 @@ class StreamState:
             "response": self.response,
             "sequence_counter": self.sequence_counter,
             "run_completed": self.run_completed,
+            "awaiting_user_input": bool(self.pending_input_requests),
         }

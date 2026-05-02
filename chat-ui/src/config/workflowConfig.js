@@ -168,7 +168,7 @@ class WorkflowConfig {
 
   /**
    * Get the workflow marked as entry_point in backend config.
-   * Canonical source is platform/config/ai.json; backend projects it onto
+   * Canonical source is app/config/ai.json; backend projects it onto
    * the workflow configs returned by /api/workflows.
    * Returns null if no workflow has entry_point: true or configs aren't loaded yet.
    */

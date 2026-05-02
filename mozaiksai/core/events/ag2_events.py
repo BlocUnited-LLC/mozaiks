@@ -164,9 +164,9 @@ class ArtifactReadyEvent(BaseEvent):
 
 
 @wrap_event
-class UIToolRequestedEvent(BaseEvent):
+class ToolCallRequestedEvent(BaseEvent):
     """Emitted when an agent requests a UI component to be rendered."""
-    ui_tool_id: str
+    tool_name: str
     agent_name: str
     chat_id: str
     workflow_name: str
@@ -174,7 +174,7 @@ class UIToolRequestedEvent(BaseEvent):
     payload: Dict[str, Any] = None
 
     def print(self, f=None):
-        print(f"[UI_TOOL] {self.agent_name} requests {self.ui_tool_id} ({self.display_mode})", file=f)
+        print(f"[TOOL_CALL] {self.agent_name} requests {self.tool_name} ({self.display_mode})", file=f)
 
 
 @wrap_event
@@ -294,17 +294,17 @@ def emit_decomposition_planned(
     ))
 
 
-def emit_ui_tool_requested(
-    ui_tool_id: str,
+def emit_tool_call_requested(
+    tool_name: str,
     agent_name: str,
     chat_id: str,
     workflow_name: str,
     display_mode: str = "inline",
     payload: Optional[Dict[str, Any]] = None,
 ) -> bool:
-    """Convenience function to emit UI tool request."""
-    return emit_ag2_event(UIToolRequestedEvent(
-        ui_tool_id=ui_tool_id,
+    """Convenience function to emit tool call request."""
+    return emit_ag2_event(ToolCallRequestedEvent(
+        tool_name=tool_name,
         agent_name=agent_name,
         chat_id=chat_id,
         workflow_name=workflow_name,
@@ -367,7 +367,7 @@ MOZAIKSAI_RUNTIME_EVENTS = [
     DecompositionPlannedEvent,
     ArtifactUpdatedEvent,
     ArtifactReadyEvent,
-    UIToolRequestedEvent,
+    ToolCallRequestedEvent,
     ContextUpdatedEvent,
 ]
 

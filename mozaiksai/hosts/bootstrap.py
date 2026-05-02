@@ -68,7 +68,7 @@ def configure_repo_host_defaults(host: str) -> None:
         roots.append(str((app_root / "workflows").resolve()))
 
     if repo_root is not None:
-        factory_workflows_root = (repo_root / "factory_app" / "app" / "workflows").resolve()
+        factory_workflows_root = (repo_root / "factory_app" / "workflows").resolve()
         if factory_workflows_root.is_dir():
             roots.append(str(factory_workflows_root))
 

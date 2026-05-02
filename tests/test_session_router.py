@@ -237,7 +237,7 @@ async def test_resolve_transition_persists_pending_transition(monkeypatch):
         user_id="user_1",
         transition_id="entry",
         option_id="continue",
-        context_seed={"app_type": "new"},
+        context_seed={"app_type": "greenfield_app"},
     )
 
     assert resolution.resolution_type == "transition"
@@ -293,7 +293,7 @@ async def test_resolve_transition_routes_to_workflow_and_binds_session(monkeypat
         user_id="user_1",
         transition_id="entry",
         option_id="docs",
-        context_seed={"app_type": "new"},
+        context_seed={"app_type": "greenfield_app"},
     )
 
     assert resolution.resolution_type == "workflow"
@@ -333,7 +333,7 @@ async def test_resolve_transition_merges_option_context_variables(monkeypatch):
                     "transition_type": "user_choice_context",
                     "ui": {"component": "LauncherScreen", "mode": "screen"},
                     "options": [
-                        {"id": "existing_app", "route_to": "ValueEngine", "context_variables": {"app_type": "existing"}},
+                        {"id": "brownfield_app", "route_to": "ValueEngine", "context_variables": {"app_type": "brownfield_app"}},
                     ],
                 }
             ],
@@ -346,13 +346,13 @@ async def test_resolve_transition_merges_option_context_variables(monkeypatch):
         app_id="app_1",
         user_id="user_1",
         transition_id="entry",
-        option_id="existing_app",
+        option_id="brownfield_app",
         context_seed={"source": "route"},
     )
 
     assert resolution.resolution_type == "workflow"
     assert resolution.target_id == "ValueEngine"
-    assert resolution.context_seed == {"source": "route", "app_type": "existing"}
+    assert resolution.context_seed == {"source": "route", "app_type": "brownfield_app"}
 
 
 @pytest.mark.asyncio
@@ -402,11 +402,11 @@ async def test_resolve_condition_transition_uses_context_key(monkeypatch):
                     "context_key": "app_type",
                     "routes": [
                         {
-                            "match": "existing",
+                            "match": "brownfield_app",
                             "route_to": "DesignDocs",
                         },
                         {
-                            "match": "new",
+                            "match": "greenfield_app",
                             "route_to": "AppGenerator",
                         },
                     ],
@@ -422,12 +422,12 @@ async def test_resolve_condition_transition_uses_context_key(monkeypatch):
         app_id="app_1",
         user_id="user_1",
         transition_id="entry",
-        context_seed={"app_type": "existing"},
+        context_seed={"app_type": "brownfield_app"},
     )
 
     assert resolution.resolution_type == "workflow"
     assert resolution.target_id == "DesignDocs"
-    assert resolution.context_seed["app_type"] == "existing"
+    assert resolution.context_seed["app_type"] == "brownfield_app"
 
 
 @pytest.mark.asyncio
@@ -461,12 +461,12 @@ async def test_resolve_silent_transition_without_route_to(monkeypatch):
         app_id="app_1",
         user_id="user_1",
         transition_id="entry",
-        context_seed={"app_type": "new"},
+        context_seed={"app_type": "greenfield_app"},
     )
 
     assert resolution.resolution_type == "transition"
     assert resolution.target_id == "details"
-    assert resolution.context_seed["app_type"] == "new"
+    assert resolution.context_seed["app_type"] == "greenfield_app"
 
     state = await store.load(app_id="app_1", user_id="user_1")
     assert state is not None
@@ -540,7 +540,7 @@ async def test_bind_workflow_session_infers_position_after_entry_transition(monk
                     "id": "app_type_selector",
                     "transition_type": "user_choice_context",
                     "ui": {"component": "AppTypeSelector", "mode": "screen"},
-                    "options": [{"id": "new_app", "route_to": "ValueEngine", "context_variables": {"app_type": "new"}}],
+                    "options": [{"id": "greenfield_app", "route_to": "ValueEngine", "context_variables": {"app_type": "greenfield_app"}}],
                 }
             ],
             "workflow_sequences": [

@@ -589,8 +589,8 @@ class AG2PersistenceManager:
         """Persist latest artifact/tool panel context for multi-user resume.
 
         Expected artifact dict keys (best-effort, flexible):
-            ui_tool_id: str
-            event_id: str | None
+            tool_name: str
+            tool_call_id: str | None
             display: str (e.g., 'artifact')
             workflow_name: str
             payload: arbitrary JSON-safe structure
@@ -610,8 +610,9 @@ class AG2PersistenceManager:
             coll = await self._coll()
             now = datetime.now(UTC)
             doc = {
-                "ui_tool_id": artifact.get("ui_tool_id"),
-                "event_id": artifact.get("event_id"),
+                "tool_name": artifact.get("tool_name"),
+                "tool_call_id": artifact.get("tool_call_id"),
+                "component_type": artifact.get("component_type"),
                 "display": artifact.get("display"),
                 "workflow_name": artifact.get("workflow_name"),
                 # Keep payload shallow (avoid huge memory copies); truncate strings if massive in future enhancement
@@ -624,7 +625,7 @@ class AG2PersistenceManager:
             )
             logger.debug(
                 "[LAST_ARTIFACT] Updated",
-                extra={"chat_id": chat_id, "app_id": resolved_app_id, "ui_tool_id": doc.get("ui_tool_id")},
+                extra={"chat_id": chat_id, "app_id": resolved_app_id, "tool_name": doc.get("tool_name")},
             )
         except Exception as e:  # pragma: no cover
             logger.debug(f"[LAST_ARTIFACT] Update failed chat_id={chat_id}: {e}")
@@ -1680,7 +1681,7 @@ class AG2PersistenceManager:
             return result
 
     # UI Tool Persistence -----------------------------------------------
-    async def attach_ui_tool_metadata(
+    async def attach_tool_call_metadata(
         self,
         *,
         chat_id: str,
@@ -1688,17 +1689,11 @@ class AG2PersistenceManager:
         event_id: str,
         metadata: Dict[str, Any]
     ) -> None:
-        """Attach UI tool metadata to the most recent agent message.
-        
-        This enables UI tool state to persist across reconnections.
-        When a UI tool is invoked, we store its configuration and state
+        """Attach tool-call metadata to the most recent agent message.
+
+        This enables workflow UI state to persist across reconnections.
+        When a tool call is emitted, we store its configuration and state
         in the last agent message's metadata field.
-        
-        Args:
-            chat_id: Chat session identifier
-            app_id: App identifier
-            event_id: UI tool event identifier (for correlation)
-            metadata: UI tool metadata (ui_tool_id, display, payload, etc.)
         """
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
@@ -1713,12 +1708,12 @@ class AG2PersistenceManager:
             )
             
             if not doc:
-                logger.warning(f"[UI_TOOL_METADATA] Chat {chat_id} not found")
+                logger.debug(f"[TOOL_CALL_METADATA] Chat {chat_id} not found")
                 return
             
             messages = doc.get("messages", [])
             if not messages:
-                logger.warning(f"[UI_TOOL_METADATA] No messages in chat {chat_id}")
+                logger.debug(f"[TOOL_CALL_METADATA] No messages in chat {chat_id}")
                 return
             
             # Find the last assistant message index
@@ -1730,10 +1725,10 @@ class AG2PersistenceManager:
                     break
             
             if last_assistant_idx is None:
-                logger.warning(f"[UI_TOOL_METADATA] No assistant message found in {chat_id}")
+                logger.debug(f"[TOOL_CALL_METADATA] No assistant message found in {chat_id}")
                 return
             
-            # Update the specific message with ui_tool metadata
+            # Update the specific message with tool_call metadata
             result = await coll.update_one(
                 {
                     "_id": chat_id,
@@ -1742,7 +1737,7 @@ class AG2PersistenceManager:
                 {
                     "$set": {
                         f"messages.{last_assistant_idx}.metadata": {
-                            "ui_tool": metadata
+                            "tool_call": metadata
                         }
                     }
                 }
@@ -1750,73 +1745,66 @@ class AG2PersistenceManager:
             
             if result.modified_count > 0:
                 logger.info(
-                    f"[UI_TOOL_METADATA] Attached ui_tool metadata to message[{last_assistant_idx}] "
-                    f"in {chat_id} (tool={metadata.get('ui_tool_id')}, event={event_id})"
+                    f"[TOOL_CALL_METADATA] Attached tool_call metadata to message[{last_assistant_idx}] "
+                    f"in {chat_id} (tool={metadata.get('tool_name')}, event={event_id})"
                 )
             else:
-                logger.warning(f"[UI_TOOL_METADATA] Failed to update message in {chat_id}")
+                logger.debug(f"[TOOL_CALL_METADATA] Failed to update message in {chat_id}")
         except Exception as e:
-            logger.error(f"[UI_TOOL_METADATA] Failed to attach metadata for {chat_id}: {e}", exc_info=True)
+            logger.error(f"[TOOL_CALL_METADATA] Failed to attach metadata for {chat_id}: {e}", exc_info=True)
 
-    async def update_ui_tool_completion(
+    async def update_tool_call_state(
         self,
         *,
         chat_id: str,
         app_id: Optional[str] = None,
         event_id: str,
-        completed: bool,
-        status: str
+        status: str,
+        completed: Optional[bool] = None,
     ) -> None:
-        """Update UI tool completion status in persisted message metadata.
-        
-        Called after a UI tool interaction completes to mark the tool as done.
-        This ensures that on reconnect, completed inline components show
-        a "Completed" chip instead of the interactive component.
-        
-        Args:
-            chat_id: Chat session identifier
-            app_id: App identifier
-            event_id: UI tool event identifier (for correlation)
-            completed: Whether the tool interaction is complete
-            status: Completion status ("completed", "dismissed", etc.)
-        """
+        """Update persisted tool-call lifecycle state for reconnect/resume."""
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
         try:
             coll = await self._coll()
-            
-            # Find the message with matching ui_tool.event_id
+            now = datetime.now(UTC).isoformat()
+            updates: Dict[str, Any] = {
+                "messages.$[elem].metadata.tool_call.tool_call_status": status,
+            }
+            if completed is not None:
+                updates["messages.$[elem].metadata.tool_call.tool_call_completed"] = completed
+            if status == "responded":
+                updates["messages.$[elem].metadata.tool_call.responded_at"] = now
+            if completed or status in {"completed", "dismissed", "cancelled", "skipped"}:
+                updates["messages.$[elem].metadata.tool_call.completed_at"] = now
+
             result = await coll.update_one(
                 {
                     "_id": chat_id,
                     **build_app_scope_filter(str(resolved_app_id)),
-                    "messages.metadata.ui_tool.event_id": event_id
+                    "messages.metadata.tool_call.tool_call_id": event_id
                 },
                 {
-                    "$set": {
-                        "messages.$[elem].metadata.ui_tool.ui_tool_completed": completed,
-                        "messages.$[elem].metadata.ui_tool.ui_tool_status": status,
-                        "messages.$[elem].metadata.ui_tool.completed_at": datetime.now(UTC).isoformat()
-                    }
+                    "$set": updates
                 },
                 array_filters=[
-                    {"elem.metadata.ui_tool.event_id": event_id}
+                    {"elem.metadata.tool_call.tool_call_id": event_id}
                 ]
             )
             
             if result.modified_count > 0:
                 logger.info(
-                    f"[UI_TOOL_COMPLETE] Updated completion for event={event_id} "
+                    f"[TOOL_CALL_STATE] Updated tool_call state for event={event_id} "
                     f"in {chat_id} (completed={completed}, status={status})"
                 )
             else:
-                logger.warning(
-                    f"[UI_TOOL_COMPLETE] No message found with ui_tool.event_id={event_id} "
+                logger.debug(
+                    f"[TOOL_CALL_STATE] No message found with tool_call.tool_call_id={event_id} "
                     f"in {chat_id}"
                 )
         except Exception as e:
-            logger.error(f"[UI_TOOL_COMPLETE] Failed to update completion for {chat_id}: {e}", exc_info=True)
+            logger.error(f"[TOOL_CALL_STATE] Failed to update tool_call state for {chat_id}: {e}", exc_info=True)
 
     # Pending Input Request Persistence ------------------------------------
     async def save_pending_input_request(
@@ -1827,6 +1815,13 @@ class AG2PersistenceManager:
         request_id: str,
         agent: str,
         prompt: str,
+        component_type: Optional[str] = None,
+        workflow_name: Optional[str] = None,
+        tool_name: Optional[str] = None,
+        display: str = "inline",
+        interaction_type: str = "input_request",
+        password: bool = False,
+        raw_payload: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Save pending input request state to the chat document.
 
@@ -1853,6 +1848,13 @@ class AG2PersistenceManager:
                             "request_id": request_id,
                             "agent": agent,
                             "prompt": prompt,
+                            "component_type": component_type,
+                            "workflow_name": workflow_name,
+                            "tool_name": tool_name,
+                            "display": display,
+                            "interaction_type": interaction_type,
+                            "password": bool(password),
+                            "raw_payload": raw_payload if isinstance(raw_payload, dict) else {},
                             "created_at": datetime.now(UTC).isoformat(),
                         },
                         "last_updated_at": datetime.now(UTC),

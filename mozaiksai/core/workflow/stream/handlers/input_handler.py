@@ -18,6 +18,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, Dict, Optional, Set, Type
 
 from .base import BaseEventHandler
+from mozaiksai.core.events.event_serialization import serialize_event_content
 
 if TYPE_CHECKING:
     from ..context import StreamContext, StreamState
@@ -36,6 +37,46 @@ def _normalize_prompt_hint(prompt_hint: Any) -> tuple[str, str, bool]:
     if _GENERIC_GROUP_FEEDBACK_PROMPT_RE.match(prompt_text):
         return "", "ag2_group_feedback_compat", True
     return prompt_text, "input_request_event", False
+
+
+def _extract_component_hint(request_obj: Any) -> Optional[str]:
+    if request_obj is None:
+        return None
+    try:
+        if hasattr(request_obj, "tool_name"):
+            value = getattr(request_obj, "tool_name", None)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        if isinstance(request_obj, dict):
+            for key in ("tool_name", "component", "component_type"):
+                value = request_obj.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+    except Exception:
+        return None
+    return None
+
+
+def _extract_request_payload(request_obj: Any) -> Dict[str, Any]:
+    raw_payload: Any = None
+    try:
+        if request_obj is not None:
+            if hasattr(request_obj, "model_dump"):
+                raw_payload = request_obj.model_dump()  # type: ignore[attr-defined]
+            elif isinstance(request_obj, dict):
+                raw_payload = dict(request_obj)
+    except Exception:
+        raw_payload = None
+
+    if not isinstance(raw_payload, dict):
+        return {}
+
+    raw_payload.pop("respond", None)
+    try:
+        serialized = serialize_event_content(raw_payload)
+        return serialized if isinstance(serialized, dict) else {}
+    except Exception:
+        return {}
 
 
 class InputRequestHandler(BaseEventHandler):
@@ -102,31 +143,6 @@ class InputRequestHandler(BaseEventHandler):
         if not callable(respond_cb) and request_obj is not None:
             respond_cb = getattr(request_obj, "respond", None)
 
-        if callable(respond_cb):
-            # Store in state for tracking
-            state.pending_input_requests[request_id] = respond_cb
-
-            # Register with transport for user input handling
-            try:
-                if ctx.transport:
-                    registered_id = ctx.transport.register_input_request(
-                        ctx.chat_id, request_id, respond_cb
-                    )
-                    # Transport may return a different ID
-                    if registered_id and registered_id != request_id:
-                        state.pending_input_requests.pop(request_id, None)
-                        state.pending_input_requests[registered_id] = respond_cb
-                        setattr(event, "_mozaiks_request_id", registered_id)
-                        request_id = registered_id
-            except Exception as e:
-                ctx.wf_logger.debug(
-                    f"Failed to register input request {request_id}: {e}"
-                )
-        else:
-            ctx.wf_logger.debug(
-                f"No respond callback available for input request {request_id}"
-            )
-
         # Extract prompt hint if available
         prompt_hint = getattr(event, "prompt", None)
         if prompt_hint is None and request_obj is not None:
@@ -146,6 +162,52 @@ class InputRequestHandler(BaseEventHandler):
                     f"for input request {request_id}"
                 )
 
+        state.awaiting_user_input = True
+
+        if callable(respond_cb):
+            state.pending_input_requests[request_id] = respond_cb
+
+            try:
+                if ctx.transport:
+                    registered_id = ctx.transport.register_input_request(
+                        ctx.chat_id, request_id, respond_cb
+                    )
+                    if registered_id and registered_id != request_id:
+                        state.pending_input_requests.pop(request_id, None)
+                        state.pending_input_requests[registered_id] = respond_cb
+                        setattr(event, "_mozaiks_request_id", registered_id)
+                        request_id = registered_id
+            except Exception as e:
+                ctx.wf_logger.debug(
+                    f"Failed to register input request {request_id}: {e}"
+                )
+        else:
+            ctx.wf_logger.debug(
+                f"No respond callback available for input request {request_id}"
+            )
+
+        component_hint = _extract_component_hint(request_obj)
+        component_type = component_hint or "UserInputRequest"
+        tool_name = component_hint or component_type
+        display_mode = "inline"
+        request_payload = _extract_request_payload(request_obj)
+        password = bool(
+            getattr(event, "password", False)
+            or request_payload.get("password", False)
+        )
+        normalized_payload = {
+            **request_payload,
+            "input_request_id": request_id,
+            "request_id": request_id,
+            "prompt": prompt_hint or "",
+            "password": password,
+            "workflow_name": ctx.workflow_name,
+            "component_type": component_type,
+            "display": request_payload.get("display") or request_payload.get("mode") or display_mode,
+            "mode": request_payload.get("mode") or request_payload.get("display") or display_mode,
+            "interaction_type": "input_request",
+        }
+
         # Persist pending input request for resume support
         try:
             await ctx.persistence_manager.save_pending_input_request(
@@ -154,17 +216,32 @@ class InputRequestHandler(BaseEventHandler):
                 request_id=request_id,
                 agent=state.turn_agent or "Agent",
                 prompt=prompt_hint or "",
+                component_type=component_type,
+                workflow_name=ctx.workflow_name,
+                tool_name=tool_name,
+                display=display_mode,
+                interaction_type="input_request",
+                password=password,
+                raw_payload=request_payload,
             )
         except Exception as e:
             ctx.wf_logger.debug(f"Failed to persist pending input request: {e}")
 
-        # Build input_request payload for UI
+        # Build response-required workflow UI payload for transport.
         return {
-            "kind": "input_request",
-            "request_id": request_id,
+            "kind": "tool_call",
+            "tool_call_id": request_id,
+            "corr": request_id,
+            "tool_name": tool_name,
+            "component_type": component_type,
+            "workflow_name": ctx.workflow_name,
+            "interaction_type": "input_request",
+            "awaiting_response": True,
+            "display": display_mode,
+            "display_type": display_mode,
             "agent": state.turn_agent or "Agent",
-            "prompt": prompt_hint or "",
             "chat_id": ctx.chat_id,
+            "payload": normalized_payload,
             "metadata": {
                 "source": metadata_source,
                 "has_respond_callback": callable(respond_cb),

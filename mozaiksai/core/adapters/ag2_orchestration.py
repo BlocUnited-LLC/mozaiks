@@ -266,12 +266,14 @@ class AG2OrchestrationAdapter:
             )
 
         run_completed = bool(raw.get("run_completed", False))
+        awaiting_user_input = bool(raw.get("awaiting_user_input", False))
+        run_status = raw.get("run_status")
 
-        if run_completed:
+        if run_completed and not awaiting_user_input and str(run_status) not in {"0", "in_progress", "paused"}:
             status = RunStatus.COMPLETED
+        elif awaiting_user_input or not run_completed:
+            status = RunStatus.PAUSED
         else:
-            # AG2 finished (generator exhausted) but no explicit run_complete event.
-            # This can happen with max_turns or other termination conditions.
             status = RunStatus.COMPLETED
 
         return RunResult(

@@ -3,6 +3,7 @@
  *
  * All workflow starts converge here regardless of trigger source:
  *   - transition resolution → trigger_source: "transition"
+ *   - persistent page action → trigger_source: "page"
  *   - action button      → trigger_source: "action", action_id: "..."
  *   - routed non-chat trigger → trigger_source: "refinement" | "route" | ..., trigger_payload: {...}
  *   - direct chat        → trigger_source: "chat" (default)

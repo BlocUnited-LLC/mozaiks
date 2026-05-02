@@ -34,7 +34,7 @@ class ChatUIConfig {
         // Auth system configured via runtime auth endpoints
         defaultAppId: process.env.REACT_APP_DEFAULT_APP_ID || process.env.REACT_APP_DEFAULT_app_id,
         // Workflow resolution handled by resolveWorkflow() utility
-        // (backend entry_point derived from platform/config/ai.json → singleton auto-select → null)
+        // (backend entry_point derived from app/config/ai.json → singleton auto-select → null)
       },
     };
 

@@ -142,32 +142,23 @@ GET /api/sessions/list/{app_id}/{user_id}?workflow_name=ValueEngine&limit=10&off
 
 ---
 
-### 6. Submit User Input (REST)
+### 6. Submit UI Tool Response (WebSocket)
 
-```http
-POST /api/user-input/submit
-Content-Type: application/json
-```
+Response-required interactions are delivered on the chat stream as
+`chat.tool_call` envelopes with `awaiting_response=true`. Clients answer them by
+posting a `tool_call_response` message on the active websocket connection.
 
 **Request:**
 ```json
 {
-  "app_id": "app_456",
-  "chat_id": "550e8400...",
-  "user_id": "user_123",
-  "message": "I want to build a task management app"
+  "type": "tool_call_response",
+  "event_id": "evt_123",
+  "component_id": "comp_456",
+  "response_data": {
+    "value": "I want to build a task management app"
+  }
 }
 ```
-
-**Response:**
-```json
-{
-  "success": true,
-  "queued": true
-}
-```
-
-> Note: Response comes via WebSocket, not this endpoint.
 
 ---
 
@@ -387,7 +378,7 @@ All errors follow this format:
 | `client.StartChatAsync()` | `POST /api/chats/{app_id}/{workflow}/start` |
 | `client.GetChatAsync()` | `GET /api/chats/meta/{app_id}/{workflow}/{chat_id}` |
 | `client.ListSessionsAsync()` | `GET /api/sessions/list/{app_id}/{user_id}` |
-| `client.SendMessageAsync()` | `POST /api/user-input/submit` |
+| `client.SendMessageAsync()` | `WS tool_call_response` |
 | `client.UploadFileAsync()` | `POST /api/chat/upload/{app_id}/{user_id}` |
 | `client.TriggerWorkflowAsync()` | `POST /api/workflows/{workflow}/trigger` |
 | `client.ConnectChatAsync()` | `WS /ws/{workflow}/{app_id}/{chat_id}/{user_id}` |

@@ -1,0 +1,58 @@
+definitions:
+  concept_overview:
+    type: string
+    description: Project description and overview from the Concepts collection (produced
+      by ValueEngine).
+    source:
+      type: data_reference
+      database_name: autogen_ai_agents
+      collection: Concepts
+      query_template:
+        app_id: '{{runtime.app_id}}'
+      fields:
+      - ConceptOverview
+      default: null
+  monetization_enabled:
+    type: boolean
+    description: Flag indicating if monetization features are enabled.
+    source:
+      type: config
+      env_var: MONETIZATION_ENABLED
+      default: false
+  coding_participation:
+    type: string
+    description: Build participation mode selected at the transition checkpoint after theme capture.
+    source:
+      type: state
+      default: autonomous
+  design_docs_hitl:
+    type: boolean
+    description: True when the user selected a guided design-doc checkpoint before generation continues.
+    source:
+      type: state
+      default: false
+  database_provider:
+    type: string
+    description: >
+      Database provider selected at the build transition checkpoint.
+      MongoDB is the current canonical provider.
+    source:
+      type: state
+      default: mongodb
+  database_setup_mode:
+    type: string
+    description: >
+      Database setup mode selected at the build transition checkpoint:
+      local, atlas, existing_uri, or skip.
+    source:
+      type: state
+      default: local
+agents:
+  DesignDocsAgent:
+    variables:
+    - concept_overview
+    - monetization_enabled
+    - coding_participation
+    - design_docs_hitl
+    - database_provider
+    - database_setup_mode
