@@ -94,7 +94,6 @@ nav:
   - Home: index.md
   - Start Here:
       - Getting Started: getting-started.md
-      - First-Run Ritual: first-run-ritual.md
   - Guides:
     - Add Workflows: guides/adding-workflows/01-overview.md
     - App Shell And Branding: guides/custom-brand-integration/01-overview.md
