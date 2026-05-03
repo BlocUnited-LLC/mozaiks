@@ -16,7 +16,7 @@ def _load_handler_module():
     elif workspace_path:
         app_root = Path(workspace_path) / "app"
     else:
-        pytest.skip("No active app workspace configured. Set MOZAIKS_APP_WORKSPACE_PATH or PLATFORM_PATH.")
+        pytest.skip("No active app workspace configured. Set MOZAIKS_APP_WORKSPACE_PATH or PLATFORM_PATH.", allow_module_level=True)
     file_path = app_root / "modules" / "investor_marketplace" / "backend" / "handler.py"
     module_name = "tests.investor_marketplace_handler_direct"
     spec = importlib.util.spec_from_file_location(module_name, file_path)

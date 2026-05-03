@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from factory_app.app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
+from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
 from mozaiksai.core.admin import build_app_backend_admin_code_files
 from mozaiksai.core.workflow.generator_support.code_files import (
     extract_code_file_map_from_payload,

@@ -12,11 +12,40 @@ def _workspace() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+_FACTORY_APP_PATH = str(_workspace() / "factory_app")
+
+
+@pytest.fixture(autouse=True)
+def _clean_factory_app_syspath():
+    """Ensure factory_app/ is on sys.path during the test and clean up imported workflow modules after."""
+    added = _FACTORY_APP_PATH not in sys.path
+    if added:
+        sys.path.insert(0, _FACTORY_APP_PATH)
+
+    # Track modules added during the test
+    before = set(sys.modules.keys())
+
+    yield
+
+    # Remove only workflow-namespace modules added during the test to avoid cross-test pollution.
+    # Do NOT remove mozaiksai.* modules — other tests in the suite depend on them staying cached.
+    added_keys = [
+        k for k in sys.modules
+        if k not in before and (k.startswith("workflows.") or k.startswith("factory_app."))
+    ]
+    for k in added_keys:
+        del sys.modules[k]
+
+    if added:
+        try:
+            sys.path.remove(_FACTORY_APP_PATH)
+        except ValueError:
+            pass
+
+
 def _import_workflow_module(module_name: str):
-    workflow_root = _workspace() / "factory_app" / "app"
-    workflow_root_str = str(workflow_root)
-    if workflow_root_str not in sys.path:
-        sys.path.insert(0, workflow_root_str)
+    """Import a workflow tool file by dotted path under factory_app/workflows/."""
+    # factory_app/ is already on sys.path via the autouse fixture
     return importlib.import_module(module_name)
 
 

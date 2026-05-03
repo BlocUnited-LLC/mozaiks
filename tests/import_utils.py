@@ -3,6 +3,9 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
+from pathlib import Path
+
+import pytest
 
 
 def import_module_directly(module_name: str):
@@ -41,5 +44,32 @@ def import_module_directly(module_name: str):
     return mod
 
 
-__all__ = ["import_module_directly"]
+def active_app_root() -> Path:
+    """Return the active app workspace root. Skips the calling test if not configured."""
+    platform_path = os.environ.get("PLATFORM_PATH", "").strip()
+    if platform_path:
+        candidate = Path(platform_path)
+        if (candidate / "app.json").exists():
+            return candidate.resolve()
+        nested = candidate / "app"
+        if (nested / "app.json").exists():
+            return nested.resolve()
+        return candidate.resolve()
+
+    workspace_path = os.environ.get("MOZAIKS_APP_WORKSPACE_PATH", "").strip()
+    if workspace_path:
+        candidate = Path(workspace_path)
+        nested = candidate / "app"
+        if (nested / "app.json").exists():
+            return nested.resolve()
+        if (candidate / "app.json").exists():
+            return candidate.resolve()
+
+    pytest.skip(
+        "No active app workspace configured. "
+        "Set MOZAIKS_APP_WORKSPACE_PATH or PLATFORM_PATH to run this test."
+    )
+
+
+__all__ = ["import_module_directly", "active_app_root"]
 

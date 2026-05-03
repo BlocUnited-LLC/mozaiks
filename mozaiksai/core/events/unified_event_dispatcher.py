@@ -33,8 +33,6 @@ from mozaiksai.core.events.runtime_events import (
     RUNTIME_PROCESS_COMPLETED,
 )
 from mozaiksai.core.events.usage_ingest import get_usage_ingest_client
-from mozaiksai.core.workflow.pack.workflow_pack_coordinator import WorkflowPackCoordinator
-from mozaiksai.core.workflow.pack.journey_orchestrator import JourneyOrchestrator
 from mozaiksai.core.workflow.runtime_signals import SYSTEM_RESUME_SIGNAL
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
 from logs.logging_config import get_core_logger, get_workflow_logger
@@ -173,6 +171,8 @@ class UnifiedEventDispatcher:
             "events_by_category": {"business": 0, "tool_call": 0},
             "created": datetime.now(UTC).isoformat(),
         }
+        from mozaiksai.core.workflow.pack.workflow_pack_coordinator import WorkflowPackCoordinator
+        from mozaiksai.core.workflow.pack.journey_orchestrator import JourneyOrchestrator
         self._auto_tool_handler = AutoToolEventHandler()
         self._pack_coordinator = WorkflowPackCoordinator()
         self._journey_orchestrator = JourneyOrchestrator()

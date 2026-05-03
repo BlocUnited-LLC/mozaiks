@@ -38,7 +38,7 @@ def test_appgenerator_build_plan_preserves_event_flows() -> None:
     assert models["AppBuildPlan"]["fields"]["event_flows"]["items"] == "AppEventFlow"
 
     source = _read("factory_app/workflows/AppGenerator/agents.yaml")
-    assert "11c. **event architecture rule**" in source
+    assert "**event architecture rule**" in source
     assert "`event_flows[].event_type` must be a namespaced `domain.{module_id}.{event_name}`" in source
     assert "Workflow reactions must reference `workflow_capability_ids`; do not put raw workflow names" in source
 

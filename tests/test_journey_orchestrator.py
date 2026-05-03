@@ -12,6 +12,15 @@ _session_router = import_module_directly("mozaiksai.core.session.router")
 _session_pkg = types.ModuleType("mozaiksai.core.session")
 _session_pkg.TriggerInput = _session_model.TriggerInput
 _session_pkg.get_session_router = _session_router.get_session_router
+
+# Save originals before patching so they can be restored after this module's
+# collection-time setup is complete.  The fake transport with __path__ = []
+# would prevent `mozaiksai.core.transport.rate_limit` from being found in
+# later test files collected in the same session.
+_orig_session = sys.modules.get("mozaiksai.core.session")
+_orig_transport = sys.modules.get("mozaiksai.core.transport")
+_orig_session_registry = sys.modules.get("mozaiksai.core.transport.session_registry")
+
 sys.modules["mozaiksai.core.session"] = _session_pkg
 _transport_pkg = types.ModuleType("mozaiksai.core.transport")
 _transport_pkg.__path__ = []
@@ -23,6 +32,18 @@ _session_registry_mod.session_registry = types.SimpleNamespace(
 sys.modules["mozaiksai.core.transport"] = _transport_pkg
 sys.modules["mozaiksai.core.transport.session_registry"] = _session_registry_mod
 _journey_mod = import_module_directly("mozaiksai.core.workflow.pack.journey_orchestrator")
+
+# Restore originals so subsequent test files can import the real transport.
+def _restore(key, original):
+    if original is None:
+        sys.modules.pop(key, None)
+    else:
+        sys.modules[key] = original
+
+_restore("mozaiksai.core.session", _orig_session)
+_restore("mozaiksai.core.transport", _orig_transport)
+_restore("mozaiksai.core.transport.session_registry", _orig_session_registry)
+del _restore, _orig_session, _orig_transport, _orig_session_registry
 
 JourneyOrchestrator = _journey_mod.JourneyOrchestrator
 JourneyAdvanceDecision = _session_model.JourneyAdvanceDecision

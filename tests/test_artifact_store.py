@@ -5,10 +5,24 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import sys
+
 from tests.import_utils import import_module_directly
+
+# Save the real mozaiksai.core.artifacts before import_module_directly creates a
+# fake parent stub for it.  Restoring it afterwards ensures that later test files
+# can still do `from mozaiksai.core.artifacts import ChangeClassification`.
+_orig_artifacts_pkg = sys.modules.get("mozaiksai.core.artifacts")
 
 _artifact_models_mod = import_module_directly("mozaiksai.core.artifacts.models")
 _artifact_store_mod = import_module_directly("mozaiksai.core.artifacts.store")
+
+# Restore the real package (or remove the fake stub if none existed before)
+if _orig_artifacts_pkg is None:
+    sys.modules.pop("mozaiksai.core.artifacts", None)
+else:
+    sys.modules["mozaiksai.core.artifacts"] = _orig_artifacts_pkg
+del _orig_artifacts_pkg
 
 ArtifactLifecycleStatus = _artifact_models_mod.ArtifactLifecycleStatus
 ArtifactValidationStatus = _artifact_models_mod.ArtifactValidationStatus
