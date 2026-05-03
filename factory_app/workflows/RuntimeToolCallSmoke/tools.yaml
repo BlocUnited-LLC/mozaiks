@@ -8,4 +8,5 @@ tools:
   ui:
     component: UserInputRequest
     mode: inline
+    workflow_primitive: form_card
 lifecycle_tools: []

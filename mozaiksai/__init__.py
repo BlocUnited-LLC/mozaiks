@@ -19,5 +19,6 @@ full-stack entrypoint.
 """
 
 from mozaiksai.factory import create_mozaiks_app
+from mozaiksai.version import __version__
 
-__all__ = ["create_mozaiks_app"]
+__all__ = ["__version__", "create_mozaiks_app"]

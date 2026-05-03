@@ -458,7 +458,7 @@ class GroupChatResumer:
         component_type: Optional[str] = None,
         workflow_name: Optional[str] = None,
         tool_name: Optional[str] = None,
-        display: str = "inline",
+        display: str = "composer",
         interaction_type: str = "input_request",
         password: bool = False,
         raw_payload: Optional[Dict[str, Any]] = None,
@@ -466,7 +466,7 @@ class GroupChatResumer:
         """Build a response-required tool_call payload for UI resume."""
         resolved_component = component_type or "UserInputRequest"
         resolved_tool_name = tool_name or component_type or resolved_component
-        resolved_display = display or "inline"
+        resolved_display = display or "composer"
         payload = {
             **(raw_payload if isinstance(raw_payload, dict) else {}),
             "input_request_id": request_id,

@@ -20,8 +20,8 @@ That means the canonical model is:
 1. Mozaiks ships reusable runtime and shell dependencies
 2. the factory layer produces app artifacts
 3. each generated app becomes its own workspace/repository
-4. App Zero uses the same app-workspace contract, even if it remains in this
-   repo during transition
+4. hosted product workspaces use the same app-workspace contract from their own
+   repos
 
 ## The Five Artifact Types
 
@@ -89,11 +89,11 @@ Canonical target:
 
 Current implementation state:
 
-- `factory_app/app/` is the current first-party factory workspace
+- `factory_app/app/` is the current first-party Studio app bundle
 - shared builder workflows live under `factory_app/workflows/`
-- App Zero consumes that factory layer through multi-root workflow loading and
-   a product-owned overlay registry at
-   `mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`
+- active app workspaces consume that factory layer through multi-root workflow
+  loading; any product-owned overlay registry lives in the product workspace,
+  not in this repo
 
 ### 4. App workspace
 
@@ -124,17 +124,17 @@ Rules:
 - app behavior is declared and extended inside that workspace
 - promotion lands validated artifacts into that workspace
 
-### 5. App Zero / Mozaiks product workspace
+### 5. Hosted product workspace
 
-App Zero is a real app workspace built on the same substrate.
+A hosted Mozaiks product is a real app workspace built on the same substrate.
 
-It may also carry hosted-only product capabilities, but it should still follow
-the same app-workspace contract as generated apps.
+It may carry hosted-only product capabilities, but it should still follow the
+same app-workspace contract as generated apps.
 
 Canonical target:
 
 ```text
-mozaiks-platform/
+hosted-product/
 └── app/
     ├── app.json
     ├── config/
@@ -149,8 +149,8 @@ mozaiks-platform/
 
 Current implemented state in this repo:
 
-- `mozaiks-platform/app/` is the active App Zero app root
-- App Zero now keeps `ui/` and `brand/` inside that app root
+- `factory_app/app/` is the first-party Studio app bundle
+- hosted product workspaces are expected to live outside this repo
 
 ## How Apps Should Be Created
 
@@ -173,12 +173,11 @@ Current composition rule in this repo:
 - the active app workspace is resolved first
 - that app root's `workflows/` load first
 - `factory_app/workflows/` loads second as the shared builder layer
-- App Zero keeps product-owned workflow definitions under
-   `mozaiks-platform/app/workflows/`, with its overlay registry at
-   `mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`
+- product-owned overlay workflows stay under the active app root's
+  `workflows/` directory
 
-That is the same composition model that should survive when `mozaiks-platform`
-moves to its own repository.
+That is the same composition model that should survive when a hosted product
+workspace lives in its own repository.
 
 ## OSS Versus Hosted
 
@@ -219,7 +218,7 @@ The current repo contains both canonical pieces and transitional layout.
 
 ### Transitional layout that should not be deepened
 
-- App Zero-specific product concerns leaking into shared framework ownership
+- hosted product concerns leaking into shared framework ownership
 
 ## Canonical Decisions
 
@@ -227,12 +226,12 @@ These are the decisions the rest of the docs should follow.
 
 1. Generated apps should become standalone workspaces/repositories.
 2. The factory layer must not permanently live inside an app workspace.
-3. Shared generation workflows must not live inside App Zero or any app
-   workspace.
+3. Shared generation workflows must not live inside a hosted product workspace
+   or any customer app workspace.
 4. App workspaces should be self-contained: `config/`, `ui/pages/`, `workflows/`,
    `modules/`, `ui/`, and `brand/` belong together.
-5. App Zero should use the same workspace contract as generated apps, with
-   hosted-only capabilities layered above it.
+5. Hosted product workspaces should use the same workspace contract as
+   generated apps, with hosted-only capabilities layered above it.
 6. OSS and hosted should differ primarily in deployment/product capabilities,
    not in the app artifact contract.
 
@@ -242,4 +241,3 @@ These are the decisions the rest of the docs should follow.
 - [workflow-architecture.md](./workflow-architecture.md)
 - [architecture-overview.md](./architecture-overview.md)
 - repo-root `ARCHITECTURE.md`
-

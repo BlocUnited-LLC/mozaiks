@@ -200,7 +200,7 @@ Rules:
 - Named React imports only. No `import React from 'react'`.
 - `typography.js` font-stack constants (`--font-heading`, `--font-body`) are acceptable
   for font-family only; they are not color tokens and are not affected by the v2 token rules.
-- Custom Route UI must not import from `factory_app/app/ui/studio/` or `chat-ui/src/admin/`.
+- Custom Route UI must not import from `factory_app/app/ui/pages/custom/studio/` or `chat-ui/src/admin/`.
   The dependency flows one way: app custom routes build on the substrate.
 
 ## Decision Guide

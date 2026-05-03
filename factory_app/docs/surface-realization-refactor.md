@@ -19,6 +19,14 @@ concepts in a few important places:
   with runtime app modules under `app/modules/*`.
 - `AppGenerator` effectively treats most business capability packs as modules.
 
+This document assumes the lifecycle contract in
+`factory_app/docs/end-to-end-build-lifecycle.md`, especially the distinction
+between:
+
+- scaffolded active workspace
+- staged generated artifacts
+- explicit promotion into a runnable app root
+
 This refactor introduces one missing concept:
 
 - `surface_kind`: the realization boundary for a planned surface

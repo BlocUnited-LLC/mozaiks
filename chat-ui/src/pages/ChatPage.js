@@ -2227,6 +2227,107 @@ const ChatPage = () => {
         }
         return;
       }
+      // ── ui.* typed event contract (L2) ──────────────────────────────────
+      case 'ui.render': {
+        // Typed contract fields mirror UIRenderData from ui_events.py.
+        const inner = data.data || {};
+        const component  = inner.component || inner.component_type || '';
+        const displayMode = inner.display_mode || inner.display || 'inline';
+        const toolCallId  = inner.tool_call_id || null;
+        const workflow    = inner.workflow || inner.workflow_name || currentWorkflowName;
+        const agent       = inner.agent || inner.agent_name || null;
+        const awaiting    = inner.awaiting_response !== false;
+        const basePayload = inner.payload || {};
+        const toolName    = inner.tool_name || component;
+        const interactionType = inner.interaction_type || (awaiting ? 'ui_tool' : 'ui_surface');
+
+        console.log('🛠️ [UI_RENDER] Received ui.render:', { toolName, component, displayMode, toolCallId });
+
+        const sendResponse = (responseData) => {
+          const activeWs = wsRef.current;
+          if (activeWs && activeWs.send) return activeWs.send(responseData);
+          console.warn('⚠️ No WebSocket available for ui.render response');
+          return false;
+        };
+
+        dynamicUIHandler.processUIEvent({
+          type: 'ui.render',
+          tool_name: toolName,
+          component: component,
+          component_type: component,
+          tool_call_id: toolCallId || undefined,
+          workflow: workflow,
+          workflow_name: workflow,
+          display: displayMode,
+          display_mode: displayMode,
+          awaiting_response: awaiting,
+          agent,
+          agentName: agent,
+          interaction_type: interactionType,
+          payload: {
+            ...basePayload,
+            component_type: component,
+            workflow_name: workflow,
+            awaiting_response: awaiting,
+            interaction_type: interactionType,
+            display: displayMode,
+          },
+        }, sendResponse);
+
+        try {
+          if (displayMode === 'artifact') {
+            setLayoutMode && setLayoutMode('split');
+            setIsSidePanelOpen && setIsSidePanelOpen(true);
+          }
+        } catch (e) {}
+        return;
+      }
+
+      case 'ui.update': {
+        // Patch a live component's payload without re-mounting.
+        const inner = data.data || {};
+        const patchId = inner.tool_call_id || null;
+        const patch   = inner.patch || {};
+        if (patchId) {
+          const applyPatch = (msg) => {
+            if (msg?.toolCall?.tool_call_id === patchId || msg?.metadata?.toolCallId === patchId) {
+              return {
+                ...msg,
+                toolCall: msg.toolCall
+                  ? { ...msg.toolCall, payload: { ...(msg.toolCall.payload || {}), ...patch } }
+                  : msg.toolCall,
+              };
+            }
+            return msg;
+          };
+          setMessagesWithLogging(prev => prev.map(applyPatch));
+          setCurrentArtifactMessages(prev => prev.map(applyPatch));
+        }
+        return;
+      }
+
+      case 'ui.dismiss': {
+        // Tear down a rendered component — same logic as tool_call_dismiss.
+        const inner = data.data || {};
+        const dismissedId = inner.tool_call_id || null;
+        if (dismissedId) {
+          setMessagesWithLogging((prev) =>
+            prev.filter(
+              (msg) => !(msg?.metadata?.toolCallId === dismissedId && msg?.metadata?.type === 'tool_call_agent_message')
+            )
+          );
+        }
+        if (lastArtifactEventRef.current && (!dismissedId || dismissedId === lastArtifactEventRef.current)) {
+          setIsSidePanelOpen(false);
+          lastArtifactEventRef.current = null;
+          artifactCacheValidRef.current = false;
+          setCurrentArtifactMessages([]);
+          if (currentChatId) clearStoredArtifactState(currentChatId);
+        }
+        return;
+      }
+      // ── end ui.* ────────────────────────────────────────────────────────
+
       case 'tool_call_complete':
       case 'chat.tool_call_complete': {
         const envelope = data || {};
@@ -3213,8 +3314,43 @@ useEffect(() => {
     const unsubscribe = dynamicUIHandler.onUIUpdate((update) => {
       try {
         if (!update || !update.type) return;
-        // Only handle tool_call here; other updates (status/component updates) are ignored for now
-        if (update.type === 'tool_call') {
+
+        // ui.update — patch live component payload without re-mounting
+        if (update.type === 'ui.update') {
+          const { tool_call_id: patchId, patch = {} } = update;
+          if (patchId) {
+            const applyPatch = (msg) => {
+              if (msg?.toolCall?.tool_call_id === patchId || msg?.metadata?.toolCallId === patchId) {
+                return { ...msg, toolCall: msg.toolCall ? { ...msg.toolCall, payload: { ...(msg.toolCall.payload || {}), ...patch } } : msg.toolCall };
+              }
+              return msg;
+            };
+            setMessagesWithLogging(prev => prev.map(applyPatch));
+            setCurrentArtifactMessages(prev => prev.map(applyPatch));
+          }
+          return;
+        }
+
+        // ui.dismiss — remove rendered component
+        if (update.type === 'ui.dismiss') {
+          const { tool_call_id: dismissId } = update;
+          if (dismissId) {
+            setMessagesWithLogging(prev => prev.filter(
+              msg => !(msg?.metadata?.toolCallId === dismissId && msg?.metadata?.type === 'tool_call_agent_message')
+            ));
+            if (lastArtifactEventRef.current === dismissId) {
+              setIsSidePanelOpen(false);
+              lastArtifactEventRef.current = null;
+              artifactCacheValidRef.current = false;
+              setCurrentArtifactMessages([]);
+              if (currentChatId) clearStoredArtifactState(currentChatId);
+            }
+          }
+          return;
+        }
+
+        // tool_call (legacy InputRequestEvent path) and ui.render (L2 typed path)
+        if (update.type === 'tool_call' || update.type === 'ui.render') {
           if (dispatchSurfaceEvent) {
             dispatchSurfaceEvent(update);
           }
@@ -3382,33 +3518,58 @@ useEffect(() => {
     };
     }, [setMessagesWithLogging, currentChatId]);
 
-  const findPendingInputRequestToolCall = (messageList) => {
+  const isComposerInputRequestToolCall = (toolCall, message = null) => {
+    if (!toolCall?.tool_call_id || message?.tool_call_completed) {
+      return false;
+    }
+    const payload = toolCall.payload || {};
+    const interactionType = String(
+      toolCall.interaction_type || payload.interaction_type || ''
+    ).trim().toLowerCase();
+    if (interactionType !== 'input_request') {
+      return false;
+    }
+    if (Boolean(payload.password)) {
+      return false;
+    }
+    const displayMode = String(
+      toolCall.display || payload.display || payload.mode || ''
+    ).trim().toLowerCase();
+    return displayMode === 'composer';
+  };
+
+  const findPendingComposerInputRequestToolCall = (messageList) => {
     if (!Array.isArray(messageList) || messageList.length === 0) {
       return null;
     }
     for (let index = messageList.length - 1; index >= 0; index -= 1) {
       const message = messageList[index];
       const toolCall = message?.toolCall;
-      if (!toolCall?.tool_call_id || message?.tool_call_completed) {
-        continue;
-      }
-      const payload = toolCall.payload || {};
-      const interactionType = String(
-        toolCall.interaction_type || payload.interaction_type || ''
-      ).trim().toLowerCase();
-      const componentType = String(
-        toolCall.component_type || payload.component_type || ''
-      ).trim().toLowerCase();
-      const toolName = String(toolCall.tool_name || '').trim().toLowerCase();
-      if (
-        interactionType === 'input_request'
-        || componentType === 'userinputrequest'
-        || toolName === 'userinputrequest'
-      ) {
+      if (isComposerInputRequestToolCall(toolCall, message)) {
         return toolCall;
       }
     }
     return null;
+  };
+
+  const buildToolCallTextResponseAction = (toolCall, text = '') => ({
+    type: 'tool_call_response',
+    tool_name: toolCall.tool_name,
+    tool_call_id: toolCall.tool_call_id,
+    response: {
+      status: 'submitted',
+      text,
+      user_input: text,
+      user_response: text,
+    },
+  });
+
+  const handlePendingComposerInputSkip = async (toolCall) => {
+    if (!toolCall?.tool_call_id) {
+      return;
+    }
+    await handleAgentAction(buildToolCallTextResponseAction(toolCall, ''));
+    setLoading(true);
   };
 
   const sendMessage = async (messageContent) => {
@@ -3484,23 +3645,18 @@ useEffect(() => {
         return;
       }
 
-      const pendingInputRequestToolCall = findPendingInputRequestToolCall(messagesRef.current);
-      if (pendingInputRequestToolCall?.tool_call_id) {
+      const pendingComposerInputRequestToolCall = findPendingComposerInputRequestToolCall(messagesRef.current);
+      if (pendingComposerInputRequestToolCall?.tool_call_id) {
         console.log(
           '📤 [SEND] Routing workflow reply through tool_call_response:',
-          pendingInputRequestToolCall.tool_call_id
+          pendingComposerInputRequestToolCall.tool_call_id
         );
-        await handleAgentAction({
-          type: 'tool_call_response',
-          tool_name: pendingInputRequestToolCall.tool_name,
-          tool_call_id: pendingInputRequestToolCall.tool_call_id,
-          response: {
-            status: 'submitted',
-            text: messageContent.content,
-            user_input: messageContent.content,
-            user_response: messageContent.content,
-          },
-        });
+        await handleAgentAction(
+          buildToolCallTextResponseAction(
+            pendingComposerInputRequestToolCall,
+            messageContent.content,
+          ),
+        );
         setLoading(true);
         return;
       }
@@ -5006,6 +5162,8 @@ useEffect(() => {
               artifactContext={currentArtifactContext}
               onArtifactAction={sendArtifactAction}
               actionStatusMap={actionStatusMap}
+              pendingComposerInputToolCall={pendingComposerInputToolCall}
+              onPendingComposerInputSkip={handlePendingComposerInputSkip}
             />
           </div>
         </div>
@@ -5052,6 +5210,7 @@ useEffect(() => {
     uiStartupMode === 'UserDriven'
       ? null
       : currentWorkflowConfig?.initial_message_to_user;
+  const pendingComposerInputToolCall = findPendingComposerInputRequestToolCall(messages);
 
   const handlePendingTransitionNavigate = useCallback(
     async (option_id = null, contextVariables = {}) => {
@@ -5160,6 +5319,8 @@ useEffect(() => {
         artifactContext={currentArtifactContext}
         onArtifactAction={sendArtifactAction}
         actionStatusMap={actionStatusMap}
+        pendingComposerInputToolCall={pendingComposerInputToolCall}
+        onPendingComposerInputSkip={handlePendingComposerInputSkip}
       />
     </ErrorBoundary>
   );

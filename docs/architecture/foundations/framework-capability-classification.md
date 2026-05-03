@@ -64,7 +64,7 @@ Current examples:
 
 - `factory_app/`
 - `mozaiksai/hosts/studio.py`
-- `factory_app/app/ui/studio/`
+- `factory_app/app/ui/pages/custom/studio/`
 - `chat-ui/src/admin/`
 - `mozaiks_cli/`
 
@@ -89,8 +89,7 @@ Typical characteristics:
 Current examples:
 
 - `mozaiksai/hosts/mozaiks.py`
-- `mozaiks-platform/`
-- `mozaiks-platform/app/`
+- external hosted product workspaces consuming the `app/` contract
 
 Rule:
 
@@ -123,11 +122,11 @@ Rule:
 | core `chat-ui/` primitives | Universal substrate | reusable shell/UI substrate |
 | `factory_app/` | Framework-owned optional capability | first-party factory workspace |
 | `mozaiksai/hosts/studio.py` | Framework-owned optional capability | control-plane host |
-| `factory_app/app/ui/studio/` | Framework-owned optional capability | Studio management UI |
+| `factory_app/app/ui/pages/custom/studio/` | Framework-owned optional capability | Studio management UI |
 | `chat-ui/src/admin/` | Framework-owned optional capability | platform-management UI owned by Studio |
 | `mozaiks_cli/` | Framework-owned optional capability | developer interface |
 | `mozaiksai/hosts/mozaiks.py` | Product-specific consumer | hosted product layer on top of Studio |
-| `mozaiks-platform/` | Product-specific consumer | App Zero workspace and product assets |
+| external hosted product workspaces | Product-specific consumer | hosted workspace and product assets |
 | `generated/` | Generated/transient output | staged build output |
 
 ## Decision Test
@@ -163,10 +162,10 @@ Allowed dependency direction should stay simple:
 Disallowed direction:
 
 - substrate depending on Studio or `factory_app/`
-- substrate depending on `mozaiks-platform/`
+- substrate depending on a repo-local hosted product workspace
 - shared framework capability code depending on generated output as a canonical
   source of truth
-- App Zero or another consumer becoming the owner of shared generation logic
+- a hosted product consumer becoming the owner of shared generation logic
 
 ## Practical Consequence
 

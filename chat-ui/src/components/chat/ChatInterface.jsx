@@ -79,6 +79,9 @@ const ToolCallRenderer = React.memo(({ toolCall, onResponse, isCompleted, onArti
     toolCall.payload?.display ||
     toolCall.payload?.mode ||
     'inline';
+  if (displayMode === 'composer') {
+    return null;
+  }
 
   const handleResponse = async (resp) => {
     try {
@@ -170,7 +173,9 @@ const ModernChatInterface = ({
   overlayMode = false,
   onOverlayClose = null,
   onArtifactAction = null,
-  actionStatusMap = null
+  actionStatusMap = null,
+  pendingComposerInputToolCall = null,
+  onPendingComposerInputSkip = null,
 }) => {
   const [message, setMessage] = useState('');
   const [hasUserInteracted, setHasUserInteracted] = useState(false);
@@ -220,6 +225,18 @@ const ModernChatInterface = ({
   };
 
   const { appId } = useParams();
+  const pendingComposerPrompt = String(
+    pendingComposerInputToolCall?.payload?.prompt || ''
+  ).trim();
+  const pendingComposerAgent = (
+    pendingComposerInputToolCall?.agent
+    || pendingComposerInputToolCall?.payload?.agent
+    || pendingComposerInputToolCall?.payload?.agent_name
+    || 'Agent'
+  );
+  const composerPlaceholder = pendingComposerInputToolCall
+    ? 'Reply to continue the workflow...'
+    : 'Transmit your message...';
 
   // Agent action handler - used by UI tool event responses
   const handleAgentAction = (action) => {
@@ -251,6 +268,7 @@ const ModernChatInterface = ({
   const onUploadClick = () => {
     if (!onUploadFile) return;
     if (buttonText === 'NEXT') return;
+    if (pendingComposerInputToolCall) return;
     try {
       fileInputRef.current?.click?.();
     } catch {}
@@ -638,6 +656,32 @@ const ModernChatInterface = ({
 
   {/* Fixed Transmission Input Area - Never moves */}
             <div className={`flex-shrink-0 p-2 sm:p-2.5 md:p-3 border-t border-[rgba(var(--color-primary-light-rgb),0.2)] bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.05)] to-[rgba(var(--color-secondary-rgb),0.05)] backdrop-blur-xl shadow-lg transition-all duration-500 transmission-input-tight rounded-b-[inherit]`}>
+        {pendingComposerInputToolCall && (
+          <div className="mb-2 rounded-xl border border-[rgba(var(--color-primary-light-rgb),0.3)] bg-[rgba(var(--color-primary-rgb),0.08)] px-3 py-2 backdrop-blur-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-primary-light)]">
+                  Awaiting Workflow Reply
+                </div>
+                <div className="mt-1 text-xs text-[var(--color-text-secondary)]">
+                  {pendingComposerPrompt || `${pendingComposerAgent} is waiting for your reply. Your next message will be sent directly to this workflow step.`}
+                </div>
+              </div>
+              {typeof onPendingComposerInputSkip === 'function' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMessage('');
+                    onPendingComposerInputSkip(pendingComposerInputToolCall);
+                  }}
+                  className="shrink-0 rounded-md border border-[rgba(var(--color-primary-light-rgb),0.35)] bg-white/5 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-secondary)] transition hover:border-[rgba(var(--color-primary-light-rgb),0.65)] hover:text-white"
+                >
+                  Skip
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         <form onSubmit={onSubmitClick} className="flex gap-2 sm:gap-3 flex-row items-center">
           {/* Hidden file input (Upload) */}
           <input
@@ -659,7 +703,7 @@ const ModernChatInterface = ({
               }}
               onKeyPress={handleKeyPress}
               onFocus={() => setHasUserInteracted(true)}
-              placeholder={"Transmit your message..."}
+              placeholder={composerPlaceholder}
               disabled={buttonText === 'NEXT'}
               rows={1}
               className={`w-full bg-white/10 border-2 rounded-lg sm:rounded-xl px-2.5 sm:px-3 py-1.5 sm:py-2 mt-0.5 text-[var(--color-text-primary)] text-slate-100 text-sm sm:text-base placeholder:text-[var(--color-text-secondary)] placeholder:text-slate-400 placeholder:text-xs sm:placeholder:text-sm focus:outline-none resize-none transition-all duration-300 transmission-typing-font min-h-[36px] sm:min-h-[40px] max-h-[120px] my-scroll1 backdrop-blur-sm ${
@@ -682,7 +726,7 @@ const ModernChatInterface = ({
             <button
               type="button"
               onClick={onUploadClick}
-              disabled={buttonText === 'NEXT' || isUploadingFile}
+              disabled={buttonText === 'NEXT' || isUploadingFile || !!pendingComposerInputToolCall}
               className={
                 `px-2 py-1.5 rounded-md transition-all duration-300 min-w-[36px] sm:min-w-[40px] w-auto h-8 sm:h-9 oxanium font-bold text-[13px] flex items-center justify-center letter-spacing-wide border-2 flex-shrink-0 ` +
                 `${(buttonText === 'NEXT' || isUploadingFile)

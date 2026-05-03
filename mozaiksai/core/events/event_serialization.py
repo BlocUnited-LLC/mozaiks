@@ -288,7 +288,15 @@ def build_ui_event_payload(*, ev: Any, ctx: EventBuildContext) -> Optional[Dict[
 		if request_id:
 			request_id = str(request_id)
 		component_type = component_hint or "UserInputRequest"
-		display_mode = "inline"
+		password = bool(getattr(ev, "password", False))
+		requested_display = None
+		if isinstance(raw_payload, dict):
+			requested_display = raw_payload.get("display") or raw_payload.get("mode")
+		display_mode = (
+			str(requested_display).strip()
+			if requested_display
+			else ("inline" if component_hint or password else "composer")
+		)
 		normalized_payload = {}
 		if isinstance(raw_payload, dict):
 			normalized_payload.update(raw_payload)
@@ -296,7 +304,7 @@ def build_ui_event_payload(*, ev: Any, ctx: EventBuildContext) -> Optional[Dict[
 			"input_request_id": request_id,
 			"request_id": request_id,
 			"prompt": (prompt_text or ""),
-			"password": bool(getattr(ev, "password", False)),
+			"password": password,
 			"component_type": component_type,
 			"display": display_mode,
 			"mode": display_mode,

@@ -33,9 +33,7 @@
       "Bash(set -a)",
       "Bash(source:*)",
       "Bash(set +a)",
-      "Bash(.venv/Scripts/python.exe -c \"from studio_app import app; print\\('OK'\\)\")",
-      "Bash(cp -r \"c:/Users/mbari/OneDrive/Desktop/BlocUnited/BlocUnited Code/mozaiks/platform/brand/assets\" \"c:/Users/mbari/OneDrive/Desktop/BlocUnited/BlocUnited Code/mozaiks/mozaiks-platform/brand/assets\")",
-      "Bash(cp -r \"c:/Users/mbari/OneDrive/Desktop/BlocUnited/BlocUnited Code/mozaiks/platform/brand/fonts\" \"c:/Users/mbari/OneDrive/Desktop/BlocUnited/BlocUnited Code/mozaiks/mozaiks-platform/brand/fonts\")"
+      "Bash(.venv/Scripts/python.exe -c \"from studio_app import app; print\\('OK'\\)\")"
     ]
   }
 }

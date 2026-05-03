@@ -16,6 +16,12 @@ from mozaiksai.core.workflow.ui_primitives import (
     get_page_ui_primitive_names,
     validate_component_ui_primitives,
 )
+from mozaiksai.core.workflow.workflow_ui_catalog import (
+    get_workflow_shipped_component_names,
+    get_workflow_shipped_component_map,
+    get_workflow_ui_primitive_ids,
+    validate_workflow_ui_primitive_ids,
+)
 
 _logger = logging.getLogger("tools.tool_planning")
 
@@ -65,6 +71,7 @@ def tool_planning(
         ui_requirements = []
 
     normalized_ui_requirements: List[Dict[str, Any]] = []
+    shipped_component_map = dict(get_workflow_shipped_component_map())
     for index, requirement in enumerate(ui_requirements):
         if not isinstance(requirement, dict):
             raise ValueError(
@@ -72,10 +79,31 @@ def tool_planning(
                 f"got {type(requirement).__name__}"
             )
         normalized_requirement = dict(requirement)
+        primitive_id = normalized_requirement.get("workflow_primitive")
+        normalized_requirement["workflow_primitive"] = (
+            validate_workflow_ui_primitive_ids(
+                [primitive_id] if primitive_id is not None else None,
+                context=f"ToolPlanning.ui_requirements[{index}].workflow_primitive",
+            )[0]
+            if primitive_id is not None
+            else "composer_reply"
+        )
         normalized_requirement["primitives_hint"] = validate_component_ui_primitives(
             normalized_requirement.get("primitives_hint"),
             context=f"ToolPlanning.ui_requirements[{index}].primitives_hint",
         )
+        if normalized_requirement["workflow_primitive"] == "composer_reply":
+            normalized_requirement["component"] = None
+            normalized_requirement["display"] = "composer"
+            normalized_requirement["primitives_hint"] = []
+        else:
+            shipped_component = shipped_component_map.get(normalized_requirement["workflow_primitive"])
+            component_name = str(normalized_requirement.get("component") or "").strip()
+            if shipped_component and not component_name:
+                normalized_requirement["component"] = shipped_component
+                component_name = shipped_component
+            if shipped_component and component_name == shipped_component:
+                normalized_requirement["primitives_hint"] = []
         normalized_ui_requirements.append(normalized_requirement)
 
     normalized_payload = dict(ToolPlanning)
@@ -91,6 +119,16 @@ def tool_planning(
         context_variables,
         "available_page_primitives",
         list(get_page_ui_primitive_names()),
+    )
+    _cache_context_value(
+        context_variables,
+        "available_workflow_ui_primitives",
+        list(get_workflow_ui_primitive_ids(include_shell_status=False)),
+    )
+    _cache_context_value(
+        context_variables,
+        "available_shipped_workflow_components",
+        list(get_workflow_shipped_component_names()),
     )
 
     _logger.info(

@@ -4,15 +4,9 @@ import os
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
+from mozaiksai.resources import resolve_factory_workflows_root
 
 def repo_root() -> Path:
-    here = Path(__file__).resolve()
-    for parent in [here] + list(here.parents):
-        try:
-            if (parent / "mozaiksai").is_dir():
-                return parent
-        except Exception:
-            continue
     return Path.cwd().resolve()
 
 
@@ -21,6 +15,9 @@ def _unconfigured_active_app_root() -> Path:
 
 
 def _repo_factory_workflows_root() -> Path:
+    resolved = resolve_factory_workflows_root()
+    if resolved is not None:
+        return resolved
     return (repo_root() / "factory_app" / "workflows").resolve()
 
 

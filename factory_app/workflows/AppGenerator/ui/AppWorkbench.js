@@ -5,7 +5,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { Code, LayoutGrid, Monitor } from 'lucide-react';
-import { components as designComponents, typography as designTypography } from '../../../../../chat-ui/src/platform/workflowSurfaceStyles.js';
+import { components as designComponents, typography as designTypography } from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
 import { useAppValidationWorkbench } from './useAppValidationWorkbench';
 import BuildStatusArtifact from './BuildStatusArtifact';
 import CodeEditorArtifact from './CodeEditorArtifact';

@@ -84,19 +84,18 @@ When the user wants to create a new project:
    ```
 
 3. **Explain what was created:**
-   - `platform/app.json` with app identity and startup intent
-   - `platform/config/ai.json` + `platform/config/shell.json`
-   - `brand/theme_config.json` for visual identity
-   - `ui/extension.json` for custom page ownership
-   - Empty `platform/modules/`, `platform/workflows/`, and `platform/pages/` stubs
+   - `app/app.json` with app identity and startup intent
+   - `app/config/ai.json` + `app/config/shell.json`
+   - `app/brand/theme_config.json` for visual identity
+   - Empty `app/modules/`, `app/workflows/`, and `app/ui/pages/` stubs
 
 4. **Explain starter content is opt-in:**
    - Default `init` creates shape only
    - Use `--starter` only when the user explicitly wants example workflow content
 
 5. **Guide next steps:**
-   - Point `PLATFORM_PATH` at the generated `platform/` directory
-   - Customize `platform/app.json`, `platform/config/ai.json`, and `brand/theme_config.json`
+   - Run `mozaiks serve .` from the workspace root
+   - Customize `app/app.json`, `app/config/ai.json`, and `app/brand/theme_config.json`
    - Add real workflows/operations only after the user has product context
 
 ## Feature Upgrade Path
@@ -136,10 +135,10 @@ mozaiks init chat --name my-website-bot
 ```
 
 This will create:
-- `platform/app.json` (preset: chat)
-- `platform/config/ai.json` and `platform/config/shell.json`
-- `brand/theme_config.json`
-- stub folders for workflows, operations, and pages
+- `app/app.json` (preset: chat)
+- `app/config/ai.json` and `app/config/shell.json`
+- `app/brand/theme_config.json`
+- stub folders for `app/workflows/`, `app/modules/`, and `app/ui/pages/`
 
 If you want starter example content too, use:
 ```bash

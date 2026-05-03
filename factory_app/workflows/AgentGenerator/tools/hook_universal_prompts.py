@@ -16,6 +16,17 @@ from typing import Any, List, Dict
 
 logger = logging.getLogger(__name__)
 
+
+def _apply_system_message(agent: Any, message: str) -> None:
+    updater = getattr(agent, "update_system_message", None)
+    if callable(updater):
+        updater(message)
+    elif hasattr(agent, "_system_message"):
+        agent._system_message = message
+    else:
+        setattr(agent, "_system_message", message)
+    setattr(agent, "_mozaiks_base_system_message", message)
+
 # =============================================================================
 # SECTION 1: UNIVERSAL - Apply to ALL agents
 # =============================================================================
@@ -254,7 +265,7 @@ def inject_universal_prompts(agent, messages: List[Dict[str, Any]], groupchat: A
         # Skip purely conversational agents for all conditional sections
         conversational_agents = {"InterviewAgent"}
         if agent_name in conversational_agents:
-            agent.system_message = system_message
+            _apply_system_message(agent, system_message)
             if sections_added:
                 logger.info(f"✓ Injected universal sections into {agent_name}: {', '.join(sections_added)}")
             return system_message
@@ -306,7 +317,7 @@ def inject_universal_prompts(agent, messages: List[Dict[str, Any]], groupchat: A
             sections_added.append("VALIDATION_CHECKLIST")
         
         # Update agent and log
-        agent.system_message = system_message
+        _apply_system_message(agent, system_message)
         
         if sections_added:
             logger.info(f"✓ Injected prompt sections into {agent_name}: {', '.join(sections_added)}")

@@ -60,7 +60,7 @@ mozaiks add --preset full        # Upgrade to full tier
 
 When you add a feature:
 
-1. **Updates platform/app.json:**
+1. **Updates app/app.json:**
    - Adds feature override OR upgrades preset
    - Example: `{"features": {"modules": true}}`
 
@@ -78,10 +78,11 @@ When you add a feature:
 ### Adding **modules**
 ```
 Next steps:
-1. Create platform/modules/<name>/
-2. Add module.yaml with name, version, actions
-3. Add handler.py with action class methods
-4. Restart backend
+1. Create app/modules/<name>/
+2. Add module.yaml with identity, actions, permissions
+3. Add backend/handler.py (thin dispatch), backend/service.py (logic),
+   backend/repo.py (MongoDB), backend/policy.py (scoping), backend/schemas.py (typed shapes)
+4. Restart backend: mozaiks serve .
 ```
 
 ### Adding **event_bus**
@@ -97,14 +98,14 @@ Next steps:
 Next steps:
 1. Start Docker services: docker compose -f infra/compose/docker-compose.yml up -d
 2. Configure .env: KEYCLOAK_* variables
-3. Update platform/app.json: authRequired: true
+3. Update app/app.json: authRequired: true
 4. Restart backend
 ```
 
 ### Adding **admin**
 ```
 Next steps:
-1. Configure admins in platform/app.json
+1. Configure admins in app/app.json
 2. Access admin portal at /admin
 3. Requires auth to be enabled
 ```
@@ -112,9 +113,9 @@ Next steps:
 ### Adding **chat_ui**
 ```
 Next steps:
-1. Start frontend: cd app && npm run dev
-2. Configure branding in platform/brand/
-3. Access chat at http://localhost:5173
+1. Start frontend: npm run dev (from web_shell or mozaiks-app root)
+2. Configure branding in app/brand/
+3. Access chat at http://localhost:3000
 ```
 
 ## When to Use This Skill
@@ -143,13 +144,13 @@ mozaiks add modules
 ```
 
 This will:
-1. Update platform/app.json to enable the `modules` feature
-2. Allow you to create modules in platform/modules/
+1. Update app/app.json to enable the `modules` feature
+2. Allow you to create modules in app/modules/
 
 After running this command:
-1. Create a module directory: `platform/modules/my_module/`
-2. Add `module.yaml` with name, version, actions
-3. Add `handler.py` with action class methods
-4. Restart your backend to load the new module
+1. Create a module directory: `app/modules/my_module/`
+2. Add `module.yaml` with id, actions, permissions
+3. Add `backend/handler.py` (dispatch), `backend/service.py` (logic), `backend/repo.py` (data)
+4. Restart your backend: `mozaiks serve .`
 
 Modules are great for deterministic business logic that doesn't need AI. For AI tasks, use workflows instead."

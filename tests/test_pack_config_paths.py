@@ -8,6 +8,7 @@ from tests.import_utils import import_module_directly
 
 _config = import_module_directly("mozaiksai.core.workflow.pack.config")
 _paths = import_module_directly("mozaiksai.core.workflow.paths")
+_resources = import_module_directly("mozaiksai.resources")
 get_global_pack_graph_path = _config.get_global_pack_graph_path
 get_workflow_pack_graph_path = _config.get_workflow_pack_graph_path
 load_global_pack_graph = _config.load_global_pack_graph
@@ -194,3 +195,13 @@ def test_active_app_root_uses_workspace_env_when_platform_path_missing(monkeypat
     monkeypatch.setenv("MOZAIKS_APP_WORKSPACE_PATH", str(workspace_root))
 
     assert _paths.resolve_active_app_root() == app_root.resolve()
+
+
+def test_chat_ui_src_root_defaults_to_repo_checkout(monkeypatch) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    monkeypatch.chdir(repo_root)
+    monkeypatch.delenv("MOZAIKS_CHAT_UI_PATH", raising=False)
+
+    root = _resources.resolve_chat_ui_src_root()
+
+    assert root == (repo_root / "chat-ui" / "src").resolve()

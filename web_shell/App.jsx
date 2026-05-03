@@ -7,7 +7,9 @@ import {
 // Active app UI barrel — resolved at build time via @platform/extensions.
 // The selected app root owns custom route components, including any
 // management surfaces it declares in its route manifest.
-import { register } from '@platform/extensions';
+import * as platformExtensions from '@platform/extensions';
+
+const { register, createAuthAdapter } = platformExtensions;
 
 // Register active app UI extensions once.
 // Core substrate components are always loaded from coreComponents.js.
@@ -22,25 +24,33 @@ const apiAdapter = new WebSocketApiAdapter({
 });
 
 // ── Auth adapter ───────────────────────────────────────────────────────────
-// Development mock — replaced by Keycloak adapter in production.
-// Auth configuration is declared in the active app root app.json.
-const mockAuthAdapter = {
-  isAuthenticated:    () => true,
-  getCurrentUser:     () => Promise.resolve({ id: 'demo-user', firstName: 'Demo', lastName: 'User', email: 'demo@example.com', roles: ['admin', 'user'] }),
-  getToken:           () => Promise.resolve('demo-token'),
-  login:              () => Promise.resolve(),
-  logout:             () => Promise.resolve(),
-  onAuthStateChange:  (callback) => {
-    callback({ id: 'demo-user', firstName: 'Demo', lastName: 'User', email: 'demo@example.com', roles: ['admin', 'user'] });
+// Platform app exports createAuthAdapter() — uses OIDC when VITE_OIDC_AUTHORITY
+// is set, falls back to mock adapter (VITE_MOCK_MODE=true or no authority).
+// If the platform extension doesn't export createAuthAdapter, fall back to the
+// development mock so the shell always works.
+const fallbackMockAdapter = {
+  isAuthenticated:   () => true,
+  getCurrentUser:    () => Promise.resolve({ id: 'demo-user', name: 'Developer', email: 'demo@example.com', roles: ['admin', 'user'] }),
+  getToken:          () => Promise.resolve('demo-token'),
+  login:             () => Promise.resolve(),
+  logout:            () => Promise.resolve(),
+  onAuthStateChange: (callback) => {
+    callback({ id: 'demo-user', name: 'Developer', email: 'demo@example.com', roles: ['admin', 'user'] });
     return () => {};
   },
+  getAccessToken: () => 'demo-token',
+  handleCallback: () => Promise.resolve(),
 };
+
+const authAdapter = typeof createAuthAdapter === 'function'
+  ? createAuthAdapter()
+  : fallbackMockAdapter;
 
 export default function App() {
   return (
     <MozaiksApp
       apiAdapter={apiAdapter}
-      authAdapter={mockAuthAdapter}
+      authAdapter={authAdapter}
     />
   );
 }

@@ -25,10 +25,10 @@ contributors should share before reading implementation deep dives.
 - Not all first-class framework code is universal app-runtime substrate: the
   runtime, platform host, and core shell primitives are universal, while Studio,
   CLI, and shared generation core are optional framework-owned capabilities.
-- The current repo now uses App Zero under `mozaiks-platform/app` as the
-  repo-local app root, and generated app workspaces follow the same
-  self-contained contract with `app/config`, `app/ui/pages`, `app/workflows`,
-  `app/modules`, `app/ui`, and `app/brand`.
+- `factory_app/app` is the first-party Studio app bundle in this repo, and
+  generated/hosted app workspaces follow the same self-contained contract with
+  `app/config`, `app/ui/pages`, `app/workflows`, `app/modules`, `app/ui`, and
+  `app/brand`.
 - Deterministic app behavior is hosted by `mozaiksai/hosts/platform.py` modules or by an
   optional external/generated backend connected through `AppBackendPort`.
 - Profile, settings, notifications, subscriptions, and admin are first-class

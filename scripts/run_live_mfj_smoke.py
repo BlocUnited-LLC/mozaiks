@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional
 
 import uvicorn
 import websockets
@@ -196,6 +196,86 @@ def _build_tool_call_response_payload(response_text: str) -> Dict[str, Any]:
     }
 
 
+def _normalize_tool_response_payload(raw_payload: Any) -> Dict[str, Any]:
+    if isinstance(raw_payload, dict):
+        normalized = dict(raw_payload)
+        normalized.setdefault("status", "submitted")
+        return normalized
+    return _build_tool_call_response_payload(str(raw_payload or ""))
+
+
+def _load_tool_response_file(path: Path) -> Dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("tool response file must contain a top-level JSON object")
+
+    input_replies = payload.get("input_replies") or []
+    if not isinstance(input_replies, list) or any(not isinstance(item, str) for item in input_replies):
+        raise ValueError("tool response file input_replies must be a list of strings")
+
+    tool_responses = payload.get("tool_responses") or {}
+    if not isinstance(tool_responses, dict):
+        raise ValueError("tool response file tool_responses must be an object keyed by tool/component name")
+
+    return {
+        "input_replies": [str(item).strip() for item in input_replies if str(item).strip()],
+        "tool_responses": tool_responses,
+    }
+
+
+def _build_tool_response_queues(tool_responses: Optional[Dict[str, Any]]) -> Dict[str, Deque[Any]]:
+    queues: Dict[str, Deque[Any]] = {}
+    if not isinstance(tool_responses, dict):
+        return queues
+
+    for raw_key, raw_value in tool_responses.items():
+        key = str(raw_key or "").strip().lower()
+        if not key:
+            continue
+        values = raw_value if isinstance(raw_value, list) else [raw_value]
+        queue: Deque[Any] = deque()
+        for value in values:
+            queue.append(value)
+        if queue:
+            queues[key] = queue
+    return queues
+
+
+def _tool_response_candidates(data: Dict[str, Any]) -> List[str]:
+    payload = data.get("payload") or {}
+    candidates = [
+        data.get("tool_name"),
+        data.get("component_type"),
+        data.get("tool_call_id"),
+    ]
+    if isinstance(payload, dict):
+        candidates.extend(
+            [
+                payload.get("component_type"),
+                payload.get("workflow_primitive"),
+            ]
+        )
+    normalized: List[str] = []
+    for candidate in candidates:
+        text = str(candidate or "").strip().lower()
+        if text and text not in normalized:
+            normalized.append(text)
+    normalized.append("*")
+    return normalized
+
+
+def _pop_tool_response_payload(
+    response_queues: Dict[str, Deque[Any]],
+    data: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    for candidate in _tool_response_candidates(data):
+        queue = response_queues.get(candidate)
+        if not queue:
+            continue
+        return _normalize_tool_response_payload(queue.popleft())
+    return None
+
+
 def _is_input_request_tool_call(data: Dict[str, Any]) -> bool:
     interaction_type = str(data.get("interaction_type") or "").strip().lower()
     component_type = str(data.get("component_type") or "").strip().lower()
@@ -240,14 +320,15 @@ async def _collect_events(
     timeout_seconds: float,
     tool_response_text: Optional[str] = None,
     user_replies: Optional[List[str]] = None,
+    tool_response_payloads: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     events: List[Dict[str, Any]] = []
     responded_tool_calls: set[str] = set()
     reply_queue = deque(str(reply).strip() for reply in (user_replies or []) if str(reply).strip())
+    response_queues = _build_tool_response_queues(tool_response_payloads)
 
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     completion_grace_deadline: Optional[float] = None
-    saw_assistant_message = False
 
     while True:
         now = asyncio.get_running_loop().time()
@@ -290,21 +371,23 @@ async def _collect_events(
         if event_type == "chat.tool_call" and isinstance(data, dict):
             tool_call_id = str(data.get("tool_call_id") or "").strip()
             awaiting_response = bool(data.get("awaiting_response"))
-            input_request_response = None
+            response_payload: Optional[Dict[str, Any]] = None
             if reply_queue and _is_input_request_tool_call(data):
-                input_request_response = reply_queue[0]
-            fallback_response = tool_response_text
-            response_text = input_request_response or fallback_response
-            if tool_call_id and awaiting_response and response_text is not None and tool_call_id not in responded_tool_calls:
+                response_payload = _build_tool_call_response_payload(reply_queue[0])
+            if response_payload is None:
+                response_payload = _pop_tool_response_payload(response_queues, data)
+            if response_payload is None and tool_response_text is not None:
+                response_payload = _build_tool_call_response_payload(tool_response_text)
+            if tool_call_id and awaiting_response and response_payload is not None and tool_call_id not in responded_tool_calls:
                 responded_tool_calls.add(tool_call_id)
-                if input_request_response is not None:
+                if reply_queue and _is_input_request_tool_call(data):
                     reply_queue.popleft()
                 await websocket.send(
                     json.dumps(
                         {
                             "type": "tool_call_response",
                             "tool_call_id": tool_call_id,
-                            "response": _build_tool_call_response_payload(response_text),
+                            "response": response_payload,
                         }
                     )
                 )
@@ -323,14 +406,6 @@ async def _collect_events(
             and str(data.get("ui_visibility") or "").strip().lower() != "trace"
         )
 
-        if event_type in {"chat.text", "chat.stream_end"}:
-            sender = assistant_name_normalized
-            content = assistant_content
-            if sender not in {"", "user", "userproxy", "chat_manager", "manager"} and isinstance(content, str) and content.strip():
-                saw_assistant_message = True
-                if not reply_queue:
-                    completion_grace_deadline = now + 2.0
-
         if event_type == "chat.input_ack" and not reply_queue:
             completion_grace_deadline = max(
                 completion_grace_deadline or 0.0,
@@ -339,8 +414,6 @@ async def _collect_events(
 
         if event_type in {"chat.workflow_complete", "chat.workflow_completed", "chat.completed"}:
             completion_grace_deadline = now + 1.0
-        elif saw_assistant_message and completion_grace_deadline is None and not reply_queue:
-            completion_grace_deadline = now + 2.0
 
 
 async def run_live_mfj_smoke(
@@ -351,6 +424,7 @@ async def run_live_mfj_smoke(
     workflows_root: Optional[Path] = None,
     tool_response_text: Optional[str] = None,
     user_replies: Optional[List[str]] = None,
+    tool_response_payloads: Optional[Dict[str, Any]] = None,
 ) -> SmokeResult:
     load_dotenv(REPO_ROOT / ".env")
     _require_env()
@@ -427,6 +501,7 @@ async def run_live_mfj_smoke(
                     timeout_seconds=timeout_seconds,
                     tool_response_text=tool_response_text,
                     user_replies=user_replies,
+                    tool_response_payloads=tool_response_payloads,
                 )
             )
             workflow_wait_task = asyncio.create_task(asyncio.wait_for(run_task, timeout=timeout_seconds))
@@ -546,7 +621,18 @@ def main() -> int:
         default=[],
         help="Optional scripted user reply for after-work user handoffs. Repeat for multi-turn workflows.",
     )
+    parser.add_argument(
+        "--tool-response-file",
+        default=None,
+        help="Optional JSON file with scripted input_replies and structured tool_responses.",
+    )
     args = parser.parse_args()
+
+    scripted_responses = None
+    scripted_replies: List[str] = list(args.user_reply or [])
+    if args.tool_response_file:
+        scripted_responses = _load_tool_response_file(Path(args.tool_response_file))
+        scripted_replies = list(scripted_responses.get("input_replies") or []) + scripted_replies
 
     result = asyncio.run(
         run_live_mfj_smoke(
@@ -555,7 +641,8 @@ def main() -> int:
             workflow_name=args.workflow,
             workflows_root=Path(args.workflows_root),
             tool_response_text=args.tool_response_text,
-            user_replies=args.user_reply or None,
+            user_replies=scripted_replies or None,
+            tool_response_payloads=(scripted_responses or {}).get("tool_responses"),
         )
     )
     exit_code = 0 if result.success else 1

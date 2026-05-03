@@ -1,7 +1,7 @@
 // ==============================================================================
 // FILE: chat-ui/src/core/ui/UserInputRequest.js
-// DESCRIPTION: Generic user input component for AG2 agent requests
-// PURPOSE: Reusable user input component for any workflow
+// DESCRIPTION: Explicit fallback user input component for workflow tool calls
+// PURPOSE: Reusable inline input surface when a workflow requests a component
 // ==============================================================================
 
 import React, { useState, useCallback } from 'react';
@@ -10,8 +10,8 @@ import { FiMessageCircle, FiSend, FiX } from 'react-icons/fi';
 /**
  * 🎯 GENERIC USER INPUT REQUEST COMPONENT
  * 
- * Handles any user input requests from AG2 agents during workflow execution.
- * This is triggered when agents use input() or need user feedback.
+ * Handles workflow text input when a component-based UI is explicitly requested.
+ * Generic AG2 text feedback in chat-ui now defaults to the main composer instead.
  * 
  * USAGE:
  * - Any workflow can use this for generic user input

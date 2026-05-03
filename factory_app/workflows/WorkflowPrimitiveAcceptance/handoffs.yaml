@@ -1,0 +1,29 @@
+handoff_rules:
+- source_agent: user
+  target_agent: IntakeAgent
+  handoff_type: condition
+  condition_type: expression
+  condition_scope: null
+  condition: ${intake_complete} == False
+  transition_target: AgentTarget
+- source_agent: IntakeAgent
+  target_agent: user
+  handoff_type: condition
+  condition_type: expression
+  condition_scope: null
+  condition: ${intake_complete} == False
+  transition_target: RevertToUserTarget
+- source_agent: IntakeAgent
+  target_agent: ReviewAgent
+  handoff_type: condition
+  condition_type: expression
+  condition_scope: null
+  condition: ${intake_complete} == True
+  transition_target: AgentTarget
+- source_agent: ReviewAgent
+  target_agent: terminate
+  handoff_type: after_work
+  condition_type: null
+  condition_scope: null
+  condition: null
+  transition_target: TerminateTarget

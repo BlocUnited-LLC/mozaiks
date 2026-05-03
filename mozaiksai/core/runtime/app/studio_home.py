@@ -8,6 +8,7 @@ from typing import Any
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     build_app_validation_strategy_summary,
 )
+from mozaiksai.resources import resolve_factory_brand_root
 
 
 GENERATOR_WORKFLOW_IDS = [
@@ -413,9 +414,12 @@ def _read_json(path: Path) -> dict:
 
 
 def _resolve_theme_config_path(app_root: Path) -> Path:
-    candidates = [
-        app_root / "brand" / "theme_config.json",
-    ]
+    candidates = [app_root / "brand" / "theme_config.json"]
+    factory_brand_root = resolve_factory_brand_root()
+    if factory_brand_root is not None:
+        candidates.append(factory_brand_root / "theme_config.json")
+    else:
+        candidates.append(Path(__file__).resolve().parents[4] / "factory_app" / "app" / "brand" / "theme_config.json")
     return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
 
 

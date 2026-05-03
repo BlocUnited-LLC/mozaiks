@@ -21,6 +21,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request, WebSocket, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from mozaiksai.version import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ def create_mozaiks_app(
     runtime_subapp = FastAPI(
         title="mozaiksai Runtime Substrate",
         description="Convenience runtime-only sub-application",
-        version="1.0.0",
+        version=__version__,
         docs_url="/docs" if debug else None,
         redoc_url="/redoc" if debug else None,
     )

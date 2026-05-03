@@ -4,10 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mozaiks"
-version = "1.0.0"
+dynamic = ["version"]
 description = "Mozaiks AG2 Runtime — production-ready multi-tenant workflow execution backend"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [
     {name = "BlocUnited LLC", email = "mike@blocunited.com"}
@@ -15,7 +16,6 @@ authors = [
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -41,6 +41,7 @@ dependencies = [
     "httpx",
     "aiohttp>=3.8.0",
     "python-dateutil>=2.8.0",
+    "limits>=3.6.0",
 ]
 
 [project.optional-dependencies]
@@ -81,15 +82,11 @@ Documentation = "https://github.com/BlocUnited-LLC/mozaiks#readme"
 line-length = 100
 target-version = "py311"
 
-# ---------------------------------------------------------------------------
-# Package discovery — auto-discovers all mozaiksai, mozaiks_cli, and logs
-# subpackages.  factory_app is not included in the distribution package;
-# Studio/factory features require the full repo checkout (OSS) or the hosted
-# Mozaiks deployment.
-# ---------------------------------------------------------------------------
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["mozaiksai*", "mozaiks_cli*", "logs*"]
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.dynamic]
+version = {attr = "mozaiksai.version.__version__"}
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

@@ -11,7 +11,6 @@ def _load_tool_planning_module():
     file_path = (
         workspace
         / "factory_app"
-        / "app"
         / "workflows"
         / "AgentGenerator"
         / "tools"
@@ -47,7 +46,8 @@ def test_tool_planning_normalizes_and_caches_available_primitives() -> None:
             "system_hooks": [],
             "ui_requirements": [
                 {
-                    "component": "ApprovalCard",
+                    "workflow_primitive": "diff_review",
+                    "component": "ChangeReviewCard",
                     "primitives_hint": ["Card", "Button", "Card"],
                 }
             ],
@@ -56,9 +56,12 @@ def test_tool_planning_normalizes_and_caches_available_primitives() -> None:
     )
 
     assert "1 UI requirements" in result
+    assert context.data["ToolPlanning"]["ui_requirements"][0]["workflow_primitive"] == "diff_review"
     assert context.data["ToolPlanning"]["ui_requirements"][0]["primitives_hint"] == ["Card", "Button"]
     assert "Card" in context.data["available_ui_primitives"]
     assert "DataTable" in context.data["available_page_primitives"]
+    assert "approval_card" in context.data["available_workflow_ui_primitives"]
+    assert "ApprovalCard" in context.data["available_shipped_workflow_components"]
 
 
 def test_tool_planning_rejects_unknown_primitives() -> None:
@@ -67,6 +70,7 @@ def test_tool_planning_rejects_unknown_primitives() -> None:
             ToolPlanning={
                 "ui_requirements": [
                     {
+                        "workflow_primitive": "approval_card",
                         "component": "ApprovalCard",
                         "primitives_hint": ["Card", "Wizard"],
                     }
@@ -74,3 +78,49 @@ def test_tool_planning_rejects_unknown_primitives() -> None:
             },
             context_variables=_Context(),
         )
+
+
+def test_tool_planning_normalizes_composer_reply_requirements() -> None:
+    context = _Context()
+
+    tool_planning_module.tool_planning(
+        ToolPlanning={
+            "ui_requirements": [
+                {
+                    "workflow_primitive": "composer_reply",
+                    "component": "ShouldBeCleared",
+                    "display": "artifact",
+                    "primitives_hint": ["Card"],
+                }
+            ]
+        },
+        context_variables=context,
+    )
+
+    requirement = context.data["ToolPlanning"]["ui_requirements"][0]
+    assert requirement["workflow_primitive"] == "composer_reply"
+    assert requirement["component"] is None
+    assert requirement["display"] == "composer"
+    assert requirement["primitives_hint"] == []
+
+
+def test_tool_planning_defaults_to_shipped_component_for_shared_workflow_primitive() -> None:
+    context = _Context()
+
+    tool_planning_module.tool_planning(
+        ToolPlanning={
+            "ui_requirements": [
+                {
+                    "workflow_primitive": "approval_card",
+                    "component": "",
+                    "display": "inline",
+                    "primitives_hint": ["Card", "Button"],
+                }
+            ]
+        },
+        context_variables=context,
+    )
+
+    requirement = context.data["ToolPlanning"]["ui_requirements"][0]
+    assert requirement["component"] == "ApprovalCard"
+    assert requirement["primitives_hint"] == []

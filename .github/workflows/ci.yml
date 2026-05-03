@@ -79,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: app
+        working-directory: web_shell
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -89,15 +89,80 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: web_shell/package-lock.json
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Type check
-        run: npm run typecheck || true  # Don't fail on type errors for now
 
       - name: Build
         run: npm run build
         env:
           VITE_MOCK_MODE: "true"
+          MOZAIKS_FACTORY_APP_PATH: ${{ github.workspace }}/factory_app
+          MOZAIKS_CHAT_UI_PATH: ${{ github.workspace }}/chat-ui
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Build wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel
+
+      - name: Install wheel in clean venv
+        run: |
+          python -m venv .pkg-venv
+          . .pkg-venv/bin/activate
+          pip install dist/*.whl
+
+      - name: Smoke installed CLI
+        run: |
+          . .pkg-venv/bin/activate
+          mozaiks --version
+          mozaiks quickstart --help
+
+      - name: Verify packaged resources
+        run: |
+          . .pkg-venv/bin/activate
+          mkdir -p /tmp/mozaiks-package-smoke
+          cd /tmp/mozaiks-package-smoke
+          python - <<'PY'
+          from pathlib import Path
+          from mozaiksai.resources import (
+              resolve_chat_ui_src_root,
+              resolve_factory_brand_root,
+              resolve_factory_workflows_root,
+              resolve_web_shell_root,
+          )
+
+          resources = {
+              "factory_workflows": resolve_factory_workflows_root(),
+              "factory_brand": resolve_factory_brand_root(),
+              "web_shell": resolve_web_shell_root(),
+              "chat_ui_src": resolve_chat_ui_src_root(),
+          }
+
+          for name, path in resources.items():
+              assert path is not None, f"{name} did not resolve"
+              resolved = Path(path)
+              assert resolved.exists(), f"{name} path missing: {resolved}"
+              assert "site-packages" in str(resolved), f"{name} resolved to non-installed path: {resolved}"
+
+          print("Packaged resources resolved from site-packages")
+          PY
+
+      - name: Smoke packaged scaffold init
+        run: |
+          . .pkg-venv/bin/activate
+          mkdir -p /tmp/mozaiks-package-init
+          mozaiks init chat --name "CI Package Smoke" --dir /tmp/mozaiks-package-init
+          test -f /tmp/mozaiks-package-init/app/brand/theme_config.json

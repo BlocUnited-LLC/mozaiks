@@ -1,0 +1,21 @@
+definitions:
+  intake_complete:
+    type: boolean
+    description: True once IntakeAgent has received the composer reply and emitted NEXT.
+    source:
+      type: state
+      default: false
+      triggers:
+      - type: agent_text
+        agent: IntakeAgent
+        ui_hidden: true
+        match:
+          equals: NEXT
+
+agents:
+  IntakeAgent:
+    variables:
+    - intake_complete
+  ReviewAgent:
+    variables:
+    - intake_complete

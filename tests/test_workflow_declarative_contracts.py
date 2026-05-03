@@ -259,6 +259,7 @@ def test_workflow_manager_normalizes_ui_tool_contract_defaults(tmp_path: Path) -
                 "    ui:",
                 "      component: PlanPanel",
                 "      mode: artifact",
+                "      workflow_primitive: form_card",
             ]
         ),
     )
@@ -353,6 +354,7 @@ def test_workflow_manager_accepts_ui_surface_without_ui_contract(tmp_path: Path)
                 "    ui:",
                 "      component: PlanPanel",
                 "      mode: artifact",
+                "      workflow_primitive: document_preview",
             ]
         ),
     )
@@ -368,6 +370,36 @@ def test_workflow_manager_accepts_ui_surface_without_ui_contract(tmp_path: Path)
     assert tool["tool_type"] == "UI_Surface"
     assert tool.get("ui", {}).get("component") == "PlanPanel"
     assert tool.get("ui_contract") is None
+
+
+def test_workflow_manager_rejects_non_renderable_workflow_primitive(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "FlowInvalidWorkflowPrimitive"
+    wf_dir.mkdir(parents=True)
+    _write_minimal_orchestrator_and_agents(wf_dir, "FlowInvalidWorkflowPrimitive")
+    _write_yaml(
+        wf_dir / "tools.yaml",
+        "\n".join(
+            [
+                "tools:",
+                "  - agent: Planner",
+                "    file: render_panel.py",
+                "    function: render_panel",
+                "    tool_type: UI_Tool",
+                "    ui:",
+                "      component: PlanPanel",
+                "      mode: inline",
+                "      workflow_primitive: composer_reply",
+            ]
+        ),
+    )
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    manager = _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(tmp_path))
+    info = manager.get_workflow_info("FlowInvalidWorkflowPrimitive")
+
+    assert info is not None
+    assert info.get("status") == "error"
+    assert "workflow_primitive" in str(info.get("error") or "")
 
 
 def test_workflow_manager_rejects_manifest_tool_integration_metadata(tmp_path: Path) -> None:

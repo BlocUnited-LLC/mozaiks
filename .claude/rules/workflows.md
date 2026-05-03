@@ -3,8 +3,9 @@
 **Reference:** See [/CLAUDE.md](/CLAUDE.md) for patterns and [/ARCHITECTURE.md](/ARCHITECTURE.md) for context.
 
 Use these rules when touching:
-- `platform/workflows/**`
-- `mozaiks-platform/app/workflows/**`
+- `app/workflows/**`
+- `factory_app/workflows/**`
+- `factory_app/app/workflows/**`
 - Any workflow YAML files or tool implementations
 
 ## Core Principles

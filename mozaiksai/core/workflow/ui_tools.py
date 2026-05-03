@@ -76,7 +76,7 @@ async def _emit_tool_call_core(
     Args:
         tool_id: The unique identifier for the UI component (e.g., "agent_api_key_input").
         payload: The data required by the UI component (props).
-        display: How the component should be displayed ("inline" or "artifact").
+        display: How the component should be displayed ("composer", "inline", or "artifact").
         chat_id: The ID of the chat session to send the event to.
         workflow_name: The name of the workflow emitting the event.
 

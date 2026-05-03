@@ -12,6 +12,7 @@ project-management surface. The canonical build lifecycle — artifact review,
 diff, run history, promotion, build state — belongs to Studio.
 
 Commands:
+    mozaiks quickstart      Minimal first-run path: bootstrap + open Studio
     mozaiks init <preset>     Create a new app bundle scaffold
     mozaiks serve [path]      Start the Mozaiks runtime for an app workspace
     mozaiks onboard           Guide setup for an existing scaffold
@@ -24,7 +25,17 @@ Commands:
 import argparse
 import sys
 
-from mozaiks_cli.commands import init_command, onboard_command, serve_command, studio_command, add_command, info_command, gen_command
+from mozaiks_cli.commands import (
+    add_command,
+    gen_command,
+    info_command,
+    init_command,
+    onboard_command,
+    quickstart_command,
+    serve_command,
+    studio_command,
+)
+from mozaiksai.version import __version__
 
 
 def create_parser():
@@ -38,10 +49,79 @@ def create_parser():
     parser.add_argument(
         "--version",
         action="version",
-        version="%(prog)s 0.1.0",
+        version=f"%(prog)s {__version__}",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # mozaiks quickstart
+    quickstart_parser = subparsers.add_parser(
+        "quickstart",
+        aliases=["start"],
+        help="Minimal first-run path for builders",
+        description=(
+            "Bootstrap a workspace with minimal defaults and launch Studio. "
+            "This is the recommended path for people building apps through the shared "
+            "factory_app workflows. Use 'onboard --full' or the lower-level commands "
+            "only when you need detailed workspace configuration or framework control."
+        ),
+    )
+    quickstart_parser.add_argument(
+        "--dir",
+        dest="directory",
+        default=".",
+        help="Workspace root to create/configure (default: current directory)",
+    )
+    quickstart_parser.add_argument(
+        "--preset",
+        choices=["engine", "chat", "integrated", "full"],
+        default="chat",
+        help="Scaffold preset to use if the workspace is missing a valid app bundle (default: chat)",
+    )
+    quickstart_parser.add_argument(
+        "--name",
+        default=None,
+        help="App name to store in the scaffold (default: workspace folder name)",
+    )
+    quickstart_parser.add_argument(
+        "--journey",
+        choices=["greenfield_app", "brownfield_app"],
+        default=None,
+        help="Builder track to store as the initial Studio context",
+    )
+    quickstart_parser.add_argument(
+        "--goal",
+        default=None,
+        help="Optional first goal to seed into Studio context",
+    )
+    quickstart_parser.add_argument(
+        "--provider",
+        choices=["anthropic", "openai", "local", "other"],
+        default=None,
+        help="Default AI provider to store in the workspace config",
+    )
+    quickstart_parser.add_argument(
+        "--model",
+        default=None,
+        help="Default model name to store in the workspace config",
+    )
+    quickstart_parser.add_argument(
+        "--backend-port",
+        type=int,
+        default=8000,
+        help="Backend port to use when launching Studio (default: 8000)",
+    )
+    quickstart_parser.add_argument(
+        "--frontend-port",
+        type=int,
+        default=3000,
+        help="Frontend port to use when launching Studio (default: 3000)",
+    )
+    quickstart_parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Launch Studio services without opening the browser",
+    )
 
     # mozaiks init
     init_parser = subparsers.add_parser(
@@ -116,14 +196,20 @@ def create_parser():
     # mozaiks onboard
     onboard_parser = subparsers.add_parser(
         "onboard",
-        help="Guide setup for an existing scaffold",
-        description="Collect app intent and update the canonical app-bundle config surfaces.",
+        help="Guide first-run setup and open Studio",
+        description="Configure Mozaiks, create a scaffold when missing, and update the canonical app-bundle config surfaces.",
     )
     onboard_parser.add_argument(
         "--dir",
         dest="directory",
         default=".",
         help="Workspace root containing the active app root at app/ (default: current directory)",
+    )
+    onboard_parser.add_argument(
+        "--preset",
+        choices=["engine", "chat", "integrated", "full"],
+        default="chat",
+        help="Preset to use if onboarding needs to create a missing scaffold (default: chat)",
     )
     onboard_parser.add_argument(
         "--name",
@@ -159,7 +245,7 @@ def create_parser():
     )
     onboard_parser.add_argument(
         "--theme-primary",
-        choices=["teal", "blue", "emerald", "slate", "amber", "rose"],
+        choices=["cyan", "teal", "blue", "emerald", "slate", "amber", "rose"],
         default=None,
         help="Primary brand color token",
     )
@@ -183,12 +269,40 @@ def create_parser():
         action="store_true",
         help="Use current config and provided flags without prompting",
     )
+    onboard_parser.add_argument(
+        "--full",
+        dest="full_setup",
+        action="store_true",
+        help="Collect detailed product, branding, and admin configuration instead of the minimal Studio-first setup",
+    )
+    onboard_parser.add_argument(
+        "--open-studio",
+        action="store_true",
+        help="Launch Studio after onboarding completes",
+    )
+    onboard_parser.add_argument(
+        "--backend-port",
+        type=int,
+        default=8000,
+        help="Backend port to use when launching Studio (default: 8000)",
+    )
+    onboard_parser.add_argument(
+        "--frontend-port",
+        type=int,
+        default=3000,
+        help="Frontend port to use when launching Studio (default: 3000)",
+    )
+    onboard_parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Launch Studio services without opening the browser",
+    )
 
     # mozaiks studio
     studio_parser = subparsers.add_parser(
         "studio",
-        help="Print workspace status to the terminal",
-        description="Read the active workspace and print a status summary. This is a developer diagnostic tool — for the full management interface, run the server and open /studio in the browser.",
+        help="Inspect or launch Studio",
+        description="Read the active workspace and print a status summary, or launch the full Studio create/build UI when used with --open.",
     )
     studio_parser.add_argument(
         "--dir",
@@ -201,6 +315,29 @@ def create_parser():
         dest="json_output",
         action="store_true",
         help="Emit the Studio Home summary as JSON",
+    )
+    studio_parser.add_argument(
+        "--open",
+        dest="open_studio",
+        action="store_true",
+        help="Launch the backend + frontend Studio stack for this workspace",
+    )
+    studio_parser.add_argument(
+        "--backend-port",
+        type=int,
+        default=8000,
+        help="Backend port to use when launching Studio (default: 8000)",
+    )
+    studio_parser.add_argument(
+        "--frontend-port",
+        type=int,
+        default=3000,
+        help="Frontend port to use when launching Studio (default: 3000)",
+    )
+    studio_parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Launch Studio services without opening the browser",
     )
 
     # mozaiks add
@@ -276,6 +413,8 @@ def main():
     try:
         if args.command == "init":
             init_command.run(args)
+        elif args.command in {"quickstart", "start"}:
+            quickstart_command.run(args)
         elif args.command == "serve":
             serve_command.run(args)
         elif args.command == "onboard":

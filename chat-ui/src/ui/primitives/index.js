@@ -18,16 +18,22 @@
  *   TODO — PrimitiveRegistry and PageRenderer will be added here.
  */
 
-export { DataTable } from './DataTable.jsx';
-export { Form }      from './Form.jsx';
-export { Card }      from './Card.jsx';
-export { Stat }      from './Stat.jsx';
-export { Grid }      from './Grid.jsx';
-export { Button }    from './Button.jsx';
-export { Modal }     from './Modal.jsx';
-export { Alert }     from './Alert.jsx';
-export { Badge }     from './Badge.jsx';
+export { DataTable }       from './DataTable.jsx';
+export { Form }            from './Form.jsx';
+export { Card }            from './Card.jsx';
+export { Stat }            from './Stat.jsx';
+export { Grid }            from './Grid.jsx';
+export { Button }          from './Button.jsx';
+export { Modal }           from './Modal.jsx';
+export { Alert }           from './Alert.jsx';
+export { Badge }           from './Badge.jsx';
 export { Skeleton, Empty } from './Skeleton.jsx';
+export { Timeline }        from './Timeline.jsx';
+export { CodeBlock }       from './CodeBlock.jsx';
+export { ProgressTracker } from './ProgressTracker.jsx';
+export { AlertBanner }     from './AlertBanner.jsx';
+export { ActionButton }    from './ActionButton.jsx';
+export { FileList }        from './FileList.jsx';
 
 // Event bus — exported so App.jsx / providers can wire the WebSocket bridge
 export { mountAppEventBridge, useAppEvent, emitAppEvent } from '../hooks/useAppEventBus.js';

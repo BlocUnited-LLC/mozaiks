@@ -208,8 +208,8 @@ Already outputs the correct declarative YAML format (orchestrator.yaml, agents.y
 - [ ] Install shadcn/ui base components into `chat-ui/src/ui/base/` — the internal layer AI never sees
 - [ ] Install and configure Tailwind CSS in `chat-ui/`
 - [ ] Create CSS token system (`chat-ui/src/ui/theme/tokens.js`) — maps theme config to CSS variables
-- [ ] Create `mozaiks-platform/app/brand/` folder with `theme_config.json` and base CSS tokens
-- [ ] Wire `mozaiks-platform/app/brand/` into the existing `themeProvider.js` pipeline
+- [ ] Create hosted product `app/brand/` folder with `theme_config.json` and base CSS tokens
+- [ ] Wire hosted product `app/brand/` into the existing `themeProvider.js` pipeline
 - [ ] Create `chat-ui/src/ui/primitives/` directory — home for all Mozaiks primitives
 
 ### Layer 1 — Core Primitives (the moat, build in this order)
@@ -288,10 +288,10 @@ Already outputs the correct declarative YAML format (orchestrator.yaml, agents.y
 - [ ] Add `save_gate_config` tool — appends gate to `extension_registry.json`
 - [ ] Teach `ToolPlanningAgent` semantic rules for when to generate a gate vs use handoffs
 
-### Layer 5 — mozaiks-platform Migration
+### Layer 5 — Hosted Product Workspace Migration
 
-- [ ] Create `mozaiks-platform/app/brand/theme_config.json` with platform theme tokens
-- [ ] Create `mozaiks-platform/app/ui/pages/dashboard.yaml` using DataTable + Card + Stat primitives (replaces `Dashboard.jsx` hand-written code)
+- [ ] Create hosted product `app/brand/theme_config.json` with platform theme tokens
+- [ ] Create hosted product `app/ui/pages/dashboard.yaml` using DataTable + Card + Stat primitives (replaces `Dashboard.jsx` hand-written code)
 - [ ] Keep `CreateApp.jsx` as-is — it's a workflow launcher, not a CRUD page, intentionally imperative
 - [ ] Add `AppCard` usage as a `Card` primitive instance in `dashboard.yaml`
 - [ ] Verify `list_apps` module endpoint wired and returning data
@@ -340,7 +340,7 @@ Already outputs the correct declarative YAML format (orchestrator.yaml, agents.y
 Week 1 — Foundation + 3 primitives (unblocks testing)
   Layer 0 complete
   Card, Grid, Stat primitives
-  mozaiks-platform/app/brand/ wired
+  hosted product app/brand/ wired
 
 Week 2 — Core table + form primitives (unblocks AppGenerator output)
   DataTable primitive with ui.datatable.refresh
@@ -357,7 +357,7 @@ Week 4 — Workflow updates (closes the loop end to end)
   ValueEngine: app_ui_requirements
   DesignDocs: ui_schema 4th document
   AppGenerator: schema output (not raw code)
-  mozaiks-platform dashboard.yaml migration
+  hosted product dashboard.yaml migration
 
 Week 5 — E2B + polish
   E2B template prepared
@@ -391,5 +391,3 @@ Week 5 — E2B + polish
 
 4. **Event bus transport**: do App UI events share the workflow WebSocket or get a separate connection?
    - Recommendation: share the workflow WebSocket — same bus, different event namespace (`ui.*` vs workflow events)
-
-

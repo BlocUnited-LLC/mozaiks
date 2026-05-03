@@ -4,7 +4,7 @@
 
 <img src="assets/mozaik_logo.svg" alt="Mozaiks Logo" width="180"/>
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/CHANGELOG.md)
+[![Release](https://img.shields.io/github/v/release/BlocUnited-LLC/mozaiks)](https://github.com/BlocUnited-LLC/mozaiks/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://www.python.org/)
 [![AG2](https://img.shields.io/badge/AG2-Autogen-green)](https://github.com/ag2ai/ag2)
@@ -13,7 +13,9 @@
 
 > **Note**: This is the unified Mozaiks stack. BlocUnited offers a managed platform with app generation tools at [mozaiks.ai](https://mozaiks.ai), but you're welcome to self-host and build everything yourself.
 
-> **Zero-Code Setup**: New to development? No problem! Start with the [Getting Started guide](getting-started.md) for the Claude Code setup path and let your AI coding agent guide you through the full setup.
+> **Start Here**: New to Mozaiks? Start with the [Getting Started guide](getting-started.md), then use [Install Modes](install-modes.md) if you need to choose between the builder path and the lower-level framework path.
+
+> **Maintainers**: Use [Releasing](releasing.md) for the tag-driven package publish flow.
 
 ---
 
@@ -69,9 +71,17 @@ Choose the path that matches what you need to do.
 
     ---
 
-    Clone the repo, configure the environment, and boot the stack.
+    Clone the repo, configure the environment, and boot Studio through the builder quickstart path.
 
     [:octicons-arrow-right-24: Getting Started](getting-started.md)
+
+-   :material-source-branch: **Choose Your Install Path**
+
+    ---
+
+    Decide whether you are building an app through Studio or working on the framework internals.
+
+    [:octicons-arrow-right-24: Install Modes](install-modes.md)
 
 -   :material-robot-outline: **Use an AI Coding Agent**
 

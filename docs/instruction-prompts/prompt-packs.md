@@ -51,7 +51,7 @@ Any prompt pack for this repo should preserve these boundaries:
 - canonical hosts live under `mozaiksai/hosts/`
 - shared builder workflows live under `factory_app/workflows/`
 - app-owned workflows live under the active app root's `app/workflows/`
-- App Zero's local product app root is `mozaiks-platform/app/`
+- the first-party Studio app bundle in this repo is `factory_app/app/`
 - do not reintroduce retired roots such as `platform/` as the canonical app
   workspace contract
 

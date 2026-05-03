@@ -26,9 +26,9 @@ CURRENT STATE:
 ├── mozaiksai/hosts/platform.py          # headless app host
 ├── mozaiksai/hosts/studio.py            # local/private builder host
 ├── mozaiksai/hosts/mozaiks.py           # hosted product host
-├── platform/                # default OSS/sample active app root
-└── mozaiks-platform/
-    └── app/                 # active App Zero app root
+├── factory_app/app/         # first-party Studio app bundle
+└── external hosted product workspace
+    └── app/                 # hosted product app root
 
 TARGET STATE:
 ├── mozaiks/
@@ -39,10 +39,8 @@ TARGET STATE:
 │       ├── runtime/         # NEW: app composition
 │       ├── ui/              # From chat-ui/
 │       └── cli/             # From mozaiks_cli/
-└── mozaiks-platform/
-    ├── app/                 # active App Zero app root
-    ├── brand/
-    ├── ui/
+└── hosted-product/
+    ├── app/                 # hosted product app root
     └── generated/
 ```
 
@@ -633,7 +631,7 @@ access:
 - [ ] Unit tests for all SDK methods
 
 ### Platform Modules
-- [ ] Create `mozaiks-platform-modules` package
+- [ ] Create hosted-product module package(s) only if packaging that consumer separately still makes sense
 - [ ] Implement `platform.users` module
 - [ ] Implement `platform.apps` module
 - [ ] Implement `platform.governance` module

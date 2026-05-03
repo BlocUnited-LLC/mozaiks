@@ -44,7 +44,6 @@ def _load_update_agent_state_pattern_module():
     file_path = (
         workspace
         / "factory_app"
-        / "app"
         / "workflows"
         / "AgentGenerator"
         / "tools"
@@ -128,6 +127,7 @@ def test_inject_ui_file_generator_guidance_replaces_legacy_examples() -> None:
     assert "[UI FILE GENERATOR CONTRACT]" in injected
     assert "WorkflowUIRouter" in injected
     assert "from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool" in injected
+    assert "shipped shared components" in injected
     assert "app.modules.ui_tools" in injected  # negative rule only
     assert "artifactDesignSystem" not in injected
     assert "subscribes via `useAppEventBus`" not in injected
@@ -138,7 +138,6 @@ def test_ui_file_generator_prompt_uses_runtime_helper_contract() -> None:
     agents_yaml = (
         workspace
         / "factory_app"
-        / "app"
         / "workflows"
         / "AgentGenerator"
         / "agents.yaml"
@@ -148,6 +147,8 @@ def test_ui_file_generator_prompt_uses_runtime_helper_contract() -> None:
 
     assert "use_ui_tool(...)" in ui_section
     assert "WorkflowUIRouter" in ui_section
+    assert "workflow_primitive" in ui_section
+    assert "shipped shared component" in ui_section
     assert "subscribes via `useAppEventBus`" not in ui_section
     assert "calls `send_ui_tool_event(component_name, display_type, payload)`" not in ui_section
 

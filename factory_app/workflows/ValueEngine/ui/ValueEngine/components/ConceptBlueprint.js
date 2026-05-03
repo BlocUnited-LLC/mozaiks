@@ -19,7 +19,7 @@ import {
   components as designComponents,
   spacing as designSpacing,
   typography as designTypography,
-} from '../../../../../../../chat-ui/src/platform/workflowSurfaceStyles.js';
+} from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
 
 const asText = (value) => (typeof value === 'string' ? value.trim() : '');
 

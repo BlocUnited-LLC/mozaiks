@@ -1,0 +1,59 @@
+tools:
+- agent: ReviewAgent
+  file: request_acceptance_approval.py
+  function: request_acceptance_approval
+  description: Collect structured approval for the workflow primitive acceptance checkpoint.
+  tool_type: UI_Tool
+  auto_tool_call: false
+  ui:
+    component: ApprovalCard
+    mode: inline
+    workflow_primitive: approval_card
+  ui_contract:
+    surface_kind: agent_tool
+    payload_schema:
+      type: object
+      properties:
+        title:
+          type: string
+        summary:
+          type: string
+        checkpoints:
+          type: array
+      additionalProperties: true
+    actions_schema:
+    - id: approve
+      description: Accept the workflow primitive validation checkpoint.
+      payload_schema:
+        type: object
+        properties:
+          action:
+            type: string
+          approved:
+            type: boolean
+          rationale:
+            type: string
+        additionalProperties: true
+    - id: request_changes
+      description: Reject the checkpoint and request another iteration.
+      payload_schema:
+        type: object
+        properties:
+          action:
+            type: string
+          approved:
+            type: boolean
+          rationale:
+            type: string
+        additionalProperties: true
+- agent: ReviewAgent
+  file: show_acceptance_diagram.py
+  function: show_acceptance_diagram
+  description: Emit the artifact viewer surface for the workflow primitive acceptance smoke.
+  tool_type: UI_Surface
+  auto_tool_call: false
+  ui:
+    component: DiagramViewer
+    mode: artifact
+    workflow_primitive: diagram_viewer
+lifecycle_tools: []

@@ -9,16 +9,22 @@
  * To add a new primitive: import it and add an entry to PRIMITIVES.
  */
 
-import { DataTable } from '../primitives/DataTable.jsx';
-import { Form }      from '../primitives/Form.jsx';
-import { Card }      from '../primitives/Card.jsx';
-import { Stat }      from '../primitives/Stat.jsx';
-import { Grid }      from '../primitives/Grid.jsx';
-import { Button }    from '../primitives/Button.jsx';
-import { Modal }     from '../primitives/Modal.jsx';
-import { Alert }     from '../primitives/Alert.jsx';
-import { Badge }     from '../primitives/Badge.jsx';
+import { DataTable }       from '../primitives/DataTable.jsx';
+import { Form }            from '../primitives/Form.jsx';
+import { Card }            from '../primitives/Card.jsx';
+import { Stat }            from '../primitives/Stat.jsx';
+import { Grid }            from '../primitives/Grid.jsx';
+import { Button }          from '../primitives/Button.jsx';
+import { Modal }           from '../primitives/Modal.jsx';
+import { Alert }           from '../primitives/Alert.jsx';
+import { Badge }           from '../primitives/Badge.jsx';
 import { Skeleton, Empty } from '../primitives/Skeleton.jsx';
+import { Timeline }        from '../primitives/Timeline.jsx';
+import { CodeBlock }       from '../primitives/CodeBlock.jsx';
+import { ProgressTracker } from '../primitives/ProgressTracker.jsx';
+import { AlertBanner }     from '../primitives/AlertBanner.jsx';
+import { ActionButton }    from '../primitives/ActionButton.jsx';
+import { FileList }        from '../primitives/FileList.jsx';
 
 const PRIMITIVES = {
   DataTable,
@@ -32,6 +38,12 @@ const PRIMITIVES = {
   Badge,
   Skeleton,
   Empty,
+  Timeline,
+  CodeBlock,
+  ProgressTracker,
+  AlertBanner,
+  ActionButton,
+  FileList,
 };
 
 /**

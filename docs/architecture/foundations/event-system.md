@@ -19,7 +19,7 @@ Event ownership follows the layer that owns the fact.
 | `artifact.*` | runtime or generator workflow | artifact lifecycle facts | yes for transport, no for business meaning |
 | `ui.*` | app UI contract | primitive updates and client-side UI reactions | no |
 | `notification.*` | platform host notification service | notification lifecycle | no |
-| `platform.*` | product/platform layer | App Zero or hosted-platform product facts | no |
+| `platform.*` | product/platform layer | hosted product facts | no |
 | `hosted.*` | hosted-only capability packs | paid hosted product capabilities | no |
 
 The runtime may transport many event families. Transport is not ownership.
@@ -37,7 +37,8 @@ New interactive workflow UI should follow the `chat.tool_call` transport path.
 
 Response-required AG2 input interactions normalize onto `chat.tool_call` with
 `interaction_type=input_request`. That is the only canonical browser-facing
-lane for runtime-managed interactive input.
+lane for runtime-managed interactive input. In `chat-ui`, generic text input
+requests now default to `display=composer`.
 
 ## Layer Responsibilities
 
@@ -93,6 +94,52 @@ Current implementation:
   `workflows/*/orchestrator.yaml`, creates the routed chat session, and
   auto-starts background execution when transport is available.
 - Capability resolution emits `platform.workflow_capability_started`.
+- Handler targets route the event payload directly to a named module action
+  method, enabling module-to-module event-driven calls without HTTP indirection.
+
+### Subscription target reference
+
+```yaml
+# subscriptions.yaml
+subscriptions:
+  - id: my_subscription
+    event: domain.tasks.task_created      # event type to react to
+
+    # Target kind 1: notification
+    # Creates a platform notification intent from notifications.yaml rule.
+    target:
+      kind: notification
+      notification_id: task_created
+
+  - id: my_workflow_trigger
+    event: domain.tasks.task_created
+
+    # Target kind 2: capability
+    # Resolves capability_id against workflow orchestrator.yaml triggers.
+    # Starts a workflow session when a matching trigger is found.
+    target:
+      kind: capability
+      capability_id: tasks.review
+
+  - id: my_handler_call
+    event: hosted.other_module.something_happened
+
+    # Target kind 3: handler (module-to-module event routing)
+    # Routes payload fields as keyword arguments to the named module action.
+    # Format: hosted.{module_id}.{handler_method_name}
+    # The receiving handler method must accept the event payload fields as kwargs.
+    handler: hosted.{module_id}.{handler_method_name}
+```
+
+**Handler target rules:**
+
+- Use `handler:` (not `target: kind: handler`) — it is a top-level key.
+- The handler reference format is `hosted.{module_id}.{method_name}`.
+- The event payload is unpacked as keyword arguments into the handler method.
+- The receiving method must be declared as an action in its `module.yaml` or be
+  a documented subscription handler on the handler class.
+- Handler targets are for deterministic module-to-module reactions. For
+  AI-driven reactions, use a capability target to trigger a workflow instead.
 - `/api/notifications/count` reads unread platform notification intents for the
   current principal.
 
@@ -112,7 +159,7 @@ workflow sessions without module code importing workflow internals.
 
 These are product facts, not universal runtime assumptions.
 
-App Zero's deterministic hosted product modules currently center on:
+Hosted product modules currently center on examples such as:
 
 - `investor_marketplace`, which publishes `hosted.marketplace.*`
 - `communications`, which publishes `hosted.communication.*`
@@ -183,15 +230,17 @@ workflow tool
 ```
 
 AG2 `InputRequestEvent` now follows the same transport lane, using
-`interaction_type=input_request` and a generic `UserInputRequest` fallback
-component when no workflow-specific component hint is provided.
+`interaction_type=input_request`. Generic text reply defaults to
+`display=composer`; `UserInputRequest` remains the fallback component identity
+when a workflow explicitly wants inline input or the request cannot use the
+composer (for example, password entry).
 
 Key implications:
 
 - workflow-owned artifact cards and interactive panels are not `ui.*` primitive
   events
 - they are chat-session-scoped UI surfaces
-- their display mode (`inline`, `artifact`, `view`) influences the frontend
+- their display mode (`composer`, `inline`, `artifact`, `view`) influences the frontend
   surface state machine
 
 ### 3. Typed `ui.*` primitive lane

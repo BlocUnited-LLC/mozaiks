@@ -3,6 +3,21 @@ from typing import Any, List, Dict
 
 logger = logging.getLogger(__name__)
 
+
+def _read_system_message(agent: Any) -> str:
+    return getattr(agent, "system_message", None) or getattr(agent, "_system_message", "") or ""
+
+
+def _apply_system_message(agent: Any, message: str) -> None:
+    updater = getattr(agent, "update_system_message", None)
+    if callable(updater):
+        updater(message)
+    elif hasattr(agent, "_system_message"):
+        agent._system_message = message
+    else:
+        setattr(agent, "_system_message", message)
+    setattr(agent, "_mozaiks_base_system_message", message)
+
 def inject_file_generation_instructions(agent, messages: List[Dict[str, Any]]) -> None:
     """
     Injects comprehensive file generation best practices and compliance requirements
@@ -62,11 +77,13 @@ def inject_file_generation_instructions(agent, messages: List[Dict[str, Any]]) -
 ```
 """
         # Check if instructions already exist to avoid duplication
-        if "[FILE GENERATION INSTRUCTIONS]" in agent.system_message:
+        current = _read_system_message(agent)
+        if "[FILE GENERATION INSTRUCTIONS]" in current:
              return
 
         # Append to system message
-        agent.system_message += f"\n\n{instructions}"
+        new_message = f"{current}\n\n{instructions}" if current else instructions
+        _apply_system_message(agent, new_message)
         logger.info(f"✓ Injected file generation instructions into {agent.name}")
 
     except Exception as e:

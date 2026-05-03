@@ -3,9 +3,11 @@
 import json
 import re
 import sys
+import shutil
 from pathlib import Path
 
 from mozaiksai.core.admin.contract import build_default_host_admin_config
+from mozaiksai.resources import resolve_factory_brand_root
 
 # Tier definitions
 TIER_PRESETS = {
@@ -82,7 +84,7 @@ def run(args):
     if TIER_PRESETS[preset].get("admin"):
         admin_email = _prompt_admin_email()
 
-    _create_bundle_scaffold(
+    create_scaffold(
         target_dir=target_dir,
         preset=preset,
         app_name=app_name,
@@ -92,6 +94,41 @@ def run(args):
 
     print("\nProject initialized successfully.")
     _show_next_steps(target_dir, preset, starter)
+
+
+def create_scaffold(
+    *,
+    target_dir: Path,
+    preset: str,
+    app_name: str,
+    admin_email: str | None = None,
+    starter: bool = False,
+) -> Path:
+    """Create a fresh scaffold in target_dir and return the workspace root."""
+    if preset not in TIER_PRESETS:
+        raise ValueError(f"Unknown preset '{preset}'")
+
+    app_root = target_dir / "app"
+    existing_surfaces = _existing_scaffold_surfaces(
+        app_root,
+        target_dir / "platform",
+        target_dir / "brand",
+        target_dir / "ui",
+    )
+    if existing_surfaces:
+        raise ValueError(
+            f"scaffold already exists in {target_dir} (found: {', '.join(existing_surfaces)})"
+        )
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    _create_bundle_scaffold(
+        target_dir=target_dir,
+        preset=preset,
+        app_name=app_name,
+        admin_email=admin_email,
+        starter=starter,
+    )
+    return target_dir
 
 
 def _existing_scaffold_surfaces(*paths: Path) -> list[str]:
@@ -228,11 +265,8 @@ def _create_bundle_scaffold(
         _write_json(admin_json_path, admin_config)
         print(f"Created app/config/admin.json (admin: {resolved_email})")
 
-    _write_json(brand_dir / "theme_config.json", _build_theme_config(app_name))
-    print("Created app/brand/theme_config.json")
-
-    _write_text(assets_dir / "logo.svg", _default_logo_svg())
-    print("Created app/brand/assets/logo.svg")
+    _copy_default_brand_bundle(brand_dir, app_name)
+    print("Created app/brand from factory_app default brand")
 
     _write_json(ui_dir / "route_manifest.json", {"pages": []})
     print("Created app/ui/route_manifest.json")
@@ -271,7 +305,8 @@ def _build_shell_config(app_name: str) -> dict:
     return {
         "header": {
             "logo": {
-                "src": "/assets/logo.svg",
+                "src": None,
+                "wordmark": None,
                 "alt": f"{app_name} logo",
                 "href": "/",
             },
@@ -293,82 +328,47 @@ def _build_shell_config(app_name: str) -> dict:
     }
 
 
-def _build_theme_config(app_name: str) -> dict:
-    return {
-        "_comment": (
-            "Blank visual identity scaffold. Replace colors and assets when the product direction is clear."
-        ),
-        "theme": {
-            "primary": "teal",
-            "variant": "modern",
-            "radius": "medium",
-            "font": "system",
-            "font_heading": "system",
-            "appearance": "light",
-            "density": "comfortable",
-            "branding": {
-                "app_name": app_name,
-                "logo_url": "/assets/logo.svg",
-            },
-        },
-        "identity": {
-            "name": app_name,
-            "tagline": "Mozaiks app bundle",
-            "app_name": app_name,
-        },
-        "assets": {
-            "logo": "logo.svg",
-        },
-        "colors": {
-            "primary": {
-                "main": "#0f766e",
-                "light": "#14b8a6",
-                "dark": "#115e59",
-                "name": "teal",
-            },
-            "secondary": {
-                "main": "#1d4ed8",
-                "light": "#60a5fa",
-                "dark": "#1e40af",
-                "name": "blue",
-            },
-            "background": {
-                "base": "#f8fafc",
-                "surface": "#ffffff",
-                "elevated": "#ffffff",
-                "overlay": "rgba(15, 23, 42, 0.24)",
-            },
-            "border": {
-                "subtle": "#dbeafe",
-                "strong": "#93c5fd",
-                "accent": "#0f766e",
-            },
-            "text": {
-                "primary": "#0f172a",
-                "secondary": "#334155",
-                "muted": "#64748b",
-                "onAccent": "#f8fafc",
-            },
-        },
-        "shadows": {
-            "primary": "0 20px 45px rgba(15, 118, 110, 0.18)",
-            "elevated": "0 24px 60px rgba(15, 23, 42, 0.12)",
-        },
-        "ui": {
-            "chat": {
-                "modes": {
-                    "ask": {
-                        "tint": "#0f766e",
-                        "label": "Ask",
-                    },
-                    "workflow": {
-                        "tint": "#1d4ed8",
-                        "label": "Workflow",
-                    },
-                },
-            },
-        },
-    }
+def _resolve_default_brand_template_dir() -> Path:
+    resolved = resolve_factory_brand_root()
+    if resolved is not None:
+        return resolved
+    return (Path(__file__).resolve().parents[2] / "factory_app" / "app" / "brand").resolve()
+
+
+def _load_default_brand_theme_config(app_name: str) -> dict:
+    template_path = _resolve_default_brand_template_dir() / "theme_config.json"
+    if not template_path.exists():
+        raise FileNotFoundError(f"Default brand template not found: {template_path}")
+
+    payload = json.loads(template_path.read_text(encoding="utf-8"))
+
+    identity = payload.get("identity")
+    if isinstance(identity, dict):
+        identity["name"] = app_name
+        identity["app_name"] = app_name
+
+    theme = payload.get("theme")
+    if isinstance(theme, dict):
+        branding = theme.get("branding")
+        if isinstance(branding, dict):
+            branding["app_name"] = app_name
+
+    return payload
+
+
+def _copy_default_brand_bundle(brand_dir: Path, app_name: str) -> None:
+    template_dir = _resolve_default_brand_template_dir()
+    if not template_dir.exists():
+        raise FileNotFoundError(f"Default brand bundle not found: {template_dir}")
+
+    for child in template_dir.iterdir():
+        destination = brand_dir / child.name
+        if child.is_dir():
+            shutil.copytree(child, destination, dirs_exist_ok=True)
+        else:
+            shutil.copy2(child, destination)
+
+    _write_json(brand_dir / "theme_config.json", _load_default_brand_theme_config(app_name))
 
 
 def _create_starter_workflow(workflows_dir: Path) -> None:
@@ -465,16 +465,16 @@ def _show_next_steps(target_dir: Path, preset: str, starter: bool) -> None:
     app_root = target_dir / "app"
     print("\nNext Steps:")
     print(f"  1. cd {target_dir}")
-    print("  2. Review app/app.json, app/config/ai.json, and app/brand/theme_config.json")
+    print("  2. Run onboarding: mozaiks onboard --dir .")
     print("  3. Set OPENAI_API_KEY and MONGO_URI in your environment (or a .env file)")
-    print(f"  4. Start the runtime: mozaiks serve . --host platform")
+    print("  4. Open Studio: mozaiks studio --dir . --open")
     if starter:
-        print("  4. Replace app/workflows/HelloWorkflow with real product workflows")
+        print("  5. Replace app/workflows/HelloWorkflow only after you confirm the real product behavior")
     else:
-        print("  4. Add workflows in app/workflows/ and modules in app/modules/")
-    print("  5. Optional: use mozaiks gen once you have real product context")
+        print("  5. Use Studio to generate the first real workflows/modules instead of hand-populating the scaffold")
+    print("  6. Optional: use mozaiks gen once you have real product context")
     if features.get("admin"):
-        print("  6. Confirm admin access in app/config/admin.json and app/app.json admins")
+        print("  7. Confirm admin access in app/config/admin.json and app/app.json admins")
 
     print("\nTo add more features later: mozaiks add <feature>")
 
@@ -543,15 +543,3 @@ def _ui_component_registry_index() -> str:
 """
 
 
-def _default_logo_svg() -> str:
-    return """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Mozaiks logo placeholder">
-  <defs>
-    <linearGradient id="mozaiksGradient" x1="0%" x2="100%" y1="0%" y2="100%">
-      <stop offset="0%" stop-color="#0f766e" />
-      <stop offset="100%" stop-color="#1d4ed8" />
-    </linearGradient>
-  </defs>
-  <rect width="128" height="128" rx="28" fill="url(#mozaiksGradient)" />
-  <path d="M28 92V36h18l18 30 18-30h18v56H84V63L69 88H59L44 63v29Z" fill="#f8fafc" />
-</svg>
-"""

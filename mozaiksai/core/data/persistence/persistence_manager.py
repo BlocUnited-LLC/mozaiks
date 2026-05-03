@@ -106,11 +106,37 @@ class PersistenceManager:
                     await coll.create_index(app_workflow_created_keys, name="cs_app_wf_created")
                     logger.debug("Created app/workflow/created index")
                 
-                # Create status index if not exists  
+                # Create status index if not exists
                 if "idx_status" not in index_names and "cs_status_created" not in index_names:
                     await coll.create_index("status", name="idx_status")
                     logger.debug("Created status index")
-                    
+
+                # Compound index for idempotency window check in start_chat:
+                # query: {app_id, user_id, workflow_name, status, created_at range}
+                # ESR order: equality fields first, range field last.
+                idempotency_keys = [
+                    ("app_id", 1),
+                    ("user_id", 1),
+                    ("workflow_name", 1),
+                    ("status", 1),
+                    ("created_at", -1),
+                ]
+                if "cs_idempotency" not in index_names and not _has_index_with_keys(existing_indexes, idempotency_keys):
+                    await coll.create_index(idempotency_keys, name="cs_idempotency")
+                    logger.debug("Created ChatSessions idempotency compound index")
+
+                # TTL index — auto-expire old sessions to prevent unbounded collection growth.
+                # Configurable via CHAT_SESSION_TTL_DAYS; default 90 days.
+                # Set to 0 to disable TTL.
+                ttl_days = int(os.getenv("CHAT_SESSION_TTL_DAYS", "90"))
+                if ttl_days > 0 and "cs_ttl" not in index_names:
+                    await coll.create_index(
+                        "created_at",
+                        name="cs_ttl",
+                        expireAfterSeconds=ttl_days * 86400,
+                    )
+                    logger.debug("Created ChatSessions TTL index (%d days)", ttl_days)
+
                 # Note: per-event normalized rows and their indexes in WorkflowStats
                 # were removed to reduce collection noise; WorkflowStats now holds
                 # live rollup documents (mon_ prefix) only, so no per-event index is needed.
@@ -1818,7 +1844,7 @@ class AG2PersistenceManager:
         component_type: Optional[str] = None,
         workflow_name: Optional[str] = None,
         tool_name: Optional[str] = None,
-        display: str = "inline",
+        display: str = "composer",
         interaction_type: str = "input_request",
         password: bool = False,
         raw_payload: Optional[Dict[str, Any]] = None,

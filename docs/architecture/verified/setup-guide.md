@@ -5,22 +5,21 @@ or embed the runtime substrate into another backend.
 
 ---
 
-## 1. Install Required Packages
+## 1. Install And Start The Repo
 
-To begin, install the required backend and frontend packages:
+For the canonical Mozaiks builder flow, start from the repo checkout instead of
+mixing separate runtime and UI package installs:
 
 ```bash
-# Backend - AI workflow runtime
-pip install mozaiksai
-
-# Frontend - Chat widget components
-npm install @mozaiks/chat-ui
+git clone https://github.com/BlocUnited-LLC/mozaiks.git
+cd mozaiks
+python -m venv .venv
+source .venv/bin/activate  # or .\.venv\Scripts\Activate.ps1 on PowerShell
+pip install -e .
 ```
 
-| Package | What it provides |
-|---------|------------------|
-| `mozaiksai` | Workflow execution, WebSocket streaming, persistence, token tracking |
-| `@mozaiks/chat-ui` | `ChatWidget` component, chat interface, artifact rendering |
+Use standalone package embedding only when you are intentionally integrating
+the runtime substrate into another backend.
 
 ---
 
@@ -34,15 +33,12 @@ If you are running this repo directly, the canonical entrypoints are the root
 host files:
 
 ```bash
-# Defaults to the local/private Studio host
-mozaiks serve .
+# Builder path
+mozaiks quickstart --dir ./my-first-mozaiks-app
 
-# Or target a specific layer directly
-python run_runtime.py
-python run_platform.py
-python run_studio.py
-python run_mozaiks.py
-```
+# Or launch Studio against an existing workspace
+mozaiks studio --dir ./my-first-mozaiks-app --open
+``` 
 
 Use this mode when you want the layered repo architecture as-is.
 
@@ -136,23 +132,23 @@ The ChatWidget is a floating button that expands to a chat overlay:
 
 ## 3. Workflow Directory Structure
 
-You will need a place for first-party factory workflows to live. In this repo they
-live under `factory_app/workflows/`. App-owned workflows live under the
-active app root's `app/workflows/`. Below is the canonical factory workspace
-structure:
+Shared first-party factory workflows live under `factory_app/workflows/`.
+App-owned workflows live under the active app root's `app/workflows/`. The
+first-party Studio bundle in this repo is `factory_app/app/`, but shared
+builder workflows are not stored inside that app root.
 
-```
+```text
 factory_app/
-└── app/
-  └── workflows/
+├── app/                        # first-party Studio app bundle
+└── workflows/
     ├── extended_orchestration/
-    │   └── extension_registry.json   # Cross-workflow pack registry (optional)
+    │   └── extension_registry.json
     └── {workflow_name}/
-      ├── extended_orchestration/
-      │   └── mfj_extension.json    # Per-workflow MFJ config (optional)
-      ├── orchestrator.yaml
-      ├── agents.yaml
-      ├── handoffs.yaml
+        ├── extended_orchestration/
+        │   └── mfj_extension.json
+        ├── orchestrator.yaml
+        ├── agents.yaml
+        ├── handoffs.yaml
         ├── context_variables.yaml
         ├── structured_outputs.yaml
         ├── tools.yaml
@@ -194,9 +190,9 @@ A general-purpose agent that lets users ask questions about your app or product.
 
 Purpose-built multi-agent workflows for specific tasks. These are the workflows
 you create in the active app root, such as `app/workflows/` in the canonical
-workspace model. App Zero keeps local journey and launcher config under
-`mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`, but its shared build
-workflow implementations also resolve from `factory_app/workflows/`.
+workspace model. Product/app overlays may keep local journey and launcher
+config under the active app root's `workflows/extended_orchestration/`, while
+shared build workflow implementations resolve from `factory_app/workflows/`.
 
 - Follows a defined agent orchestration pattern
 - Has specific tools, handoffs, and structured outputs

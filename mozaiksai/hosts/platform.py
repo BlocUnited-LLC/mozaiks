@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from mozaiksai.hosts import runtime as runtime_app
+from mozaiksai.version import __version__ as _API_VERSION
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.auth import (
     UserPrincipal,
@@ -47,6 +48,7 @@ from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRo
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 from mozaiksai.core.session.launcher import create_routed_chat_session, launch_transition, validate_context_for_workflow
 from mozaiksai.core.workflow.paths import resolve_active_app_root
+from mozaiksai.resources import resolve_factory_brand_root
 from mozaiksai.core.admin.contract import build_admin_shell_routes
 
 
@@ -57,6 +59,15 @@ logger = get_workflow_logger("platform_app")
 executor_registry = ExecutorRegistry()
 app.state.executor_registry = executor_registry
 _runtime_services: list[Any] = []
+
+
+@app.middleware("http")
+async def add_api_version_header(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-API-Version"] = _API_VERSION
+    return response
+
+
 _DEFAULT_PROFILE_USER_ID = os.getenv("MOZAIKS_DEFAULT_USER_ID", "demo-user").strip() or "demo-user"
 _ACCOUNT_PROFILE_COLLECTION = "UserProfiles"
 _ACCOUNT_PREFERENCES_COLLECTION = "UserPreferences"
@@ -82,6 +93,13 @@ def resolve_app_root() -> Path:
 def resolve_platform_path() -> Path:
     """Backward-compatible alias for resolve_app_root()."""
     return resolve_app_root()
+
+
+def _resolve_default_brand_root() -> Path:
+    resolved = resolve_factory_brand_root()
+    if resolved is not None:
+        return resolved
+    return (Path(__file__).resolve().parents[2] / "factory_app" / "app" / "brand").resolve()
 
 
 _NON_RUNNABLE_WORKFLOW_IDS = {"extended_orchestration"}
@@ -561,7 +579,11 @@ def _dedupe_and_sort_pages(pages: List[dict]) -> List[dict]:
 
 def _resolve_theme_config_path() -> Path:
     app_root = resolve_app_root()
-    return (app_root / "brand" / "theme_config.json").resolve()
+    candidates = [
+        (app_root / "brand" / "theme_config.json").resolve(),
+        (_resolve_default_brand_root() / "theme_config.json").resolve(),
+    ]
+    return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
 
 
 def _resolve_shell_config_path() -> Path:
@@ -1025,6 +1047,9 @@ def _extract_bearer_token(request: Request) -> Optional[str]:
     return auth_header.strip() or None
 
 
+_MODULE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
 async def _execute_module_action(
     *,
     module_name: str,
@@ -1034,6 +1059,11 @@ async def _execute_module_action(
     params: Dict[str, Any],
     context_overrides: Optional[Dict[str, Any]] = None,
 ) -> Any:
+    if not _MODULE_NAME_RE.fullmatch(module_name):
+        raise HTTPException(status_code=400, detail="Invalid module name")
+    if not _MODULE_NAME_RE.fullmatch(action_name):
+        raise HTTPException(status_code=400, detail="Invalid action name")
+
     module_executor = executor_registry.module_executor
     if module_executor is None:
         raise HTTPException(
@@ -1164,8 +1194,8 @@ async def get_transition_by_id(transition_id: str):
 
 
 class TransitionResolveRequest(BaseModel):
-    transition_id: str
-    option_id: Optional[str] = None
+    transition_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    option_id: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
     context_variables: Dict[str, Any] = Field(default_factory=dict)
     app_id: Optional[str] = None
     user_id: Optional[str] = None

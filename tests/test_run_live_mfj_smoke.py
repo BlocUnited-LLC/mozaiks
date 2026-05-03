@@ -12,6 +12,7 @@ from scripts.run_live_mfj_smoke import (
     _collect_events,
     _configure_event_loop_policy,
     _is_input_request_tool_call,
+    _load_tool_response_file,
     _resolve_assistant_message,
     _resolve_default_workflows_root,
 )
@@ -70,6 +71,30 @@ def test_build_tool_call_response_payload_uses_canonical_fields() -> None:
         "text": "approved",
         "user_input": "approved",
         "user_response": "approved",
+    }
+
+
+def test_load_tool_response_file_reads_scripted_replies_and_structured_payloads(tmp_path: Path) -> None:
+    fixture = tmp_path / "responses.json"
+    fixture.write_text(
+        json.dumps(
+            {
+                "input_replies": ["First reply"],
+                "tool_responses": {
+                    "ApprovalCard": {"action": "approve", "approved": True},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = _load_tool_response_file(fixture)
+
+    assert payload == {
+        "input_replies": ["First reply"],
+        "tool_responses": {
+            "ApprovalCard": {"action": "approve", "approved": True},
+        },
     }
 
 
@@ -214,6 +239,56 @@ async def test_collect_events_uses_fallback_tool_response_for_non_input_tool_cal
                 "text": "approved",
                 "user_input": "approved",
                 "user_response": "approved",
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_collect_events_uses_structured_tool_response_payload_for_matching_component() -> None:
+    websocket = _FakeWebSocket(
+        [
+            {
+                "type": "chat.tool_call",
+                "data": {
+                    "tool_call_id": "tc-3",
+                    "tool_name": "AcceptanceApprovalCard",
+                    "component_type": "AcceptanceApprovalCard",
+                    "interaction_type": "ui_tool",
+                    "awaiting_response": True,
+                    "payload": {
+                        "interaction_type": "ui_tool",
+                        "component_type": "AcceptanceApprovalCard",
+                        "workflow_primitive": "approval_card",
+                    },
+                },
+            }
+        ]
+    )
+
+    events = await _collect_events(
+        websocket,
+        chat_id="chat-test-4",
+        timeout_seconds=0.1,
+        tool_response_payloads={
+            "AcceptanceApprovalCard": {
+                "action": "approve",
+                "approved": True,
+                "rationale": "Structured approval worked.",
+            }
+        },
+    )
+
+    assert [event["type"] for event in events] == ["chat.tool_call"]
+    assert websocket.sent == [
+        {
+            "type": "tool_call_response",
+            "tool_call_id": "tc-3",
+            "response": {
+                "status": "submitted",
+                "action": "approve",
+                "approved": True,
+                "rationale": "Structured approval worked.",
             },
         }
     ]

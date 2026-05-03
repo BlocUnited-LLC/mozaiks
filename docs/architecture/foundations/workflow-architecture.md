@@ -88,9 +88,8 @@ Workflow files live under:
 
 - `app/workflows/*` — workflows owned by one app workspace
 - `factory_app/workflows/*` — shared factory workflows owned by the builder system, not by individual app workspaces
-- `mozaiks-platform/app/workflows/*` — current App Zero product-owned workflow implementations during transition
 - `factory_app/workflows/extended_orchestration/` — shared build launcher, journeys, and transition UI
-- `mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json` — App Zero product overlay on top of that shared routing layer
+- `<active app root>/workflows/extended_orchestration/extension_registry.json` — optional product/app overlay on top of that shared routing layer
 
 For the factory dogfood workspace specifically, `factory_app/app/workflows/*`
 is only an app-local overlay seam. It is not the canonical location for shared
@@ -103,13 +102,13 @@ Workflow resolution is multi-root:
 - the shared generation-core workflow root is searched second
 - `MOZAIKS_WORKFLOW_ROOTS` may override that order explicitly
 
-This lets App Zero keep product workflows locally while still consuming shared
-factory workflows through the same runtime and launcher graph.
+This lets an app workspace keep product workflows locally while still
+consuming shared factory workflows through the same runtime and launcher graph.
 
-That is the current composition contract between `mozaiks-platform` and
-`factory_app`: App Zero owns its product workflows and overlay registry, while
-`factory_app/workflows/` remains the shared builder layer loaded alongside
-the active app root.
+That is the composition contract between an active app workspace and
+`factory_app`: app/product workspaces own their overlay registries, while
+`factory_app/workflows/` remains the shared builder layer loaded alongside the
+active app root.
 
 The same contract applies when the active app root is `factory_app/app`: any
 workflow placed in that app root is app-owned overlay behavior, while the

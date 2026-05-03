@@ -6,7 +6,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { GitBranch, ListChecks, StickyNote, CheckCircle2 } from 'lucide-react';
-import { typography, components, colors } from '../../../../../chat-ui/src/platform/workflowSurfaceStyles.js';
+import { typography, components, colors } from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
 
 const DEFAULT_PENDING_MESSAGE = 'Sequence diagram is on the way. Approve the action plan to trigger generation.';
 

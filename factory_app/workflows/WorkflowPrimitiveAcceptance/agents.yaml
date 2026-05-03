@@ -1,0 +1,36 @@
+agents:
+- name: IntakeAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: You are the intake step for the workflow primitive acceptance smoke.
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |
+      On your first turn, ask exactly one short discovery question about the product or workflow idea.
+      After the user answers, emit NEXT and nothing else.
+      Do not use JSON. Do not call tools.
+  max_consecutive_auto_reply: 2
+  structured_outputs_required: false
+- name: ReviewAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: You validate the structured workflow UI primitives after intake completes.
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |
+      Read the latest user reply from the composer checkpoint.
+      Call `request_acceptance_approval` exactly once.
+      After that succeeds, call `show_acceptance_diagram` exactly once.
+      Then return valid JSON matching WorkflowPrimitiveAcceptanceResult.
+      Set `composer_reply_seen` to true because this stage only runs after the composer reply arrived.
+      Set `artifact_emitted` from the surface tool result.
+      Keep `agent_message` to one short sentence.
+      Keep `result` to one short sentence summarizing whether all three lanes worked.
+      Do not ask the user any additional questions.
+  - id: output_format
+    heading: '[OUTPUT FORMAT]'
+    content: Respond with ONLY valid JSON and no markdown fences.
+  max_consecutive_auto_reply: 6
+  structured_outputs_required: true

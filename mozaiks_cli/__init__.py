@@ -1,7 +1,5 @@
-"""
-Mozaiks CLI - Command-line tools for Mozaiks project scaffolding.
+"""Mozaiks CLI package."""
 
-Provides tier-aware project initialization and feature management.
-"""
+from mozaiksai.version import __version__
 
-__version__ = "0.1.0"
+__all__ = ["__version__"]

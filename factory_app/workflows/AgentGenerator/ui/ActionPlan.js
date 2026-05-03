@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { ChevronDown, ChevronRight, Layers, Plug, UserCheck, Bot, Sparkles, Zap, Activity, GitBranch, Clock, Settings, Database, MousePointerClick, Compass, MessageSquare, DollarSign, ArrowRightCircle } from 'lucide-react';
-import { createToolsLogger } from '../../../../../chat-ui/src/platform/workflowSurfaceRuntime.js';
+import { createToolsLogger } from '@mozaiks/chat-ui/platform/workflowSurfaceRuntime.js';
 
 // Badge classes using --mz-* semantic tokens (v2 theme system)
 const MZ_BADGE = {

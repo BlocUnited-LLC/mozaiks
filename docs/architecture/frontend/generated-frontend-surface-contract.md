@@ -14,7 +14,7 @@ Mozaiks should not flatten those surfaces into one generic AG-UI-style contract.
 | Surface | Owner | Contract | Runtime path |
 | --- | --- | --- | --- |
 | Persistent App UI | AppGenerator | `app.json` + `ui/pages/*.yaml` | `SchemaPage` -> `PageRenderer` -> page primitives |
-| Workflow UI | AgentGenerator / handwritten workflows | Python tool + workflow-local React | `use_ui_tool(...)` -> `chat.tool_call` -> `WorkflowUIRouter` |
+| Workflow UI | AgentGenerator / handwritten workflows | Python tool + shipped shared component or workflow-local React | `use_ui_tool(...)` -> `chat.tool_call` -> `WorkflowUIRouter` |
 | Transition UI | workflow pack author / shell author | `extension_registry.json` + transition component | `RouteRenderer` / `TransitionScreen` |
 | Bounded custom UI | AppGenerator custom route bundle, module/admin JS stubs | `ui/route_manifest.json`, `ui/pages/custom/*.jsx`, explicit stub contracts | route/component registry |
 
@@ -91,7 +91,22 @@ Rules:
 - fire-and-forget workflow UI uses `emit_ui_surface(...)`
 - wire contract is `chat.tool_call`
 - response contract is `tool_call_response`
-- React components are workflow-local and mounted by `WorkflowUIRouter`
+- generic text checkpoints in `chat-ui` should use the standard composer lane
+  (`interaction_type=input_request`, `display=composer`)
+- inline React components are for structured workflow interaction, not default
+  free-text reply
+- shared workflow components live in `chat-ui/src/core/ui/` and are mounted by `WorkflowUIRouter`
+- workflow-local React is only for genuine customization or primitive gaps
+- workflow interaction planning should use the canonical
+  [Workflow UI Primitive Catalog](workflow-ui-primitive-catalog.md)
+- shell-owned workflow status surfaces such as progress, run status, and agent
+  activity are not workflow-local React generation targets
+- every real workflow manifest UI entry must declare `ui.workflow_primitive`
+- `composer_reply` remains shell-owned and must not generate a `UI_Tool` or `UI_Surface` manifest entry
+- shipped workflow primitives should prefer the canonical shared component names directly
+- workflow-local wrappers around shipped components should stay thin and intentional
+- the first deterministic regression target for this contract is
+  `factory_app/workflows/WorkflowPrimitiveAcceptance`
 
 This is the surface that should keep borrowing ideas from AG-UI and CopilotKit:
 

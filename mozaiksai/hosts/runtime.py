@@ -21,6 +21,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.middleware.cors import CORSMiddleware
 
+from mozaiksai.core.transport.rate_limit import RateLimitMiddleware
+
 from logs.logging_config import (
     get_workflow_logger,
     setup_development_logging,
@@ -49,9 +51,14 @@ from mozaiksai.core.workflow.workflow_manager import (
     get_workflow_transport,
     workflow_status_summary,
 )
+from mozaiksai.version import __version__
 
 
 env = os.getenv("ENVIRONMENT", "development").lower()
+
+# Max characters allowed in a single user message (~2 000 GPT-4 tokens at the default).
+# Set CHAT_MESSAGE_MAX_CHARS=0 to disable.
+_MESSAGE_MAX_CHARS = int(os.getenv("CHAT_MESSAGE_MAX_CHARS", "8000"))
 if env == "production":
     setup_production_logging()
 else:
@@ -133,7 +140,7 @@ wf_logger.info("autogen version: %s", getattr(autogen, "__version__", "unknown")
 app = FastAPI(
     title="Mozaiks Runtime Host",
     description="Generic workflow, agent, transport, event, persistence, and auth runtime.",
-    version="1.0.0",
+    version=__version__,
 )
 app.state.persistence_manager = persistence_manager
 
@@ -177,6 +184,10 @@ if _cors_origins:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+# Rate limiting — runs before CORS (outermost layer).
+# Controlled entirely by RATE_LIMIT_* env vars; disabled when RATE_LIMIT_ENABLED=false.
+app.add_middleware(RateLimitMiddleware)
 
 
 async def _chat_coll():
@@ -298,13 +309,59 @@ async def runtime_lifespan(_: FastAPI):
 register_app_lifespan(app, runtime_lifespan)
 
 
+@app.get("/api/health/live")
+async def health_liveness():
+    """Liveness probe — confirms the process is running. Never checks dependencies."""
+    return {"status": "alive", "timestamp": datetime.now(UTC).isoformat()}
+
+
+@app.get("/api/health/ready")
+async def health_readiness():
+    """Readiness probe — checks all critical dependencies before accepting traffic."""
+    checks: dict[str, str] = {}
+    degraded = False
+
+    # MongoDB
+    if mongo_client is None:
+        checks["mongodb"] = "not_initialized"
+        degraded = True
+    else:
+        try:
+            await mongo_client.admin.command("ping", serverSelectionTimeoutMS=2000)
+            checks["mongodb"] = "ok"
+        except Exception as exc:
+            checks["mongodb"] = f"error: {exc}"
+            degraded = True
+
+    # Transport
+    if simple_transport is None:
+        checks["transport"] = "not_initialized"
+        degraded = True
+    else:
+        checks["transport"] = "ok"
+
+    status_code = 503 if degraded else 200
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "degraded" if degraded else "ready",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "checks": checks,
+        },
+    )
+
+
 @app.get("/api/health")
 async def health_check():
-    """Return runtime health."""
+    """Full health check — includes dependency status and workflow summary."""
     if mongo_client is None:
         raise HTTPException(status_code=503, detail="MongoDB client is not initialized")
 
-    await mongo_client.admin.command("ping")
+    try:
+        await mongo_client.admin.command("ping", serverSelectionTimeoutMS=2000)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"MongoDB unreachable: {exc}") from exc
+
     status = workflow_status_summary()
 
     return {
@@ -660,6 +717,11 @@ async def handle_user_input(
         raise HTTPException(status_code=400, detail="workflow_name is required")
     if not message:
         raise HTTPException(status_code=400, detail="message cannot be empty")
+    if _MESSAGE_MAX_CHARS and len(str(message)) > _MESSAGE_MAX_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"message exceeds maximum length of {_MESSAGE_MAX_CHARS} characters",
+        )
 
     coll = await _chat_coll()
     owned = await coll.find_one(

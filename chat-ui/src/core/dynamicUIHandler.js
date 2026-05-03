@@ -11,6 +11,7 @@
 
 import { appApi } from '../adapters/api';
 import { createToolsLogger } from './toolsLogger';
+import { UI_RENDER, UI_UPDATE, UI_DISMISS } from './ui/uiEventTypes';
 
 export class DynamicUIHandler {
   constructor() {
@@ -31,6 +32,11 @@ export class DynamicUIHandler {
     this.registerHandler('tool_call', this.handleToolCall.bind(this));
     this.registerHandler('component_update', this.handleComponentUpdate.bind(this));
     this.registerHandler('status', this.handleStatusUpdate.bind(this));
+
+    // ui.* typed event contract (L2)
+    this.registerHandler(UI_RENDER, this.handleUIRender.bind(this));
+    this.registerHandler(UI_UPDATE, this.handleUIUpdate.bind(this));
+    this.registerHandler(UI_DISMISS, this.handleUIDismiss.bind(this));
 
     console.log('✅ Dynamic UI Handler initialized');
   }
@@ -290,9 +296,126 @@ export class DynamicUIHandler {
     }
   }
 
+  // ─── ui.* typed event handlers (L2 contract) ──────────────────────────────
+
+  /**
+   * Handle ``ui.render`` events — typed replacement for ``chat.tool_call`` for
+   * tool-driven UI surface rendering.
+   *
+   * Reads from the typed UIRenderData contract fields and normalises them into
+   * the same shape that notifyUIUpdate / ChatPage subscribers expect, so no
+   * downstream consumer needs to change.
+   *
+   * @param {Object} eventData  Already-extracted inner data (type stripped).
+   * @param {Function} responseCallback  Callback to send tool_call_response.
+   */
+  async handleUIRender(eventData, responseCallback) {
+    try {
+      // Typed contract fields (see UIRenderData in ui_events.py)
+      const component = eventData.component || eventData.component_type || '';
+      const toolName = eventData.tool_name || component;
+      const toolCallId = eventData.tool_call_id || null;
+      const workflowName = eventData.workflow_name || eventData.workflow || null;
+      const display = eventData.display || eventData.display_mode || 'inline';
+      const awaiting = eventData.awaiting_response !== false;
+      const interactionType = eventData.interaction_type || (awaiting ? 'ui_tool' : 'ui_surface');
+      const payload = { ...(eventData.payload || {}) };
+
+      const agentName = eventData.agentName || eventData.agent_name || eventData.agent || null;
+      if (agentName) {
+        payload.agentName = payload.agentName || agentName;
+        payload.agent_name = payload.agent_name || agentName;
+        const chatKey = payload?.chat_id || eventData.chat_id || workflowName || null;
+        if (chatKey) this._lastSpeaker.set(chatKey, agentName);
+      }
+
+      // Enrich payload with contract fields so WorkflowUIRouter can resolve
+      // the component via its existing workflow:component registry key.
+      payload.component_type = payload.component_type || component;
+      payload.workflow_name = payload.workflow_name || workflowName;
+      payload.awaiting_response = awaiting;
+      payload.interaction_type = interactionType;
+      if (display) payload.display = payload.display || display;
+
+      if (!toolName) {
+        console.error('❌ Missing component/tool_name in ui.render event');
+        return null;
+      }
+
+      // Skip auto-tool events without an explicit display surface
+      if (interactionType === 'auto_tool' && !display) {
+        console.log(`⏭️ DynamicUIHandler: Skipping auto-tool ui.render (${toolName}) — no display`);
+        return true;
+      }
+
+      const onResponse = async (response) => {
+        if (responseCallback && typeof responseCallback === 'function') {
+          await responseCallback({
+            type: 'tool_call_response',
+            tool_name: toolName,
+            tool_call_id: toolCallId,
+            workflow_name: workflowName,
+            payload,
+            response,
+          });
+        }
+      };
+
+      this.notifyUIUpdate({
+        type: UI_RENDER,
+        tool_name: toolName,
+        tool_call_id: toolCallId,
+        component_type: component,
+        payload,
+        workflow_name: workflowName,
+        display: display || 'inline',
+        onResponse,
+        agent_name: agentName || undefined,
+        agentName: agentName || undefined,
+        agent: agentName || undefined,
+      });
+
+      console.log(`✅ DynamicUIHandler: Notified UI callbacks for ui.render ${toolName} (display=${display})`);
+      return true;
+    } catch (error) {
+      console.error('❌ DynamicUIHandler: Error handling ui.render event', error);
+      return null;
+    }
+  }
+
+  /**
+   * Handle ``ui.update`` events — patch a live component's payload in place.
+   * @param {Object} eventData  UIUpdateData fields.
+   */
+  async handleUIUpdate(eventData) {
+    const toolCallId = eventData.tool_call_id || null;
+    const patch = eventData.patch || {};
+    if (!toolCallId) {
+      console.warn('⚠️ DynamicUIHandler: ui.update missing tool_call_id');
+      return;
+    }
+    this.notifyUIUpdate({ type: UI_UPDATE, tool_call_id: toolCallId, patch });
+  }
+
+  /**
+   * Handle ``ui.dismiss`` events — signal that a rendered component should be
+   * removed.
+   * @param {Object} eventData  UIDismissData fields.
+   */
+  handleUIDismiss(eventData) {
+    const toolCallId = eventData.tool_call_id || null;
+    if (!toolCallId) {
+      console.warn('⚠️ DynamicUIHandler: ui.dismiss missing tool_call_id');
+      return;
+    }
+    this.notifyUIUpdate({ type: UI_DISMISS, tool_call_id: toolCallId });
+  }
+
+  // ─── legacy chat.tool_call handler ────────────────────────────────────────
+
   /**
    * Handle workflow UI tool_call events
-   * @param {Object} eventData - Event data from backend  
+   * @param {Object} eventData - Event data from backend
    * @param {Function} responseCallback - Callback to send response to backend
    */
   async handleToolCall(eventData, responseCallback) {
@@ -368,7 +491,7 @@ export class DynamicUIHandler {
         }
       };
 
-  // Determine display mode ('inline' or 'artifact') with robust fallbacks
+  // Determine display mode ('composer', 'inline', or 'artifact') with robust fallbacks
       const display = eventData.display || eventData.display_type || (payload && (payload.display || payload.mode)) || null;
 
       // CRITICAL: Skip rendering for auto-tool events without explicit display mode
@@ -378,7 +501,7 @@ export class DynamicUIHandler {
         return true; // Successful processing, just not rendering yet
       }
 
-      // Default to inline only if we're actually rendering
+      // Default to inline only if the tool call did not declare a surface
       const finalDisplay = display || 'inline';
 
       // SIMPLIFIED: Just notify UI callbacks - let ChatInterface handle rendering

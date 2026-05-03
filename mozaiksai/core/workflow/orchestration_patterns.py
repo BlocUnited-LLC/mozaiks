@@ -1244,8 +1244,8 @@ async def run_workflow_orchestration(
 
             max_turns_reached = getattr(response, 'max_turns_reached', False)
 
-            workflow_complete = bool(stream_state.get("run_completed", False))
             awaiting_user_input = bool(stream_state.get("awaiting_user_input", False))
+            workflow_complete = bool(stream_state.get("run_completed", False)) or not awaiting_user_input
             workflow_status_value = 1 if workflow_complete else 0
 
             if workflow_complete:

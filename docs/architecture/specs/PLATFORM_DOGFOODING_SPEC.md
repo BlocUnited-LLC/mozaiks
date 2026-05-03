@@ -4,7 +4,9 @@
 **Created:** 2026-04-07
 **Depends on:** MODULAR_ARCHITECTURE_V2.md, UI_SYSTEM_SPEC.md, PLATFORM_SDK_SPEC.md
 
-This document specifies how mozaiks-platform will use the mozaiks runtime to build its own admin dashboard and user interfaces - proving the architecture works by dogfooding it.
+This document specifies how a first-party hosted product workspace will use the
+mozaiks runtime to build its own admin dashboard and user interfaces, proving
+the architecture works by dogfooding it.
 
 ---
 
@@ -14,7 +16,7 @@ This document specifies how mozaiks-platform will use the mozaiks runtime to bui
 
 > **If we can't build our own admin dashboard with mozaiks, customers can't build their apps with it either.**
 
-The mozaiks-platform has:
+The hosted product workspace has:
 - **.NET services** providing REST APIs (Admin, Apps, Governance, Payment, Hosting, etc.)
 - **No standalone admin frontend** - only workflow-embedded React artifacts
 
@@ -1184,9 +1186,9 @@ user_menu:
 The platform admin is defined as a mozaiks app.
 
 ```json
-// app/app.json - Platform Admin App
+// app/app.json - Hosted Product Admin App
 {
-  "appName": "mozaiks-platform-admin",
+  "appName": "mozaiks-hosted-admin",
   "version": "1.0",
   "description": "Mozaiks Platform Administration Dashboard",
   "targets": {

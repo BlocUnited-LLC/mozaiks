@@ -33,6 +33,7 @@ The architecture builds from four layered concepts. Read them in order.
 | [Conversation Modes](conversation-modes.md) | `ask` mode (general Q&A) vs `workflow` mode (structured agentic run) |
 | [Layout Modes](layout-modes.md) | Four visual layouts that control how chat and artifact panels share the screen |
 | [Generated Frontend Surface Contract](generated-frontend-surface-contract.md) | Where persistent app UI ends, workflow UI begins, and how generated apps launch workflows cleanly |
+| [Workflow UI Primitive Catalog](workflow-ui-primitive-catalog.md) | Canonical workflow interaction patterns, shell-owned status surfaces, and where they enter the generation pipeline |
 | [Event System](../foundations/event-system.md) | How domain, runtime, `chat.*`, `chat.tool_call`, and `ui.*` events stay separate |
 | [Tool Event Lifecycle](tool-event-lifecycle.md) | Exact runtime-to-frontend path for `use_ui_tool(...)`, `chat.tool_call`, response handling, and AG-UI/CopilotKit comparison |
 | [AG-UI Comparison](ag-ui-copilotkit-comparison.md) | Where Mozaiks should keep its architecture and where it should converge toward AG-UI/CopilotKit |

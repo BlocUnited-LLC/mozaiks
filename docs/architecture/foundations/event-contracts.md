@@ -252,7 +252,8 @@ Owner:
 platform/product layer.
 
 Allowed publishers:
-App Zero, platform host services, Mozaiks product services.
+hosted product workspaces, platform host services, and Mozaiks product
+services.
 
 Allowed subscribers:
 platform host, Studio, product analytics, hosted services.
@@ -261,7 +262,7 @@ Allowed in generic modules:
 no.
 
 Hosted-only:
-sometimes. App Zero product modules may use this namespace; generated generic
+sometimes. Hosted product modules may use this namespace; generated generic
 apps should prefer `domain.*`.
 
 Example:
@@ -293,7 +294,7 @@ Example:
 type: hosted.mozaikspay.revenue_share_recorded
 ```
 
-App Zero hosted product examples:
+Hosted product examples:
 
 ```yaml
 type: hosted.marketplace.interest.recorded
@@ -459,8 +460,8 @@ Key rules:
 - `tool_call_id` is the primary UI interaction identifier
 - `corr` remains the compatibility alias for existing consumers
 - `workflow_name` should be available at the envelope level and inside `payload`
-- `interaction_type` distinguishes `ui_tool`, `ui_surface`, and `auto_tool`
-- `display` controls whether the surface is `inline`, `artifact`, or `view`
+- `interaction_type` distinguishes `ui_tool`, `ui_surface`, `auto_tool`, and `input_request`
+- `display` controls whether the surface is `composer`, `inline`, `artifact`, or `view`
 - `corr` / event id is the response correlation key
 - this lane is session-scoped and may persist artifact state for resume
 - generic `chat.tool_call` events without `component_type` are not workflow UI

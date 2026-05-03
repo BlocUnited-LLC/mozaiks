@@ -5,22 +5,81 @@
 
 import UserInputRequest from './UserInputRequest';
 import ShellUIToolRenderer from './ShellUIToolRenderer';
+import ApprovalCard from './ApprovalCard';
+import ChoicePicker from './ChoicePicker';
+import ConfirmationSummary from './ConfirmationSummary';
+import FormCard from './FormCard';
+import DiagramViewer from './DiagramViewer';
+import DownloadCenter from './DownloadCenter';
+import ArtifactWorkbench from './ArtifactWorkbench';
+
+// L1 agent-UI primitives (ui.render event system)
+import {
+  DataTable,
+  Card,
+  Stat,
+  Timeline,
+  CodeBlock,
+  ProgressTracker,
+  AlertBanner,
+  ActionButton,
+  FileList,
+  Form,
+} from './primitives/index.js';
 
 /**
  * Shell Core UI Components
- * 
- * - UserInputRequest: Generic user input component for agent prompts
+ *
+ * - UserInputRequest: Explicit fallback component for inline workflow text input
  * - ShellUIToolRenderer: Shell-specific tool renderer (routes through eventDispatcher)
+ * - Shipped workflow primitives: reusable agent/workflow UI surfaces shared across workflows
+ * - L1 primitives: agent-UI building blocks for the ui.render event system
  */
 
 const CoreComponents = {
   UserInputRequest,
-  ShellUIToolRenderer
+  ShellUIToolRenderer,
+  ApprovalCard,
+  ChoicePicker,
+  ConfirmationSummary,
+  FormCard,
+  DiagramViewer,
+  DownloadCenter,
+  ArtifactWorkbench,
+  // L1 primitives — discoverable by WorkflowUIRouter via component name
+  DataTable,
+  Card,
+  Stat,
+  Timeline,
+  CodeBlock,
+  ProgressTracker,
+  AlertBanner,
+  ActionButton,
+  FileList,
+  Form,
 };
 
 export default CoreComponents;
 
 export {
   UserInputRequest,
-  ShellUIToolRenderer
+  ShellUIToolRenderer,
+  ApprovalCard,
+  ChoicePicker,
+  ConfirmationSummary,
+  FormCard,
+  DiagramViewer,
+  DownloadCenter,
+  ArtifactWorkbench,
+  // L1 primitives
+  DataTable,
+  Card,
+  Stat,
+  Timeline,
+  CodeBlock,
+  ProgressTracker,
+  AlertBanner,
+  ActionButton,
+  FileList,
+  Form,
 };

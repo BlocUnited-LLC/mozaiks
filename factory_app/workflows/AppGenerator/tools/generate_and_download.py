@@ -36,6 +36,7 @@ from workflows.AppGenerator.tools.export_app_code import (
 )
 from workflows.AppGenerator.tools.requirements_scanner import scan_requirements
 from workflows.AppGenerator.tools.update_app_record import update_build_status
+from workflows.AppGenerator.tools.schema_migration import inject_migration_into_bundle
 
 try:
     from logs.tools_logs import get_tool_logger as _get_tool_logger, log_tool_event as _log_tool_event  # type: ignore
@@ -236,6 +237,16 @@ async def generate_and_download(
     # Inject requirements.txt if the agents did not produce one.
     if "requirements.txt" not in files_map:
         files_map["requirements.txt"] = scan_requirements(files_map)
+
+    # Inject any pending migration file produced by DatabaseAgent during refinement.
+    pending_migration: Optional[Dict[str, Any]] = None
+    if context_variables is not None and hasattr(context_variables, "get"):
+        try:
+            pending_migration = context_variables.get("pending_schema_migration")
+        except Exception:
+            pending_migration = None
+    if isinstance(pending_migration, dict) and pending_migration.get("migration_id"):
+        inject_migration_into_bundle(files_map, pending_migration)
 
     bundle_name = "GeneratedApp"
     try:

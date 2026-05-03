@@ -109,9 +109,9 @@ It must:
 - deep-merge `asset_manifest` into `config/asset_manifest.json`
 - store `app_manifest`, `app_pages`, `app_custom_route_bundle`, `app_theme_config_patch`, `app_shell_config`, `app_asset_manifest`, and `app_schema_ready` in workflow context
 
-It must not write directly into an active runtime-loaded app root such as
-`platform/` or `mozaiks-platform/app`. Activation requires an explicit
-promotion step.
+It must not write directly into an active runtime-loaded app root such as a
+workspace's `app/` bundle or `factory_app/app`. Activation requires an
+explicit promotion step.
 
 ### 4. AssemblyAgent
 
@@ -211,4 +211,3 @@ Do not:
 
 Without this split, AppGenerator either under-specifies visual/media control or mixes styling, shell behavior, and asset inventory.
 The contract above keeps bundle generation deterministic, keeps ThemeCapture reusable, and gives the runtime a stable set of artifacts to consume.
-

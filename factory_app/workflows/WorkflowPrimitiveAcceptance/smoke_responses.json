@@ -1,0 +1,13 @@
+{
+  "input_replies": [
+    "We need a workflow that helps regional operations managers approve field requests without juggling multiple tools."
+  ],
+  "tool_responses": {
+    "ApprovalCard": {
+      "status": "submitted",
+      "action": "approve",
+      "approved": true,
+      "rationale": "The approval checkpoint is clear and the artifact can proceed."
+    }
+  }
+}

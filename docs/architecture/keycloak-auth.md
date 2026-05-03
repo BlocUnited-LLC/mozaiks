@@ -64,11 +64,11 @@ This is separate from the in-app shell assets under `app/brand/assets/`.
 
 ## Current Repo Note
 
-The current repo now uses `mozaiks-platform/app/app.json`,
-`mozaiks-platform/app/config/ai.json`, and `mozaiks-platform/app/brand/*` in
-the local App Zero workspace. The canonical
-target for generated/customer apps is a self-contained app workspace with
-`app/app.json`, `app/config/ai.json`, and `app/brand/*`.
+The canonical target for generated/customer apps is a self-contained app
+workspace with `app/app.json`, `app/config/ai.json`, and `app/brand/*`. In
+this repo, the first-party Studio bundle follows that same contract through
+`factory_app/app/app.json`, `factory_app/app/config/ai.json`, and
+`factory_app/app/brand/*`.
 
 ## Runtime Flow
 

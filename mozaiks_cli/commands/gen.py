@@ -31,6 +31,7 @@ from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     default_app_validation_strategy,
     normalize_app_validation_strategy,
 )
+from mozaiksai.resources import resolve_factory_workflows_root
 
 # Rich for nice CLI output
 try:
@@ -75,8 +76,7 @@ def _check_api_key() -> bool:
 def _find_generator_source() -> Optional[Path]:
     """Locate the AgentGenerator workflow source directory."""
     candidates = [
-        # Factory-owned workflow packs inside this repo
-        Path(__file__).parents[2] / "factory_app" / "workflows",
+        resolve_factory_workflows_root(),
         # Env override
         Path(os.environ.get("MOZAIKS_WORKFLOWS_PATH", ""))
         if os.environ.get("MOZAIKS_WORKFLOWS_PATH") else None,
@@ -535,7 +535,7 @@ def run(args):
     source_path = _find_generator_source()
     if not source_path:
         _print_error("Could not find AgentGenerator workflow.")
-        _print_info("Ensure you are in the mozaiks repo or set MOZAIKS_WORKFLOWS_PATH")
+        _print_info("Install the shared factory_app package or set MOZAIKS_WORKFLOWS_PATH")
         return 1
 
     resolved_validation_strategy = args.validation_strategy

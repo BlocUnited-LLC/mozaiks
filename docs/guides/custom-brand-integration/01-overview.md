@@ -13,8 +13,8 @@ Branding is split across a few app-owned files:
 - `app/config/shell.json` for shell content and navigation chrome
 - `app/app.json` for startup route and auth intent, not raw theme tokens
 
-For the local product workspace in this repo, the same contract lives under
-`mozaiks-platform/app/`.
+In this repo, the first-party Studio bundle follows the same contract under
+`factory_app/app/`.
 
 ## What Branding Does Not Own
 

@@ -18,10 +18,10 @@ Gather from the user:
 
 ## Workflow Structure
 
-Create under `platform/workflows/[WorkflowName]/`:
+Create under `app/workflows/[WorkflowName]/`:
 
 ```
-platform/workflows/[WorkflowName]/
+app/workflows/[WorkflowName]/
 ├── orchestrator.yaml       # Workflow execution bootstrap
 ├── agents.yaml             # Agent roster and prompts
 ├── handoffs.yaml           # Agent-to-agent routing

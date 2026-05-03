@@ -1,0 +1,8 @@
+workflow_name: WorkflowPrimitiveAcceptance
+max_turns: 10
+human_in_the_loop: true
+workflow_startup_mode: AgentDriven
+orchestration_pattern: DefaultPattern
+initial_message_to_user: null
+initial_message: Validate the composer reply, approval card, and artifact viewer workflow UI lanes in order.
+initial_agent: IntakeAgent

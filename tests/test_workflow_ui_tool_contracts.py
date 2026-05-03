@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 import yaml
+from mozaiksai.core.workflow.workflow_ui_catalog import get_workflow_shipped_component_names
 
 
 def _workspace() -> Path:
@@ -20,7 +21,7 @@ def _read_yaml(relative_path: str):
 
 
 def _workflow_manifest_paths() -> list[Path]:
-    from conftest import _resolve_active_app_root
+    from tests.conftest import _resolve_active_app_root
     workspace = _workspace()
     roots = ["factory_app/workflows"]
     app_root = _resolve_active_app_root()
@@ -78,6 +79,7 @@ def test_repo_owned_interactive_ui_tools_use_canonical_helper_import() -> None:
         "factory_app/workflows/AppGenerator/tools/generate_and_download.py",
         "factory_app/workflows/AgentGenerator/tools/generate_and_download.py",
         "factory_app/workflows/AgentGenerator/tools/request_api_key.py",
+        "factory_app/workflows/WorkflowPrimitiveAcceptance/tools/request_acceptance_approval.py",
     ]
 
     for relative_path in files:
@@ -102,7 +104,7 @@ def test_agent_generator_runtime_helpers_are_yaml_first() -> None:
 
 
 def test_repo_workflow_tools_do_not_import_global_shared_workflow_bucket() -> None:
-    from conftest import _resolve_active_app_root
+    from tests.conftest import _resolve_active_app_root
     app_root = _resolve_active_app_root()
     if app_root is None:
         import pytest
@@ -277,6 +279,7 @@ def test_repo_owned_one_way_ui_emitters_use_canonical_surface_helper() -> None:
         "factory_app/workflows/AgentGenerator/tools/mermaid_sequence_diagram.py",
         "factory_app/workflows/ValueEngine/tools/manifest.py",
         "factory_app/workflows/ExistingAppDiscovery/tools/save_existing_app_artifacts.py",
+        "factory_app/workflows/WorkflowPrimitiveAcceptance/tools/show_acceptance_diagram.py",
     ]
 
     for relative_path in files:
@@ -300,6 +303,7 @@ def test_workflow_manifests_use_explicit_ui_surface_types() -> None:
         "factory_app/workflows/AppGenerator/tools.yaml",
         "factory_app/workflows/DesignDocs/tools.yaml",
         "factory_app/workflows/ValueEngine/tools.yaml",
+        "factory_app/workflows/WorkflowPrimitiveAcceptance/tools.yaml",
     ]
 
     for relative_path in files:
@@ -314,9 +318,30 @@ def test_workflow_manifests_use_explicit_ui_surface_types() -> None:
                     assert isinstance(ui, dict), f"{relative_path}:{entry.get('function')} is missing ui metadata"
                     assert ui.get("component")
                     assert ui.get("mode")
+                    assert ui.get("workflow_primitive")
+                    assert ui.get("workflow_primitive") != "composer_reply"
+
+
+def test_workflow_primitive_acceptance_exports_expected_ui_surfaces() -> None:
+    manifest = _read_yaml("factory_app/workflows/WorkflowPrimitiveAcceptance/tools.yaml")
+    response_fixture = _read_yaml("factory_app/workflows/WorkflowPrimitiveAcceptance/smoke_responses.json")
+    shipped_components = set(get_workflow_shipped_component_names())
+
+    assert [tool["ui"]["component"] for tool in manifest["tools"]] == [
+        "ApprovalCard",
+        "DiagramViewer",
+    ]
+    assert [tool["ui"]["workflow_primitive"] for tool in manifest["tools"]] == [
+        "approval_card",
+        "diagram_viewer",
+    ]
+    assert set(tool["ui"]["component"] for tool in manifest["tools"]) <= shipped_components
+    assert response_fixture["tool_responses"]["ApprovalCard"]["approved"] is True
 
 
 def test_ui_manifest_components_are_exported_by_resolvable_workflow_barrels() -> None:
+    shipped_components = set(get_workflow_shipped_component_names())
+
     for manifest_path in _workflow_manifest_paths():
         manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
         required_components: set[str] = set()
@@ -333,11 +358,15 @@ def test_ui_manifest_components_are_exported_by_resolvable_workflow_barrels() ->
             continue
 
         index_file = manifest_path.parent / "ui/index.js"
-        assert index_file.exists(), f"{manifest_path} declares UI components but {index_file} is missing"
+        if not index_file.exists():
+            assert required_components <= shipped_components, (
+                f"{manifest_path} declares non-shipped UI components but {index_file} is missing"
+            )
+            continue
 
         index_content = index_file.read_text(encoding="utf-8")
         exported_names, module_paths = _parse_index_exports(index_content)
-        missing_exports = sorted(required_components - exported_names)
+        missing_exports = sorted((required_components - exported_names) - shipped_components)
         assert not missing_exports, (
             f"{index_file} missing exports for manifest UI components: {missing_exports}"
         )
@@ -348,6 +377,13 @@ def test_ui_manifest_components_are_exported_by_resolvable_workflow_barrels() ->
         assert not unresolved_modules, (
             f"{index_file} has unresolved export targets: {unresolved_modules}"
         )
+
+
+def test_core_ui_index_exports_shipped_workflow_components() -> None:
+    content = _read("chat-ui/src/core/ui/index.js")
+
+    for component_name in get_workflow_shipped_component_names():
+        assert component_name in content
 
 
 def test_workflow_ui_components_use_payload_prop_contract() -> None:
@@ -405,6 +441,10 @@ def test_frontend_prompts_enforce_theme_shell_ownership_boundaries() -> None:
 def test_agent_generator_primitive_reference_matches_runtime_contract() -> None:
     content = _read("factory_app/workflows/AgentGenerator/agents.yaml")
 
+    assert "composer_reply" in content
+    assert "workflow_primitive" in content
+    assert "Do NOT emit workflow-local UI requirements for framework-owned shell status surfaces" in content
+
     # Canonical runtime-aligned props
     assert "`DataTable`  — `id`, `columns[]`, `data[]`" in content
     assert "`Form`       — `id`, `fields[]`, `layout`, `columns`, `submit_label`" in content
@@ -457,7 +497,7 @@ def test_extended_orchestration_transition_components_are_file_backed() -> None:
 
 
 def test_platform_ui_fonts_flow_through_semantic_theme_tokens() -> None:
-    from conftest import active_app_root
+    from tests.conftest import active_app_root
     app_root = active_app_root()
     typography = (app_root / "ui" / "theme" / "typography.js").read_text(encoding="utf-8")
     app_card = (app_root / "ui" / "components" / "AppCard.jsx").read_text(encoding="utf-8")

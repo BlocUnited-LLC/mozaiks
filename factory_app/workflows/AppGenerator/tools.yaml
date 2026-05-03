@@ -34,6 +34,7 @@ tools:
   ui:
     component: AppWorkbench
     mode: artifact
+    workflow_primitive: artifact_workbench
 - agent: AppValidationAgent
   file: app_validation.py
   function: validate_app_build

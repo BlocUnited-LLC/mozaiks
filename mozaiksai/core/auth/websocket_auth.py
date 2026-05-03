@@ -161,10 +161,12 @@ async def authenticate_websocket(
     # Extract token
     token = access_token
 
-    # Allow query param extraction by default (browsers can't set WS headers)
-    # Set MOZAIKS_WS_ALLOW_QUERY_TOKEN=false to disable for reverse-proxy setups
+    # Query-param token extraction is disabled by default.
+    # Tokens in query params appear in server logs, browser history, and proxy logs.
+    # Enable only for local dev or architectures where WebSocket header auth is unavailable:
+    #   MOZAIKS_WS_ALLOW_QUERY_TOKEN=true
     if not token:
-        allow_query_token = os.getenv("MOZAIKS_WS_ALLOW_QUERY_TOKEN", "true").lower() in ("true", "1", "yes")
+        allow_query_token = os.getenv("MOZAIKS_WS_ALLOW_QUERY_TOKEN", "false").lower() in ("true", "1", "yes")
         if allow_query_token:
             token = websocket.query_params.get("access_token")
         elif websocket.query_params.get("access_token"):

@@ -1,0 +1,70 @@
+name: Dashboard
+route: /dashboard
+title: Dashboard
+layout: grid
+
+sections:
+  # KPI row — three stat tiles
+  - id: kpi-row
+    primitive: Grid
+    config:
+      columns: 3
+      gap: md
+      children:
+        - primitive: Stat
+          config:
+            label: Total Runs
+            value: 0
+            format: number
+            color: default
+        - primitive: Stat
+          config:
+            label: Active Workflows
+            value: 0
+            format: number
+            color: default
+        - primitive: Stat
+          config:
+            label: Status
+            value: Ready
+            color: success
+
+  # Recent activity table — replace data with api_endpoint once a backend module is wired
+  - id: recent-activity
+    primitive: DataTable
+    title: Recent Activity
+    config:
+      columns:
+        - key: workflow
+          label: Workflow
+        - key: status
+          label: Status
+        - key: started_at
+          label: Started
+          type: date
+      data: []
+      pagination: false
+      search: false
+      empty:
+        title: No activity yet
+        message: Run a workflow to see activity here.
+
+  # Primary CTA
+  - id: start-cta
+    primitive: ActionButton
+    config:
+      title: Start building
+      layout: row
+      actions:
+        - id: open-chat
+          label: Open Chat
+          variant: primary
+          action:
+            action_type: navigate
+            href: /chat
+        - id: getting-started
+          label: Getting Started
+          variant: outline
+          action:
+            action_type: navigate
+            href: /getting-started

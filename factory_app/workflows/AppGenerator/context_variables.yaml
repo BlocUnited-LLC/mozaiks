@@ -10,6 +10,16 @@ definitions:
     source:
       type: state
       default: null
+  build_registry_id:
+    type: string
+    description: >
+      ID of the hosted app_registry record created at pipeline start by ValueEngine's
+      create_app_record lifecycle tool. Flows through the full pipeline so
+      generate_and_download can update the record to 'generated' once the bundle
+      is written. Null in OSS/unauthenticated runs where app_registry is not installed.
+    source:
+      type: state
+      default: null
   refinement_mode:
     type: boolean
     description: >
@@ -489,6 +499,15 @@ definitions:
     source:
       type: computed
       default: null
+  pending_schema_migration:
+    type: object
+    description: >
+      Migration document produced by DatabaseAgent during a refinement run.
+      Null for greenfield generation runs. generate_and_download injects this
+      into the bundle as backend/database/migrations/{migration_id}.json when present.
+    source:
+      type: computed
+      default: null
   app_validation_strategy:
     type: string
     description: >
@@ -602,6 +621,11 @@ agents:
     - mfj_app_task_results
   DatabaseAgent:
     variables:
+    - refinement_mode
+    - change_class
+    - artifact_version_id
+    - refinement_request
+    - pending_schema_migration
     - concept_overview
     - concept_api_endpoints
     - concept_blueprint
@@ -694,6 +718,7 @@ agents:
     - integration_test_result
   DownloadAgent:
     variables:
+    - build_registry_id
     - app_validation_status
     - app_validation_strategy_used
     - app_validation_preview_url

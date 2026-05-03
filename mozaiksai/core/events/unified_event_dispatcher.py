@@ -504,6 +504,8 @@ class UnifiedEventDispatcher:
             'attachment_uploaded': 'chat.attachment_uploaded',
             'stream_chunk': 'chat.stream_chunk', 'stream_end': 'chat.stream_end', 'custom_event': 'chat.custom_event',
             'greeting_echo': 'chat.greeting_echo',
+            # ui.* namespace — typed primitive event contract (L2)
+            'ui_render': 'ui.render', 'ui_update': 'ui.update', 'ui_dismiss': 'ui.dismiss',
         }
         mapped_type = kind if kind.startswith('chat.') else ns_map.get(kind, kind)
         

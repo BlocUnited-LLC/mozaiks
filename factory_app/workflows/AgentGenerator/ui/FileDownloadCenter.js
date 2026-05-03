@@ -4,12 +4,12 @@
 // ==============================================================================
 
 import React, { useMemo, useState } from 'react';
-import { createToolsLogger } from '../../../../../chat-ui/src/platform/workflowSurfaceRuntime.js';
+import { createToolsLogger } from '@mozaiks/chat-ui/platform/workflowSurfaceRuntime.js';
 import {
   colors as designColors,
   components as designComponents,
   typography as designTypography,
-} from '../../../../../chat-ui/src/platform/workflowSurfaceStyles.js';
+} from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
 
 /**
  * FileDownloadCenter - Production AG2 component for file downloads

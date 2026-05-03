@@ -59,10 +59,12 @@ lane:
 
 - transport event: `chat.tool_call`
 - discriminator: `interaction_type=input_request`
-- generic fallback component: `UserInputRequest`
+- generic chat-ui presentation: `display=composer`
+- fallback component identity: `UserInputRequest`
 
 That means response-required UI from `InputRequestEvent` now follows the same
-render lane as `use_ui_tool(...)`.
+render lane as `use_ui_tool(...)`, but generic text reply in `chat-ui` uses the
+main composer instead of an inline card.
 
 `chat.input_request` is not emitted to browser clients for runtime-managed
 interactive input.
@@ -147,7 +149,7 @@ Current rules:
 - `workflow_name` should be available at the top level and in `payload`
 - `interaction_type` should be one of `ui_tool`, `ui_surface`, `auto_tool`, or `input_request`
 - `awaiting_response=true` means the frontend is expected to answer
-- `display` controls `inline`, `artifact`, or `view` behavior
+- `display` controls `composer`, `inline`, `artifact`, or `view` behavior
 
 Generic tool invocations that do not carry `component_type` are not workflow UI
 surfaces. They are transport/telemetry events, not component-mount requests.

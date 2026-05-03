@@ -31,6 +31,82 @@ TYPE_MAP = {
 }
 
 
+def _build_literal_enum(name: str, values: List[Any]) -> type[Enum]:
+    enum_name = f"{name}Enum_{abs(hash(tuple(values))) % 10000}"
+    enum_members = {f"VALUE_{i}": value for i, value in enumerate(values)}
+    return Enum(enum_name, enum_members)  # type: ignore[return-value]
+
+
+def _resolve_named_type(
+    type_name: str,
+    available_models: Dict[str, type],
+    alias_defs: Dict[str, Dict[str, Any]],
+    alias_cache: Dict[str, Any],
+    stack: Optional[Set[str]] = None,
+) -> Any:
+    normalized = str(type_name or "").strip()
+    if not normalized:
+        raise ValueError("Empty type reference")
+
+    if normalized in TYPE_MAP:
+        return TYPE_MAP[normalized]
+    if normalized in available_models:
+        return available_models[normalized]
+    if normalized not in alias_defs:
+        raise ValueError(f"Unknown type reference: {normalized}")
+
+    if normalized in alias_cache:
+        return alias_cache[normalized]
+
+    stack = set(stack or set())
+    if normalized in stack:
+        raise ValueError(f"Circular type alias reference: {normalized}")
+    stack.add(normalized)
+
+    alias_def = alias_defs[normalized]
+    alias_type = str(alias_def.get("type", "")).strip()
+
+    if alias_type == "literal":
+        values = alias_def.get("values") or []
+        if not values:
+            raise ValueError(f"Literal alias '{normalized}' requires non-empty values")
+        resolved = _build_literal_enum(normalized, values)
+    elif alias_type == "union":
+        variants = alias_def.get("variants") or []
+        if not isinstance(variants, list) or not variants:
+            raise ValueError(f"Union alias '{normalized}' requires non-empty variants")
+        resolved_types = []
+        optional_variant = False
+        for variant in variants:
+            variant_key = str(variant or "").strip()
+            if variant_key.lower() in {"null", "none"}:
+                optional_variant = True
+                continue
+            resolved_types.append(
+                _resolve_named_type(
+                    variant_key,
+                    available_models,
+                    alias_defs,
+                    alias_cache,
+                    stack,
+                )
+            )
+        if not resolved_types:
+            raise ValueError(f"Union alias '{normalized}' must include at least one non-null variant")
+        unique_types = []
+        for resolved_type in resolved_types:
+            if resolved_type not in unique_types:
+                unique_types.append(resolved_type)
+        base_type = unique_types[0] if len(unique_types) == 1 else Union[tuple(unique_types)]  # type: ignore[misc]
+        resolved = Optional[base_type] if optional_variant else base_type  # type: ignore[arg-type]
+    else:
+        raise ValueError(f"Unsupported alias type: {alias_type}")
+
+    alias_cache[normalized] = resolved
+    stack.remove(normalized)
+    return resolved
+
+
 def _inline_schema_refs(node: Any, defs: Dict[str, Any], stack: Optional[Set[str]] = None) -> Any:
     if stack is None:
         stack = set()
@@ -91,7 +167,14 @@ def _patch_model_schema(model_cls: type[BaseModel]) -> None:
     setattr(model_cls, "__mozaiks_schema_patched", True)
 
 
-def resolve_field_type(field_def: Dict[str, Any], available_models: Dict[str, type]) -> Tuple[Any, Any]:
+def resolve_field_type(
+    field_def: Dict[str, Any],
+    available_models: Dict[str, type],
+    alias_defs: Optional[Dict[str, Dict[str, Any]]] = None,
+    alias_cache: Optional[Dict[str, Any]] = None,
+) -> Tuple[Any, Any]:
+    alias_defs = alias_defs or {}
+    alias_cache = alias_cache or {}
     field_type_str = str(field_def.get('type', '')).strip()
     field_kwargs: Dict[str, Any] = {}
     if 'description' in field_def:
@@ -108,12 +191,8 @@ def resolve_field_type(field_def: Dict[str, Any], available_models: Dict[str, ty
         if not items_type:
             raise ValueError("List type requires 'items'")
         if isinstance(items_type, str):
-            if items_type in TYPE_MAP:
-                base = List[TYPE_MAP[items_type]]  # type: ignore[valid-type]
-            elif items_type in available_models:
-                base = List[available_models[items_type]]  # type: ignore[valid-type]
-            else:
-                raise ValueError(f"Unknown list item type: {items_type}")
+            item_type = _resolve_named_type(items_type, available_models, alias_defs, alias_cache)
+            base = List[item_type]  # type: ignore[valid-type]
         else:
             raise ValueError("Unsupported list items spec")
         if field_type_str == 'optional_list':
@@ -129,9 +208,7 @@ def resolve_field_type(field_def: Dict[str, Any], available_models: Dict[str, ty
         values = field_def.get('values') or []
         if not values:
             raise ValueError("Literal type requires 'values'")
-        enum_name = f"LiteralEnum_{abs(hash(tuple(values))) % 10000}"
-        enum_members = {f"VALUE_{i}": v for i, v in enumerate(values)}
-        LiteralEnum = Enum(enum_name, enum_members)  # type: ignore
+        LiteralEnum = _build_literal_enum("Literal", values)
         return LiteralEnum, Field(**field_kwargs)
     # list type
     # dict primitive support (already mapped in TYPE_MAP earlier, but handle explicit 'dict' path if missed)
@@ -149,12 +226,10 @@ def resolve_field_type(field_def: Dict[str, Any], available_models: Dict[str, ty
                 if variant_key.lower() in ('null', 'none'):
                     optional_variant = True
                     continue
-                if variant_key in TYPE_MAP:
-                    resolved_types.append(TYPE_MAP[variant_key])
-                    continue
-                if variant_key in available_models:
-                    resolved_types.append(available_models[variant_key])
-                    continue
+                resolved_types.append(
+                    _resolve_named_type(variant_key, available_models, alias_defs, alias_cache)
+                )
+                continue
             raise ValueError(f"Unknown union variant: {variant}")
         if not resolved_types:
             raise ValueError("Union type must include at least one non-null variant")
@@ -167,22 +242,25 @@ def resolve_field_type(field_def: Dict[str, Any], available_models: Dict[str, ty
             base_type = Optional[base_type]  # type: ignore[arg-type]
         return base_type, Field(**field_kwargs)
     # direct model ref
-    if field_type_str in available_models:
-        return available_models[field_type_str], Field(**field_kwargs)
+    if field_type_str in available_models or field_type_str in alias_defs:
+        return _resolve_named_type(field_type_str, available_models, alias_defs, alias_cache), Field(**field_kwargs)
     # list[Model]
     if field_type_str.startswith('list[') and field_type_str.endswith(']'):
         inner = field_type_str[5:-1].strip()
-        if inner in TYPE_MAP:
-            return List[TYPE_MAP[inner]], Field(**field_kwargs)  # type: ignore
-        if inner in available_models:
-            return List[available_models[inner]], Field(**field_kwargs)  # type: ignore
-        raise ValueError(f"Unknown model reference: {inner}")
+        inner_type = _resolve_named_type(inner, available_models, alias_defs, alias_cache)
+        return List[inner_type], Field(**field_kwargs)  # type: ignore
     raise ValueError(f"Unknown field type: {field_type_str}")
 
 def build_models_from_config(models_config: Dict[str, Any]) -> Dict[str, type]:
     if not models_config:
         return {}
     models: Dict[str, type] = {}
+    alias_defs: Dict[str, Dict[str, Any]] = {
+        name: mdef
+        for name, mdef in models_config.items()
+        if isinstance(mdef, dict) and mdef.get("type") in {"literal", "union"}
+    }
+    alias_cache: Dict[str, Any] = {}
     pending: List[Tuple[str, Dict[str, Any]]] = []
     # first pass
     for name, mdef in models_config.items():
@@ -192,7 +270,7 @@ def build_models_from_config(models_config: Dict[str, Any]) -> Dict[str, type]:
         unresolved = False
         for fname, fdef in (mdef.get('fields') or {}).items():
             try:
-                ftype, fld = resolve_field_type(fdef, models)
+                ftype, fld = resolve_field_type(fdef, models, alias_defs, alias_cache)
                 fields[fname] = (ftype, fld)
             except ValueError:
                 unresolved = True
@@ -211,7 +289,7 @@ def build_models_from_config(models_config: Dict[str, Any]) -> Dict[str, type]:
             unresolved = False
             for fname, fdef in (mdef.get('fields') or {}).items():
                 try:
-                    ftype, fld = resolve_field_type(fdef, models)
+                    ftype, fld = resolve_field_type(fdef, models, alias_defs, alias_cache)
                     fields[fname] = (ftype, fld)
                 except ValueError:
                     unresolved = True

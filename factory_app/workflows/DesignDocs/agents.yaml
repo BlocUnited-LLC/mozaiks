@@ -77,6 +77,7 @@ agents:
 
       Rules:
       - Use `module` for durable deterministic business logic under `app/modules/*`.
+      - For every `module` surface, describe the deterministic action boundary clearly enough for downstream generation of `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and `backend/schemas.py`.
       - Use `workflow` for agentic orchestration lanes.
       - Use `control_plane` for Studio/build/session/refinement coordination.
       - Use `external_integration` when the main boundary is Stripe Connect, ads APIs, hosting providers, CRM APIs, etc.
@@ -92,6 +93,7 @@ agents:
       Rules:
       - Use finite taxonomies and stable ids wherever downstream generators will need deterministic contracts.
       - Treat generic account/profile/preferences as host-owned platform primitives. Only define profile entities in the docs when they are domain-specific business records such as investor profiles or seller profiles.
+      - For durable module surfaces, be explicit about owned entities, mutations, permissions, event facts, and ownership checks so downstream layered backend generation does not have to infer them from vague prose.
       - Do not rely on prose-only conventions for event namespaces, primitive types, layout modes, capability ids, or admin sections.
       - Keep the ui_schema YAML simple enough to transcribe into typed structured outputs without heuristic interpretation.
       - If a surface truly needs file-backed customization, describe the need in a bounded way; do not invent ad hoc YAML keys or raw implementation blobs.

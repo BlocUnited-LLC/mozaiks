@@ -118,9 +118,8 @@ contracts are now aligned.
 
 Today it contains:
 
-- `mozaiks-platform/app/*` — current App Zero app root
-- `generated/*` and `mozaiks-platform/app-builder/*` — staged generated output
-  plus product-owned planning assets
+- `factory_app/app/*` — first-party Studio app bundle
+- `generated/*` — staged generated output
 - `chat-ui/` and `web_shell/` — shared shell source plus local shell host
 
 The canonical target is:
@@ -128,7 +127,7 @@ The canonical target is:
 - shared generation core outside app workspaces
 - self-contained app workspaces with `app/config`, `app/ui/pages`,
   `app/workflows`, `app/modules`, `app/ui`, and `app/brand`
-- App Zero converging on that same workspace contract
+- hosted product workspaces consuming that same workspace contract
 
 ## What App Authors Should Think About
 
@@ -194,18 +193,16 @@ Then read:
 
 1. [Core, Product, and App Bundle Boundary](core-product-app-bundle-boundary.md)
 2. [Workflow Authoring Contracts](workflow-authoring-contracts.md)
-3. App Zero under `mozaiks-platform/app/` when you need the repo-local product
-   app bundle
+3. `factory_app/app/` when you need the repo-local Studio app bundle
 
 ## Builder Product Note
 
-Shared generation-core workflows live in `factory_app/workflows/`. App Zero keeps only its product overlay under
-`mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`. Generated apps should
-understand the shared workflow contract, not an App Zero-specific workflow
-directory layout.
+Shared generation-core workflows live in `factory_app/workflows/`. Product
+workspaces may keep their own overlay registries under the active app root, but
+generated apps should understand the shared workflow contract, not a
+repo-specific product directory layout.
 
 For the factory dogfood workspace, `factory_app/app/workflows/` is only an
 app-local overlay seam. It is expected to remain empty until the factory app
 actually owns a workflow that is not part of the shared generation core.
-
 

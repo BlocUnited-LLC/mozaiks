@@ -15,8 +15,8 @@ The current canonical architecture is the layered host model documented in
 - `mozaiksai/hosts/platform.py` — headless app host
 - `mozaiksai/hosts/studio.py` — local/private builder host
 - `mozaiksai/hosts/mozaiks.py` — hosted Mozaiks product host
-- current repo layout includes transitional roots such as `platform/` and
-  `mozaiks-platform/app/`
+- current repo layout includes `factory_app/app/` as the first-party Studio
+  app bundle; hosted product workspaces are external to this repo
 
 The package-splitting documents are retained as future packaging proposals, not
 as the current source of truth.
@@ -24,7 +24,7 @@ as the current source of truth.
 **Start here:**
 - [../../../ARCHITECTURE.md](../../../ARCHITECTURE.md) - canonical architecture
 - [../foundations/distribution-and-workspace-model.md](../foundations/distribution-and-workspace-model.md) - canonical target distribution and workspace model
-- [../foundations/canonical-app-structure.md](../foundations/canonical-app-structure.md) - active app root and product workspace layout
+- [../foundations/canonical-app-structure.md](../foundations/canonical-app-structure.md) - active app root and hosted workspace layout
 - [agentic-app-generation-strategy.md](./agentic-app-generation-strategy.md) - app-generation architecture
 - [appgenerator-output-assembly-contract.md](./appgenerator-output-assembly-contract.md) - AppGenerator bundle output contract
 - [agentgenerator-output-assembly-contract.md](./agentgenerator-output-assembly-contract.md) - AgentGenerator workflow output contract
@@ -511,9 +511,9 @@ CURRENT STATE:
 ├── mozaiksai/hosts/platform.py             # headless app host
 ├── mozaiksai/hosts/studio.py               # local/private builder host
 ├── mozaiksai/hosts/mozaiks.py              # hosted product host
-├── platform/                   # default OSS/sample active app root
-└── mozaiks-platform/
-    └── app/                    # active App Zero app root
+├── factory_app/app/            # first-party Studio app bundle
+└── external hosted product workspace
+    └── app/                    # hosted product app root
 
 TARGET STATE (MODULAR):
 ├── mozaiks/                    # Modular packages (NOT merged!)
@@ -526,10 +526,8 @@ TARGET STATE (MODULAR):
 │   │   └── cli/                # CLI tool
 │   ├── templates/              # App templates
 │   └── examples/               # Example apps
-└── mozaiks-platform/
-    ├── app/                    # active App Zero app root
-    ├── brand/
-    ├── ui/
+└── hosted-product/
+    ├── app/                    # hosted product app root
     └── generated/
 ```
 
@@ -668,7 +666,8 @@ When modules and AI need to communicate asynchronously, they use events (not imp
 
 ### 6. Platform Owns Billing/Analytics
 
-All monetization and analytics data flows to mozaiks-platform via platform-routed events.
+All monetization and analytics data flows to the hosted product workspace via
+platform-routed events.
 
 ### 7. .NET Services Subscribe
 
@@ -741,4 +740,5 @@ All monetization and analytics data flows to mozaiks-platform via platform-route
 
 ## Contact
 
-For questions about this architecture, see the conversation that generated it or create an issue in mozaiks-platform.
+For questions about this architecture, see the conversation that generated it
+or create an issue in the hosted product workspace repo that consumes it.

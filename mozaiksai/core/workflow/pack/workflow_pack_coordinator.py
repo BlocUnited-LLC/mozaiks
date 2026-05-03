@@ -678,19 +678,19 @@ class WorkflowPackCoordinator:
             return False
         try:
             from mozaiksai.core.workflow.paths import normalize_workflow_roots
+            from mozaiksai.resources import resolve_factory_workflows_root
 
             for root in normalize_workflow_roots():
                 candidate = Path(root) / wf
                 if candidate.exists() and candidate.is_dir():
                     return True
+            factory_root = resolve_factory_workflows_root()
+            if factory_root is not None:
+                candidate = factory_root / wf
+                if candidate.exists() and candidate.is_dir():
+                    return True
         except Exception:
             pass
-
-        root = Path(__file__).resolve()
-        for parent in [root] + list(root.parents):
-            candidate = parent / "factory_app" / "workflows" / wf
-            if candidate.exists() and candidate.is_dir():
-                return True
         return False
 
     # ------------------------------------------------------------------

@@ -98,11 +98,11 @@ Canonical ownership:
 | `mozaiksai.hosts.mozaiks` | Hosted Mozaiks product host — extends Studio with hosted-only capabilities |
 | `mozaiksai.hosts.bootstrap` | Repo-local path defaults (CWD-relative; no-ops when not in repo checkout) |
 | `mozaiks_cli/` | CLI / developer interface — parallel to Studio, not a subset of it |
-| `factory_app/app/` | First-party factory app workspace root — builder/control-plane app contract |
-| `factory_app/app/ui/studio/` | Studio UI components — management interface layer |
+| `factory_app/app/` | First-party Studio app bundle — shared control-plane routes, default brand, and factory app contract |
+| `factory_app/app/ui/pages/custom/studio/` | Studio UI components — management interface layer |
+| `factory_app/app/modules/factory_control_plane/` | First-party Studio control-plane module |
 | `chat-ui/src/admin/` | Platform-management surfaces — registered by Studio, inherited by Mozaiks App |
-| `mozaiks-platform/app/` | Current App Zero app root |
-| `mozaiks-platform/app-builder/` | Product planning/docs; not runtime-loaded |
+| `platform/` | Repo-local infrastructure assets only — not an app workspace |
 | `generated/` | Generator output awaiting validation/promotion |
 
 Canonical target:
@@ -111,7 +111,7 @@ Canonical target:
 - shared generation core lives outside any individual app workspace
 - app workspaces are self-contained and keep `config/`, `ui/pages/`, `workflows/`,
   `modules/`, `ui/`, and `brand/` together under the active app root
-- App Zero should converge on that same self-contained workspace contract
+- hosted product workspaces should consume that same contract from their own repos
 
 ## Module Contract Rule
 
@@ -123,9 +123,13 @@ When working in or generating modules:
   and `backend/handler.py`.
 - YAML declares contracts, capabilities, events, settings, notification rules,
   subscriptions, and admin panels.
-- Python stubs implement behavior and hooks: `backend/handler.py` is required;
+- Python stubs implement behavior and hooks: `backend/handler.py` is required
+  (thin dispatch — one method per declared action, no business logic, no ctx.db,
+  no ctx.emit); `backend/service.py`, `backend/repo.py`, `backend/policy.py`,
+  and `backend/schemas.py` are the canonical support files for any module with
+  database access;
   `backend/settings.py`, `backend/subscriptions.py`, `backend/notifications.py`,
-  and `backend/admin.py` are optional.
+  and `backend/admin.py` are optional hooks.
 - Generic modules may publish `domain.*` events. Workflow starts/resumes are
   resolved by runtime/platform trigger contracts, not by hardcoded workflow
   names in module code.
@@ -170,9 +174,7 @@ contract.
 
 ## Generator Output Rule
 
-Shared factory workflows live in `factory_app/workflows/`. App Zero currently consumes the shared workflows
-through a local product overlay under
-`mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`. Generator output must
+Shared factory workflows live in `factory_app/workflows/`. Generator output must
 not land directly in active runtime paths.
 
 Workflow loading is multi-root by contract:
@@ -181,8 +183,10 @@ Workflow loading is multi-root by contract:
 - shared `factory_app/workflows/` second
 - `MOZAIKS_WORKFLOW_ROOTS` may override that order explicitly
 
-App Zero's local extended-orchestration overlay may reference both shared factory
-workflow IDs and product-owned workflow IDs under `mozaiks-platform/app/workflows/`.
+`factory_app/app/workflows/` is an app-local overlay seam for the first-party
+Studio app bundle. External hosted product workspaces may define their own
+overlay workflows under their active app root, but those overlays are not
+canonical source code for this repo.
 
 Use `MOZAIKS_GENERATED_ARTIFACTS_PATH`, defaulting to:
 
@@ -197,8 +201,7 @@ generated/apps/{app_id}/{build_id}/app/
 generated/workflows/{app_id}/{build_id}/{workflow_name}/
 ```
 
-Only explicit promotion may copy validated artifacts into active roots such as
-`platform/` or `mozaiks-platform/app/`.
+Only explicit promotion may copy validated artifacts into an active app root.
 
 ## UI System Rule
 
@@ -218,4 +221,3 @@ For runtime, generator, orchestration, or contract changes:
 - run targeted tests
 - update docs
 - prefer at least one real runtime smoke when practical
-

@@ -77,12 +77,10 @@ const WorkflowUIRouter = ({
         }
       }
 
-      // Fallback to core components (UserInputRequest support)
+      // Fallback to core components (explicit UserInputRequest support)
       try {
         const coreModule = await import('./ui/index.js');
-        const coreComponents = {
-          UserInputRequest: coreModule.UserInputRequest,
-        };
+        const coreComponents = coreModule.default || coreModule;
         const coreComponent = coreComponents[component] || coreComponents[toolName];
         if (coreComponent) {
           console.log(`✅ WorkflowUIRouter: Using core component ${component || toolName}`);

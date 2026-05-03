@@ -498,6 +498,68 @@ export function SectionRenderer({
       };
       break;
     }
+    case 'Timeline':
+      primitiveProps = {
+        id: componentId,
+        title: config.title,
+        items: Array.isArray(config.items) ? config.items : [],
+      };
+      break;
+    case 'CodeBlock':
+      primitiveProps = {
+        id: componentId,
+        title: config.title,
+        code: config.code ?? '',
+        language: config.language,
+        filename: config.filename,
+      };
+      break;
+    case 'ProgressTracker':
+      primitiveProps = {
+        id: componentId,
+        title: config.title,
+        stages: Array.isArray(config.stages) ? config.stages : [],
+      };
+      break;
+    case 'AlertBanner': {
+      const bannerActions = materializeActions(config.actions, executeAction, section.id);
+      primitiveProps = {
+        id: componentId,
+        message: config.message,
+        title: config.title,
+        variant: config.variant ?? 'info',
+        dismissible: config.dismissible ?? false,
+        actions: bannerActions,
+        onAction: (actionId, selectedRows) => {
+          const action = bannerActions.find((a) => (a.id ?? a.label) === actionId);
+          if (action) void executeAction(action, { selectedRows });
+        },
+      };
+      break;
+    }
+    case 'ActionButton': {
+      const buttonActions = materializeActions(config.actions, executeAction, section.id);
+      const actionLookup = new Map(buttonActions.map((a) => [a.id ?? a.label, a]));
+      primitiveProps = {
+        id: componentId,
+        title: config.title,
+        layout: config.layout ?? 'row',
+        actions: buttonActions,
+        onAction: (actionId) => {
+          const action = actionLookup.get(actionId);
+          if (action) void executeAction(action, {});
+        },
+      };
+      break;
+    }
+    case 'FileList':
+      primitiveProps = {
+        id: componentId,
+        title: config.title,
+        files: Array.isArray(config.files) ? config.files : [],
+        onAction: (actionId, selectedRows) => void executeAction({ id: actionId }, { selectedRows }),
+      };
+      break;
     default:
       primitiveProps = { ...config, id: componentId };
       break;

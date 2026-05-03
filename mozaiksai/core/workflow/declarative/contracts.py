@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from mozaiksai.core.workflow.workflow_ui_catalog import validate_workflow_renderable_primitive_ids
+
 
 def _required_text(value: Any, *, field_name: str) -> str:
     text = str(value or "").strip()
@@ -323,11 +325,22 @@ class ContextVariablesConfig(DeclarativeModel):
 class ToolUIConfig(DeclarativeModel):
     component: Optional[str] = None
     mode: Optional[str] = None
+    workflow_primitive: Optional[str] = None
 
-    @field_validator("component", "mode", mode="before")
+    @field_validator("component", "mode", "workflow_primitive", mode="before")
     @classmethod
     def _normalize_optional_text(cls, value: Any) -> Optional[str]:
         return _optional_text(value)
+
+    @field_validator("workflow_primitive")
+    @classmethod
+    def _validate_workflow_primitive(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return validate_workflow_renderable_primitive_ids(
+            [value],
+            context="ToolUIConfig.workflow_primitive",
+        )[0]
 
 
 def _default_ui_payload_schema() -> Dict[str, Any]:
@@ -420,11 +433,13 @@ class ToolSpec(DeclarativeModel):
         if self.tool_type in {"UI_Tool", "UI_Surface"}:
             if not self.ui:
                 raise ValueError(
-                    f"{self.tool_type} '{self.function}' must declare a non-empty ui block with component and mode"
+                    f"{self.tool_type} '{self.function}' must declare a non-empty ui block with "
+                    "component, mode, and workflow_primitive"
                 )
-            if not self.ui.component or not self.ui.mode:
+            if not self.ui.component or not self.ui.mode or not self.ui.workflow_primitive:
                 raise ValueError(
-                    f"{self.tool_type} '{self.function}' must declare ui.component and ui.mode"
+                    f"{self.tool_type} '{self.function}' must declare ui.component, ui.mode, "
+                    "and ui.workflow_primitive"
                 )
             if self.tool_type == "UI_Tool" and self.ui_contract is None:
                 self.ui_contract = UIToolContractSpec()
@@ -483,11 +498,13 @@ class LifecycleToolSpec(DeclarativeModel):
         if self.tool_type in {"UI_Tool", "UI_Surface"}:
             if not self.ui:
                 raise ValueError(
-                    f"{self.tool_type} lifecycle tool '{self.function}' must declare a non-empty ui block with component and mode"
+                    f"{self.tool_type} lifecycle tool '{self.function}' must declare a non-empty ui "
+                    "block with component, mode, and workflow_primitive"
                 )
-            if not self.ui.component or not self.ui.mode:
+            if not self.ui.component or not self.ui.mode or not self.ui.workflow_primitive:
                 raise ValueError(
-                    f"{self.tool_type} lifecycle tool '{self.function}' must declare ui.component and ui.mode"
+                    f"{self.tool_type} lifecycle tool '{self.function}' must declare ui.component, "
+                    "ui.mode, and ui.workflow_primitive"
                 )
         elif self.ui is not None:
             raise ValueError(
@@ -647,9 +664,58 @@ class StructuredOutputModelSpec(DeclarativeModel):
         return value
 
 
+class StructuredOutputLiteralSpec(DeclarativeModel):
+    type: Literal["literal"]
+    description: Optional[str] = None
+    values: List[Any] = Field(default_factory=list)
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _normalize_description(cls, value: Any) -> Optional[str]:
+        return _optional_text(value)
+
+    @field_validator("values")
+    @classmethod
+    def _validate_values(cls, value: List[Any]) -> List[Any]:
+        if not value:
+            raise ValueError("literal.values must not be empty")
+        return value
+
+
+class StructuredOutputUnionSpec(DeclarativeModel):
+    type: Literal["union"]
+    description: Optional[str] = None
+    variants: List[str] = Field(default_factory=list)
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _normalize_description(cls, value: Any) -> Optional[str]:
+        return _optional_text(value)
+
+    @field_validator("variants")
+    @classmethod
+    def _validate_variants(cls, value: List[str]) -> List[str]:
+        normalized = _normalize_string_list(value)
+        if not normalized:
+            raise ValueError("union.variants must not be empty")
+        return normalized
+
+
 class StructuredOutputsConfig(DeclarativeModel):
     registry: Dict[str, Optional[str]] = Field(default_factory=dict)
-    models: Dict[str, StructuredOutputModelSpec] = Field(default_factory=dict)
+    models: Dict[str, StructuredOutputModelSpec | StructuredOutputLiteralSpec | StructuredOutputUnionSpec] = (
+        Field(default_factory=dict)
+    )
+
+    @field_validator("models")
+    @classmethod
+    def _validate_model_keys(
+        cls,
+        value: Dict[str, StructuredOutputModelSpec | StructuredOutputLiteralSpec | StructuredOutputUnionSpec],
+    ) -> Dict[str, StructuredOutputModelSpec | StructuredOutputLiteralSpec | StructuredOutputUnionSpec]:
+        for key in value.keys():
+            _required_text(key, field_name="structured output definition name")
+        return value
 
     @model_validator(mode="after")
     def _validate_registry_refs(self) -> "StructuredOutputsConfig":
@@ -661,6 +727,11 @@ class StructuredOutputsConfig(DeclarativeModel):
             if resolved_model not in self.models:
                 raise ValueError(
                     f"registry entry '{agent_name}: {resolved_model}' references unknown model"
+                )
+            model_def = self.models[resolved_model]
+            if getattr(model_def, "type", None) != "model":
+                raise ValueError(
+                    f"registry entry '{agent_name}: {resolved_model}' must reference a model definition"
                 )
         return self
 

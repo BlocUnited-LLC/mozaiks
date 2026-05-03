@@ -631,7 +631,7 @@ agents:
     content: |-
       **Upstream Dependencies**:
       - `WorkflowStrategy.workflow_stages`: Defines agent needs per workflow stage.
-      - `ToolPlanning.ui_requirements`: Defines UI interaction contracts (inline vs artifact per workflow stage).
+      - `ToolPlanning.ui_requirements`: Defines workflow UI primitives and display strategies per workflow stage.
       - `PatternSelection.pattern_name`: Pattern-specific agent naming conventions and role assignments.
       - `WorkflowStrategy.decomposition`: Exact decomposition-role agent names when workflow-local MFJ is needed.
   - id: instructions
@@ -658,6 +658,7 @@ agents:
 
       2. **Derive `human_interaction`** (Derivation Rule):
          - Find matching `ui_requirement` from `ToolPlanning.ui_requirements` (same workflow stage).
+         - IF `workflow_primitive`=`composer_reply` -> 'context'.
          - IF `display`='inline' -> 'context'.
          - IF `display`='artifact' -> 'approval'.
          - IF no match -> 'none'.
@@ -705,7 +706,7 @@ agents:
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
-      - Decide the UI surface for every agent interaction (inline vs artifact) based on WorkflowStrategy and AgentRoster.
+      - Decide the canonical workflow UI primitive for every agent interaction checkpoint based on WorkflowStrategy and AgentRoster.
       - Define backend/logic tools required by agents.
       - Define lifecycle tools and system hooks.
   - id: context
@@ -722,26 +723,33 @@ agents:
       **UI surface rules**:
       - Supporting workflows: FORCE `ui_requirements` = [] (backend-only, no user interaction).
       - `human_in_loop`=false: FORCE `ui_requirements` = [].
-      - `human_interaction`='context' → `display`='inline'.
-      - `human_interaction`='approval' → `display`='artifact'.
+      - Plain natural-language clarification or feedback → `workflow_primitive`=`composer_reply`, `display`=`composer`, `component`=null.
+      - Structured context capture or bounded interaction → choose a workflow-local primitive and set `display` based on complexity.
+      - `human_interaction`='approval' usually maps to artifact-oriented review primitives.
 
       **Display mode selection**:
-      Two display modes. Pick based on complexity and placement — do not default to artifact:
+      Three display modes. Pick based on interaction shape — do not default to artifact:
 
       | Mode | When to use |
       |------|-------------|
-      | `inline` | Short conversational output: status text, single stat, confirmation, streaming text |
-      | `artifact` | Complex interactive UI: multi-step approval, wizard, data table with actions, diagram |
+      | `composer` | User should answer in plain natural language through the main chat composer |
+      | `inline` | Short structured interaction: small approvals, bounded choices, concise summaries |
+      | `artifact` | Complex review UI: forms, tables, diffs, diagrams, downloads, multi-step review |
 
-      These are agent-driven UI components — not app pages. They live in the chat interface,
-      receive pushed updates from the agent via `ui.*` events, and can send user actions
-      (approve, submit, select) back to the agent. Think CopilotKit-style generative UI.
+      **Shell status rule**:
+      - Do NOT emit workflow-local UI requirements for framework-owned shell status surfaces such as progress steppers, run status banners, or agent activity feeds.
+      - Those are platform-owned and should be driven by workflow stages, runtime state, and execution telemetry rather than generated React.
+
+      These are agent-driven UI surfaces — not app pages. Structured workflow UI lives in
+      the chat interface, receives pushed updates from the agent via `chat.tool_call`,
+      and can send user actions (approve, submit, select) back to the agent.
 
       **primitives_hint** — building blocks for the generated React component:
       - Populate based on what the UI actually needs to display.
       - UIFileGenerator imports and composes these instead of building from scratch.
       - Valid values are injected at runtime in `[SHIPPED UI PRIMITIVES]` from the live `chat-ui` primitive registry.
       - Never invent primitive names outside that shipped catalog.
+      - If the chosen `workflow_primitive` resolves to a shipped workflow component, prefer that shipped component directly and leave `primitives_hint` empty unless a custom wrapper is truly needed.
       - Examples:
         - Approval card with details → ["Card", "Button"]
         - Results list with filters → ["DataTable"]
@@ -754,11 +762,16 @@ agents:
          - Skip entirely if workflow role='supporting' OR `human_in_loop`=false.
          - For each agent in `AgentRoster` with `human_interaction` != 'none':
            - Set `surface_kind`=`agent_tool` (transition surfaces are declared only in pack graph metadata, not here).
-           - Base mapping: 'context' → 'inline', 'approval' → 'artifact'.
+           - Choose `workflow_primitive` from the canonical workflow UI primitive catalog.
+           - Use `composer_reply` when the user only needs to answer in natural language.
+           - Base mapping for non-composer interactions: 'context' → 'inline', 'approval' → 'artifact'.
            - Promote to 'artifact' when the output needs complex interaction (multi-field form, table with row actions, wizard steps, diagram).
-           - Set `primitives_hint` listing which pre-built components the generated React should compose.
-           - Assign a new PascalCase `component` name (e.g. "ApprovalCard", "ResultsPanel").
+           - For `workflow_primitive=composer_reply`, set `display`=`composer`, `component`=null, and `primitives_hint`=[].
+           - For any generated custom UI surface, set `primitives_hint` listing which shipped building-block primitives the React component should compose.
+           - For shipped workflow primitives, prefer the canonical shipped component name from the catalog (for example `ApprovalCard`, `FormCard`, `DiagramViewer`) and leave `primitives_hint`=[] unless a workflow-local wrapper is genuinely required.
+           - Assign a workflow-local PascalCase `component` name only when `workflow_primitive` is not `composer_reply` and the shipped component does not already satisfy the interaction.
            - Assign a concise `label` (CTA or heading) and `purpose`.
+           - Keep `tool` as the logical checkpoint identifier that downstream tool synthesis will match when a generated UI surface is required.
 
       2. **Derive `agent_tools`** (Backend/Logic Tools Only):
          - Create tools for backend logic implied by module purpose (analysis, computation, API calls).
@@ -797,8 +810,9 @@ agents:
               "surface_kind": "agent_tool",
               "stage_index": "<int>",
               "label": "<CTA or heading>",
-              "display": "inline|artifact",
-              "component": "<PascalCase component name (new custom component)>",
+              "workflow_primitive": "composer_reply|approval_card|choice_picker|confirmation_summary|form_card|record_picker|file_upload_prompt|diff_review|action_plan_review|artifact_workbench|document_preview|download_center|comparison_board|diagram_viewer|table_review",
+              "display": "composer|inline|artifact",
+              "component": "<canonical shipped component name, workflow-local PascalCase name, or null for composer_reply>",
               "primitives_hint": ["<Primitive>", "..."],
               "purpose": "<string>"
             }
@@ -1118,7 +1132,7 @@ agents:
     content: |-
       **Upstream Dependencies**:
       - `ToolPlanning.agent_tools`: Defines agent tools and lifecycle tools.
-      - `ToolPlanning.ui_requirements`: Defines UI modes for tools (inline vs artifact).
+      - `ToolPlanning.ui_requirements`: Defines workflow primitive, display mode, and component strategy for interaction checkpoints.
       - `ContextVariablesPlan.lifecycle_requirements`: Defines lifecycle tool definitions.
       - `ContextVariablesPlan.definitions`: State variable trigger hints.
   - id: instructions
@@ -1126,12 +1140,15 @@ agents:
     content: |-
       1. **Derive `tools`**:
          - For every planned agent tool in `ToolPlanning.agent_tools`, create tool entries.
-         - Set `tool_type` = 'UI_Tool' when the tool opens an interactive UI and waits for a user response.
-         - Set `tool_type` = 'UI_Surface' when the tool emits a one-way inline/artifact surface with no user response.
+         - First, match any `ToolPlanning.ui_requirements` entry whose `tool` field refers to this tool.
+         - If the matched `workflow_primitive` is `composer_reply`, do NOT emit `UI_Tool` or `UI_Surface` metadata for that checkpoint; the runtime input-request/composer lane owns it.
+         - Set `tool_type` = 'UI_Tool' when the matched workflow primitive opens an interactive UI and waits for a structured user response.
+         - Set `tool_type` = 'UI_Surface' when the matched workflow primitive emits a one-way inline/artifact surface with no user response.
          - Set `tool_type` = 'Agent_Tool' for backend-only logic with no UI.
+         - Do not model plain free-text chat reply as a `UI_Tool`. If the workflow only needs the user to answer in natural language, use the standard runtime input-request/composer lane instead of generating an inline text box.
          - Set `description` from the agent tool purpose.
          - Do NOT include `integration` in the final tools manifest; integrations stay in planning context only.
-         - For `UI_Tool` and `UI_Surface`, set `ui` {"component", "mode"}.
+         - For `UI_Tool` and `UI_Surface`, set `ui` {"component", "mode", "workflow_primitive"} from the matched `ui_requirement`.
          - For `Agent_Tool`, omit `ui`.
          - For `UI_Tool`, set `ui_contract` with:
            - `surface_kind`: "agent_tool"
@@ -1148,7 +1165,7 @@ agents:
          - Extract lifecycle tools from `ToolPlanning.lifecycle_tools`.
          - Preserve `trigger` (before_chat|after_chat|before_agent|after_agent) and `agent` when scoped; `agent`=null for chat-level hooks.
          - Map `description` from purpose; use `UI_Tool` for interactive lifecycle UI, `UI_Surface` for one-way lifecycle UI, else `Agent_Tool`.
-         - For UI lifecycle hooks, include `ui` {"component", "mode"}; for `Agent_Tool`, omit `ui`.
+         - For UI lifecycle hooks, include `ui` {"component", "mode", "workflow_primitive"}; for `Agent_Tool`, omit `ui`.
          - Set `file`="tools/<name>.py" and `function`="<name>".
          - Lifecycle helpers are also contract-declared files. Do not imply undeclared support modules.
          - Lifecycle tool paths follow the same workflow-local rule; do not create or reference shared workflow tool folders.
@@ -1163,10 +1180,10 @@ agents:
       ```json
       {
         "tools": [
-          {"agent": "<PascalCase>", "file": "tools/<name>.py", "function": "<name>", "description": "<string>", "tool_type": "UI_Tool|UI_Surface|Agent_Tool", "auto_tool_call": true|false|null, "ui": {"component": "<string>", "mode": "inline|artifact"}, "ui_contract": {"surface_kind": "agent_tool", "payload_schema": {"type": "object", "properties": {}, "additionalProperties": true}, "actions_schema": [{"id": "approve", "description": "Optional", "payload_schema": {"type": "object", "properties": {}, "additionalProperties": true}}]}}
+          {"agent": "<PascalCase>", "file": "tools/<name>.py", "function": "<name>", "description": "<string>", "tool_type": "UI_Tool|UI_Surface|Agent_Tool", "auto_tool_call": true|false|null, "ui": {"component": "<string>", "mode": "inline|artifact", "workflow_primitive": "<catalog id>"}, "ui_contract": {"surface_kind": "agent_tool", "payload_schema": {"type": "object", "properties": {}, "additionalProperties": true}, "actions_schema": [{"id": "approve", "description": "Optional", "payload_schema": {"type": "object", "properties": {}, "additionalProperties": true}}]}}
         ],
         "lifecycle_tools": [
-          {"agent": "<PascalCase|null>", "file": "tools/<name>.py", "function": "<name>", "description": "<string>", "tool_type": "UI_Tool|UI_Surface|Agent_Tool", "trigger": "before_chat|after_chat|before_agent|after_agent", "ui": {"component": "<string>", "mode": "inline|artifact"}}
+          {"agent": "<PascalCase|null>", "file": "tools/<name>.py", "function": "<name>", "description": "<string>", "tool_type": "UI_Tool|UI_Surface|Agent_Tool", "trigger": "before_chat|after_chat|before_agent|after_agent", "ui": {"component": "<string>", "mode": "inline|artifact", "workflow_primitive": "<catalog id>"}}
         ]
       }
       ```
@@ -1194,29 +1211,33 @@ agents:
       - The React component is mounted by `WorkflowUIRouter`, renders using platform
         primitives, and surfaces user actions (approve, submit, select) back via
         `onResponse`.
+      - Treat `workflow_primitive` as the canonical interaction pattern. `component` is the workflow-local realization of that pattern, not the source of truth.
+      - Some workflow primitives resolve to shipped shared components. For those, `component` may be the canonical shipped component name instead of a workflow-local file.
       - Treat these files as contract-declared customization stubs. Generate only the files required by the Tools manifest and `ui_contract`; do not invent extra UI surfaces.
       - Enforce `--mz-*` CSS semantic tokens in all generated React. No legacy color classes.
   - id: primitives
     heading: '[PLATFORM PRIMITIVES — BUILDING BLOCKS]'
     content: |
-      Pre-built components in `chat-ui/src/ui/primitives/`. Import and compose them
+      Pre-built components in `@mozaiks/chat-ui/ui/primitives/`. Import and compose them
       inside generated React components — do not reimplement common UI patterns.
       The live shipped catalog is injected at runtime in `[SHIPPED UI PRIMITIVES]`.
       Use only those names and import paths.
 
-      **Import paths** (relative to component file in `ui/<WorkflowName>/`):
+      **Import paths** (canonical alias form):
       ```js
-      import { DataTable } from '../../ui/primitives/DataTable.jsx'
-      import { Form }      from '../../ui/primitives/Form.jsx'
-      import { Card }      from '../../ui/primitives/Card.jsx'
-      import { Stat }      from '../../ui/primitives/Stat.jsx'
-      import { Grid }      from '../../ui/primitives/Grid.jsx'
-      import { Button }    from '../../ui/primitives/Button.jsx'
-      import { Modal }     from '../../ui/primitives/Modal.jsx'
-      import { Alert }     from '../../ui/primitives/Alert.jsx'
-      import { Badge }     from '../../ui/primitives/Badge.jsx'
-      import { Skeleton, Empty }  from '../../ui/primitives/Skeleton.jsx'
+      import { DataTable } from '@mozaiks/chat-ui/ui/primitives/DataTable.jsx'
+      import { Form }      from '@mozaiks/chat-ui/ui/primitives/Form.jsx'
+      import { Card }      from '@mozaiks/chat-ui/ui/primitives/Card.jsx'
+      import { Stat }      from '@mozaiks/chat-ui/ui/primitives/Stat.jsx'
+      import { Grid }      from '@mozaiks/chat-ui/ui/primitives/Grid.jsx'
+      import { Button }    from '@mozaiks/chat-ui/ui/primitives/Button.jsx'
+      import { Modal }     from '@mozaiks/chat-ui/ui/primitives/Modal.jsx'
+      import { Alert }     from '@mozaiks/chat-ui/ui/primitives/Alert.jsx'
+      import { Badge }     from '@mozaiks/chat-ui/ui/primitives/Badge.jsx'
+      import { Skeleton, Empty } from '@mozaiks/chat-ui/ui/primitives/Skeleton.jsx'
       ```
+
+      Never emit brittle deep relative imports into `chat-ui/src/...` or `../../ui/...`.
 
       **Primitive reference** (type → key props):
       - `DataTable`  — `id`, `columns[]`, `data[]`, `selection`, `pagination`, `page_size`, `search`, `actions[]`, `onAction`, `onRefresh`, `loading`, `empty`
@@ -1287,10 +1308,10 @@ agents:
       **React component** — receives shell props, renders UI, sends actions back:
       ```jsx
       import { useState } from 'react'
-      import { Alert } from '../../ui/primitives/Alert.jsx'
-      import { Badge } from '../../ui/primitives/Badge.jsx'
-      import { Card } from '../../ui/primitives/Card.jsx'
-      import { Button } from '../../ui/primitives/Button.jsx'
+      import { Alert } from '@mozaiks/chat-ui/ui/primitives/Alert.jsx'
+      import { Badge } from '@mozaiks/chat-ui/ui/primitives/Badge.jsx'
+      import { Card } from '@mozaiks/chat-ui/ui/primitives/Card.jsx'
+      import { Button } from '@mozaiks/chat-ui/ui/primitives/Button.jsx'
 
       export default function <Component>({
         payload = {},
@@ -1379,13 +1400,16 @@ agents:
     heading: '[CONTEXT]'
     content: |
       **Upstream Dependencies**:
-      - `ToolsManifest`: UI metadata, function names, `display` mode (`inline`|`artifact`), `primitives_hint`, and `ui_contract` (`payload_schema` + `actions_schema`).
+      - `ToolsManifest`: UI metadata, function names, `display` mode (`inline`|`artifact`), `workflow_primitive`, `primitives_hint`, and `ui_contract` (`payload_schema` + `actions_schema`).
       - `UXArchitecture.ui_requirements`: Component names and display hints.
       - `ContextVariablesPlan.definitions.triggers`: Response keys for UI state updates.
 
       Every UI tool produces exactly two files: `tools/<name>.py` + `ui/<WorkflowName>/<Component>.jsx`.
       The `display` field controls where the component renders (inline in chat vs artifact tray),
-      not whether React is generated — React is always generated.
+      not whether React is generated — for every non-composer ToolsManifest entry, React is always generated.
+      Exception: when a ToolsManifest entry uses a shipped shared workflow component directly,
+      no workflow-local React file is required unless a thin wrapper is explicitly needed.
+      Generic free-text human reply in `chat-ui` does not need a generated React component; it should use the shell composer unless the interaction is structured enough to justify dedicated UI.
       UI tool files are workflow-local artifacts. Do not create shared workflow
       tool folders; generate any helper needed by a UI tool under this workflow's
       own `tools/` directory.
@@ -1405,7 +1429,10 @@ agents:
          - React component (`ui/<WorkflowName>/<Component>.jsx`): receives shell props from
            `WorkflowUIRouter` (`payload`, `onResponse`, `onCancel`,
            `toolName`, `toolCallId`, `workflowName`, `componentId`), composes primitives from
-           `primitives_hint`, and sends actions back with `onResponse`.
+           `primitives_hint`, implements the selected `workflow_primitive`, and sends actions back with `onResponse`.
+         - If `workflow_primitive` maps to a shipped shared component and `ui.component` already uses that canonical shipped component name, do NOT generate a React file for it.
+         - If `workflow_primitive` maps to a shipped shared component but `ui.component` is workflow-local, generate only a thin re-export or wrapper around the shipped component.
+         - Do not generate files for `workflow_primitive=composer_reply`; that lane is shell-owned and handled by the standard composer.
          - Align emitted payload and outbound actions to `ui_contract.payload_schema` and `ui_contract.actions_schema`.
          - Multiple UI tools may share one React component (many-to-one is valid).
 

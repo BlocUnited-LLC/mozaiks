@@ -12,10 +12,9 @@ It should not dump low-level platform configuration onto the user.
 
 ## Current Repo Note
 
-The current repo keeps its local product manifest at
-`mozaiks-platform/app/app.json`. The canonical target for generated/customer
-apps is a self-contained app workspace with `app/app.json` inside the app
-repository.
+The canonical target is a self-contained app workspace with `app/app.json`
+inside the app repository. In this repo, `factory_app/app/app.json` is the
+first-party Studio app bundle manifest that follows that same contract.
 
 ## The Right Mental Model
 

@@ -434,6 +434,41 @@ models:
         items: ContextVariableAgentExposure
         description: Agent exposure entries describing which variables are visible
           to each agent.
+  WorkflowRenderablePrimitiveId:
+    type: literal
+    values:
+    - approval_card
+    - choice_picker
+    - confirmation_summary
+    - form_card
+    - record_picker
+    - file_upload_prompt
+    - diff_review
+    - action_plan_review
+    - artifact_workbench
+    - document_preview
+    - download_center
+    - comparison_board
+    - diagram_viewer
+    - table_review
+  WorkflowUIPrimitiveId:
+    type: literal
+    values:
+    - composer_reply
+    - approval_card
+    - choice_picker
+    - confirmation_summary
+    - form_card
+    - record_picker
+    - file_upload_prompt
+    - diff_review
+    - action_plan_review
+    - artifact_workbench
+    - document_preview
+    - download_center
+    - comparison_board
+    - diagram_viewer
+    - table_review
   UIConfig:
     type: model
     fields:
@@ -450,6 +485,12 @@ models:
         - artifact
         description: Placement hint for ChatUI. Mirrors the existing tools.yaml
           schema (inline vs artifact). Optional; omit to fall back to runtime defaults.
+      workflow_primitive:
+        type: union
+        variants:
+        - WorkflowRenderablePrimitiveId
+        - 'null'
+        description: Canonical workflow UI primitive pattern selected upstream. Null for non-UI tools.
   UIToolAction:
     type: model
     fields:
@@ -1038,22 +1079,32 @@ models:
         type: str
         description: User-facing label or CTA text so the architect narrative can
           reference the UI affordance verbatim.
+      workflow_primitive:
+        type: WorkflowUIPrimitiveId
+        description: >
+          Canonical workflow UI primitive selected for this interaction checkpoint.
+          Use `composer_reply` for plain natural-language feedback routed through the
+          shell composer. Use the other values for structured workflow-local UI surfaces.
       component:
         type: union
         variants:
         - str
         - 'null'
         description: >
-          PascalCase name of the React component to generate (e.g. "ApprovalCard",
-          "ResultsPanel"). Always a new custom name — UIFileGenerator generates the file.
-          Null only when there is no UI surface (human_interaction='none').
+          PascalCase React component name. Use null for `workflow_primitive=composer_reply`.
+          For shipped workflow primitives this may be the canonical shared component
+          name (for example `ApprovalCard`, `FormCard`, `DiagramViewer`). Otherwise
+          it is the workflow-local component UIFileGenerator produces.
       display:
         type: literal
         values:
+        - composer
         - inline
         - artifact
         description: >
           Visual placement and rendering strategy.
+          "composer" — shell-owned free-text reply lane using the main chat composer.
+            Use for plain natural-language answers or clarifications.
           "inline" — agent-driven output rendered conversationally in the chat flow.
             Use for status updates, single stats, short confirmations, streaming text.
           "artifact" — agent-driven output rendered in a side tray or modal panel.
@@ -1067,6 +1118,8 @@ models:
           These are pre-built components from the live shipped `chat-ui` primitive catalog.
           UIFileGenerator imports them to avoid re-implementing common UI patterns from scratch.
           Valid values are injected at runtime via `[SHIPPED UI PRIMITIVES]`; do not invent names.
+          Use [] when the workflow can rely directly on a shipped shared workflow component
+          and does not need a workflow-local wrapper.
       summary:
         type: str
         description: <=200 char narrative explaining what the user sees or confirms

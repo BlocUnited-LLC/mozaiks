@@ -151,5 +151,44 @@ class AppGeneratorBackendClient(BackendClient):
         params = {"userId": user_id or "mozaiksai"}
         return await self.get(f"/api/apps/{app_id}/database/status", params=params, error_msg="Failed to get database status")
 
+    async def get_artifact_schema(self, app_id: str, artifact_version_id: str) -> Dict[str, Any]:
+        """
+        GET /api/apps/{appId}/database/schema/{artifactVersionId}
+
+        Returns the schema.json that was applied for the given artifact version.
+        Response: {"schema": <dict | null>}
+        Returns {"schema": null} when no schema is recorded for that version.
+        """
+        return await self.get(
+            f"/api/apps/{app_id}/database/schema/{artifact_version_id}",
+            error_msg="Failed to fetch artifact schema",
+        )
+
+    async def apply_schema_migration(
+        self,
+        app_id: str,
+        migration: Dict[str, Any],
+        user_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        POST /api/apps/{appId}/database/migrate
+
+        Apply the safe ops in a migration document produced by schema_migration.py.
+        The backend applies only additive ops (new collections, new fields, new indexes)
+        and records the migration_id in the app's migration history.
+
+        Payload: {"userId": str, "migration": <migration dict>}
+        Response: {"success": bool, "migration_id": str, "applied_ops": [...], "skipped_ops": [...]}
+        """
+        payload = {
+            "userId": user_id or "mozaiksai",
+            "migration": migration,
+        }
+        return await self.post(
+            f"/api/apps/{app_id}/database/migrate",
+            json=payload,
+            error_msg="Failed to apply schema migration",
+        )
+
 # Singleton instance
 app_gen_backend_client = AppGeneratorBackendClient()

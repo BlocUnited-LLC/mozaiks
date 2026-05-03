@@ -153,12 +153,18 @@ the shared smoke workflows under `factory_app/workflows/`:
 - `RuntimeSmoke` validates base orchestration, streaming, persistence, and structured output.
 - `RuntimeToolCallSmoke` validates the response-required workflow UI lane:
   `chat.tool_call -> tool_call_response`.
+- `WorkflowPrimitiveAcceptance` validates the three canonical generated-workflow
+  UI lanes together:
+  - composer reply
+  - structured inline workflow primitive
+  - artifact workflow surface
 
 Run them through the live harness:
 
 ```bash
 python scripts/run_live_mfj_smoke.py --workflow RuntimeSmoke --workflows-root factory_app/workflows
 python scripts/run_live_mfj_smoke.py --workflow RuntimeToolCallSmoke --workflows-root factory_app/workflows --tool-response-text approved
+python scripts/run_live_mfj_smoke.py --workflow WorkflowPrimitiveAcceptance --workflows-root factory_app/workflows --tool-response-file factory_app/workflows/WorkflowPrimitiveAcceptance/smoke_responses.json
 ```
 
 For real multi-turn workflows that pause on AG2 input requests, the same
@@ -178,6 +184,27 @@ python scripts/run_live_mfj_smoke.py --workflow ValueEngine --workflows-root fac
 workflow chat messages. AG2 compatibility prompts such as
 `Please give feedback to chat_manager...` still use that same pending
 input-request lane; the runtime suppresses the raw prompt text, but the harness
-or frontend still needs to answer the pending interaction.
+or frontend still needs to answer the pending interaction. In `chat-ui`,
+generic text input requests default to the main composer (`display=composer`).
+
+When a workflow also needs structured tool responses, prefer
+`--tool-response-file` over ad hoc text fallbacks. The file is a JSON object:
+
+```json
+{
+  "input_replies": [
+    "We need an approval dashboard for regional operations teams."
+  ],
+  "tool_responses": {
+    "AcceptanceApprovalCard": {
+      "action": "approve",
+      "approved": true,
+      "rationale": "The checkpoint is clear."
+    }
+  }
+}
+```
+
+`tool_responses` keys match the emitted workflow `tool_name` / `component_type`.
 
 Both require a working `.env` with `OPENAI_API_KEY` and `MONGO_URI`, plus a reachable MongoDB instance.

@@ -14,10 +14,12 @@ The platform shell renders them automatically using pre-built primitives.
 ## What a Page Is
 
 ```
-platform/
-├── app.yaml              ← navigation entry goes here
-└── pages/
-    └── <name>.yaml       ← the page schema
+app/ui/pages/
+└── <name>.yaml       ← the page schema
+
+# Or folder form:
+app/ui/pages/<name>/
+└── page.yaml
 ```
 
 The `SchemaPage` route component fetches `/api/pages/<name>`, and `PageRenderer`
@@ -30,7 +32,7 @@ assembles the layout from the schema using the primitive registry.
 ### 1. Create the page schema
 
 ```bash
-touch platform/pages/<name>.yaml
+touch app/ui/pages/<name>.yaml
 ```
 
 ### 2. Write the schema
@@ -48,21 +50,16 @@ sections:
       columns:
         - { key: id,    label: ID }
         - { key: name,  label: Name }
-    api_endpoint: /api/modules/<module>/list   # optional live data
+    api_endpoint: /api/modules/<module>/<action>   # optional live data
 ```
 
-### 3. Add to navigation in `app.yaml`
+### 3. Restart the backend
 
-```yaml
-# platform/app.yaml
-navigation:
-  - label: <Nav Label>
-    route: /<name>
-    schema: <name>          # matches the page file name
-    icon: table             # optional
+```bash
+mozaiks serve .
 ```
 
-That's it — no React files, no registration, no build step.
+Pages are loaded at startup. The route `/<name>` is served automatically.
 
 ---
 
@@ -119,7 +116,7 @@ sections:
         - { key: id,     label: Order ID }
         - { key: total,  label: Total }
         - { key: status, label: Status }
-    api_endpoint: /api/modules/orders/recent
+    api_endpoint: /api/modules/orders/list_orders
 ```
 
 ---
@@ -141,7 +138,7 @@ sections:
         - { name: email, label: Email,      type: email, required: true }
         - { name: phone, label: Phone,      type: text }
       submitLabel: Create Customer
-      api_endpoint: /api/modules/customers/create
+      api_endpoint: /api/modules/customers/create_customer
 ```
 
 ---
@@ -155,12 +152,37 @@ The agent can also trigger a refresh by emitting `ui.datatable.refresh` with the
 
 ---
 
+## Custom Full-Page React Routes
+
+For cases the declarative schema cannot express, use the escape hatch:
+
+```
+app/ui/pages/custom/<name>.jsx   ← custom React page
+app/ui/route_manifest.json       ← registers the route
+```
+
+```json
+// app/ui/route_manifest.json
+{
+  "routes": [
+    {
+      "path": "/custom/<name>",
+      "component": "<Name>Page",
+      "meta": { "requiresAuth": true }
+    }
+  ]
+}
+```
+
+Use custom routes sparingly. Declarative `app/ui/pages/` is the default.
+
+---
+
 ## Rules
 
-- **No custom React** — if the primitives don't cover the use case, extend the primitive, don't work around it
-- Pages belong in `platform/pages/` — never in `app/` or workflow directories
-- File name must match the `name` field and the `schema` field in `app.yaml` navigation
-- `api_endpoint` paths must be `/api/modules/...` routes (module routes)
+- **Prefer declarative YAML** — if the primitives don't cover the use case, extend the primitive
+- Pages belong in `app/ui/pages/` — never in a module's backend directory
+- `api_endpoint` paths must be `/api/modules/{name}/{action_id}` routes
 
 ---
 

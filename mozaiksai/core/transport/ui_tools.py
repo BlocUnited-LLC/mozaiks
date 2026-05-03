@@ -22,6 +22,8 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+from mozaiksai.core.transport.ui_events import UIDisplayMode, UIRenderData, UIUpdateData
+
 if TYPE_CHECKING:
     pass
 
@@ -129,8 +131,11 @@ class UIToolsMixin:
         awaiting_response: bool = True,
         agent_name: Optional[str] = None
     ) -> None:
-        """
-        Emit a tool_call event to the frontend using the strict chat.tool_call protocol.
+        """Emit a ``ui.render`` event to the frontend.
+
+        Builds a :class:`UIRenderData`-shaped envelope and routes it through
+        the unified event dispatcher so the frontend receives a typed
+        ``ui.render`` WebSocket event instead of the old ``chat.tool_call``.
         """
         # Extract agent_name from payload if not explicitly provided
         if not agent_name and isinstance(payload, dict):
@@ -140,28 +145,38 @@ class UIToolsMixin:
         if not isinstance(interaction_type, str) or not interaction_type.strip():
             interaction_type = "ui_tool" if awaiting_response else "ui_surface"
 
-        # Build a standardized AG2 tool_call payload
-        event = {
-            "kind": "tool_call",
-            "tool_call_id": event_id,
-            "tool_name": tool_name,
-            "component_type": component_name,
-            "awaiting_response": bool(awaiting_response),
-            "payload": payload,
-            "corr": event_id,
-            "workflow_name": workflow_name,
-            "interaction_type": interaction_type,
-            "display": display_type,
-            "display_type": display_type,
-        }
+        # Normalise display_type to the UIDisplayMode enum values.
+        # Unknown values fall back to "inline" so the frontend always gets a
+        # valid mode string even if a workflow passes a legacy value.
+        _display_norm = str(display_type or "").strip().lower()
+        if _display_norm not in (UIDisplayMode.INLINE, UIDisplayMode.ARTIFACT):
+            _display_norm = UIDisplayMode.INLINE
 
-        # Set agent field if available
-        if agent_name:
-            event["agent"] = agent_name
+        # Build the typed ui.render payload.
+        render_data = UIRenderData(
+            tool_call_id=event_id,
+            component=component_name,
+            display_mode=_display_norm,
+            awaiting_response=bool(awaiting_response),
+            workflow=workflow_name,
+            agent=agent_name,
+            payload=payload if isinstance(payload, dict) else {},
+            interaction_type=interaction_type,
+        )
+
+        event = {
+            "kind": "ui_render",
+            **render_data.model_dump(),
+            # tool_name kept alongside component so WorkflowUIRouter can fall
+            # back to it when resolving legacy component registry keys.
+            "tool_name": tool_name,
+            "corr": event_id,
+        }
 
         payload_keys = list(payload.keys()) if isinstance(payload, dict) else []
         logger.info(
-            f"[UI_TOOL] Emitting tool_call event: tool={tool_name}, component={component_name}, display={display_type}, event_id={event_id}, chat_id={chat_id}, payload_keys={payload_keys[:12]}"
+            "[UI_TOOL] Emitting ui.render event: tool=%s component=%s display=%s event_id=%s chat_id=%s payload_keys=%s",
+            tool_name, component_name, _display_norm, event_id, chat_id, payload_keys[:12],
         )
 
         try:
@@ -179,10 +194,28 @@ class UIToolsMixin:
             self._ui_tool_metadata[event_id] = {
                 "chat_id": chat_id,
                 "tool_name": tool_name,
-                "display": display_type,
+                "display": _display_norm,
             }
 
         # Delegate to core event sender for namespacing and sequence handling
+        await self.send_event_to_ui(event, chat_id)
+
+    async def send_ui_update(
+        self,
+        event_id: str,
+        chat_id: Optional[str],
+        patch: Dict[str, Any],
+    ) -> None:
+        """Emit a ``ui.update`` event to patch a live component's payload.
+
+        ``event_id`` must match the ``tool_call_id`` of a previously emitted
+        ``ui.render`` event.  The frontend shallow-merges ``patch`` into the
+        component's current payload without re-mounting it.
+        """
+        update_data = UIUpdateData(tool_call_id=event_id, patch=patch)
+        event = {"kind": "ui_update", **update_data.model_dump()}
+        logger.info("[UI_TOOL] Emitting ui.update event: event_id=%s chat_id=%s patch_keys=%s",
+                    event_id, chat_id, list(patch.keys())[:12])
         await self.send_event_to_ui(event, chat_id)
 
     # ==================================================================================
@@ -305,15 +338,14 @@ class UIToolsMixin:
             try:
                 await self.send_event_to_ui(
                     {
-                        "kind": "tool_call_dismiss",
+                        "kind": "ui_dismiss",
                         "tool_call_id": event_id,
-                        "tool_name": metadata.get("tool_name"),
                     },
                     chat_ref,
                 )
-                logger.debug(f"[UI_TOOL] Emitted dismiss event for artifact {event_id}")
+                logger.debug("[UI_TOOL] Emitted ui.dismiss event for artifact %s", event_id)
             except Exception as dismiss_err:
-                logger.debug(f"[UI_TOOL] Failed to emit dismiss event for {event_id}: {dismiss_err}")
+                logger.debug("[UI_TOOL] Failed to emit ui.dismiss event for %s: %s", event_id, dismiss_err)
 
     async def submit_tool_call_response(self, event_id: str, response_data: Dict[str, Any]) -> bool:
         """

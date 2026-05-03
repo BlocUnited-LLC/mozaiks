@@ -8,6 +8,7 @@ tools:
   ui:
     component: FileDownloadCenter
     mode: inline
+    workflow_primitive: download_center
 - agent: DownloadAgent
   file: export_to_github.py
   function: export_to_github
@@ -57,6 +58,7 @@ tools:
   ui:
     component: MermaidSequenceDiagram
     mode: artifact
+    workflow_primitive: diagram_viewer
 - agent: ContextVariablesAgent
   file: attachments_tools.py
   function: list_attachments
@@ -84,6 +86,7 @@ tools:
   ui:
     component: AgentAPIKeysBundleInput
     mode: inline
+    workflow_primitive: form_card
 lifecycle_tools:
 - trigger: before_agent
   agent: ContextVariablesAgent
@@ -94,6 +97,7 @@ lifecycle_tools:
   ui:
     component: AgentAPIKeysBundleInput
     mode: inline
+    workflow_primitive: form_card
 - trigger: after_agent
   agent: OrchestratorAgent
   file: iterator_tool.py

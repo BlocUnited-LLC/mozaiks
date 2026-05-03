@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 
 from mozaiksai.core.admin.contract import build_default_host_admin_config
+from mozaiks_cli.commands.init import create_scaffold
+from mozaiks_cli.studio_launcher import launch_studio
 from mozaiks_cli.workspace import (
     resolve_active_app_root,
     resolve_theme_config_path,
@@ -16,6 +18,11 @@ from mozaiks_cli.workspace import (
 
 
 THEME_PRESETS = {
+    "cyan": {
+        "main": "#06b6d4",
+        "light": "#67e8f9",
+        "dark": "#0e7490",
+    },
     "teal": {
         "main": "#0f766e",
         "light": "#14b8a6",
@@ -61,14 +68,34 @@ def run(args) -> None:
     """Execute the onboard command."""
     workspace_root = resolve_workspace_root(getattr(args, "directory", None))
     app_root = resolve_active_app_root(workspace_root)
+    should_prompt = not bool(getattr(args, "non_interactive", False)) and sys.stdin is not None and not sys.stdin.closed
+    full_setup = bool(getattr(args, "full_setup", False))
+    has_explicit_extended_inputs = any(
+        getattr(args, name, None) is not None
+        for name in (
+            "journey",
+            "goal",
+            "tagline",
+            "theme_primary",
+            "admin_email",
+            "existing_url",
+            "host_owned_summary",
+        )
+    )
+    collect_extended_setup = full_setup or has_explicit_extended_inputs
     missing_surfaces = _missing_scaffold_surfaces(workspace_root, app_root)
     if missing_surfaces:
-        print(f"Error: no valid Mozaiks scaffold found in {workspace_root}")
-        print("Missing required files:")
-        for rel_path in missing_surfaces:
-            print(f"  - {rel_path}")
-        print("Run 'mozaiks init <preset>' first or point --dir at an existing scaffold.")
-        return
+        preset = getattr(args, "preset", None) or "chat"
+        default_name = getattr(args, "name", None) or workspace_root.name or "my-app"
+        print(f"No valid Mozaiks scaffold found in {workspace_root}")
+        print(f"Bootstrapping a fresh '{preset}' scaffold for {default_name}.\n")
+        create_scaffold(
+            target_dir=workspace_root,
+            preset=preset,
+            app_name=default_name,
+            starter=False,
+        )
+        app_root = resolve_active_app_root(workspace_root)
 
     app_json_path = app_root / "app.json"
     ai_json_path = app_root / "config" / "ai.json"
@@ -82,9 +109,9 @@ def run(args) -> None:
     theme_config = _read_json(theme_json_path)
     admin_config = _read_json(admin_json_path) if admin_json_path.exists() else None
 
-    should_prompt = not bool(getattr(args, "non_interactive", False)) and sys.stdin is not None and not sys.stdin.closed
-
-    print(f"Onboarding Mozaiks app bundle at: {workspace_root}\n")
+    mode_label = "full" if collect_extended_setup else "minimal"
+    print(f"Onboarding Mozaiks app bundle at: {workspace_root}")
+    print(f"Setup mode: {mode_label}\n")
 
     default_name = app_config.get("appName") or workspace_root.name
     app_name = _prompt_text(
@@ -95,42 +122,52 @@ def run(args) -> None:
     )
 
     previous_onboarding = app_config.get("onboarding") or {}
-    journey = _prompt_choice(
-        label="What are you doing first?",
-        explicit=getattr(args, "journey", None),
-        default=previous_onboarding.get("journey") or "greenfield_app",
-        options=["greenfield_app", "brownfield_app"],
-        should_prompt=should_prompt,
-    )
+    journey_default = previous_onboarding.get("journey") or "greenfield_app"
+    if collect_extended_setup:
+        journey = _prompt_choice(
+            label="What are you doing first?",
+            explicit=getattr(args, "journey", None),
+            default=journey_default,
+            options=["greenfield_app", "brownfield_app"],
+            should_prompt=should_prompt,
+        )
+    else:
+        journey = getattr(args, "journey", None) or journey_default
 
-    goal_label = "What should Mozaiks help with first?"
     default_goal = previous_onboarding.get("first_goal") or (
         "Define the first real product capability" if journey == "greenfield_app" else "Bridge the first useful host capability"
     )
-    first_goal = _prompt_text(
-        label=goal_label,
-        explicit=getattr(args, "goal", None),
-        default=default_goal,
-        should_prompt=should_prompt,
-    )
+    if collect_extended_setup:
+        first_goal = _prompt_text(
+            label="What should Mozaiks help with first?",
+            explicit=getattr(args, "goal", None),
+            default=default_goal,
+            should_prompt=should_prompt,
+        )
+    else:
+        first_goal = getattr(args, "goal", None) or default_goal
 
     existing_url = None
     host_owned_summary = None
     if journey == "brownfield_app":
-        existing_url = _prompt_text(
-            label="Existing app URL (optional)",
-            explicit=getattr(args, "existing_url", None),
-            default=previous_onboarding.get("existing_app_url") or "",
-            should_prompt=should_prompt,
-            allow_empty=True,
-        )
-        host_owned_summary = _prompt_text(
-            label="What should stay host-owned? (optional)",
-            explicit=getattr(args, "host_owned_summary", None),
-            default=previous_onboarding.get("host_owned_summary") or "",
-            should_prompt=should_prompt,
-            allow_empty=True,
-        )
+        if collect_extended_setup:
+            existing_url = _prompt_text(
+                label="Existing app URL (optional)",
+                explicit=getattr(args, "existing_url", None),
+                default=previous_onboarding.get("existing_app_url") or "",
+                should_prompt=should_prompt,
+                allow_empty=True,
+            )
+            host_owned_summary = _prompt_text(
+                label="What should stay host-owned? (optional)",
+                explicit=getattr(args, "host_owned_summary", None),
+                default=previous_onboarding.get("host_owned_summary") or "",
+                should_prompt=should_prompt,
+                allow_empty=True,
+            )
+        else:
+            existing_url = getattr(args, "existing_url", None) or previous_onboarding.get("existing_app_url") or None
+            host_owned_summary = getattr(args, "host_owned_summary", None) or previous_onboarding.get("host_owned_summary") or None
 
     existing_llm = ai_config.get("llm") or {}
     provider = _prompt_choice(
@@ -148,22 +185,31 @@ def run(args) -> None:
     )
 
     identity = theme_config.get("identity") or {}
-    tagline = _prompt_text(
-        label="Brand tagline (optional)",
-        explicit=getattr(args, "tagline", None),
-        default=identity.get("tagline") or "",
-        should_prompt=should_prompt,
-        allow_empty=True,
-    )
+    if collect_extended_setup:
+        tagline = _prompt_text(
+            label="Brand tagline (optional)",
+            explicit=getattr(args, "tagline", None),
+            default=identity.get("tagline") or "",
+            should_prompt=should_prompt,
+            allow_empty=True,
+        )
+    else:
+        tagline = getattr(args, "tagline", None)
+        if tagline is None:
+            tagline = identity.get("tagline") or ""
 
     theme_root = theme_config.get("theme") or {}
-    theme_primary = _prompt_choice(
-        label="Primary brand color",
-        explicit=getattr(args, "theme_primary", None),
-        default=theme_root.get("primary") or "teal",
-        options=list(THEME_PRESETS.keys()),
-        should_prompt=should_prompt,
-    )
+    theme_primary_default = theme_root.get("primary") if theme_root.get("primary") in THEME_PRESETS else "cyan"
+    if collect_extended_setup:
+        theme_primary = _prompt_choice(
+            label="Primary brand color",
+            explicit=getattr(args, "theme_primary", None),
+            default=theme_primary_default,
+            options=list(THEME_PRESETS.keys()),
+            should_prompt=should_prompt,
+        )
+    else:
+        theme_primary = getattr(args, "theme_primary", None) or theme_primary_default
 
     default_admin_email = ""
     if isinstance(admin_config, dict):
@@ -175,13 +221,18 @@ def run(args) -> None:
         if admins:
             default_admin_email = admins[0]
 
-    admin_email = _prompt_text(
-        label="Admin email (optional)",
-        explicit=getattr(args, "admin_email", None),
-        default=default_admin_email,
-        should_prompt=should_prompt,
-        allow_empty=True,
-    )
+    if collect_extended_setup:
+        admin_email = _prompt_text(
+            label="Admin email (optional)",
+            explicit=getattr(args, "admin_email", None),
+            default=default_admin_email,
+            should_prompt=should_prompt,
+            allow_empty=True,
+        )
+    else:
+        admin_email = getattr(args, "admin_email", None)
+        if admin_email is None:
+            admin_email = default_admin_email
 
     _apply_app_config(
         app_config=app_config,
@@ -223,7 +274,38 @@ def run(args) -> None:
         print(f"Updated {admin_json_path.relative_to(workspace_root)}")
 
     print("\nOnboarding completed.")
-    _show_next_steps(workspace_root=workspace_root, journey=journey, first_goal=first_goal, admin_email=admin_email)
+    _show_next_steps(
+        workspace_root=workspace_root,
+        journey=journey,
+        first_goal=first_goal,
+        admin_email=admin_email,
+        full_setup=collect_extended_setup,
+    )
+    should_open_studio = bool(getattr(args, "open_studio", False))
+    if not should_open_studio and should_prompt:
+        should_open_studio = _prompt_yes_no(
+            label="Open Studio now?",
+            default=True,
+            should_prompt=should_prompt,
+        )
+
+    if should_open_studio:
+        result = launch_studio(
+            workspace_root=workspace_root,
+            backend_port=int(getattr(args, "backend_port", 8000)),
+            frontend_port=int(getattr(args, "frontend_port", 3000)),
+            open_browser=not bool(getattr(args, "no_browser", False)),
+        )
+        print("\nStudio launched.")
+        print(f"  Backend: {result['backend_url']}")
+        if result["studio_url"]:
+            print(f"  Studio:  {result['studio_url']}")
+        elif result["frontend_available"]:
+            print(f"  Frontend: {result['frontend_url']}")
+        else:
+            print("  Frontend shell is unavailable outside the framework repo checkout.")
+
+
 def _missing_scaffold_surfaces(workspace_root: Path, app_root: Path) -> list[str]:
     theme_path = resolve_theme_config_path(app_root)
     ui_path = resolve_ui_route_manifest_path(app_root)
@@ -317,6 +399,31 @@ def _prompt_choice(
         print(f"Enter one of: {', '.join(options)}")
 
 
+def _prompt_yes_no(
+    *,
+    label: str,
+    default: bool,
+    should_prompt: bool,
+) -> bool:
+    if not should_prompt:
+        return default
+
+    suffix = " [Y/n]" if default else " [y/N]"
+    while True:
+        try:
+            response = input(f"{label}{suffix}: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            response = ""
+
+        if not response:
+            return default
+        if response in {"y", "yes"}:
+            return True
+        if response in {"n", "no"}:
+            return False
+        print("Enter y or n.")
+
+
 def _apply_app_config(
     *,
     app_config: dict,
@@ -391,7 +498,8 @@ def _build_ask_prompt(*, app_name: str, journey: str, first_goal: str) -> str:
 def _apply_shell_config(*, shell_config: dict, app_name: str) -> None:
     header = shell_config.setdefault("header", {})
     logo = header.setdefault("logo", {})
-    logo.setdefault("src", "/assets/logo.svg")
+    logo.setdefault("src", None)
+    logo.setdefault("wordmark", None)
     logo["alt"] = f"{app_name} logo"
     logo.setdefault("href", "/")
 
@@ -405,14 +513,11 @@ def _apply_theme_config(*, theme_config: dict, app_name: str, tagline: str, them
     theme["primary"] = theme_primary
     branding = theme.setdefault("branding", {})
     branding["app_name"] = app_name
-    branding.setdefault("logo_url", "/assets/logo.svg")
 
     identity = theme_config.setdefault("identity", {})
     identity["name"] = app_name
     identity["app_name"] = app_name
     identity["tagline"] = tagline or identity.get("tagline") or "Mozaiks app bundle"
-
-    theme_config.setdefault("assets", {}).setdefault("logo", "logo.svg")
 
     colors = theme_config.setdefault("colors", {})
     palette = THEME_PRESETS[theme_primary]
@@ -455,17 +560,27 @@ def _apply_admin_config(admin_config: dict, admin_email: str) -> dict:
     return admin_config
 
 
-def _show_next_steps(*, workspace_root: Path, journey: str, first_goal: str, admin_email: str) -> None:
+def _show_next_steps(
+    *,
+    workspace_root: Path,
+    journey: str,
+    first_goal: str,
+    admin_email: str,
+    full_setup: bool,
+) -> None:
     app_root = resolve_active_app_root(workspace_root)
     print("\nNext Steps:")
     print(f"  1. Review {app_root / 'app.json'} and confirm the onboarding summary")
     print(f"  2. Confirm your default AI provider and model in {app_root / 'config' / 'ai.json'}")
-    print("  3. Use the first goal below as your next build request:")
-    print(f"     {first_goal}")
-    print("  4. Start the local/private Studio management/create host with python run_studio.py")
+    print(f"  3. Open Studio with: mozaiks studio --dir \"{workspace_root}\" --open")
     if journey == "brownfield_app":
-        print("  5. Bridge the first host-owned surface before attempting broader generation")
+        print("  4. Use Studio to bridge the first host-owned surface before attempting broader generation")
     else:
-        print("  5. Add the first real workflow or module only after you confirm the product surface")
+        print("  4. Use the factory_app workflows in Studio to define the first real product surface")
+    if first_goal:
+        print("  5. Optional seed prompt for Studio:")
+        print(f"     {first_goal}")
+    if not full_setup:
+        print("  6. Optional: run `mozaiks onboard --full` later for detailed brand/admin setup")
     if admin_email:
-        print(f"  6. Verify admin access in {app_root / 'config' / 'admin.json'}")
+        print(f"  7. Verify admin access in {app_root / 'config' / 'admin.json'}")

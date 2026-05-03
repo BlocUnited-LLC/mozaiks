@@ -94,6 +94,8 @@ nav:
   - Home: index.md
   - Start Here:
       - Getting Started: getting-started.md
+      - Install Modes: install-modes.md
+      - Releasing: releasing.md
   - Guides:
     - Add Workflows: guides/adding-workflows/01-overview.md
     - App Shell And Branding: guides/custom-brand-integration/01-overview.md
@@ -134,6 +136,7 @@ nav:
           - Conversation Modes: architecture/frontend/conversation-modes.md
           - Layout Modes: architecture/frontend/layout-modes.md
           - Generated Frontend Surface Contract: architecture/frontend/generated-frontend-surface-contract.md
+          - Workflow UI Primitive Catalog: architecture/frontend/workflow-ui-primitive-catalog.md
           - Tool Event Lifecycle: architecture/frontend/tool-event-lifecycle.md
           - Admin Observability Contract: architecture/frontend/admin-observability-contract.md
           - AG-UI Comparison: architecture/frontend/ag-ui-copilotkit-comparison.md

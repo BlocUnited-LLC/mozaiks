@@ -4,8 +4,8 @@
 // ==============================================================================
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { typography, colors, components, spacing } from '../../../../../chat-ui/src/platform/workflowSurfaceStyles.js';
-import { createToolsLogger } from '../../../../../chat-ui/src/platform/workflowSurfaceRuntime.js';
+import { typography, colors, components, spacing } from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
+import { createToolsLogger } from '@mozaiks/chat-ui/platform/workflowSurfaceRuntime.js';
 
 const toTitle = (value = '') => {
   return value

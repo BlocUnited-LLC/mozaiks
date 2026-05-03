@@ -6,8 +6,7 @@ file contracts.
 ## Core Rule
 
 The canonical target is a self-contained app workspace rooted at `app/`. The
-same app-root shape should appear inside product workspaces such as
-`mozaiks-platform/app`.
+same app-root shape should appear inside hosted product workspaces as well.
 
 It should contain declaratives, assets, and explicit logic stubs. It should not contain framework compiler logic.
 
@@ -25,13 +24,12 @@ Modules exist as support bundles, but they should not dominate the authoring mod
 The runtime reads an active app root. Canonically, that root is:
 
 - `app/` in a generated/customer app workspace
-- `mozaiks-platform/app/` in the current App Zero repo layout
+- `factory_app/app/` for the first-party Studio app bundle in this repo
 
 Current repo note:
 
-- `mozaiks-platform/app/` is the repo-local App Zero app-root path inside this repo
-- App Zero now follows the same self-contained app-root pattern with
-  `mozaiks-platform/app/brand` and `mozaiks-platform/app/ui`
+- `factory_app/app/` is the repo-local first-party app bundle inside this repo
+- hosted product workspaces should follow the same self-contained app-root pattern
 
 ## Primary Families
 
@@ -178,9 +176,17 @@ Required:
 - `notifications.yaml`
 - `settings.yaml`
 - `admin.yaml`
+- `backend/__init__.py`
 - `backend/handler.py`
 
-Optional:
+Recommended for any module with database access:
+
+- `backend/service.py`
+- `backend/repo.py`
+- `backend/policy.py`
+- `backend/schemas.py`
+
+Optional hooks:
 
 - `backend/settings.py`
 - `backend/subscriptions.py`
@@ -188,6 +194,109 @@ Optional:
 - `backend/admin.py`
 - `ui/index.js`
 - additional `ui/*.{js,jsx}`
+
+#### Backend layer contract
+
+Each file in `backend/` has a single responsibility. Do not mix concerns.
+
+**`handler.py`** — dispatch layer only.
+
+```python
+class {Name}Handler:
+    def __init__(self):
+        self.service = {Name}Service()
+
+    async def action_name(self, ctx, *, param: str) -> dict:
+        return await self.service.action_name(ctx, param=param)
+```
+
+Rules: never access `ctx.db` directly, never contain conditional business logic,
+never call `ctx.emit()`. One method per action declared in `module.yaml`.
+
+**`service.py`** — all business logic lives here.
+
+```python
+class {Name}Service:
+    def __init__(self, repo=None):
+        self.repo = repo or {Name}Repo()
+
+    async def action_name(self, ctx, *, param: str) -> dict:
+        # validate → repo calls → ctx.emit() → return
+        record = await self.repo.get(ctx, query={...})
+        await ctx.emit("hosted.{name}.{event}", {...})
+        return {"success": True}
+```
+
+Rules: never access `ctx.db` directly, delegates all DB operations to repo,
+calls `ctx.emit()` only after state is committed.
+
+**`repo.py`** — database access only.
+
+```python
+COLLECTION = "hosted_{name}_records"
+
+class {Name}Repo:
+    async def _collection(self, ctx):
+        db = getattr(ctx, "db", None)
+        if db is not None:
+            return db[COLLECTION]
+        from mozaiksai.core.core_config import get_mongo_client
+        return get_mongo_client()["mozaiks"][COLLECTION]
+
+    async def get(self, ctx, *, query: dict) -> dict | None: ...
+    async def insert(self, ctx, *, record: dict) -> None: ...
+    async def update(self, ctx, *, query: dict, update: dict) -> int: ...
+    async def list(self, ctx, *, query: dict, limit: int) -> list[dict]: ...
+    async def count(self, ctx, *, query: dict) -> int: ...
+```
+
+Rules: no business logic, no event emission, no validation — pure data access.
+
+**`policy.py`** — multi-tenancy query scoping.
+
+```python
+def owner_id_from_context(ctx, user_id=None) -> str:
+    return user_id or getattr(ctx, "user_id", None) or ""
+
+def scoped_owner_query(ctx) -> dict:
+    owner_id = owner_id_from_context(ctx)
+    return {"owner_id": owner_id} if owner_id else {}
+
+def scoped_record_query(ctx, *, record_id: str) -> dict:
+    query = {"record_id": record_id}
+    owner_id = owner_id_from_context(ctx)
+    if owner_id:
+        query["owner_id"] = owner_id
+    return query
+```
+
+Rules: pure functions only, no DB access, no side effects.
+
+**`schemas.py`** — typed document definitions and pure helpers.
+
+```python
+from typing import TypedDict
+
+class {Name}Record(TypedDict):
+    record_id: str
+    owner_id: str
+    status: str
+    created_at: str
+    updated_at: str
+
+def timestamp_now() -> str:
+    from datetime import UTC, datetime
+    return datetime.now(UTC).isoformat()
+
+def coerce_limit(value, default: int = 20, maximum: int = 100) -> int:
+    try:
+        return max(1, min(int(value), maximum))
+    except Exception:
+        return default
+```
+
+Rules: TypedDicts for MongoDB document shapes, no Pydantic (framework handles
+dispatch validation), no I/O, no imports from service or repo.
 
 Modules are backing capability bundles. The generator should not create module UI unless the module truly exports reusable UI.
 
@@ -199,7 +308,6 @@ When a generated app needs bounded frontend customization, the active app root
 may also contain:
 
 - `app/ui/index.js` in app workspaces
-- `mozaiks-platform/app/ui/index.js` in App Zero
 
 This file is the deterministic registration barrel loaded by `@platform/extensions`.
 Generators may create it only to register contract-declared UI stubs such as
@@ -279,4 +387,3 @@ That means:
 - [canonical-app-structure.md](canonical-app-structure.md)
 - [architecture-overview.md](architecture-overview.md)
 - [surface-model.md](surface-model.md)
-

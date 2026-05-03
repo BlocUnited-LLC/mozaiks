@@ -1,0 +1,28 @@
+registry:
+  ReviewAgent: WorkflowPrimitiveAcceptanceResult
+
+models:
+  WorkflowPrimitiveAcceptanceResult:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: User-facing completion message.
+      result:
+        type: str
+        description: One-sentence acceptance summary for the workflow UI primitive lanes.
+      composer_reply_seen:
+        type: bool
+        description: Whether the composer-routed human reply checkpoint completed.
+      approved:
+        type: bool
+        description: Whether the structured approval checkpoint was accepted.
+      approval_action:
+        type: str
+        description: Action returned by the approval card.
+      artifact_emitted:
+        type: bool
+        description: Whether the artifact viewer surface was emitted.
+      surface_component:
+        type: str
+        description: Workflow-local component name used for the artifact surface.

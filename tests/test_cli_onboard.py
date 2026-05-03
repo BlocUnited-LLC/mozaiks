@@ -101,6 +101,7 @@ def test_onboard_command_prompts_when_values_are_missing(monkeypatch, tmp_path) 
             "Operator workspace",
             "emerald",
             "owner@example.com",
+            "n",
         ]
     )
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
@@ -119,6 +120,7 @@ def test_onboard_command_prompts_when_values_are_missing(monkeypatch, tmp_path) 
             existing_url=None,
             host_owned_summary=None,
             non_interactive=False,
+            full_setup=True,
         )
     )
 

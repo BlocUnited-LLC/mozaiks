@@ -2315,7 +2315,11 @@ def inject_ui_file_generator_guidance(agent, messages: List[Dict[str, Any]]) -> 
             "- Do not call low-level `send_tool_call_event` directly, or subscribe via `useAppEventBus` in generated React.\\n"
             "- `use_ui_tool(...)` emits a session-scoped `chat.tool_call`; generated React should assume the shell mounts it from that workflow UI lane, not from legacy `ui_tool_event` transport semantics.\\n"
             "- Generated React components are mounted by `WorkflowUIRouter` and receive props like `payload`, `onResponse`, `onCancel`, `toolName`, `toolCallId`, `workflowName`, and `componentId`.\\n"
+            "- `ToolsManifest.ui.workflow_primitive` is the canonical interaction pattern; implement that pattern and treat `ui.component` as the workflow-local realization.\\n"
+            "- Some workflow primitives resolve to shipped shared components. If `ui.component` already uses that canonical shipped component name, do not generate custom React for it.\\n"
+            "- If a shipped shared component needs workflow-local naming, generate only a thin wrapper or re-export around the shipped component.\\n"
             "- The `use_ui_tool(...)` identifier must match the declared `ui.component` value so runtime lookup resolves correctly.\\n"
+            "- Do not generate an inline text box just to collect ordinary chat feedback. Plain free-text user reply should use the shell composer/input-request lane unless the interaction is structured enough to require a dedicated component.\\n"
             "- Compose only the shipped `chat-ui` primitives declared in `[SHIPPED UI PRIMITIVES]`.\\n\\n"
         )
 

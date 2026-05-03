@@ -25,7 +25,7 @@ Shell defaults (such as startup mode and landing spot) are derived from
 
 Current repo note:
 
-- the local App Zero workspace now uses `mozaiks-platform/app/config/ai.json`
+- the first-party Studio bundle in this repo uses `factory_app/app/config/ai.json`
 - the canonical target for generated/customer apps is `app/config/ai.json`
 
 ### 2. Page surface

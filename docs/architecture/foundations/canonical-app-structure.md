@@ -62,11 +62,16 @@ app/
 │       ├── settings.yaml       # user/app settings schema
 │       ├── admin.yaml          # admin panels mounted under /admin/*
 │       ├── backend/
-│       │   ├── handler.py      # required deterministic action handler
-│       │   ├── settings.py     # optional settings hooks
-│       │   ├── subscriptions.py
-│       │   ├── notifications.py
-│       │   └── admin.py
+│       │   ├── __init__.py
+│       │   ├── handler.py      # required — thin dispatch, one method per declared action
+│       │   ├── service.py      # recommended — all business logic and event emission
+│       │   ├── repo.py         # recommended — MongoDB access layer, no logic
+│       │   ├── policy.py       # recommended — query scoping for multi-tenancy
+│       │   ├── schemas.py      # recommended — typed request/response + document shapes
+│       │   ├── settings.py     # optional — settings hook implementations
+│       │   ├── subscriptions.py# optional — subscription handler implementations
+│       │   ├── notifications.py# optional — notification hook implementations
+│       │   └── admin.py        # optional — admin panel implementations
 │       └── ui/                 # optional module-specific UI surfaces
 │           └── index.js
 └── brand/                      # colocated brand/theme assets
@@ -129,14 +134,15 @@ Use this distinction when reasoning about changes:
   should still target the generic `app/` contract without the factory/studio
   exceptions
 
-## Product Workspace Layout
+## Hosted Product Workspace Layout
 
-App Zero should ultimately use the same self-contained app-workspace contract.
+Hosted product workspaces should ultimately use the same self-contained
+app-workspace contract.
 
 Canonical target:
 
 ```text
-mozaiks-platform/
+hosted-product/
 └── app/                        # active app root read by mozaiksai/hosts/platform.py
     ├── app.json
     ├── config/
@@ -148,29 +154,13 @@ mozaiks-platform/
     └── brand/
 ```
 
-Current transitional state in this repo:
-
-```text
-mozaiks-platform/
-├── app/                        # current active app root
-├── brand/                      # transitional sibling product brand assets
-├── ui/                         # transitional sibling product UI extension
-├── generated/                  # generator output, not runtime-loaded
-│   ├── apps/{app_id}/{build_id}/app/
-│   └── workflows/{app_id}/{build_id}/{workflow_name}/
-└── app-builder/                # builder docs/planning, not runtime-loaded
-```
-
-The sibling `brand/` and `ui/` layout above is transitional, not the canonical
-end-state.
-
-App Zero's local `workflows/` directory is now primarily an overlay surface.
-The shared generator implementations App Zero consumes resolve from the shared
-generation core, while
+The product workspace's local `workflows/` directory is primarily an overlay
+surface. The shared generator implementations the product consumes resolve from
+the shared generation core, while
 `factory_app/workflows/extended_orchestration/extension_registry.json`
 defines the shared build journeys and entrypoints and
-`mozaiks-platform/app/workflows/extended_orchestration/extension_registry.json`
-adds App Zero product-specific workflow overlays.
+`app/workflows/extended_orchestration/extension_registry.json`
+adds product-specific workflow overlays.
 
 The same boundary applies to `factory_app/app/workflows/`: it is an app-local
 overlay surface and may legitimately stay empty when the factory app does not
@@ -182,7 +172,7 @@ Runtime workflow loading is multi-root. By default the runtime searches:
 2. the shared generation-core workflow root
 
 If needed, `MOZAIKS_WORKFLOW_ROOTS` can override that order explicitly.
-That is what allows App Zero's local registry to reference both shared
+That is what allows a product workspace registry to reference both shared
 generation workflows and product-owned workflows such as `AppMarketing` and
 `InvestorMarketplace`.
 
@@ -190,11 +180,12 @@ For generated OSS-style bundles, bounded frontend customization lives inside the
 active app root at `app/ui/index.js`. That file is the app-owned extension
 barrel loaded through `@platform/extensions`.
 
-App Zero's active modules are hosted-product modules, not generic sample
-modules:
+Hosted product modules are hosted-product modules, not generic sample modules:
 
 ```text
-mozaiks-platform/app/modules/
+app/modules/
+├── app_registry/               # build records, staged artifact history
+├── hosting/                    # hosted deployment intake + lifecycle
 ├── investor_marketplace/       # listings, investor profiles, investment interest
 └── communications/             # conversations, messages, announcements
 ```
@@ -342,17 +333,15 @@ That is enough to prove the product shape without drowning the user in schema.
 
 ## Current Repo Reality
 
-The current repo now carries an App Zero product workspace under
-`mozaiks-platform/` whose active app root is `mozaiks-platform/app/`.
-
-Treat those as implementation state, not the canonical long-term authoring
-model.
+This repo now treats `factory_app/app/` as the first-party Studio app bundle.
+Hosted product workspaces are expected to live outside this repo and consume
+the same contract.
 
 The canonical target is:
 
 - self-contained app workspaces
 - shared generation core outside app workspaces
-- App Zero converging on the same workspace contract
+- hosted product workspaces consuming the same workspace contract
 
 ## Cross References
 

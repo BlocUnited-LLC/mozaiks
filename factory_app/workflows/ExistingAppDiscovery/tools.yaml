@@ -17,6 +17,7 @@ tools:
   ui:
     component: DiscoveryBriefCard
     mode: artifact
+    workflow_primitive: document_preview
 
 lifecycle_tools:
 - trigger: before_chat

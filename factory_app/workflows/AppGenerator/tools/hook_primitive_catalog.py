@@ -10,8 +10,19 @@ logger = logging.getLogger(__name__)
 _HEADER = "[SHIPPED PAGE PRIMITIVES]"
 
 
+def _apply_system_message(agent: Any, message: str) -> None:
+    updater = getattr(agent, "update_system_message", None)
+    if callable(updater):
+        updater(message)
+    elif hasattr(agent, "_system_message"):
+        agent._system_message = message
+    else:
+        setattr(agent, "_system_message", message)
+    setattr(agent, "_mozaiks_base_system_message", message)
+
+
 def _update_section(agent: Any, header: str, body: str) -> None:
-    current = getattr(agent, "system_message", "") or ""
+    current = getattr(agent, "system_message", None) or getattr(agent, "_system_message", "") or ""
     section = f"{header}\n{body}"
     if header in current:
         prefix = current.split(header, 1)[0].rstrip()
@@ -22,11 +33,7 @@ def _update_section(agent: Any, header: str, body: str) -> None:
     if new_message == current:
         return
 
-    updater = getattr(agent, "update_system_message", None)
-    if callable(updater):
-        updater(new_message)
-    else:
-        agent.system_message = new_message
+    _apply_system_message(agent, new_message)
 
 
 def inject_primitive_catalog(agent: Any, messages: List[Dict[str, Any]]) -> None:

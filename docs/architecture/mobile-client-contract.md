@@ -158,7 +158,9 @@ Note:
 - A `chat_meta` event type is currently emitted (not namespaced as `chat.chat_meta`).
 - Response-required runtime UI should expect `chat.tool_call` with
   `awaiting_response=true` and possibly `interaction_type=input_request`, and
-  should answer with `tool_call_response`.
+  should answer with `tool_call_response`. If the tool call carries
+  `display=composer`, a chat-style client should route the user's normal
+  composer submission into that response instead of opening a second text box.
 
 ## 5) Resume and Replay Contract
 

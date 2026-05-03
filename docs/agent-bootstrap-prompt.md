@@ -13,7 +13,7 @@ Treat these as canonical:
   mozaiksai/hosts/studio.py, mozaiksai/hosts/mozaiks.py
 - Shared builder workflows: factory_app/workflows/
 - App-owned workflows: app/workflows/ under the active app root
-- Current local product app root: mozaiks-platform/app/
+- First-party Studio app bundle: factory_app/app/
 - Generated artifacts: generated/
 
 Do not treat these as current canonical contracts:

@@ -189,11 +189,16 @@ class InputRequestHandler(BaseEventHandler):
         component_hint = _extract_component_hint(request_obj)
         component_type = component_hint or "UserInputRequest"
         tool_name = component_hint or component_type
-        display_mode = "inline"
         request_payload = _extract_request_payload(request_obj)
         password = bool(
             getattr(event, "password", False)
             or request_payload.get("password", False)
+        )
+        requested_display = request_payload.get("display") or request_payload.get("mode")
+        display_mode = (
+            str(requested_display).strip()
+            if requested_display
+            else ("inline" if component_hint or password else "composer")
         )
         normalized_payload = {
             **request_payload,

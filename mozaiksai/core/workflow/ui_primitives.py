@@ -6,6 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
+from mozaiksai.resources import resolve_chat_ui_src_root
 
 _EXPORT_RE = re.compile(
     r"export\s*\{\s*([^}]+)\s*\}\s*from\s*['\"](?P<source>\./[^'\"]+)['\"]"
@@ -22,12 +23,11 @@ class UIPrimitiveExport:
     source_file: str
 
 
-def _repo_root() -> Path:
-    here = Path(__file__).resolve()
-    for candidate in [here.parent, *here.parents]:
-        if (candidate / "chat-ui" / "src" / "ui" / "primitives" / "index.js").is_file():
-            return candidate
-    raise FileNotFoundError("Unable to locate repo root from ui_primitives.py")
+def _chat_ui_src_root() -> Path:
+    root = resolve_chat_ui_src_root()
+    if root is None:
+        raise FileNotFoundError("Unable to locate packaged chat-ui source bundle")
+    return root
 
 
 def _split_identifiers(raw_specifiers: str) -> List[str]:
@@ -55,15 +55,13 @@ def _parse_exports(file_path: Path, pattern: re.Pattern[str]) -> Tuple[UIPrimiti
 
 @lru_cache(maxsize=1)
 def get_component_ui_primitive_exports() -> Tuple[UIPrimitiveExport, ...]:
-    root = _repo_root()
-    exports_path = root / "chat-ui" / "src" / "ui" / "primitives" / "index.js"
+    exports_path = _chat_ui_src_root() / "ui" / "primitives" / "index.js"
     return _parse_exports(exports_path, _EXPORT_RE)
 
 
 @lru_cache(maxsize=1)
 def get_page_ui_primitive_exports() -> Tuple[UIPrimitiveExport, ...]:
-    root = _repo_root()
-    registry_path = root / "chat-ui" / "src" / "ui" / "page-renderer" / "PrimitiveRegistry.js"
+    registry_path = _chat_ui_src_root() / "ui" / "page-renderer" / "PrimitiveRegistry.js"
     return _parse_exports(registry_path, _IMPORT_RE)
 
 
@@ -153,12 +151,12 @@ def format_component_ui_primitive_guidance() -> str:
     names = ", ".join(get_component_ui_primitive_names())
     grouped = _group_exports_by_source(get_component_ui_primitive_exports())
     import_lines = [
-        f"import {{ {', '.join(names_for_source)} }} from '../../ui/primitives/{source_file}'"
+        f"import {{ {', '.join(names_for_source)} }} from '@mozaiks/chat-ui/ui/primitives/{source_file}'"
         for source_file, names_for_source in grouped.items()
     ]
     imports_block = "\n".join(import_lines)
     return (
-        "Live shipped agent/UI primitives from `chat-ui/src/ui/primitives/index.js`:\n"
+        "Live shipped agent/UI primitives from `@mozaiks/chat-ui/ui/primitives/index.js`:\n"
         f"- {names}\n\n"
         "Use ONLY these names in `primitives_hint` and generated component imports.\n"
         "Suggested import statements:\n"
@@ -171,7 +169,7 @@ def format_component_ui_primitive_guidance() -> str:
 def format_page_ui_primitive_guidance() -> str:
     names = ", ".join(get_page_ui_primitive_names())
     return (
-        "Live shipped page primitives from `chat-ui/src/ui/page-renderer/PrimitiveRegistry.js`:\n"
+        "Live shipped page primitives from `@mozaiks/chat-ui/ui/page-renderer/PrimitiveRegistry.js`:\n"
         f"- {names}\n\n"
         "Emit ONLY these names in `sections[*].primitive` and nested Grid child primitives."
     )

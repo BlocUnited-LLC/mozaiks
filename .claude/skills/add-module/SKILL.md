@@ -15,79 +15,298 @@ Modules support workflows — they provide the action surface that AI agents cal
 ## What a Module Is
 
 ```
-platform/modules/<name>/
-├── module.yaml    ← metadata (name, version, actions, events)
-├── handler.py     ← handler class with action methods
-├── models.py      ← Pydantic request/response schemas (optional)
-└── service.py     ← business logic (optional, recommended for complex cases)
+app/modules/{name}/
+├── module.yaml           ← actions, permissions, capabilities, emits
+├── events.yaml           ← domain events this module may publish
+├── subscriptions.yaml    ← event reactions owned by this module
+├── notifications.yaml    ← notification rules derived from events
+├── settings.yaml         ← user/app settings schema (empty list if none)
+├── admin.yaml            ← admin panels (omit file if none)
+└── backend/
+    ├── __init__.py
+    ├── handler.py        ← required — thin dispatch, one method per action
+    ├── service.py        ← recommended — all business logic and event emission
+    ├── repo.py           ← recommended — MongoDB access, no logic
+    ├── policy.py         ← recommended — multi-tenancy query scoping
+    └── schemas.py        ← recommended — typed shapes + pure helpers
 ```
 
 The runtime auto-discovers and registers all modules at startup.
+Module routes are auto-mounted at `/api/modules/{name}/{action_id}`.
 
 ---
 
 ## Steps to Add a Module
 
-### 1. Create the directory
-
-```bash
-mkdir platform/modules/<name>
-```
-
-### 2. Write `module.yaml`
+### 1. Write `module.yaml`
 
 ```yaml
-name: <name>
-version: "1.0"
-description: What this module does.
+schema_version: mozaiks.module.v1
+module:
+  id: {name}
+  display_name: {Display Name}
+  version: 1.0.0
+  description: What this module does.
+  owner: mozaiks
+  visibility: hosted
+  handler: backend.handler:{Name}Handler
+
+permissions:
+  - id: {name}.read
+    description: Read {name} data.
+  - id: {name}.manage
+    description: Create and update {name} records.
 
 actions:
-  - name: list
-    type: query
-    description: List all items
-  - name: create
-    type: mutation
-    description: Create an item
-    emits:
-      - <name>.created
+  - id: list_{name}s
+    description: List records.
+    handler_method: list_{name}s
+    input_schema:
+      type: object
+      properties:
+        limit: { type: integer }
+    output_schema:
+      type: object
+      required: [items, count]
+    permissions: [{name}.read]
 
+  - id: create_{name}
+    description: Create a record.
+    handler_method: create_{name}
+    input_schema:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+    output_schema:
+      type: object
+      required: [success]
+    permissions: [{name}.manage]
+    emits: [hosted.{name}.record.created]
+```
+
+### 2. Write `events.yaml`
+
+```yaml
+schema_version: mozaiks.events.v1
 events:
-  - <name>.created
-  - <name>.updated
-  - <name>.deleted
+  - type: hosted.{name}.record.created
+    version: 1
+    description: Emitted when a {name} record is created.
+    producer: {name}
+    payload_schema:
+      type: object
+      required: [record_id, owner_id]
 ```
 
-### 3. Write `models.py`
+### 3. Write `subscriptions.yaml`
+
+```yaml
+subscriptions: []
+# Add entries when this module reacts to events from other modules.
+# Three target kinds:
+#   notification  → create a notification intent from notifications.yaml
+#   capability    → trigger a workflow via orchestrator.yaml capability_id
+#   handler       → route event payload to a handler method (module-to-module)
+#
+# Example handler target:
+#   - id: {name}.on_something
+#     event: hosted.other_module.something_happened
+#     handler: hosted.{name}.handle_something
+```
+
+### 4. Write `notifications.yaml`
+
+```yaml
+schema_version: mozaiks.notifications.v1
+notifications:
+  - id: {name}.record_created.admin
+    event: hosted.{name}.record.created
+    channels: [in_app, email]
+    recipients: [admin]
+    template:
+      subject: "New {name}: {{name}}"
+      body: >
+        A new {name} record has been created by {{owner_id}}.
+```
+
+### 5. Write `settings.yaml`
+
+```yaml
+schema_version: mozaiks.settings.v1
+settings: []
+```
+
+### 6. Write `backend/schemas.py`
+
+TypedDicts for MongoDB document shapes. Pure helpers. No I/O.
 
 ```python
-from pydantic import BaseModel
-from typing import Optional
+from __future__ import annotations
+from datetime import UTC, datetime
+from typing import Any, TypedDict
 
-class CreateItemRequest(BaseModel):
-    name: str
-    description: Optional[str] = None
 
-class ItemResponse(BaseModel):
-    id: str
+class {Name}Record(TypedDict):
+    record_id: str
+    owner_id: str
     name: str
-    description: Optional[str] = None
+    status: str
+    created_at: str
+    updated_at: str
+
+
+def timestamp_now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def coerce_limit(value: Any, default: int = 20, maximum: int = 100) -> int:
+    try:
+        return max(1, min(int(value), maximum))
+    except Exception:
+        return default
 ```
 
-### 4. Write `handler.py`
+### 7. Write `backend/policy.py`
+
+Pure functions that turn `ctx` into scoped MongoDB queries. No DB access.
 
 ```python
-class <Name>Module:
-    async def list(self, ctx, *, limit: int = 20) -> list:
-        # Replace with real data source
-        return []
+from __future__ import annotations
+from typing import Any
 
-    async def create(self, ctx, *, name: str, description: str = None) -> dict:
-        result = {"id": "new-id", "name": name, "description": description}
-        await ctx.emit("<name>.created", result)
-        return result
+
+def owner_id_from_context(ctx, user_id: str | None = None) -> str:
+    return user_id or getattr(ctx, "user_id", None) or ""
+
+
+def scoped_owner_query(ctx) -> dict[str, Any]:
+    owner_id = owner_id_from_context(ctx)
+    return {"owner_id": owner_id} if owner_id else {}
+
+
+def scoped_record_query(ctx, *, record_id: str) -> dict[str, Any]:
+    query: dict[str, Any] = {"record_id": record_id}
+    owner_id = owner_id_from_context(ctx)
+    if owner_id:
+        query["owner_id"] = owner_id
+    return query
 ```
 
-### 5. Restart the backend
+### 8. Write `backend/repo.py`
+
+MongoDB access only. No business logic, no event emission, no validation.
+
+```python
+from __future__ import annotations
+from typing import Any
+
+COLLECTION = "hosted_{name}_records"
+
+
+class {Name}Repo:
+
+    async def _collection(self, ctx):
+        db = getattr(ctx, "db", None)
+        if db is not None:
+            return db[COLLECTION]
+        from mozaiksai.core.core_config import get_mongo_client
+        return get_mongo_client()["mozaiks"][COLLECTION]
+
+    async def get(self, ctx, *, query: dict[str, Any]) -> dict[str, Any] | None:
+        col = await self._collection(ctx)
+        return await col.find_one(query, {"_id": 0})
+
+    async def insert(self, ctx, *, record: dict[str, Any]) -> None:
+        col = await self._collection(ctx)
+        await col.insert_one({**record})
+
+    async def update(self, ctx, *, query: dict[str, Any], update: dict[str, Any]) -> int:
+        col = await self._collection(ctx)
+        result = await col.update_one(query, {"$set": update})
+        return int(result.matched_count)
+
+    async def list(self, ctx, *, query: dict[str, Any], limit: int) -> list[dict[str, Any]]:
+        col = await self._collection(ctx)
+        cursor = col.find(query, {"_id": 0}).sort("created_at", -1).limit(limit)
+        return await cursor.to_list(length=limit)
+
+    async def count(self, ctx, *, query: dict[str, Any]) -> int:
+        col = await self._collection(ctx)
+        return int(await col.count_documents(query))
+```
+
+### 9. Write `backend/service.py`
+
+All business logic. Validates inputs, calls repo, emits events. Never touches DB directly.
+
+```python
+from __future__ import annotations
+from typing import Any
+from uuid import uuid4
+
+from .schemas import {Name}Record, coerce_limit, timestamp_now
+from .policy import owner_id_from_context, scoped_owner_query, scoped_record_query
+from .repo import {Name}Repo
+
+
+class {Name}Service:
+
+    def __init__(self, repo: {Name}Repo | None = None) -> None:
+        self.repo = repo or {Name}Repo()
+
+    async def list_{name}s(self, ctx, *, limit: int = 20) -> dict[str, Any]:
+        query = scoped_owner_query(ctx)
+        items = await self.repo.list(ctx, query=query, limit=coerce_limit(limit))
+        return {"items": items, "count": len(items)}
+
+    async def create_{name}(self, ctx, *, name: str) -> dict[str, Any]:
+        owner_id = owner_id_from_context(ctx)
+        now = timestamp_now()
+        record: {Name}Record = {
+            "record_id": str(uuid4()),
+            "owner_id": owner_id,
+            "name": name.strip(),
+            "status": "active",
+            "created_at": now,
+            "updated_at": now,
+        }
+        await self.repo.insert(ctx, record=record)
+        await ctx.emit(
+            "hosted.{name}.record.created",
+            {"record_id": record["record_id"], "owner_id": owner_id, "name": name},
+        )
+        return {"success": True, "record": dict(record)}
+```
+
+### 10. Write `backend/handler.py`
+
+Thin dispatch only. One method per action. Delegates everything to service.
+
+```python
+from __future__ import annotations
+from typing import Any
+
+from .service import {Name}Service
+
+
+class {Name}Handler:
+
+    def __init__(self) -> None:
+        self.service = {Name}Service()
+
+    async def list_{name}s(self, ctx, *, limit: int = 20) -> dict[str, Any]:
+        return await self.service.list_{name}s(ctx, limit=limit)
+
+    async def create_{name}(self, ctx, *, name: str) -> dict[str, Any]:
+        return await self.service.create_{name}(ctx, name=name)
+```
+
+### 11. Write `backend/__init__.py`
+
+Empty file — makes `backend/` a Python package.
+
+### 12. Restart the backend
 
 ```bash
 mozaiks serve .
@@ -97,12 +316,45 @@ Modules are loaded at startup. No registration step needed.
 
 ---
 
-## Connecting a Module to a Page
+## Layer Rules — Enforce These
 
-Once the module is loaded, reference it in an `AppPageSchema`:
+| Layer | Allowed | Not allowed |
+|-------|---------|-------------|
+| `handler.py` | Receive ctx + kwargs, call service, return result | ctx.db, ctx.emit, business logic, conditionals |
+| `service.py` | Validate, call repo, call ctx.emit after commit | ctx.db direct access, HTTP calls |
+| `repo.py` | MongoDB queries, cursor iteration | Business logic, event emission, validation |
+| `policy.py` | Build query dicts from ctx | DB access, side effects |
+| `schemas.py` | TypedDicts, timestamp_now, coerce_limit | I/O, imports from service/repo |
+
+---
+
+## Subscription Handler Target (module-to-module)
+
+When this module needs to react to an event from another module without starting
+a workflow, use the `handler` target in `subscriptions.yaml`:
 
 ```yaml
-# platform/pages/items.yaml
+subscriptions:
+  - id: {name}.on_other_event
+    event: hosted.other_module.something_happened
+    handler: hosted.{name}.handle_something
+```
+
+Add `handle_something` as a method on `{Name}Handler` (and delegate to service):
+
+```python
+async def handle_something(self, ctx, *, field_from_event: str) -> dict[str, Any]:
+    return await self.service.handle_something(ctx, field_from_event=field_from_event)
+```
+
+The event payload fields are unpacked as keyword arguments.
+
+---
+
+## Connecting a Module to a Page
+
+```yaml
+# app/ui/pages/items.yaml
 name: items
 title: Items
 layout: full-width
@@ -112,16 +364,13 @@ sections:
     primitive: DataTable
     config:
       columns:
-        - { key: name,        label: Name }
-        - { key: description, label: Description }
-    api_endpoint: /api/modules/<name>/list
+        - { key: name, label: Name }
+    api_endpoint: /api/modules/{name}/list_{name}s
 ```
 
 ---
 
 ## Connecting a Module to a Workflow
-
-Workflows call modules via the AppBackendPort adapter:
 
 ```python
 # In a workflow tool
@@ -129,20 +378,11 @@ from mozaiksai.core.workflow.app_backend_tools import backend_request
 
 result = await backend_request(
     method="POST",
-    path="/api/modules/<name>/create",
+    path="/api/modules/{name}/create_{name}",
     body={"name": "example"},
     context_variables=context_variables,
 )
 ```
-
----
-
-## Rules
-
-- Modules are **dumb**: data in, data out. No AI calls inside a module.
-- Keep business logic in `service.py`, action wiring in `handler.py`.
-- Use Pydantic models for all request/response shapes.
-- Module routes are auto-mounted at `/api/modules/<name>/<action>`.
 
 ---
 

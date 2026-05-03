@@ -1370,6 +1370,12 @@ models:
         - Badge
         - Skeleton
         - Empty
+        - Timeline
+        - CodeBlock
+        - ProgressTracker
+        - AlertBanner
+        - ActionButton
+        - FileList
         description: UI primitive type from the shipped chat-ui primitive system.
       title:
         type: union
@@ -1392,6 +1398,12 @@ models:
           Badge: { label, variant? }
           Skeleton: { rows?, height? }
           Empty: { title?, message?, action?, icon? }
+          Timeline: { title?, items: [{ label, status (done|active|pending|error), description?, timestamp? }] }
+          CodeBlock: { title?, code, language?, filename? }
+          ProgressTracker: { title?, stages: [{ label, status (done|active|pending|error), description? }] }
+          AlertBanner: { title?, message, variant? (info|success|warning|destructive), dismissible?, actions? }
+          ActionButton: { title?, layout? (row|column), actions: [{ id?, label, variant?, action? }] }
+          FileList: { title?, files: [{ name, type?, size?, url?, status? (ready|generating|error) }] }
           Legacy aliases such as toolbar_actions, submit_endpoint, field_type, cols, modal_id, and event_payload are tolerated by the runtime adapter but should not be emitted in new schemas.
       event_triggers:
         type: optional_list

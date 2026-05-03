@@ -1,21 +1,11 @@
-"""
-mozaiks studio - Print workspace status to the terminal.
-
-This command is a developer diagnostic tool. It reads the active workspace and
-prints a status summary: app intent, readiness, adapter config, workflow count,
-and the recommended next step.
-
-Studio (the management interface at /studio) is a separate, parallel interface.
-This command does not replicate Studio — it provides a quick terminal view of
-the same workspace state. For the full management interface, run the server and
-open /studio in the browser.
-"""
+"""mozaiks studio - Inspect or launch Studio for an app workspace."""
 
 from __future__ import annotations
 
 import json
 
 from mozaiksai.core.runtime.app import build_studio_home_summary, get_missing_studio_surfaces
+from mozaiks_cli.studio_launcher import launch_studio
 from mozaiks_cli.workspace import resolve_active_app_root, resolve_workspace_root
 
 
@@ -29,7 +19,24 @@ def run(args) -> None:
         print("Missing required files:")
         for rel_path in missing_surfaces:
             print(f"  - {rel_path}")
-        print("Run 'mozaiks init <preset>' first or point --dir at an existing scaffold.")
+        print("Run 'mozaiks onboard --dir <workspace>' to create/configure a scaffold first.")
+        return
+
+    if getattr(args, "open_studio", False):
+        result = launch_studio(
+            workspace_root=workspace_root,
+            backend_port=int(getattr(args, "backend_port", 8000)),
+            frontend_port=int(getattr(args, "frontend_port", 3000)),
+            open_browser=not bool(getattr(args, "no_browser", False)),
+        )
+        print("Studio launched.\n")
+        print(f"Backend: {result['backend_url']}")
+        if result["studio_url"]:
+            print(f"Studio:  {result['studio_url']}")
+        elif result["frontend_available"]:
+            print(f"Frontend: {result['frontend_url']}")
+        else:
+            print("Frontend shell unavailable; backend is running but browser Studio is not available in this environment.")
         return
 
     summary = build_studio_home_summary(app_root, surface="cli-home", local_only=True)
@@ -66,4 +73,4 @@ def _print_studio_home(summary: dict) -> None:
     print("\nNext Step:")
     print(f"  {home['next_step']}")
     print("\nUse 'mozaiks studio --json' for machine-readable output.")
-    print("For the full management interface, run the server and open /studio in the browser.")
+    print("Launch the full management interface with: mozaiks studio --dir <workspace> --open")

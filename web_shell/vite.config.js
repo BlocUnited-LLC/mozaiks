@@ -29,6 +29,21 @@ function resolveAppBundleDir(platformInputPath) {
   return platformInputPath;
 }
 
+function resolveBrandDir(platformAppDir, factoryBrandDir) {
+  const candidates = [
+    path.resolve(platformAppDir, 'brand'),
+    factoryBrandDir,
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, 'theme_config.json'))) {
+      return candidate;
+    }
+  }
+
+  return candidates[0];
+}
+
 function resolveFirstExistingPath(candidates) {
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) return candidate;
@@ -49,8 +64,8 @@ function hasWorkflowDefinitions(candidate) {
   }
 }
 
-function resolveWorkflowRoots(platformAppDir, platformInputPath, workflowRootsEnv, workflowsEnvPath) {
-  const stubRoot = path.resolve(projectRoot, 'chat-ui/src/workflows_stub');
+function resolveWorkflowRoots(platformAppDir, platformInputPath, workflowRootsEnv, workflowsEnvPath, factoryWorkflowsRoot, chatUiSrcRoot) {
+  const stubRoot = path.resolve(chatUiSrcRoot, 'workflows_stub');
   const roots = [];
   const seen = new Set();
 
@@ -75,7 +90,7 @@ function resolveWorkflowRoots(platformAppDir, platformInputPath, workflowRootsEn
   } else {
     add(path.resolve(platformAppDir, 'workflows'));
     add(path.resolve(platformInputPath, 'workflows'));
-    add(path.resolve(projectRoot, 'factory_app/workflows'));
+    add(factoryWorkflowsRoot);
   }
 
   const withDefinitions = roots.filter((candidate) => hasWorkflowDefinitions(candidate));
@@ -107,6 +122,30 @@ function normalizeFaviconPath(value) {
 // theme loading via /api/theme-config is the authoritative source).
 export default defineConfig(({ mode }) => {
   const rootEnv = loadEnv(mode, projectRoot, '');
+  const factoryAppRoot = resolveFirstExistingPath([
+    process.env.MOZAIKS_FACTORY_APP_PATH || rootEnv.MOZAIKS_FACTORY_APP_PATH || '',
+    path.resolve(projectRoot, 'factory_app'),
+  ]);
+  const factoryBrandDir = resolveFirstExistingPath([
+    path.resolve(factoryAppRoot, 'app/brand'),
+    path.resolve(projectRoot, 'factory_app/app/brand'),
+  ]);
+  const factoryWorkflowsRoot = resolveFirstExistingPath([
+    path.resolve(factoryAppRoot, 'workflows'),
+    path.resolve(projectRoot, 'factory_app/workflows'),
+  ]);
+  const chatUiRoot = resolveFirstExistingPath([
+    process.env.MOZAIKS_CHAT_UI_PATH || rootEnv.MOZAIKS_CHAT_UI_PATH || '',
+    path.resolve(projectRoot, 'chat-ui'),
+  ]);
+  const chatUiSrcRoot = resolveFirstExistingPath([
+    path.resolve(chatUiRoot, 'src'),
+    path.resolve(projectRoot, 'chat-ui/src'),
+  ]);
+  const chatUiNodeModules = resolveFirstExistingPath([
+    path.resolve(chatUiRoot, 'node_modules'),
+    path.resolve(__dirname, 'node_modules'),
+  ]);
   const platformEnv = process.env.PLATFORM_PATH || rootEnv.PLATFORM_PATH;
   const appWorkspaceEnv =
     process.env.MOZAIKS_APP_WORKSPACE_PATH ||
@@ -116,7 +155,7 @@ export default defineConfig(({ mode }) => {
     ? path.resolve(projectRoot, platformEnv)
     : appWorkspaceEnv
       ? path.resolve(projectRoot, appWorkspaceEnv)
-    : path.resolve(projectRoot, 'mozaiks-platform/app');
+      : path.resolve(factoryAppRoot, 'app');
   const platformAppDir = resolveAppBundleDir(platformInputPath);
   const workflowsEnv =
     process.env.MOZAIKS_WORKFLOWS_PATH ||
@@ -130,13 +169,20 @@ export default defineConfig(({ mode }) => {
     process.env.VITE_MOZAIKS_WORKFLOW_ROOTS ||
     rootEnv.VITE_MOZAIKS_WORKFLOW_ROOTS ||
     '';
-  const platformWorkflowRoots = resolveWorkflowRoots(platformAppDir, platformInputPath, workflowRootsEnv, workflowsEnv);
+  const platformWorkflowRoots = resolveWorkflowRoots(
+    platformAppDir,
+    platformInputPath,
+    workflowRootsEnv,
+    workflowsEnv,
+    factoryWorkflowsRoot,
+    chatUiSrcRoot,
+  );
 
   // Platform UI extensions come from the active app bundle: <app>/ui/index.js
   const platformExtensionsFile = path.resolve(platformAppDir, 'ui/index.js');
 
   // Public (static) assets come from the active app bundle: <app>/brand
-  const platformBrandDir = path.resolve(platformAppDir, 'brand');
+  const platformBrandDir = resolveBrandDir(platformAppDir, factoryBrandDir);
 
   // App manifest — only user-facing fields (appName, targets, authRequired, admins).
   // apiUrl/wsUrl fall back to env vars or localhost for local dev.
@@ -165,16 +211,19 @@ export default defineConfig(({ mode }) => {
   return {
   plugins: [
     // Pre-process .js files that contain JSX anywhere in the build graph.
-    // Covers chat-ui/src (chat UI), factory workflow UIs,
-    // product/app workflow UIs (any *-platform), and active app module UIs.
+    // Covers chat-ui/src, shared factory workflow UIs, active app workflow/module
+    // UIs, and product/workspace overlays that still ship JSX in .js files.
     {
       name: 'jsx-in-js',
       enforce: 'pre',
       async transform(code, id) {
-        const isChatUiJs     = /[\\/]chat-ui[\\/]src[\\/].*\.js$/.test(id);
-        const isPlatformUiJs = /(?:[\\/]factory_app[\\/]app[\\/]workflows[\\/]|[\\/]app[\\/]modules[\\/]).*[\\/]ui[\\/].*\.js$/.test(id);
-        const isProductUiJs  = /[\\/][^/\\]+-platform[\\/].*\.js$/.test(id);
-        if (isChatUiJs || isPlatformUiJs || isProductUiJs) {
+      const isChatUiJs = /(?:[\\/]chat-ui[\\/]src[\\/]|[\\/]mozaiks_chat_ui[\\/]src[\\/]).*\.js$/.test(id);
+        const isWorkflowOrModuleUiJs =
+          /[\\/]factory_app[\\/]workflows[\\/].*[\\/]ui[\\/].*\.js$/.test(id) ||
+          /[\\/]factory_app[\\/]app[\\/]workflows[\\/].*[\\/]ui[\\/].*\.js$/.test(id) ||
+          /[\\/]app[\\/](?:workflows|modules)[\\/].*[\\/]ui[\\/].*\.js$/.test(id);
+        const isProductUiJs = /[\\/][^/\\]+-platform[\\/].*\.js$/.test(id);
+        if (isChatUiJs || isWorkflowOrModuleUiJs || isProductUiJs) {
           return transformWithEsbuild(code, id, { loader: 'jsx', jsx: 'automatic', jsxImportSource: 'react' });
         }
       },
@@ -196,10 +245,10 @@ export default defineConfig(({ mode }) => {
 
   resolve: {
     // Resolve shared packages from chat-ui/node_modules (where all deps live).
-    modules: [path.resolve(__dirname, '../chat-ui/node_modules'), 'node_modules'],
+    modules: [chatUiNodeModules, path.resolve(__dirname, 'node_modules'), 'node_modules'],
     alias: {
       // ── Core aliases (always present) ───────────────────────────────────
-      '@mozaiks/chat-ui': path.resolve(__dirname, '../chat-ui/src'),
+      '@mozaiks/chat-ui': chatUiSrcRoot,
       '@chat-workflows-root': platformWorkflowRoots.primary,
       '@chat-workflows-root-secondary': platformWorkflowRoots.secondary,
       'react-native':     'react-native-web',

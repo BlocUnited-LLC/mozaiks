@@ -1,0 +1,15 @@
+recursive-include factory_app/app *
+recursive-include factory_app/workflows *
+recursive-include web_shell *.js *.jsx *.css *.html *.json *.md
+include web_shell/.env.example
+recursive-include chat-ui/src *
+include chat-ui/package.json
+include chat-ui/package-lock.json
+include chat-ui/postcss.config.js
+include chat-ui/tailwind.config.js
+include chat-ui/tsconfig.json
+include chat-ui/vite.embed.config.js
+include chat-ui/README.md
+prune web_shell/node_modules
+prune web_shell/dist
+global-exclude *.py[cod]
