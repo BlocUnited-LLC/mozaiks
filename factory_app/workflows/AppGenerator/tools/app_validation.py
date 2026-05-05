@@ -24,7 +24,7 @@ from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     local_app_validation_available,
     resolve_app_validation_strategy,
 )
-from mozaiksai.core.workflow.generator_support.code_files import (
+from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     extract_code_file_map_from_payload,
 )
 

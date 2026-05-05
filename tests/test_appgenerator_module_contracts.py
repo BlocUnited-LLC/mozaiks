@@ -42,8 +42,6 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "ModuleAdminManifest",
         "ModulePythonStub",
         "ModuleJsStub",
-        "HostAdminRuntimePanel",
-        "HostAdminConfig",
         "DatabaseArtifactFile",
         "DatabaseOutput",
         "BackendFoundationFile",
@@ -71,12 +69,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert contract_fields["js_stubs"]["items"] == "ModuleJsStub"
     assert models["ConfigMiddlewareOutput"]["fields"]["mode"]["values"] == [
         "module_contract_bundle",
-        "admin_config_bundle",
         "backend_foundation",
-    ]
-    assert models["ConfigMiddlewareOutput"]["fields"]["host_admin_config"]["variants"] == [
-        "HostAdminConfig",
-        "null",
     ]
     assert models["ConfigMiddlewareOutput"]["fields"]["backend_foundation_bundle"]["variants"] == [
         "BackendFoundationBundle",
@@ -89,8 +82,6 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert models["AppCustomRouteBundle"]["fields"]["page_files"]["items"] == "AppCustomPageFile"
     assert models["ModuleManifest"]["fields"]["module"]["type"] == "ModuleIdentity"
     assert models["ModuleAdminManifest"]["fields"]["schema_version"]["description"] == "Must be mozaiks.admin.v2."
-    assert models["HostAdminConfig"]["fields"]["schema_version"]["values"] == ["mozaiks.admin.host.v1"]
-    assert models["HostAdminRuntimePanel"]["fields"]["id"]["values"] == ["stats", "runs", "sessions"]
     assert models["AppBackendAdminConfig"]["fields"]["schema_version"]["values"] == ["mozaiks.admin.app_backend.v1"]
     assert models["ControllerOutput"]["fields"]["mode"]["values"] == [
         "module_api_adapter",
@@ -127,11 +118,8 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
     handoffs = _read_yaml("factory_app/workflows/AppGenerator/handoffs.yaml")
 
     assert "task_type: module_contract" in source
-    assert "task_type: admin_config" in source
-    assert "mode\": \"admin_config_bundle\"" in source
-    assert "host_admin_config" in source
     assert "backend_foundation_bundle" in source
-    assert "Never emit `module_panels`" in source
+    assert "Do NOT include an `admin_config` build task." in source
     assert "Fail the task rather than guessing a fallback mode." in source
     assert "modules/{pack_name}/module.yaml" in source
     assert "modules/{pack_name}/subscriptions.yaml" in source
@@ -156,9 +144,9 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
     assert "\"app_backend_admin_config\"" in source
     assert "backend/admin_config.py" in source
     assert "backend/routes/admin.py" in source
-    assert "build_app_backend_admin_router" in source
-    assert "validate_app_backend_admin_config" in source
-    assert "`app/config/admin.json`" in source
+    assert "APIRouter" in source
+    assert "self-contained FastAPI" in source
+    assert "`app/app.json` `admins`" in source
     assert "`platform/config/admin.json`" not in source
     assert "Every panel must set `section`" in source
     assert "structured-output-first contract" in source
@@ -172,6 +160,10 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
     assert "\"model_files\"" in source
     assert "contract_refs" in source
     assert "`page_component` and `shell_extension`" not in source
+    assert "task_type: admin_config" not in source
+    assert "mode\": \"admin_config_bundle\"" not in source
+    assert "host_admin_config" not in source
+    assert "`app/config/admin.json`" not in source
     assert any(
         rule["source_agent"] == "ServiceAgent" and rule["target_agent"] == "FrontendStubAgent"
         for rule in handoffs["handoff_rules"]

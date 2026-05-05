@@ -16,59 +16,59 @@ surfaces.
 - Do not invent alternate panel arrays, nested `panels.app/modules/runtime`
   groups, or implicit built-in panel ids.
 
-For Python backends that depend on Mozaiks runtime packages, validate this
-payload with:
-
-```python
-from mozaiksai.core.admin import (
-    build_app_backend_admin_router,
-    validate_app_backend_admin_config,
-)
-```
-
 Recommended generated file ownership for split backends:
 
-- `backend/admin_config.py` — returns the canonical `mozaiks.admin.app_backend.v1` payload
-- `backend/routes/admin.py` — exposes `GET /api/admin/config` through `build_app_backend_admin_router(...)`
+- `backend/admin_config.py` — returns the canonical `mozaiks.admin.app_backend.v1` payload as a plain dict (validated at codegen time by AppGenerator)
+- `backend/routes/admin.py` — exposes `GET /api/admin/config` as a self-contained FastAPI `APIRouter`
 
 For AppGenerator, the typed source of truth is `ControllerOutput.app_backend_admin_config`.
-Bundle/extraction logic may regenerate the canonical `backend/admin_config.py` and
-`backend/routes/admin.py` files from that typed object instead of trusting ad hoc
-raw code strings.
+The codegen step validates the config at generation time and materialises these two files
+from the typed object — no runtime Mozaiks import is required in the generated code.
 
-Example:
+Generated example:
 
 ```python
 # backend/admin_config.py
-from mozaiksai.core.admin import validate_app_backend_admin_config
+_ADMIN_CONFIG = {
+    "schema_version": "mozaiks.admin.app_backend.v1",
+    "panels": [
+        {
+            "id": "app.users",
+            "label": "Users",
+            "section": "users",
+            "order": 10,
+            "renderer": "builtin",
+            "builtin_panel": "users",
+        }
+    ],
+}
 
 
 def get_admin_config():
-    return validate_app_backend_admin_config(
-        {
-            "schema_version": "mozaiks.admin.app_backend.v1",
-            "panels": [
-                {
-                    "id": "app.users",
-                    "label": "Users",
-                    "section": "users",
-                    "order": 10,
-                    "renderer": "builtin",
-                    "builtin_panel": "users",
-                }
-            ],
-        }
-    )
+    return _ADMIN_CONFIG
 ```
 
 ```python
 # backend/routes/admin.py
-from mozaiksai.core.admin import build_app_backend_admin_router
+from fastapi import APIRouter, HTTPException
+from inspect import isawaitable
 
 from backend.admin_config import get_admin_config
 
+router = APIRouter(prefix="/api/admin", tags=["app-backend-admin"])
 
-router = build_app_backend_admin_router(get_admin_config)
+
+@router.get("/config")
+async def _get_admin_config():
+    try:
+        result = get_admin_config()
+        if isawaitable(result):
+            result = await result
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 ```
 
 ## Response Shape
@@ -200,6 +200,6 @@ Do not duplicate the same surface in both places.
 This contract does not:
 
 - define the `/admin` shell
-- replace `app/config/admin.json`
+- replace `app/app.json` `admins`
 - replace `modules/{module}/admin.yaml`
 - allow app backends to generate standalone admin routes or React shells

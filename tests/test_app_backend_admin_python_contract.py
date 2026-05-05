@@ -5,7 +5,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from mozaiksai.core.admin.app_backend_contract import validate_app_backend_admin_config
+from factory_app.workflows.AppGenerator.tools.app_backend_admin_contract import (
+    validate_app_backend_admin_config,
+)
 
 
 def _workspace() -> Path:

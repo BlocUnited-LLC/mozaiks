@@ -3,8 +3,6 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import Any, Dict, List, Optional
 
-from mozaiksai.core.admin import build_app_backend_admin_code_files
-
 
 def safe_relpath(raw: str) -> Optional[str]:
     if not isinstance(raw, str):
@@ -42,9 +40,9 @@ def _normalize_code_file_entries(raw_entries: Any) -> Dict[str, str]:
 def extract_code_file_map_from_payload(payload: Any) -> Dict[str, str]:
     """Resolve deterministic code files from a structured agent payload.
 
-    `code_files` remains the generic file lane. For split app-backend admin
-    surfaces, `app_backend_admin_config` is the typed source of truth and wins
-    over conflicting raw code_files for the canonical admin paths.
+    Handles the generic file lanes used across all generator workflows.
+    AppGenerator-specific expansions (e.g. app_backend_admin_config codegen)
+    live in factory_app/workflows/AppGenerator/tools/code_file_utils.py.
     """
 
     if not isinstance(payload, dict):
@@ -114,15 +112,6 @@ def extract_code_file_map_from_payload(payload: Any) -> Dict[str, str]:
         safe = safe_relpath("ui/index.js")
         if safe:
             file_map[safe] = str(registration_barrel)
-
-    raw_app_backend_admin_config = payload.get("app_backend_admin_config")
-    if raw_app_backend_admin_config is not None:
-        for item in build_app_backend_admin_code_files(raw_app_backend_admin_config):
-            safe = safe_relpath(str(item.get("filename") or ""))
-            content = item.get("content")
-            if not safe or content is None:
-                continue
-            file_map[safe] = str(content)
 
     return file_map
 

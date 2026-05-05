@@ -17,7 +17,7 @@ from mozaiksai.core.workflow.generator_support.agent_endpoints import (
     resolve_agent_websocket_url,
 )
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
-from mozaiksai.core.workflow.generator_support.code_files import (
+from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     extract_code_file_map_from_payload,
 )
 from mozaiksai.core.workflow.generator_support.workflow_exports import get_latest_workflow_export

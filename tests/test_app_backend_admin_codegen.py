@@ -8,8 +8,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
-from mozaiksai.core.admin import build_app_backend_admin_code_files
-from mozaiksai.core.workflow.generator_support.code_files import (
+from factory_app.workflows.AppGenerator.tools.app_backend_admin_codegen import (
+    build_app_backend_admin_code_files,
+)
+from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     extract_code_file_map_from_payload,
 )
 
@@ -77,8 +79,8 @@ def test_build_app_backend_admin_code_files_produces_importable_surface(tmp_path
 
     admin_config_module = importlib.import_module("backend.admin_config")
     admin_config = admin_config_module.get_admin_config()
-    assert admin_config.schema_version == "mozaiks.admin.app_backend.v1"
-    assert admin_config.panels[0].builtin_panel == "users"
+    assert admin_config["schema_version"] == "mozaiks.admin.app_backend.v1"
+    assert admin_config["panels"][0]["builtin_panel"] == "users"
 
     route_module = importlib.import_module("backend.routes.admin")
     app = FastAPI()
@@ -106,8 +108,10 @@ def test_extract_code_file_map_prefers_typed_app_backend_admin_config() -> None:
     file_map = extract_code_file_map_from_payload(payload)
 
     assert "BROKEN" not in file_map["backend/admin_config.py"]
-    assert "validate_app_backend_admin_config" in file_map["backend/admin_config.py"]
-    assert "build_app_backend_admin_router" in file_map["backend/routes/admin.py"]
+    assert "mozaiks.admin.app_backend.v1" in file_map["backend/admin_config.py"]
+    assert "get_admin_config" in file_map["backend/admin_config.py"]
+    assert "APIRouter" in file_map["backend/routes/admin.py"]
+    assert "/api/admin" in file_map["backend/routes/admin.py"]
 
 
 def test_assembly_phase_materializes_split_admin_surface_from_typed_payload() -> None:
@@ -125,4 +129,5 @@ def test_assembly_phase_materializes_split_admin_surface_from_typed_payload() ->
 
     assert set(file_map) == {"backend/admin_config.py", "backend/routes/admin.py"}
     assert "mozaiks.admin.app_backend.v1" in file_map["backend/admin_config.py"]
-    assert "build_app_backend_admin_router" in file_map["backend/routes/admin.py"]
+    assert "get_admin_config" in file_map["backend/admin_config.py"]
+    assert "APIRouter" in file_map["backend/routes/admin.py"]

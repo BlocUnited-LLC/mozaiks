@@ -1,12 +1,12 @@
 """
-generate_and_download - Bundle generated app code and present FileDownloadCenter UI.
+generate_and_download - Bundle generated app code and present AppWorkbench + DownloadCenter UI.
 
 This tool:
 1) Collects latest agent JSON outputs for the chat/app
 2) Extracts `code_files` from any agent output
 3) Writes files to disk under generated_apps/<app_id>/<chat_id>/<bundle_name>/
 4) Creates a ZIP bundle
-5) Presents FileDownloadCenter UI and (optionally) triggers export_to_github
+5) Presents AppWorkbench export actions and (optionally) triggers export_to_github
 """
 
 
@@ -18,12 +18,13 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Annotated, Dict, List, Optional
 
 from autogen.tools.dependency_injection import Field
+from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.workflow.generator_support.agent_endpoints import (
     resolve_agent_api_url,
     resolve_agent_websocket_url,
 )
-from mozaiksai.core.workflow.generator_support.code_files import (
+from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     extract_code_file_map_from_payload,
 )
 from mozaiksai.core.workflow.generator_support.workflow_exports import get_latest_workflow_export
@@ -180,6 +181,52 @@ async def _emit_deployment_event(*, chat_id: Optional[str], status: str, data: d
         return
 
 
+async def _persist_pending_schema_migration(
+    *,
+    pending_migration: Optional[Dict[str, Any]],
+    app_id: str,
+    build_id: str,
+    workflow_name: str,
+    chat_id: Optional[str],
+    context_variables: Optional[Any],
+    generated_app_dir: str,
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(pending_migration, dict):
+        return None
+    migration_id = str(pending_migration.get("migration_id") or "").strip()
+    if not migration_id:
+        return None
+
+    artifact_version_id = None
+    change_class = None
+    if context_variables is not None and hasattr(context_variables, "get"):
+        try:
+            artifact_version_id = context_variables.get("artifact_version_id")
+            change_class = context_variables.get("change_class")
+        except Exception:
+            artifact_version_id = None
+            change_class = None
+
+    store = BuilderArtifactStore()
+    record = await store.save_database_migration(
+        app_id=str(app_id),
+        build_id=str(build_id),
+        artifact_version_id=str(artifact_version_id) if artifact_version_id else None,
+        change_class=str(change_class) if change_class else None,
+        migration=pending_migration,
+        status="staged",
+        source_workflow=workflow_name,
+        source_chat_id=str(chat_id) if chat_id else None,
+        generated_app_dir=generated_app_dir,
+    )
+    if context_variables is not None and hasattr(context_variables, "set"):
+        try:
+            context_variables.set("persisted_database_migration", record)
+        except Exception:
+            pass
+    return record
+
+
 async def generate_and_download(
     DownloadRequest: Annotated[
         Dict[str, Any],
@@ -202,6 +249,7 @@ async def generate_and_download(
     app_id: Optional[str] = None
     user_id: Optional[str] = None
     build_registry_id: Optional[str] = None
+    build_id: Optional[str] = None
     workflow_name = "AppGenerator"
     if context_variables is not None and hasattr(context_variables, "get"):
         try:
@@ -209,6 +257,7 @@ async def generate_and_download(
             app_id = context_variables.get("app_id")
             user_id = context_variables.get("user_id")
             build_registry_id = context_variables.get("build_registry_id")
+            build_id = context_variables.get("build_id")
             workflow_name = context_variables.get("workflow_name") or workflow_name
         except Exception:
             pass
@@ -280,6 +329,20 @@ async def generate_and_download(
         out_path.write_text(str(content), encoding="utf-8")
         written_paths.append(safe)
 
+    migration_record = None
+    try:
+        migration_record = await _persist_pending_schema_migration(
+            pending_migration=pending_migration,
+            app_id=str(app_id),
+            build_id=str(build_id or chat_id),
+            workflow_name=workflow_name,
+            chat_id=chat_id,
+            context_variables=context_variables,
+            generated_app_dir=str(app_dir.resolve()),
+        )
+    except Exception as exc:
+        wf_logger.warning("Failed to persist pending schema migration: %s", exc)
+
     # Update the hosted build-registry record to 'generated' now that files are on disk.
     await update_build_status(
         build_registry_id=build_registry_id or "",
@@ -318,6 +381,8 @@ async def generate_and_download(
         # Workbench context (best-effort): allow ChatUI to render file tree + editor + preview.
         "generated_files": files_map,
     }
+    if migration_record:
+        ui_payload["database_migration"] = migration_record
     # Best-effort: include validation/integration context for the AppWorkbench.
     if context_variables is not None and hasattr(context_variables, "get"):
         try:
@@ -352,7 +417,7 @@ async def generate_and_download(
             "message": "User declined download",
         }
 
-    # Optional GitHub export (triggered by FileDownloadCenter action)
+    # Optional GitHub export (triggered by DownloadCenter action)
     deployment_result: Optional[Dict[str, Any]] = None
     try:
         action = None
@@ -406,13 +471,16 @@ async def generate_and_download(
 
             repo_name = None
             commit_message = "Initial code generation from Mozaiks AI"
-            if isinstance(response, dict) and isinstance(response.get("data"), dict):
-                repo_name = response["data"].get("repo_name") or response["data"].get("repoName")
-                commit_message = (
-                    response["data"].get("commit_message")
-                    or response["data"].get("commitMessage")
-                    or commit_message
-                )
+            if isinstance(response, dict):
+                repo_name = response.get("repo_name") or response.get("repoName")
+                commit_message = response.get("commit_message") or response.get("commitMessage") or commit_message
+                if isinstance(response.get("data"), dict):
+                    repo_name = response["data"].get("repo_name") or response["data"].get("repoName") or repo_name
+                    commit_message = (
+                        response["data"].get("commit_message")
+                        or response["data"].get("commitMessage")
+                        or commit_message
+                    )
             deployment_result = await export_app_code_to_github(
                 bundle_path=str(zip_path.resolve()),
                 app_id=app_id,

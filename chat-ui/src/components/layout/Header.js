@@ -94,7 +94,7 @@ const getDefaultProfileMenu = (user) => {
       label: "Admin Portal",
       icon: "settings.svg",
       action: "navigate",
-      href: "/admin",
+      path: "/admin",
       requiresRole: "admin",
     },
   ];
@@ -343,10 +343,9 @@ const Header = ({
   const showNotifications = notificationsConfig.show !== false;
   const primaryActionLabel = primaryAction?.label || primaryAction?.id || "Action";
   const headerFrameStyle = {
-    maxWidth: "var(--shell-frame-max-width, 1440px)",
     minHeight: "var(--shell-header-height, 4rem)",
     gap: "var(--shell-header-gap, 1rem)",
-    paddingInline: "var(--shell-header-padding-x, 1.5rem)",
+    paddingInline: 0,
   };
   const headerClusterStyle = {
     gap: "var(--shell-header-cluster-gap, 0.875rem)",
@@ -456,7 +455,7 @@ const Header = ({
 
   return (
     <header className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isScrolled ? "backdrop-blur-md bg-black/25" : "backdrop-blur-md bg-black/15"} border-b border-[rgba(var(--color-primary-rgb),0.1)]`}>
-      <div className="relative mx-auto flex w-full items-center justify-between" style={headerFrameStyle}>
+      <div className="relative flex w-full items-center justify-between" style={headerFrameStyle}>
         <div className="flex min-w-0 items-center" style={headerClusterStyle}>
           <LogoSection />
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from mozaiksai.core.workflow.generator_support.code_files import (
+from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     extract_code_file_entries_from_payload,
 )
 

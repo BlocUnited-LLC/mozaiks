@@ -103,7 +103,7 @@ agents:
 
       **Optional integration context**:
       - `agent_api_url`, `agent_websocket_url`, `available_agents`, `available_tools` indicate that a separate agent backend already exists and may need to be integrated into the generated app.
-      - `platform_user_email`: Email of the authenticated platform user. Use this as the `admin_emails` value in admin.json when generating the admin_config build task. Non-null when running on the hosted mozaiks.ai platform; null in OSS/self-hosted contexts.
+      - `platform_user_email`: Email of the authenticated platform user. Use this as the initial `admins` entry in `app/app.json` when the generated app needs admin bootstrap access. Non-null when running on the hosted mozaiks.ai platform; null in OSS/self-hosted contexts.
       - `app_backend_url`: Base URL of the active Mozaiks app host for this app. When non-null, generated agents call this URL + the platform module action API to persist data and trigger domain events. Include this in the `module_contract` build task's initial_message so downstream module implementation agents have it.
       - `generated_workflow_name`, `generated_workflow_capability_id`, `generated_workflow_startup_mode`, `generated_workflow_trigger_events`: Metadata produced by AgentGenerator for the workflow it generated. When non-null, the workflow exists and must be wired into the app — do not re-derive or invent these values. Use `generated_workflow_capability_id` (not the raw workflow name) in all `workflow_capability_ids` fields. Use `generated_workflow_name` as the direct page-launch `workflow_id` when persistent app pages need to open that workflow. Use `generated_workflow_startup_mode` only to shape launch expectations/copy; the runtime owns who speaks first after session launch. Pass `generated_workflow_trigger_events` in the `module_contract` build task's `initial_message` so ConfigMiddlewareAgent can generate the correct `subscriptions.yaml` entries.
 
@@ -190,7 +190,7 @@ agents:
       12a. **admin_pack rule**: When `admin_pack` is included in capability_packs:
         - The unified admin shell at `/admin` is provided automatically by the framework — DO NOT plan a separate admin page, app-admin route, admin dashboard page schema, or admin React UI.
         - The generated app's admin responsibility is limited to two contracts:
-          1. A host-owned `app/config/admin.json` config file declaring `admin_emails`, section visibility/order, and runtime/operator panel visibility.
+          1. `app/app.json` `admins` owns bootstrap/access for the framework admin shell.
           2. Module-owned `modules/{pack_name}/admin.yaml` files declaring feature panels that render inside user-facing sections of the unified `/admin` shell.
         - If the app uses a split app backend and needs app-business admin panels, that backend must expose `GET {app_backend_url}/api/admin/config` returning `schema_version: mozaiks.admin.app_backend.v1` with `panels[]`. Those panels must use the explicit renderer contract:
           - `renderer: builtin` with `builtin_panel: stats | users | subscriptions`
@@ -199,18 +199,19 @@ agents:
           Do NOT invent nested `panels.app/modules/runtime` groups or implicit built-in panel ids.
         - When those app-business panels are required, include an app-level `task_type: api_surface` build task with `capability_pack_id: null`, `initial_agent: ControllerAgent`, and `owned_paths: ["backend/admin_config.py", "backend/routes/admin.py"]`.
           - `ControllerAgent` must emit the typed `ControllerOutput.app_backend_admin_config` object as the canonical source of truth for that surface.
-          - `backend/admin_config.py` must return a payload validated by `validate_app_backend_admin_config`.
-          - `backend/routes/admin.py` must expose `GET /api/admin/config` through `mozaiksai.core.admin.build_app_backend_admin_router`.
-        - **admin_emails population**: Use `platform_user_email` from context as the `admin_emails` value in the build task initial_message.
+          - `backend/admin_config.py` must return the canonical `mozaiks.admin.app_backend.v1` config as a plain dict (validated at codegen time).
+          - `backend/routes/admin.py` must expose `GET /api/admin/config` as a self-contained FastAPI `APIRouter` — no external mozaiksai imports required.
+        - **admin bootstrap population**: Use `platform_user_email` from context as the initial `admins` entry in `app/app.json`.
           If `platform_user_email` is null or empty, use the email captured from the user during the interview.
-          Never leave `admin_emails` empty — if both are null, use `"admin@example.com"` as a placeholder and note it in the task description.
-        - Include a `task_type: admin_config` build task with `owned_paths: ["app/config/admin.json"]`.
+          Never leave `admins` empty — if both are null, use `"admin@example.com"` as a placeholder and note it in the scaffold context.
+        - Do NOT include an `admin_config` build task.
         - Do NOT include admin pages in `pages[]`, generated page routes, or admin tasks targeting React files.
       12b. **surface realization rule**:
         - Only capability packs with `surface_kind = module` may emit `task_type: module_contract`.
         - `surface_kind = workflow` packs describe agentic behavior and UI/workflow touchpoints, but do not generate runtime modules here.
         - `surface_kind = control_plane` packs should use app-level orchestration tasks such as `backend_foundation` or `api_surface`, not `module_contract`.
         - `surface_kind = external_integration` packs should use `api_surface` or `agent_backend_integration` tasks, not `module_contract`.
+        - Connector credentials, API-key metadata, and Studio adapter records are platform-owned integration state. Do not turn them into app-owned module entities or collections.
         - `surface_kind = ui_only` packs should use `page_bundle` tasks only unless another surface owns their backend mutations.
       12c. **module_contract rule**: For every capability pack with `surface_kind = module`, include a `task_type: module_contract` build task:
         - This task produces the canonical module contract files that wire the capability into platform_app.
@@ -221,9 +222,9 @@ agents:
           - `modules/{pack_name}/notifications.yaml` — notification intents per event
           - `modules/{pack_name}/settings.yaml` — module-local settings and feature flags
           - `modules/{pack_name}/admin.yaml` — feature-specific admin panels mounted inside user-facing sections of the unified `/admin` shell
-        - `initial_message` must include: the capability pack's entities, actions, capability ids, events it may publish, event subscriptions/reactions, notification needs, settings/feature flags, required Python hook files, backend layering expectations (`handler/service/repo/policy/schemas`), and `app_backend_url` from context (null = schema-only, non-null = active backend).
+        - `initial_message` must include: the capability pack's entities, actions, capability ids, events it may publish, event subscriptions/reactions, notification needs, settings/feature flags, required Python hook files, backend layering expectations (`handler/service/repo/policy/models`), and `app_backend_url` from context (null = schema-only, non-null = active backend).
         - `initial_agent` for this task is `ConfigMiddlewareAgent`.
-        - Do NOT generate Python implementation code here. YAML declares the contract; ServiceAgent implements `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, `backend/schemas.py`, and any optional hook stubs such as `backend/settings.py`, `backend/subscriptions.py`, and `backend/notifications.py`.
+        - Do NOT generate Python implementation code here. YAML declares the contract; ServiceAgent implements `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, `backend/models.py`, and any optional hook stubs such as `backend/settings.py`, `backend/subscriptions.py`, and `backend/notifications.py`.
         - `module_contract` tasks run in the `backend-foundation` phase, before `data-models`.
       12d. **event architecture rule**:
         - Populate `event_flows` for every durable state change that other modules, notifications, integrations, or workflows may react to.
@@ -412,6 +413,8 @@ agents:
       - `Grid`: responsive layout container. Config: `columns` (1-6), `gap` (sm|md|lg), `children` (inline primitive list). If a Grid declares `api_endpoint`, its child Stats/Cards can bind into that response using `value_key`, `trend_key`, and interpolated action payloads.
       - `Card`: content card with optional `title`, `subtitle`, `actions`, and `children`.
       - `Modal`: overlay dialog. Config: `title`, `description`, `size` (small|medium|large|full), `actions`, `children`. Use the section `id` as the modal target for `ui.modal.open` / `ui.modal.close`; only use `modal_id` when adapting older schemas.
+      - Prefer `Modal` for secondary edit/create/drill-in interactions when the main page should stay compact. Do not duplicate the same editor inline beneath the same summary card unless the workflow truly requires side-by-side editing.
+      - Prefer compact summary cards plus a focused follow-up interaction over repeating the same entity title, metadata, and form fields in multiple stacked sections.
       - `Alert`: status message. Config: optional `title`, required `message`, optional `variant` (default|info|success|warning|destructive), `dismissible`.
       - `Badge`: status indicator. Config: `label`, optional `variant`.
       - `Button`: action button. Config: `label`, optional `variant`, `size`, and `action`.
@@ -486,7 +489,7 @@ agents:
 
       **Admin portal rule (hard constraint)**:
       - NEVER generate an admin page schema. The `/admin` route and `AdminPortal` component are platform-owned and registered as the unified admin shell.
-      - If `app_build_plan.capability_packs` contains `admin_pack`, do NOT add an admin page to `manifest.pages` or generated page routes. The platform mounts `/admin` automatically when `app/config/admin.json` exists.
+      - If `app_build_plan.capability_packs` contains `admin_pack`, do NOT add an admin page to `manifest.pages` or generated page routes. The platform mounts `/admin` automatically.
       - App and feature admin surfaces are declared by `modules/{pack_name}/admin.yaml`, not by generated pages or React files.
       - Admin panels must use user-facing section names: `overview`, `users`, `billing`, `usage`, `activity`, `settings`, `integrations`, or `support`. Never expose `modules`, `plugins`, `operations`, `tools`, `studio`, `build`, or manifest concepts as admin sections.
   - id: instructions
@@ -710,7 +713,7 @@ agents:
         4. Call `apply_schema_migration` with the migration document.
         5. Set `pending_schema_migration` to the migration document in your output.
         6. Include the migration file in `code_files` at:
-           `backend/database/migrations/{migration_id}.json`
+           `config/database_migrations/{migration_id}.json`
         7. Do NOT call `provision_database`, `apply_database_schema`, or `seed_database`
            in refinement mode — the database already exists.
 
@@ -755,7 +758,7 @@ agents:
         "database_files": [],
         "code_files": [
           {
-            "filename": "backend/database/migrations/{migration_id}.json",
+            "filename": "config/database_migrations/{migration_id}.json",
             "content": "{...migration document...}"
           }
         ],
@@ -803,10 +806,7 @@ agents:
       **Mode A — module_contract** (`current_build_task_type == "module_contract"`):
         Produce the typed canonical module contract bundle for one capability pack.
 
-      **Mode B — admin_config** (`current_build_task_type == "admin_config"`):
-        Produce the host-owned `app/config/admin.json` contract only.
-
-      **Mode C — backend_foundation** (`current_build_task_type == "backend_foundation"` or no task_run_mode):
+      **Mode B — backend_foundation** (`current_build_task_type == "backend_foundation"` or no task_run_mode):
         Generate app scaffold, configuration, database connection, and middleware files.
   - id: objective
     heading: '[OBJECTIVE]'
@@ -818,12 +818,7 @@ agents:
       - Treat the YAML bundle as a structured-output-first contract: use explicit typed sub-objects, finite taxonomies, and stable ids only.
       - Customization is allowed only through declared stub references. Do not invent side-channel files, freeform config blobs, or undeclared hook fields.
 
-      **Mode B (admin_config)**:
-      - Generate only the host-owned `app/config/admin.json` contract.
-      - Do not generate app-business panels, module panels, admin routes, or frontend admin surfaces here.
-      - Treat this as a structured-output-first host contract with fixed section taxonomy and finite runtime panel ids.
-
-      **Mode C (backend_foundation)**:
+      **Mode B (backend_foundation)**:
       - Generate app scaffold using `generate_scaffold`.
       - Generate configuration, database connection, and middleware files.
       - Emit only integration glue — do not build a standalone platform.
@@ -833,7 +828,7 @@ agents:
     content: |-
       **Task context** (always read first):
       - `task_run_mode`: true when executing a specific build task via MFJ fan-out.
-      - `current_build_task_type`: `module_contract` → Mode A, `admin_config` → Mode B, `backend_foundation` → Mode C.
+      - `current_build_task_type`: `module_contract` → Mode A, `backend_foundation` → Mode B.
       - `current_build_task`: full task spec including `capability_pack_id`, `initial_message`, `owned_paths`.
 
       **Mode A inputs** (from `current_build_task.initial_message`):
@@ -851,12 +846,6 @@ agents:
       - `generated_workflow_trigger_events`: trigger event contracts from the AgentGenerator workflow's orchestrator.yaml triggers block. Each entry carries an event type (and optional capability_id) that should fire the workflow. Generate one `subscriptions.yaml` entry per trigger event routing the matching domain event to the workflow via `generated_workflow_capability_id`. Empty array when no trigger events are declared.
 
       **Mode B inputs**:
-      - `current_build_task.initial_message`: must include `admin_emails`, section visibility/order guidance, and runtime panel visibility choices.
-      - `current_build_task.owned_paths`: must contain `app/config/admin.json` only.
-      - The host section taxonomy is fixed: `overview`, `users`, `billing`, `usage`, `activity`, `settings`, `integrations`, `support`.
-      - The runtime panel id set is finite: `stats`, `runs`, `sessions`.
-
-      **Mode C inputs**:
       - `app_build_plan`: backend scope, auth strategy, and integration requirements.
       - Tech Stack (backend framework).
       - Previous Validation Errors: if this is a retry, review chat history and fix them.
@@ -950,29 +939,6 @@ agents:
       hooks: []
       ```
 
-      **Host admin.json contract (Mode B)**:
-      ```json
-      {
-        "schema_version": "mozaiks.admin.host.v1",
-        "enabled": true,
-        "admin_emails": ["owner@example.com"],
-        "sections": {
-          "overview": { "label": "Overview", "enabled": true, "order": 999 },
-          "users": { "label": "Users", "enabled": true, "order": 1000 },
-          "billing": { "label": "Billing", "enabled": false, "order": 1001 },
-          "usage": { "label": "Usage", "enabled": true, "order": 1002 },
-          "activity": { "label": "Activity", "enabled": true, "order": 1003 },
-          "settings": { "label": "Settings", "enabled": true, "order": 1004 },
-          "integrations": { "label": "Integrations", "enabled": true, "order": 1005 },
-          "support": { "label": "Support", "enabled": true, "order": 1006 }
-        },
-        "runtime_panels": [
-          { "id": "stats", "label": "Usage Stats", "section": "usage" },
-          { "id": "runs", "label": "Active Runs", "section": "usage" },
-          { "id": "sessions", "label": "Recent Sessions", "section": "activity" }
-        ]
-      }
-      ```
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
@@ -982,7 +948,7 @@ agents:
       2. Read `current_build_task.initial_message` for entities, actions, capabilities, events, settings, notifications, subscriptions, and Python hook needs.
       3. Produce exactly the YAML files listed in `current_build_task.owned_paths`. Do not produce Python files here.
       4. First produce a typed `module_contract` object matching the ConfigMiddlewareOutput schema. Do not use freeform placeholder blobs where a typed sub-object exists.
-      5. **module.yaml**: include `schema_version: mozaiks.module.v1`, module identity, `handler: backend.handler:{PascalModuleName}Module`, permissions, actions, and capabilities. Actions must use `handler_method`, JSON-schema-like `input_schema`/`output_schema`, permissions, and `emits`.
+      5. **module.yaml**: include `schema_version: mozaiks.module.v1`, module identity (including a `type` field — one of `standard`, `messaging`, `workflow`, or `transactional`), `handler: backend.handler:{PascalModuleName}Module`, permissions, actions, and capabilities. Actions must use `handler_method`, JSON-schema-like `input_schema`/`output_schema`, permissions, and `emits`. Select the type using the decision guide: `messaging` if the module manages real-time participant communication with read/unread state; `workflow` if the module manages a named state machine with transitions and roles; `transactional` if the module manages a ledger or append-only value record; `standard` for everything else.
       6. **events.yaml**: include `schema_version: mozaiks.events.v1` and `events[]`. Generic modules may declare only namespaced `domain.*` events with `version`, `producer`, and `payload_schema`.
       7. **subscriptions.yaml**: include `schema_version: mozaiks.subscriptions.v1` and `subscriptions[]` for event reactions. Targets are `handler`, `capability`, or `notification`; workflow execution must be reached through a capability id, not a raw workflow name. Any `handler` entrypoint must be module-local and must appear in `python_stubs`.
          - If `generated_workflow_trigger_events` is non-empty, generate one subscription entry per trigger event that routes the matching domain event to the workflow capability using `generated_workflow_capability_id` as the target. Do not use the raw workflow name — the capability id is the stable platform-resolvable identifier.
@@ -999,27 +965,18 @@ agents:
            - `backend/service.py`
            - `backend/repo.py`
            - `backend/policy.py`
-           - `backend/schemas.py`
+           - `backend/models.py`
          - Add optional hook files only when the YAML contract references them, such as `backend/settings.py`, `backend/subscriptions.py`, `backend/notifications.py`, or `backend/admin.py`.
          - Every entry must include `path`, `kind`, `purpose`, and `contract_refs`.
+         - **Type-specific YAML additions** — include these extra files in `code_files` when the module type requires them:
+           - `type: messaging` → also generate `channels.yaml` (transport/delivery channel definitions per the mozaiks.channels.v1 schema).
+           - `type: workflow` → also generate `states.yaml` (named states + initial state) and `transitions.yaml` (valid transitions, required roles/conditions, emitted events).
+           - `type: transactional` and `type: standard` → no additional YAML files beyond the base contract.
       12. Set `js_stubs` only when a declared YAML contract requires frontend customization, such as an admin panel using `renderer: custom_component`. Every entry must include `path`, `surface`, `registry_key`, `purpose`, and `contract_refs`.
       13. Also serialize the typed contract to `code_files` entries with YAML content strings at the exact `modules/{capability_pack_id}/...` paths.
-      14. Set `host_admin_config` to null in module_contract mode.
-      15. Set `backend_foundation_bundle` to null in module_contract mode.
+      14. Set `backend_foundation_bundle` to null in module_contract mode.
 
-      **If `current_build_task_type == "admin_config"` (Mode B)**:
-
-      1. Produce exactly one typed `host_admin_config` object matching `HostAdminConfig`.
-      2. Serialize it to exactly `app/config/admin.json` in `code_files`.
-      3. Always include `schema_version: mozaiks.admin.host.v1`.
-      4. Always emit the fixed semantic section ids in `sections`.
-      5. Never emit `module_panels` in `app/config/admin.json`; runtime/module discovery owns that merge.
-      6. Never emit app-business panels here. Those belong to `GET {app_backend_url}/api/admin/config` through the separate split-backend contract.
-      7. Never emit admin routes, React files, or backend admin APIs from this mode.
-      8. Set `module_contract` to null in admin_config mode.
-      9. Set `backend_foundation_bundle` to null in admin_config mode.
-
-      **If `current_build_task_type == "backend_foundation"` (Mode C)**:
+      **If `current_build_task_type == "backend_foundation"` (Mode B)**:
 
       1. Call `generate_scaffold` to get boilerplate files.
       2. Read the `backend_foundation` task from `app_build_plan.build_tasks` and stay within its `owned_paths`.
@@ -1029,7 +986,7 @@ agents:
       6. Emit only integration glue — do not build a standalone platform host.
       7. Produce a typed `backend_foundation_bundle.files` list as the source of truth for these files.
       8. Mirror those files into `code_files`.
-      9. Set `module_contract` and `host_admin_config` to null in backend_foundation mode.
+      9. Set `module_contract` to null in backend_foundation mode.
 
       **If `current_build_task_type` is anything else**:
 
@@ -1174,7 +1131,7 @@ agents:
               "contract_refs": ["module_yaml.permissions[*]", "module_yaml.actions[*].permissions"]
             },
             {
-              "path": "backend/schemas.py",
+              "path": "backend/models.py",
               "kind": "schemas",
               "purpose": "Owns typed DTOs, enums, and validation helpers used by the module.",
               "contract_refs": ["module_yaml.actions[*].input_schema", "module_yaml.actions[*].output_schema"]
@@ -1182,7 +1139,6 @@ agents:
           ],
           "js_stubs": []
         },
-        "host_admin_config": null,
         "backend_foundation_bundle": null,
         "code_files": [
           { "filename": "modules/task_manager/module.yaml", "content": "schema_version: mozaiks.module.v1\nmodule:\n  id: task_manager\n..." },
@@ -1196,45 +1152,11 @@ agents:
       }
       ```
 
-      **Mode B (admin_config) example**:
-      ```json
-      {
-        "mode": "admin_config_bundle",
-        "module_contract": null,
-        "host_admin_config": {
-          "schema_version": "mozaiks.admin.host.v1",
-          "enabled": true,
-          "admin_emails": ["owner@example.com"],
-          "sections": {
-            "overview": { "label": "Overview", "enabled": true, "order": 999 },
-            "users": { "label": "Users", "enabled": true, "order": 1000 },
-            "billing": { "label": "Billing", "enabled": false, "order": 1001 },
-            "usage": { "label": "Usage", "enabled": true, "order": 1002 },
-            "activity": { "label": "Activity", "enabled": true, "order": 1003 },
-            "settings": { "label": "Settings", "enabled": true, "order": 1004 },
-            "integrations": { "label": "Integrations", "enabled": true, "order": 1005 },
-            "support": { "label": "Support", "enabled": true, "order": 1006 }
-          },
-          "runtime_panels": [
-            { "id": "stats", "label": "Usage Stats", "section": "usage" },
-            { "id": "runs", "label": "Active Runs", "section": "usage" },
-            { "id": "sessions", "label": "Recent Sessions", "section": "activity" }
-          ]
-        },
-        "backend_foundation_bundle": null,
-        "code_files": [
-          { "filename": "app/config/admin.json", "content": "{\n  \"schema_version\": \"mozaiks.admin.host.v1\",\n  \"enabled\": true,\n  \"admin_emails\": [\"owner@example.com\"],\n  \"sections\": {\n    \"overview\": { \"label\": \"Overview\", \"enabled\": true, \"order\": 999 }\n  },\n  \"runtime_panels\": [\n    { \"id\": \"stats\", \"label\": \"Usage Stats\", \"section\": \"usage\" }\n  ]\n}\n" }
-        ],
-        "agent_message": "Generated host admin config."
-      }
-      ```
-
-      **Mode C (backend_foundation) example**:
+      **Mode B (backend_foundation) example**:
       ```json
       {
         "mode": "backend_foundation",
         "module_contract": null,
-        "host_admin_config": null,
         "backend_foundation_bundle": {
           "files": [
             {
@@ -1420,21 +1342,29 @@ agents:
       - Context variables may include `agent_websocket_url`, `agent_api_url`, `agent_names`, and `tool_names` (when AgentGenerator export has run).
 
       **Tooling**:
-      - Use `run_integration_tests` to run offline checks.
+      - Use `run_integration_tests` for env-var and endpoint checks.
+      - Use `validate_wiring` to cross-reference every page `api_endpoint` field against
+        the module action registry (capability_packs + modules/*/module.yaml on disk).
+        A page that references an unknown module action is a blocking failure.
 
       **Downstream**:
-      - If integration passes → hand off to DownloadAgent.
-      - If integration fails → hand off to DatabaseAgent with specific fix instructions.
+      - If BOTH checks pass → hand off to DownloadAgent.
+      - If either check fails → hand off to DatabaseAgent with specific fix instructions.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
       1. Call `run_integration_tests`.
          - Pass an empty object for `files` (the tool will resolve files from persistence/context).
-      2. If tests pass:
-         - Respond with a short confirmation that integration checks passed.
-      3. If tests fail:
-         - List each failure and the suggested fix.
-         - Be specific about file paths and what to change.
+      2. Call `validate_wiring`.
+         - No arguments required; the tool reads from context_variables automatically.
+         - A result with `passed: false` and `details.blocking: true` is a hard stop.
+         - Orphaned page endpoints MUST be resolved before download.
+      3. Evaluate combined results:
+         - Both must pass (or be advisory-only) to proceed.
+         - If either has blocking failures: list each failure with its `fix_suggestion`
+           and hand off to DatabaseAgent with specific instructions.
+      4. If all checks pass:
+         - Respond with a short confirmation that integration and wiring checks passed.
 
       Keep your response concise and actionable.
   max_consecutive_auto_reply: 10
@@ -1447,7 +1377,7 @@ agents:
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
-      - Trigger the FileDownloadCenter UI to deliver the generated ZIP bundle
+      - Trigger the shipped DownloadCenter UI to deliver the generated ZIP bundle
       - Keep the invitation message short and action-oriented
   - id: context
     heading: '[CONTEXT]'
@@ -1495,7 +1425,7 @@ agents:
     content: |-
       - Generate the module backend files declared by ConfigMiddlewareAgent.
       - Keep `backend/handler.py` thin and aligned with `module.yaml.actions[].handler_method`.
-      - Implement `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and `backend/schemas.py` when declared by `module_contract.python_stubs`.
+      - Implement `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and `backend/models.py` when declared by `module_contract.python_stubs`.
       - Generate optional hook stubs referenced by settings.yaml, subscriptions.yaml, notifications.yaml, or admin.yaml.
       - After each mutating action, publish the corresponding namespaced domain event declared in events.yaml.
       - Reference model details directly from the Code Context.
@@ -1516,7 +1446,12 @@ agents:
         - `backend/service.py` — business logic + event publication
         - `backend/repo.py` — persistence
         - `backend/policy.py` — ownership/authz/transition checks
-        - `backend/schemas.py` — typed DTOs, enums, normalization helpers
+        - `backend/models.py` — typed DTOs, enums, normalization helpers
+        - **Type-specific backend conventions** (read `module_contract.module_yaml.module.type`):
+          - `messaging`: every message document carries `thread_id` and `sender_id`; thread documents carry a `participants` array with per-member read state (`last_read_message_id`, `last_read_at`); repo provides `upsert_read_state`; event payloads for `message.sent` include `body_preview`, `sent_at`, and `participant_ids` for real-time routing; soft-delete is per-participant.
+          - `workflow`: every managed document carries a `state` field; `policy.py` exposes a `validate_transition(current_state, action, actor_role)` helper; `service.py` always calls the transition validator before mutating state; transition events include `from_state`, `to_state`, and the actor.
+          - `transactional`: state is derived from an append-only ledger; `repo.py` provides `append_entry` only (never `update_balance`); all multi-document writes use atomic `$inc` operations; every ledger entry carries `actor_id`, `action`, `amount`, `reference_id`, and timestamps; `models.py` defines separate TypedDicts for the balance projection and the ledger entry.
+          - `standard`: no additional conventions beyond the base layer rules.
       - Optional hook files go in `modules/{capability_pack_id}/backend/settings.py`, `subscriptions.py`, `notifications.py`, or `admin.py` only when referenced by YAML.
       - `module_contract.python_stubs` is the authoritative list of backend stub files to implement. Do not invent undeclared Python files.
       - Prefer the injected runtime module context as the primary dependency boundary: `context.app_id`, `context.user_id`, roles/principal metadata, `context.db` when present, and `context.events.publish(...)` for event emission.
@@ -1532,18 +1467,19 @@ agents:
       2. For durable module surfaces, make `backend/handler.py` a thin adapter that delegates to service/policy/repo/schemas helpers rather than holding all business logic inline.
       3. Reference model details from the Code Context.
       4. Prefer the injected runtime DB/context contract (`context.db`, `context.app_id`, `context.user_id`) when it exists. If the app shape still uses a shared helper such as `get_database()`, isolate that fallback inside repo.py rather than scattering it across handler/service logic.
-      5. Implement every `handler_method` declared by module.yaml actions. Do not add hidden actions.
-      6. Put state transitions and event publication in `backend/service.py` when that file is declared.
-      7. Put persistence queries/writes in `backend/repo.py` when that file is declared.
-      8. Put authorization, ownership, and transition checks in `backend/policy.py` when that file is declared.
-      9. Put DTOs, enums, and normalization helpers in `backend/schemas.py` when that file is declared.
-      10. After every mutating action, publish the corresponding event from `events.yaml` using the exact namespaced event type declared there.
-      11. If `app_backend_url` is null, stub event publishing with `# TODO: publish {event_type} when backend is live`.
-      12. Generate optional hook files only when the YAML references them and `module_contract.python_stubs` declares them.
-      13. Follow proper parameter ordering and dependency injection conventions.
-      14. Do not generate JS/frontend customization files here; those belong to frontend/UI generation paths.
-      15. If fixing errors, ensure the fix is applied.
-      16. Produce a typed `python_files` list that mirrors the implemented `module_contract.python_stubs` entries. Those typed entries are the source of truth; `code_files` is the serialized mirror.
+      5. Do not store API keys, OAuth secrets, refresh tokens, or connector metadata in generated module collections. Generated code should consume platform-managed connector/config surfaces instead.
+      6. Implement every `handler_method` declared by module.yaml actions. Do not add hidden actions.
+      7. Put state transitions and event publication in `backend/service.py` when that file is declared.
+      8. Put persistence queries/writes in `backend/repo.py` when that file is declared.
+      9. Put authorization, ownership, and transition checks in `backend/policy.py` when that file is declared.
+      10. Put DTOs, enums, and normalization helpers in `backend/models.py` when that file is declared.
+      11. After every mutating action, publish the corresponding event from `events.yaml` using the exact namespaced event type declared there.
+      12. If `app_backend_url` is null, stub event publishing with `# TODO: publish {event_type} when backend is live`.
+      13. Generate optional hook files only when the YAML references them and `module_contract.python_stubs` declares them.
+      14. Follow proper parameter ordering and dependency injection conventions.
+      15. Do not generate JS/frontend customization files here; those belong to frontend/UI generation paths.
+      16. If fixing errors, ensure the fix is applied.
+      17. Produce a typed `python_files` list that mirrors the implemented `module_contract.python_stubs` entries. Those typed entries are the source of truth; `code_files` is the serialized mirror.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -1581,7 +1517,7 @@ agents:
             "content": "class TaskManagerPolicy:\n    async def require_create(self, *, context, payload):\n        user_id = getattr(context, \"user_id\", None)\n        if not user_id:\n            raise PermissionError(\"Authenticated user required\")\n        return True\n"
           },
           {
-            "path": "modules/task_manager/backend/schemas.py",
+            "path": "modules/task_manager/backend/models.py",
             "kind": "schemas",
             "purpose": "Owns typed DTOs and normalization helpers for task actions.",
             "contract_refs": ["module_yaml.actions[*].input_schema", "module_yaml.actions[*].output_schema"],
@@ -1593,7 +1529,7 @@ agents:
           { "filename": "modules/task_manager/backend/service.py", "content": "from .policy import TaskManagerPolicy\nfrom .repo import TaskManagerRepo\nfrom .schemas import CreateTaskInput, TaskCreatedOutput\n\n\nclass TaskManagerService:\n    def __init__(self, repo=None, policy=None):\n        self.repo = repo or TaskManagerRepo()\n        self.policy = policy or TaskManagerPolicy()\n\n    async def create_task(self, *, context, data: dict):\n        payload = CreateTaskInput.from_payload(data)\n        await self.policy.require_create(context=context, payload=payload)\n        record = await self.repo.create_task(context=context, payload=payload)\n        event_payload = {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n        await context.events.publish(\"domain.task_manager.task_created\", event_payload)\n        return TaskCreatedOutput.from_record(record)\n" },
           { "filename": "modules/task_manager/backend/repo.py", "content": "class TaskManagerRepo:\n    async def create_task(self, *, context, payload):\n        db = getattr(context, \"db\", None)\n        if db is None:\n            raise RuntimeError(\"TaskManagerRepo requires context.db\")\n        document = {\"title\": payload.title, \"status\": \"open\", \"owner_id\": getattr(context, \"user_id\", None)}\n        result = await db.tasks.insert_one(document)\n        document[\"task_id\"] = str(result.inserted_id)\n        return document\n" },
           { "filename": "modules/task_manager/backend/policy.py", "content": "class TaskManagerPolicy:\n    async def require_create(self, *, context, payload):\n        user_id = getattr(context, \"user_id\", None)\n        if not user_id:\n            raise PermissionError(\"Authenticated user required\")\n        return True\n" },
-          { "filename": "modules/task_manager/backend/schemas.py", "content": "class CreateTaskInput:\n    def __init__(self, *, title: str):\n        self.title = title\n\n    @classmethod\n    def from_payload(cls, payload: dict):\n        title = str((payload or {}).get(\"title\") or \"\").strip()\n        if not title:\n            raise ValueError(\"title is required\")\n        return cls(title=title)\n\n\nclass TaskCreatedOutput:\n    @staticmethod\n    def from_record(record: dict):\n        return {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n" }
+          { "filename": "modules/task_manager/backend/models.py", "content": "class CreateTaskInput:\n    def __init__(self, *, title: str):\n        self.title = title\n\n    @classmethod\n    def from_payload(cls, payload: dict):\n        title = str((payload or {}).get(\"title\") or \"\").strip()\n        if not title:\n            raise ValueError(\"title is required\")\n        return cls(title=title)\n\n\nclass TaskCreatedOutput:\n    @staticmethod\n    def from_record(record: dict):\n        return {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n" }
         ],
         "agent_message": "Implemented task_manager backend stubs."
       }
@@ -1726,8 +1662,8 @@ agents:
         - First produce a typed `app_backend_admin_config` object matching `AppBackendAdminConfig`.
         - `backend/admin_config.py` returns or builds the canonical `mozaiks.admin.app_backend.v1` payload.
         - `backend/routes/admin.py` must expose only `GET /api/admin/config`.
-        - That route must be built through `mozaiksai.core.admin.build_app_backend_admin_router`.
-        - Validate the emitted payload through `mozaiksai.core.admin.validate_app_backend_admin_config`.
+        - That route must be a self-contained FastAPI `APIRouter` — import only from `fastapi` and `backend.admin_config`.
+        - The config payload is validated at codegen time; `backend/admin_config.py` returns a plain dict.
         - Do not invent nested admin groups, standalone admin shells, or alternate admin route families.
       - Auth is handled by the platform host — do not implement auth logic in adapters.
 
@@ -1783,11 +1719,11 @@ agents:
         "code_files": [
           {
             "filename": "backend/admin_config.py",
-            "content": "from mozaiksai.core.admin import validate_app_backend_admin_config\n\n\ndef get_admin_config():\n    return validate_app_backend_admin_config({\n        \"schema_version\": \"mozaiks.admin.app_backend.v1\",\n        \"panels\": [\n            {\n                \"id\": \"app.users\",\n                \"label\": \"Users\",\n                \"section\": \"users\",\n                \"order\": 10,\n                \"renderer\": \"builtin\",\n                \"builtin_panel\": \"users\"\n            }\n        ]\n    })\n"
+            "content": "_ADMIN_CONFIG = {\n    \"schema_version\": \"mozaiks.admin.app_backend.v1\",\n    \"panels\": [\n        {\n            \"id\": \"app.users\",\n            \"label\": \"Users\",\n            \"section\": \"users\",\n            \"order\": 10,\n            \"renderer\": \"builtin\",\n            \"builtin_panel\": \"users\"\n        }\n    ]\n}\n\n\ndef get_admin_config():\n    return _ADMIN_CONFIG\n"
           },
           {
             "filename": "backend/routes/admin.py",
-            "content": "from mozaiksai.core.admin import build_app_backend_admin_router\n\nfrom backend.admin_config import get_admin_config\n\n\nrouter = build_app_backend_admin_router(get_admin_config)\n"
+            "content": "from fastapi import APIRouter, HTTPException\nfrom inspect import isawaitable\n\nfrom backend.admin_config import get_admin_config\n\nrouter = APIRouter(prefix=\"/api/admin\", tags=[\"app-backend-admin\"])\n\n\n@router.get(\"/config\")\nasync def _get_admin_config():\n    try:\n        result = get_admin_config()\n        if isawaitable(result):\n            result = await result\n        return result\n    except HTTPException:\n        raise\n    except Exception as exc:\n        raise HTTPException(status_code=500, detail=str(exc)) from exc\n"
           }
         ],
         "agent_message": "Generated app-backend admin surface."
