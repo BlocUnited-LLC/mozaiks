@@ -480,7 +480,7 @@ That produces a better DX than forcing every change through `AgentGenerator` or 
 
 ### Python API
 
-**Location:** `factory_app/app/modules/factory_control_plane/backend/refinement_router.py`
+**Location:** `factory_app/control_plane/refinement_router.py`
 
 The module exposes a framework-owned refinement resolver. Studio and Mozaiks wire
 it into SessionRouter through the runtime trigger-route resolver seam, so the
@@ -488,7 +488,7 @@ runtime stays policy-agnostic while the shared generation layer owns create and
 refinement routing.
 
 ```python
-from factory_app.app.modules.factory_control_plane.backend.refinement_router import (
+from factory_app.control_plane.refinement_router import (
     ChangeClass,     # Enum: patch | design | feature | core
     ArtifactKind,    # Enum: app_bundle | workflow_bundle | design_docs | concept
     RefinementRequest,

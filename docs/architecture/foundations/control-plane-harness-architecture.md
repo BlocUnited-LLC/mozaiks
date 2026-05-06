@@ -303,30 +303,31 @@ Today the repo is in a bridge state:
 - the config contract is early
 - the tool/profile system does not exist yet
 
-Current transitional placement:
+Current first-party implementation placement:
 
-- `factory_app/app/modules/factory_control_plane/backend/*`
+- `factory_app/control_plane/*`
 
-That is functional, but misleading. Those files are not loaded by the dynamic
-module system. They are directly imported by the Studio host.
+That is the correct first-party implementation seam. The dynamic module system
+still does not load these files. They are injected by the Studio host and sit
+outside the module-runtime action contract.
 
 ## Implementation Checklist
 
 ### Phase 1: Establish core/control-plane boundary
 
-- [ ] Create `mozaiksai/core/control_plane/`
-- [ ] Move generic control-plane config/contracts out of `factory_app`
-- [ ] Define ports for classifier, router policy, coding worker, and tool executor
-- [ ] Keep `factory_app` implementation-specific logic out of core
+- [x] Create `mozaiksai/core/control_plane/`
+- [x] Move generic control-plane config/contracts out of `factory_app`
+- [x] Define ports for classifier, router policy, coding worker, and tool executor
+- [x] Keep `factory_app` implementation-specific logic out of core
 
 ### Phase 2: Move first-party implementation
 
-- [ ] Create `factory_app/control_plane/`
-- [ ] Move `orchestration_control.py` there
-- [ ] Move `change_classifier.py` there
-- [ ] Move `refinement_router.py` there
-- [ ] Update Studio imports to use the new package
-- [ ] Leave `factory_app/app/modules/factory_control_plane/` only for true module/admin/runtime concerns
+- [x] Create `factory_app/control_plane/`
+- [x] Move `orchestration_control.py` there
+- [x] Move `change_classifier.py` there
+- [x] Move `refinement_router.py` there
+- [x] Update Studio imports to use the new package
+- [x] Leave `factory_app/app/modules/factory_control_plane/` only for true module/admin/runtime concerns
 
 ### Phase 3: Introduce control-plane pack declaratives
 
