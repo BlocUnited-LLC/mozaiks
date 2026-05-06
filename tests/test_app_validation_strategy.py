@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -44,9 +45,21 @@ def _clean_factory_app_syspath():
 
 
 def _import_workflow_module(module_name: str):
-    """Import a workflow tool file by dotted path under factory_app/workflows/."""
-    # factory_app/ is already on sys.path via the autouse fixture
-    return importlib.import_module(module_name)
+    """Import a workflow tool file directly from this repo's workflow pack."""
+    parts = module_name.split(".")
+    if len(parts) < 4 or parts[0] != "workflows":
+        return importlib.import_module(module_name)
+
+    workflow_name = parts[1]
+    relative_parts = parts[3:]
+    file_path = _workspace() / "factory_app" / "workflows" / workflow_name / "tools" / f"{relative_parts[-1]}.py"
+    module_name_direct = f"tests.{workflow_name.lower()}_{relative_parts[-1]}_direct"
+    spec = importlib.util.spec_from_file_location(module_name_direct, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load module spec for {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class _Context:
@@ -90,18 +103,13 @@ def test_resolve_export_gate_uses_validation_status_and_integration(status, inte
 
 
 def test_validation_strategy_defaults_to_skip_when_e2b_and_local_are_unavailable(monkeypatch) -> None:
-    from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
-        resolve_app_validation_strategy,
-    )
+    from mozaiksai.core.workflow.generator_support import app_validation_strategy as app_validation_strategy_module
 
     monkeypatch.delenv("E2B_API_KEY", raising=False)
     monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
-    monkeypatch.setattr(
-        "mozaiksai.core.workflow.generator_support.app_validation_strategy.local_app_validation_available",
-        lambda: False,
-    )
+    monkeypatch.setattr(app_validation_strategy_module, "local_app_validation_available", lambda: False)
 
-    strategy, reason = resolve_app_validation_strategy(requested=None, context_value=None)
+    strategy, reason = app_validation_strategy_module.resolve_app_validation_strategy(requested=None, context_value=None)
 
     assert strategy == "skip"
     assert "resolved" in reason
@@ -148,3 +156,12 @@ def test_validate_app_build_skip_strategy_persists_context() -> None:
     assert context.get("app_validation_status") == "skipped"
     assert context.get("app_validation_strategy_used") == "skip"
     assert context.get("app_validation_preview_url") is None
+
+
+def test_validate_wiring_tool_annotations_are_runtime_resolved() -> None:
+    from mozaiksai.core.workflow.agents.tools import load_agent_tool_functions
+
+    mapping = load_agent_tool_functions("AppGenerator")
+    validate_wiring = next(fn for fn in mapping["IntegrationTestAgent"] if fn.__name__ == "validate_wiring")
+
+    assert validate_wiring.__annotations__["context_variables"] != "Optional[Dict[str, Any]]"

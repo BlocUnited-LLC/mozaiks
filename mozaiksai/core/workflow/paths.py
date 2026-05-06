@@ -77,25 +77,30 @@ def normalize_workflow_roots(
             add(value)
         return candidates
 
-    explicit_roots = _split_roots(str(os.getenv("MOZAIKS_WORKFLOW_ROOTS") or "").strip())
-    if explicit_roots:
-        for value in explicit_roots:
-            add(value)
-        return candidates
-
     single_root = str(os.getenv("MOZAIKS_WORKFLOWS_PATH") or "").strip()
     if single_root:
         add(single_root)
         return candidates
 
+    # Legacy compatibility: if callers still provide MOZAIKS_WORKFLOW_ROOTS,
+    # treat the first entry as the selected root instead of merging roots.
+    explicit_roots = _split_roots(str(os.getenv("MOZAIKS_WORKFLOW_ROOTS") or "").strip())
+    if explicit_roots:
+        add(explicit_roots[0])
+        return candidates
+
     resolved_active_root = resolve_active_app_root()
     unconfigured_root = _unconfigured_active_app_root()
     if resolved_active_root != unconfigured_root:
-        add((resolved_active_root / "workflows").resolve())
+        app_workflows_root = (resolved_active_root / "workflows").resolve()
+        if app_workflows_root.is_dir():
+            add(app_workflows_root)
+            return candidates
 
     repo_factory_root = _repo_factory_workflows_root()
     if repo_factory_root.is_dir():
         add(repo_factory_root)
+        return candidates
 
     if not candidates:
         add((resolved_active_root / "workflows").resolve())

@@ -20,6 +20,7 @@ from mozaiksai.core.workflow.workflow_ui_catalog import (
     get_workflow_shipped_component_names,
     get_workflow_shipped_component_map,
     get_workflow_ui_primitive_ids,
+    infer_workflow_ui_realization,
     validate_workflow_ui_primitive_ids,
 )
 
@@ -96,6 +97,7 @@ def tool_planning(
             normalized_requirement["component"] = None
             normalized_requirement["display"] = "composer"
             normalized_requirement["primitives_hint"] = []
+            normalized_requirement["realization"] = "shell_builtin"
         else:
             shipped_component = shipped_component_map.get(normalized_requirement["workflow_primitive"])
             component_name = str(normalized_requirement.get("component") or "").strip()
@@ -104,6 +106,10 @@ def tool_planning(
                 component_name = shipped_component
             if shipped_component and component_name == shipped_component:
                 normalized_requirement["primitives_hint"] = []
+            normalized_requirement["realization"] = infer_workflow_ui_realization(
+                normalized_requirement["workflow_primitive"],
+                normalized_requirement.get("component"),
+            )
         normalized_ui_requirements.append(normalized_requirement)
 
     normalized_payload = dict(ToolPlanning)

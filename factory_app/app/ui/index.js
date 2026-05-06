@@ -39,7 +39,7 @@ export function registerStudioComponents(registerComponent) {
   });
 
   registerComponent('StudioAdaptersPage', StudioAdaptersPage, {
-    description: 'Studio Adapters surface — shows API key and adapter configuration status for the runtime.',
+    description: 'Studio Adapters surface — focused third-party adapter inventory and CRUD controls for app-scoped integrations.',
   });
 }
 

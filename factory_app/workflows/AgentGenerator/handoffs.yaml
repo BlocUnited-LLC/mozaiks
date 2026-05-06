@@ -67,37 +67,14 @@ handoff_rules:
   handoff_type: condition
   condition_type: expression
   condition_scope: pre
-  condition: ${action_plan_acceptance} == "accepted"
+  condition: ${workflow_review_approved} == True
   transition_target: AgentTarget
 - source_agent: user
   target_agent: PatternAgent
   handoff_type: condition
   condition_type: expression
   condition_scope: pre
-  condition: ${action_plan} != None and ${action_plan_acceptance} != "accepted"
-  transition_target: AgentTarget
-- source_agent: user
-  target_agent: ContextVariablesAgent
-  handoff_type: condition
-  condition_type: expression
-  condition_scope: null
-  condition: ${action_plan_acceptance} == "accepted"
-  transition_target: AgentTarget
-- source_agent: user
-  target_agent: PatternAgent
-  handoff_type: condition
-  condition_type: expression
-  condition_scope: null
-  condition: ${action_plan} != None and ${action_plan_acceptance} != "accepted"
-  transition_target: AgentTarget
-- source_agent: user
-  target_agent: PatternAgent
-  handoff_type: condition
-  condition_type: string_llm
-  condition_scope: null
-  condition: When the user provides feedback, suggestions, changes, or critique about
-    the workflow, action plan, phases, agents, operations, integrations, or any aspect
-    of the proposed solution.
+  condition: ${workflow_review_revision_requested} == True
   transition_target: AgentTarget
 - source_agent: ContextVariablesAgent
   target_agent: ToolsManagerAgent

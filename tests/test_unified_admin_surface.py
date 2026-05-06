@@ -15,7 +15,7 @@ def _read(relative_path: str) -> str:
 
 def test_admin_portal_is_the_only_registered_admin_page() -> None:
     core_source = _read("chat-ui/src/registry/coreComponents.js")
-    studio_source = _read("factory_app/app/ui/studio/index.js")
+    studio_source = _read("factory_app/app/ui/index.js")
 
     assert "registerComponent('AdminPortal'" not in core_source
     assert "registerComponent('AdminPortal'" in studio_source
@@ -65,6 +65,16 @@ def test_platform_shell_registers_admin_section_routes() -> None:
     assert "build_admin_shell_routes" in platform_source
 
 
+def test_platform_host_mounts_admin_api_routes() -> None:
+    import importlib
+
+    platform_host = importlib.import_module("mozaiksai.hosts.platform")
+    routes = {route.path for route in platform_host.app.routes}
+
+    assert "/api/admin/config" in routes
+    assert "/api/admin/stats" in routes
+
+
 def test_profile_menu_uses_framework_defaults() -> None:
     source = _read("chat-ui/src/components/layout/Header.js")
 
@@ -88,7 +98,7 @@ def test_app_admin_dashboard_is_panel_group_not_registered_route() -> None:
 def test_runtime_admin_config_uses_flat_panel_collections() -> None:
     source = _read("mozaiksai/core/admin/router.py")
 
-    assert "DEFAULT_ADMIN_CONFIG" in source
+    assert "DEFAULT_ADMIN_SHELL_CONFIG" in source
     assert "_load_module_admin_panels" in source
     assert '"runtime_panels"' in source
     assert '"module_panels"' in source

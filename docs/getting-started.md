@@ -140,6 +140,9 @@ Before launching Studio, set:
 - your LLM key
 - your Mongo connection string
 
+If you want the exact breakdown of what is required versus optional, read
+[User Configuration](user-configuration.md).
+
 ### PowerShell example
 
 ```powershell

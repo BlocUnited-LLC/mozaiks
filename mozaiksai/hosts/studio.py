@@ -10,26 +10,33 @@ workflow triggering on top of the headless platform host.
 from typing import Any, Dict, Literal, Optional
 
 from fastapi import Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from mozaiksai.hosts.bootstrap import configure_repo_host_defaults
 
 configure_repo_host_defaults("studio")
 
 from mozaiksai.hosts import platform as platform_app
-from factory_app.app.modules.factory_control_plane.backend.refinement_router import (
-    get_refinement_trigger_route_resolver,
+from factory_app.control_plane.orchestration_control import (
+    get_orchestration_control_harness,
 )
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.auth import UserPrincipal, require_any_auth, require_user_scope
 from mozaiksai.core.runtime.app.studio_home import (
     build_create_section,
     build_studio_adapters_summary,
+    build_studio_apps_summary,
     build_studio_home_summary,
     build_studio_create_summary,
     get_missing_studio_surfaces,
     load_studio_create_state_from_db,
     save_studio_create_state_to_db,
+)
+from mozaiksai.core.workflow.generator_support.connector_service import (
+    delete_connector,
+    list_connectors,
+    store_connector,
+    update_connector_metadata,
 )
 from mozaiksai.core.session.launcher import launch_prepared_workflow, prepare_routed_workflow_launch
 from mozaiksai.core.session.router import configure_session_router
@@ -45,28 +52,8 @@ app = platform_app.app
 logger = get_workflow_logger("studio_app")
 
 configure_session_router(
-    trigger_route_resolver=get_refinement_trigger_route_resolver(),
+    trigger_route_resolver=get_orchestration_control_harness(),
 )
-
-
-def _build_trigger_payload(
-    *,
-    change_class: Optional[str] = None,
-    artifact_kind: Optional[str] = None,
-    artifact_version_id: Optional[str] = None,
-    raw_user_request: Optional[str] = None,
-) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {}
-    if change_class is not None:
-        payload["change_class"] = change_class
-    if artifact_kind is not None:
-        payload["artifact_kind"] = artifact_kind
-    if artifact_version_id is not None:
-        payload["artifact_version_id"] = artifact_version_id
-    if raw_user_request is not None:
-        payload["raw_user_request"] = raw_user_request
-    return payload
-
 
 def _resolve_studio_scope(
     principal: UserPrincipal,
@@ -107,12 +94,162 @@ async def get_studio_home(
         raise HTTPException(status_code=500, detail=f"Failed to build Studio Home summary: {exc}") from exc
 
 
-@app.get("/api/studio/adapters")
-async def get_studio_adapters(
+@app.get("/api/studio/apps")
+async def get_studio_apps(
     principal: UserPrincipal = Depends(require_any_auth),
 ):
     _ = principal
-    return await build_studio_adapters_summary()
+    app_root = resolve_app_root()
+    missing_surfaces = get_missing_studio_surfaces(app_root)
+    if missing_surfaces:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Studio Hub is missing required surfaces: {', '.join(missing_surfaces)}",
+        )
+
+    try:
+        return build_studio_apps_summary(app_root, surface="shell-hub", local_only=True)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to build Studio Hub summary: {exc}") from exc
+
+
+@app.get("/api/studio/adapters")
+async def get_studio_adapters(
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    app_id, _ = _resolve_studio_scope(principal)
+    return await build_studio_adapters_summary(app_id=app_id)
+
+
+@app.get("/api/studio/adapters/connectors")
+async def get_studio_connectors(
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    app_id, _ = _resolve_studio_scope(principal)
+    connectors = await list_connectors(app_id)
+    return {
+        "app_id": app_id,
+        "connectors": connectors,
+    }
+
+
+class StudioConnectorPatchRequest(BaseModel):
+    display_name: Optional[str] = None
+    notes: Optional[str] = None
+    status: Optional[Literal["metadata_only", "active", "expiring", "expired", "revoked"]] = None
+    expires_at: Optional[str] = None
+    secret_value: Optional[str] = None
+    ttl_days: Optional[int] = Field(default=30, ge=1, le=3650)
+
+
+class StudioConnectorCreateRequest(StudioConnectorPatchRequest):
+    service: str = Field(..., description="Connector service identifier, such as openai or stripe")
+
+
+@app.post("/api/studio/adapters/connectors")
+async def create_or_update_studio_connector(
+    body: StudioConnectorCreateRequest,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    app_id, user_id = _resolve_studio_scope(principal)
+    record = None
+    secret_result: Optional[Dict[str, Any]] = None
+    if body.secret_value:
+        secret_result = await store_connector(
+            app_id=app_id,
+            user_id=user_id,
+            service=body.service,
+            secret_value=body.secret_value,
+            display_name=body.display_name,
+            ttl_days=body.ttl_days or 30,
+        )
+        record = secret_result.get("record")
+    if body.display_name is not None or body.notes is not None or body.status is not None or body.expires_at is not None:
+        record = await update_connector_metadata(
+            app_id=app_id,
+            service=body.service,
+            user_id=user_id,
+            display_name=body.display_name,
+            notes=body.notes,
+            status=body.status or (secret_result or {}).get("connector_status") or "metadata_only",
+            expires_at=body.expires_at,
+        )
+    if not record:
+        from mozaiksai.core.data.persistence import AppConnectorStore
+
+        store = AppConnectorStore()
+        record = await store.upsert_connector(
+            app_id=app_id,
+            service=body.service,
+            display_name=body.display_name,
+            user_id=user_id,
+            status=body.status or "metadata_only",
+            secret_storage="unmanaged",
+            secret_available=False,
+            notes=body.notes,
+            expires_at=body.expires_at,
+            status_reason="Created manually from the Studio adapters surface.",
+        )
+    return {
+        "app_id": app_id,
+        "connector": record,
+        "secret_result": secret_result,
+    }
+
+
+@app.patch("/api/studio/adapters/connectors/{service}")
+async def patch_studio_connector(
+    service: str,
+    body: StudioConnectorPatchRequest,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    from mozaiksai.core.data.persistence import AppConnectorStore
+
+    app_id, user_id = _resolve_studio_scope(principal)
+    store = AppConnectorStore()
+    existing = await store.get_connector(app_id=app_id, service=service)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Connector not found: {service}")
+
+    secret_result: Optional[Dict[str, Any]] = None
+    if body.secret_value:
+        secret_result = await store_connector(
+            app_id=app_id,
+            user_id=user_id,
+            service=service,
+            secret_value=body.secret_value,
+            display_name=body.display_name,
+            ttl_days=body.ttl_days or 30,
+        )
+    record = await update_connector_metadata(
+        app_id=app_id,
+        service=service,
+        user_id=user_id,
+        display_name=body.display_name,
+        notes=body.notes,
+        status=body.status,
+        expires_at=body.expires_at,
+    )
+    return {
+        "app_id": app_id,
+        "connector": record,
+        "secret_result": secret_result,
+    }
+
+
+@app.delete("/api/studio/adapters/connectors/{service}")
+async def remove_studio_connector(
+    service: str,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    app_id, _ = _resolve_studio_scope(principal)
+    result = await delete_connector(app_id=app_id, service=service)
+    if not result.get("deleted"):
+        raise HTTPException(status_code=404, detail=f"Connector not found: {service}")
+    return {
+        "app_id": app_id,
+        **result,
+    }
 
 
 @app.get("/api/studio/history")
@@ -311,14 +448,42 @@ async def trigger_workflow(
 ):
     app_id, user_id = _resolve_studio_scope(principal, app_id=body.app_id, user_id=body.user_id)
     trigger_payload = dict(body.trigger_payload or {})
-    resolved_change_class = str(trigger_payload.get("change_class") or "").strip() or None
-    resolved_artifact_kind = str(trigger_payload.get("artifact_kind") or "").strip() or None
-    resolved_artifact_version_id = str(trigger_payload.get("artifact_version_id") or "").strip() or None
-    resolved_raw_user_request = str(trigger_payload.get("raw_user_request") or "").strip() or None
+    orchestration_control = get_orchestration_control_harness()
+    refinement_request = None
+    refinement_decision = None
+    resolved_change_class = None
+    resolved_artifact_kind = None
+    resolved_artifact_version_id = None
 
-    valid_change_classes = {"patch", "design", "feature", "core"}
-    if resolved_change_class and resolved_change_class not in valid_change_classes:
-        raise HTTPException(status_code=400, detail=f"Invalid change_class. Must be one of: {valid_change_classes}")
+    if body.trigger_source == "refinement":
+        try:
+            refinement_request = orchestration_control.request_from_payload(
+                payload=trigger_payload,
+                app_id=app_id,
+                requested_workflow_id=body.workflow_id,
+                default_source_surface=(
+                    str((body.context_variables or {}).get("screen") or "").strip() or None
+                ),
+            )
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid refinement_request: {exc}") from exc
+
+        if refinement_request is None:
+            raise HTTPException(
+                status_code=400,
+                detail="refinement triggers require trigger_payload.refinement_request.",
+            )
+
+        try:
+            refinement_decision = await orchestration_control.route_refinement_request(refinement_request)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"Refinement classification unavailable: {exc}") from exc
+        resolved_change_class = refinement_decision.change_intent.change_class.value
+        resolved_artifact_kind = refinement_request.artifact_kind.value
+        resolved_artifact_version_id = refinement_request.artifact_version_id
+        trigger_payload = {
+            "refinement_request": refinement_request.model_dump(mode="python"),
+        }
 
     try:
         launch = await prepare_routed_workflow_launch(
@@ -344,18 +509,22 @@ async def trigger_workflow(
     resolved_workflow_id = launch.workflow_id
     routing_decision = launch.routing_decision
 
-    if body.trigger_source == "refinement" and resolved_change_class:
+    if refinement_request is not None and refinement_decision is not None:
         try:
             artifact_store = get_artifact_store()
             await artifact_store.create_change_request(
                 app_id=app_id,
-                artifact_kind=resolved_artifact_kind or "app_bundle",
-                artifact_key=body.artifact_key or resolved_artifact_kind or "app_bundle",
-                artifact_version_id=resolved_artifact_version_id or "",
-                raw_user_request=resolved_raw_user_request or "",
-                classification=ChangeClassification(resolved_change_class),
+                artifact_kind=refinement_request.artifact_kind.value,
+                artifact_key=body.artifact_key or refinement_request.normalized_artifact_key(),
+                artifact_version_id=refinement_request.artifact_version_id,
+                raw_user_request=refinement_request.raw_user_request,
+                classification=ChangeClassification(refinement_decision.change_intent.change_class.value),
+                refinement_request=refinement_request.model_dump(mode="python"),
+                change_intent=refinement_decision.change_intent.model_dump(mode="python"),
+                impact_set=refinement_decision.impact_set.model_dump(mode="python"),
                 router_decision={
                     "workflow_id": resolved_workflow_id,
+                    "requested_workflow_id": routing_decision.requested_workflow_id,
                     "explanation": routing_decision.explanation,
                     "is_full_restart": routing_decision.is_full_restart,
                     "rerouted_by_dependency": routing_decision.rerouted_by_dependency,

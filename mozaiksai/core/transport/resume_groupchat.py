@@ -67,6 +67,7 @@ class GroupChatResumer:
 
         replay_result = await self._replay_messages(
             chat_id=chat_id,
+            app_id=app_id,
             messages=messages,
             send_event=send_event,
             mode="auto",
@@ -130,6 +131,7 @@ class GroupChatResumer:
 
         replay_result = await self._replay_messages(
             chat_id=chat_id,
+            app_id=app_id,
             messages=messages,
             send_event=send_event,
             mode="client",
@@ -152,6 +154,7 @@ class GroupChatResumer:
         self,
         *,
         chat_id: str,
+        app_id: Optional[str],
         messages: List[Dict[str, Any]],
         send_event: SendEventFunc,
         mode: str,
@@ -241,7 +244,10 @@ class GroupChatResumer:
         try:
             pm = self._get_persistence_manager()
             if pm:
-                pending = await pm.get_pending_input_request(chat_id=chat_id)
+                pending = await pm.get_pending_input_request(
+                    chat_id=chat_id,
+                    app_id=app_id,
+                )
                 if pending:
                     self.logger.info(
                         "[AUTO_RESUME] Re-emitting pending input request: %s (chat=%s)",
@@ -264,6 +270,17 @@ class GroupChatResumer:
                         ),
                         chat_id,
                     )
+                    raw_payload = pending.get("raw_payload") if isinstance(pending.get("raw_payload"), dict) else {}
+                    if raw_payload.get("resume_ui_kind") == "awaiting_reply":
+                        await send_event(
+                            self._build_awaiting_reply_event(
+                                agent=pending.get("agent", "Agent"),
+                                prompt=pending.get("prompt", ""),
+                                chat_id=chat_id,
+                                workflow_name=pending.get("workflow_name"),
+                            ),
+                            chat_id,
+                        )
         except Exception as e:
             self.logger.debug("[AUTO_RESUME] Failed to check pending input request: %s", e)
 
@@ -462,7 +479,7 @@ class GroupChatResumer:
         interaction_type: str = "input_request",
         password: bool = False,
         raw_payload: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        ) -> Dict[str, Any]:
         """Build a response-required tool_call payload for UI resume."""
         resolved_component = component_type or "UserInputRequest"
         resolved_tool_name = tool_name or component_type or resolved_component
@@ -493,6 +510,31 @@ class GroupChatResumer:
             "agent": agent,
             "chat_id": chat_id,
             "payload": payload,
+            "replay": True,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "metadata": {
+                "source": "resume_pending_input",
+            },
+        }
+
+    def _build_awaiting_reply_event(
+        self,
+        *,
+        agent: str,
+        prompt: str,
+        chat_id: str,
+        workflow_name: Optional[str],
+    ) -> Dict[str, Any]:
+        return {
+            "kind": "awaiting_reply",
+            "agent": agent or "Agent",
+            "chat_id": chat_id,
+            "workflow_name": workflow_name,
+            "display": "composer",
+            "interaction_type": "input_request",
+            "reason": "awaiting_user_reply",
+            "prompt": prompt or "",
+            "source_agent": agent or "Agent",
             "replay": True,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "metadata": {

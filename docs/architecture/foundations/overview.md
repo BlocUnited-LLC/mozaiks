@@ -13,10 +13,13 @@ contributors should share before reading implementation deep dives.
 6. [Core, Product, and App Bundle Boundary](core-product-app-bundle-boundary.md)
 7. [Account, Admin, and Platform Services](account-admin-and-platform-services.md)
 8. [Workflow Architecture](workflow-architecture.md)
-9. [Workflow Authoring Contracts](workflow-authoring-contracts.md)
-10. [Declarative AG2 Mapping](declarative-ag2-mapping.md)
-11. [Event System](event-system.md)
-12. [Event Contracts](event-contracts.md)
+9. [Control-Plane Harness Architecture](control-plane-harness-architecture.md)
+10. [Orchestration Control Loops](orchestration-control-loops.md)
+11. [Workflow Authoring Contracts](workflow-authoring-contracts.md)
+12. [Declarative AG2 Mapping](declarative-ag2-mapping.md)
+13. [Event System](event-system.md)
+14. [Event Contracts](event-contracts.md)
+15. [Persistence and Artifact Storage](persistence-and-artifact-storage.md)
 
 ## Contract Summary
 
@@ -35,10 +38,19 @@ contributors should share before reading implementation deep dives.
   deterministic platform services, not workflow-owned product surfaces.
 - Workflows are declarative AI runs owned either by an app workspace or by the
   shared generation core.
+- Workflow-local AG2 execution, builder-session routing, and scoped refinement
+  workers are separate orchestration loops with different limits and resume
+  semantics.
+- Builder-session free-text routing belongs to a configurable control-plane
+  harness layer above workflows, with generic contracts in core and first-party
+  implementation in `factory_app`.
 - App UI pages are declarative page surfaces owned by the app workspace.
 - Deterministic app behavior belongs behind explicit runtime/backend contracts,
   not inside workflow prompts.
 - App events and workflow triggers connect ordinary app behavior to AI runs.
+- Durable persistence is required for Studio and the builder pipeline, with one
+  canonical framework-owned Mongo namespace and explicit separation between
+  runtime state, builder artifacts, and app business data.
 
 For the full repository-level architecture, see
 [ARCHITECTURE.md](https://github.com/BlocUnited-LLC/mozaiks/blob/main/ARCHITECTURE.md).

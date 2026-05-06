@@ -133,7 +133,7 @@ The ChatWidget is a floating button that expands to a chat overlay:
 ## 3. Workflow Directory Structure
 
 Shared first-party factory workflows live under `factory_app/workflows/`.
-App-owned workflows live under the active app root's `app/workflows/`. The
+App-owned workflows live under the active app root's `workflows/`. The
 first-party Studio bundle in this repo is `factory_app/app/`, but shared
 builder workflows are not stored inside that app root.
 

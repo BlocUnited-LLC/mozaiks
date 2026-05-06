@@ -89,25 +89,22 @@ async def handle_user_input_submit(
         target_app_id = target_conn.get("app_id") or target_app_id
         target_user_id = target_conn.get("user_id") or target_user_id
 
-        workflow_startup_mode = "AgentDriven"
-        if isinstance(target_workflow_name, str) and target_workflow_name.strip():
-            try:
-                from mozaiksai.core.workflow.workflow_manager import workflow_manager
+        has_workflow_context = bool(
+            isinstance(target_workflow_name, str)
+            and target_workflow_name.strip()
+            and target_app_id
+        )
 
-                cfg = workflow_manager.get_config(str(target_workflow_name))
-                workflow_startup_mode = str((cfg or {}).get("workflow_startup_mode", "AgentDriven"))
-            except Exception:
-                workflow_startup_mode = "AgentDriven"
-
-        # For UserDriven workflows, the first free-form user message should
-        # start (or continue) orchestration through the same smart router used
-        # by HTTP input. For other modes, persist the message without routing it.
-        if workflow_startup_mode == "UserDriven":
+        # Workflow-mode composer input must always route back through the
+        # orchestration bridge when workflow context exists. Startup mode only
+        # decides who speaks first at session launch; it must not block later
+        # human turns after a pause or review checkpoint.
+        if has_workflow_context:
             if not target_app_id or not target_workflow_name:
                 await transport._send_ws_error(
                     websocket,
-                    "Missing workflow context for UserDriven message",
-                    "USER_DRIVEN_CONTEXT_MISSING",
+                    "Missing workflow context for workflow message",
+                    "WORKFLOW_CONTEXT_MISSING",
                 )
                 return
             await transport.handle_user_input_from_api(

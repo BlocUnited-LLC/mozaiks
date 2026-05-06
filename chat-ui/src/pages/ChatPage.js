@@ -546,6 +546,7 @@ const ChatPage = () => {
   const [hasUnseenChat, setHasUnseenChat] = useState(false);
   const [hasUnseenArtifact, setHasUnseenArtifact] = useState(false);
   const [actionStatusMap, setActionStatusMap] = useState({});
+  const [pendingWorkflowReply, setPendingWorkflowReply] = useState(null);
   const optimisticSnapshotsRef = useRef(new Map());
   
   // Current artifact messages rendered inside ArtifactPanel (not in chat messages)
@@ -2611,6 +2612,49 @@ const ChatPage = () => {
         }
         return;
       }
+      case 'activity': {
+        const activityType = data.activity_type || data.status || 'background';
+        const activityAgent = data.agent || data.agent_name || 'System';
+        const activityStatus = data.status || 'working';
+        const activityMessage = data.message
+          || `${activityAgent} is working in the background.`;
+        const activityKey = `${activityType}:${activityAgent}`;
+        if (showInitSpinner) {
+          setShowInitSpinner(false);
+          initSpinnerHiddenOnceRef.current = true;
+        }
+        setMessagesWithLogging(prev => {
+          const updated = [...prev];
+          const last = updated.length ? updated[updated.length - 1] : null;
+          const nextEntry = {
+            id: last?.metadata?.event_type === 'activity' && last?.metadata?.activity_key === activityKey
+              ? last.id
+              : `activity-${Date.now()}`,
+            sender: 'system',
+            agentName: 'System',
+            content: `⏳ ${activityMessage}`,
+            isStreaming: false,
+            metadata: {
+              event_type: 'activity',
+              activity_type: activityType,
+              activity_status: activityStatus,
+              activity_agent: activityAgent,
+              activity_key: activityKey,
+              workflow_name: data.workflow_name || currentWorkflowName || null,
+            },
+          };
+          if (last?.metadata?.event_type === 'activity' && last?.metadata?.activity_key === activityKey) {
+            updated[updated.length - 1] = nextEntry;
+            return updated;
+          }
+          if (last?.metadata?.event_type === 'activity' && last?.content === nextEntry.content) {
+            return updated;
+          }
+          updated.push(nextEntry);
+          return updated;
+        });
+        return;
+      }
       case 'tool_progress': {
         // Update or append progress for a long-running tool
         const progress = data.progress_percent;
@@ -2714,6 +2758,16 @@ const ChatPage = () => {
         setMessagesWithLogging(prev => [...prev, { id:`timeout-${Date.now()}`, sender:'system', agentName:'System', content:`⏱️ Input request timed out.`, isStreaming:false }]);
         return;
       }
+      case 'awaiting_reply': {
+        const payload = data.data || {};
+        setLoading(false);
+        setPendingWorkflowReply({
+          agent: payload.source_agent || payload.agent || 'Agent',
+          prompt: payload.prompt || '',
+          reason: payload.reason || 'awaiting_user_reply',
+        });
+        return;
+      }
       case 'run_complete': {
         console.log('🎉 [COMPLETION] Workflow completed:', data);
         
@@ -2728,8 +2782,14 @@ const ChatPage = () => {
         );
         if (!isTerminalCompletion) {
           setLoading(false);
+          setPendingWorkflowReply(prev => prev || {
+            agent: data.agent || data.data?.agent || 'Agent',
+            prompt: data.prompt || data.data?.prompt || '',
+            reason,
+          });
           return;
         }
+        setPendingWorkflowReply(null);
         const duration = data.duration_sec || data.data?.duration_sec;
         const tokensUsed = data.total_tokens || data.data?.total_tokens;
         
@@ -2753,6 +2813,7 @@ const ChatPage = () => {
         return;
       }
       case 'error': {
+        setPendingWorkflowReply(null);
         const errorMsg = data.message || data.data?.message || 'Unknown error';
         const errorCode = data.error_code || data.data?.error_code;
         // Create a stable ID based on error content to prevent duplicates
@@ -2770,6 +2831,7 @@ const ChatPage = () => {
         return;
       }
       case 'input_ack':
+        setPendingWorkflowReply(null);
         return;
       case 'resume_boundary':
         if (workflowReplayPendingRef.current) {
@@ -3351,6 +3413,7 @@ useEffect(() => {
 
         // tool_call (legacy InputRequestEvent path) and ui.render (L2 typed path)
         if (update.type === 'tool_call' || update.type === 'ui.render') {
+          setPendingWorkflowReply(null);
           if (dispatchSurfaceEvent) {
             dispatchSurfaceEvent(update);
           }
@@ -3679,6 +3742,9 @@ useEffect(() => {
       );
       console.log('📤 [SEND] WebSocket send result:', success);
       if (success) {
+        if (pendingWorkflowReply) {
+          setPendingWorkflowReply(null);
+        }
         setLoading(true);
       }
     } catch (error) {
@@ -5163,6 +5229,7 @@ useEffect(() => {
               onArtifactAction={sendArtifactAction}
               actionStatusMap={actionStatusMap}
               pendingComposerInputToolCall={pendingComposerInputToolCall}
+              pendingComposerReply={pendingWorkflowReply}
               onPendingComposerInputSkip={handlePendingComposerInputSkip}
             />
           </div>
@@ -5320,6 +5387,7 @@ useEffect(() => {
         onArtifactAction={sendArtifactAction}
         actionStatusMap={actionStatusMap}
         pendingComposerInputToolCall={pendingComposerInputToolCall}
+        pendingComposerReply={pendingWorkflowReply}
         onPendingComposerInputSkip={handlePendingComposerInputSkip}
       />
     </ErrorBoundary>

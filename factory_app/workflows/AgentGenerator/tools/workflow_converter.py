@@ -15,6 +15,10 @@ import textwrap
 
 from logs.logging_config import get_workflow_logger
 from logs.runtime_artifacts import get_workflow_converter_logs_dir
+from mozaiksai.core.workflow.workflow_ui_catalog import (
+    get_workflow_shipped_component_map,
+    infer_workflow_ui_realization,
+)
 
 # Standard YAML file mappings for workflows
 WORKFLOW_FILE_MAPPINGS = {
@@ -745,9 +749,17 @@ def _normalize_ui_contract(raw_contract: Any) -> Dict[str, Any]:
             if action_id is None:
                 continue
             normalized_action: Dict[str, Any] = {"id": action_id}
+            label = _normalize_nullable_text(action.get("label"))
+            if label is not None:
+                normalized_action["label"] = label
             description = _normalize_nullable_text(action.get("description"))
             if description is not None:
                 normalized_action["description"] = description
+            variant = _normalize_nullable_text(action.get("variant"))
+            if variant is not None:
+                normalized_action["variant"] = variant
+            if isinstance(action.get("approved"), bool):
+                normalized_action["approved"] = action["approved"]
             action_payload_schema = action.get("payload_schema")
             if not isinstance(action_payload_schema, dict) or not action_payload_schema:
                 action_payload_schema = _default_ui_payload_schema()
@@ -786,6 +798,14 @@ def _normalize_tools_manifest(
             tool.pop("integration", None)
             tool_type = _normalize_tool_type(tool.get("tool_type"))
             tool["tool_type"] = tool_type
+            ui = tool.get("ui")
+            if isinstance(ui, dict):
+                ui = dict(ui)
+                ui["realization"] = infer_workflow_ui_realization(
+                    ui.get("workflow_primitive"),
+                    ui.get("component"),
+                )
+                tool["ui"] = ui
             if tool_type == "UI_Tool":
                 tool["ui_contract"] = _normalize_ui_contract(tool.get("ui_contract"))
             else:
@@ -810,10 +830,199 @@ def _normalize_tools_manifest(
             tool.pop("integration", None)
             if "tool_type" in tool:
                 tool["tool_type"] = _normalize_tool_type(tool.get("tool_type"))
+            ui = tool.get("ui")
+            if isinstance(ui, dict):
+                ui = dict(ui)
+                ui["realization"] = infer_workflow_ui_realization(
+                    ui.get("workflow_primitive"),
+                    ui.get("component"),
+                )
+                tool["ui"] = ui
             normalized_lifecycle.append(tool)
         normalized["lifecycle_tools"] = normalized_lifecycle
 
     return normalized
+
+
+def _collect_code_files(
+    output_payload: Any,
+    *,
+    list_key: str = "tools",
+    source_name: str,
+    wf_logger: Any,
+) -> List[Dict[str, str]]:
+    """Normalize CodeFile-style output objects into workflow extra files."""
+
+    if not isinstance(output_payload, dict):
+        return []
+
+    raw_files = output_payload.get(list_key)
+    if not isinstance(raw_files, list):
+        return []
+
+    normalized_files: List[Dict[str, str]] = []
+    for index, entry in enumerate(raw_files):
+        if not isinstance(entry, dict):
+            wf_logger.warning(
+                "⚠️ [CREATE_WORKFLOW_FILES] Skipping %s entry %d: expected object, got %s",
+                source_name,
+                index,
+                type(entry).__name__,
+            )
+            continue
+
+        rel_path = _normalize_workflow_extra_path(entry.get("filename") or entry.get("path"))
+        content = entry.get("content")
+        if rel_path is None:
+            wf_logger.warning(
+                "⚠️ [CREATE_WORKFLOW_FILES] Skipping %s entry %d with unsafe path: %r",
+                source_name,
+                index,
+                entry.get("filename") or entry.get("path"),
+            )
+            continue
+        if not isinstance(content, str) or not content.strip():
+            wf_logger.warning(
+                "⚠️ [CREATE_WORKFLOW_FILES] Skipping %s entry %d without file content: %s",
+                source_name,
+                index,
+                rel_path,
+            )
+            continue
+
+        normalized_files.append({"path": rel_path, "content": content})
+
+    return normalized_files
+
+
+def _index_workflow_ui_targets(tools_config: Any) -> Dict[str, Dict[str, Any]]:
+    """Index declared workflow UI components by component name."""
+
+    if not isinstance(tools_config, dict):
+        return {}
+
+    shipped_component_map = dict(get_workflow_shipped_component_map())
+    targets: Dict[str, Dict[str, Any]] = {}
+    for list_key in ("tools", "lifecycle_tools"):
+        raw_entries = tools_config.get(list_key)
+        if not isinstance(raw_entries, list):
+            continue
+        for entry in raw_entries:
+            if not isinstance(entry, dict):
+                continue
+            ui = entry.get("ui")
+            if not isinstance(ui, dict):
+                continue
+            component_name = str(ui.get("component") or "").strip()
+            workflow_primitive = str(ui.get("workflow_primitive") or "").strip()
+            if not component_name or not workflow_primitive or workflow_primitive == "composer_reply":
+                continue
+            shipped_component = shipped_component_map.get(workflow_primitive)
+            realization = str(ui.get("realization") or "").strip()
+            targets[component_name] = {
+                "workflow_primitive": workflow_primitive,
+                "shipped_component": shipped_component,
+                "realization": realization,
+                "direct_shipped": realization == "shipped_component",
+            }
+    return targets
+
+
+def _build_workflow_ui_barrel(component_paths: Dict[str, str]) -> str:
+    lines = [
+        "/**",
+        " * AUTO-GENERATED FILE - workflow UI barrel.",
+        " * Each named export is auto-registered by @chat-workflows.",
+        " */",
+        "",
+    ]
+    for component_name in sorted(component_paths):
+        rel_path = PurePosixPath(component_paths[component_name])
+        export_path = "./" + rel_path.relative_to("ui").as_posix()
+        lines.append(
+            f"export {{ default as {component_name} }} from './{export_path[2:]}';"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _collect_ui_code_files(
+    output_payload: Any,
+    *,
+    tools_config: Any,
+    wf_logger: Any,
+) -> List[Dict[str, str]]:
+    """Collect UIFileGenerator output while enforcing shipped-primitive rules."""
+
+    files = _collect_code_files(
+        output_payload,
+        source_name="UIFileGenerator",
+        wf_logger=wf_logger,
+    )
+    if not files:
+        return []
+
+    ui_targets = _index_workflow_ui_targets(tools_config)
+    workflow_component_paths: Dict[str, str] = {}
+    kept_files: List[Dict[str, str]] = []
+    seen_paths: set[str] = set()
+
+    for item in files:
+        rel_path = item["path"]
+        if rel_path in seen_paths:
+            wf_logger.warning(
+                "⚠️ [CREATE_WORKFLOW_FILES] Skipping duplicate UIFileGenerator path: %s",
+                rel_path,
+            )
+            continue
+        seen_paths.add(rel_path)
+
+        if rel_path == "ui/index.js":
+            continue
+
+        if rel_path.startswith("ui/") and PurePosixPath(rel_path).suffix.lower() in {".js", ".jsx"}:
+            component_name = PurePosixPath(rel_path).stem
+            target = ui_targets.get(component_name)
+            if target and target.get("direct_shipped"):
+                wf_logger.info(
+                    "🧩 [CREATE_WORKFLOW_FILES] Skipping workflow-local React for shipped primitive "
+                    "%s (%s)",
+                    component_name,
+                    target.get("workflow_primitive"),
+                )
+                continue
+            if target:
+                existing = workflow_component_paths.get(component_name)
+                if existing and existing != rel_path:
+                    raise ValueError(
+                        f"UIFileGenerator emitted multiple component paths for {component_name}: "
+                        f"{existing} and {rel_path}"
+                    )
+                workflow_component_paths[component_name] = rel_path
+
+        kept_files.append(item)
+
+    expected_workflow_local_components = {
+        component_name
+        for component_name, target in ui_targets.items()
+        if not target.get("direct_shipped")
+    }
+    missing_components = sorted(expected_workflow_local_components - set(workflow_component_paths))
+    if missing_components:
+        wf_logger.warning(
+            "⚠️ [CREATE_WORKFLOW_FILES] UIFileGenerator did not emit workflow-local component files for: %s",
+            ", ".join(missing_components),
+        )
+
+    if workflow_component_paths:
+        kept_files.append(
+            {
+                "path": "ui/index.js",
+                "content": _build_workflow_ui_barrel(workflow_component_paths),
+            }
+        )
+
+    return kept_files
 
 
 def _slugify_identifier(value: Optional[str], default: str) -> str:
@@ -1383,118 +1592,41 @@ async def create_workflow_files(data: Dict[str, Any], context_variables: Optiona
                         extra_files.append({'filename': env_filename, 'filecontent': env_content})
                         wf_logger.info("🧩 [CREATE_WORKFLOW_FILES] Added API key env attachment to extra_files")
 
-        # Extract files from UIFileGenerator output (UI tools - Python + React)
+        # Extract files from UIFileGenerator output (CodeFile objects)
         ui_file_generator_output = data.get('ui_file_generator_output', {})
         if ui_file_generator_output:
-            ui_tools = ui_file_generator_output.get('tools', [])
-            if isinstance(ui_tools, list) and ui_tools:
-                ui_tool_files = []
-                for tool_obj in ui_tools:
-                    if not isinstance(tool_obj, dict):
-                        continue
-                    tool_name = tool_obj.get('tool_name')
-                    if not tool_name:
-                        continue
-                    
-                    # Python backend file (tool_name is snake_case)
-                    py_content = tool_obj.get('py_content')
-                    if py_content:
-                        ui_tool_files.append({
-                            'path': f"tools/{tool_name}.py",
-                            'content': py_content
-                        })
-                    
-                    # React component file (extract PascalCase component name from js_content)
-                    js_content = tool_obj.get('js_content')
-                    if js_content:
-                        # Extract component name from "const ComponentName = ({" pattern
-                        component_name = None
-                        for line in js_content.split('\n'):
-                            if 'const ' in line and ' = ({' in line:
-                                # Extract: "const ActionPlan = ({" -> "ActionPlan"
-                                match = line.strip().split('const ')[1].split(' = ({')[0].strip()
-                                component_name = match
-                                break
-                        
-                        # Fallback: convert tool_name to PascalCase if pattern not found
-                        if not component_name:
-                            # Convert snake_case to PascalCase (e.g., "action_plan" -> "ActionPlan")
-                            component_name = ''.join(word.capitalize() for word in tool_name.split('_'))
-                        
-                        ui_tool_files.append({
-                            'path': f"ui/components/{component_name}.jsx",
-                            'content': js_content
-                        })
-
-                component_exports = []
-                for item in ui_tool_files:
-                    rel_path = item.get('path')
-                    if not isinstance(rel_path, str) or not rel_path.startswith('ui/components/'):
-                        continue
-                    component_name = Path(rel_path).stem
-                    component_exports.append(component_name)
-
-                if component_exports:
-                    barrel_lines = [
-                        "/**",
-                        " * AUTO-GENERATED FILE - workflow UI barrel.",
-                        " * Each named export is auto-registered by @chat-workflows.",
-                        " */",
-                        "",
-                    ]
-                    for component_name in sorted(dict.fromkeys(component_exports)):
-                        barrel_lines.append(
-                            f"export {{ default as {component_name} }} from './components/{component_name}.jsx';"
-                        )
-                    barrel_lines.append("")
-                    ui_tool_files.append({
-                        'path': "ui/index.js",
-                        'content': "\n".join(barrel_lines),
-                    })
-                
-                if ui_tool_files:
-                    if extra_files:
-                        extra_files.extend(ui_tool_files)
-                    else:
-                        extra_files = ui_tool_files
-                    wf_logger.info(f"📋 [CREATE_WORKFLOW_FILES] Added {len(ui_tool_files)} UI tool files from UIFileGenerator (Python + React)")
+            ui_tool_files = _collect_ui_code_files(
+                ui_file_generator_output,
+                tools_config=config.get("tools"),
+                wf_logger=wf_logger,
+            )
+            if ui_tool_files:
+                if extra_files:
+                    extra_files.extend(ui_tool_files)
+                else:
+                    extra_files = ui_tool_files
+                wf_logger.info(
+                    "📋 [CREATE_WORKFLOW_FILES] Added %d UI files from UIFileGenerator",
+                    len(ui_tool_files),
+                )
 
         # Extract files from AgentToolsFileGenerator output
         agent_tools_output = data.get('agent_tools_file_generator_output', {})
         if agent_tools_output:
-            # Process agent tools
-            agent_tools = agent_tools_output.get('tools', [])
-            if isinstance(agent_tools, list) and agent_tools:
-                tool_files = []
-                for tool_obj in agent_tools:
-                    if isinstance(tool_obj, dict) and 'tool_name' in tool_obj and 'py_content' in tool_obj:
-                        tool_files.append({
-                            'path': f"tools/{tool_obj['tool_name']}.py",
-                            'content': tool_obj['py_content']
-                        })
-                if tool_files:
-                    if extra_files:
-                        extra_files.extend(tool_files)
-                    else:
-                        extra_files = tool_files
-                    wf_logger.info(f"📋 [CREATE_WORKFLOW_FILES] Added {len(tool_files)} agent tool .py files from AgentToolsFileGenerator")
-
-            # Process lifecycle tools
-            lifecycle_tools = agent_tools_output.get('lifecycle_tools', [])
-            if isinstance(lifecycle_tools, list) and lifecycle_tools:
-                lifecycle_files = []
-                for tool_obj in lifecycle_tools:
-                    if isinstance(tool_obj, dict) and 'tool_name' in tool_obj and 'py_content' in tool_obj:
-                        lifecycle_files.append({
-                            'path': f"tools/{tool_obj['tool_name']}.py",
-                            'content': tool_obj['py_content']
-                        })
-                if lifecycle_files:
-                    if extra_files:
-                        extra_files.extend(lifecycle_files)
-                    else:
-                        extra_files = lifecycle_files
-                    wf_logger.info(f"📋 [CREATE_WORKFLOW_FILES] Added {len(lifecycle_files)} lifecycle tool .py files from AgentToolsFileGenerator")
+            agent_tool_files = _collect_code_files(
+                agent_tools_output,
+                source_name="AgentToolsFileGenerator",
+                wf_logger=wf_logger,
+            )
+            if agent_tool_files:
+                if extra_files:
+                    extra_files.extend(agent_tool_files)
+                else:
+                    extra_files = agent_tool_files
+                wf_logger.info(
+                    "📋 [CREATE_WORKFLOW_FILES] Added %d backend tool files from AgentToolsFileGenerator",
+                    len(agent_tool_files),
+                )
 
         if isinstance(extra_files, list) and extra_files:
             config['extra_files'] = extra_files

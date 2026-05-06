@@ -2,7 +2,7 @@
 mermaid_sequence_diagram tool - renders the workflow sequence diagram artifact.
 
 Reads MermaidSequenceDiagram structured output and emits a UI artifact
-via the MermaidSequenceDiagram React component for user review.
+via the shipped DiagramViewer component for user review.
 """
 
 from __future__ import annotations
@@ -75,10 +75,11 @@ async def mermaid_sequence_diagram(
 
     try:
         await emit_ui_surface(
-            "MermaidSequenceDiagram",
+            "DiagramViewer",
             {
                 "workflow_name": workflow_name,
                 "diagram": diagram_text,
+                "diagram_type": "mermaid",
                 "legend": legend,
                 "notes": notes,
                 "agent_message": agent_message,
@@ -86,9 +87,9 @@ async def mermaid_sequence_diagram(
             chat_id=str(chat_id) if chat_id else None,
             workflow_name=str(runtime_workflow_name or "AgentGenerator"),
         )
-        _logger.info("Emitted MermaidSequenceDiagram artifact for '%s'", workflow_name)
+        _logger.info("Emitted DiagramViewer artifact for '%s'", workflow_name)
     except Exception as exc:
-        _logger.error("Failed to emit MermaidSequenceDiagram artifact: %s", exc)
+        _logger.error("Failed to emit DiagramViewer artifact: %s", exc)
         return f"Error rendering diagram: {exc}"
 
     return f"Sequence diagram rendered for '{workflow_name}'"

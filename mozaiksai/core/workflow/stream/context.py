@@ -135,6 +135,10 @@ class StreamState:
     # AG2 response object (set during stream initialization)
     response: Any = None
 
+    # Latest visible text event
+    last_text_role: Optional[str] = None
+    last_text_content: Optional[str] = None
+
     def record_tool_call(self, call_id: str, agent_name: str, tool_name: str) -> None:
         """Record a tool call for correlation with its response."""
         self.tool_call_initiators[call_id] = agent_name
@@ -201,5 +205,5 @@ class StreamState:
             "response": self.response,
             "sequence_counter": self.sequence_counter,
             "run_completed": self.run_completed,
-            "awaiting_user_input": bool(self.pending_input_requests),
+            "awaiting_user_input": bool(self.awaiting_user_input or self.pending_input_requests),
         }

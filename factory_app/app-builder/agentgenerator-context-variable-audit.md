@@ -34,19 +34,18 @@ Implication:
 
 ## Variable Usage Snapshot (Current)
 
-Declared variables: 23
+Declared variables: 22
 
 Routing-critical (actively used in handoff conditions):
 
 - `interview_complete`
 - `action_plan`
-- `action_plan_acceptance`
 - `pack_generation_complete`
 
 Tool-read/write critical:
 
 - Read by tools: `action_plan`, `workflow_strategy`, `technical_blueprint`, `context_include_schema`, `context_schema_db`, `is_multi_workflow`, `pack_name`, `workflows_spec`
-- Written by tools: `action_plan`, `action_plan_acceptance`, `workflow_strategy`, `strategy_ready`, `technical_blueprint`, `download_complete`
+- Written by tools: `action_plan`, `workflow_strategy`, `strategy_ready`, `technical_blueprint`, `download_complete`
 
 Prompt-only signals (mentioned in prompts, not read by tools):
 
@@ -87,7 +86,6 @@ Keep top-level orchestration booleans small, move rich planning signal into stru
 Top-level orchestration state:
 
 - `interview_complete: bool`
-- `action_plan_acceptance: \"pending\" | \"accepted\" | \"adjustments_requested\"`
 - `pack_generation_complete: bool`
 - `current_workflow_index: int`
 

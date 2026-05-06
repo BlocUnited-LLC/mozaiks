@@ -6,91 +6,58 @@
 # ==============================================================================
 import uuid
 from typing import Any, Dict, Optional, Annotated, List
-from datetime import datetime, timezone
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
+from mozaiksai.core.workflow.generator_support.connector_service import record_connector_metadata
 
 
 __all__ = ["request_api_key", "request_api_keys_bundle"]
 
 
-async def _persist_api_key_metadata(
+async def _persist_connector_metadata(
     *,
+    app_id: Optional[str],
+    user_id: Optional[str],
     service_norm: str,
     display_name: str,
     key_length: Optional[int],
-    context_variables: Optional[Any],
     workflow_name: Optional[str],
     chat_id: Optional[str],
     agent_message_id: Optional[str],
     ui_event_id: Optional[str],
     wf_logger,
 ) -> Dict[str, Any]:
-    """Persist sanitized API key metadata to MongoDB (never the secret)."""
+    """Persist sanitized connector metadata through the platform connector service."""
 
     result: Dict[str, Any] = {
         "saved": False,
-        "metadata_id": None,
-        "database_info": None,
+        "connector": None,
         "error": None,
     }
 
-    if not key_length or key_length <= 0:
-        key_length = 0
-
-    try:
-        from mozaiksai.core.core_config import get_mongo_client
-        from bson import ObjectId
-    except Exception as import_err:  # pragma: no cover - defensive guard
-        wf_logger.warning(f"⚠️ Database client import failed (non-critical): {import_err}")
-        result["error"] = str(import_err)
+    if not app_id:
+        result["error"] = "app_id is required to persist connector metadata"
         return result
 
     try:
-        client = get_mongo_client()
-        db_name = "autogen_ai_agents"
-        coll_name = "APIKeys"
-        db = client[db_name]
-        collection = db[coll_name]
-
-        now_dt = datetime.now(timezone.utc)
-        metadata: Dict[str, Any] = {
-            "api_key_service": service_norm,
-            "api_key_service_display": display_name,
-            "key_length": key_length,
-            "is_valid": key_length > 10,
-            "requested_by_user": True,
-            "requested_at": now_dt.isoformat(),
-            "validation_method": "length_check",
-            "source": "ui_interaction",
-            "agent_message_id": agent_message_id,
-            "ui_event_id": ui_event_id,
-            "chat_id": context_variables.get("chat_id") if context_variables and hasattr(context_variables, "get") else None,
-            "workflow_name": workflow_name,
-            "created_at": now_dt,
-            "updated_at": now_dt,
-        }
-
-        app_id = None
-        if context_variables and hasattr(context_variables, "get"):
-            app_id = context_variables.get("app_id")
-        if app_id:
-            try:
-                metadata["app_id"] = ObjectId(app_id)
-            except Exception:
-                metadata["app_id"] = app_id
-
-        insert_result = await collection.insert_one(metadata)
-        inserted_id = str(insert_result.inserted_id)
-        wf_logger.info(f"✅ API key metadata saved to {db_name}.{coll_name}: {inserted_id}")
-
+        record_result = await record_connector_metadata(
+            app_id=str(app_id),
+            user_id=str(user_id) if user_id else None,
+            service=service_norm,
+            display_name=display_name,
+            key_length=int(key_length or 0),
+            workflow_name=workflow_name,
+            chat_id=chat_id,
+            agent_message_id=agent_message_id,
+            ui_event_id=ui_event_id,
+            logger=wf_logger,
+        )
         result["saved"] = True
-        result["metadata_id"] = inserted_id
-        result["database_info"] = {"database": db_name, "collection": coll_name}
+        result["connector"] = record_result.get("connector")
         return result
     except Exception as persist_err:
-        wf_logger.warning(f"⚠️ Database save failed (non-critical): {persist_err}")
+        wf_logger.warning(f"⚠️ Connector metadata save failed (non-critical): {persist_err}")
         result["error"] = str(persist_err)
         return result
 
@@ -159,11 +126,11 @@ async def request_api_key(
       - Only metadata (length, status) is returned.
       - If saved to database, only metadata is stored (never the actual key).
 
-    DATABASE INTEGRATION:
-      - Automatically saves API key metadata to database (hardcoded settings)
-      - Never stores actual API key - only service, length, timestamps, context
-      - Database/collection names are configured in the tool code directly
-      - Automatically adds app_id, timestamps, and chat context
+    CONNECTOR METADATA:
+      - Automatically saves sanitized connector metadata for the current app.
+      - Never stores the actual API key in MongoDB.
+      - Connector metadata is platform-owned and surfaces in Studio/Admin adapters.
+      - Actual secret persistence requires a vault-backed connector implementation.
     """
     # Extract parameters from AG2 ContextVariables
     chat_id: Optional[str] = None
@@ -281,12 +248,12 @@ async def request_api_key(
 
     key_length = len(api_key) if isinstance(api_key, str) else None
 
-    # Store connector if requested (Key Vault + AppConnectors)
+    app_id = context_variables.get("app_id") if context_variables and hasattr(context_variables, "get") else None
+    user_id = context_variables.get("user_id") if context_variables and hasattr(context_variables, "get") else None
+
+    # Attempt durable connector storage when the runtime provides a secret-backed connector implementation
     connector_result = None
     if api_key and store_connector and context_variables:
-        app_id = context_variables.get("app_id") if hasattr(context_variables, "get") else None
-        user_id = context_variables.get("user_id") if hasattr(context_variables, "get") else None
-        
         if app_id:
             try:
                 from mozaiksai.core.workflow.generator_support.connector_service import store_connector as do_store
@@ -316,17 +283,19 @@ async def request_api_key(
         "has_key": bool(api_key),
         "key_length": key_length,
         "connector_stored": connector_result.get("success") if connector_result else False,
+        "connector_metadata_saved": connector_result.get("metadata_saved") if connector_result else False,
         "connector_expires_at": connector_result.get("expires_at") if connector_result else None,
         "_secret_for_e2b": api_key if return_for_e2b else None,  # Only populated when explicitly requested
     }
 
-    # Save metadata to database (NEVER the actual key)
+    # Save connector metadata (NEVER the actual key)
     if api_key:
-        persist_result = await _persist_api_key_metadata(
+        persist_result = await _persist_connector_metadata(
+            app_id=str(app_id) if app_id else None,
+            user_id=str(user_id) if user_id else None,
             service_norm=service_norm,
             display_name=display_name,
             key_length=key_length,
-            context_variables=context_variables,
             workflow_name=workflow_name,
             chat_id=chat_id,
             agent_message_id=agent_message_id,
@@ -334,10 +303,8 @@ async def request_api_key(
             wf_logger=wf_logger,
         )
         result["metadata_saved"] = persist_result.get("saved", False)
-        if persist_result.get("metadata_id"):
-            result["metadata_id"] = persist_result["metadata_id"]
-        if persist_result.get("database_info"):
-            result["database_info"] = persist_result["database_info"]
+        if persist_result.get("connector"):
+            result["connector"] = persist_result["connector"]
         if persist_result.get("error"):
             result["metadata_error"] = persist_result["error"]
     else:
@@ -516,25 +483,27 @@ async def request_api_keys_bundle(
         key_length = len(trimmed_key) if trimmed_key else 0
         has_key = bool(trimmed_key)
 
-        metadata_out: Dict[str, Any] = {"saved": False, "metadata_id": None, "error": None}
+        app_id = context_variables.get("app_id") if context_variables and hasattr(context_variables, "get") else None
+        user_id = context_variables.get("user_id") if context_variables and hasattr(context_variables, "get") else None
+        metadata_out: Dict[str, Any] = {"saved": False, "connector": None, "error": None}
         connector_stored = False
+        connector_metadata_saved = False
         if has_key:
-            metadata_out = await _persist_api_key_metadata(
+            metadata_out = await _persist_connector_metadata(
+                app_id=str(app_id) if app_id else None,
+                user_id=str(user_id) if user_id else None,
                 service_norm=svc["service"],
                 display_name=svc["display_name"],
                 key_length=key_length,
-                context_variables=context_variables,
                 workflow_name=workflow_name,
                 chat_id=chat_id,
                 agent_message_id=svc["agent_message_id"],
                 ui_event_id=response.get("ui_event_id"),
                 wf_logger=wf_logger,
             )
+            connector_metadata_saved = metadata_out.get("saved", False)
             
-            # Store connector in Key Vault + AppConnectors
-            app_id = context_variables.get("app_id") if context_variables and hasattr(context_variables, "get") else None
-            user_id = context_variables.get("user_id") if context_variables and hasattr(context_variables, "get") else None
-            
+            # Attempt durable connector storage in addition to sanitized metadata persistence
             if app_id and trimmed_key:
                 try:
                     from mozaiksai.core.workflow.generator_support.connector_service import store_connector
@@ -548,6 +517,7 @@ async def request_api_keys_bundle(
                         logger=wf_logger
                     )
                     connector_stored = conn_result.get("success", False)
+                    connector_metadata_saved = connector_metadata_saved or conn_result.get("metadata_saved", False)
                     if connector_stored:
                         wf_logger.info(f"✓ Connector stored for {svc['service']}")
                 except Exception as conn_err:
@@ -567,11 +537,11 @@ async def request_api_keys_bundle(
             "has_key": has_key,
             "key_length": key_length,
             "metadata_saved": metadata_out.get("saved", False),
-            "metadata_id": metadata_out.get("metadata_id"),
             "connector_stored": connector_stored,
+            "connector_metadata_saved": connector_metadata_saved,
         }
-        if metadata_out.get("database_info"):
-            sanitized_entry["database_info"] = metadata_out["database_info"]
+        if metadata_out.get("connector"):
+            sanitized_entry["connector"] = metadata_out["connector"]
         if metadata_out.get("error"):
             sanitized_entry["metadata_error"] = metadata_out["error"]
         if not has_key:

@@ -274,8 +274,6 @@ def inject_universal_prompts(agent, messages: List[Dict[str, Any]], groupchat: A
         # UserProxy, persistence, or token tracking agents
         workflow_design_agents = {
             "WorkflowStrategyAgent",
-            "WorkflowArchitectAgent",
-            "WorkflowImplementationAgent"
         }
         
         if agent_name in workflow_design_agents and "[MOZAIKS RUNTIME CONTEXT]" not in system_message:

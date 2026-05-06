@@ -1202,7 +1202,7 @@ The platform admin is defined as a mozaiks app.
 ```
 
 ```yaml
-# app/brand/theme_config.json or app/config/admin.json own the visual/admin
+# app/brand/theme_config.json plus the framework admin shell contract own the visual/admin
 # surface details; modules and workflows are discovered from app/modules/* and
 # app/workflows/*.
 ```

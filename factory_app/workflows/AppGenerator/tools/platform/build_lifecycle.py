@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from mozaiksai.core.core_config import get_mongo_client
+from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeCollections
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id
 from logs.logging_config import get_core_logger
 
@@ -60,7 +61,7 @@ async def _get_last_artifact_payload(*, app_id: str, build_id: str) -> Optional[
         return None
 
     client = get_mongo_client()
-    coll = client["MozaiksAI"]["ChatSessions"]
+    coll = client[SYSTEM_DATABASE][RuntimeCollections.CHAT_SESSIONS]
     doc = await coll.find_one(
         {"_id": str(build_id), **build_app_scope_filter(str(resolved_app_id))},
         {"last_artifact": 1},

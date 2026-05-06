@@ -1,12 +1,15 @@
 import { useMemo, useState } from 'react';
 import { Alert, Badge, Button, Card } from '../../ui/primitives/index.js';
-import { normalizeOptions } from './workflowPrimitiveUtils.js';
+import { normalizeOptions, normalizePrimitiveActions, sendPrimitiveResponse } from './workflowPrimitiveUtils.js';
 
 export default function ChoicePicker({ payload = {}, onResponse, onCancel }) {
   const selectionMode = String(payload.selection_mode || payload.selectionMode || 'single');
   const options = useMemo(() => normalizeOptions(payload.options), [payload.options]);
   const [selected, setSelected] = useState(selectionMode === 'multi' ? [] : '');
   const [submitting, setSubmitting] = useState(false);
+  const actions = normalizePrimitiveActions(payload, [
+    { id: payload.submit_action || 'submit_selection', label: payload.submit_label || 'Continue', variant: 'primary' },
+  ]);
 
   const toggle = (option) => {
     if (selectionMode === 'multi') {
@@ -20,14 +23,12 @@ export default function ChoicePicker({ payload = {}, onResponse, onCancel }) {
     setSelected(option.id);
   };
 
-  const submit = async () => {
+  const submit = async (action) => {
     setSubmitting(true);
     try {
       const selection = selectionMode === 'multi' ? selected : (selected ? [selected] : []);
       const selectedOptions = options.filter((option) => selection.includes(option.id));
-      await onResponse?.({
-        status: 'submitted',
-        action: payload.submit_action || 'submit_selection',
+      await sendPrimitiveResponse(onResponse, action, {
         selection,
         selected_options: selectedOptions,
         value: selectionMode === 'multi' ? selection : (selection[0] || null),
@@ -81,12 +82,15 @@ export default function ChoicePicker({ payload = {}, onResponse, onCancel }) {
         </div>
 
         <div className="flex flex-wrap gap-3">
-          <Button
-            label={submitting ? 'Submitting…' : (payload.submit_label || 'Continue')}
-            variant="primary"
-            disabled={!hasSelection || submitting}
-            onClick={submit}
-          />
+          {actions.map((action) => (
+            <Button
+              key={action.id}
+              label={submitting ? 'Submitting…' : action.label}
+              variant={action.variant}
+              disabled={!hasSelection || submitting}
+              onClick={() => submit(action)}
+            />
+          ))}
           {onCancel ? (
             <Button label="Cancel" variant="ghost" disabled={submitting} onClick={() => onCancel({ status: 'cancelled', action: 'cancel' })} />
           ) : null}

@@ -17,11 +17,11 @@ logger = logging.getLogger(__name__)
 
 # Use mozaiks runtime persistence
 try:
-    from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+    from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
     _HAS_PERSISTENCE = True
 except ImportError:
     _HAS_PERSISTENCE = False
-    AG2PersistenceManager = None
+    BuilderArtifactStore = None
 
 from mozaiksai.core.workflow.ui_tools import emit_ui_surface
 
@@ -41,6 +41,64 @@ def _set_context_value(context_variables: Optional[Any], key: str, value: Any) -
             context_variables[key] = value
     except Exception:
         return
+
+
+def _build_concept_record(
+    *,
+    app_id: str,
+    manifest_id: str,
+    structured_output: Dict[str, Any],
+    app_name: str,
+    concept_overview: str,
+    api_endpoints: List[Any],
+    capability_pack_hints: List[Any],
+    surface_candidate_hints: List[Any],
+    agentic_capabilities: List[Any],
+    now_iso: str,
+) -> Dict[str, Any]:
+    """Build the canonical persisted concept artifact used by downstream workflows."""
+
+    return {
+        "concept_id": manifest_id,
+        "app_id": str(app_id),
+        "app_name": app_name,
+        "ConceptOverview": concept_overview,
+        "ApiEndpoints": api_endpoints,
+        "Blueprint": structured_output,
+        "capability_pack_hints": capability_pack_hints,
+        "surface_candidate_hints": surface_candidate_hints,
+        "agentic_capabilities": agentic_capabilities,
+        "updated_at": now_iso,
+        "status": "draft",
+    }
+
+
+def _concept_record_to_manifest(doc: Dict[str, Any], app_id: str) -> Dict[str, Any]:
+    """Normalize the canonical Concepts record into the runtime manifest shape."""
+
+    blueprint = doc.get("Blueprint")
+    if not isinstance(blueprint, dict):
+        blueprint = {}
+
+    app_name = str(doc.get("app_name") or blueprint.get("app_name") or "Unnamed App")
+    concept_overview = str(doc.get("ConceptOverview") or blueprint.get("concept_overview") or "")
+    api_endpoints = doc.get("ApiEndpoints")
+    if not isinstance(api_endpoints, list):
+        api_endpoints = list(blueprint.get("api_endpoints") or [])
+
+    return {
+        "manifest_id": str(doc.get("concept_id") or f"concept_{app_id}"),
+        "app_id": str(app_id),
+        "app_name": app_name,
+        "concept_overview": concept_overview,
+        "api_endpoints": api_endpoints,
+        "capability_pack_hints": list(doc.get("capability_pack_hints") or blueprint.get("capability_pack_hints") or []),
+        "surface_candidate_hints": list(doc.get("surface_candidate_hints") or blueprint.get("surface_candidate_hints") or []),
+        "agentic_capabilities": list(doc.get("agentic_capabilities") or blueprint.get("agentic_capabilities") or []),
+        "blueprint": blueprint,
+        "updated_at": doc.get("updated_at"),
+        "status": doc.get("status") or "draft",
+    }
 
 
 async def save_value_manifest(
@@ -127,20 +185,29 @@ async def save_value_manifest(
         "updated_at": now.isoformat(),
         "status": "draft",  # Will be "approved" after user confirms
     }
+    concept_record = _build_concept_record(
+        app_id=str(app_id),
+        manifest_id=manifest_id,
+        structured_output=structured_output,
+        app_name=app_name,
+        concept_overview=concept_overview,
+        api_endpoints=api_endpoints,
+        capability_pack_hints=capability_pack_hints,
+        surface_candidate_hints=surface_candidate_hints,
+        agentic_capabilities=agentic_capabilities,
+        now_iso=now.isoformat(),
+    )
 
     # Persist to MongoDB via mozaiks runtime
-    if _HAS_PERSISTENCE and AG2PersistenceManager:
+    if _HAS_PERSISTENCE and BuilderArtifactStore:
         try:
-            pm = AG2PersistenceManager()
-            await pm._ensure_client()
-            if pm.client:
-                coll = pm.client["autogen_ai_agents"]["ValueManifests"]
-                await coll.update_one(
-                    {"app_id": str(app_id)},
-                    {"$set": manifest, "$setOnInsert": {"created_at": now.isoformat()}},
-                    upsert=True,
-                )
-                logger.info(f"[ValueEngine] Manifest saved for app_id={app_id}")
+            store = BuilderArtifactStore()
+            await store.save_concept(
+                app_id=str(app_id),
+                concept_record=concept_record,
+                created_at=now.isoformat(),
+            )
+            logger.info(f"[ValueEngine] Concept saved for app_id={app_id}")
         except Exception as e:
             logger.warning(f"[ValueEngine] Persistence failed: {e}")
 
@@ -212,16 +279,15 @@ async def get_value_manifest(
             return {"success": True, "manifest": cached}
 
     # Load from MongoDB
-    if _HAS_PERSISTENCE and AG2PersistenceManager:
+    if _HAS_PERSISTENCE and BuilderArtifactStore:
         try:
-            pm = AG2PersistenceManager()
-            await pm._ensure_client()
-            if pm.client:
-                coll = pm.client["autogen_ai_agents"]["ValueManifests"]
-                manifest = await coll.find_one({"app_id": str(app_id)})
-                if manifest:
-                    manifest.pop("_id", None)
-                    return {"success": True, "manifest": manifest}
+            store = BuilderArtifactStore()
+            concept = await store.get_concept(app_id=str(app_id))
+            if concept:
+                return {
+                    "success": True,
+                    "manifest": _concept_record_to_manifest(concept, str(app_id)),
+                }
         except Exception as e:
             logger.warning(f"[ValueEngine] Load manifest failed: {e}")
 

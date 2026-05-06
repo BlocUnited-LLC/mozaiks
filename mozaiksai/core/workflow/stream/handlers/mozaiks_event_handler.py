@@ -34,8 +34,10 @@ logger = logging.getLogger(__name__)
 from mozaiksai.core.events.ag2_events import (
     AgentThinkingEvent,
     ALL_MOZAIKSAI_EVENTS,
+    ArtifactReadyEvent,
     ArtifactUpdatedEvent,
     ContextUpdatedEvent,
+    DecompositionPlannedEvent,
     HandoffRequestedEvent,
     JourneyCompletedEvent,
     JourneyStartedEvent,
@@ -135,6 +137,23 @@ class MozaiksaiEventHandler(BaseEventHandler):
         Some events (like AgentThinkingEvent) should update the UI.
         Others (like internal control events) should not.
         """
+        def _content_attr(name: str, default=None):
+            if hasattr(event, "content"):
+                return getattr(event.content, name, default)
+            return getattr(event, name, default)
+
+        def _build_activity(activity_type: str, message: str, *, status: str = "working", agent: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+            return {
+                "kind": "activity",
+                "activity_type": activity_type,
+                "status": status,
+                "agent": agent,
+                "message": message,
+                "chat_id": ctx.chat_id,
+                "workflow_name": ctx.workflow_name,
+                "metadata": metadata or {},
+            }
+
         if isinstance(event, AgentThinkingEvent):
             return {
                 "kind": "agent_thinking",
@@ -144,15 +163,20 @@ class MozaiksaiEventHandler(BaseEventHandler):
             }
 
         if isinstance(event, StructuredOutputEvent):
-            # This maps to runtime.agent_output_validated
-            return {
-                "kind": "agent_output_validated",
-                "agent": getattr(event.content, "agent_name", None) if hasattr(event, "content") else getattr(event, "agent_name", None),
-                "output_type": getattr(event.content, "output_type", None) if hasattr(event, "content") else getattr(event, "output_type", None),
-                "structured_data": getattr(event.content, "output_data", {}) if hasattr(event, "content") else getattr(event, "output_data", {}),
-                "validation_passed": getattr(event.content, "validation_passed", True) if hasattr(event, "content") else getattr(event, "validation_passed", True),
-                "chat_id": ctx.chat_id,
-            }
+            agent_name = _content_attr("agent_name")
+            output_type = _content_attr("output_type")
+            validation_passed = bool(_content_attr("validation_passed", True))
+            status = "validated" if validation_passed else "invalid"
+            return _build_activity(
+                "structured_output",
+                f"{agent_name or 'Agent'} produced {status} {output_type or 'structured output'}.",
+                status=status,
+                agent=agent_name,
+                metadata={
+                    "output_type": output_type,
+                    "validation_passed": validation_passed,
+                },
+            )
 
         if isinstance(event, ToolCallRequestedEvent):
             return {
@@ -165,13 +189,56 @@ class MozaiksaiEventHandler(BaseEventHandler):
             }
 
         if isinstance(event, HandoffRequestedEvent):
-            return {
-                "kind": "handoff_requested",
-                "from_agent": getattr(event.content, "from_agent", None) if hasattr(event, "content") else getattr(event, "from_agent", None),
-                "to_agent": getattr(event.content, "to_agent", None) if hasattr(event, "content") else getattr(event, "to_agent", None),
-                "reason": getattr(event.content, "reason", "") if hasattr(event, "content") else getattr(event, "reason", ""),
-                "chat_id": ctx.chat_id,
-            }
+            from_agent = _content_attr("from_agent")
+            to_agent = _content_attr("to_agent")
+            reason = _content_attr("reason", "")
+            return _build_activity(
+                "handoff_requested",
+                f"Handoff: {from_agent or 'Agent'} to {to_agent or 'next agent'}.",
+                status="handoff",
+                agent=from_agent,
+                metadata={"from_agent": from_agent, "to_agent": to_agent, "reason": reason},
+            )
+
+        if isinstance(event, DecompositionPlannedEvent):
+            structured_data = _content_attr("structured_data", {}) or {}
+            workflow_count = len(structured_data.get("workflows", []) or []) if isinstance(structured_data, dict) else 0
+            agent_name = _content_attr("agent_name")
+            return _build_activity(
+                "decomposition_planned",
+                f"{agent_name or 'Agent'} planned {workflow_count} child workflow{'' if workflow_count == 1 else 's'}.",
+                status="planned",
+                agent=agent_name,
+                metadata={"workflow_count": workflow_count},
+            )
+
+        if isinstance(event, (ArtifactUpdatedEvent, ArtifactReadyEvent)):
+            artifact_type = _content_attr("artifact_type", "artifact")
+            artifact_id = _content_attr("artifact_id")
+            action = "ready" if isinstance(event, ArtifactReadyEvent) else str(_content_attr("action", "updated") or "updated").strip().lower()
+            return _build_activity(
+                f"artifact_{action}",
+                f"{artifact_type.replace('_', ' ').title()} {action}.",
+                status=action,
+                metadata={
+                    "artifact_type": artifact_type,
+                    "artifact_id": artifact_id,
+                    "artifact_version_id": _content_attr("artifact_version_id"),
+                },
+            )
+
+        if isinstance(event, PlanCreatedEvent):
+            steps = _content_attr("steps", []) or []
+            return _build_activity(
+                "plan_created",
+                f"Execution plan created with {len(steps)} step{'' if len(steps) == 1 else 's'}.",
+                status="planned",
+                metadata={
+                    "plan_id": _content_attr("plan_id"),
+                    "step_count": len(steps),
+                    "estimated_turns": _content_attr("estimated_turns", 0),
+                },
+            )
 
         # Other events are internal and don't need UI representation
         return None

@@ -25,4 +25,4 @@ models:
         description: Whether the artifact viewer surface was emitted.
       surface_component:
         type: str
-        description: Workflow-local component name used for the artifact surface.
+        description: Component name used for the artifact surface.

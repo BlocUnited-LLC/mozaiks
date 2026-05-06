@@ -22,7 +22,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-from mozaiksai.core.transport.ui_events import UIDisplayMode, UIRenderData, UIUpdateData
+from mozaiksai.core.transport.ui_events import UIDisplayMode, UIUpdateData
 
 if TYPE_CHECKING:
     pass
@@ -45,6 +45,29 @@ class UIToolsMixin:
     # ==================================================================================
     # UI TOOL STATE PERSISTENCE
     # ==================================================================================
+
+    def _get_resolved_tool_call_registry(self) -> Dict[str, None]:
+        registry = getattr(self, "_resolved_tool_call_ids", None)
+        if not isinstance(registry, dict):
+            registry = {}
+            setattr(self, "_resolved_tool_call_ids", registry)
+        return registry
+
+    def _mark_tool_call_response_resolved(self, event_id: str) -> None:
+        if not event_id:
+            return
+        registry = self._get_resolved_tool_call_registry()
+        registry[event_id] = None
+        while len(registry) > 1024:
+            oldest = next(iter(registry), None)
+            if oldest is None:
+                break
+            registry.pop(oldest, None)
+
+    def _is_tool_call_response_resolved(self, event_id: str) -> bool:
+        if not event_id:
+            return False
+        return event_id in self._get_resolved_tool_call_registry()
 
     async def _persist_ui_tool_state(
         self,
@@ -131,12 +154,7 @@ class UIToolsMixin:
         awaiting_response: bool = True,
         agent_name: Optional[str] = None
     ) -> None:
-        """Emit a ``ui.render`` event to the frontend.
-
-        Builds a :class:`UIRenderData`-shaped envelope and routes it through
-        the unified event dispatcher so the frontend receives a typed
-        ``ui.render`` WebSocket event instead of the old ``chat.tool_call``.
-        """
+        """Emit the canonical ``chat.tool_call`` workflow UI event to the frontend."""
         # Extract agent_name from payload if not explicitly provided
         if not agent_name and isinstance(payload, dict):
             agent_name = payload.get("agent_name")
@@ -152,30 +170,26 @@ class UIToolsMixin:
         if _display_norm not in (UIDisplayMode.INLINE, UIDisplayMode.ARTIFACT):
             _display_norm = UIDisplayMode.INLINE
 
-        # Build the typed ui.render payload.
-        render_data = UIRenderData(
-            tool_call_id=event_id,
-            component=component_name,
-            display_mode=_display_norm,
-            awaiting_response=bool(awaiting_response),
-            workflow=workflow_name,
-            agent=agent_name,
-            payload=payload if isinstance(payload, dict) else {},
-            interaction_type=interaction_type,
-        )
-
         event = {
-            "kind": "ui_render",
-            **render_data.model_dump(),
-            # tool_name kept alongside component so WorkflowUIRouter can fall
-            # back to it when resolving legacy component registry keys.
-            "tool_name": tool_name,
+            "kind": "tool_call",
+            "tool_call_id": event_id,
             "corr": event_id,
+            "tool_name": tool_name,
+            "component_type": component_name,
+            "workflow_name": workflow_name,
+            "display": _display_norm,
+            "display_type": _display_norm,
+            "awaiting_response": bool(awaiting_response),
+            "interaction_type": interaction_type,
+            "payload": payload if isinstance(payload, dict) else {},
         }
+        if agent_name:
+            event["agent"] = agent_name
+            event["agent_name"] = agent_name
 
         payload_keys = list(payload.keys()) if isinstance(payload, dict) else []
         logger.info(
-            "[UI_TOOL] Emitting ui.render event: tool=%s component=%s display=%s event_id=%s chat_id=%s payload_keys=%s",
+            "[UI_TOOL] Emitting chat.tool_call event: tool=%s component=%s display=%s event_id=%s chat_id=%s payload_keys=%s",
             tool_name, component_name, _display_norm, event_id, chat_id, payload_keys[:12],
         )
 
@@ -191,6 +205,7 @@ class UIToolsMixin:
             logger.debug(f"[UI_TOOL] Persist hook raised for chat {chat_id}: {persist_exc}")
 
         if event_id and bool(awaiting_response):
+            self._get_resolved_tool_call_registry().pop(event_id, None)
             self._ui_tool_metadata[event_id] = {
                 "chat_id": chat_id,
                 "tool_name": tool_name,
@@ -354,12 +369,17 @@ class UIToolsMixin:
         This method is called by an API endpoint when the frontend submits data
         from an interactive UI component.
         """
+        if self._is_tool_call_response_resolved(event_id):
+            logger.debug("[UI_TOOL] Ignoring duplicate response for already resolved event %s", event_id)
+            return True
+
         future = self._resolve_tool_call_future(event_id)
         if future is not None:
             if not future.done():
                 self._complete_tool_call_future(future, response_data)
                 logger.info(f"[UI_TOOL] Submitted response for event {event_id}")
                 metadata = self._ui_tool_metadata.pop(event_id, None)
+                self._mark_tool_call_response_resolved(event_id)
                 await self._finalize_tool_call_response(
                     event_id=event_id,
                     response_data=response_data,
@@ -368,12 +388,14 @@ class UIToolsMixin:
                 return True
             else:
                 self._ui_tool_metadata.pop(event_id, None)
-                logger.warning(f"[UI_TOOL] Event {event_id} already completed")
-                return False
+                self._mark_tool_call_response_resolved(event_id)
+                logger.debug("[UI_TOOL] Ignoring duplicate response for completed event %s", event_id)
+                return True
         metadata = self._ui_tool_metadata.get(event_id)
         if metadata is not None:
             self._buffered_tool_call_responses[event_id] = response_data
             self._ui_tool_metadata.pop(event_id, None)
+            self._mark_tool_call_response_resolved(event_id)
             logger.info(f"[UI_TOOL] Buffered early response for event {event_id}")
             await self._finalize_tool_call_response(
                 event_id=event_id,
@@ -384,7 +406,10 @@ class UIToolsMixin:
         input_request_text = self._coerce_input_request_response_text(response_data)
         if self._has_pending_input_request(event_id):
             logger.info(f"[UI_TOOL] Routing response-required interaction through submit_user_input for {event_id}")
-            return await self.submit_user_input(event_id, input_request_text)
+            submitted = await self.submit_user_input(event_id, input_request_text)
+            if submitted:
+                self._mark_tool_call_response_resolved(event_id)
+            return submitted
 
         logger.warning(f"[UI_TOOL] No pending event found for {event_id}")
         return False

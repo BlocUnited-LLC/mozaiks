@@ -116,7 +116,8 @@ Source file analyzed:
 | `context_include_schema` | `boolean` | `config` | `os.getenv("CONTEXT_INCLUDE_SCHEMA")`, fallback `false`, boolean coercion |
 | `context_schema_db` | `string` | `config` | `os.getenv("CONTEXT_SCHEMA_DB")`, fallback `null` |
 | `interview_complete` | `boolean` | `state` | Initialized to `false`; set through state trigger (`agent_text`, `InterviewAgent`, `match.equals=NEXT`, `ui_hidden=true`) |
-| `action_plan_acceptance` | `string` | `state` | Initialized to `pending`; updated by UI trigger from tool `mermaid_sequence_diagram` at `response_key=plan_acceptance` |
+| `workflow_review_approved` | `boolean` | `state` | Initialized to `false`; set through a `user_text` regex when the user approves the review step in the main chat composer |
+| `workflow_review_revision_requested` | `boolean` | `state` | Initialized to `false`; set through a `user_text` regex when the user asks for revisions in the main chat composer |
 | `action_plan` | `object` | `computed` | Starts `None`; set by workflow tools (for example action plan generation tool chain) |
 | `workflow_strategy` | `object` | `computed` | Starts `None`; populated by strategy generation tool path |
 | `technical_blueprint` | `object` | `computed` | Starts `None`; populated by technical blueprint tool path |

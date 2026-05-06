@@ -127,7 +127,26 @@ async def test_create_change_request_and_refinement_session_persist_structured_r
         artifact_version_id="av_123",
         raw_user_request="Add export button",
         classification=ChangeClassification.FEATURE,
-        scope={"owned_paths": ["src/pages/reports.tsx"]},
+        refinement_request={
+            "declared_change_class": "feature",
+            "artifact_kind": "app_bundle",
+            "artifact_key": "primary",
+            "artifact_version_id": "av_123",
+            "raw_user_request": "Add export button",
+        },
+        change_intent={
+            "change_class": "feature",
+            "rationale": "Feature extension requested for the app bundle; preserve the current concept while widening the owned implementation scope.",
+        },
+        impact_set={
+            "affected_workflows": ["AppGenerator"],
+            "affected_bundle_paths": ["src/pages/reports.tsx"],
+            "affected_declarative_families": ["app_bundle"],
+            "requires_replanning": True,
+            "requires_rebuild": True,
+            "restart_from": "AppGenerator",
+            "scope_summary": "Extend app bundle scope.",
+        },
         router_decision={"reentry": "feature_refinement"},
         created_by_user_id="user-1",
     )
@@ -143,6 +162,8 @@ async def test_create_change_request_and_refinement_session_persist_structured_r
     )
 
     assert change_request.classification == ChangeClassification.FEATURE
+    assert change_request.change_intent.change_class == ChangeClassification.FEATURE
+    assert change_request.impact_set.requires_replanning is True
     assert refinement_session.provider == "e2b"
     assert refinement_session.sandbox_id == "sbx_123"
     assert refinement_session.preview_url == "https://preview.example"
@@ -150,4 +171,6 @@ async def test_create_change_request_and_refinement_session_persist_structured_r
     inserted_change = change_coll.insert_one.await_args.args[0]
     inserted_session = session_coll.insert_one.await_args.args[0]
     assert inserted_change["router_decision"]["reentry"] == "feature_refinement"
+    assert inserted_change["refinement_request"]["declared_change_class"] == "feature"
+    assert inserted_change["impact_set"]["restart_from"] == "AppGenerator"
     assert inserted_session["status"] == RefinementSessionStatus.PROVISIONING.value

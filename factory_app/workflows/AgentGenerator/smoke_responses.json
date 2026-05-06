@@ -1,0 +1,37 @@
+{
+  "input_replies": [
+    "Users should start the workflow manually in chat whenever a support ticket needs review.",
+    "It should handle one ticket per run and keep revising the resolution until a human approves closing it.",
+    "No assets or datasets are needed for this workflow.",
+    "No external integrations. Keep it minimal and deterministic.",
+    "Use simple urgency levels: low, medium, high, and critical."
+  ],
+  "default_input_reply": "Use the current assumptions: manual chat startup, urgency levels low/medium/high/critical, no assets, no integrations, and proceed with the workflow.",
+  "assistant_reply_rules": [
+    {
+      "contains": "final tweaks",
+      "reply": "No final tweaks. Proceed to workflow planning."
+    },
+    {
+      "contains": "Review the agent flow below",
+      "reply": "Approved. The sequence diagram looks good. Proceed with implementation."
+    }
+  ],
+  "tool_responses": {
+    "DownloadCenter": {
+      "status": "submitted",
+      "action": "download_complete",
+      "download_accepted": true
+    },
+    "AgentAPIKeysBundleInput": {
+      "status": "submitted",
+      "action": "cancel",
+      "services": []
+    },
+    "*": {
+      "status": "submitted",
+      "action": "approve",
+      "approved": true
+    }
+  }
+}

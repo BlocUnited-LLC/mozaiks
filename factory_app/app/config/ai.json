@@ -9,5 +9,22 @@
   "workflows": {
     "entry_point": "ValueEngine",
     "resume_policy": "last_active_then_oldest_then_entry_point"
+  },
+  "control_plane": {
+    "enabled": true,
+    "classifier": {
+      "enabled": true,
+      "llm_config": {
+        "model": "gpt-4o-mini",
+        "temperature": 0.0
+      }
+    },
+    "coding": {
+      "enabled": false,
+      "llm_config": {
+        "model": "gpt-5.2-codex",
+        "temperature": 0.1
+      }
+    }
   }
 }

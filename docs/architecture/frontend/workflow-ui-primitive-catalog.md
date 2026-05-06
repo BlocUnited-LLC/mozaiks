@@ -74,8 +74,10 @@ Rules:
 - `composer_reply` is shell-owned input UX but still a plannable workflow checkpoint.
 - All other entries are **workflow interaction patterns**.
 - The primitive id is the canonical planning contract.
-- `component` is the realization detail.
+- `ui.realization` is the realization contract.
+- `component` is the concrete runtime identifier for that realization.
 - `ui.workflow_primitive` is required on every emitted `UI_Tool` and `UI_Surface` manifest entry.
+- `ui.realization` is required on every emitted `UI_Tool` and `UI_Surface` manifest entry.
 - Only renderable workflow primitives may appear in `tools.yaml`; shell status primitives and `composer_reply` must not.
 
 ### Shipped Shared Workflow Components
@@ -99,6 +101,8 @@ Rules:
 - Do not generate bespoke React for these when the shipped component already fits.
 - Generate only a thin wrapper or re-export when workflow-local naming or light customization is required.
 - Keep `primitives_hint` empty when no workflow-local wrapper is needed.
+- Treat `ui_contract` as the canonical runtime contract for shipped shared components.
+- Shipped shared components should read action semantics from `ui_contract.actions_schema`; `payload.actions` is only a runtime projection for convenience.
 
 ---
 
@@ -113,6 +117,7 @@ The build path is intentionally split by ownership.
 Canonical output:
 
 - `ToolPlanning.ui_requirements[*].workflow_primitive`
+- `ToolPlanning.ui_requirements[*].realization`
 - `display`
 - `component`
 - `primitives_hint`
@@ -132,11 +137,15 @@ This is the **decision point** for workflow UI.
 - `primitives_hint` against the shipped component primitive registry
 - `workflow_primitive` against the canonical workflow UI catalog
 - `composer_reply` normalization:
+  - force `realization=shell_builtin`
   - force `display=composer`
   - force `component=null`
   - clear `primitives_hint`
 - shipped component normalization:
   - default `component` to the canonical shipped component name when the primitive maps to one
+  - set `realization=shipped_component` when the canonical shipped component is used directly
+  - set `realization=workflow_wrapper` when a workflow-local wrapper intentionally sits on top of a shipped primitive
+  - set `realization=generated_component` when the primitive has no shipped shared implementation
   - clear `primitives_hint` when the canonical shipped component is used directly
 
 This is the **contract enforcement point**.
@@ -156,12 +165,14 @@ Rules:
   - emit `ui.component`
   - emit `ui.mode`
   - emit `ui.workflow_primitive`
+  - emit `ui.realization`
   - emit `ui_contract` when the surface is interactive
 
 For shipped shared components:
 
 - it is valid for `ui.component` to be the canonical shipped component name
 - no workflow-local React file is required unless a wrapper is intentionally introduced
+- `ui_contract.actions_schema` should carry the action ids and button metadata (`label`, `variant`, optional `approved`) needed by the shared component at runtime
 
 This is the **manifest synthesis point**.
 
@@ -174,8 +185,9 @@ Rules:
 - Treat `ui.workflow_primitive` as the source of truth for behavior.
 - Treat `ui.component` as either a canonical shipped shared component name or a workflow-local implementation name.
 - Generate React only for entries that actually produce workflow-local UI.
-- If the primitive maps to a shipped shared component and `ui.component` already uses that name, skip React generation entirely.
-- If the primitive maps to a shipped shared component but `ui.component` is workflow-local, generate only a thin wrapper/re-export.
+- If `ui.realization=shipped_component`, skip React generation entirely.
+- If `ui.realization=workflow_wrapper`, generate only a thin wrapper/re-export.
+- If `ui.realization=generated_component`, generate the full workflow-local UI.
 - Do not generate files for `composer_reply`.
 
 This is the **component realization point**.
@@ -188,6 +200,7 @@ The runtime and shell own:
 - `tool_call_response`
 - composer-mode input routing
 - progress/status/activity shell UI
+- payload enrichment from `tools.yaml` so workflow UI events carry canonical `workflow_primitive`, `ui_contract`, and projected action metadata
 
 These are not AppGenerator responsibilities.
 
@@ -220,6 +233,29 @@ in the live app bundle. When AgentGenerator prompt, manifest, or runtime
 contracts change, this workflow should keep passing before those changes are
 considered promotion-ready.
 
+The stable real-AG2 regression target is:
+
+- `factory_app/workflows/AgentGenerator`
+
+Use it when validating:
+
+- multi-turn AG2 interview flows
+- composer fallback handling via `default_input_reply`
+- workflow-local review components such as `ActionPlan`
+- shipped shared workflow primitives such as `DownloadCenter`
+- final generated-bundle handoff
+
+Canonical smoke command:
+
+```bash
+python scripts/run_live_mfj_smoke.py \
+  --workflow AgentGenerator \
+  --workflows-root factory_app/workflows \
+  --prompt-file factory_app/workflows/AgentGenerator/smoke_prompt.txt \
+  --tool-response-file factory_app/workflows/AgentGenerator/smoke_responses.json \
+  --timeout-seconds 300
+```
+
 ---
 
 ## Relationship To AppGenerator
@@ -247,9 +283,9 @@ to the shell and AgentGenerator lane.
 
 The current source of truth is split across:
 
-- [workflow_ui_catalog.py](../../../mozaiksai/core/workflow/workflow_ui_catalog.py)
-- [tool_planning.py](../../../factory_app/workflows/AgentGenerator/tools/tool_planning.py)
-- [AgentGenerator prompts](../../../factory_app/workflows/AgentGenerator/agents.yaml)
+- `mozaiksai/core/workflow/workflow_ui_catalog.py`
+- `factory_app/workflows/AgentGenerator/tools/tool_planning.py`
+- `factory_app/workflows/AgentGenerator/agents.yaml`
 
 If those contracts change, update the docs, prompts, validators, and tests
 together.

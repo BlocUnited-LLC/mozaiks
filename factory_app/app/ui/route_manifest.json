@@ -1,6 +1,18 @@
 {
   "pages": [
     {
+      "path": "/hub",
+      "component": "HubPage",
+      "label": "Hub",
+      "order": 4,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "App Hub",
+        "appShell": true
+      }
+    },
+    {
       "path": "/studio",
       "component": "StudioHomePage",
       "label": "Studio",

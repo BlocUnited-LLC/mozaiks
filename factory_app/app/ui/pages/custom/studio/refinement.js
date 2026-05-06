@@ -34,28 +34,36 @@ const REFINEMENT_PLACEHOLDERS = {
 }
 
 export function getRefinementRequestPlaceholder(changeClass) {
-  return REFINEMENT_PLACEHOLDERS[changeClass] || 'Select a change type above, then describe what you want...'
+  return REFINEMENT_PLACEHOLDERS[changeClass] || 'Describe the change you want. Mozaiks will classify and route it automatically.'
 }
 
 export function buildRefinementTriggerPayload({
   changeClass,
   artifactKind,
+  artifactKey = null,
   artifactVersionId = null,
   rawUserRequest = null,
+  sourceSurface = null,
 }) {
-  const payload = {
-    change_class: changeClass,
+  const trimmedRequest = typeof rawUserRequest === 'string' ? rawUserRequest.trim() : ''
+  const refinementRequest = {
     artifact_kind: artifactKind,
+    artifact_key: artifactKey || artifactKind,
+    raw_user_request: trimmedRequest,
+  }
+
+  if (changeClass) {
+    refinementRequest.declared_change_class = changeClass
   }
 
   if (artifactVersionId) {
-    payload.artifact_version_id = artifactVersionId
+    refinementRequest.artifact_version_id = artifactVersionId
+  }
+  if (sourceSurface) {
+    refinementRequest.source_surface = sourceSurface
   }
 
-  const trimmedRequest = typeof rawUserRequest === 'string' ? rawUserRequest.trim() : ''
-  if (trimmedRequest) {
-    payload.raw_user_request = trimmedRequest
+  return {
+    refinement_request: refinementRequest,
   }
-
-  return payload
 }

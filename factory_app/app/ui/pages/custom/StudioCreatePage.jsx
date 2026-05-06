@@ -8,6 +8,7 @@ import {
   SurfaceCard,
   Metric,
   ActionButton,
+  StudioSlideOver,
   StudioLoadingState,
   StudioErrorState,
 } from './studio/StudioPrimitives.jsx'
@@ -188,6 +189,46 @@ function CreateStatePanel({ createData, ai, workspace }) {
   )
 }
 
+function RefinementSummaryCard({ selectedMode, readyCount, busy, onOpen }) {
+  return (
+    <SurfaceCard title="Refinement Paths" eyebrow="Routed Re-Entry">
+      <div className="space-y-4">
+        <p className="text-sm leading-7 text-muted-foreground">
+          Keep the main create surface focused on the request brief. Mozaiks classifies refinement requests automatically and reopens the right workflow; optional route hints stay available when you want to bias the result.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <StatusPill tone={selectedMode ? (selectedMode.isDestructive ? 'destructive' : 'primary') : 'default'}>
+            {selectedMode ? `${selectedMode.label || selectedMode.title} selected` : 'No path selected'}
+          </StatusPill>
+          <StatusPill tone={readyCount > 0 ? 'success' : 'warning'}>{readyCount} ready paths</StatusPill>
+        </div>
+        <div className="rounded-2xl border border-border bg-background/70 p-4">
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Current Selection</div>
+          <p className="mt-2 text-sm font-semibold text-foreground">
+            {selectedMode ? (selectedMode.label || selectedMode.title) : 'Automatic classification'}
+          </p>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            {selectedMode
+              ? selectedMode.description
+              : 'Launch refinement without selecting a route hint and the backend classifier will determine whether this is a patch, design change, feature request, or core reset.'}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          <ActionButton onClick={onOpen} variant="secondary">
+            {selectedMode ? 'Edit route hint' : 'Open refinement controls'}
+          </ActionButton>
+          <div className="self-center text-sm text-muted-foreground">
+            Uses the current Request Brief from the Create panel above.
+          </div>
+        </div>
+        {busy && (
+          <div className="text-sm text-muted-foreground">A workflow action is already in progress.</div>
+        )}
+      </div>
+    </SurfaceCard>
+  )
+}
+
 function ArtifactVersionRow({ version, onRevert, reverting }) {
   const isCurrent = version.lifecycle_status === 'current'
   const hasPath = Boolean(version.commit_metadata?.metadata?.artifact_path)
@@ -308,6 +349,7 @@ export default function StudioCreatePage() {
   const [revertResult, setRevertResult] = useState(null)
   const [selectedRefinementClass, setSelectedRefinementClass] = useState(null)
   const [selectedValidationStrategy, setSelectedValidationStrategy] = useState(null)
+  const [refinementOverlayOpen, setRefinementOverlayOpen] = useState(false)
   const { startWorkflow, starting, error: workflowError } = useWorkflowStart()
 
   const syncFromSummary = (payload) => {
@@ -384,6 +426,8 @@ export default function StudioCreatePage() {
       workflowId: support[changeClass]?.workflow_id || null,
     }))
   }, [createData.refinement_support])
+  const selectedRefinementMode = refinementModes.find((entry) => entry.changeClass === selectedRefinementClass) || null
+  const readyRefinementCount = refinementModes.filter((entry) => entry.available).length
 
   const persistCreateRequest = async ({ nextRequestKind, changeClass = null }) => {
     setLocalError(null)
@@ -458,23 +502,35 @@ export default function StudioCreatePage() {
     }
   }
 
-  const handleRefinement = async (changeClass) => {
+  const handleRefinement = async (changeClass = null) => {
     setLocalError(null)
-    if (!draft.trim()) { setLocalError('Enter a request before launching a refinement run.'); return }
-    const mode = refinementModes.find((entry) => entry.changeClass === changeClass)
-    if (!mode) { setLocalError('Select a refinement path before launching.'); return }
-    if (!mode.available) { setLocalError("This refinement path's workflow is not installed."); return }
+    if (!draft.trim()) { setLocalError('Enter a request before launching a refinement run.'); return false }
+    const mode = refinementModes.find((entry) => entry.changeClass === changeClass) || null
+    if (mode && !mode.available) { setLocalError("This refinement path's workflow is not installed."); return false }
     const persisted = await persistCreateRequest({ nextRequestKind: 'refinement', changeClass })
     if (persisted) {
-      await startWorkflow(null, selectedValidationStrategy ? { app_validation_strategy: selectedValidationStrategy } : {}, {
-        trigger_source: 'refinement',
-        trigger_payload: buildRefinementTriggerPayload({
-          changeClass,
-          artifactKind: 'app_bundle',
-          rawUserRequest: draft,
-        }),
-      })
+      try {
+        await startWorkflow(null, selectedValidationStrategy ? { app_validation_strategy: selectedValidationStrategy } : {}, {
+          trigger_source: 'refinement',
+          trigger_payload: buildRefinementTriggerPayload({
+            changeClass,
+            artifactKind: 'app_bundle',
+            artifactKey: 'app_bundle',
+            rawUserRequest: draft,
+            sourceSurface: 'studio_create',
+          }),
+        })
+        return true
+      } catch (err) {
+        setLocalError(err instanceof Error ? err.message : 'Refinement could not be started.')
+      }
     }
+    return false
+  }
+
+  const handleRefinementFromOverlay = async (changeClass) => {
+    const started = await handleRefinement(changeClass)
+    if (started) setRefinementOverlayOpen(false)
   }
 
   if (loading) return <StudioLoadingState label="Loading Studio Create..." />
@@ -528,23 +584,12 @@ export default function StudioCreatePage() {
         </SurfaceCard>
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-          <SurfaceCard title="Refinement Paths" eyebrow="Routed Re-Entry">
-            <RefinementControls
-              modes={refinementModes}
-              selectedClass={selectedRefinementClass}
-              onSelectClass={setSelectedRefinementClass}
-              request={draft}
-              onRequestChange={setDraft}
-              onSubmit={handleRefinement}
-              busy={busy}
-              error={combinedError}
-              showRequestInput={false}
-              title="Refinement Paths"
-              description="Choose the routed refinement path, then use the current request brief above as the refinement prompt."
-              helperText="The Apply refinement action uses the current Request Brief from the Create panel above. Save Draft first if you want the request persisted before launch."
-              submitLabel="Apply refinement"
-            />
-          </SurfaceCard>
+          <RefinementSummaryCard
+            selectedMode={selectedRefinementMode}
+            readyCount={readyRefinementCount}
+            busy={busy}
+            onOpen={() => setRefinementOverlayOpen(true)}
+          />
 
           <CreateHistory
             currentPlan={currentPlan}
@@ -555,6 +600,30 @@ export default function StudioCreatePage() {
             revertResult={revertResult}
           />
         </div>
+
+        <StudioSlideOver
+          open={refinementOverlayOpen}
+          title="Refinement Paths"
+          description="Apply refinement using the current Request Brief from the Create panel. Mozaiks classifies the request automatically; route hints below are optional."
+          onClose={() => setRefinementOverlayOpen(false)}
+        >
+          <RefinementControls
+            modes={refinementModes}
+            selectedClass={selectedRefinementClass}
+            onSelectClass={setSelectedRefinementClass}
+            request={draft}
+            onRequestChange={setDraft}
+            onSubmit={handleRefinementFromOverlay}
+            onDismiss={() => setRefinementOverlayOpen(false)}
+            busy={busy}
+            error={combinedError}
+            showRequestInput={false}
+            showHeader={false}
+            surface="plain"
+            helperText="The Apply refinement action uses the current Request Brief from the Create panel above. Leave the route hint unset if you want the backend classifier to decide the scope on its own."
+            submitLabel="Apply refinement"
+          />
+        </StudioSlideOver>
       </div>
     </AdminWorkspaceLayout>
   )

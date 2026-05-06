@@ -9,6 +9,7 @@ tools:
     component: ApprovalCard
     mode: inline
     workflow_primitive: approval_card
+    realization: shipped_component
   ui_contract:
     surface_kind: agent_tool
     payload_schema:
@@ -24,6 +25,9 @@ tools:
     actions_schema:
     - id: approve
       description: Accept the workflow primitive validation checkpoint.
+      label: Approve
+      variant: primary
+      approved: true
       payload_schema:
         type: object
         properties:
@@ -36,6 +40,9 @@ tools:
         additionalProperties: true
     - id: request_changes
       description: Reject the checkpoint and request another iteration.
+      label: Request Changes
+      variant: secondary
+      approved: false
       payload_schema:
         type: object
         properties:
@@ -56,4 +63,5 @@ tools:
     component: DiagramViewer
     mode: artifact
     workflow_primitive: diagram_viewer
+    realization: shipped_component
 lifecycle_tools: []

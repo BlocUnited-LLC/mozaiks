@@ -51,6 +51,20 @@ That means optimization goals are different from a legacy enterprise codebase:
 - Remove stale logic when a better contract or architecture is introduced.
 - Do not keep compatibility shims, aliases, wrappers, fallback branches, or duplicate schemas unless explicitly requested.
 
+## Release Hold
+
+Do **not** publish this repo yet.
+
+- Do not create or push `v*` Git tags.
+- Do not trigger `.github/workflows/release.yml`.
+- Do not publish to PyPI or create a GitHub release.
+- Do not treat trusted-publisher or GitHub environment setup as approval to
+  release.
+- Do not bump `mozaiksai/version.py` for a public release unless the user
+  explicitly says the repo is production-ready and wants to publish.
+
+Normal code pushes are fine. Public release actions are not.
+
 ## Replacement Policy
 
 When adjusting behavior:
@@ -177,16 +191,14 @@ contract.
 Shared factory workflows live in `factory_app/workflows/`. Generator output must
 not land directly in active runtime paths.
 
-Workflow loading is multi-root by contract:
-
-- active app root `workflows/` first
-- shared `factory_app/workflows/` second
-- `MOZAIKS_WORKFLOW_ROOTS` may override that order explicitly
-
-`factory_app/app/workflows/` is an app-local overlay seam for the first-party
-Studio app bundle. External hosted product workspaces may define their own
-overlay workflows under their active app root, but those overlays are not
-canonical source code for this repo.
+Workflow resolution is single-root by contract. A running host binds to one
+workflow root via `MOZAIKS_WORKFLOWS_PATH` rather than auto-merging app and
+factory roots. Studio defaults to `factory_app/workflows/`; product/app hosts
+use the active app root's `workflows/` when present. The first-party
+`factory_app/app` bundle should not check in `factory_app/app/workflows/`
+until it owns a real app-local workflow. External hosted product workspaces may
+define their own app-local workflows under their active app root, but those are
+not canonical source code for this repo.
 
 Use `MOZAIKS_GENERATED_ARTIFACTS_PATH`, defaulting to:
 

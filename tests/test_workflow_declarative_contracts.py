@@ -243,6 +243,41 @@ def test_workflow_manager_accepts_valid_declarative_bundle(tmp_path: Path) -> No
     assert isinstance(config.get("handoffs", {}).get("handoff_rules"), list)
 
 
+def test_workflow_manager_accepts_user_text_state_trigger(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "FlowUserTextTrigger"
+    wf_dir.mkdir(parents=True)
+    _write_minimal_orchestrator_and_agents(wf_dir, "FlowUserTextTrigger")
+    _write_yaml(
+        wf_dir / "context_variables.yaml",
+        "\n".join(
+            [
+                "definitions:",
+                "  review_approved:",
+                "    type: boolean",
+                "    source:",
+                "      type: state",
+                "      default: false",
+                "      triggers:",
+                "        - type: user_text",
+                "          match:",
+                "            contains: approved",
+                "agents: {}",
+            ]
+        ),
+    )
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    manager = _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(tmp_path))
+    info = manager.get_workflow_info("FlowUserTextTrigger")
+    config = manager.get_config("FlowUserTextTrigger")
+
+    assert info is not None
+    assert info.get("status") == "loaded"
+    trigger = config["context_variables"]["definitions"]["review_approved"]["source"]["triggers"][0]
+    assert trigger["type"] == "user_text"
+    assert trigger["match"]["contains"] == "approved"
+
+
 def test_workflow_manager_normalizes_ui_tool_contract_defaults(tmp_path: Path) -> None:
     wf_dir = tmp_path / "FlowUiContractDefaults"
     wf_dir.mkdir(parents=True)
@@ -260,6 +295,7 @@ def test_workflow_manager_normalizes_ui_tool_contract_defaults(tmp_path: Path) -
                 "      component: PlanPanel",
                 "      mode: artifact",
                 "      workflow_primitive: form_card",
+                "      realization: workflow_wrapper",
             ]
         ),
     )
@@ -355,6 +391,7 @@ def test_workflow_manager_accepts_ui_surface_without_ui_contract(tmp_path: Path)
                 "      component: PlanPanel",
                 "      mode: artifact",
                 "      workflow_primitive: document_preview",
+                "      realization: generated_component",
             ]
         ),
     )
@@ -389,6 +426,7 @@ def test_workflow_manager_rejects_non_renderable_workflow_primitive(tmp_path: Pa
                 "      component: PlanPanel",
                 "      mode: inline",
                 "      workflow_primitive: composer_reply",
+                "      realization: shell_builtin",
             ]
         ),
     )
@@ -400,6 +438,36 @@ def test_workflow_manager_rejects_non_renderable_workflow_primitive(tmp_path: Pa
     assert info is not None
     assert info.get("status") == "error"
     assert "workflow_primitive" in str(info.get("error") or "")
+
+
+def test_workflow_manager_rejects_ui_surface_missing_realization(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "FlowMissingRealization"
+    wf_dir.mkdir(parents=True)
+    _write_minimal_orchestrator_and_agents(wf_dir, "FlowMissingRealization")
+    _write_yaml(
+        wf_dir / "tools.yaml",
+        "\n".join(
+            [
+                "tools:",
+                "  - agent: Planner",
+                "    file: render_panel.py",
+                "    function: render_panel",
+                "    tool_type: UI_Surface",
+                "    ui:",
+                "      component: PlanPanel",
+                "      mode: artifact",
+                "      workflow_primitive: document_preview",
+            ]
+        ),
+    )
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    manager = _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(tmp_path))
+    info = manager.get_workflow_info("FlowMissingRealization")
+
+    assert info is not None
+    assert info.get("status") == "error"
+    assert "ui.realization" in str(info.get("error") or "")
 
 
 def test_workflow_manager_rejects_manifest_tool_integration_metadata(tmp_path: Path) -> None:

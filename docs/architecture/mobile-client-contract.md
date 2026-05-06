@@ -145,6 +145,7 @@ Common `type` values:
 - `chat.tool_call_complete`
 - `chat.tool_call_dismiss`
 - `chat.tool_response`
+- `chat.awaiting_reply`
 - `chat.usage_delta`
 - `chat.usage_summary`
 - `chat.run_complete`
@@ -161,6 +162,9 @@ Note:
   should answer with `tool_call_response`. If the tool call carries
   `display=composer`, a chat-style client should route the user's normal
   composer submission into that response instead of opening a second text box.
+- `chat.awaiting_reply` means AG2 handed control back to the user without a
+  dedicated response-bearing tool call. The next composer message should resume
+  the workflow on the same chat session.
 
 ## 5) Resume and Replay Contract
 

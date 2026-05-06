@@ -96,17 +96,34 @@ Rules:
 - inline React components are for structured workflow interaction, not default
   free-text reply
 - shared workflow components live in `chat-ui/src/core/ui/` and are mounted by `WorkflowUIRouter`
+- runtime-enriched workflow payloads should carry manifest-owned `workflow_primitive` and `ui_contract`
+- runtime-enriched workflow payloads should carry manifest-owned `workflow_primitive`, `ui_realization`, and `ui_contract`
+- shipped shared workflow components should derive their actions from `ui_contract.actions_schema`
 - workflow-local React is only for genuine customization or primitive gaps
+- `UIFileGenerator` should emit canonical `CodeFile` entries under the workflow's
+  `tools/` and `ui/` tree, not ad hoc frontend payload shapes
+- workflow assembly synthesizes `ui/index.js` deterministically from the
+  workflow-local component files that remain after contract validation
 - workflow interaction planning should use the canonical
   [Workflow UI Primitive Catalog](workflow-ui-primitive-catalog.md)
 - shell-owned workflow status surfaces such as progress, run status, and agent
   activity are not workflow-local React generation targets
 - every real workflow manifest UI entry must declare `ui.workflow_primitive`
+- every real workflow manifest UI entry must declare `ui.realization`
 - `composer_reply` remains shell-owned and must not generate a `UI_Tool` or `UI_Surface` manifest entry
 - shipped workflow primitives should prefer the canonical shared component names directly
+- `ui.realization=shipped_component` means no workflow-local React file should exist for that checkpoint
+- `ui.realization=workflow_wrapper` means the workflow owns only a thin wrapper/re-export around a shipped primitive
+- `ui.realization=generated_component` means the workflow owns the full custom React surface
 - workflow-local wrappers around shipped components should stay thin and intentional
+- if `ui.component` already equals the canonical shipped component name, no
+  workflow-local React file should be generated or saved for that checkpoint
 - the first deterministic regression target for this contract is
   `factory_app/workflows/WorkflowPrimitiveAcceptance`
+- the stable real-AG2 regression target is
+  `factory_app/workflows/AgentGenerator` with the workflow-owned smoke pair:
+  `factory_app/workflows/AgentGenerator/smoke_prompt.txt` and
+  `factory_app/workflows/AgentGenerator/smoke_responses.json`
 
 This is the surface that should keep borrowing ideas from AG-UI and CopilotKit:
 

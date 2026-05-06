@@ -224,7 +224,8 @@ Its job is to answer:
 - where fan-in happens before validation
 
 `BuildGraph` should be the builder's conveyor belt. It should not be confused
-with workflow-local DAGs or runtime execution graphs.
+with workflow-local DAGs, runtime execution graphs, or the refinement worker
+loop.
 
 ## `BuilderBlueprint`
 
@@ -306,3 +307,4 @@ top, rather than a generator pretending to be a framework.
 - [builder-orchestration-taxonomy.md](builder-orchestration-taxonomy.md)
 - [builder-execution-model.md](builder-execution-model.md)
 - [app-creation-guide.md](app-creation-guide.md)
+- [../../docs/architecture/foundations/orchestration-control-loops.md](../../docs/architecture/foundations/orchestration-control-loops.md)

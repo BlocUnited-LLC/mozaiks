@@ -2,11 +2,16 @@
 
 **Status:** Proposed near-term strategy
 **Last updated:** 2026-04-02
-**Depends on:** [Event System](../../architecture/foundations/event-system.md), [Event Contracts](../../architecture/foundations/event-contracts.md), [Orchestration and Decomposition](../../architecture/orchestration-and-decomposition.md), [Mid-Flight Journeys](mid-flight-journeys.md), [Implementation Plan](ag2-beta-preperation-plan.md)
+**Depends on:** [Event System](../../architecture/foundations/event-system.md), [Event Contracts](../../architecture/foundations/event-contracts.md), [Orchestration and Decomposition](../../architecture/orchestration-and-decomposition.md), [Orchestration Control Loops](../../architecture/foundations/orchestration-control-loops.md), [Mid-Flight Journeys](mid-flight-journeys.md), [Implementation Plan](ag2-beta-preperation-plan.md)
 
 ---
 
 ## Purpose
+
+This document is an engine-strategy note, not the canonical control-plane
+contract. The authoritative ownership model for workflow runs, builder sessions,
+and refinement workers is
+[Orchestration Control Loops](../../architecture/foundations/orchestration-control-loops.md).
 
 This document defines the near-term runtime strategy for Mozaiks while the
 platform continues to use AG2 group chats and `a_run_group_chat`-style

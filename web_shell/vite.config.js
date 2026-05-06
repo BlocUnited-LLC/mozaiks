@@ -64,40 +64,49 @@ function hasWorkflowDefinitions(candidate) {
   }
 }
 
-function resolveWorkflowRoots(platformAppDir, platformInputPath, workflowRootsEnv, workflowsEnvPath, factoryWorkflowsRoot, chatUiSrcRoot) {
+function resolveWorkflowRoot(platformAppDir, platformInputPath, workflowRootsEnv, workflowsEnvPath, factoryWorkflowsRoot, chatUiSrcRoot) {
   const stubRoot = path.resolve(chatUiSrcRoot, 'workflows_stub');
-  const roots = [];
-  const seen = new Set();
-
-  const add = (candidate) => {
-    if (!candidate) return;
-    const resolved = path.isAbsolute(candidate)
+  const resolveCandidate = (candidate) => {
+    if (!candidate) return '';
+    return path.isAbsolute(candidate)
       ? candidate
       : path.resolve(projectRoot, candidate);
-    if (seen.has(resolved)) return;
-    seen.add(resolved);
-    roots.push(resolved);
   };
 
-  if (workflowRootsEnv) {
-    workflowRootsEnv
-      .split(path.delimiter)
-      .map((value) => value.trim())
-      .filter(Boolean)
-      .forEach(add);
-  } else if (workflowsEnvPath) {
-    add(workflowsEnvPath);
-  } else {
-    add(path.resolve(platformAppDir, 'workflows'));
-    add(path.resolve(platformInputPath, 'workflows'));
-    add(factoryWorkflowsRoot);
+  if (workflowsEnvPath) {
+    return resolveCandidate(workflowsEnvPath);
   }
 
-  const withDefinitions = roots.filter((candidate) => hasWorkflowDefinitions(candidate));
-  const primary = withDefinitions[0] || resolveFirstExistingPath([...roots, stubRoot]);
-  const secondary = withDefinitions.find((candidate) => candidate !== primary) || stubRoot;
+  if (workflowRootsEnv) {
+    const firstLegacyRoot = workflowRootsEnv
+      .split(path.delimiter)
+      .map((value) => value.trim())
+      .filter(Boolean)[0];
+    if (firstLegacyRoot) {
+      return resolveCandidate(firstLegacyRoot);
+    }
+  }
 
-  return { primary, secondary };
+  const appWorkflowRoot = path.resolve(platformAppDir, 'workflows');
+  if (hasWorkflowDefinitions(appWorkflowRoot)) {
+    return appWorkflowRoot;
+  }
+
+  const workspaceWorkflowRoot = path.resolve(platformInputPath, 'workflows');
+  if (workspaceWorkflowRoot !== appWorkflowRoot && hasWorkflowDefinitions(workspaceWorkflowRoot)) {
+    return workspaceWorkflowRoot;
+  }
+
+  if (hasWorkflowDefinitions(factoryWorkflowsRoot)) {
+    return factoryWorkflowsRoot;
+  }
+
+  return resolveFirstExistingPath([
+    appWorkflowRoot,
+    workspaceWorkflowRoot,
+    factoryWorkflowsRoot,
+    stubRoot,
+  ]);
 }
 
 function normalizeFaviconPath(value) {
@@ -169,7 +178,7 @@ export default defineConfig(({ mode }) => {
     process.env.VITE_MOZAIKS_WORKFLOW_ROOTS ||
     rootEnv.VITE_MOZAIKS_WORKFLOW_ROOTS ||
     '';
-  const platformWorkflowRoots = resolveWorkflowRoots(
+  const platformWorkflowRoot = resolveWorkflowRoot(
     platformAppDir,
     platformInputPath,
     workflowRootsEnv,
@@ -249,8 +258,7 @@ export default defineConfig(({ mode }) => {
     alias: {
       // ── Core aliases (always present) ───────────────────────────────────
       '@mozaiks/chat-ui': chatUiSrcRoot,
-      '@chat-workflows-root': platformWorkflowRoots.primary,
-      '@chat-workflows-root-secondary': platformWorkflowRoots.secondary,
+      '@chat-workflows-root': platformWorkflowRoot,
       'react-native':     'react-native-web',
       // Ensure files imported from sibling product/workflow folders resolve to
       // this frontend's dependency tree instead of walking unrelated parents.

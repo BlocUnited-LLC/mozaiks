@@ -64,6 +64,48 @@ class ArtifactCommitMetadata(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class RefinementRequestPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_kind: str = "refinement"
+    declared_change_class: Optional[ChangeClassification] = None
+    artifact_kind: str
+    artifact_key: Optional[str] = None
+    artifact_version_id: Optional[str] = None
+    raw_user_request: str = ""
+    source_surface: Optional[str] = None
+    app_id: Optional[str] = None
+    requested_workflow_id: Optional[str] = None
+    extra: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ChangeIntentDoc(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    change_class: ChangeClassification
+    source: str = "declared"
+    signals: List[str] = Field(default_factory=list)
+    rationale: str
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    requires_concept_revision: bool = False
+    touches_app_bundle: bool = False
+    touches_workflow_bundle: bool = False
+    touches_design_docs: bool = False
+    touches_concept: bool = False
+
+
+class ImpactSetDoc(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    affected_workflows: List[str] = Field(default_factory=list)
+    affected_bundle_paths: List[str] = Field(default_factory=list)
+    affected_declarative_families: List[str] = Field(default_factory=list)
+    requires_replanning: bool = False
+    requires_rebuild: bool = True
+    restart_from: Optional[str] = None
+    scope_summary: str = ""
+
+
 class ArtifactVersionDoc(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -95,10 +137,12 @@ class ChangeRequestDoc(BaseModel):
     app_id: str
     artifact_kind: str
     artifact_key: str
-    artifact_version_id: str
-    raw_user_request: str
+    artifact_version_id: Optional[str] = None
+    raw_user_request: str = ""
     classification: ChangeClassification
-    scope: Dict[str, Any] = Field(default_factory=dict)
+    refinement_request: RefinementRequestPayload
+    change_intent: ChangeIntentDoc
+    impact_set: ImpactSetDoc
     router_decision: Dict[str, Any] = Field(default_factory=dict)
     created_by_user_id: Optional[str] = None
     created_at: datetime = Field(default_factory=_utc_now)

@@ -102,7 +102,7 @@ agents:
 
       **NEXT Rules**: Never emit with extra text. Never emit if criteria missing.
   max_consecutive_auto_reply: 20
-  structured_outputs_required: true
+  structured_outputs_required: false
 - name: PatternAgent
   prompt_sections:
   - id: role
@@ -140,7 +140,7 @@ agents:
 
       **The MFJ fan-out in this generator specifically:**
       Your `PatternSelection` output triggers a two-stage fan-out in the AgentGenerator's own runtime:
-      - Stage 1 (Plan): Each workflow in your `workflows[]` list spawns a child run that executes WorkflowStrategyAgent → ProjectOverviewAgent in parallel. Fan-in presents a combined action plan to the user.
+      - Stage 1 (Plan): Each workflow in your `workflows[]` list spawns a child run that executes WorkflowStrategyAgent → ProjectOverviewAgent in parallel. Planning artifacts are reviewed through the artifact/composer lane before implementation begins.
       - Stage 2 (Implement): After user approval, each workflow spawns a second child run executing ToolsManagerAgent → OrchestratorAgent in parallel. Fan-in assembles the download bundle.
 
       This means: if you emit 3 workflows, the user gets 3 workflows planned and built in parallel. If you emit 1 workflow, everything runs sequentially as a standard generation. Only emit multiple workflows when the user genuinely needs a multi-workflow system.
@@ -548,6 +548,7 @@ agents:
 
       **Notes**:
       - Not all apps require persistence; if no database is needed, emit empty collections and no access patterns.
+      - Third-party credentials and connector metadata are platform-owned. Do not create workflow collections for API keys, connector secrets, adapter records, or vault state.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
@@ -572,6 +573,7 @@ agents:
          - Use appropriate BSON types: ObjectId, String, Integer, Boolean, Float, Double, Timestamp, Array, Object.
          - Add `constraints.unique` for fields that require unique indexes (e.g., email).
          - Add `indices` for frequently queried fields (e.g., userId, createdAt, status).
+         - Never model API keys, OAuth secrets, refresh tokens, or Studio adapter records as workflow-owned collections. If an integration needs credentials, capture that dependency in access patterns and rely on the platform connector flow instead.
 
       3. **Describe access patterns**:
          - Provide 3-8 short strings describing expected read/write patterns.
@@ -667,8 +669,9 @@ agents:
          - IF agent generates media: Assign one of `text`, `image`, `video`, `audio`.
          - ELSE: `null`.
 
-      4. **Runtime-owned turn limits**:
-         - The runtime sets `max_consecutive_auto_reply` when building live agents; do NOT infer or mention turn counts here.
+      4. **Turn-limit ownership boundary**:
+        - Do NOT emit or reason about `max_consecutive_auto_reply` here.
+        - AgentsAgent owns runtime turn limits later when it produces the final `agents.yaml` contract.
 
       5. **Emit Output**:
          - Generate `AgentRosterOutput` JSON.
@@ -723,7 +726,7 @@ agents:
       **UI surface rules**:
       - Supporting workflows: FORCE `ui_requirements` = [] (backend-only, no user interaction).
       - `human_in_loop`=false: FORCE `ui_requirements` = [].
-      - Plain natural-language clarification or feedback → `workflow_primitive`=`composer_reply`, `display`=`composer`, `component`=null.
+      - Plain natural-language clarification or feedback → `workflow_primitive`=`composer_reply`, `realization`=`shell_builtin`, `display`=`composer`, `component`=null.
       - Structured context capture or bounded interaction → choose a workflow-local primitive and set `display` based on complexity.
       - `human_interaction`='approval' usually maps to artifact-oriented review primitives.
 
@@ -766,7 +769,10 @@ agents:
            - Use `composer_reply` when the user only needs to answer in natural language.
            - Base mapping for non-composer interactions: 'context' → 'inline', 'approval' → 'artifact'.
            - Promote to 'artifact' when the output needs complex interaction (multi-field form, table with row actions, wizard steps, diagram).
-           - For `workflow_primitive=composer_reply`, set `display`=`composer`, `component`=null, and `primitives_hint`=[].
+           - For `workflow_primitive=composer_reply`, set `realization`=`shell_builtin`, `display`=`composer`, `component`=null, and `primitives_hint`=[].
+           - For direct shipped workflow primitives, set `realization`=`shipped_component`.
+           - For workflow-local wrappers around shipped primitives, set `realization`=`workflow_wrapper`.
+           - For true workflow-local custom UI, set `realization`=`generated_component`.
            - For any generated custom UI surface, set `primitives_hint` listing which shipped building-block primitives the React component should compose.
            - For shipped workflow primitives, prefer the canonical shipped component name from the catalog (for example `ApprovalCard`, `FormCard`, `DiagramViewer`) and leave `primitives_hint`=[] unless a workflow-local wrapper is genuinely required.
            - Assign a workflow-local PascalCase `component` name only when `workflow_primitive` is not `composer_reply` and the shipped component does not already satisfy the interaction.
@@ -776,6 +782,9 @@ agents:
       2. **Derive `agent_tools`** (Backend/Logic Tools Only):
          - Create tools for backend logic implied by module purpose (analysis, computation, API calls).
          - Do NOT create tools for UI interactions; those are encoded in `ui_requirements`.
+         - If a workflow needs third-party credentials, reuse the platform connector flow (`get_or_request_api_key`, `request_api_keys_bundle`, and the Studio adapters/admin surface) instead of inventing a custom API-key table, raw Mongo write, or bespoke credential form.
+         - Treat connector availability as app-scoped runtime context: some integrations may already be ready from the Studio adapters surface, some may be metadata-only, and others may be missing entirely.
+         - When an integration is required but not ready, explicitly call it out as a missing dependency and recommend collecting/configuring it instead of assuming the agent can already use it.
          - **Decomposition Logic**:
            - If `WorkflowStrategy.decomposition.required`=false, do NOT add recursive planning tools.
            - If `required`=true, prefer a structured-output planner plus workflow-local MFJ graph over ad hoc recursive tooling.
@@ -812,6 +821,7 @@ agents:
               "label": "<CTA or heading>",
               "workflow_primitive": "composer_reply|approval_card|choice_picker|confirmation_summary|form_card|record_picker|file_upload_prompt|diff_review|action_plan_review|artifact_workbench|document_preview|download_center|comparison_board|diagram_viewer|table_review",
               "display": "composer|inline|artifact",
+              "realization": "shell_builtin|shipped_component|workflow_wrapper|generated_component",
               "component": "<canonical shipped component name, workflow-local PascalCase name, or null for composer_reply>",
               "primitives_hint": ["<Primitive>", "..."],
               "purpose": "<string>"
@@ -889,7 +899,7 @@ agents:
           "diagram": "sequenceDiagram\n    participant User\n    participant AgentA\n    ...",
           "legend": ["S1: Intake", "S2: Review"],
           "notes": "<optional context note or null>",
-          "agent_message": "Review the agent flow below, then click Continue to proceed."
+          "agent_message": "Review the agent flow below, then reply in chat with approval or requested changes."
         }
       }
       ```
@@ -936,6 +946,7 @@ agents:
       - Do NOT invent paths. Bundled file placement is automatic.
 
       **Multi-tenancy invariant**: Always include `tenant_id`, `app_id`, `user_id` as `data_reference` variables.
+      - Connector metadata and secrets are platform-owned. Do not declare workflow-owned API-key stores or adapter tables as `data_entity` / `data_reference` variables unless the workflow is explicitly reading a documented platform connector contract.
 
       **MFJ boundary**: Do NOT declare the runtime-owned `inject_as` variable or `_mfj_resume_*` keys.
   - id: instructions
@@ -962,6 +973,7 @@ agents:
 
       **A. Identify the trigger source:**
       - Does the variable gate on an agent emitting a token (NEXT, DONE, etc.)? → `agent_text` trigger
+      - Does the variable derive from a plain user chat/composer reply? → `user_text` trigger
       - Does the variable capture a UI tool response (approval, selection, form)? → `ui_response` trigger
 
       **B. Build the trigger object:**
@@ -977,6 +989,16 @@ agents:
       ```
       - Use `ui_hidden: true` for control tokens (NEXT, DONE, ERROR) that shouldn't display in chat.
       - The `agent` field MUST match an agent name from the roster output.
+
+      **user_text trigger** (plain composer replies):
+      ```json
+      {
+        "type": "user_text",
+        "match": {"regex": "(?i)approved|looks good|needs changes"}
+      }
+      ```
+      - Use `user_text` when a workflow should branch on a free-form chat reply instead of a custom inline component.
+      - Prefer `user_text` for approval/revision review steps in `chat-ui` because generic text feedback now uses the main composer by default.
 
       **ui_response trigger** (UI tool responses):
       ```json
@@ -1098,6 +1120,7 @@ agents:
       | Trigger Type | Required Fields | Purpose |
       |--------------|-----------------|----------|
       | agent_text | type, agent, match | Set boolean when agent emits token |
+      | user_text | type, match | Set boolean from a free-form composer reply |
       | ui_response | type, tool, response_key | Set variable from UI tool response |
 
       **Graph Node/Edge Guidelines**:
@@ -1148,24 +1171,25 @@ agents:
          - Do not model plain free-text chat reply as a `UI_Tool`. If the workflow only needs the user to answer in natural language, use the standard runtime input-request/composer lane instead of generating an inline text box.
          - Set `description` from the agent tool purpose.
          - Do NOT include `integration` in the final tools manifest; integrations stay in planning context only.
-         - For `UI_Tool` and `UI_Surface`, set `ui` {"component", "mode", "workflow_primitive"} from the matched `ui_requirement`.
+         - For `UI_Tool` and `UI_Surface`, set `ui` {"component", "mode", "workflow_primitive", "realization"} from the matched `ui_requirement`.
          - For `Agent_Tool`, omit `ui`.
          - For `UI_Tool`, set `ui_contract` with:
            - `surface_kind`: "agent_tool"
            - `payload_schema`: schema of backend->UI payload shape
-           - `actions_schema`: allowed UI->agent action list (`id`, optional `description`, `payload_schema`)
+           - `actions_schema`: allowed UI->agent action list (`id`, optional `label`, optional `description`, optional `variant`, optional `approved`, `payload_schema`)
          - For `UI_Surface` and `Agent_Tool`, omit `ui_contract`.
          - Set `auto_tool_call`: true for `UI_Tool` and `UI_Surface` when the surface should emit automatically from structured output; for `Agent_Tool`, true only when downstream persistence/auto store is required, else false.
          - Set `file`="tools/<name>.py" and `function`="<name>".
          - Every Python or React file you imply must be declared through this manifest first. Do not invent helper files outside the tool contract.
          - Tool paths are workflow-local only. Never emit `workflows/_shared`, `app.workflows._shared`, sibling-workflow paths, or root-level shared tool paths.
          - If a helper is specific to this workflow, generate it inside this workflow's `tools/` directory. If a platform service is truly framework-owned, import the documented `mozaiksai.core.*` API from a workflow-local tool.
+         - Connector credentials are platform-owned. Do not emit tool contracts that persist API keys directly to workflow collections; use the shipped connector helpers and surface sanitized connector records through the adapters/admin surface instead.
 
       2. **Derive `lifecycle_tools`**:
          - Extract lifecycle tools from `ToolPlanning.lifecycle_tools`.
          - Preserve `trigger` (before_chat|after_chat|before_agent|after_agent) and `agent` when scoped; `agent`=null for chat-level hooks.
          - Map `description` from purpose; use `UI_Tool` for interactive lifecycle UI, `UI_Surface` for one-way lifecycle UI, else `Agent_Tool`.
-         - For UI lifecycle hooks, include `ui` {"component", "mode", "workflow_primitive"}; for `Agent_Tool`, omit `ui`.
+         - For UI lifecycle hooks, include `ui` {"component", "mode", "workflow_primitive", "realization"}; for `Agent_Tool`, omit `ui`.
          - Set `file`="tools/<name>.py" and `function`="<name>".
          - Lifecycle helpers are also contract-declared files. Do not imply undeclared support modules.
          - Lifecycle tool paths follow the same workflow-local rule; do not create or reference shared workflow tool folders.
@@ -1180,10 +1204,10 @@ agents:
       ```json
       {
         "tools": [
-          {"agent": "<PascalCase>", "file": "tools/<name>.py", "function": "<name>", "description": "<string>", "tool_type": "UI_Tool|UI_Surface|Agent_Tool", "auto_tool_call": true|false|null, "ui": {"component": "<string>", "mode": "inline|artifact", "workflow_primitive": "<catalog id>"}, "ui_contract": {"surface_kind": "agent_tool", "payload_schema": {"type": "object", "properties": {}, "additionalProperties": true}, "actions_schema": [{"id": "approve", "description": "Optional", "payload_schema": {"type": "object", "properties": {}, "additionalProperties": true}}]}}
+          {"agent": "<PascalCase>", "file": "tools/<name>.py", "function": "<name>", "description": "<string>", "tool_type": "UI_Tool|UI_Surface|Agent_Tool", "auto_tool_call": true|false|null, "ui": {"component": "<string>", "mode": "inline|artifact", "workflow_primitive": "<catalog id>", "realization": "shipped_component|workflow_wrapper|generated_component"}, "ui_contract": {"surface_kind": "agent_tool", "payload_schema": {"type": "object", "properties": {}, "additionalProperties": true}, "actions_schema": [{"id": "approve", "label": "Approve", "variant": "primary", "approved": true, "description": "Optional", "payload_schema": {"type": "object", "properties": {}, "additionalProperties": true}}]}}
         ],
         "lifecycle_tools": [
-          {"agent": "<PascalCase|null>", "file": "tools/<name>.py", "function": "<name>", "description": "<string>", "tool_type": "UI_Tool|UI_Surface|Agent_Tool", "trigger": "before_chat|after_chat|before_agent|after_agent", "ui": {"component": "<string>", "mode": "inline|artifact", "workflow_primitive": "<catalog id>"}}
+          {"agent": "<PascalCase|null>", "file": "tools/<name>.py", "function": "<name>", "description": "<string>", "tool_type": "UI_Tool|UI_Surface|Agent_Tool", "trigger": "before_chat|after_chat|before_agent|after_agent", "ui": {"component": "<string>", "mode": "inline|artifact", "workflow_primitive": "<catalog id>", "realization": "shipped_component|workflow_wrapper|generated_component"}}
         ]
       }
       ```
@@ -1211,10 +1235,12 @@ agents:
       - The React component is mounted by `WorkflowUIRouter`, renders using platform
         primitives, and surfaces user actions (approve, submit, select) back via
         `onResponse`.
-      - Treat `workflow_primitive` as the canonical interaction pattern. `component` is the workflow-local realization of that pattern, not the source of truth.
+      - Treat `workflow_primitive` as the canonical interaction pattern. `ui.realization` declares whether the component is shell-owned, direct shipped, a workflow wrapper, or a generated custom surface.
+      - `component` is the concrete runtime identifier for that realization, not the source of truth.
       - Some workflow primitives resolve to shipped shared components. For those, `component` may be the canonical shipped component name instead of a workflow-local file.
       - Treat these files as contract-declared customization stubs. Generate only the files required by the Tools manifest and `ui_contract`; do not invent extra UI surfaces.
       - Enforce `--mz-*` CSS semantic tokens in all generated React. No legacy color classes.
+      - Credential capture is a platform-owned exception: when a workflow needs API keys or connector input, prefer the shipped connector helpers/components and the Studio adapters surface instead of generating a bespoke credential-management UI.
   - id: primitives
     heading: '[PLATFORM PRIMITIVES — BUILDING BLOCKS]'
     content: |
@@ -1430,10 +1456,12 @@ agents:
            `WorkflowUIRouter` (`payload`, `onResponse`, `onCancel`,
            `toolName`, `toolCallId`, `workflowName`, `componentId`), composes primitives from
            `primitives_hint`, implements the selected `workflow_primitive`, and sends actions back with `onResponse`.
-         - If `workflow_primitive` maps to a shipped shared component and `ui.component` already uses that canonical shipped component name, do NOT generate a React file for it.
-         - If `workflow_primitive` maps to a shipped shared component but `ui.component` is workflow-local, generate only a thin re-export or wrapper around the shipped component.
+         - If `ui.realization`=`shipped_component`, do NOT generate a React file for it.
+         - If `ui.realization`=`workflow_wrapper`, generate only a thin re-export or wrapper around the shipped shared component.
+         - If `ui.realization`=`generated_component`, generate the full workflow-local React surface.
          - Do not generate files for `workflow_primitive=composer_reply`; that lane is shell-owned and handled by the standard composer.
          - Align emitted payload and outbound actions to `ui_contract.payload_schema` and `ui_contract.actions_schema`.
+         - Shipped shared workflow components consume `ui_contract.actions_schema` as the canonical action contract; do not rely on ad hoc `payload.actions` as the source of truth.
          - Multiple UI tools may share one React component (many-to-one is valid).
 
       3. **Emit Output**:
@@ -1600,6 +1628,30 @@ agents:
       1. Check if agent appears in structured outputs registry → `structured_outputs_required = true`
       Note: auto-tool execution is derived from tools.yaml at runtime (agents with auto_tool_call tools). Do not add any auto-tool field to agents.yaml.
 
+      ### Step 1B: Derive `max_consecutive_auto_reply`
+      Assign a deterministic turn budget for each generated runtime agent. This field belongs to AgentsAgent and MUST be emitted for every agent.
+
+      Use this decision order:
+      1. **Single-turn workers → 1**
+        - Pure classifiers, validators, extractors, scorers, evaluators, or deterministic specialists that should act once and hand off.
+        - Typical signals: no user interaction, no review loop, no coordination role, produces one bounded structured output.
+      2. **Short bounded stages → 2**
+        - Linear pipeline stages, author/reviewer pairs, or other agents that may need one follow-up reasoning turn before handing off.
+      3. **Escalation / triage / intake stages → 3**
+        - Agents that may need a brief back-and-forth to assess, route, or package work before transfer.
+      4. **Moderate coordinators or decomposition planners → 5**
+        - Strategy leads, decomposition planners, synthesis/presenter agents, or other orchestrators that need some internal coordination but should still stay bounded.
+      5. **Open-ended coordinators or creative hubs → 10**
+        - Facilitators, hub agents, or primary creative agents where the pattern requires broader exploration or multi-step coordination.
+
+      Hard rules:
+      - Prefer the SMALLEST value that safely fits the role.
+      - Supporting/backend utility agents should usually be 1-3 unless they are the explicit coordinator for that workflow.
+      - Primary user-facing coordinators may be 5-10 when the pattern genuinely requires broader iteration.
+      - MFJ child worker agents should usually be 1-2; MFJ resume/synthesis agents are usually 5.
+      - Do NOT emit 0 for runtime agents. 0 is reserved for the runtime-created user proxy.
+      - Do NOT exceed 10 unless the workflow contract explicitly requires a long-running coordinator and you state that reason in the prompt sections.
+
       ### Step 2: Build Prompt Sections (5 total)
 
       **Section A - role** (Derivation Rule):
@@ -1694,6 +1746,7 @@ agents:
       - ALL agents MUST use `prompt_sections` arrays (NOT `system_message` strings)
       - Sections MUST be: role, objective, context, instructions, output_format (exactly 5)
       - Context section: Use GENERIC upstream/downstream references, NOT specific agent names
+      - `max_consecutive_auto_reply` MUST be emitted for every agent using the deterministic turn-budget rules above
       - `structured_outputs_required` matches registry
       - Auto-tool execution is derived from tools.yaml at runtime - do not set any auto-tool field in agents.yaml
       - IF `is_child_workflow`=true: Add headless instruction in every agent's instructions
@@ -1813,13 +1866,15 @@ agents:
       For each transition between agents:
       1. Check if the target agent has `human_interaction` != 'none' → UI gate required
       2. Check context variables for `ui_response` triggers → pre-condition for handoff
-      3. Check context variables for `agent_text` triggers → coordination token signals
+      3. Check context variables for `user_text` triggers → free-form composer review decisions
+      4. Check context variables for `agent_text` triggers → coordination token signals
 
       ### Step 3: Define Handoff Rules
       For each source→target pair:
 
       **A. Derive `condition`** (Derivation Rule):
       - IF target is gated by UI response: Use variable check, e.g., `action_plan_approval == true`
+      - IF target is gated by a free-form user reply: Use the derived `user_text` boolean, e.g., `workflow_review_approved == true`
       - IF target follows a coordination token: Use the boolean flag, e.g., `interview_complete == true`
       - IF no gate: Set `condition = null`
 

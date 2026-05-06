@@ -6,6 +6,10 @@ This document defines what workflows are in Mozaiks.
 
 Workflows are for agentic work.
 
+Builder-session harness behavior is not authored in workflow packs. It is
+enabled per app through `app/config/ai.json -> control_plane`, then layered
+above workflow execution by the host/control plane.
+
 Use a workflow when the value comes from:
 
 - reasoning
@@ -67,6 +71,11 @@ decision. They are not the classifier. The detailed refinement-routing plan is
 internal; the public contract is that refinement uses a classifier before
 choosing a workflow re-entry point.
 
+That distinction exists because workflows are only one of Mozaiks' three
+control loops. Workflow-local AG2 orchestration is separate from the
+builder-session loop that chooses re-entry points and from the refinement worker
+loop that performs scoped repair.
+
 ## What Workflows Should Not Own
 
 Workflows should not be the default place for:
@@ -92,27 +101,22 @@ Workflow files live under:
 - `<active app root>/workflows/extended_orchestration/extension_registry.json` — optional product/app overlay on top of that shared routing layer
 
 For the factory dogfood workspace specifically, `factory_app/app/workflows/*`
-is only an app-local overlay seam. It is not the canonical location for shared
-generation-core workflows and may remain empty until the app workspace owns a
-workflow that is not part of the shared builder layer.
+is only an app-local overlay path. It is not the canonical location for shared
+generation-core workflows, and the directory should stay absent until the
+factory app actually owns a workflow that is not part of the shared builder
+layer.
 
-Workflow resolution is multi-root:
+Workflow resolution is single-root.
 
-- the active app root's `workflows/` directory is searched first
-- the shared generation-core workflow root is searched second
-- `MOZAIKS_WORKFLOW_ROOTS` may override that order explicitly
+- Studio binds to `factory_app/workflows/` as the shared builder root
+- app/product hosts bind to the active app root's `workflows/` directory when
+  the app owns workflows there
+- `MOZAIKS_WORKFLOWS_PATH` may override the selected root explicitly
 
-This lets an app workspace keep product workflows locally while still
-consuming shared factory workflows through the same runtime and launcher graph.
-
-That is the composition contract between an active app workspace and
-`factory_app`: app/product workspaces own their overlay registries, while
-`factory_app/workflows/` remains the shared builder layer loaded alongside the
-active app root.
-
-The same contract applies when the active app root is `factory_app/app`: any
-workflow placed in that app root is app-owned overlay behavior, while the
-shared generation-core implementations still resolve from `factory_app/workflows/`.
+The runtime does not auto-merge app and factory workflow roots. That is the
+composition contract between an active app workspace and `factory_app`: a given
+host/session executes one selected workflow root, and `factory_app/workflows/`
+remains the shared builder layer for Studio/builder execution.
 
 Builder workflows may generate new workflow bundles, but generated output is
 staged under `MOZAIKS_GENERATED_ARTIFACTS_PATH` and is not runtime-loaded until
@@ -159,3 +163,4 @@ Mozaiks should feel like:
 - [overview.md](overview.md)
 - [event-system.md](event-system.md)
 - [surface-model.md](surface-model.md)
+- [orchestration-control-loops.md](orchestration-control-loops.md)

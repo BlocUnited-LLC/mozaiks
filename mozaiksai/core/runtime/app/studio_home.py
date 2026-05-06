@@ -5,6 +5,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, BuilderCollections, PlatformCollections
+from mozaiksai.core.workflow.generator_support.connector_service import (
+    get_connector_backend_summary,
+    list_connectors,
+)
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     build_app_validation_strategy_summary,
 )
@@ -47,7 +52,7 @@ DEFAULT_STUDIO_CREATE_STATE = {
     "last_saved_at": None,
 }
 
-STUDIO_CREATE_STATE_COLLECTION = "StudioCreateState"
+STUDIO_CREATE_STATE_COLLECTION = PlatformCollections.STUDIO_CREATE_STATE
 
 
 def get_missing_studio_surfaces(app_root: Path) -> list[str]:
@@ -76,9 +81,6 @@ def build_studio_home_summary(
     theme_config = _read_json(_resolve_theme_config_path(app_root))
     ui_route_manifest = _read_json(_resolve_ui_route_manifest_path(app_root))
 
-    admin_json_path = app_root / "config" / "admin.json"
-    admin_config = _read_json(admin_json_path) if admin_json_path.exists() else {}
-
     onboarding = app_config.get("onboarding") or {}
     llm = ai_config.get("llm") or {}
     identity = theme_config.get("identity") or {}
@@ -87,7 +89,7 @@ def build_studio_home_summary(
     custom_page_count = len(ui_route_manifest.get("pages") or [])
     schema_page_count = _count_schema_pages(app_root)
     entry_point = (ai_config.get("workflows") or {}).get("entry_point")
-    admin_emails = _resolve_admin_emails(app_config, admin_config)
+    admins = _resolve_admins(app_config)
 
     return {
         "studio": {
@@ -119,8 +121,8 @@ def build_studio_home_summary(
             "header_action_count": len(((shell_config.get("header") or {}).get("actions") or [])),
         },
         "admin": {
-            "enabled": bool(admin_config.get("enabled")) if admin_config else False,
-            "admin_emails": admin_emails,
+            "enabled": True,
+            "admins": admins,
         },
         "workspace": {
             "page_count": custom_page_count + schema_page_count,
@@ -136,10 +138,50 @@ def build_studio_home_summary(
                 onboarding=onboarding,
                 provider=llm.get("provider"),
                 model=llm.get("model"),
-                admin_emails=admin_emails,
+                admins=admins,
                 workflow_count=workflow_count,
             )
         },
+    }
+
+
+def build_studio_apps_summary(
+    app_root: Path,
+    *,
+    surface: str = "shell-hub",
+    local_only: bool = True,
+) -> dict:
+    summary = build_studio_home_summary(app_root, surface=surface, local_only=local_only)
+    app = summary.get("app") or {}
+    theme = summary.get("theme") or {}
+    workspace = summary.get("workspace") or {}
+    home = summary.get("home") or {}
+
+    runtime_readiness = workspace.get("runtime_readiness")
+    destination = "/studio" if runtime_readiness == "entry_point_configured" else "/studio/create"
+    status = "generated" if runtime_readiness == "entry_point_configured" else "pending"
+    description = (
+        theme.get("tagline")
+        or app.get("first_goal")
+        or app.get("host_owned_summary")
+        or home.get("next_step")
+        or "Local workspace app"
+    )
+
+    return {
+        "studio": {**summary.get("studio", {}), "surface": surface, "route": "/hub"},
+        "apps": [
+            {
+                "build_registry_id": f"local:{app_root.name}",
+                "app_id": app_root.name,
+                "name": app.get("name") or app_root.name,
+                "description": description,
+                "status": status,
+                "created_at": None,
+                "created_label": "Local workspace",
+                "destination": destination,
+            }
+        ],
     }
 
 
@@ -211,7 +253,23 @@ def build_studio_create_summary(
     return summary
 
 
-async def build_studio_adapters_summary() -> dict:
+def _build_connector_summary(connectors: list[dict[str, Any]]) -> dict[str, int]:
+    summary = {
+        "total": len(connectors),
+        "active": 0,
+        "metadata_only": 0,
+        "revoked": 0,
+        "expiring": 0,
+        "expired": 0,
+    }
+    for connector in connectors:
+        status = str(connector.get("status") or "").strip().lower()
+        if status in summary:
+            summary[status] += 1
+    return summary
+
+
+async def build_studio_adapters_summary(*, app_id: str | None = None) -> dict:
     import os
 
     def _mask(value: str, show: int = 6) -> str:
@@ -245,7 +303,7 @@ async def build_studio_adapters_summary() -> dict:
         from mozaiksai.core.core_config import get_mongo_client
 
         db_client = get_mongo_client()
-        document = await db_client.autogen_ai_agents.LLMConfig.find_one({}, {"_id": 0, "model": 1})
+        document = await db_client[SYSTEM_DATABASE][BuilderCollections.LLM_CONFIG].find_one({}, {"_id": 0, "model": 1})
         mongo_llm_configured = document is not None
     except Exception:
         pass
@@ -298,15 +356,31 @@ async def build_studio_adapters_summary() -> dict:
         },
     }
 
-    if azure_kv_name:
-        adapters["azure_keyvault"] = {
-            "label": "Azure Key Vault",
-            "kind": "vault",
-            "configured": True,
-            "vault_name": azure_kv_name,
-        }
+    vault_summary = await get_connector_backend_summary()
+    adapters["connector_vault"] = {
+        "label": "Connector Vault",
+        "kind": "vault",
+        "configured": bool(vault_summary.get("configured")),
+        "provider": vault_summary.get("provider"),
+        "mode": vault_summary.get("mode"),
+        "vault_name": vault_summary.get("vault_name") or azure_kv_name or None,
+        "secret_prefix": vault_summary.get("secret_prefix"),
+        "error": vault_summary.get("error"),
+    }
 
-    return {"adapters": adapters}
+    app_connectors: list[dict[str, Any]] = []
+    if app_id:
+        try:
+            app_connectors = await list_connectors(app_id)
+        except Exception:
+            app_connectors = []
+
+    return {
+        "adapters": adapters,
+        "runtime_adapters": adapters,
+        "app_connectors": app_connectors,
+        "connector_summary": _build_connector_summary(app_connectors),
+    }
 
 
 async def load_studio_create_state_from_db(app_id: str) -> dict:
@@ -314,7 +388,7 @@ async def load_studio_create_state_from_db(app_id: str) -> dict:
     try:
         from mozaiksai.core.core_config import get_mongo_client
         client = get_mongo_client()
-        coll = client["mozaiksai"][STUDIO_CREATE_STATE_COLLECTION]
+        coll = client[SYSTEM_DATABASE][STUDIO_CREATE_STATE_COLLECTION]
         raw: Any = await coll.find_one({"_id": app_id})
         if isinstance(raw, dict):
             raw.pop("_id", None)
@@ -370,7 +444,7 @@ async def save_studio_create_state_to_db(
         current_state["plan_state"] = "not_started"
 
     client = get_mongo_client()
-    coll = client["mozaiksai"][STUDIO_CREATE_STATE_COLLECTION]
+    coll = client[SYSTEM_DATABASE][STUDIO_CREATE_STATE_COLLECTION]
     await coll.update_one(
         {"_id": app_id},
         {"$set": {**current_state, "_id": app_id}},
@@ -594,12 +668,9 @@ def _count_schema_pages(app_root: Path) -> int:
     return count
 
 
-def _resolve_admin_emails(app_config: dict, admin_config: dict) -> list[str]:
-    admin_emails = admin_config.get("admin_emails") or []
-    if admin_emails:
-        return admin_emails
+def _resolve_admins(app_config: dict) -> list[str]:
     admins = app_config.get("admins") or []
-    return admins if isinstance(admins, list) else []
+    return [admin.strip() for admin in admins if isinstance(admin, str) and admin.strip()] if isinstance(admins, list) else []
 
 
 def _runtime_readiness(workflow_count: int, entry_point: str | None) -> str:
@@ -615,15 +686,15 @@ def _recommend_next_step(
     onboarding: dict,
     provider: str | None,
     model: str | None,
-    admin_emails: list[str],
+    admins: list[str],
     workflow_count: int,
 ) -> str:
     if not onboarding.get("journey") or not onboarding.get("first_goal"):
         return "Run 'mozaiks onboard' so Studio Home has product intent, provider defaults, and admin bootstrap."
     if not provider or not model:
         return "Confirm your default provider and model in app/config/ai.json before starting build work."
-    if not admin_emails:
-        return "Add a local admin email with 'mozaiks onboard --admin-email <email>' before opening admin workflows."
+    if not admins:
+        return "Add a local admin identity with 'mozaiks onboard --admin-email <email>' so app.json grants Studio/Admin access."
     if workflow_count == 0:
         if onboarding.get("journey") == "brownfield_app":
             return "Connect the first host-owned surface or submit the first build request from this workspace."

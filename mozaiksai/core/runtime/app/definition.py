@@ -37,7 +37,7 @@ class ExecutionMode(str, Enum):
 class WorkflowRef(BaseModel):
     """Reference to a discovered workflow."""
     name: str
-    path: Optional[str] = None  # defaults to active app root or shared generation core
+    path: Optional[str] = None  # defaults to the active workflow root selected for the host/session
 
 
 class ModuleRef(BaseModel):

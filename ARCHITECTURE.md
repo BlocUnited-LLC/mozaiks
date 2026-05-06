@@ -68,6 +68,9 @@ That means:
 - the first-party factory layer now lives under `factory_app/`
 - `ui/` and `brand/` belong inside the app workspace in the canonical target
 - hosted product workspaces should consume the same self-contained app-root contract
+- `app/config/ai.json` is the canonical app-level AI boot contract, including
+  optional `control_plane` settings for builder-session harnesses, refinement
+  classification, and future coding-agent refinement workers
 
 See [docs/architecture/foundations/distribution-and-workspace-model.md](docs/architecture/foundations/distribution-and-workspace-model.md)
 for the authoritative target model.
@@ -279,29 +282,29 @@ shared build journeys, transitions, and transition UI live under
 their own overlay registries under their active app root, but the shared
 builder routing contract and transition UI are not product-owned.
 
-`factory_app/app/workflows/` is now an app-local overlay seam, not the shared
-builder root. It may be empty. That is the expected clean state until the
-factory dogfood app owns a workflow that is specific to that app workspace
-rather than to the shared generation core.
+A running host should resolve one workflow root, not merge app and factory
+workflow roots at runtime.
 
-Workflow loading is multi-root by contract:
+Canonical selection:
 
-- active app root `workflows/` first
-- shared `factory_app/workflows/` second
-- `MOZAIKS_WORKFLOW_ROOTS` may override that order explicitly
+- Studio uses `factory_app/workflows/` as the shared builder workflow root
+- product/app hosts use `<active app root>/workflows/` when the active app owns
+  workflows there
+- `MOZAIKS_WORKFLOWS_PATH` may override the selected root explicitly
 
-That is what lets an app workspace keep its own product workflows under
-`app/workflows/` while still referencing shared generation-core workflow IDs in
-its local launcher graph.
+The first-party `factory_app/app` bundle should not check in
+`factory_app/app/workflows/` until it owns a real app-local workflow.
 
 Hosted products consume the factory layer by composition, not by copying shared
 builder logic into their own repos:
 
 - the active app workspace is resolved from `PLATFORM_PATH` or
   `MOZAIKS_APP_WORKSPACE_PATH` when provided
-- the active app root's `workflows/` load first
-- `factory_app/workflows/` loads second as the shared builder layer
-- app workspaces keep only their own overlay registries and product workflows
+- Studio binds to `factory_app/workflows/` for shared builder execution
+- app/product hosts bind to the active app root's `workflows/` when those
+  workflows exist
+- repo-local dogfood hosts fall back to `factory_app/workflows/` when the
+  factory app bundle itself has no local workflow directory
 
 - `AppGenerator` owns deterministic app bundle artifacts: `app.json`,
   `ui/pages/*.yaml`, `config/*`, `brand/*`, and module contract files.
@@ -485,8 +488,9 @@ manifest, then loaded by the shell through `@studio/extensions`:
 - **Module admin panels** — panels declared by modules and rendered inside `/admin`
 - **Runtime panels** — Mozaiks runtime/operator panels such as workflow runs, tokens, cost, and sessions
 
-Panel lists are config-driven. Runtime/operator panels live in
-`app/config/admin.json`. A connected app backend may expose app-business panels via
+Panel lists are config-driven. Runtime/operator panels live in the framework
+admin shell contract, while access bootstrap lives in `app/app.json` `admins`.
+A connected app backend may expose app-business panels via
 `GET app_backend_url/api/admin/config` using `mozaiks.admin.app_backend.v1`. Modules contribute panels through their
 module admin contract and may register custom React components via
 the active app root's `ui/index.js` extension barrel.
@@ -855,7 +859,7 @@ orchestration layer. The framework handles the runtime side of that boundary.
 |------|--------|-------|
 | `app/config/ai.json` | Keep | LLM provider, model, temperature |
 | `app/brand/theme_config.json` | Keep | Color schemes, fonts, shell chrome |
-| `app/config/admin.json` | Keep (app-level) | Declares `admin_emails` and runtime/operator panels for the unified AdminPortal |
+| `app/app.json` | Keep | App identity, routes, and `admins` bootstrap access for the unified AdminPortal |
 
 ---
 

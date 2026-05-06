@@ -21,6 +21,15 @@ def test_factory_app_entry_point_uses_value_engine() -> None:
     assert data["workflows"]["entry_point"] == "ValueEngine"
 
 
+def test_factory_app_control_plane_defaults_are_declared() -> None:
+    ai_path = Path(__file__).resolve().parents[1] / "factory_app" / "app" / "config" / "ai.json"
+    data = json.loads(ai_path.read_text(encoding="utf-8"))
+
+    assert data["control_plane"]["enabled"] is True
+    assert data["control_plane"]["classifier"]["enabled"] is True
+    assert data["control_plane"]["classifier"]["llm_config"]["model"] == "gpt-4o-mini"
+
+
 def test_create_launcher_workflow_is_removed() -> None:
     workflow_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows" / "CreateLauncher"
 

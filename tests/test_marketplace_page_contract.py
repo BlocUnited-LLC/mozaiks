@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import yaml
 
-from conftest import active_app_root
+from tests.import_utils import active_app_root
 
 
 def test_marketplace_page_is_data_driven() -> None:

@@ -6,7 +6,6 @@ import json
 import sys
 from pathlib import Path
 
-from mozaiksai.core.admin.contract import build_default_host_admin_config
 from mozaiks_cli.commands.init import create_scaffold
 from mozaiks_cli.studio_launcher import launch_studio
 from mozaiks_cli.workspace import (
@@ -101,13 +100,11 @@ def run(args) -> None:
     ai_json_path = app_root / "config" / "ai.json"
     shell_json_path = app_root / "config" / "shell.json"
     theme_json_path = resolve_theme_config_path(app_root)
-    admin_json_path = app_root / "config" / "admin.json"
 
     app_config = _read_json(app_json_path)
     ai_config = _read_json(ai_json_path)
     shell_config = _read_json(shell_json_path)
     theme_config = _read_json(theme_json_path)
-    admin_config = _read_json(admin_json_path) if admin_json_path.exists() else None
 
     mode_label = "full" if collect_extended_setup else "minimal"
     print(f"Onboarding Mozaiks app bundle at: {workspace_root}")
@@ -212,14 +209,9 @@ def run(args) -> None:
         theme_primary = getattr(args, "theme_primary", None) or theme_primary_default
 
     default_admin_email = ""
-    if isinstance(admin_config, dict):
-        admin_emails = admin_config.get("admin_emails") or []
-        if admin_emails:
-            default_admin_email = admin_emails[0]
-    if not default_admin_email:
-        admins = app_config.get("admins") or []
-        if admins:
-            default_admin_email = admins[0]
+    admins = app_config.get("admins") or []
+    if admins:
+        default_admin_email = admins[0]
 
     if collect_extended_setup:
         admin_email = _prompt_text(
@@ -267,11 +259,6 @@ def run(args) -> None:
     print(f"Updated {shell_json_path.relative_to(workspace_root)}")
     _write_json(theme_json_path, theme_config)
     print(f"Updated {theme_json_path.relative_to(workspace_root)}")
-
-    if admin_email:
-        resolved_admin = _apply_admin_config(admin_config or {}, admin_email)
-        _write_json(admin_json_path, resolved_admin)
-        print(f"Updated {admin_json_path.relative_to(workspace_root)}")
 
     print("\nOnboarding completed.")
     _show_next_steps(
@@ -447,8 +434,9 @@ def _apply_app_config(
     admins = app_config.get("admins")
     if not isinstance(admins, list):
         admins = []
-    if admin_email and admin_email not in admins:
-        admins.append(admin_email)
+    normalized_admin = admin_email.strip().lower() if isinstance(admin_email, str) and admin_email.strip() else ""
+    if normalized_admin and normalized_admin not in admins:
+        admins.append(normalized_admin)
     app_config["admins"] = admins
 
 
@@ -538,28 +526,6 @@ def _apply_theme_config(*, theme_config: dict, app_name: str, tagline: str, them
     ask_mode["tint"] = palette["main"]
 
 
-def _apply_admin_config(admin_config: dict, admin_email: str) -> dict:
-    if not isinstance(admin_config, dict):
-        admin_config = build_default_host_admin_config()
-
-    if "sections" not in admin_config or "runtime_panels" not in admin_config:
-        baseline = build_default_host_admin_config()
-        baseline.update({key: value for key, value in admin_config.items() if key != "_comment"})
-        admin_config = baseline
-
-    admin_config["enabled"] = True
-    emails = admin_config.get("admin_emails")
-    if not isinstance(emails, list):
-        emails = []
-    if admin_email not in emails:
-        emails.append(admin_email)
-    admin_config["admin_emails"] = emails
-    admin_config.setdefault("schema_version", "mozaiks.admin.host.v1")
-    admin_config.setdefault("sections", build_default_host_admin_config()["sections"])
-    admin_config.setdefault("runtime_panels", build_default_host_admin_config()["runtime_panels"])
-    return admin_config
-
-
 def _show_next_steps(
     *,
     workspace_root: Path,
@@ -583,4 +549,4 @@ def _show_next_steps(
     if not full_setup:
         print("  6. Optional: run `mozaiks onboard --full` later for detailed brand/admin setup")
     if admin_email:
-        print(f"  7. Verify admin access in {app_root / 'config' / 'admin.json'}")
+        print(f"  7. Verify admin access in {app_root / 'app.json'}")

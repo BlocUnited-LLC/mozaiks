@@ -14,9 +14,6 @@ import {
   RiUser3Fill,
 } from 'react-icons/ri'
 
-import { useChatUI } from '../../context/ChatUIContext'
-
-
 const ADMIN_NAV_DEFS = [
   { id: 'overview', label: 'Overview', path: '/admin', icon: RiDashboardFill, exact: true, order: 999 },
   { id: 'users', label: 'Users', path: '/admin/users', icon: RiUser3Fill, order: 1000 },
@@ -128,11 +125,6 @@ function isItemActive(item, location) {
 }
 
 
-function findActiveItem(location, navGroups) {
-  return navGroups.flatMap((group) => group.items).find((item) => isItemActive(item, location))
-}
-
-
 function AdminSidebar({ adminSections = null, onNavigate = null }) {
   const location = useLocation()
   const navGroups = useMemo(() => buildNavGroups(adminSections), [adminSections])
@@ -185,39 +177,18 @@ function AdminSidebar({ adminSections = null, onNavigate = null }) {
 }
 
 
-function AdminTopbar({ adminSections = null, onOpenMenu }) {
-  const location = useLocation()
-  const { user } = useChatUI()
-  const navGroups = useMemo(() => buildNavGroups(adminSections), [adminSections])
-  const activeItem = useMemo(() => findActiveItem(location, navGroups), [location, navGroups])
-  const userLabel = getUserLabel(user)
-
+function AdminTopbar({ onOpenMenu }) {
   return (
-    <header className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3 shadow-sm">
-      <div className="flex min-w-0 items-center gap-3">
+    <header className="lg:hidden">
+      <div className="flex items-center gap-3 px-1">
         <button
           type="button"
           onClick={onOpenMenu}
-          className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-background text-foreground transition hover:bg-muted lg:hidden"
+          className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-background text-foreground transition hover:bg-muted"
           aria-label="Open admin navigation"
         >
           <MenuGlyph />
         </button>
-        <div className="min-w-0">
-          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            Admin Dashboard
-          </div>
-          <h1 className="truncate text-lg font-semibold text-foreground">
-            {activeItem?.label || 'Overview'}
-          </h1>
-        </div>
-      </div>
-      <div className="flex shrink-0 items-center gap-3">
-        <div className="hidden text-right sm:block">
-          <div className="max-w-40 truncate text-sm font-semibold text-foreground">{userLabel}</div>
-          <div className="text-xs text-muted-foreground">admin</div>
-        </div>
-        <div className="h-10 w-10 rounded-lg border border-primary/30 bg-primary/15" aria-hidden="true" />
       </div>
     </header>
   )
@@ -237,14 +208,14 @@ export function AdminWorkspaceLayout({ children, adminSections = null }) {
         </div>
 
         {mobileOpen ? (
-          <div className="fixed inset-0 z-[60] lg:hidden">
+          <div className="fixed inset-0 z-[70] lg:hidden">
             <button
               type="button"
               className="absolute inset-0 bg-black/50"
               aria-label="Close admin navigation"
               onClick={() => setMobileOpen(false)}
             />
-            <div className="absolute bottom-4 left-4 top-4 w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-lg bg-background p-3 shadow-xl">
+            <div className="absolute bottom-4 left-4 top-24 w-[min(21rem,calc(100vw-2rem))] overflow-y-auto rounded-3xl border border-border bg-card/95 p-3 shadow-2xl backdrop-blur-md">
               <div className="mb-3 flex justify-end">
                 <button
                   type="button"
@@ -261,7 +232,7 @@ export function AdminWorkspaceLayout({ children, adminSections = null }) {
         ) : null}
 
         <div className="min-w-0 flex-1 space-y-5">
-          <AdminTopbar adminSections={adminSections} onOpenMenu={() => setMobileOpen(true)} />
+          <AdminTopbar onOpenMenu={() => setMobileOpen(true)} />
           {children}
         </div>
       </div>

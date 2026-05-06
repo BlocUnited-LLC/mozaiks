@@ -252,7 +252,7 @@ def create_parser():
     onboard_parser.add_argument(
         "--admin-email",
         default=None,
-        help="Admin email to write into the active app root config/admin.json",
+        help="Admin email to write into the active app root app.json admins list",
     )
     onboard_parser.add_argument(
         "--existing-url",

@@ -64,7 +64,7 @@ def test_studio_command_outputs_json_summary_for_onboarded_workspace(tmp_path, c
     assert summary["ai"]["provider"] == "anthropic"
     assert summary["ai"]["model"] == "claude-sonnet-4-5"
     assert summary["theme"]["primary"] == "blue"
-    assert summary["admin"]["admin_emails"] == ["founder@example.com"]
+    assert summary["admin"]["admins"] == ["founder@example.com"]
     assert summary["workspace"]["workflow_count"] >= 0
     assert summary["workspace"]["runtime_readiness"] in {
         "no_workflows",

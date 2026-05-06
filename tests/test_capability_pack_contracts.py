@@ -269,13 +269,13 @@ def test_app_build_plan_tool_rejects_raw_frontend_source_outputs() -> None:
         )
 
 
-def test_app_build_plan_tool_rejects_admin_config_with_wrong_owner() -> None:
+def test_app_build_plan_tool_rejects_obsolete_admin_config_task_type() -> None:
     module = _load_module(
         "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
         "tests.app_build_plan_tool_admin_config_guard",
     )
 
-    with pytest.raises(ValueError, match="admin_config must start at ConfigMiddlewareAgent"):
+    with pytest.raises(ValueError, match="obsolete task_type 'admin_config'"):
         module.app_build_plan(
             AppBuildPlan={
                 "agent_message": "Planned the product.",
@@ -297,12 +297,12 @@ def test_app_build_plan_tool_rejects_admin_config_with_wrong_owner() -> None:
                         "task_type": "admin_config",
                         "capability_pack_id": None,
                         "execution_target": "AppGenerator",
-                        "initial_agent": "ControllerAgent",
-                        "description": "Generate host admin config.",
-                        "initial_message": "Generate app/config/admin.json",
+                        "initial_agent": "ConfigMiddlewareAgent",
+                        "description": "Generate obsolete host admin config.",
+                        "initial_message": "Generate obsolete app/config/admin.json",
                         "owned_paths": ["app/config/admin.json"],
                         "depends_on": [],
-                        "acceptance_criteria": ["Admin emails configured"],
+                        "acceptance_criteria": ["Admin bootstrap configured"],
                     }
                 ],
                 "generation_order": ["admin"],
@@ -311,13 +311,13 @@ def test_app_build_plan_tool_rejects_admin_config_with_wrong_owner() -> None:
         )
 
 
-def test_app_build_plan_tool_rejects_host_admin_config_hidden_in_backend_foundation() -> None:
+def test_app_build_plan_tool_rejects_obsolete_host_admin_config_path() -> None:
     module = _load_module(
         "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
         "tests.app_build_plan_tool_host_admin_path_guard",
     )
 
-    with pytest.raises(ValueError, match="Host admin config must be generated through the explicit admin_config task"):
+    with pytest.raises(ValueError, match="owns obsolete path 'app/config/admin.json'"):
         module.app_build_plan(
             AppBuildPlan={
                 "agent_message": "Planned the product.",

@@ -57,6 +57,7 @@ def test_tool_planning_normalizes_and_caches_available_primitives() -> None:
 
     assert "1 UI requirements" in result
     assert context.data["ToolPlanning"]["ui_requirements"][0]["workflow_primitive"] == "diff_review"
+    assert context.data["ToolPlanning"]["ui_requirements"][0]["realization"] == "generated_component"
     assert context.data["ToolPlanning"]["ui_requirements"][0]["primitives_hint"] == ["Card", "Button"]
     assert "Card" in context.data["available_ui_primitives"]
     assert "DataTable" in context.data["available_page_primitives"]
@@ -99,6 +100,7 @@ def test_tool_planning_normalizes_composer_reply_requirements() -> None:
 
     requirement = context.data["ToolPlanning"]["ui_requirements"][0]
     assert requirement["workflow_primitive"] == "composer_reply"
+    assert requirement["realization"] == "shell_builtin"
     assert requirement["component"] is None
     assert requirement["display"] == "composer"
     assert requirement["primitives_hint"] == []
@@ -123,4 +125,26 @@ def test_tool_planning_defaults_to_shipped_component_for_shared_workflow_primiti
 
     requirement = context.data["ToolPlanning"]["ui_requirements"][0]
     assert requirement["component"] == "ApprovalCard"
+    assert requirement["realization"] == "shipped_component"
     assert requirement["primitives_hint"] == []
+
+
+def test_tool_planning_marks_noncanonical_component_as_workflow_wrapper() -> None:
+    context = _Context()
+
+    tool_planning_module.tool_planning(
+        ToolPlanning={
+            "ui_requirements": [
+                {
+                    "workflow_primitive": "approval_card",
+                    "component": "BrandedApprovalCard",
+                    "display": "inline",
+                    "primitives_hint": ["Card", "Button"],
+                }
+            ]
+        },
+        context_variables=context,
+    )
+
+    requirement = context.data["ToolPlanning"]["ui_requirements"][0]
+    assert requirement["realization"] == "workflow_wrapper"

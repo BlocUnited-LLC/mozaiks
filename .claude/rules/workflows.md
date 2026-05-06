@@ -5,7 +5,7 @@
 Use these rules when touching:
 - `app/workflows/**`
 - `factory_app/workflows/**`
-- `factory_app/app/workflows/**`
+- app-local overlay workflows under an active app root when they exist, including future files under `factory_app/app/workflows/**`
 - Any workflow YAML files or tool implementations
 
 ## Core Principles

@@ -418,9 +418,11 @@ Primary writable surfaces:
 - `app/app.json`
 - `app/config/ai.json`
 - `app/config/shell.json`
-- `app/config/admin.json`
 - `app/brand/theme_config.json`
 - `app/ui/route_manifest.json`
+
+Admin bootstrap lives in `app/app.json` `admins`; there is no separate
+`app/config/admin.json` surface.
 
 Optional supporting surfaces:
 

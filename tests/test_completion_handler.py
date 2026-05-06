@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -20,6 +21,7 @@ def _build_ctx() -> SimpleNamespace:
         app_id="app-1",
         user_id="user-1",
         context_variables=None,
+        persistence_manager=SimpleNamespace(clear_pending_input_request=AsyncMock()),
     )
 
 
@@ -36,6 +38,10 @@ async def test_completion_handler_marks_terminal_completion(monkeypatch) -> None
     payload = await handler.handle(object(), ctx, state)
 
     assert state.run_completed is True
+    ctx.persistence_manager.clear_pending_input_request.assert_awaited_once_with(
+        chat_id="chat-1",
+        app_id="app-1",
+    )
     assert payload["status"] == int(WorkflowStatus.COMPLETED)
     assert payload["reason"] == "finished"
     assert payload["awaiting_user_input"] is False
@@ -56,6 +62,7 @@ async def test_completion_handler_keeps_run_in_progress_when_input_is_pending(mo
     payload = await handler.handle(object(), ctx, state)
 
     assert state.run_completed is False
+    ctx.persistence_manager.clear_pending_input_request.assert_not_awaited()
     assert payload["status"] == int(WorkflowStatus.IN_PROGRESS)
     assert payload["reason"] == "awaiting_user_input"
     assert payload["awaiting_user_input"] is True

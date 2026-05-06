@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from conftest import active_app_root
+from tests.import_utils import active_app_root
 
 
 ROOT = Path(__file__).resolve().parents[1]

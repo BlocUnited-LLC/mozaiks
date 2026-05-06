@@ -203,6 +203,6 @@ generated apps should understand the shared workflow contract, not a
 repo-specific product directory layout.
 
 For the factory dogfood workspace, `factory_app/app/workflows/` is only an
-app-local overlay seam. It is expected to remain empty until the factory app
+app-local overlay path. It should not be checked in until the factory app
 actually owns a workflow that is not part of the shared generation core.
 

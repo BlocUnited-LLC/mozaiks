@@ -134,10 +134,18 @@ class WebSocketProtocolMixin:
                         serialized_message = self._serialize_ag2_events(message)
                         await websocket.send_json(serialized_message)
                 except Exception as e:
+                    if chat_id not in self.connections:
+                        logger.debug(
+                            "Dropping queued messages for disconnected chat %s after send failure: %s",
+                            chat_id,
+                            e,
+                        )
+                        self._message_queues.pop(chat_id, None)
+                        break
                     logger.error(f"Failed to send queued message to {chat_id}: {e}. Will retry shortly.")
                     # Re-queue remaining (including current) for retry
                     remaining = [message] + messages_to_send[messages_to_send.index(message)+1:]
-                    self._message_queues[chat_id] = remaining + self._message_queues[chat_id]
+                    self._message_queues[chat_id] = remaining + self._message_queues.get(chat_id, [])
                     # Schedule a retry flush with small backoff
                     self._schedule_flush_retry(chat_id)
                     break
@@ -259,6 +267,12 @@ class WebSocketProtocolMixin:
                     await self._queue_message_with_backpressure(chat_id, {
                         "type": "chat.resume_boundary",
                         "data": boundary
+                    })
+                elif kind == "awaiting_reply":
+                    awaiting = {k: v for k, v in event_dict.items() if k != "kind"}
+                    await self._queue_message_with_backpressure(chat_id, {
+                        "type": "chat.awaiting_reply",
+                        "data": awaiting,
                     })
 
             # Call the resumer with workflow_startup_mode filtering
@@ -526,6 +540,10 @@ class WebSocketProtocolMixin:
 
         if chat_id in self._message_queues:
             del self._message_queues[chat_id]
+
+        overflow_counts = getattr(self, "_pre_connection_buffer_overflow_counts", None)
+        if isinstance(overflow_counts, dict):
+            overflow_counts.pop(chat_id, None)
 
         await self._stop_heartbeat(chat_id)
         logger.info(f"Cleaned up connection resources for {chat_id}")

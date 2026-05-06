@@ -107,7 +107,7 @@ def test_notification_count_query_uses_platform_notification_intents():
 
 
 def test_mozaiks_dashboard_uses_canonical_module_route():
-    from conftest import active_app_root
+    from tests.import_utils import active_app_root
     app_root = active_app_root()
     source = (app_root / "ui" / "pages" / "custom" / "Dashboard.jsx").read_text(encoding="utf-8")
 
@@ -232,7 +232,7 @@ async def test_platform_host_loads_app_zero_product_modules(monkeypatch):
     from mozaiksai.hosts import platform as platform_app
     from mozaiksai.core.runtime.app.loader import AppLoader
 
-    from conftest import active_app_root
+    from tests.import_utils import active_app_root
     monkeypatch.setenv("PLATFORM_PATH", str(active_app_root()))
     load_result = await AppLoader.load(str(platform_app.resolve_app_root()))
     loaded_modules = {module.name: type(module.handler).__name__ for module in load_result.modules}

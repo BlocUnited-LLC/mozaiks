@@ -1,17 +1,14 @@
-from datetime import UTC, datetime
 import re
 from typing import Any, Dict, Optional
 
 import yaml
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 
 
 logger = get_workflow_logger("design_docs")
-
-
-_COLLECTION = "DesignDocuments"
 
 
 class DesignDocKinds:
@@ -31,22 +28,9 @@ _FIRST_DOC = DesignDocKinds.FRONTEND
 _LAST_DOC = DesignDocKinds.UI_SCHEMA
 
 
-async def _ensure_indexes(pm: AG2PersistenceManager) -> None:
-    await pm.persistence._ensure_client()  # noqa: SLF001 (runtime pattern)
-    assert pm.persistence.client is not None
-    coll = pm.persistence.client["MozaiksAI"][_COLLECTION]
-    try:
-        existing = await coll.list_indexes().to_list(length=None)
-        names = {i.get("name") for i in existing if isinstance(i, dict)}
-        if "dd_app_kind" not in names:
-            await coll.create_index([("app_id", 1), ("kind", 1)], unique=True, name="dd_app_kind")
-    except Exception as err:
-        logger.debug("Failed to ensure DesignDocuments indexes: %s", err)
-
-
 async def _upsert_design_doc(
     *,
-    pm: AG2PersistenceManager,
+    store: BuilderArtifactStore,
     app_id: str,
     user_id: Optional[str],
     kind: str,
@@ -56,76 +40,35 @@ async def _upsert_design_doc(
     source_chat_id: Optional[str],
     extra_fields: Optional[Dict[str, Any]] = None,
 ) -> None:
-    await _ensure_indexes(pm)
-    assert pm.persistence.client is not None
-    coll = pm.persistence.client["MozaiksAI"][_COLLECTION]
-    now = datetime.now(UTC)
-
-    set_fields: Dict[str, Any] = {
-        "app_id": app_id,
-        "user_id": user_id,
-        "kind": kind,
-        "stage": stage,
-        "content": content,
-        "status": "succeeded",
-        "source": {"workflow": source_workflow, "chat_id": source_chat_id},
-        "updated_at": now,
-    }
-    if extra_fields:
-        set_fields.update(extra_fields)
-
-    update: Dict[str, Any] = {
-        "$set": {
-            **set_fields,
-        },
-        "$setOnInsert": {"created_at": now},
-        "$push": {
-            "revisions": {
-                "$each": [
-                    {
-                        "stage": stage,
-                        "content": content,
-                        "workflow": source_workflow,
-                        "chat_id": source_chat_id,
-                        "created_at": now,
-                    }
-                ],
-                "$slice": -5,
-            }
-        },
-    }
-
-    await coll.update_one({"app_id": app_id, "kind": kind}, update, upsert=True)
+    await store.upsert_design_doc(
+        app_id=app_id,
+        user_id=user_id,
+        kind=kind,
+        stage=stage,
+        content=content,
+        source_workflow=source_workflow,
+        source_chat_id=source_chat_id,
+        extra_fields=extra_fields,
+    )
 
 
 async def _mark_design_docs_status(
     *,
-    pm: AG2PersistenceManager,
+    store: BuilderArtifactStore,
     app_id: str,
     user_id: Optional[str],
     stage: str,
     status: str,
     error: Optional[str] = None,
 ) -> None:
-    await _ensure_indexes(pm)
-    assert pm.persistence.client is not None
-    coll = pm.persistence.client["MozaiksAI"][_COLLECTION]
-    now = datetime.now(UTC)
-    for k in _DOC_KINDS:
-        update: Dict[str, Any] = {
-            "$set": {
-                "app_id": app_id,
-                "user_id": user_id,
-                "kind": k,
-                "stage": stage,
-                "status": status,
-                "updated_at": now,
-            },
-            "$setOnInsert": {"created_at": now},
-        }
-        if error:
-            update["$set"]["error"] = error
-        await coll.update_one({"app_id": app_id, "kind": k}, update, upsert=True)
+    await store.mark_design_doc_status(
+        app_id=app_id,
+        user_id=user_id,
+        stage=stage,
+        status=status,
+        kinds=_DOC_KINDS,
+        error=error,
+    )
 
 
 def _cv_get(context_variables: Any, key: str) -> Optional[Any]:
@@ -194,6 +137,83 @@ def _canonical_surface_map(raw: Any) -> Dict[str, Any]:
     return {"surfaces": surfaces}
 
 
+def _canonical_database_intent_bundle(
+    raw: Any,
+    *,
+    app_id: str,
+    artifact_version_id: Optional[str],
+    surface_map: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValueError("database_intent_bundle must be an object")
+
+    raw_surfaces = raw.get("surfaces")
+    if not isinstance(raw_surfaces, list) or not raw_surfaces:
+        raise ValueError("database_intent_bundle.surfaces must be a non-empty list")
+
+    known_surface_ids = {
+        str(surface.get("surface_id")): str(surface.get("surface_kind"))
+        for surface in surface_map.get("surfaces", [])
+        if isinstance(surface, dict) and surface.get("surface_id")
+    }
+
+    normalized_surfaces = []
+    for index, surface in enumerate(raw_surfaces):
+        if not isinstance(surface, dict):
+            raise ValueError(f"database_intent_bundle.surfaces[{index}] must be an object")
+        surface_id = str(surface.get("surface_id") or "").strip()
+        surface_kind = str(surface.get("surface_kind") or "").strip()
+        if not surface_id or not surface_kind:
+            raise ValueError(f"database_intent_bundle.surfaces[{index}] requires surface_id and surface_kind")
+        expected_kind = known_surface_ids.get(surface_id)
+        if expected_kind and expected_kind != surface_kind:
+            raise ValueError(
+                f"database_intent_bundle.surfaces[{index}] surface_kind must match surface_map "
+                f"for '{surface_id}'"
+            )
+        collections = surface.get("collections")
+        if not isinstance(collections, list):
+            raise ValueError(f"database_intent_bundle.surfaces[{index}].collections must be a list")
+        normalized_surfaces.append(
+            {
+                "surface_id": surface_id,
+                "surface_kind": surface_kind,
+                "collections": collections,
+            }
+        )
+
+    shared_collections = raw.get("shared_collections")
+    if shared_collections is None:
+        shared_collections = []
+    if not isinstance(shared_collections, list):
+        raise ValueError("database_intent_bundle.shared_collections must be a list")
+
+    policies = raw.get("policies")
+    if policies is None:
+        policies = {
+            "default_scope_field": "app_id",
+            "allow_destructive_migrations": False,
+        }
+    if not isinstance(policies, dict):
+        raise ValueError("database_intent_bundle.policies must be an object")
+
+    default_scope_field = str(policies.get("default_scope_field") or "app_id").strip()
+    if not default_scope_field:
+        raise ValueError("database_intent_bundle.policies.default_scope_field must be non-empty")
+
+    return {
+        "version": str(raw.get("version") or "1"),
+        "app_id": str(app_id),
+        "artifact_version_id": str(artifact_version_id).strip() if artifact_version_id else None,
+        "surfaces": normalized_surfaces,
+        "shared_collections": shared_collections,
+        "policies": {
+            "default_scope_field": default_scope_field,
+            "allow_destructive_migrations": bool(policies.get("allow_destructive_migrations", False)),
+        },
+    }
+
+
 def _surface_map_yaml_block(surface_map: Dict[str, Any]) -> str:
     return yaml.safe_dump(
         {"surface_map": surface_map},
@@ -256,13 +276,14 @@ async def save_design_doc(
         return {"ok": False, "reason": "empty_content"}
 
     pm = AG2PersistenceManager()
+    store = BuilderArtifactStore(pm=pm)
     normalized_stage = str(stage or "draft")
 
     # Best-effort stage status tracking: mark running on first doc, succeeded on last.
     try:
         if normalized_kind == _FIRST_DOC:
             await _mark_design_docs_status(
-                pm=pm,
+                store=store,
                 app_id=app_id,
                 user_id=str(user_id) if user_id else None,
                 stage=normalized_stage,
@@ -272,7 +293,7 @@ async def save_design_doc(
         pass
 
     await _upsert_design_doc(
-        pm=pm,
+        store=store,
         app_id=app_id,
         user_id=str(user_id) if user_id else None,
         kind=normalized_kind,
@@ -286,7 +307,7 @@ async def save_design_doc(
     try:
         if normalized_kind == _LAST_DOC:
             await _mark_design_docs_status(
-                pm=pm,
+                store=store,
                 app_id=app_id,
                 user_id=str(user_id) if user_id else None,
                 stage=normalized_stage,
@@ -311,6 +332,9 @@ async def save_design_docs_bundle(
     app_id = _cv_get(context_variables, "app_id")
     chat_id = _cv_get(context_variables, "chat_id")
     user_id = _cv_get(context_variables, "user_id")
+    artifact_version_id = _cv_get(context_variables, "artifact_version_id")
+    build_id = _cv_get(context_variables, "build_id") or chat_id
+    change_class = _cv_get(context_variables, "change_class")
 
     if not app_id or not isinstance(app_id, str):
         return {"ok": False, "reason": "missing_app_id"}
@@ -325,6 +349,12 @@ async def save_design_docs_bundle(
         database_markdown = str(bundle.get("database_markdown") or "").strip()
         ui_schema_yaml = str(bundle.get("ui_schema_yaml") or "").strip()
         surface_map = _canonical_surface_map(bundle.get("surface_map"))
+        database_intent_bundle = _canonical_database_intent_bundle(
+            bundle.get("database_intent_bundle"),
+            app_id=app_id,
+            artifact_version_id=str(artifact_version_id) if artifact_version_id else None,
+            surface_map=surface_map,
+        )
         if not frontend_markdown or not backend_markdown or not database_markdown or not ui_schema_yaml:
             raise ValueError("DesignDocsBundle must include all four document strings")
         backend_markdown = _inject_backend_surface_map(backend_markdown, surface_map)
@@ -333,11 +363,12 @@ async def save_design_docs_bundle(
         return {"ok": False, "reason": "invalid_design_docs_bundle", "error": str(err)}
 
     pm = AG2PersistenceManager()
+    store = BuilderArtifactStore(pm=pm)
     normalized_stage = "draft"
 
     try:
         await _mark_design_docs_status(
-            pm=pm,
+            store=store,
             app_id=app_id,
             user_id=str(user_id) if user_id else None,
             stage=normalized_stage,
@@ -355,7 +386,7 @@ async def save_design_docs_bundle(
 
     for kind, content, extra_fields in docs:
         await _upsert_design_doc(
-            pm=pm,
+            store=store,
             app_id=app_id,
             user_id=str(user_id) if user_id else None,
             kind=kind,
@@ -366,9 +397,20 @@ async def save_design_docs_bundle(
             extra_fields=extra_fields,
         )
 
+    await store.save_database_intent(
+        app_id=app_id,
+        build_id=str(build_id or chat_id or "design-docs"),
+        artifact_version_id=str(artifact_version_id) if artifact_version_id else None,
+        change_class=str(change_class) if change_class else None,
+        database_intent_bundle=database_intent_bundle,
+        user_id=str(user_id) if user_id else None,
+        source_workflow="DesignDocs",
+        source_chat_id=str(chat_id) if chat_id else None,
+    )
+
     try:
         await _mark_design_docs_status(
-            pm=pm,
+            store=store,
             app_id=app_id,
             user_id=str(user_id) if user_id else None,
             stage=normalized_stage,
@@ -383,6 +425,7 @@ async def save_design_docs_bundle(
     _cv_set(context_variables, "ui_design_document", ui_schema_yaml)
     _cv_set(context_variables, "experience_spec_document", ui_schema_yaml)
     _cv_set(context_variables, "design_surface_map", surface_map)
+    _cv_set(context_variables, "database_intent_bundle", database_intent_bundle)
 
     return {
         "ok": True,
@@ -390,4 +433,5 @@ async def save_design_docs_bundle(
         "stage": normalized_stage,
         "kinds": list(_DOC_KINDS),
         "surface_count": len(surface_map.get("surfaces", [])),
+        "database_surface_count": len(database_intent_bundle.get("surfaces", [])),
     }

@@ -2,14 +2,15 @@
 
 ## Problem
 
-A handoff can evaluate before UI-driven context updates are available if you use
-the wrong scope. This causes missed transitions (for example after a user clicks
-approve in a UI tool).
+A handoff can drift when the workflow expects an approval state variable that no
+longer exists on the live UI path. This causes missed transitions after the user
+reviews an artifact and replies in chat.
 
 ## Canonical Approach
 
 Use `handoffs.yaml` with `handoff_type: condition` and set
-`condition_scope: pre` for context-based checks that should run before reply.
+`condition_type: string_llm` when the user is replying through the composer after
+reviewing a one-way artifact such as a diagram.
 
 ## Example (`handoffs.yaml`)
 
@@ -18,42 +19,24 @@ handoff_rules:
   - source_agent: user
     target_agent: ContextVariablesAgent
     handoff_type: condition
-    condition_type: expression
-    condition: ${action_plan_acceptance} == "accepted"
-    condition_scope: pre
+    condition_type: string_llm
+    condition: When the user approves the proposed workflow, confirms they want
+      to proceed, says the sequence diagram looks correct, or indicates there are
+      no further changes needed.
     transition_target: AgentTarget
 
   - source_agent: user
-    target_agent: ActionPlanArchitect
+    target_agent: PatternAgent
     handoff_type: condition
-    condition_type: llm
-    condition: "When the user requests changes to the action plan."
+    condition_type: string_llm
+    condition: When the user requests changes, gives critique, or asks for revisions
+      to the proposed workflow.
     transition_target: AgentTarget
-```
-
-## Example (`context_variables.yaml`)
-
-```yaml
-definitions:
-  action_plan_acceptance:
-    type: string
-    description: Tracks whether the user accepted the action plan
-    source:
-      type: state
-      default: pending
-      triggers:
-        - type: ui_response
-          tool: action_plan
-          response_key: plan_acceptance
-
-agents:
-  ContextVariablesAgent:
-    variables:
-      - action_plan_acceptance
 ```
 
 ## Notes
 
 - Keep this in YAML declaratives (`handoffs.yaml`, `context_variables.yaml`,
   `tools.yaml`).
-- Use `condition_scope: pre` for UI-driven acceptance/rejection gates.
+- Use composer replies for plain-text approval/feedback after one-way artifact review.
+- Reserve context-expression gates for state that is actually produced by the live UI contract.

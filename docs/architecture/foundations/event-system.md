@@ -38,7 +38,17 @@ New interactive workflow UI should follow the `chat.tool_call` transport path.
 Response-required AG2 input interactions normalize onto `chat.tool_call` with
 `interaction_type=input_request`. That is the only canonical browser-facing
 lane for runtime-managed interactive input. In `chat-ui`, generic text input
-requests now default to `display=composer`.
+requests use `display=composer` at the wire level, but the "Awaiting Workflow
+Reply" banner is suppressed for bare conversational turns — those with no
+explicit prompt and component type `UserInputRequest`. The banner only renders
+when the agent explicitly provides a prompt or requests a named component other
+than `UserInputRequest`. The underlying `tool_call_response` routing path
+remains active regardless of banner visibility.
+
+Native AG2 user handoffs can also pause without emitting a dedicated
+`InputRequestEvent`. When that happens, the runtime now emits `chat.awaiting_reply`
+to mark that the next composer message should resume the workflow. This is a
+composer-turn pause signal, not a second workflow UI renderer lane.
 
 ## Layer Responsibilities
 
@@ -60,6 +70,9 @@ requests now default to `display=composer`.
 
 - `1` means terminal workflow completion
 - `0` means the workflow paused awaiting user input and remains resumable
+
+When the pause came from a raw AG2 handoff rather than a response-bearing
+`chat.tool_call`, the runtime also emits `chat.awaiting_reply`.
 
 The runtime must not define app business events such as invoices, bookings,
 campaigns, payments, or app-specific status changes.
@@ -242,6 +255,8 @@ Key implications:
 - they are chat-session-scoped UI surfaces
 - their display mode (`composer`, `inline`, `artifact`, `view`) influences the frontend
   surface state machine
+- shipped shared workflow components should receive manifest-derived `workflow_primitive`
+  and `ui_contract` metadata in the `chat.tool_call` payload
 
 ### 3. Typed `ui.*` primitive lane
 

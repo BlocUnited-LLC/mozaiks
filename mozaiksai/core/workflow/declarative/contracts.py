@@ -11,7 +11,11 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from mozaiksai.core.workflow.workflow_ui_catalog import validate_workflow_renderable_primitive_ids
+from mozaiksai.core.workflow.workflow_ui_catalog import (
+    infer_workflow_ui_realization,
+    validate_workflow_renderable_primitive_ids,
+    validate_workflow_ui_realization_ids,
+)
 
 
 def _required_text(value: Any, *, field_name: str) -> str:
@@ -207,7 +211,7 @@ class ContextTriggerMatchSpec(DeclarativeModel):
 
 
 class ContextTriggerSpec(DeclarativeModel):
-    type: Literal["agent_text", "ui_response"]
+    type: Literal["agent_text", "ui_response", "user_text"]
     agent: Optional[str] = None
     match: Optional[ContextTriggerMatchSpec] = None
     tool: Optional[str] = None
@@ -226,6 +230,9 @@ class ContextTriggerSpec(DeclarativeModel):
                 raise ValueError("agent_text trigger requires 'agent'")
             if not self.match:
                 raise ValueError("agent_text trigger requires 'match'")
+        if self.type == "user_text":
+            if not self.match:
+                raise ValueError("user_text trigger requires 'match'")
         if self.type == "ui_response":
             if not self.tool:
                 raise ValueError("ui_response trigger requires 'tool'")
@@ -326,8 +333,9 @@ class ToolUIConfig(DeclarativeModel):
     component: Optional[str] = None
     mode: Optional[str] = None
     workflow_primitive: Optional[str] = None
+    realization: Optional[str] = None
 
-    @field_validator("component", "mode", "workflow_primitive", mode="before")
+    @field_validator("component", "mode", "workflow_primitive", "realization", mode="before")
     @classmethod
     def _normalize_optional_text(cls, value: Any) -> Optional[str]:
         return _optional_text(value)
@@ -342,6 +350,38 @@ class ToolUIConfig(DeclarativeModel):
             context="ToolUIConfig.workflow_primitive",
         )[0]
 
+    @field_validator("realization")
+    @classmethod
+    def _validate_realization(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return validate_workflow_ui_realization_ids(
+            [value],
+            context="ToolUIConfig.realization",
+            include_shell_builtin=True,
+        )[0]
+
+    @model_validator(mode="after")
+    def _normalize_realization(self) -> "ToolUIConfig":
+        if self.workflow_primitive is None:
+            if self.realization is not None:
+                raise ValueError("ui.realization requires ui.workflow_primitive")
+            return self
+
+        inferred_realization = infer_workflow_ui_realization(self.workflow_primitive, self.component)
+        if inferred_realization is None:
+            return self
+        if inferred_realization == "shell_builtin":
+            raise ValueError("ui.workflow_primitive for declarative UI tools must not resolve to shell_builtin")
+        if self.realization is None:
+            raise ValueError("ui.realization is required for declarative UI tools")
+        if self.realization != inferred_realization:
+            raise ValueError(
+                "ui.realization does not match the declared workflow primitive/component relationship "
+                f"(expected {inferred_realization}, got {self.realization})"
+            )
+        return self
+
 
 def _default_ui_payload_schema() -> Dict[str, Any]:
     return {"type": "object", "properties": {}, "additionalProperties": True}
@@ -349,7 +389,10 @@ def _default_ui_payload_schema() -> Dict[str, Any]:
 
 class UIToolActionSpec(DeclarativeModel):
     id: str
+    label: Optional[str] = None
     description: Optional[str] = None
+    variant: Optional[str] = None
+    approved: Optional[bool] = None
     payload_schema: Dict[str, Any] = Field(default_factory=_default_ui_payload_schema)
 
     @field_validator("id")
@@ -357,9 +400,9 @@ class UIToolActionSpec(DeclarativeModel):
     def _validate_action_id(cls, value: Any) -> str:
         return _required_text(value, field_name="id")
 
-    @field_validator("description", mode="before")
+    @field_validator("label", "description", "variant", mode="before")
     @classmethod
-    def _normalize_description(cls, value: Any) -> Optional[str]:
+    def _normalize_optional_text(cls, value: Any) -> Optional[str]:
         return _optional_text(value)
 
     @field_validator("payload_schema", mode="before")
@@ -434,12 +477,12 @@ class ToolSpec(DeclarativeModel):
             if not self.ui:
                 raise ValueError(
                     f"{self.tool_type} '{self.function}' must declare a non-empty ui block with "
-                    "component, mode, and workflow_primitive"
+                    "component, mode, workflow_primitive, and realization"
                 )
-            if not self.ui.component or not self.ui.mode or not self.ui.workflow_primitive:
+            if not self.ui.component or not self.ui.mode or not self.ui.workflow_primitive or not self.ui.realization:
                 raise ValueError(
                     f"{self.tool_type} '{self.function}' must declare ui.component, ui.mode, "
-                    "and ui.workflow_primitive"
+                    "ui.workflow_primitive, and ui.realization"
                 )
             if self.tool_type == "UI_Tool" and self.ui_contract is None:
                 self.ui_contract = UIToolContractSpec()
@@ -467,6 +510,7 @@ class LifecycleToolSpec(DeclarativeModel):
     description: Optional[str] = None
     tool_type: Literal["Agent_Tool", "UI_Tool", "UI_Surface"] = "Agent_Tool"
     ui: Optional[ToolUIConfig] = None
+    ui_contract: Optional[UIToolContractSpec] = None
 
     @field_validator("agent", "description", mode="before")
     @classmethod
@@ -499,16 +543,26 @@ class LifecycleToolSpec(DeclarativeModel):
             if not self.ui:
                 raise ValueError(
                     f"{self.tool_type} lifecycle tool '{self.function}' must declare a non-empty ui "
-                    "block with component, mode, and workflow_primitive"
+                    "block with component, mode, workflow_primitive, and realization"
                 )
-            if not self.ui.component or not self.ui.mode or not self.ui.workflow_primitive:
+            if not self.ui.component or not self.ui.mode or not self.ui.workflow_primitive or not self.ui.realization:
                 raise ValueError(
                     f"{self.tool_type} lifecycle tool '{self.function}' must declare ui.component, "
-                    "ui.mode, and ui.workflow_primitive"
+                    "ui.mode, ui.workflow_primitive, and ui.realization"
+                )
+            if self.tool_type == "UI_Tool" and self.ui_contract is None:
+                self.ui_contract = UIToolContractSpec()
+            if self.tool_type == "UI_Surface" and self.ui_contract is not None:
+                raise ValueError(
+                    f"UI_Surface lifecycle tool '{self.function}' must not declare ui_contract"
                 )
         elif self.ui is not None:
             raise ValueError(
                 f"Agent_Tool lifecycle tool '{self.function}' must not declare ui"
+            )
+        elif self.ui_contract is not None:
+            raise ValueError(
+                f"Agent_Tool lifecycle tool '{self.function}' must not declare ui_contract"
             )
         return self
 

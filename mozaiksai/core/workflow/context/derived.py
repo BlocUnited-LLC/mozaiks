@@ -35,6 +35,34 @@ def _resolve_nested_key(payload: Any, key: Optional[str]) -> Any:
         current = current.get(part)
     return current
 
+
+def _compile_optional_regex(pattern: Optional[str]) -> Optional[re.Pattern[str]]:
+    if not pattern:
+        return None
+    try:
+        return re.compile(pattern, re.IGNORECASE)
+    except re.error:
+        return None
+
+
+def _matches_text_conditions(
+    *,
+    text: str,
+    equals: Optional[str],
+    contains: Optional[str],
+    compiled: Optional[re.Pattern[str]],
+) -> bool:
+    candidate = str(text or "").strip()
+    if not candidate:
+        return False
+    if equals and candidate.lower() == equals.strip().lower():
+        return True
+    if contains and contains.lower() in candidate.lower():
+        return True
+    if compiled and compiled.search(candidate):
+        return True
+    return False
+
 def _resolve_sender_name(event: TextEvent) -> Optional[str]:
     """Extract logical agent name for matching triggers."""
 
@@ -106,11 +134,7 @@ class AgentTextTrigger:
     _compiled: Optional[re.Pattern[str]] = None
 
     def __post_init__(self) -> None:
-        if self.regex:
-            try:
-                self._compiled = re.compile(self.regex, re.IGNORECASE)
-            except re.error:
-                self._compiled = None
+        self._compiled = _compile_optional_regex(self.regex)
 
     def matches(self, event: TextEvent) -> bool:
         sender_name = _resolve_sender_name(event)
@@ -118,16 +142,35 @@ class AgentTextTrigger:
             return False
 
         text = _extract_text(event)
-        if not text:
-            return False
-        candidate = text.strip()
-        if self.equals and candidate.lower() == self.equals.strip().lower():
-            return True
-        if self.contains and self.contains.lower() in candidate.lower():
-            return True
-        if self._compiled and self._compiled.search(candidate):
-            return True
-        return False
+        return _matches_text_conditions(
+            text=text,
+            equals=self.equals,
+            contains=self.contains,
+            compiled=self._compiled,
+        )
+
+
+@dataclass
+class UserTextBinding:
+    """Represents a derived trigger driven by a plain user reply."""
+
+    variable: str
+    equals: Optional[str] = None
+    contains: Optional[str] = None
+    regex: Optional[str] = None
+    value: Any = True
+    _compiled: Optional[re.Pattern[str]] = None
+
+    def __post_init__(self) -> None:
+        self._compiled = _compile_optional_regex(self.regex)
+
+    def matches(self, text: str) -> bool:
+        return _matches_text_conditions(
+            text=text,
+            equals=self.equals,
+            contains=self.contains,
+            compiled=self._compiled,
+        )
 
 
 def _extract_text(event: TextEvent) -> str:
@@ -224,11 +267,15 @@ class DerivedContextManager:
             [getattr(agent, "context_variables", None) for agent in agents.values() if getattr(agent, "context_variables", None)]
         )
 
-        self.variables = self._load_variables()
-        self.ui_response_bindings = self._load_ui_response_bindings()
+        self.definitions = self._load_definitions()
+        self.state_defaults = self._load_state_defaults(self.definitions)
+        self.variables = self._from_definitions(self.definitions)
+        self.ui_response_bindings = self._ui_bindings_from_definitions(self.definitions)
+        self.user_text_bindings = self._user_text_bindings_from_definitions(self.definitions)
 
-        if self.variables:
+        if self.variables or self.ui_response_bindings or self.user_text_bindings or self.state_defaults:
             self.seed_defaults()
+        if self.variables:
             logger.info(
                 f"[DERIVED_CONTEXT] Loaded {len(self.variables)} agent_text state variables: {[v.name for v in self.variables]}"
             )
@@ -237,7 +284,11 @@ class DerivedContextManager:
             logger.info(
                 f"[DERIVED_CONTEXT] Loaded ui_response bindings: {len(self.ui_response_bindings)}"
             )
-        if not self.variables and not self.ui_response_bindings:
+        if self.user_text_bindings:
+            logger.info(
+                f"[DERIVED_CONTEXT] Loaded user_text bindings: {len(self.user_text_bindings)}"
+            )
+        if not self.variables and not self.ui_response_bindings and not self.user_text_bindings:
             logger.debug("[DERIVED_CONTEXT] No triggers configured")
 
 
@@ -247,18 +298,27 @@ class DerivedContextManager:
         tool: str
         response_key: Optional[str] = None
 
-    def _load_variables(self) -> List[DerivedVariableSpec]:
+    def _load_definitions(self) -> Dict[str, Any]:
         definitions = getattr(self.base_context, "_mozaiks_context_definitions", None)
         if isinstance(definitions, dict) and definitions:
-            return self._from_definitions(definitions)
+            return definitions
         try:
             config = workflow_manager.get_config(self.workflow_name) or {}
             ctx_section = config.get("context_variables") or {}
             plan = load_context_variables_config(ctx_section)
-            return self._from_definitions(plan.definitions)
+            return plan.definitions
         except Exception as err:  # pragma: no cover
             logger.debug(f"Derived context fallback load failed: {err}")
-            return []
+            return {}
+
+    def _load_state_defaults(self, definitions: Dict[str, Any]) -> Dict[str, Any]:
+        defaults: Dict[str, Any] = {}
+        for name, definition in definitions.items():
+            source = getattr(definition, "source", None)
+            if not source or getattr(source, "type", None) != "state":
+                continue
+            defaults[name] = getattr(source, "default", False)
+        return defaults
 
     def _from_definitions(self, definitions: Dict[str, Any]) -> List[DerivedVariableSpec]:
         results: List[DerivedVariableSpec] = []
@@ -307,19 +367,6 @@ class DerivedContextManager:
             )
         return results
 
-    def _load_ui_response_bindings(self) -> List["DerivedContextManager.UIResponseBinding"]:
-        definitions = getattr(self.base_context, "_mozaiks_context_definitions", None)
-        if isinstance(definitions, dict) and definitions:
-            return self._ui_bindings_from_definitions(definitions)
-        try:
-            config = workflow_manager.get_config(self.workflow_name) or {}
-            ctx_section = config.get("context_variables") or {}
-            plan = load_context_variables_config(ctx_section)
-            return self._ui_bindings_from_definitions(plan.definitions)
-        except Exception as err:  # pragma: no cover
-            logger.debug(f"UI response bindings fallback load failed: {err}")
-            return []
-
     def _ui_bindings_from_definitions(self, definitions: Dict[str, Any]) -> List["DerivedContextManager.UIResponseBinding"]:
         bindings: List[DerivedContextManager.UIResponseBinding] = []
         for name, definition in definitions.items():
@@ -347,9 +394,32 @@ class DerivedContextManager:
 
         return bindings
 
+    def _user_text_bindings_from_definitions(self, definitions: Dict[str, Any]) -> List[UserTextBinding]:
+        bindings: List[UserTextBinding] = []
+        for name, definition in definitions.items():
+            source = getattr(definition, "source", None)
+            if not source or getattr(source, "type", None) != "state":
+                continue
+            for trig_spec in getattr(source, "triggers", []) or []:
+                if not trig_spec or getattr(trig_spec, "type", None) != "user_text":
+                    continue
+                match = getattr(trig_spec, "match", None)
+                if not match:
+                    continue
+                bindings.append(
+                    UserTextBinding(
+                        variable=name,
+                        equals=getattr(match, "equals", None),
+                        contains=getattr(match, "contains", None),
+                        regex=getattr(match, "regex", None),
+                        value=True,
+                    )
+                )
+        return bindings
+
     def has_variables(self) -> bool:
         # Back-compat method name: treat any trigger binding as active.
-        return bool(self.variables or self.ui_response_bindings)
+        return bool(self.variables or self.ui_response_bindings or self.user_text_bindings)
 
     def apply_tool_call_response(self, *, tool_name: str, response_data: Dict[str, Any]) -> List[str]:
         """Apply declarative ui_response triggers based on a completed tool call response.
@@ -384,6 +454,38 @@ class DerivedContextManager:
                 for cb in list(self._listeners):
                     try:
                         cb({"variable": binding.variable, "value": value, "tool": normalized_tool})
+                    except Exception:  # pragma: no cover
+                        pass
+
+        return updated_vars
+
+    def apply_user_text(self, text: str) -> Dict[str, Any]:
+        """Apply declarative user_text triggers based on a free-form composer reply."""
+
+        candidate = str(text or "").strip()
+        if not candidate:
+            return {}
+
+        updated_vars: Dict[str, Any] = {}
+        for binding in self.user_text_bindings or []:
+            if not binding.matches(candidate):
+                continue
+            updated = False
+            for provider in self.providers:
+                if hasattr(provider, "set"):
+                    try:
+                        provider.set(binding.variable, binding.value)  # type: ignore[attr-defined]
+                        updated = True
+                    except Exception as err:  # pragma: no cover
+                        logger.debug(f"[DERIVED_CONTEXT] user_text update failed: {err}")
+            if updated:
+                updated_vars[binding.variable] = binding.value
+                logger.info(
+                    f"[DERIVED_CONTEXT] {self.workflow_name}: {binding.variable} -> {binding.value!r} (user_text)"
+                )
+                for cb in list(self._listeners):
+                    try:
+                        cb({"variable": binding.variable, "value": binding.value, "source": "user_text"})
                     except Exception:  # pragma: no cover
                         pass
 
@@ -473,26 +575,30 @@ class DerivedContextManager:
 
     @staticmethod
     def _matches_trigger(trigger: AgentTextTrigger, text: str) -> bool:
-        candidate = text.strip()
-        if not candidate:
-            return False
-        if trigger.equals and candidate.lower() == trigger.equals.strip().lower():
-            return True
-        if trigger.contains and trigger.contains.lower() in candidate.lower():
-            return True
-        if trigger._compiled and trigger._compiled.search(candidate):
-            return True
-        return False
+        return _matches_text_conditions(
+            text=text,
+            equals=trigger.equals,
+            contains=trigger.contains,
+            compiled=trigger._compiled,
+        )
 
     def register_additional_provider(self, provider: Any) -> None:
         if provider and provider not in self.providers:
             self.providers.append(provider)
-            for var in self.variables:
-                var.seed([provider])
+            self.seed_defaults()
 
     def seed_defaults(self) -> None:
-        for var in self.variables:
-            var.seed(self.providers)
+        for name, default in self.state_defaults.items():
+            for provider in self.providers:
+                if hasattr(provider, "contains") and provider.contains(name):  # type: ignore[attr-defined]
+                    continue
+                if hasattr(provider, "get") and provider.get(name, None) is not None:  # type: ignore[attr-defined]
+                    continue
+                if hasattr(provider, "set"):
+                    try:
+                        provider.set(name, default)  # type: ignore[attr-defined]
+                    except Exception as err:  # pragma: no cover
+                        logger.debug(f"Derived variable seed failed: {err}")
 
     def add_listener(self, callback) -> None:
         if callable(callback):

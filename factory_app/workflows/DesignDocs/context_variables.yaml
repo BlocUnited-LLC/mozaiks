@@ -1,12 +1,12 @@
 definitions:
   concept_overview:
     type: string
-    description: Project description and overview from the Concepts collection (produced
+    description: Project description and overview from the BuilderConcepts collection (produced
       by ValueEngine).
     source:
       type: data_reference
-      database_name: autogen_ai_agents
-      collection: Concepts
+      database_name: mozaiksai
+      collection: BuilderConcepts
       query_template:
         app_id: '{{runtime.app_id}}'
       fields:

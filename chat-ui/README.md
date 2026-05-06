@@ -37,12 +37,12 @@ template/
 chat-ui keeps workflow UI registration inside its own package, but the actual workflow root is still a **host-owned injection seam**.
 
 The registry module reads `<workflow>/ui/index.js` barrels from a build-time alias named `@chat-workflows-root`.
-That keeps chat-ui decoupled from repo layout and artifact paths while letting the host decide which app bundle is active.
+That keeps chat-ui decoupled from repo layout and artifact paths while letting the host inject one selected workflow root for the active host/session.
 
 ### How it works
 
 1. **In chat-ui (this package):** the internal registry module scans `@chat-workflows-root/*/ui/index.{js,jsx}`.
-2. **In a consuming app:** the bundler alias `@chat-workflows-root` is configured to point at the active app bundle's `workflows/` directory.
+2. **In a consuming app:** the bundler alias `@chat-workflows-root` is configured to point at the selected workflow root for that host/session.
 3. **In standalone/embed builds:** `@chat-workflows-root` points at an empty stub directory, so no workflow UI is registered.
 
 ### Consuming app setup (Vite example)
@@ -62,6 +62,8 @@ export default defineConfig({
   },
 });
 ```
+
+For Studio in this repo, that selected root is `factory_app/workflows`. For an app/product host, it is usually the active app root's `workflows/` directory.
 
 ### Creating a workflow UI module
 

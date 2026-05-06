@@ -11,12 +11,12 @@ from mozaiksai.core.workflow.ui_tools import emit_ui_surface
 logger = logging.getLogger(__name__)
 
 try:
-    from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+    from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
 
     _HAS_PERSISTENCE = True
 except ImportError:
     _HAS_PERSISTENCE = False
-    AG2PersistenceManager = None
+    BuilderArtifactStore = None
 
 
 def _set_context_value(context_variables: Optional[Any], key: str, value: Any) -> None:
@@ -62,27 +62,16 @@ async def save_captured_theme(
     persistence_id = str(app_id or identity.get("app_name") or identity.get("name") or "captured-theme")
     now = datetime.now(UTC)
 
-    if _HAS_PERSISTENCE and AG2PersistenceManager:
+    if _HAS_PERSISTENCE and BuilderArtifactStore:
         try:
-            pm = AG2PersistenceManager()
-            await pm._ensure_client()
-            if pm.client:
-                coll = pm.client["MozaiksAI"]["ThemeCaptures"]
-                await coll.update_one(
-                    {"app_id": persistence_id},
-                    {
-                        "$set": {
-                            "app_id": persistence_id,
-                            "chat_id": str(chat_id) if chat_id else None,
-                            "app_url": app_url,
-                            "identity": identity,
-                            "theme_config": theme_config,
-                            "updated_at": now.isoformat(),
-                        },
-                        "$setOnInsert": {"created_at": now.isoformat()},
-                    },
-                    upsert=True,
-                )
+            store = BuilderArtifactStore()
+            await store.save_theme_capture(
+                app_id=persistence_id,
+                chat_id=str(chat_id) if chat_id else None,
+                app_url=app_url,
+                identity=identity,
+                theme_config=theme_config,
+            )
         except Exception as exc:
             logger.warning("[ThemeCapture] Persistence failed: %s", exc)
 

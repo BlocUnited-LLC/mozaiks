@@ -16,8 +16,6 @@ exclude_docs: |
   architecture/roadmap/**
   architecture/specs/**
   architecture/foundations/architecture-overview.md
-  reference/deep-dives/ag2-beta-groupchat-strategy.md
-  reference/deep-dives/ag2-beta-preperation-plan.md
   reference/deep-dives/ag2-touchpoints-and-extensions.md
 
 extra:
@@ -94,6 +92,7 @@ nav:
   - Home: index.md
   - Start Here:
       - Getting Started: getting-started.md
+      - User Configuration: user-configuration.md
       - Install Modes: install-modes.md
       - Releasing: releasing.md
   - Guides:
@@ -119,6 +118,8 @@ nav:
           - Account, Admin, and Platform Services: architecture/foundations/account-admin-and-platform-services.md
           - Admin System: architecture/foundations/admin-system.md
           - Workflow Architecture: architecture/foundations/workflow-architecture.md
+          - Control-Plane Harness Architecture: architecture/foundations/control-plane-harness-architecture.md
+          - Orchestration Control Loops: architecture/foundations/orchestration-control-loops.md
           - Declarative AG2 Mapping: architecture/foundations/declarative-ag2-mapping.md
           - Workflow Authoring Contracts: architecture/foundations/workflow-authoring-contracts.md
           - UI Surface and Layout: architecture/foundations/ui-surface-and-layout-architecture.md

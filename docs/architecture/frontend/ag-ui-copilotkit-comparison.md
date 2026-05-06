@@ -92,7 +92,7 @@ The conclusion is:
 | Frontend tools | UI advertises tools in `RunAgentInput.tools`; frontend executes and renders them | Runtime-owned `use_ui_tool(...)` emits workflow-local components through transport | Ownership model differs | Keep Mozaiks workflow-local generation, but simplify protocol semantics |
 | Generative UI | CopilotKit `useComponent`, `useRenderTool`, `useDefaultRenderTool` | `WorkflowUIRouter`, component registry, workflow-local `ui/index.js` barrels | Mozaiks is more generator-friendly, less ergonomic | Keep workflow-local registry, add a simpler top-level render contract |
 | Shared state | `STATE_SNAPSHOT`, `STATE_DELTA`, `MESSAGES_SNAPSHOT`; CopilotKit `useCoAgent`/`useAgent` | `ChatUIContext` caches plus artifact/session state in the chat shell | Mozaiks has shell/session state but no canonical AG-UI-style runtime shared-state stream | If shared runtime state is needed, add it as a first-class protocol instead of another ad hoc frontend cache path |
-| HITL | Explicit interrupt/pause semantics; CopilotKit `renderAndWaitForResponse`, `useInterrupt` | `use_ui_tool(...)` plus normalized `chat.tool_call` input interactions | Mozaiks supports HITL, but pause/resume semantics are still under-modeled | Keep one response-required lane and model pause/resume more explicitly |
+| HITL | Explicit interrupt/pause semantics; CopilotKit `renderAndWaitForResponse`, `useInterrupt` | `use_ui_tool(...)` plus normalized `chat.tool_call` input interactions; the "Awaiting Workflow Reply" banner is suppressed for bare AG2 conversational turns — only shown when the agent explicitly sets a prompt or requests a named component | Mozaiks supports HITL; visual noise for routine AG2 turns is eliminated; pause/resume semantics are still under-modeled | Keep one response-required lane and model pause/resume more explicitly |
 | Tool transparency | Built-in default tool renderer and wildcard renderer | Requires workflow UI or custom handling; partial fallback behavior | CopilotKit is cleaner | Add a default renderer for all tool calls |
 | Session persistence | AG-UI thread/run model; CopilotKit thread support | `activeChatId`, `askMessages`, `workflowMessages`, artifact cache, widget re-entry | Mozaiks is stronger at shell/session UX | Keep as differentiator |
 | App shell/layout | Usually chat-centric with optional custom UI | First-class `ask/workflow/view` layouts and persistent widget | Mozaiks is stronger | Keep |
@@ -250,11 +250,16 @@ Current Mozaiks equivalent:
 - AG2 input requests now normalize onto `chat.tool_call` with
   `interaction_type=input_request`
 - completion and dismiss behavior is partly tool-specific
+- the "Awaiting Workflow Reply" composer banner is suppressed for bare AG2
+  conversational turns — those where component type is `UserInputRequest` and
+  no explicit prompt was set; the `tool_call_response` callback remains
+  registered regardless
 
 Assessment:
 
 - Mozaiks supports HITL.
-- The render lane is now mostly canonical.
+- The render lane is now canonical; visual noise for routine AG2 turns is
+  eliminated.
 - Pause/resume semantics are still not modeled as explicitly as AG-UI.
 
 Recommendation:

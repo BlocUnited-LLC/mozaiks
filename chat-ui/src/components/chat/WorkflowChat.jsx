@@ -189,6 +189,39 @@ function WorkflowChat({
       case 'stream_end':
         finalizeStream(setMessages, event, onMessage);
         return;
+      case 'activity': {
+        const content = String(
+          event?.message
+          || `${getWorkflowAgentName(event)} is working in the background.`
+        );
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated.length ? updated[updated.length - 1] : null;
+          const activityKey = `${event?.activity_type || 'background'}:${event?.agent || event?.agent_name || 'System'}`;
+          const nextMessage = {
+            id: last?.metadata?.activityKey === activityKey ? last.id : `activity-${Date.now()}`,
+            sender: 'system',
+            content: `⏳ ${content}`,
+            agentName: 'System',
+            timestamp: new Date().toISOString(),
+            metadata: {
+              eventType: 'activity',
+              activityKey,
+              activityStatus: event?.status || 'working',
+            },
+          };
+          if (last?.metadata?.activityKey === activityKey) {
+            updated[updated.length - 1] = nextMessage;
+            return updated;
+          }
+          if (last?.content === nextMessage.content && last?.metadata?.eventType === 'activity') {
+            return updated;
+          }
+          updated.push(nextMessage);
+          return updated;
+        });
+        return;
+      }
       case 'run_complete':
       case 'workflow_complete':
         if (

@@ -174,15 +174,24 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 path,
                 matched_prefix,
             )
+            # Include CORS header on the 429 so the browser reports it as a
+            # rate-limit error rather than a confusing CORS policy violation.
+            # The rate-limit middleware sits outside the CORS middleware, so it
+            # must add the header itself when it short-circuits the response.
+            response_headers: dict[str, str] = {
+                "Retry-After": str(reset_in),
+                "X-RateLimit-Limit": str(active_limit.amount),
+                "X-RateLimit-Remaining": "0",
+                "X-RateLimit-Reset": str(reset_in),
+            }
+            origin = request.headers.get("origin", "")
+            if origin:
+                response_headers["Access-Control-Allow-Origin"] = origin
+                response_headers["Access-Control-Allow-Credentials"] = "true"
             return JSONResponse(
                 status_code=429,
                 content={"detail": "Too many requests. Please slow down."},
-                headers={
-                    "Retry-After": str(reset_in),
-                    "X-RateLimit-Limit": str(active_limit.amount),
-                    "X-RateLimit-Remaining": "0",
-                    "X-RateLimit-Reset": str(reset_in),
-                },
+                headers=response_headers,
             )
 
         response = await call_next(request)

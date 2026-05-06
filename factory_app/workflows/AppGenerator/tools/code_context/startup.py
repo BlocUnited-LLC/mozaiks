@@ -4,6 +4,7 @@ import logging
 import os
 from typing import Optional
 
+from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE
 from .tools import initialize_code_context_tools
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ except Exception:  # pragma: no cover
 
 
 def _resolve_db_name() -> str:
-    return str(os.getenv("MOZAIKS_CODE_CONTEXT_DB") or "MozaiksAI").strip() or "MozaiksAI"
+    return str(os.getenv("MOZAIKS_CODE_CONTEXT_DB") or SYSTEM_DATABASE).strip() or SYSTEM_DATABASE
 
 
 def _resolve_uri() -> Optional[str]:

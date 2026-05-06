@@ -46,7 +46,7 @@ async def request_api_key(service: str):
 async def generate_files(confirmation_only: bool = True):
     if confirmation_only:
         # Step 1: Ask for confirmation (empty payload)
-        confirm_response = await use_ui_tool("FileDownloadCenter", {
+        confirm_response = await use_ui_tool("DownloadCenter", {
             "files": [],  # Empty - just asking permission
             "agent_message": "Ready to generate files?",
             "downloadType": "single"
@@ -59,7 +59,7 @@ async def generate_files(confirmation_only: bool = True):
         files = await create_files()
         
         # Step 3: Show result UI with populated payload
-        download_response = await use_ui_tool("FileDownloadCenter", {
+        download_response = await use_ui_tool("DownloadCenter", {
             "files": files,  # Populated - actual data
             "agent_message": "Files ready! Click to download.",
             "downloadType": "bulk" if len(files) > 1 else "single"
@@ -69,7 +69,7 @@ async def generate_files(confirmation_only: bool = True):
     else:
         # Single-step mode: create immediately
         files = await create_files()
-        response = await use_ui_tool("FileDownloadCenter", {
+        response = await use_ui_tool("DownloadCenter", {
             "files": files,
             "agent_message": "Generated files ready!",
             "downloadType": "bulk" if len(files) > 1 else "single"
@@ -165,7 +165,7 @@ tools:
     tool_type: UI_Tool
     auto_tool_call: true
     ui:
-      component: FileDownloadCenter
+      component: DownloadCenter
       mode: inline
 lifecycle_tools: []
 ```

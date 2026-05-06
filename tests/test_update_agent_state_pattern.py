@@ -166,6 +166,41 @@ def test_agents_agent_guidance_omits_agent_auto_tool_field_from_examples() -> No
     assert "auto_tool_mode" not in injected
 
 
+def test_agents_agent_prompt_declares_turn_limit_derivation_rules() -> None:
+    workspace = Path(__file__).resolve().parents[1]
+    agents_yaml = (
+        workspace
+        / "factory_app"
+        / "workflows"
+        / "AgentGenerator"
+        / "agents.yaml"
+    ).read_text(encoding="utf-8")
+
+    agents_section = agents_yaml.split("- name: AgentsAgent", 1)[1].split("- name:", 1)[0]
+    roster_section = agents_yaml.split("- name: AgentRosterAgent", 1)[1].split("- name:", 1)[0]
+
+    assert "### Step 1B: Derive `max_consecutive_auto_reply`" in agents_section
+    assert "Single-turn workers" in agents_section
+    assert "Open-ended coordinators or creative hubs" in agents_section
+    assert "MFJ child worker agents should usually be 1-2; MFJ resume/synthesis agents are usually 5." in agents_section
+    assert "Do NOT emit or reason about `max_consecutive_auto_reply` here." in roster_section
+    assert "AgentsAgent owns runtime turn limits later" in roster_section
+
+
+def test_hooks_bind_agents_guidance_to_agents_agent() -> None:
+    workspace = Path(__file__).resolve().parents[1]
+    hooks_yaml = (
+        workspace
+        / "factory_app"
+        / "workflows"
+        / "AgentGenerator"
+        / "hooks.yaml"
+    ).read_text(encoding="utf-8")
+
+    assert "hook_agent: AgentsAgent\n  filename: update_agent_state_pattern.py\n  function: inject_agents_agent_guidance" in hooks_yaml
+    assert "hook_agent: AgentRosterAgent\n  filename: update_agent_state_pattern.py\n  function: inject_agents_agent_guidance" not in hooks_yaml
+
+
 def test_agent_tools_guidance_marks_integration_as_planning_only() -> None:
     agent = _Agent()
     agent.name = "AgentToolsFileGenerator"

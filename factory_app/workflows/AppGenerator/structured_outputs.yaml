@@ -264,7 +264,6 @@ models:
         - api_surface
         - page_bundle
         - agent_backend_integration
-        - admin_config
         description: >
           Explicit build-task type used for downstream execution planning. Persistent
           app pages use the declarative AppSchemaAgent path. `page_bundle` means a
@@ -286,50 +285,36 @@ models:
         - control_plane
         - external_integration
         - ui_only
-        description: Surface kind this task serves.
+        description: Surface kind realized by this task.
       execution_target:
-        type: literal
-        values:
-        - AppGenerator
-        description: Workflow expected to execute the task.
-      initial_agent:
         type: str
-        description: Agent best suited to start this task when parallel execution is introduced.
-      description:
-        type: str
-        description: Human-readable summary of the build unit.
-      initial_message:
-        type: str
-        description: Seed message for future child-run execution.
-      owned_paths:
-        type: optional_list
-        items: str
-        description: Files or folders this task is responsible for producing or updating.
-      depends_on:
-        type: optional_list
-        items: str
-        description: Other task ids that must complete first.
-      acceptance_criteria:
-        type: optional_list
-        items: str
-        description: Deterministic checks the generated output must satisfy.
-  AppChildWorkflowSpec:
-    type: model
-    fields:
-      name:
-        type: str
-        description: Child workflow name to run. Use AppGenerator for app-task execution.
-      description:
-        type: str
-        description: Short summary of the child task.
+        description: Runtime or generator system responsible for executing the task.
       initial_agent:
         type: str
         description: Agent that should start the child run.
+      description:
+        type: str
+        description: Human-readable summary of the task.
       initial_message:
         type: str
         description: Seed message instructing the child run on exactly what to generate.
+      owned_paths:
+        type: optional_list
+        items: str
+        description: Canonical file paths this task exclusively owns.
+      depends_on:
+        type: optional_list
+        items: str
+        description: Task ids that must complete before this task runs.
+      acceptance_criteria:
+        type: optional_list
+        items: str
+        description: Concrete completion checks for the task output.
       context_variables:
-        type: dict
+        type: union
+        variants:
+        - dict
+        - 'null'
         description: Context variables seeded into the child run before execution.
   AppBuildPlan:
     type: model
@@ -337,13 +322,6 @@ models:
       agent_message:
         type: str
         description: Short planning summary for the build plan.
-      app_kind:
-        type: str
-        description: Short label for the product type being generated.
-      pages:
-        type: list
-        items: AppBuildPage
-        description: Canonical pages or screens that must exist in the generated app.
       entities:
         type: optional_list
         items: AppBuildEntity
@@ -422,6 +400,30 @@ models:
         type: optional_list
         items: str
         description: Recommended ordered phases for downstream generation.
+  AppChildWorkflowSpec:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Workflow name to run for the child task.
+      description:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional child-task summary for MFJ tracing.
+      initial_agent:
+        type: str
+        description: Agent that must start the child workflow run.
+      initial_message:
+        type: str
+        description: Exact task-scoped instruction the child run should execute.
+      context_variables:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: Optional child run context seed merged into the spawned workflow session.
   AppBuildPlanOutput:
     type: model
     fields:
@@ -670,6 +672,19 @@ models:
       version:
         type: str
         description: Semantic version string.
+      type:
+        type: literal
+        values:
+        - standard
+        - messaging
+        - workflow
+        - transactional
+        description: >
+          Module type governs scaffold conventions and type-specific YAML additions.
+          standard = request/response CRUD (default).
+          messaging = stateful real-time communication with read/unread tracking (adds channels.yaml).
+          workflow = named state machine with transitions and roles (adds states.yaml + transitions.yaml).
+          transactional = append-only ledger for value movements.
       description:
         type: str
         description: Short module summary.
@@ -1096,14 +1111,14 @@ models:
       hooks:
         type: optional_list
         items: str
-        description: Optional module-local Python hooks such as backend.admin:resolve_campaign_metrics for custom panel data. Every hook must be mirrored in python_stubs.
+        description: "Optional module-local Python hooks for custom panel data. Format: 'module.path:function_name', e.g. 'backend.admin:resolve_campaign_metrics'. Every hook must be mirrored in python_stubs and must resolve within the module boundary."
 
   ModulePythonStub:
     type: model
     fields:
       path:
         type: str
-        description: Module-local Python stub path such as backend/handler.py, backend/service.py, backend/repo.py, backend/policy.py, backend/schemas.py, or backend/settings.py.
+        description: Module-local Python stub path such as backend/handler.py, backend/service.py, backend/repo.py, backend/policy.py, backend/models.py, or backend/settings.py.
       kind:
         type: literal
         values:
@@ -1175,63 +1190,11 @@ models:
       python_stubs:
         type: optional_list
         items: ModulePythonStub
-        description: Python implementation stubs required by the contract. Durable module surfaces should normally declare backend/handler.py, backend/service.py, backend/repo.py, backend/policy.py, and backend/schemas.py, plus any bounded hook files referenced by YAML.
+        description: Python implementation stubs required by the contract. Durable module surfaces should normally declare backend/handler.py, backend/service.py, backend/repo.py, backend/policy.py, and backend/models.py, plus any bounded hook files referenced by YAML.
       js_stubs:
         type: optional_list
         items: ModuleJsStub
         description: Optional JS/TS frontend customization stubs required by declared admin custom components.
-
-  HostAdminRuntimePanel:
-    type: model
-    fields:
-      id:
-        type: literal
-        values:
-        - stats
-        - runs
-        - sessions
-        description: Stable host runtime panel id.
-      label:
-        type: str
-        description: Human-facing label shown in the unified /admin shell.
-      section:
-        type: literal
-        values:
-        - overview
-        - users
-        - billing
-        - usage
-        - activity
-        - settings
-        - integrations
-        - support
-        description: Semantic admin section where this runtime panel appears.
-
-  HostAdminConfig:
-    type: model
-    fields:
-      schema_version:
-        type: literal
-        values:
-        - mozaiks.admin.host.v1
-        description: Must be mozaiks.admin.host.v1.
-      enabled:
-        type: bool
-        description: Whether the host-owned /admin shell is enabled for the app.
-      admin_emails:
-        type: list
-        items: str
-        description: Email allowlist promoted to admin access by the host.
-      sections:
-        type: dict
-        description: >
-          Object keyed by semantic admin section id (`overview`, `users`, `billing`,
-          `usage`, `activity`, `settings`, `integrations`, `support`). Each value must
-          include `label`, `enabled`, and `order`.
-      runtime_panels:
-        type: list
-        items: HostAdminRuntimePanel
-        description: Host/runtime panels visible in the unified /admin shell.
 
   ConfigMiddlewareOutput:
     type: model
@@ -1240,7 +1203,6 @@ models:
         type: literal
         values:
         - module_contract_bundle
-        - admin_config_bundle
         - backend_foundation
         description: Output mode selected from current_build_task_type.
       module_contract:
@@ -1248,19 +1210,13 @@ models:
         variants:
         - ModuleContractBundle
         - 'null'
-        description: Required in module_contract mode; null for admin_config or backend_foundation modes.
-      host_admin_config:
-        type: union
-        variants:
-        - HostAdminConfig
-        - 'null'
-        description: Required in admin_config mode; null for module_contract and backend_foundation modes.
+        description: Required in module_contract mode; null for backend_foundation mode.
       backend_foundation_bundle:
         type: union
         variants:
         - BackendFoundationBundle
         - 'null'
-        description: Required in backend_foundation mode; null for module_contract and admin_config modes.
+        description: Required in backend_foundation mode; null for module_contract mode.
       code_files:
         type: list
         items: CodeFileEntry

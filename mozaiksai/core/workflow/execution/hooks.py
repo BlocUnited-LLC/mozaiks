@@ -29,7 +29,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable
+import contextlib
 import importlib
+import importlib.util
 import inspect
 import logging
 import sys
@@ -59,12 +61,24 @@ class RegisteredHook:
 
 def _ensure_workflow_import_paths(workflow_path: Path) -> None:
     """Expose the active workflows package before importing hook modules."""
-    for candidate in (workflow_path.parent.parent, workflow_path.parent, workflow_path, workflow_path / "tools"):
+    desired_order = (
+        workflow_path.parent.parent,
+        workflow_path.parent,
+        workflow_path,
+        workflow_path / "tools",
+    )
+    normalized: List[str] = []
+    for candidate in desired_order:
         try:
             value = str(candidate.resolve())
         except Exception:
             value = str(candidate)
-        if value and value not in sys.path:
+        if value:
+            normalized.append(value)
+    for value in reversed(normalized):
+        with contextlib.suppress(ValueError):
+            sys.path.remove(value)
+        if value:
             sys.path.insert(0, value)
 
 
@@ -85,14 +99,38 @@ def _resolve_import(workflow_name: str, file_value: Optional[str], function_valu
         else:
             rel = file_path.name
         stem = Path(rel).stem
-
-        # Prefer tools subpackage if file exists there
-        tools_dir = workflow_path / "tools" / f"{stem}.py"
-        if tools_dir.exists():
-            module_name = f"workflows.{workflow_name}.tools.{stem}"
-        else:
-            module_name = f"workflows.{workflow_name}.{stem}"
         fn_name = function_value
+        resolved_file = workflow_path / "tools" / f"{stem}.py"
+        if not resolved_file.exists():
+            resolved_file = workflow_path / f"{stem}.py"
+        if not resolved_file.exists():
+            logger.warning(
+                "Hook import failed: workflow=%s filename=%s not found under %s",
+                workflow_name,
+                file_value,
+                workflow_path,
+            )
+            return None, f"{workflow_name}.{stem}.{fn_name}"
+
+        try:
+            _ensure_workflow_import_paths(workflow_path)
+            module_name = f"_mz_workflow_hook_{workflow_name}_{stem}_{abs(hash(str(resolved_file.resolve())))}"
+            spec = importlib.util.spec_from_file_location(module_name, resolved_file)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"Could not load spec for {resolved_file}")
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+        except Exception as e:  # pragma: no cover
+            logger.warning(f"Hook import failed: {resolved_file}: {e}")
+            return None, f"{resolved_file}:{fn_name}"
+
+        try:
+            fn = getattr(mod, fn_name)
+        except AttributeError as e:  # pragma: no cover
+            logger.warning(f"Hook attribute not found: {resolved_file}:{fn_name}: {e}")
+            return None, f"{resolved_file}:{fn_name}"
+
+        return fn, f"{resolved_file}:{fn_name}"
     else:
         # Case 2: function field encodes module + function (colon or last dot)
         if ':' in function_value:

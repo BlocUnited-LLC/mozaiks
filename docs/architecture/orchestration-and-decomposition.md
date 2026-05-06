@@ -4,6 +4,11 @@
 **Date**: March 11, 2026  
 **Purpose**: Define the deterministic control-plane model for Mozaiks runtime orchestration and the authoring contract for decomposition.
 
+This document is about graph/config artifacts used by orchestration.
+For the execution ownership model across workflow runs, builder sessions, and
+scoped refinement workers, see
+[Orchestration Control Loops](foundations/orchestration-control-loops.md).
+
 ## Non-Negotiable Rules
 
 - The runtime control plane is deterministic.
@@ -11,10 +16,19 @@
 - Natural-language reasoning does not belong in runtime graphs.
 - LLMs may produce plans, classifications, and structured outputs inside workflows.
 - The runtime may execute those outputs, but it must not interpret vague prose to decide control flow.
+- There is no single global orchestration prompt over every user request.
+  Builder-context free-text analysis belongs in the builder-session harness
+  (`OrchestrationControlHarness`), not in pack graphs.
+- The builder-session harness is configured through `app/config/ai.json ->
+  control_plane`, not through `extension_registry.json`, `mfj_extension.json`,
+  or workflow-local handoff prompts.
 
-## The Three Layers
+## The Three Graph Scopes
 
-### 1. Global Orchestrator
+These are graph or config scopes, not the same thing as Mozaiks' three control
+loops.
+
+### 1. Global workflow sequence graph
 
 The global pack graph in `factory_app/workflows/extended_orchestration/extension_registry.json` is for sequencing across workflows.
 
@@ -38,7 +52,7 @@ Use the global layer for coarse journey phases such as:
 - `GreenRoom -> WritersRoom -> MainStage`
 - `Review -> Publish`
 
-### 2. Workflow-Level MFJ
+### 2. Workflow-level MFJ graph
 
 The per-workflow pack graph in `app/workflows/<workflow>/extended_orchestration/mfj_extension.json` is for mid-flight journeys inside one workflow. Builder workflows use the same contract under `factory_app/workflows/<workflow>/extended_orchestration/mfj_extension.json`.
 
@@ -52,7 +66,7 @@ It answers:
 
 It does not contain business prose. It only contains executable runtime config.
 
-### 3. Task Graph / DAG
+### 3. Builder task graph / DAG
 
 This is optional and separate from MFJ.
 
@@ -328,6 +342,8 @@ Decompose into product artifacts first, not workflows first.
 
 - Global pack graphs sequence workflows.
 - Workflow pack graphs handle MFJ inside a workflow.
+- Workflow execution, builder-session routing, and scoped refinement workers are
+  separate control loops above those graph artifacts.
 - Decomposition belongs to agents, not runtime graph prose.
 - DAG scheduling is optional and separate from MFJ.
 - Cross-workflow carry is explicit persistence plus lifecycle loading.

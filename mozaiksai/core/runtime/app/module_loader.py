@@ -28,6 +28,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.admin.contract import ADMIN_SECTION_ORDER
 
 logger = get_workflow_logger("module_loader")
 
@@ -282,16 +283,7 @@ class ModuleAdminPanel(ModuleContractModel):
     id: str
     label: str
     description: Optional[str] = None
-    section: Literal[
-        "overview",
-        "users",
-        "billing",
-        "usage",
-        "activity",
-        "settings",
-        "integrations",
-        "support",
-    ]
+    section: str  # validated against ADMIN_SECTION_ORDER at runtime
     order: int = 0
     renderer: Literal["schema", "custom_component"] = "schema"
     layout: Optional[Literal["grid", "sidebar", "full-width", "split"]] = None
@@ -303,6 +295,16 @@ class ModuleAdminPanel(ModuleContractModel):
     @classmethod
     def _required(cls, value: Any, info):  # type: ignore[no-untyped-def]
         return _required_text(value, field_name=info.field_name)
+
+    @field_validator("section", mode="before")
+    @classmethod
+    def _section(cls, value: Any) -> str:
+        text = str(value or "").strip().lower()
+        if text not in ADMIN_SECTION_ORDER:
+            raise ValueError(
+                f"admin panel section must be one of {list(ADMIN_SECTION_ORDER)}, got {text!r}"
+            )
+        return text
 
     @field_validator("description", "component", mode="before")
     @classmethod
@@ -347,6 +349,14 @@ class ModuleAdminPanel(ModuleContractModel):
 
 
 class ModuleAdminManifest(ModuleContractModel):
+    """Validated admin.yaml contract.
+
+    `hooks` declares optional Python callables that supply panel-specific data.
+    Format: "module.path:function_name", e.g. "backend.admin:resolve_metrics".
+    The runtime validates and stores these at load time; panel data endpoints
+    resolve them on demand when a panel requests dynamic data.
+    """
+
     schema_version: Literal["mozaiks.admin.v2"]
     panels: List[ModuleAdminPanel] = Field(default_factory=list)
     hooks: List[str] = Field(default_factory=list)
@@ -354,7 +364,18 @@ class ModuleAdminManifest(ModuleContractModel):
     @field_validator("hooks", mode="before")
     @classmethod
     def _hooks(cls, value: Any) -> List[str]:
-        return _string_list(value)
+        entries = _string_list(value)
+        for entry in entries:
+            if ":" not in entry:
+                raise ValueError(
+                    f"admin.yaml hook must be in 'module.path:function_name' format, got {entry!r}"
+                )
+            module_path, _, fn_name = entry.partition(":")
+            if not module_path.strip() or not fn_name.strip():
+                raise ValueError(
+                    f"admin.yaml hook has empty module path or function name: {entry!r}"
+                )
+        return entries
 
     @model_validator(mode="after")
     def _unique_panel_ids(self) -> "ModuleAdminManifest":

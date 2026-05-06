@@ -180,6 +180,14 @@ async def handle_switch_workflow(
                         "timestamp": utc_timestamp(),
                     }
                     await websocket.send_json(transport._serialize_ag2_events(envelope))
+                elif kind == "awaiting_reply":
+                    awaiting = {k: v for k, v in event_dict.items() if k != "kind"}
+                    envelope = {
+                        "type": "chat.awaiting_reply",
+                        "data": awaiting,
+                        "timestamp": utc_timestamp(),
+                    }
+                    await websocket.send_json(transport._serialize_ag2_events(envelope))
 
             await resumer.handle_resume_request(
                 chat_id=str(target_chat_id),

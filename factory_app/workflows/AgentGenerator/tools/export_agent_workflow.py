@@ -22,7 +22,7 @@ from mozaiksai.core.workflow.generator_support.agent_endpoints import (
     resolve_agent_websocket_url,
 )
 from mozaiksai.core.workflow.generator_support.workflow_exports import record_workflow_export
-from workflows.AgentGenerator.tools.export_to_github import export_to_github_tool
+from .export_to_github import export_to_github_tool
 
 
 def _find_zip_entry(names: List[str], suffix: str) -> Optional[str]:

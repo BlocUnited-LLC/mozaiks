@@ -42,7 +42,7 @@ from mozaiksai.core.events.event_serialization import (
     normalize_text_content,
     serialize_event_content,
 )
-from mozaiksai.core.events.ag2_events import emit_decomposition_planned
+from mozaiksai.core.events.ag2_events import emit_decomposition_planned, emit_structured_output
 from mozaiksai.core.events.runtime_events import (
     RUNTIME_AGENT_OUTPUT_VALIDATED,
     RUNTIME_DECOMPOSITION_PLANNED,
@@ -123,6 +123,11 @@ class TextEventHandler(BaseEventHandler):
                 sender_name = getattr(sender_attr, "name").strip()
         sender_name = sender_name or state.turn_agent or "Agent"
         sender_name = self._resolve_validated_output_sender(sender_name, ctx, state) or sender_name
+        sender_name_lower = sender_name.strip().lower()
+        state.last_text_role = (
+            "user" if sender_name_lower in {"user", "userproxy", "chat_manager", "manager", "agentmanager"} else "assistant"
+        )
+        state.last_text_content = message_content
 
         # Seed message deduplication
         if state.is_seed_message(message_content, sender_name):
@@ -468,6 +473,18 @@ class TextEventHandler(BaseEventHandler):
                 f"for {sender_name} (turn_key={turn_key})"
             )
             await ctx.dispatcher.emit(RUNTIME_AGENT_OUTPUT_VALIDATED, validated_event)
+
+        emitted_via_ag2 = emit_structured_output(
+            agent_name=sender_name,
+            chat_id=ctx.chat_id,
+            output_type=model_name,
+            output_data=normalized_structured,
+            validation_passed=True,
+        )
+        if emitted_via_ag2:
+            ctx.wf_logger.info(
+                f" [{ctx.workflow_name_upper}] Emitted AG2 structured output checkpoint for {sender_name}"
+            )
 
     async def _emit_decomposition_planned(
         self,

@@ -2,7 +2,7 @@
 
 **Status:** Current reference  
 **Last updated:** 2026-04-12
-**Depends on:** [Orchestration and Decomposition](../../architecture/orchestration-and-decomposition.md), [Workflow Architecture](../../architecture/foundations/workflow-architecture.md), [MFJ Strict Resume Contract](mfj-strict-resume-contract.md)
+**Depends on:** [Orchestration and Decomposition](../../architecture/orchestration-and-decomposition.md), [Workflow Architecture](../../architecture/foundations/workflow-architecture.md), [Orchestration Control Loops](../../architecture/foundations/orchestration-control-loops.md), [MFJ Strict Resume Contract](mfj-strict-resume-contract.md)
 
 **Validation status:** MFJ runtime semantics are implemented in the current codepath, but end-to-end confidence should come from the live smoke harness at `scripts/run_live_mfj_smoke.py` and `tests/test_mfj_live_smoke.py`, not from contract or mock coverage alone. The canonical no-HITL entry workflow for that harness is `factory_app/workflows/RuntimeSmoke`. The harness requires `OPENAI_API_KEY`, `MONGO_URI`, and a reachable MongoDB instance.
 
@@ -23,6 +23,10 @@ An MFJ is a workflow-local fork/join cycle:
 MFJ is not a global workflow journey.
 It is not a vague planning concept.
 It is executable runtime config under a workflow's own `extended_orchestration/mfj_extension.json`.
+
+In the canonical orchestration model, MFJ belongs only to the workflow
+execution loop. It is not the builder session loop and it is not the
+refinement worker loop.
 
 ---
 
@@ -89,6 +93,9 @@ Reasoning belongs in workflow agents and structured outputs.
 | Mid-Flight Journey | Inside one workflow | Fan out child work and merge results back into the parent run |
 | Structured output | Inside one agent turn | Provide deterministic input the runtime can consume |
 | DAG/task graph | Optional higher-order plan | Explicit dependency scheduling when a workflow needs more than simple fan-out |
+
+The builder's `BuildGraph` and refinement routing are separate control-plane
+concerns above MFJ.
 
 MFJ is the runtime mechanism that sits between a decomposition agent and a
 resumed host agent.
@@ -549,16 +556,20 @@ Human checkpoints between MFJs are not a separate feature — they're the natura
 - source_agent: user
   target_agent: ContextVariablesAgent
   handoff_type: condition
-  condition_type: expression
-  condition: ${action_plan_acceptance} == "accepted"
+  condition_type: string_llm
+  condition: When the user approves the proposed workflow, confirms they want to
+    proceed, says the sequence diagram looks correct, or indicates there are no
+    further changes needed.
   transition_target: AgentTarget
 
 # User rejects → loop back to decomposer for revision
 - source_agent: user
   target_agent: PatternAgent
   handoff_type: condition
-  condition_type: expression
-  condition: ${action_plan_acceptance} != "accepted"
+  condition_type: string_llm
+  condition: When the user provides feedback, suggestions, changes, or critique about
+    the workflow, action plan, phases, agents, operations, integrations, or any aspect
+    of the proposed solution.
   transition_target: AgentTarget
 ```
 

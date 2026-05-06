@@ -14,8 +14,11 @@ Use this docs section as the web navigation layer for that architecture.
 3. [Core, Product, and App Bundle Boundary](foundations/core-product-app-bundle-boundary.md)
 4. [Account, Admin, and Platform Services](foundations/account-admin-and-platform-services.md)
 5. [Workflow Architecture](foundations/workflow-architecture.md)
-6. [Event System](foundations/event-system.md)
-7. [Event Contracts](foundations/event-contracts.md)
+6. [Control-Plane Harness Architecture](foundations/control-plane-harness-architecture.md)
+7. [Orchestration Control Loops](foundations/orchestration-control-loops.md)
+8. [Event System](foundations/event-system.md)
+9. [Event Contracts](foundations/event-contracts.md)
+10. [Persistence and Artifact Storage](foundations/persistence-and-artifact-storage.md)
 
 ## Main Contracts
 
@@ -24,9 +27,12 @@ Use this docs section as the web navigation layer for that architecture.
 - [Account, Admin, and Platform Services](foundations/account-admin-and-platform-services.md)
 - [Declarative AG2 Mapping](foundations/declarative-ag2-mapping.md)
 - [Workflow Authoring Contracts](foundations/workflow-authoring-contracts.md)
+- [Control-Plane Harness Architecture](foundations/control-plane-harness-architecture.md)
+- [Orchestration Control Loops](foundations/orchestration-control-loops.md)
 - [UI Surface and Layout](foundations/ui-surface-and-layout-architecture.md)
 - [Event System](foundations/event-system.md)
 - [Event Contracts](foundations/event-contracts.md)
+- [Persistence and Artifact Storage](foundations/persistence-and-artifact-storage.md)
 - [Learning Loop Architecture](foundations/learning-loop-architecture.md)
 
 ## Publishing Boundary

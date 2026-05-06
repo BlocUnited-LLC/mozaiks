@@ -14,7 +14,7 @@ _FRONTEND_JS_TS_SEGMENTS = (
     "/src/pages/",
     "/src/components/",
 )
-_HOST_ADMIN_CONFIG_PATH = "app/config/admin.json"
+_OBSOLETE_HOST_ADMIN_CONFIG_PATH = "app/config/admin.json"
 _APP_BACKEND_ADMIN_PATHS = {"backend/admin_config.py", "backend/routes/admin.py"}
 
 
@@ -93,28 +93,18 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]]) -> None:
             )
 
         if task_type == "admin_config":
-            if initial_agent != "ConfigMiddlewareAgent":
-                raise ValueError(
-                    "Build task "
-                    f"'{task_id}' assigns admin config output to {initial_agent}. "
-                    "admin_config must start at ConfigMiddlewareAgent."
-                )
-            if capability_pack_id is not None:
-                raise ValueError(
-                    "Build task "
-                    f"'{task_id}' must keep capability_pack_id null for host-owned admin config."
-                )
-            if owned_paths != [_HOST_ADMIN_CONFIG_PATH]:
-                raise ValueError(
-                    "Build task "
-                    f"'{task_id}' must own only '{_HOST_ADMIN_CONFIG_PATH}'."
-                )
-
-        if _HOST_ADMIN_CONFIG_PATH in owned_paths and task_type != "admin_config":
             raise ValueError(
                 "Build task "
-                f"'{task_id}' owns '{_HOST_ADMIN_CONFIG_PATH}' but uses task_type '{task_type}'. "
-                "Host admin config must be generated through the explicit admin_config task."
+                f"'{task_id}' uses obsolete task_type 'admin_config'. "
+                "Admin bootstrap lives in app/app.json admins; use module_contract for feature panels "
+                "and api_surface for split app-backend admin APIs."
+            )
+
+        if _OBSOLETE_HOST_ADMIN_CONFIG_PATH in owned_paths:
+            raise ValueError(
+                "Build task "
+                f"'{task_id}' owns obsolete path '{_OBSOLETE_HOST_ADMIN_CONFIG_PATH}'. "
+                "Admin bootstrap lives in app/app.json admins; do not generate app/config/admin.json."
             )
 
         has_app_backend_admin_path = bool(_APP_BACKEND_ADMIN_PATHS.intersection(owned_paths))

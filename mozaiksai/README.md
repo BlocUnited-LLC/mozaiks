@@ -158,6 +158,9 @@ the shared smoke workflows under `factory_app/workflows/`:
   - composer reply
   - structured inline workflow primitive
   - artifact workflow surface
+- `AgentGenerator` is the stable real-AG2 regression target for multi-turn
+  workflow generation, workflow-local UI, shipped workflow primitives, and final
+  bundle handoff.
 
 Run them through the live harness:
 
@@ -165,6 +168,7 @@ Run them through the live harness:
 python scripts/run_live_mfj_smoke.py --workflow RuntimeSmoke --workflows-root factory_app/workflows
 python scripts/run_live_mfj_smoke.py --workflow RuntimeToolCallSmoke --workflows-root factory_app/workflows --tool-response-text approved
 python scripts/run_live_mfj_smoke.py --workflow WorkflowPrimitiveAcceptance --workflows-root factory_app/workflows --tool-response-file factory_app/workflows/WorkflowPrimitiveAcceptance/smoke_responses.json
+python scripts/run_live_mfj_smoke.py --workflow AgentGenerator --workflows-root factory_app/workflows --prompt-file factory_app/workflows/AgentGenerator/smoke_prompt.txt --tool-response-file factory_app/workflows/AgentGenerator/smoke_responses.json --timeout-seconds 300
 ```
 
 For real multi-turn workflows that pause on AG2 input requests, the same
@@ -180,12 +184,16 @@ python scripts/run_live_mfj_smoke.py --workflow ValueEngine --workflows-root fac
 ```
 
 `--user-reply` values are consumed by pending `chat.tool_call` events with
-`interaction_type=input_request`. They do not send speculative free-form
-workflow chat messages. AG2 compatibility prompts such as
-`Please give feedback to chat_manager...` still use that same pending
-input-request lane; the runtime suppresses the raw prompt text, but the harness
-or frontend still needs to answer the pending interaction. In `chat-ui`,
-generic text input requests default to the main composer (`display=composer`).
+`interaction_type=input_request` and by `chat.awaiting_reply` / non-terminal
+`chat.run_complete` workflow pauses that hand control back to the composer
+without an explicit UI tool. They do not send speculative free-form workflow
+chat messages. AG2 compatibility prompts such as
+`Please give feedback to chat_manager...` still use the pending input-request
+lane; the runtime suppresses the raw prompt text. If AG2 emits a bare generic
+feedback prompt immediately after a real user reply, the runtime auto-resumes
+internally instead of surfacing a second fake user-facing pause. In `chat-ui`,
+generic text input requests default to the main composer (`display=composer`),
+and raw AG2 user-handoff pauses now surface as `chat.awaiting_reply`.
 
 When a workflow also needs structured tool responses, prefer
 `--tool-response-file` over ad hoc text fallbacks. The file is a JSON object:
@@ -195,8 +203,15 @@ When a workflow also needs structured tool responses, prefer
   "input_replies": [
     "We need an approval dashboard for regional operations teams."
   ],
+  "default_input_reply": "Proceed with the proposed workflow.",
+  "assistant_reply_rules": [
+    {
+      "contains": "final tweaks",
+      "reply": "No final tweaks. Proceed to workflow planning."
+    }
+  ],
   "tool_responses": {
-    "AcceptanceApprovalCard": {
+    "ApprovalCard": {
       "action": "approve",
       "approved": true,
       "rationale": "The checkpoint is clear."
@@ -206,5 +221,28 @@ When a workflow also needs structured tool responses, prefer
 ```
 
 `tool_responses` keys match the emitted workflow `tool_name` / `component_type`.
+`default_input_reply` is optional and keeps variable-length AG2 interview flows
+from stalling once the explicit `input_replies` list is exhausted.
+`assistant_reply_rules` are optional and let the smoke harness answer specific
+workflow stages based on the latest visible assistant message instead of blindly
+consuming the next queued reply.
+
+For a checked-in real-AG2 regression target, use the workflow-owned smoke pair:
+
+- `factory_app/workflows/AgentGenerator/smoke_prompt.txt`
+- `factory_app/workflows/AgentGenerator/smoke_responses.json`
+
+Together they define the canonical AgentGenerator regression target for:
+
+- multi-turn AG2 interview replies
+- diagram artifact review via the composer reply lane
+- shipped/shared workflow components
+- final download handoff
+
+The smoke harness also performs one runtime-level resume pass if a run lands in
+a persisted generic AG2 feedback pause after the visible interaction is already
+complete.
 
 Both require a working `.env` with `OPENAI_API_KEY` and `MONGO_URI`, plus a reachable MongoDB instance.
+If you rely on the repo Docker Compose service, Docker Desktop must be running before
+`docker compose -f infra/compose/docker-compose.yml up -d mongo`.

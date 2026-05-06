@@ -84,7 +84,7 @@ implement deterministic behavior behind those manifests.
 | Preferences | `/profile` preferences section | `GET/PUT /api/me/preferences` | `modules/{module}/settings.yaml` and optional `backend/settings.py` for module-local settings | workflow prompts |
 | Notifications | shell notification surfaces and backend delivery rules | app backend plus module notification policy | `modules/{module}/notifications.yaml` and optional `backend/notifications.py` | workflows as source of truth |
 | Subscriptions and entitlements | profile badges, billing/admin views, and gated capability behavior | app backend entitlement state | `modules/{module}/subscriptions.yaml` and optional `backend/subscriptions.py` | capability-pack generation |
-| Admin | `/admin` route family via `AdminPortal` | host admin APIs plus optional app-backend admin APIs | `app/config/admin.json`, `modules/{module}/admin.yaml`, optional `backend/admin.py` | custom admin page generation |
+| Admin | `/admin` route family via `AdminPortal` | framework admin shell plus same-host admin APIs, `app/app.json` `admins`, and optional app-backend admin APIs | `modules/{module}/admin.yaml`, optional `backend/admin.py` | custom admin page generation |
 
 ## Profile
 
@@ -161,23 +161,25 @@ the thing that makes the notification system exist.
 ## Admin
 
 Mozaiks has one visible admin route family. The framework injects `/admin` and
-its section routes through the `AdminPortal` shell surface when
-`app/config/admin.json` is enabled.
+its section routes through the `AdminPortal` shell surface.
 
 Authority is separated by panel source:
 
 - app-business panels may come from `app_backend_url/api/admin/config` and
   related `app_backend_url/api/admin/*` endpoints
 - feature-owned admin panels come from `modules/{module}/admin.yaml`
-- runtime/operator panels come from same-host admin APIs and
-  `app/config/admin.json`
+- runtime/operator panels come from same-host admin APIs and the framework
+  admin shell contract
+
+Access is granted through the normal auth role model plus `app/app.json`
+`admins` for bootstrap email allowlisting.
 
 Important boundaries:
 
 - admin is one unified shell surface, not a generated page family
 - Studio and Build are separate product routes, not admin sections
-- generated apps should produce admin config and module admin manifests, not a
-  separate admin React shell
+- generated apps should produce module admin manifests and `app/app.json`
+  `admins`, not a separate admin React shell
 
 For the admin-only deep dive, see [Admin System](admin-system.md).
 The optional connected app-backend panel contract remains repo-internal

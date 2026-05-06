@@ -7,16 +7,24 @@
 
 **Status note:** Treat this document as a routing design reference, not as proof that every path is live-validated in the current AG2 runtime. Correctness claims for runtime behavior should come from code and targeted smoke coverage, not from this document alone.
 
+**Current architecture note:** The authoritative execution model is the three
+control-loop split in
+[Orchestration Control Loops](../../architecture/foundations/orchestration-control-loops.md).
+For builder flows, this "universal orchestrator" should be understood as a
+control-plane harness or router above workflow runs, not as one giant AG2
+groupchat or a global handoff mesh.
+
 ---
 
 ## Core Concept
 
 The UniversalOrchestrator is **not an AI agent that thinks**. It is a router.
-It receives events, determines which GroupChat or runner should handle them,
-and dispatches. It never generates content.
+It receives events, determines which workflow, worker, or runner should handle
+them, and dispatches. It never generates content.
 
 The key insight: **the trigger type is the classification when the trigger is explicit**.
-Classification (LLM call) is only needed when the trigger is ambiguous free-text.
+Classification (LLM call) is only needed when the trigger is ambiguous free-text
+inside a control-plane context.
 
 ```
 ALL EVENTS IN THE SYSTEM
@@ -162,8 +170,10 @@ This prevents a structural change from being mislabeled as FEATURE.
 
 ## The UniversalOrchestrator — AG2 Pattern
 
-The UniversalOrchestrator is the single entry point the frontend WebSocket talks to.
-It holds the routing tables and dispatches. It is always running while the user is active.
+The UniversalOrchestrator is the control-plane routing entry point.
+It holds the routing tables and dispatches.
+It should not be modeled as the same loop that handles AG2 speaker selection
+inside a workflow run.
 
 ```
 UniversalOrchestrator
@@ -514,4 +524,3 @@ This replaces Open Question #1 from BUILD_UX_ARCHITECTURE.md entirely.
 ---
 
 *Last updated: February 26, 2026*
-

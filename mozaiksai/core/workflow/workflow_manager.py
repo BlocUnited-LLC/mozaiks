@@ -185,6 +185,9 @@ class UnifiedWorkflowManager:
                         'path': module_path,
                         'component': component,
                         'mode': mode,
+                        'workflow_primitive': ui_block.get('workflow_primitive') if ui_block else None,
+                        'realization': ui_block.get('realization') if ui_block else None,
+                        'ui_contract': entry.get('ui_contract') if isinstance(entry.get('ui_contract'), dict) else None,
                         'classification': 'ui',
                         'tool_type': tool_type,
                     }
@@ -246,6 +249,9 @@ class UnifiedWorkflowManager:
                             'path': module_path,
                             'component': component,
                             'mode': mode,
+                            'workflow_primitive': ui_block.get('workflow_primitive') if ui_block else None,
+                            'realization': ui_block.get('realization') if ui_block else None,
+                            'ui_contract': entry.get('ui_contract') if isinstance(entry.get('ui_contract'), dict) else None,
                             'classification': 'ui',
                             'tool_type': tool_type,
                             'trigger': entry.get('trigger'),  # preserve lifecycle metadata
@@ -272,7 +278,7 @@ class UnifiedWorkflowManager:
             return self._ui_registry[registry_key]
         # Fallback treat argument as tool_id
         for rec in self._ui_registry.values():
-            if rec.get('tool_id') == tool_path_or_id:
+            if rec.get('tool_id') == tool_path_or_id or rec.get('fn') == tool_path_or_id:
                 return rec
         return None
 
@@ -1034,8 +1040,8 @@ class UnifiedWorkflowManager:
 # GLOBAL INSTANCE & API
 # ========================================================================
 
-# Single global instance — roots driven by MOZAIKS_WORKFLOW_ROOTS,
-# MOZAIKS_WORKFLOWS_PATH, or the active app root workflows directory.
+# Single global instance — root driven by MOZAIKS_WORKFLOWS_PATH,
+# the first legacy MOZAIKS_WORKFLOW_ROOTS entry, or the active app root.
 _unified_workflow_manager = UnifiedWorkflowManager(workflows_base_path=normalize_workflow_roots())
 
 def get_workflow_manager() -> UnifiedWorkflowManager:

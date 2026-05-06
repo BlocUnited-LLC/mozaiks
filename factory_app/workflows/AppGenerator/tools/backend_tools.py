@@ -8,7 +8,7 @@ from typing import Annotated, Dict, List, Optional, Any
 
 from autogen.tools.dependency_injection import Field
 
-from workflows.AppGenerator.tools.backend_client import app_gen_backend_client
+from factory_app.workflows.AppGenerator.tools.backend_client import app_gen_backend_client
 from logs.logging_config import get_workflow_logger
 
 logger = get_workflow_logger("backend_tools")

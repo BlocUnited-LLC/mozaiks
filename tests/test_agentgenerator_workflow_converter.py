@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 from pathlib import Path
 
@@ -24,6 +25,9 @@ class _Context:
 
     def get(self, key, default=None):
         return self.data.get(key, default)
+
+    def set(self, key, value) -> None:
+        self.data[key] = value
 
 
 def _load_workflow_converter_module():
@@ -250,7 +254,12 @@ def test_normalize_tools_manifest_stamps_default_ui_contract_for_ui_tools() -> N
                     "file": "tools/plan.py",
                     "function": "plan",
                     "tool_type": "UI_Tool",
-                    "ui": {"component": "PlanPanel", "mode": "artifact"},
+                    "ui": {
+                        "component": "PlanPanel",
+                        "mode": "artifact",
+                        "workflow_primitive": "form_card",
+                        "realization": "workflow_wrapper",
+                    },
                 }
             ]
         },
@@ -260,6 +269,8 @@ def test_normalize_tools_manifest_stamps_default_ui_contract_for_ui_tools() -> N
     assert len(normalized["tools"]) == 1
     tool = normalized["tools"][0]
     assert tool["tool_type"] == "UI_Tool"
+    assert tool["ui"]["workflow_primitive"] == "form_card"
+    assert tool["ui"]["realization"] == "workflow_wrapper"
     assert tool["ui_contract"]["surface_kind"] == "agent_tool"
     assert tool["ui_contract"]["payload_schema"]["type"] == "object"
     assert tool["ui_contract"]["actions_schema"] == []
@@ -296,7 +307,12 @@ def test_normalize_tools_manifest_preserves_ui_surface_and_strips_ui_contract() 
                     "file": "tools/render_preview.py",
                     "function": "render_preview",
                     "tool_type": "ui_surface",
-                    "ui": {"component": "PreviewPanel", "mode": "artifact"},
+                    "ui": {
+                        "component": "PreviewPanel",
+                        "mode": "artifact",
+                        "workflow_primitive": "document_preview",
+                        "realization": "generated_component",
+                    },
                     "ui_contract": {"surface_kind": "agent_tool"},
                 }
             ]
@@ -308,6 +324,8 @@ def test_normalize_tools_manifest_preserves_ui_surface_and_strips_ui_contract() 
     tool = normalized["tools"][0]
     assert tool["tool_type"] == "UI_Surface"
     assert tool["ui"]["component"] == "PreviewPanel"
+    assert tool["ui"]["workflow_primitive"] == "document_preview"
+    assert tool["ui"]["realization"] == "generated_component"
     assert "ui_contract" not in tool
 
 
@@ -321,7 +339,12 @@ def test_normalize_tools_manifest_strips_planning_only_integration_metadata() ->
                     "function": "render_preview",
                     "tool_type": "UI_Tool",
                     "integration": "Slack",
-                    "ui": {"component": "PreviewPanel", "mode": "artifact"},
+                    "ui": {
+                        "component": "PreviewPanel",
+                        "mode": "artifact",
+                        "workflow_primitive": "document_preview",
+                        "realization": "generated_component",
+                    },
                 }
             ],
             "lifecycle_tools": [
@@ -342,3 +365,240 @@ def test_normalize_tools_manifest_strips_planning_only_integration_metadata() ->
     lifecycle_tool = normalized["lifecycle_tools"][0]
     assert "integration" not in tool
     assert "integration" not in lifecycle_tool
+
+
+def test_collect_ui_code_files_skips_direct_shipped_component_files() -> None:
+    tools_config = workflow_converter._normalize_tools_manifest(
+        {
+            "tools": [
+                {
+                    "agent": "ReviewAgent",
+                    "file": "tools/request_approval.py",
+                    "function": "request_approval",
+                    "tool_type": "UI_Tool",
+                    "ui": {
+                        "component": "ApprovalCard",
+                        "mode": "inline",
+                        "workflow_primitive": "approval_card",
+                        "realization": "shipped_component",
+                    },
+                }
+            ]
+        },
+        _Logger(),
+    )
+
+    files = workflow_converter._collect_ui_code_files(
+        {
+            "tools": [
+                {
+                    "filename": "tools/request_approval.py",
+                    "content": "async def request_approval():\n    return None\n",
+                },
+                {
+                    "filename": "ui/ReviewWorkflow/ApprovalCard.jsx",
+                    "content": "export default function ApprovalCard() { return null; }\n",
+                },
+            ]
+        },
+        tools_config=tools_config,
+        wf_logger=_Logger(),
+    )
+
+    assert files == [
+        {
+            "path": "tools/request_approval.py",
+            "content": "async def request_approval():\n    return None\n",
+        }
+    ]
+
+
+def test_collect_ui_code_files_preserves_workflow_local_wrapper_and_generates_barrel() -> None:
+    tools_config = workflow_converter._normalize_tools_manifest(
+        {
+            "tools": [
+                {
+                    "agent": "ReviewAgent",
+                    "file": "tools/request_branded_approval.py",
+                    "function": "request_branded_approval",
+                    "tool_type": "UI_Tool",
+                    "ui": {
+                        "component": "BrandedApprovalCard",
+                        "mode": "inline",
+                        "workflow_primitive": "approval_card",
+                        "realization": "workflow_wrapper",
+                    },
+                }
+            ]
+        },
+        _Logger(),
+    )
+
+    files = workflow_converter._collect_ui_code_files(
+        {
+            "tools": [
+                {
+                    "filename": "tools/request_branded_approval.py",
+                    "content": "async def request_branded_approval():\n    return None\n",
+                },
+                {
+                    "filename": "ui/review/BrandedApprovalCard.jsx",
+                    "content": "export default function BrandedApprovalCard() { return null; }\n",
+                },
+                {
+                    "filename": "ui/review/helpers.js",
+                    "content": "export const helper = true;\n",
+                },
+                {
+                    "filename": "ui/index.js",
+                    "content": "export {};\n",
+                },
+            ]
+        },
+        tools_config=tools_config,
+        wf_logger=_Logger(),
+    )
+
+    assert [item["path"] for item in files] == [
+        "tools/request_branded_approval.py",
+        "ui/review/BrandedApprovalCard.jsx",
+        "ui/review/helpers.js",
+        "ui/index.js",
+    ]
+    assert (
+        "export { default as BrandedApprovalCard } from './review/BrandedApprovalCard.jsx';"
+        in files[-1]["content"]
+    )
+
+
+def test_collect_code_files_uses_canonical_codefile_contract() -> None:
+    files = workflow_converter._collect_code_files(
+        {
+            "tools": [
+                {
+                    "filename": "tools/analyze.py",
+                    "content": "async def analyze():\n    return None\n",
+                },
+                {
+                    "filename": "../outside.py",
+                    "content": "raise RuntimeError('bad path')\n",
+                },
+            ]
+        },
+        source_name="AgentToolsFileGenerator",
+        wf_logger=_Logger(),
+    )
+
+    assert files == [
+        {
+            "path": "tools/analyze.py",
+            "content": "async def analyze():\n    return None\n",
+        }
+    ]
+
+
+def test_create_workflow_files_assembles_canonical_codefiles(monkeypatch, tmp_path: Path) -> None:
+    generated_root = tmp_path / "generated"
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
+    context = _Context({"app_id": "demo-app", "chat_id": "build-123"})
+
+    result = asyncio.run(
+        workflow_converter.create_workflow_files(
+            {
+                "workflow_name": "ReviewWorkflow",
+                "orchestrator_output": {
+                    "workflow_name": "ReviewWorkflow",
+                    "startup_mode": "BackendOnly",
+                },
+                "agents_output": {
+                    "agents": [
+                        {
+                            "name": "ReviewAgent",
+                            "prompt_sections": [],
+                        }
+                    ]
+                },
+                "tools_manager_output": {
+                    "tools": [
+                        {
+                            "agent": "ReviewAgent",
+                            "file": "tools/request_approval.py",
+                            "function": "request_approval",
+                            "description": "Request approval using the shipped primitive.",
+                            "tool_type": "UI_Tool",
+                            "ui": {
+                                "component": "ApprovalCard",
+                                "mode": "inline",
+                                "workflow_primitive": "approval_card",
+                                "realization": "shipped_component",
+                            },
+                        },
+                        {
+                            "agent": "ReviewAgent",
+                            "file": "tools/request_branded_approval.py",
+                            "function": "request_branded_approval",
+                            "description": "Request approval with a workflow-local wrapper.",
+                            "tool_type": "UI_Tool",
+                            "ui": {
+                                "component": "BrandedApprovalCard",
+                                "mode": "inline",
+                                "workflow_primitive": "approval_card",
+                                "realization": "workflow_wrapper",
+                            },
+                        },
+                        {
+                            "agent": "ReviewAgent",
+                            "file": "tools/summarize_findings.py",
+                            "function": "summarize_findings",
+                            "description": "Summarize findings.",
+                            "tool_type": "Agent_Tool",
+                        },
+                    ],
+                    "lifecycle_tools": [],
+                },
+                "ui_file_generator_output": {
+                    "tools": [
+                        {
+                            "filename": "tools/request_approval.py",
+                            "content": "async def request_approval():\n    return None\n",
+                        },
+                        {
+                            "filename": "ui/review/ApprovalCard.jsx",
+                            "content": "export default function ApprovalCard() { return null; }\n",
+                        },
+                        {
+                            "filename": "tools/request_branded_approval.py",
+                            "content": "async def request_branded_approval():\n    return None\n",
+                        },
+                        {
+                            "filename": "ui/review/BrandedApprovalCard.jsx",
+                            "content": "export default function BrandedApprovalCard() { return null; }\n",
+                        },
+                    ]
+                },
+                "agent_tools_file_generator_output": {
+                    "tools": [
+                        {
+                            "filename": "tools/summarize_findings.py",
+                            "content": "async def summarize_findings():\n    return None\n",
+                        }
+                    ]
+                },
+            },
+            context_variables=context,
+        )
+    )
+
+    assert result["status"] == "success"
+
+    workflow_dir = generated_root / "workflows" / "demo-app" / "build-123" / "ReviewWorkflow"
+    assert (workflow_dir / "tools" / "request_approval.py").exists()
+    assert (workflow_dir / "tools" / "request_branded_approval.py").exists()
+    assert (workflow_dir / "tools" / "summarize_findings.py").exists()
+    assert not (workflow_dir / "ui" / "review" / "ApprovalCard.jsx").exists()
+    assert (workflow_dir / "ui" / "review" / "BrandedApprovalCard.jsx").exists()
+    assert (workflow_dir / "ui" / "index.js").exists()
+    assert (
+        "export { default as BrandedApprovalCard } from './review/BrandedApprovalCard.jsx';"
+        in (workflow_dir / "ui" / "index.js").read_text(encoding="utf-8")
+    )

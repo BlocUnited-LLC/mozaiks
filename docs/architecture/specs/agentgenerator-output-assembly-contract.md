@@ -36,6 +36,30 @@ $MOZAIKS_GENERATED_ARTIFACTS_PATH/workflows/{app_id}/{build_id}/{workflow_name}/
 They do not become active runtime-loaded workflows until an explicit promotion
 step copies them into an active app root's `workflows/` directory.
 
+Canonical live regression target for this workflow:
+
+```bash
+python scripts/run_live_mfj_smoke.py \
+  --workflow AgentGenerator \
+  --workflows-root factory_app/workflows \
+  --prompt-file factory_app/workflows/AgentGenerator/smoke_prompt.txt \
+  --tool-response-file factory_app/workflows/AgentGenerator/smoke_responses.json \
+  --timeout-seconds 300
+```
+
+The checked-in smoke pair:
+
+- `factory_app/workflows/AgentGenerator/smoke_prompt.txt`
+- `factory_app/workflows/AgentGenerator/smoke_responses.json`
+
+is the stable regression contract for:
+
+- multi-turn AG2 interview replies
+- composer fallback via `default_input_reply`
+- `ProjectOverviewAgent` diagram review through the composer reply lane
+- shipped/shared workflow primitives such as `DownloadCenter`
+- final bundle handoff through `generate_and_download`
+
 ---
 
 ## Agent Pipeline
@@ -53,8 +77,8 @@ step copies them into an active app root's `workflows/` directory.
 | 7 | `ProjectOverviewAgent` | `MermaidSequenceDiagramOutput` | Renders Mermaid sequence diagram as UI artifact; user reviews the agent pipeline before continuing |
 | 8 | `ContextVariablesAgent` | `ContextVariablesPlanOutput` | **Absorbs state architecture**: derives context var types, lifecycle_requirements, assets from WorkflowStrategy directly |
 | 9 | `ToolsManagerAgent` | `ToolsManifestOutput` | Normalizes tools manifest → `tools.yaml` |
-| 10 | `UIFileGenerator` | `UIToolsFilesOutput` | Generates React + Python tool files |
-| 11 | `AgentToolsFileGenerator` | `AgentToolsFilesOutput` | Generates Python agent tool stubs |
+| 10 | `UIFileGenerator` | `UIToolsFilesOutput` | Generates canonical `CodeFile` entries for Python UI tool wrappers and only the workflow-local React files actually required |
+| 11 | `AgentToolsFileGenerator` | `AgentToolsFilesOutput` | Generates canonical `CodeFile` entries for backend tool stubs |
 | 12 | `StructuredOutputsAgent` | `StructuredModelsOutput` | Generates `structured_outputs.yaml` models + registry |
 | 13 | `AgentsAgent` | `RuntimeAgentsOutput` | Generates full `agents.yaml` with prompt_sections |
 | 14 | `HookAgent` | `HookFilesOutput` | Generates `hooks.yaml` + hook implementations |
@@ -137,7 +161,7 @@ which builds a unified `config` dict, then calls `_save_modular_workflow()`.
 ├── extended_orchestration/
 │   └── mfj_extension.json     ← built from WorkflowStrategy.decomposition (if MFJ)
 └── tools/
-    ├── {tool_name}.py         ← UIFileGenerator + AgentToolsFileGenerator
+    ├── *.py                   ← `CodeFile.filename` entries from UIFileGenerator / AgentToolsFileGenerator
     └── ...
 ```
 
@@ -150,10 +174,19 @@ workflow tools that call them.
 Frontend React components (if any UI tools):
 ```
 {WorkflowName}/ui/
-├── index.js                  ← auto-generated workflow UI barrel
-└── components/
-    └── {ComponentName}.jsx   ← UIFileGenerator js_content
+├── index.js                  ← synthesized deterministically from workflow-local component files
+├── <workflow-local paths>    ← `CodeFile.filename` entries emitted by UIFileGenerator
+└── ...
 ```
+
+Rules:
+
+- `UIFileGenerator` emits canonical `CodeFile` objects with `filename` + `content`; `workflow_converter.py` no longer consumes ad hoc `tool_name` / `py_content` / `js_content` structures on the live path.
+- Workflow-local React files stay under the workflow's own `ui/` tree and preserve the emitted relative path when safe.
+- `ui.realization` is the canonical realization contract for workflow UI assembly.
+- If `ui.realization=shipped_component`, no workflow-local React file is required. The converter skips any accidental duplicate React file and still keeps the Python wrapper/tool file.
+- If `ui.realization=workflow_wrapper`, the converter keeps that wrapper and synthesizes `ui/index.js` from the declared workflow-local component files.
+- If `ui.realization=generated_component`, the converter preserves the full workflow-local React surface.
 
 ---
 

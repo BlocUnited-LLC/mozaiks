@@ -501,6 +501,7 @@ class UnifiedEventDispatcher:
             'input_timeout': 'chat.input_timeout', 'select_speaker': 'chat.select_speaker', 'resume_boundary': 'chat.resume_boundary',
             'usage_delta': 'chat.usage_delta', 'usage_summary': 'chat.usage_summary', 'run_complete': 'chat.run_complete', 'error': 'chat.error', 'tool_call': 'chat.tool_call', 'tool_response': 'chat.tool_response',
             'agent_output_validated': 'chat.agent_output_validated', 'run_start': 'chat.run_start', 'tool_call_dismiss': 'chat.tool_call_dismiss',
+            'awaiting_reply': 'chat.awaiting_reply', 'activity': 'chat.activity',
             'attachment_uploaded': 'chat.attachment_uploaded',
             'stream_chunk': 'chat.stream_chunk', 'stream_end': 'chat.stream_end', 'custom_event': 'chat.custom_event',
             'greeting_echo': 'chat.greeting_echo',

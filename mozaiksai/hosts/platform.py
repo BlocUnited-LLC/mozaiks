@@ -79,7 +79,7 @@ except Exception as exc:  # pragma: no cover
     logger.debug("RUNTIME_EXTENSIONS_MOUNT_FAILED: %s", exc)
 
 try:
-    from mozaiksai.core.admin import router as admin_router
+    from mozaiksai.core.admin.router import router as admin_router
 
     app.include_router(admin_router)
 except Exception as exc:  # pragma: no cover
@@ -352,29 +352,22 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
     )
     result["pages"] = _dedupe_and_sort_pages(pages)
 
-    admin_config_path = app_root / "config" / "admin.json"
-    if admin_config_path.exists():
-        try:
-            admin_cfg = json.loads(admin_config_path.read_text(encoding="utf-8"))
-            if admin_cfg.get("enabled", True):
-                pages = result.get("pages", [])
-                for route in build_admin_shell_routes(admin_cfg.get("sections")):
-                    _append_page_once(pages, {
-                        "path": route["path"],
-                        "component": "AdminPortal",
-                        "label": route["label"],
-                        "order": route["order"],
-                        "meta": {
-                            "requiresAuth": True,
-                            "requiresRole": "admin",
-                            "title": route["title"],
-                            "appShell": True,
-                            "adminSection": route["admin_section"],
-                        },
-                    })
-                result["pages"] = _dedupe_and_sort_pages(pages)
-        except Exception as exc:
-            logger.warning("[shell-config] Could not read admin.json: %s", exc)
+    pages = result.get("pages", [])
+    for route in build_admin_shell_routes():
+        _append_page_once(pages, {
+            "path": route["path"],
+            "component": "AdminPortal",
+            "label": route["label"],
+            "order": route["order"],
+            "meta": {
+                "requiresAuth": True,
+                "requiresRole": "admin",
+                "title": route["title"],
+                "appShell": True,
+                "adminSection": route["admin_section"],
+            },
+        })
+    result["pages"] = _dedupe_and_sort_pages(pages)
 
     return result
 
@@ -1412,7 +1405,13 @@ async def start_chat(
     if client_request_id:
         extra_fields["client_request_id"] = client_request_id
     if trigger_meta:
-        allowed_trigger_keys = {"trigger_source", "action_id", "change_class", "artifact_version_id"}
+        allowed_trigger_keys = {
+            "trigger_source",
+            "action_id",
+            "change_class",
+            "artifact_kind",
+            "artifact_version_id",
+        }
         extra_fields["trigger_meta"] = {key: value for key, value in trigger_meta.items() if key in allowed_trigger_keys}
     extra_fields.update(context_variables)
 

@@ -6,7 +6,6 @@ import sys
 import shutil
 from pathlib import Path
 
-from mozaiksai.core.admin.contract import build_default_host_admin_config
 from mozaiksai.resources import resolve_factory_brand_root
 
 # Tier definitions
@@ -183,13 +182,13 @@ def _prompt_admin_email() -> str:
     print("Admin portal is included in this preset.")
     print("Enter the email address for the admin account.")
     print("This is the email you will use to log in to the /admin portal.")
-    print("(Press Enter to skip and set it later in app/config/admin.json)\n")
+    print("(Press Enter to skip and set it later in app/app.json admins)\n")
     try:
         email = input("Admin email: ").strip()
     except (EOFError, KeyboardInterrupt):
         email = ""
     if not email:
-        print("Skipped — update admin_emails in app/config/admin.json before deploying.\n")
+        print("Skipped — update admins in app/app.json before deploying.\n")
         return "admin@example.com"
     print(f"Admin email set to: {email}\n")
     return email
@@ -233,7 +232,8 @@ def _create_bundle_scaffold(
     print("Created scaffold directories: app/config, app/modules, app/workflows, app/ui, app/brand")
 
     features = TIER_PRESETS[preset]
-    admins = [admin_email] if admin_email else []
+    resolved_admin = admin_email.strip().lower() if isinstance(admin_email, str) and admin_email.strip() else None
+    admins = [resolved_admin] if resolved_admin else []
     app_json = {
         "appName": app_name,
         "preset": preset,
@@ -255,15 +255,6 @@ def _create_bundle_scaffold(
 
     _write_json(config_dir / "shell.json", _build_shell_config(app_name))
     print("Created app/config/shell.json")
-
-    if features.get("admin"):
-        resolved_email = admin_email or "admin@example.com"
-        admin_config = build_default_host_admin_config()
-        admin_config["_comment"] = "Host-owned admin shell config. Feature admin panels belong in modules/{module}/admin.yaml."
-        admin_config["admin_emails"] = [resolved_email]
-        admin_json_path = config_dir / "admin.json"
-        _write_json(admin_json_path, admin_config)
-        print(f"Created app/config/admin.json (admin: {resolved_email})")
 
     _copy_default_brand_bundle(brand_dir, app_name)
     print("Created app/brand from factory_app default brand")
@@ -474,7 +465,7 @@ def _show_next_steps(target_dir: Path, preset: str, starter: bool) -> None:
         print("  5. Use Studio to generate the first real workflows/modules instead of hand-populating the scaffold")
     print("  6. Optional: use mozaiks gen once you have real product context")
     if features.get("admin"):
-        print("  7. Confirm admin access in app/config/admin.json and app/app.json admins")
+        print("  7. Confirm admin access in app/app.json admins")
 
     print("\nTo add more features later: mozaiks add <feature>")
 

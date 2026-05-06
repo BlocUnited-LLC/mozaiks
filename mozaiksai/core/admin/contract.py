@@ -75,18 +75,15 @@ def build_default_runtime_panels() -> list[dict[str, Any]]:
     return deepcopy(DEFAULT_RUNTIME_PANELS)
 
 
-def build_default_host_admin_config() -> dict[str, Any]:
+def build_default_admin_shell_config() -> dict[str, Any]:
     return {
-        "schema_version": "mozaiks.admin.host.v1",
-        "enabled": True,
-        "admin_emails": [],
         "sections": build_default_admin_sections(),
         "runtime_panels": build_default_runtime_panels(),
         "module_panels": [],
     }
 
 
-def normalize_host_admin_sections(raw_sections: Any) -> dict[str, dict[str, Any]]:
+def normalize_admin_shell_sections(raw_sections: Any) -> dict[str, dict[str, Any]]:
     normalized = build_default_admin_sections()
     if not isinstance(raw_sections, dict):
         return normalized
@@ -105,7 +102,7 @@ def normalize_host_admin_sections(raw_sections: Any) -> dict[str, dict[str, Any]
 
 
 def build_admin_shell_routes(section_config: Any = None) -> tuple[dict[str, Any], ...]:
-    sections = normalize_host_admin_sections(section_config)
+    sections = normalize_admin_shell_sections(section_config)
     routes: list[dict[str, Any]] = []
     for section in ADMIN_SECTION_ORDER:
         config = sections[section]

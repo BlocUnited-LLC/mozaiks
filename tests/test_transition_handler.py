@@ -71,7 +71,7 @@ def _build_ctx() -> StreamContext:
 
 
 @pytest.mark.asyncio
-async def test_transition_handler_observes_user_handoff_without_synthesizing_input(monkeypatch) -> None:
+async def test_transition_handler_marks_user_handoff_as_awaiting_reply(monkeypatch) -> None:
     monkeypatch.setattr(transition_handler_module, "RevertToUserTarget", _FakeRevertToUserTarget)
 
     handler = TransitionHandler()
@@ -84,7 +84,17 @@ async def test_transition_handler_observes_user_handoff_without_synthesizing_inp
 
     payload = await handler.handle(event, ctx, state)
 
-    assert payload is None
+    assert payload == {
+        "kind": "awaiting_reply",
+        "agent": "PlannerAgent",
+        "chat_id": "chat-1",
+        "workflow_name": "Workflow",
+        "display": "composer",
+        "interaction_type": "input_request",
+        "reason": "awaiting_user_reply",
+        "source_agent": "PlannerAgent",
+    }
+    assert state.awaiting_user_input is True
     assert state.run_completed is False
     assert handler.should_break(event, state) is False
 
@@ -110,4 +120,5 @@ async def test_event_stream_processor_does_not_cancel_on_transition_metadata(mon
 
     assert result["response"] is response
     assert result["run_completed"] is False
+    assert result["awaiting_user_input"] is True
     assert task.cancel_called is False

@@ -59,24 +59,48 @@ lane:
 
 - transport event: `chat.tool_call`
 - discriminator: `interaction_type=input_request`
-- generic chat-ui presentation: `display=composer`
+- wire-level display mode: `display=composer`
 - fallback component identity: `UserInputRequest`
 
-That means response-required UI from `InputRequestEvent` now follows the same
-render lane as `use_ui_tool(...)`, but generic text reply in `chat-ui` uses the
-main composer instead of an inline card.
+That means response-required UI from `InputRequestEvent` follows the same
+render lane as `use_ui_tool(...)`.
+
+**Banner suppression for bare conversational turns:** When the input request
+has component type `UserInputRequest` and carries no explicit prompt, the
+frontend suppresses the "Awaiting Workflow Reply" composer banner. The banner
+only renders when the agent provides an explicit prompt or requests a named
+component other than `UserInputRequest` — i.e., an intentional interaction, not
+a routine AG2 group-feedback turn. The pending `tool_call_response` callback
+remains registered and active regardless.
 
 `chat.input_request` is not emitted to browser clients for runtime-managed
 interactive input.
 
 AG2's generic "Please give feedback to chat_manager..." compatibility prompt is
 still the actual response handoff signal. The runtime suppresses that raw prompt
-text, but keeps the pending input request live so the user can answer through
-the normal workflow composer or `tool_call_response`.
+text. If AG2 emits it immediately after a real user reply and there is no new
+assistant question to show, the runtime now auto-resumes internally instead of
+surfacing a second fake pending interaction. Otherwise the pending input request
+stays live so the user can answer through the normal workflow composer or
+`tool_call_response`.
 
 When the AG2 run slice ends after emitting one of these input requests, the
 runtime emits `chat.run_complete` with `status=0` and
 `reason=awaiting_user_input`. Terminal workflow completion uses `status=1`.
+
+### 4. Native AG2 user handoff without `InputRequestEvent`
+
+Some AG2 flows hand control back to the user through `RevertToUserTarget`
+without emitting a dedicated `InputRequestEvent`.
+
+Mozaiks now preserves that as explicit runtime state:
+
+- transport event: `chat.awaiting_reply`
+- shell behavior: composer remains the reply surface
+- follow-up completion event: non-terminal `chat.run_complete` with `status=0`
+
+This is not a second rendered workflow UI lane. It is the canonical signal that
+the workflow paused for another free-form human turn.
 
 ## The key difference from AG-UI and CopilotKit
 
@@ -147,6 +171,9 @@ Current rules:
 - `tool_call_id` is the primary UI interaction id
 - `corr` remains the compatibility alias for existing consumers
 - `workflow_name` should be available at the top level and in `payload`
+- `workflow_primitive` should be copied from the manifest into `payload`
+- `ui_contract` should be copied from the manifest into `payload` for response-bearing workflow UI
+- shared workflow components should treat `ui_contract.actions_schema` as the canonical action contract
 - `interaction_type` should be one of `ui_tool`, `ui_surface`, `auto_tool`, or `input_request`
 - `awaiting_response=true` means the frontend is expected to answer
 - `display` controls `composer`, `inline`, `artifact`, or `view` behavior

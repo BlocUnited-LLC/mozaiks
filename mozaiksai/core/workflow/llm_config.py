@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type, Set
 from pydantic import BaseModel
 
 from mozaiksai.core.core_config import get_secret, get_mongo_client
+from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, BuilderCollections
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ def _attach_autogen_cache(llm_config: Dict[str, Any]) -> None:
     cache_root = (
         os.getenv("MOZAIKS_AUTOGEN_CACHE_DIR")
         or os.getenv("AUTOGEN_CACHE_DIR")
-        or os.path.join(tempfile.gettempdir(), "MozaiksAI_autogen_cache")
+        or os.path.join(tempfile.gettempdir(), "mozaiksai_autogen_cache")
     )
 
     try:
@@ -149,8 +150,8 @@ async def _load_raw_config_list(force: bool = False) -> List[ProviderConfig]:
         # Attempt DB fetch
         db_doc = None
         try:
-            db = get_mongo_client().autogen_ai_agents  # type: ignore[attr-defined]
-            db_doc = await db.LLMConfig.find_one()
+            db = get_mongo_client()[SYSTEM_DATABASE]
+            db_doc = await db[BuilderCollections.LLM_CONFIG].find_one()
         except Exception as e:  # pragma: no cover
             logger.debug(f"[LLM_CONFIG] Mongo fetch failed, will fallback: {e}")
 

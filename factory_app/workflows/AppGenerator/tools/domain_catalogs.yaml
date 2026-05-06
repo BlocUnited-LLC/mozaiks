@@ -1,0 +1,2427 @@
+version: 1
+
+description: >
+  Curated domain catalog used as upstream prompt context for dynamic app
+  decomposition. Domains contain common modules and module-specific files.
+  These are examples and priors — not mandatory file lists. Agents should
+  treat this catalog as a reference for choosing realistic modules and files,
+  not as a strict contract.
+
+# ---------------------------------------------------------------------------
+# GLOBAL BASE — cross-domain modules that appear in nearly every app
+# ---------------------------------------------------------------------------
+
+global_base:
+  description: >
+    Foundational modules that apply across most app domains. Include only the
+    ones a specific app actually needs — not all apps need all of these.
+  modules:
+    auth:
+      description: Authentication flows — sign-in, sign-up, password reset, session management.
+      files:
+        module.yaml: Module identity, public auth actions.
+        events.yaml: user.signed_in, user.signed_out, password.reset_requested.
+        handler.py: Sign-in, sign-up, token refresh, logout actions.
+        service.py: Auth logic, token generation, credential validation.
+        repo.py: Session and credential persistence.
+        models.py: Session, credential, and token document shapes.
+        policy.py: Auth-gated access checks.
+
+    users:
+      description: User profile management — identity, preferences, account lifecycle.
+      files:
+        module.yaml: Module identity, profile actions.
+        events.yaml: user.created, user.updated, user.deactivated.
+        admin.yaml: User management panels — list, detail, deactivate.
+        handler.py: Profile CRUD actions.
+        service.py: Profile lifecycle logic, avatar handling.
+        repo.py: User document persistence.
+        models.py: User profile document shapes.
+        policy.py: Owner and admin scoping.
+
+    organizations:
+      description: Multi-tenant org/workspace management — creation, membership, billing seat.
+      files:
+        module.yaml: Module identity, org actions.
+        events.yaml: org.created, org.member_added, org.member_removed.
+        settings.yaml: Org-level feature flags and preferences.
+        admin.yaml: Org listing, member management, billing overview.
+        handler.py: Org CRUD and membership actions.
+        service.py: Invitation flow, seat enforcement, org lifecycle.
+        repo.py: Org and membership persistence.
+        models.py: Org, membership, and invitation document shapes.
+        policy.py: Org-scoped query builders.
+
+    roles_permissions:
+      description: Role-based access control — role definitions, assignments, permission checks.
+      files:
+        module.yaml: Module identity, role/permission actions.
+        handler.py: Role assignment and permission check actions.
+        service.py: Permission evaluation, role hierarchy logic.
+        repo.py: Role and assignment persistence.
+        models.py: Role and permission document shapes.
+        policy.py: Permission guard helpers used by other modules.
+
+    admin:
+      description: Platform admin shell — configuration, panel registration, operator actions.
+      files:
+        module.yaml: Module identity, admin control actions.
+        admin.yaml: Top-level admin panels — overview, system health, config.
+        settings.yaml: Platform-level admin toggles.
+        handler.py: Admin action handlers.
+        service.py: Admin control logic, operator tooling.
+        repo.py: Admin config and audit persistence.
+        models.py: Admin config document shapes.
+
+    notifications:
+      description: User-facing notification delivery — in-app, email, push.
+      files:
+        module.yaml: Module identity, notification actions.
+        subscriptions.yaml: Subscribes to domain events to trigger delivery.
+        settings.yaml: User notification preferences per channel.
+        handler.py: Notification list and mark-read actions.
+        service.py: Delivery routing, template rendering, channel selection.
+        repo.py: Notification record persistence.
+        models.py: Notification document shapes.
+
+    files_media:
+      description: File upload, storage, and retrieval — documents, images, attachments.
+      files:
+        module.yaml: Module identity, file actions.
+        events.yaml: file.uploaded, file.deleted.
+        settings.yaml: Upload size limits, allowed types.
+        handler.py: Upload, retrieve, delete actions.
+        service.py: Upload orchestration, virus scan hooks, CDN URL generation.
+        repo.py: File metadata persistence.
+        models.py: File metadata document shapes.
+        client.py: Storage provider client (S3, GCS, Azure Blob).
+
+    audit_logs:
+      description: Immutable audit trail — who did what, when, on which resource.
+      files:
+        module.yaml: Module identity, log query actions.
+        subscriptions.yaml: Subscribes to key domain events to append log entries.
+        handler.py: Log listing and export actions.
+        service.py: Log append and redaction logic.
+        repo.py: Append-only log entry persistence.
+        models.py: Log entry document shapes.
+        queries.py: Filtered log retrieval, aggregation, export.
+
+    settings:
+      description: App-wide and user-level settings store.
+      files:
+        module.yaml: Module identity, settings read/write actions.
+        settings.yaml: Canonical settings schema for this app.
+        handler.py: Settings get/set actions.
+        service.py: Settings validation, defaults resolution.
+        repo.py: Settings persistence.
+        models.py: Settings document shapes.
+
+    search:
+      description: Cross-entity search — full-text and filtered discovery.
+      files:
+        module.yaml: Module identity, search actions.
+        subscriptions.yaml: Subscribes to entity events to maintain index.
+        handler.py: Search query action.
+        service.py: Query building, result ranking, index update orchestration.
+        repo.py: Search index reads and writes.
+        models.py: Search result and index entry shapes.
+        queries.py: Filtered, faceted, and ranked query helpers.
+
+# ---------------------------------------------------------------------------
+# DOMAINS
+# ---------------------------------------------------------------------------
+
+domains:
+
+  ecommerce:
+    description: Online retail — product catalog, cart, checkout, orders, fulfillment.
+    common_app_types:
+      - online store
+      - DTC brand
+      - multi-vendor shop
+      - subscription box
+    modules:
+      products:
+        description: Product catalog — listings, variants, pricing, availability.
+        files:
+          module.yaml: Module identity, product CRUD actions.
+          events.yaml: product.created, product.updated, product.archived.
+          admin.yaml: Product list, editor, bulk actions.
+          handler.py: Product CRUD actions.
+          service.py: Catalog logic, SEO slug generation.
+          repo.py: Product persistence.
+          models.py: Product, variant, and image document shapes.
+          variants.py: Variant combination and SKU resolution logic.
+          pricing.py: Price calculation, discount application, tax-adjusted totals.
+
+      inventory:
+        description: Stock levels, reservations, and low-stock alerts.
+        files:
+          module.yaml: Module identity, inventory actions.
+          events.yaml: inventory.low_stock, inventory.out_of_stock, inventory.restocked.
+          subscriptions.yaml: Reacts to order.placed to decrement stock.
+          notifications.yaml: Low-stock alerts for merchants.
+          admin.yaml: Inventory dashboard, adjustment tools.
+          handler.py: Stock level read and adjustment actions.
+          service.py: Reservation logic, restock threshold checks.
+          repo.py: Inventory record persistence.
+          models.py: Stock level and reservation document shapes.
+
+      cart:
+        description: Shopping cart — add/remove items, apply coupons, persist session.
+        files:
+          module.yaml: Module identity, cart actions.
+          handler.py: Add item, remove item, apply coupon, get cart actions.
+          service.py: Cart validation, coupon evaluation, line item totals.
+          repo.py: Cart session persistence.
+          models.py: Cart, line item, and coupon document shapes.
+          pricing.py: Cart-level discount and tax calculation.
+
+      checkout:
+        description: Checkout flow — address collection, payment, order confirmation.
+        files:
+          module.yaml: Module identity, checkout actions.
+          events.yaml: checkout.completed, checkout.abandoned.
+          notifications.yaml: Order confirmation notification.
+          handler.py: Checkout initiation, address save, payment submit actions.
+          service.py: Order creation, payment orchestration, inventory reservation.
+          repo.py: Checkout session persistence.
+          models.py: Checkout session and address document shapes.
+          payment_adapter.py: Payment provider abstraction (Stripe, Braintree).
+
+      orders:
+        description: Order lifecycle — creation, tracking, cancellation, refunds.
+        files:
+          module.yaml: Module identity, order actions.
+          events.yaml: order.placed, order.shipped, order.delivered, order.cancelled, order.refunded.
+          subscriptions.yaml: Reacts to fulfillment events.
+          notifications.yaml: Shipping and delivery status notifications.
+          admin.yaml: Order list, detail view, refund tools.
+          handler.py: Order query and management actions.
+          service.py: Order state transitions, refund logic.
+          repo.py: Order and line item persistence.
+          models.py: Order, line item, and shipment document shapes.
+          state_machine.py: Order lifecycle states and allowed transitions.
+
+      fulfillment:
+        description: Packing, shipping label generation, carrier integration.
+        files:
+          module.yaml: Module identity, fulfillment actions.
+          events.yaml: fulfillment.shipped, fulfillment.delivered.
+          subscriptions.yaml: Reacts to order.placed to queue fulfillment.
+          handler.py: Label creation, shipment update actions.
+          service.py: Carrier selection, label generation, tracking sync.
+          repo.py: Shipment record persistence.
+          models.py: Shipment and carrier document shapes.
+          client.py: Carrier API client (EasyPost, ShipStation).
+          fulfillment.py: Pick-pack logic, fulfillment routing rules.
+
+      discounts:
+        description: Coupon codes, promotional rules, and automatic discounts.
+        files:
+          module.yaml: Module identity, discount management actions.
+          events.yaml: discount.applied, discount.expired.
+          admin.yaml: Discount creation, usage analytics.
+          handler.py: Create, list, and validate discount actions.
+          service.py: Discount eligibility evaluation and application.
+          repo.py: Discount rule and usage persistence.
+          models.py: Discount rule and redemption document shapes.
+
+      reviews:
+        description: Product reviews and ratings.
+        files:
+          module.yaml: Module identity, review actions.
+          events.yaml: review.submitted, review.approved, review.rejected.
+          subscriptions.yaml: Reacts to order.delivered to prompt review request.
+          notifications.yaml: Review prompt notification.
+          admin.yaml: Review moderation queue.
+          handler.py: Submit, list, and moderate review actions.
+          service.py: Review validation, rating aggregation.
+          repo.py: Review persistence.
+          models.py: Review and rating document shapes.
+          moderation.py: Content moderation rules and flagging logic.
+
+  marketplace:
+    description: Multi-sided marketplace — sellers, buyers, listings, transactions, trust.
+    common_app_types:
+      - peer-to-peer marketplace
+      - service marketplace
+      - rental platform
+      - B2B exchange
+    modules:
+      listings:
+        description: Seller-owned item or service listings — creation, search, availability.
+        files:
+          module.yaml: Module identity, listing CRUD actions.
+          events.yaml: listing.created, listing.updated, listing.deactivated.
+          admin.yaml: Listing moderation queue, featured listing controls.
+          handler.py: Listing CRUD and search actions.
+          service.py: Listing validation, slug generation, availability resolution.
+          repo.py: Listing persistence.
+          models.py: Listing and media document shapes.
+          availability.py: Calendar-based availability and blackout logic.
+
+      seller_profiles:
+        description: Seller identity, verification, payout setup, and reputation.
+        files:
+          module.yaml: Module identity, seller profile actions.
+          events.yaml: seller.verified, seller.payout_account_added.
+          notifications.yaml: Verification status notifications.
+          admin.yaml: Seller verification queue, KYC review.
+          handler.py: Profile setup and verification actions.
+          service.py: KYC orchestration, payout account linking.
+          repo.py: Seller profile persistence.
+          models.py: Seller profile and verification document shapes.
+
+      transactions:
+        description: Buyer–seller transaction lifecycle — escrow, release, disputes.
+        files:
+          module.yaml: Module identity, transaction actions.
+          events.yaml: transaction.initiated, transaction.completed, transaction.disputed.
+          subscriptions.yaml: Reacts to booking or order events to create transactions.
+          notifications.yaml: Payment and payout notifications.
+          handler.py: Transaction query and dispute actions.
+          service.py: Escrow logic, payout release, dispute routing.
+          repo.py: Transaction record persistence.
+          models.py: Transaction and escrow document shapes.
+          state_machine.py: Transaction lifecycle states.
+          payment_adapter.py: Stripe Connect or platform payment provider.
+
+      reviews_trust:
+        description: Buyer and seller ratings, review moderation, trust signals.
+        files:
+          module.yaml: Module identity, review actions.
+          events.yaml: review.submitted.
+          subscriptions.yaml: Reacts to transaction.completed to prompt reviews.
+          notifications.yaml: Review prompt and response notifications.
+          admin.yaml: Review moderation tools.
+          handler.py: Submit and list review actions.
+          service.py: Review validation, trust score aggregation.
+          repo.py: Review and trust signal persistence.
+          models.py: Review and trust score document shapes.
+          moderation.py: Content policy checks and auto-flagging.
+
+      messaging:
+        description: Buyer–seller in-listing messaging and pre-transaction chat.
+        files:
+          module.yaml: Module identity, messaging actions.
+          events.yaml: message.sent, thread.created.
+          notifications.yaml: New message notification.
+          channels.yaml: WebSocket channel definitions for real-time delivery.
+          handler.py: Thread and message actions.
+          service.py: Message validation, thread management, read state tracking.
+          repo.py: Thread and message persistence.
+          models.py: Thread, message, and read-state document shapes.
+          policy.py: Participant-scoped access checks.
+
+      search_discovery:
+        description: Listing search, filtering, ranking, and recommendation.
+        files:
+          module.yaml: Module identity, search and browse actions.
+          subscriptions.yaml: Reacts to listing events to update search index.
+          handler.py: Search query and browse actions.
+          service.py: Filter building, ranking, index refresh.
+          repo.py: Search index reads.
+          models.py: Search result and facet shapes.
+          ranking.py: Relevance scoring and promoted listing logic.
+
+  saas:
+    description: Software-as-a-service — subscriptions, seats, billing, usage, API access.
+    common_app_types:
+      - B2B SaaS tool
+      - developer platform
+      - internal tool
+      - vertical SaaS
+    modules:
+      subscriptions:
+        description: Plan selection, billing cycle, upgrades, downgrades, cancellations.
+        files:
+          module.yaml: Module identity, subscription management actions.
+          events.yaml: subscription.created, subscription.upgraded, subscription.cancelled, subscription.past_due.
+          subscriptions.yaml: Reacts to payment events.
+          notifications.yaml: Trial expiry, renewal, and cancellation notifications.
+          admin.yaml: Subscription overview, manual adjustments.
+          handler.py: Subscription CRUD and plan change actions.
+          service.py: Plan change proration, trial management, cancellation flow.
+          repo.py: Subscription record persistence.
+          models.py: Subscription and plan document shapes.
+          client.py: Billing provider client (Stripe Billing, Paddle).
+
+      usage_metering:
+        description: Per-unit or seat-based usage tracking for quota enforcement and billing.
+        files:
+          module.yaml: Module identity, usage query actions.
+          events.yaml: usage.limit_approached, usage.limit_reached.
+          subscriptions.yaml: Reacts to subscription events to reset meters.
+          notifications.yaml: Usage limit warning notifications.
+          handler.py: Usage report and quota check actions.
+          service.py: Usage aggregation, quota enforcement logic.
+          repo.py: Usage event and counter persistence.
+          models.py: Usage event and quota document shapes.
+          usage_metering.py: Meter increment, rollup, and billing export logic.
+
+      api_keys:
+        description: API key lifecycle — generation, rotation, scoping, revocation.
+        files:
+          module.yaml: Module identity, API key management actions.
+          events.yaml: api_key.created, api_key.revoked.
+          admin.yaml: Key listing and forced revocation tools.
+          handler.py: Key create, list, and revoke actions.
+          service.py: Key generation, hashing, and scope validation.
+          repo.py: Key record persistence.
+          models.py: API key document shapes.
+          policy.py: Scope-based access guard helpers.
+
+      onboarding:
+        description: New user and org onboarding flows — checklist, progress, prompts.
+        files:
+          module.yaml: Module identity, onboarding progress actions.
+          events.yaml: onboarding.step_completed, onboarding.completed.
+          subscriptions.yaml: Reacts to user.created to initialize onboarding state.
+          notifications.yaml: Onboarding prompt and completion notifications.
+          handler.py: Step completion and progress query actions.
+          service.py: Checklist state machine, completion detection.
+          repo.py: Onboarding progress persistence.
+          models.py: Onboarding checklist and step document shapes.
+
+      feature_flags:
+        description: Plan-gated and experiment-based feature flag evaluation.
+        files:
+          module.yaml: Module identity, flag evaluation actions.
+          settings.yaml: Feature flag definitions and default states.
+          admin.yaml: Flag override controls per org or user.
+          handler.py: Flag evaluation and override actions.
+          service.py: Flag resolution — plan tier, org overrides, experiment cohort.
+          repo.py: Flag state and override persistence.
+          models.py: Flag definition and override document shapes.
+          entitlements.py: Plan entitlement resolution and gate enforcement.
+
+      teams:
+        description: Workspace team membership, invitations, and seat management.
+        files:
+          module.yaml: Module identity, team management actions.
+          events.yaml: team.member_invited, team.member_removed.
+          notifications.yaml: Invitation and removal notifications.
+          handler.py: Invite, remove, list member actions.
+          service.py: Invitation flow, seat count enforcement.
+          repo.py: Team membership persistence.
+          models.py: Team and invitation document shapes.
+
+  fintech_payments:
+    description: Financial products — payments, wallets, transfers, compliance, ledger.
+    common_app_types:
+      - payment platform
+      - digital wallet
+      - neobank
+      - lending app
+      - expense management
+    modules:
+      wallet:
+        description: User or org wallet — balances, credits, ledger entries.
+        files:
+          module.yaml: Module identity, wallet query and action endpoints.
+          events.yaml: wallet.credited, wallet.debited, wallet.payout_requested.
+          notifications.yaml: Balance change and payout status notifications.
+          admin.yaml: Wallet balance view, manual adjustment tools.
+          handler.py: Balance query, credit, debit, payout request actions.
+          service.py: Balance management, payout eligibility checks.
+          repo.py: Balance and ledger entry persistence.
+          models.py: Balance projection and ledger entry document shapes.
+          policy.py: Owner-scoped access guards.
+
+      payments:
+        description: Payment intent creation, capture, refunds, and provider integration.
+        files:
+          module.yaml: Module identity, payment actions.
+          events.yaml: payment.succeeded, payment.failed, payment.refunded.
+          subscriptions.yaml: Reacts to payment events to update wallet.
+          notifications.yaml: Payment confirmation and failure notifications.
+          handler.py: Payment initiation, capture, refund actions.
+          service.py: Payment orchestration, retry logic, idempotency handling.
+          repo.py: Payment record persistence.
+          models.py: Payment intent and refund document shapes.
+          client.py: Payment provider client (Stripe, Adyen, Braintree).
+          payment_adapter.py: Provider-agnostic payment interface.
+
+      invoices:
+        description: Invoice generation, delivery, and payment tracking.
+        files:
+          module.yaml: Module identity, invoice actions.
+          events.yaml: invoice.issued, invoice.paid, invoice.overdue.
+          notifications.yaml: Invoice delivery and overdue reminders.
+          admin.yaml: Invoice list, manual write-off tools.
+          handler.py: Invoice create, list, and mark-paid actions.
+          service.py: Invoice generation, line item totals, PDF rendering.
+          repo.py: Invoice persistence.
+          models.py: Invoice and line item document shapes.
+
+      kyc_compliance:
+        description: Identity verification and AML compliance workflows.
+        files:
+          module.yaml: Module identity, KYC submission and status actions.
+          events.yaml: kyc.submitted, kyc.approved, kyc.rejected.
+          notifications.yaml: Verification status notifications.
+          admin.yaml: KYC review queue, manual override tools.
+          handler.py: KYC submission and status query actions.
+          service.py: Document verification orchestration, risk scoring.
+          repo.py: KYC case persistence.
+          models.py: KYC case and document document shapes.
+          client.py: Identity verification provider client (Persona, Jumio, Onfido).
+
+      transfers:
+        description: Peer-to-peer and bank transfer initiation, scheduling, and status.
+        files:
+          module.yaml: Module identity, transfer actions.
+          events.yaml: transfer.initiated, transfer.completed, transfer.failed.
+          subscriptions.yaml: Reacts to transfer events to update balances.
+          notifications.yaml: Transfer status notifications.
+          handler.py: Transfer initiation and status query actions.
+          service.py: Transfer validation, scheduling, bank routing.
+          repo.py: Transfer record persistence.
+          models.py: Transfer and bank account document shapes.
+          state_machine.py: Transfer lifecycle states.
+
+  social_community:
+    description: Social networks, community platforms, forums, and fan communities.
+    common_app_types:
+      - social network
+      - community forum
+      - fan club
+      - interest group
+      - niche community
+    modules:
+      feed:
+        description: Personalized activity feed — posts, reactions, ranking, pagination.
+        files:
+          module.yaml: Module identity, feed query actions.
+          subscriptions.yaml: Reacts to post and follow events to update feed.
+          handler.py: Feed list and refresh actions.
+          service.py: Feed assembly, ranking, deduplication.
+          repo.py: Feed item persistence.
+          models.py: Feed item document shapes.
+          ranking.py: Recency, engagement, and follow-graph scoring.
+
+      posts:
+        description: User-created content — text, media, polls.
+        files:
+          module.yaml: Module identity, post CRUD actions.
+          events.yaml: post.created, post.deleted, post.reported.
+          notifications.yaml: Mention and reply notifications.
+          handler.py: Post create, list, delete, report actions.
+          service.py: Post validation, mention parsing, media attachment.
+          repo.py: Post persistence.
+          models.py: Post and attachment document shapes.
+          moderation.py: Content policy checks and auto-flagging.
+
+      follows:
+        description: Follow/unfollow graph — follower counts, mutual detection.
+        files:
+          module.yaml: Module identity, follow actions.
+          events.yaml: follow.created, follow.removed.
+          handler.py: Follow, unfollow, list followers/following actions.
+          service.py: Follow graph management, mutual follow detection.
+          repo.py: Follow edge persistence.
+          models.py: Follow edge document shapes.
+
+      reactions:
+        description: Likes, emoji reactions, and aggregated reaction counts.
+        files:
+          module.yaml: Module identity, reaction actions.
+          events.yaml: reaction.added, reaction.removed.
+          handler.py: Add and remove reaction actions.
+          service.py: Reaction toggle logic, count aggregation.
+          repo.py: Reaction record persistence.
+          models.py: Reaction document shapes.
+
+      groups:
+        description: Topic-based groups or communities — membership, rules, moderation.
+        files:
+          module.yaml: Module identity, group management actions.
+          events.yaml: group.created, group.member_joined, group.member_removed.
+          settings.yaml: Group privacy, posting rules, member approval settings.
+          admin.yaml: Group oversight, bulk moderation tools.
+          handler.py: Group CRUD and membership actions.
+          service.py: Membership approval logic, group discovery.
+          repo.py: Group and membership persistence.
+          models.py: Group and membership document shapes.
+
+      moderation:
+        description: Content and user moderation — reports, queues, bans, appeals.
+        files:
+          module.yaml: Module identity, moderation actions.
+          subscriptions.yaml: Reacts to report events to populate moderation queue.
+          admin.yaml: Moderation queue, user ban tools, appeal review.
+          handler.py: Report submission and moderation action endpoints.
+          service.py: Report triage, escalation logic, ban enforcement.
+          repo.py: Report and action record persistence.
+          models.py: Report and moderation action document shapes.
+          moderation.py: Auto-moderation rules and threshold logic.
+
+  messaging_communication:
+    description: Real-time and async messaging — DMs, threads, channels, announcements.
+    common_app_types:
+      - team messaging
+      - community chat
+      - customer inbox
+      - announcement platform
+    modules:
+      threads:
+        description: Threaded conversations — creation, participant management, read state.
+        files:
+          module.yaml: Module identity, thread actions.
+          events.yaml: thread.created, thread.archived.
+          handler.py: Thread create, list, archive actions.
+          service.py: Thread creation, participant management.
+          repo.py: Thread persistence.
+          models.py: Thread and participant document shapes.
+          policy.py: Participant-scoped access guards.
+
+      messages:
+        description: Message send, delivery, read receipts, and deletion.
+        files:
+          module.yaml: Module identity, message actions.
+          events.yaml: message.sent, message.deleted.
+          notifications.yaml: New message notification.
+          channels.yaml: WebSocket channel definitions for real-time delivery.
+          handler.py: Send, delete, list message actions.
+          service.py: Message validation, read state update, preview generation.
+          repo.py: Message and read-state persistence.
+          models.py: Message and read-state document shapes.
+
+      channels:
+        description: Named broadcast channels — creation, membership, topic management.
+        files:
+          module.yaml: Module identity, channel management actions.
+          events.yaml: channel.created, channel.member_added.
+          settings.yaml: Channel notification and retention settings.
+          handler.py: Channel CRUD and membership actions.
+          service.py: Channel access control, topic management.
+          repo.py: Channel and membership persistence.
+          models.py: Channel and membership document shapes.
+
+      announcements:
+        description: Org-wide or audience-targeted broadcast announcements.
+        files:
+          module.yaml: Module identity, announcement actions.
+          events.yaml: announcement.created.
+          notifications.yaml: Announcement delivery notification.
+          channels.yaml: Broadcast channel definitions.
+          admin.yaml: Announcement composer and audience targeting.
+          handler.py: Create and list announcement actions.
+          service.py: Audience resolution, delivery scheduling.
+          repo.py: Announcement persistence.
+          models.py: Announcement and audience document shapes.
+
+      presence:
+        description: Online status, last-seen, and typing indicators.
+        files:
+          module.yaml: Module identity, presence query actions.
+          handler.py: Presence update and query actions.
+          service.py: Presence state management, heartbeat expiry.
+          repo.py: Presence state persistence (low-TTL).
+          models.py: Presence state document shapes.
+
+  content_publishing:
+    description: Content creation, editorial workflow, publishing, and distribution.
+    common_app_types:
+      - blog
+      - newsletter
+      - news site
+      - documentation platform
+      - digital magazine
+    modules:
+      posts:
+        description: Article and post authoring — drafts, revisions, metadata.
+        files:
+          module.yaml: Module identity, post CRUD actions.
+          events.yaml: post.published, post.unpublished, post.scheduled.
+          admin.yaml: Post list, editor, scheduling tools.
+          handler.py: Post CRUD and publish actions.
+          service.py: Draft management, slug generation, SEO validation.
+          repo.py: Post persistence.
+          models.py: Post, revision, and tag document shapes.
+
+      editorial_workflow:
+        description: Review and approval flow for content before publication.
+        files:
+          module.yaml: Module identity, workflow actions.
+          events.yaml: review.requested, review.approved, review.rejected.
+          subscriptions.yaml: Reacts to post events to trigger review.
+          notifications.yaml: Review request and decision notifications.
+          handler.py: Submit for review, approve, reject actions.
+          service.py: Workflow state management, reviewer assignment.
+          repo.py: Workflow state persistence.
+          models.py: Review state and assignment document shapes.
+          state_machine.py: Editorial workflow states and allowed transitions.
+
+      media_library:
+        description: Image and video asset management for content.
+        files:
+          module.yaml: Module identity, media management actions.
+          handler.py: Upload, list, tag, and delete media actions.
+          service.py: Media processing, thumbnail generation, tagging.
+          repo.py: Media metadata persistence.
+          models.py: Media asset document shapes.
+          client.py: CDN and image processing provider client.
+
+      categories_tags:
+        description: Taxonomy management — category trees and tag vocabularies.
+        files:
+          module.yaml: Module identity, taxonomy actions.
+          admin.yaml: Category and tag editor.
+          handler.py: Category and tag CRUD actions.
+          service.py: Hierarchy management, slug deduplication.
+          repo.py: Category and tag persistence.
+          models.py: Category and tag document shapes.
+
+      subscribers:
+        description: Email subscriber list, subscription management, and segmentation.
+        files:
+          module.yaml: Module identity, subscriber actions.
+          events.yaml: subscriber.added, subscriber.unsubscribed.
+          notifications.yaml: Welcome and confirmation emails.
+          admin.yaml: Subscriber list, segment management, export tools.
+          handler.py: Subscribe, unsubscribe, and list actions.
+          service.py: Double opt-in flow, list segmentation.
+          repo.py: Subscriber persistence.
+          models.py: Subscriber and segment document shapes.
+
+      newsletters:
+        description: Newsletter campaigns — composition, scheduling, delivery, analytics.
+        files:
+          module.yaml: Module identity, campaign actions.
+          events.yaml: newsletter.sent, newsletter.opened.
+          admin.yaml: Campaign composer, delivery schedule, open rate analytics.
+          handler.py: Campaign create, schedule, and send actions.
+          service.py: Recipient resolution, delivery orchestration.
+          repo.py: Campaign and delivery record persistence.
+          models.py: Campaign and delivery event document shapes.
+          client.py: Email delivery provider client (Resend, SendGrid, Postmark).
+
+  media_streaming:
+    description: Video and audio streaming — content ingestion, playback, subscriptions.
+    common_app_types:
+      - VOD platform
+      - live streaming
+      - podcast platform
+      - music streaming
+    modules:
+      content_library:
+        description: Video and audio asset catalogue — metadata, availability, licensing.
+        files:
+          module.yaml: Module identity, library query and management actions.
+          events.yaml: content.added, content.updated, content.removed.
+          admin.yaml: Content list, bulk metadata editor, takedown tools.
+          handler.py: Content CRUD and browse actions.
+          service.py: Metadata validation, licensing rule enforcement.
+          repo.py: Content metadata persistence.
+          models.py: Content item and licensing document shapes.
+
+      playback:
+        description: Playback session management, resume position, quality selection.
+        files:
+          module.yaml: Module identity, playback session actions.
+          events.yaml: playback.started, playback.completed, playback.progress_saved.
+          handler.py: Start session, save progress, resume actions.
+          service.py: DRM token generation, playback URL signing, resume logic.
+          repo.py: Playback session persistence.
+          models.py: Playback session and progress document shapes.
+          client.py: CDN and DRM provider client.
+
+      transcoding:
+        description: Video transcoding job management — ingest, format conversion, thumbnail.
+        files:
+          module.yaml: Module identity, transcoding job actions.
+          events.yaml: transcode.completed, transcode.failed.
+          subscriptions.yaml: Reacts to content.added to queue transcoding.
+          handler.py: Job status query actions.
+          service.py: Job submission, status polling, output registration.
+          repo.py: Job record persistence.
+          models.py: Transcoding job document shapes.
+          client.py: Transcoding provider client (Mux, AWS MediaConvert).
+
+      recommendations:
+        description: Personalized content recommendations based on watch history.
+        files:
+          module.yaml: Module identity, recommendation query actions.
+          subscriptions.yaml: Reacts to playback events to update preference signals.
+          handler.py: Recommendation list action.
+          service.py: Signal aggregation, model scoring, result assembly.
+          repo.py: Preference signal and recommendation cache persistence.
+          models.py: Recommendation and signal document shapes.
+          ranking.py: Collaborative filtering and content-based scoring.
+
+  creator_platform:
+    description: Creator economy — content monetization, fan subscriptions, tips, merchandise.
+    common_app_types:
+      - creator subscription
+      - fan community
+      - tip and support
+      - course and content
+    modules:
+      creator_profiles:
+        description: Creator identity, bio, payout setup, and analytics overview.
+        files:
+          module.yaml: Module identity, creator profile actions.
+          events.yaml: creator.onboarded, creator.payout_account_linked.
+          admin.yaml: Creator verification, payout management.
+          handler.py: Profile setup, payout account actions.
+          service.py: Onboarding flow, payout account linking.
+          repo.py: Creator profile persistence.
+          models.py: Creator profile document shapes.
+          client.py: Payout provider client (Stripe Connect).
+
+      subscriptions:
+        description: Fan subscriptions to creators — tiers, billing, access gating.
+        files:
+          module.yaml: Module identity, subscription actions.
+          events.yaml: subscription.started, subscription.cancelled, subscription.renewed.
+          notifications.yaml: Subscription confirmation and renewal notifications.
+          handler.py: Subscribe, cancel, and list subscription actions.
+          service.py: Tier access enforcement, billing orchestration.
+          repo.py: Subscription record persistence.
+          models.py: Subscription and tier document shapes.
+          entitlements.py: Tier-based content access resolution.
+
+      tips:
+        description: One-time fan tips and super-chats during live streams.
+        files:
+          module.yaml: Module identity, tip actions.
+          events.yaml: tip.sent.
+          notifications.yaml: Tip received notification for creator.
+          handler.py: Send tip action.
+          service.py: Tip processing, platform fee split.
+          repo.py: Tip record persistence.
+          models.py: Tip document shapes.
+          payment_adapter.py: Payment provider abstraction.
+
+      exclusive_content:
+        description: Subscriber-gated posts, videos, and downloads.
+        files:
+          module.yaml: Module identity, exclusive content actions.
+          events.yaml: exclusive_content.published.
+          notifications.yaml: New exclusive content notification.
+          handler.py: Publish, list, and access-check actions.
+          service.py: Access gating, content delivery URL signing.
+          repo.py: Exclusive content record persistence.
+          models.py: Exclusive content and access grant document shapes.
+          policy.py: Subscriber tier access checks.
+
+      payouts:
+        description: Creator earnings ledger, payout requests, and payout history.
+        files:
+          module.yaml: Module identity, payout actions.
+          events.yaml: payout.requested, payout.completed.
+          notifications.yaml: Payout status notifications.
+          admin.yaml: Payout review queue, manual release tools.
+          handler.py: Payout request and history actions.
+          service.py: Earnings calculation, payout eligibility, hold period logic.
+          repo.py: Earnings ledger and payout record persistence.
+          models.py: Earnings ledger and payout document shapes.
+
+  education_lms:
+    description: Learning management — courses, lessons, progress, assessments, certificates.
+    common_app_types:
+      - online course platform
+      - corporate LMS
+      - coding bootcamp
+      - tutoring marketplace
+    modules:
+      courses:
+        description: Course catalogue — metadata, curriculum structure, pricing.
+        files:
+          module.yaml: Module identity, course CRUD actions.
+          events.yaml: course.published, course.updated, course.archived.
+          admin.yaml: Course list, curriculum editor, enrollment stats.
+          handler.py: Course CRUD and browse actions.
+          service.py: Curriculum validation, SEO slug generation.
+          repo.py: Course and curriculum persistence.
+          models.py: Course, module, and lesson document shapes.
+
+      enrollments:
+        description: Student enrollment — access provisioning, cohort assignment.
+        files:
+          module.yaml: Module identity, enrollment actions.
+          events.yaml: enrollment.created, enrollment.completed.
+          subscriptions.yaml: Reacts to payment events to provision access.
+          notifications.yaml: Enrollment confirmation notification.
+          handler.py: Enroll, unenroll, and list enrollment actions.
+          service.py: Access provisioning, cohort assignment.
+          repo.py: Enrollment record persistence.
+          models.py: Enrollment document shapes.
+
+      progress:
+        description: Lesson completion tracking and course progress calculation.
+        files:
+          module.yaml: Module identity, progress actions.
+          events.yaml: lesson.completed, course.completed.
+          subscriptions.yaml: Reacts to lesson completion events.
+          handler.py: Mark complete and progress query actions.
+          service.py: Progress calculation, completion detection.
+          repo.py: Progress record persistence.
+          models.py: Progress document shapes.
+
+      assessments:
+        description: Quizzes, assignments, grading, and feedback.
+        files:
+          module.yaml: Module identity, assessment actions.
+          events.yaml: assessment.submitted, assessment.graded.
+          notifications.yaml: Grade available notification.
+          handler.py: Submit, grade, and list assessment actions.
+          service.py: Auto-grading logic, score calculation.
+          repo.py: Assessment and submission persistence.
+          models.py: Assessment, question, and submission document shapes.
+
+      certificates:
+        description: Completion certificate generation and verification.
+        files:
+          module.yaml: Module identity, certificate actions.
+          events.yaml: certificate.issued.
+          subscriptions.yaml: Reacts to course.completed to issue certificate.
+          notifications.yaml: Certificate issued notification.
+          handler.py: Certificate request and verification actions.
+          service.py: Certificate generation, PDF rendering, verification code.
+          repo.py: Certificate record persistence.
+          models.py: Certificate document shapes.
+          client.py: PDF generation provider client.
+
+  booking_scheduling:
+    description: Appointment booking, resource scheduling, availability, and reminders.
+    common_app_types:
+      - appointment booking
+      - service scheduling
+      - room/resource reservation
+      - class booking
+    modules:
+      services:
+        description: Bookable services or resources — metadata, duration, pricing.
+        files:
+          module.yaml: Module identity, service CRUD actions.
+          events.yaml: service.created, service.updated.
+          admin.yaml: Service list and pricing editor.
+          handler.py: Service CRUD actions.
+          service.py: Service validation, duration and buffer logic.
+          repo.py: Service record persistence.
+          models.py: Service document shapes.
+
+      availability:
+        description: Provider or resource availability — schedules, blackouts, capacity.
+        files:
+          module.yaml: Module identity, availability query and management actions.
+          handler.py: Set schedule, add blackout, query availability actions.
+          service.py: Slot generation, conflict detection, capacity enforcement.
+          repo.py: Schedule and blackout persistence.
+          models.py: Schedule and availability slot document shapes.
+          availability.py: Calendar slot expansion and conflict resolution.
+
+      bookings:
+        description: Booking lifecycle — create, confirm, reschedule, cancel.
+        files:
+          module.yaml: Module identity, booking actions.
+          events.yaml: booking.created, booking.confirmed, booking.cancelled, booking.rescheduled.
+          notifications.yaml: Booking confirmation and reminder notifications.
+          admin.yaml: Booking list, calendar view, override tools.
+          handler.py: Book, confirm, cancel, reschedule actions.
+          service.py: Booking validation, slot reservation, payment hooks.
+          repo.py: Booking record persistence.
+          models.py: Booking document shapes.
+          state_machine.py: Booking lifecycle states.
+
+      reminders:
+        description: Automated pre-appointment reminders via email and SMS.
+        files:
+          module.yaml: Module identity, reminder configuration actions.
+          subscriptions.yaml: Reacts to booking events to schedule reminders.
+          settings.yaml: Reminder timing and channel preferences.
+          handler.py: Reminder preference actions.
+          service.py: Reminder scheduling, delivery orchestration.
+          repo.py: Scheduled reminder persistence.
+          models.py: Reminder record document shapes.
+          tasks.py: Async reminder dispatch task.
+          client.py: SMS and email delivery provider client.
+
+  travel_hospitality:
+    description: Travel booking — flights, hotels, experiences, itineraries.
+    common_app_types:
+      - hotel booking
+      - travel agency
+      - experience marketplace
+      - vacation rental
+    modules:
+      properties:
+        description: Hotel and rental property listings — rooms, amenities, policies.
+        files:
+          module.yaml: Module identity, property CRUD actions.
+          events.yaml: property.listed, property.updated.
+          admin.yaml: Property management and moderation.
+          handler.py: Property CRUD and browse actions.
+          service.py: Property validation, availability calendar setup.
+          repo.py: Property persistence.
+          models.py: Property, room, and amenity document shapes.
+
+      reservations:
+        description: Room or property reservations — booking, modification, cancellation.
+        files:
+          module.yaml: Module identity, reservation actions.
+          events.yaml: reservation.created, reservation.modified, reservation.cancelled.
+          notifications.yaml: Booking confirmation and check-in reminder.
+          handler.py: Reserve, modify, cancel actions.
+          service.py: Availability check, rate calculation, cancellation policy enforcement.
+          repo.py: Reservation persistence.
+          models.py: Reservation document shapes.
+          state_machine.py: Reservation lifecycle states.
+          pricing.py: Rate plan resolution, seasonal pricing, tax calculation.
+
+      experiences:
+        description: Tours, activities, and add-on experiences available at the destination.
+        files:
+          module.yaml: Module identity, experience actions.
+          events.yaml: experience.booked.
+          handler.py: Experience browse and booking actions.
+          service.py: Experience availability and booking logic.
+          repo.py: Experience and booking persistence.
+          models.py: Experience document shapes.
+          availability.py: Experience slot and capacity logic.
+
+      itineraries:
+        description: Trip itinerary builder — day-by-day plan with bookings and notes.
+        files:
+          module.yaml: Module identity, itinerary actions.
+          handler.py: Create, update, and share itinerary actions.
+          service.py: Itinerary assembly, booking linking.
+          repo.py: Itinerary persistence.
+          models.py: Itinerary and day-plan document shapes.
+
+  food_restaurant:
+    description: Food ordering — menus, orders, delivery, kitchen management.
+    common_app_types:
+      - restaurant ordering
+      - food delivery
+      - ghost kitchen
+      - catering platform
+    modules:
+      menu:
+        description: Menu items, categories, modifiers, and pricing.
+        files:
+          module.yaml: Module identity, menu management actions.
+          events.yaml: menu.updated.
+          admin.yaml: Menu editor, item availability toggles.
+          handler.py: Menu item CRUD and browse actions.
+          service.py: Menu validation, modifier group logic.
+          repo.py: Menu item and category persistence.
+          models.py: Menu item, category, and modifier document shapes.
+          pricing.py: Item pricing with modifier and upsell logic.
+
+      orders:
+        description: Order placement, tracking, kitchen queuing, and completion.
+        files:
+          module.yaml: Module identity, order actions.
+          events.yaml: order.placed, order.confirmed, order.ready, order.delivered, order.cancelled.
+          notifications.yaml: Order status notifications.
+          admin.yaml: Live order board, kitchen display integration.
+          handler.py: Place order, update status, cancel actions.
+          service.py: Order validation, kitchen queue management, ETA calculation.
+          repo.py: Order persistence.
+          models.py: Order and line item document shapes.
+          state_machine.py: Order lifecycle states.
+
+      delivery:
+        description: Delivery routing, driver assignment, and real-time tracking.
+        files:
+          module.yaml: Module identity, delivery management actions.
+          events.yaml: delivery.assigned, delivery.picked_up, delivery.completed.
+          subscriptions.yaml: Reacts to order.ready to trigger delivery assignment.
+          notifications.yaml: Delivery dispatch and arrival notifications.
+          handler.py: Delivery status query and update actions.
+          service.py: Driver assignment, routing logic, ETA updates.
+          repo.py: Delivery record persistence.
+          models.py: Delivery and driver location document shapes.
+          routing.py: Zone-based dispatch and routing optimization.
+
+      reservations:
+        description: Table reservations — party size, time slots, waitlist.
+        files:
+          module.yaml: Module identity, reservation actions.
+          events.yaml: reservation.created, reservation.cancelled.
+          notifications.yaml: Reservation confirmation and reminder.
+          handler.py: Reserve, cancel, waitlist actions.
+          service.py: Table availability logic, waitlist management.
+          repo.py: Reservation persistence.
+          models.py: Reservation and table document shapes.
+
+  events_ticketing:
+    description: Event management — creation, ticketing, check-in, and post-event.
+    common_app_types:
+      - event ticketing
+      - conference platform
+      - concert and live event
+      - hybrid event
+    modules:
+      events:
+        description: Event creation, scheduling, venue, and capacity management.
+        files:
+          module.yaml: Module identity, event CRUD actions.
+          events.yaml: event.published, event.cancelled, event.updated.
+          admin.yaml: Event list, capacity editor, analytics.
+          handler.py: Event CRUD and browse actions.
+          service.py: Event validation, capacity logic.
+          repo.py: Event persistence.
+          models.py: Event and venue document shapes.
+
+      tickets:
+        description: Ticket types, pricing tiers, purchases, and transfer.
+        files:
+          module.yaml: Module identity, ticket actions.
+          events.yaml: ticket.purchased, ticket.transferred, ticket.refunded.
+          notifications.yaml: Purchase confirmation and event reminder.
+          handler.py: Purchase, transfer, and list ticket actions.
+          service.py: Inventory enforcement, ticket generation, QR code creation.
+          repo.py: Ticket and order persistence.
+          models.py: Ticket and order document shapes.
+          pricing.py: Tier pricing, early bird, and promo code logic.
+
+      check_in:
+        description: On-site check-in — QR scanning, attendee lookup, badge printing.
+        files:
+          module.yaml: Module identity, check-in actions.
+          events.yaml: attendee.checked_in.
+          handler.py: Scan and manual check-in actions.
+          service.py: QR validation, attendance recording.
+          repo.py: Check-in record persistence.
+          models.py: Check-in record document shapes.
+
+      agenda:
+        description: Event session schedule — sessions, speakers, personal schedule builder.
+        files:
+          module.yaml: Module identity, agenda query actions.
+          handler.py: Session list and personal schedule actions.
+          service.py: Schedule conflict detection, reminder scheduling.
+          repo.py: Session and personal schedule persistence.
+          models.py: Session and speaker document shapes.
+
+  jobs_hr_recruiting:
+    description: Job board, applicant tracking, interviews, and onboarding.
+    common_app_types:
+      - job board
+      - ATS
+      - recruiting platform
+      - HR management
+    modules:
+      jobs:
+        description: Job posting creation, publishing, and management.
+        files:
+          module.yaml: Module identity, job posting actions.
+          events.yaml: job.published, job.closed.
+          admin.yaml: Job list, hiring pipeline overview.
+          handler.py: Job CRUD and search actions.
+          service.py: Posting validation, distribution logic.
+          repo.py: Job posting persistence.
+          models.py: Job posting document shapes.
+
+      applications:
+        description: Job applications — submission, tracking, and status updates.
+        files:
+          module.yaml: Module identity, application actions.
+          events.yaml: application.submitted, application.status_changed.
+          subscriptions.yaml: Reacts to job events to update application availability.
+          notifications.yaml: Application receipt and status notifications.
+          handler.py: Apply, withdraw, and list application actions.
+          service.py: Application validation, duplicate detection.
+          repo.py: Application persistence.
+          models.py: Application and resume document shapes.
+          state_machine.py: Application pipeline stages.
+
+      interviews:
+        description: Interview scheduling, feedback, and scorecards.
+        files:
+          module.yaml: Module identity, interview actions.
+          events.yaml: interview.scheduled, interview.completed.
+          notifications.yaml: Interview schedule and feedback request notifications.
+          handler.py: Schedule, submit feedback, list interview actions.
+          service.py: Interviewer assignment, calendar integration.
+          repo.py: Interview and scorecard persistence.
+          models.py: Interview and scorecard document shapes.
+          client.py: Calendar provider client (Google Calendar, Outlook).
+
+      offers:
+        description: Offer letter generation, negotiation, and acceptance tracking.
+        files:
+          module.yaml: Module identity, offer actions.
+          events.yaml: offer.sent, offer.accepted, offer.declined.
+          notifications.yaml: Offer notification.
+          handler.py: Create, send, and respond to offer actions.
+          service.py: Offer generation, acceptance flow.
+          repo.py: Offer persistence.
+          models.py: Offer document shapes.
+
+  crm_sales_marketing:
+    description: Customer relationship management — contacts, pipeline, campaigns, analytics.
+    common_app_types:
+      - CRM
+      - sales automation
+      - marketing automation
+      - lead management
+    modules:
+      contacts:
+        description: Contact and company records — profiles, enrichment, history.
+        files:
+          module.yaml: Module identity, contact CRUD actions.
+          events.yaml: contact.created, contact.updated, contact.merged.
+          admin.yaml: Contact list, deduplication tools, import.
+          handler.py: Contact CRUD and search actions.
+          service.py: Enrichment orchestration, deduplication logic.
+          repo.py: Contact and company persistence.
+          models.py: Contact and company document shapes.
+          policy.py: Owner and team-scoped access guards.
+
+      deals:
+        description: Sales pipeline — deal stages, value, close date, and owner.
+        files:
+          module.yaml: Module identity, deal management actions.
+          events.yaml: deal.created, deal.stage_changed, deal.won, deal.lost.
+          notifications.yaml: Deal stage change and close-date reminder notifications.
+          admin.yaml: Pipeline board, revenue forecast.
+          handler.py: Deal CRUD and pipeline query actions.
+          service.py: Stage transition logic, probability scoring.
+          repo.py: Deal persistence.
+          models.py: Deal document shapes.
+          state_machine.py: Deal pipeline stage definitions.
+
+      activities:
+        description: Activity log — calls, emails, meetings, notes attached to records.
+        files:
+          module.yaml: Module identity, activity logging actions.
+          events.yaml: activity.logged.
+          handler.py: Log and list activity actions.
+          service.py: Activity linking, next-step suggestions.
+          repo.py: Activity record persistence.
+          models.py: Activity document shapes.
+
+      campaigns:
+        description: Email and SMS marketing campaigns — audience, content, scheduling.
+        files:
+          module.yaml: Module identity, campaign actions.
+          events.yaml: campaign.sent, campaign.opened, campaign.clicked.
+          admin.yaml: Campaign list, performance dashboard.
+          handler.py: Create, schedule, and send campaign actions.
+          service.py: Audience segmentation, send orchestration.
+          repo.py: Campaign and engagement record persistence.
+          models.py: Campaign, audience, and engagement document shapes.
+          client.py: Email/SMS delivery provider client.
+
+      leads:
+        description: Lead capture, scoring, routing, and conversion tracking.
+        files:
+          module.yaml: Module identity, lead management actions.
+          events.yaml: lead.created, lead.qualified, lead.converted.
+          notifications.yaml: New lead and assignment notifications.
+          handler.py: Capture, score, assign, convert lead actions.
+          service.py: Lead scoring model, routing rules, conversion logic.
+          repo.py: Lead record persistence.
+          models.py: Lead document shapes.
+
+  customer_support:
+    description: Help desk — tickets, queues, agents, SLAs, and customer communication.
+    common_app_types:
+      - help desk
+      - support ticket system
+      - live chat support
+      - customer success platform
+    modules:
+      tickets:
+        description: Support ticket lifecycle — creation, assignment, resolution, closure.
+        files:
+          module.yaml: Module identity, ticket actions.
+          events.yaml: ticket.created, ticket.assigned, ticket.resolved, ticket.escalated.
+          subscriptions.yaml: Reacts to customer messages to create or update tickets.
+          notifications.yaml: Ticket receipt, assignment, and resolution notifications.
+          admin.yaml: Ticket queue, agent performance dashboard.
+          handler.py: Create, assign, resolve, escalate ticket actions.
+          service.py: Auto-assignment, SLA breach detection.
+          repo.py: Ticket persistence.
+          models.py: Ticket and comment document shapes.
+          state_machine.py: Ticket lifecycle stages.
+          sla.py: SLA policy evaluation and breach alerting.
+
+      queues:
+        description: Agent work queues — routing rules, load balancing, priority.
+        files:
+          module.yaml: Module identity, queue management actions.
+          settings.yaml: Queue routing rules and capacity settings.
+          admin.yaml: Queue health dashboard, routing rule editor.
+          handler.py: Queue assignment and requeue actions.
+          service.py: Routing rule evaluation, load balancing.
+          repo.py: Queue state persistence.
+          models.py: Queue and routing rule document shapes.
+          routing.py: Skill-based and round-robin routing logic.
+
+      knowledge_base:
+        description: Self-service help articles — authoring, search, and deflection tracking.
+        files:
+          module.yaml: Module identity, article actions.
+          events.yaml: article.published, article.updated.
+          admin.yaml: Article editor, deflection analytics.
+          handler.py: Article CRUD and search actions.
+          service.py: Article validation, search index update.
+          repo.py: Article persistence.
+          models.py: Article document shapes.
+          queries.py: Full-text search and related article queries.
+
+      csat:
+        description: Customer satisfaction surveys — post-resolution CSAT and NPS.
+        files:
+          module.yaml: Module identity, survey actions.
+          events.yaml: csat.submitted.
+          subscriptions.yaml: Reacts to ticket.resolved to send CSAT survey.
+          notifications.yaml: CSAT survey request.
+          handler.py: Survey response submission and reporting actions.
+          service.py: Score aggregation, trend detection.
+          repo.py: Survey response persistence.
+          models.py: Survey response document shapes.
+
+  knowledge_base_docs:
+    description: Documentation and knowledge base — structured content, versioning, search.
+    common_app_types:
+      - developer docs
+      - internal wiki
+      - product help center
+      - policy library
+    modules:
+      documents:
+        description: Document authoring — markdown, rich text, versioning, structure.
+        files:
+          module.yaml: Module identity, document CRUD actions.
+          events.yaml: document.published, document.updated, document.archived.
+          admin.yaml: Document list, version history, publish controls.
+          handler.py: Document CRUD and browse actions.
+          service.py: Version management, slug generation.
+          repo.py: Document persistence.
+          models.py: Document and version document shapes.
+
+      collections:
+        description: Document collections and hierarchy — spaces, sections, nesting.
+        files:
+          module.yaml: Module identity, collection management actions.
+          handler.py: Collection CRUD and tree query actions.
+          service.py: Hierarchy management, ordering logic.
+          repo.py: Collection and tree persistence.
+          models.py: Collection and node document shapes.
+
+      search:
+        description: Full-text search across documents — keyword and semantic.
+        files:
+          module.yaml: Module identity, search actions.
+          subscriptions.yaml: Reacts to document events to update index.
+          handler.py: Search query action.
+          service.py: Query building, result ranking.
+          repo.py: Search index reads and writes.
+          queries.py: Full-text and faceted query helpers.
+
+      feedback:
+        description: Page-level helpfulness ratings and correction suggestions.
+        files:
+          module.yaml: Module identity, feedback actions.
+          events.yaml: feedback.submitted.
+          admin.yaml: Low-rated article list, improvement queue.
+          handler.py: Submit and list feedback actions.
+          service.py: Rating aggregation, flagging logic.
+          repo.py: Feedback record persistence.
+          models.py: Feedback document shapes.
+
+  project_work_management:
+    description: Project and task management — boards, sprints, assignments, progress.
+    common_app_types:
+      - project management
+      - task tracker
+      - agile tool
+      - work OS
+    modules:
+      projects:
+        description: Project container — metadata, membership, status, and goals.
+        files:
+          module.yaml: Module identity, project CRUD actions.
+          events.yaml: project.created, project.archived, project.completed.
+          admin.yaml: Project list and health overview.
+          handler.py: Project CRUD and membership actions.
+          service.py: Member management, status rollup.
+          repo.py: Project persistence.
+          models.py: Project document shapes.
+
+      tasks:
+        description: Task lifecycle — creation, assignment, status, due dates, dependencies.
+        files:
+          module.yaml: Module identity, task actions.
+          events.yaml: task.created, task.assigned, task.completed, task.blocked.
+          subscriptions.yaml: Reacts to project events.
+          notifications.yaml: Assignment and due date reminder notifications.
+          handler.py: Task CRUD and transition actions.
+          service.py: Task validation, dependency blocking, overdue detection.
+          repo.py: Task persistence.
+          models.py: Task and dependency document shapes.
+          state_machine.py: Task lifecycle states.
+
+      sprints:
+        description: Sprint planning — sprint creation, backlog management, burndown.
+        files:
+          module.yaml: Module identity, sprint management actions.
+          events.yaml: sprint.started, sprint.completed.
+          handler.py: Sprint CRUD and task assignment actions.
+          service.py: Sprint capacity calculation, burndown data generation.
+          repo.py: Sprint persistence.
+          models.py: Sprint document shapes.
+          queries.py: Burndown and velocity reporting queries.
+
+      comments:
+        description: Task and project comments — threaded discussion and @mentions.
+        files:
+          module.yaml: Module identity, comment actions.
+          events.yaml: comment.added.
+          notifications.yaml: Mention and reply notifications.
+          handler.py: Add and list comment actions.
+          service.py: Mention parsing, notification dispatch.
+          repo.py: Comment persistence.
+          models.py: Comment document shapes.
+
+  analytics_bi:
+    description: Analytics and business intelligence — event tracking, dashboards, reports.
+    common_app_types:
+      - product analytics
+      - business dashboard
+      - reporting tool
+      - data exploration
+    modules:
+      events_tracking:
+        description: Client-side event ingestion — page views, clicks, custom events.
+        files:
+          module.yaml: Module identity, event ingest actions.
+          handler.py: Event batch ingest action.
+          service.py: Event validation, schema enforcement, fanout.
+          repo.py: Raw event append-only persistence.
+          models.py: Event document shapes.
+
+      dashboards:
+        description: Dashboard builder — widgets, layout, data source bindings.
+        files:
+          module.yaml: Module identity, dashboard management actions.
+          handler.py: Dashboard CRUD and widget actions.
+          service.py: Widget data resolution, refresh scheduling.
+          repo.py: Dashboard config persistence.
+          models.py: Dashboard and widget document shapes.
+
+      reports:
+        description: Scheduled and on-demand reports — generation, delivery, and history.
+        files:
+          module.yaml: Module identity, report actions.
+          events.yaml: report.generated.
+          notifications.yaml: Scheduled report delivery notification.
+          admin.yaml: Report scheduler and delivery history.
+          handler.py: Report run and history actions.
+          service.py: Report generation, format export (CSV, PDF).
+          repo.py: Report definition and run history persistence.
+          models.py: Report definition and run record shapes.
+          tasks.py: Async report generation task.
+          queries.py: Aggregation and time-series query helpers.
+
+      metrics:
+        description: KPI and metric definitions, aggregations, and alerting.
+        files:
+          module.yaml: Module identity, metric actions.
+          events.yaml: metric.threshold_breached.
+          notifications.yaml: Metric alert notification.
+          handler.py: Metric query and threshold management actions.
+          service.py: Metric aggregation, threshold evaluation.
+          repo.py: Metric definition and aggregated value persistence.
+          models.py: Metric definition and value document shapes.
+
+  ai_automation:
+    description: AI-powered automation — workflows, agents, prompt templates, model runs.
+    common_app_types:
+      - AI assistant platform
+      - automation builder
+      - AI agent marketplace
+      - copilot tool
+    modules:
+      agents:
+        description: AI agent definitions — capabilities, tools, and configuration.
+        files:
+          module.yaml: Module identity, agent management actions.
+          events.yaml: agent.run_started, agent.run_completed, agent.run_failed.
+          admin.yaml: Agent registry, run history, cost overview.
+          handler.py: Agent CRUD and run trigger actions.
+          service.py: Agent configuration validation, run orchestration.
+          repo.py: Agent definition and run record persistence.
+          models.py: Agent definition and run document shapes.
+
+      runs:
+        description: Agent and automation run execution records — inputs, outputs, status.
+        files:
+          module.yaml: Module identity, run query actions.
+          subscriptions.yaml: Reacts to agent events to update run records.
+          handler.py: Run status query and cancel actions.
+          service.py: Run lifecycle management, output storage.
+          repo.py: Run record persistence.
+          models.py: Run and output document shapes.
+
+      prompt_templates:
+        description: Prompt template library — versioning, variables, and A/B testing.
+        files:
+          module.yaml: Module identity, template management actions.
+          events.yaml: template.published, template.updated.
+          admin.yaml: Template library, version history.
+          handler.py: Template CRUD and render actions.
+          service.py: Template compilation, variable injection.
+          repo.py: Template persistence.
+          models.py: Template and version document shapes.
+
+      usage_costs:
+        description: AI model token usage tracking and cost allocation per user or org.
+        files:
+          module.yaml: Module identity, usage query actions.
+          subscriptions.yaml: Reacts to run events to record usage.
+          admin.yaml: Usage and cost dashboards per model and team.
+          handler.py: Usage report and cost breakdown actions.
+          service.py: Cost calculation, quota enforcement.
+          repo.py: Usage event persistence.
+          models.py: Usage event and cost document shapes.
+          usage_metering.py: Per-model token metering and billing export.
+
+  developer_platform:
+    description: Developer-facing platform — APIs, SDKs, webhooks, developer portal.
+    common_app_types:
+      - API platform
+      - developer portal
+      - integration marketplace
+      - webhook gateway
+    modules:
+      api_keys:
+        description: API key management — generation, scoping, rotation, revocation.
+        files:
+          module.yaml: Module identity, API key actions.
+          events.yaml: api_key.created, api_key.revoked.
+          admin.yaml: Key registry, forced revocation.
+          handler.py: Create, list, revoke key actions.
+          service.py: Key generation, hashing, scope validation.
+          repo.py: Key record persistence.
+          models.py: API key document shapes.
+          policy.py: Scope-based access guard helpers.
+
+      webhooks:
+        description: Webhook endpoint registration, delivery, retry, and signature.
+        files:
+          module.yaml: Module identity, webhook management actions.
+          events.yaml: webhook.delivery_failed, webhook.delivery_succeeded.
+          notifications.yaml: Delivery failure notification.
+          handler.py: Register, test, list, and delete webhook actions.
+          service.py: Delivery orchestration, signature generation, retry logic.
+          repo.py: Webhook config and delivery log persistence.
+          models.py: Webhook endpoint and delivery document shapes.
+          tasks.py: Async delivery retry task.
+          client.py: Outbound HTTP delivery client.
+
+      sandbox:
+        description: Developer sandbox environment — isolated test data and mock events.
+        files:
+          module.yaml: Module identity, sandbox management actions.
+          handler.py: Sandbox reset, seed data, and mock event actions.
+          service.py: Sandbox provisioning and isolation logic.
+          repo.py: Sandbox state persistence.
+          models.py: Sandbox config document shapes.
+
+      changelogs:
+        description: API version changelog — breaking changes, deprecation notices.
+        files:
+          module.yaml: Module identity, changelog query actions.
+          events.yaml: changelog.published.
+          notifications.yaml: Breaking change notification.
+          admin.yaml: Changelog editor.
+          handler.py: List and publish changelog entry actions.
+          service.py: Versioning logic, deprecation enforcement.
+          repo.py: Changelog entry persistence.
+          models.py: Changelog entry document shapes.
+
+  devops_infrastructure:
+    description: DevOps tooling — deployments, pipelines, incidents, infrastructure management.
+    common_app_types:
+      - CI/CD platform
+      - infrastructure management
+      - incident management
+      - monitoring platform
+    modules:
+      deployments:
+        description: Deployment pipeline — trigger, rollout, rollback, and status.
+        files:
+          module.yaml: Module identity, deployment actions.
+          events.yaml: deployment.triggered, deployment.succeeded, deployment.failed, deployment.rolled_back.
+          notifications.yaml: Deployment status notifications.
+          admin.yaml: Deployment history, environment status board.
+          handler.py: Trigger, rollback, and status query actions.
+          service.py: Deployment orchestration, rollback logic.
+          repo.py: Deployment record persistence.
+          models.py: Deployment and environment document shapes.
+          state_machine.py: Deployment lifecycle states.
+          client.py: Container orchestration or CD provider client.
+
+      incidents:
+        description: Incident management — detection, escalation, resolution, retrospective.
+        files:
+          module.yaml: Module identity, incident actions.
+          events.yaml: incident.opened, incident.escalated, incident.resolved.
+          notifications.yaml: Incident alert and resolution notifications.
+          admin.yaml: Incident list, severity dashboard, post-mortem tools.
+          handler.py: Open, escalate, resolve incident actions.
+          service.py: On-call routing, severity classification.
+          repo.py: Incident record persistence.
+          models.py: Incident and timeline document shapes.
+          state_machine.py: Incident lifecycle states.
+          sla.py: Incident SLA evaluation and breach tracking.
+
+      pipelines:
+        description: CI pipeline definitions — runs, steps, artifacts, test results.
+        files:
+          module.yaml: Module identity, pipeline actions.
+          events.yaml: pipeline.run_started, pipeline.run_completed, pipeline.run_failed.
+          notifications.yaml: Pipeline failure notification.
+          handler.py: Pipeline run trigger and result query actions.
+          service.py: Run orchestration, artifact storage.
+          repo.py: Pipeline run and step result persistence.
+          models.py: Pipeline run and step document shapes.
+
+      environments:
+        description: Environment registry — configuration, secrets scoping, promotion.
+        files:
+          module.yaml: Module identity, environment management actions.
+          events.yaml: environment.promoted, environment.config_updated.
+          admin.yaml: Environment list and config editor.
+          handler.py: Environment CRUD and config actions.
+          service.py: Secrets scoping, promotion validation.
+          repo.py: Environment config persistence.
+          models.py: Environment and config document shapes.
+          policy.py: Environment-scoped access guards.
+
+  security_identity:
+    description: Security tooling — SSO, MFA, threat detection, access policies.
+    common_app_types:
+      - identity provider
+      - access management
+      - security dashboard
+      - compliance platform
+    modules:
+      sso:
+        description: Single sign-on — SAML, OIDC provider connections, session federation.
+        files:
+          module.yaml: Module identity, SSO actions.
+          events.yaml: sso.login_succeeded, sso.login_failed.
+          settings.yaml: SSO provider configuration per org.
+          admin.yaml: SSO provider setup, session management.
+          handler.py: SSO initiation, callback, and session actions.
+          service.py: SAML/OIDC flow orchestration, session federation.
+          repo.py: SSO session persistence.
+          models.py: SSO session and provider config document shapes.
+          client.py: SAML and OIDC provider client.
+
+      mfa:
+        description: Multi-factor authentication — TOTP, SMS, backup codes.
+        files:
+          module.yaml: Module identity, MFA actions.
+          events.yaml: mfa.enrolled, mfa.verified, mfa.bypassed.
+          handler.py: Enroll, verify, and disable MFA actions.
+          service.py: TOTP generation, SMS dispatch, backup code management.
+          repo.py: MFA credential persistence.
+          models.py: MFA credential document shapes.
+          client.py: SMS OTP delivery provider client.
+
+      access_policies:
+        description: Resource-level access policy definitions and enforcement.
+        files:
+          module.yaml: Module identity, policy management actions.
+          handler.py: Policy CRUD and evaluation actions.
+          service.py: Policy compilation and enforcement logic.
+          repo.py: Policy definition persistence.
+          models.py: Policy definition document shapes.
+          policy.py: Policy evaluation helpers used cross-module.
+
+      audit_security:
+        description: Security-focused audit log — login events, privilege changes, anomalies.
+        files:
+          module.yaml: Module identity, security log query actions.
+          subscriptions.yaml: Subscribes to auth and permission events.
+          admin.yaml: Security event log, anomaly alerts.
+          handler.py: Security log list and export actions.
+          service.py: Event ingestion, anomaly scoring.
+          repo.py: Security event append-only persistence.
+          models.py: Security event document shapes.
+          queries.py: Anomaly detection and threat signal queries.
+
+  healthcare_wellness:
+    description: Health and wellness — patient records, appointments, care plans, telehealth.
+    common_app_types:
+      - telehealth platform
+      - patient portal
+      - care management
+      - mental health app
+    modules:
+      patients:
+        description: Patient profiles — demographics, insurance, medical history.
+        files:
+          module.yaml: Module identity, patient management actions.
+          events.yaml: patient.registered, patient.profile_updated.
+          admin.yaml: Patient list, record management.
+          handler.py: Patient CRUD actions.
+          service.py: Profile management, insurance verification.
+          repo.py: Patient record persistence.
+          models.py: Patient and insurance document shapes.
+          policy.py: HIPAA-compliant access scoping.
+
+      appointments:
+        description: Medical appointment scheduling, reminders, and telehealth links.
+        files:
+          module.yaml: Module identity, appointment actions.
+          events.yaml: appointment.booked, appointment.cancelled, appointment.completed.
+          subscriptions.yaml: Reacts to provider availability changes.
+          notifications.yaml: Appointment reminder notifications.
+          handler.py: Book, cancel, and list appointment actions.
+          service.py: Provider availability, telehealth link generation.
+          repo.py: Appointment persistence.
+          models.py: Appointment document shapes.
+          client.py: Telehealth provider client (Zoom, Doxy.me).
+
+      care_plans:
+        description: Patient care plans — goals, tasks, progress tracking.
+        files:
+          module.yaml: Module identity, care plan actions.
+          events.yaml: care_plan.created, care_plan.goal_completed.
+          notifications.yaml: Goal completion and check-in reminders.
+          handler.py: Care plan CRUD and progress actions.
+          service.py: Goal tracking, adherence scoring.
+          repo.py: Care plan and goal persistence.
+          models.py: Care plan and goal document shapes.
+
+      prescriptions:
+        description: Prescription management — issuance, pharmacy routing, refills.
+        files:
+          module.yaml: Module identity, prescription actions.
+          events.yaml: prescription.issued, prescription.refilled.
+          notifications.yaml: Prescription ready and refill reminder.
+          handler.py: Issue, refill, and list prescription actions.
+          service.py: Prescription validation, formulary check.
+          repo.py: Prescription persistence.
+          models.py: Prescription document shapes.
+          client.py: Pharmacy network client.
+
+  fitness_wellness:
+    description: Fitness and wellness apps — workouts, tracking, coaching, nutrition.
+    common_app_types:
+      - fitness app
+      - personal training
+      - nutrition tracker
+      - wellness platform
+    modules:
+      workouts:
+        description: Workout library — exercises, plans, difficulty levels.
+        files:
+          module.yaml: Module identity, workout actions.
+          events.yaml: workout.completed.
+          admin.yaml: Workout content editor.
+          handler.py: Workout CRUD and browse actions.
+          service.py: Workout plan generation, exercise sequencing.
+          repo.py: Workout persistence.
+          models.py: Workout and exercise document shapes.
+
+      tracking:
+        description: Activity and biometric tracking — logs, streaks, goal progress.
+        files:
+          module.yaml: Module identity, tracking actions.
+          events.yaml: activity.logged, goal.reached.
+          notifications.yaml: Streak and goal milestone notifications.
+          handler.py: Log activity, query progress actions.
+          service.py: Streak calculation, goal progress evaluation.
+          repo.py: Activity log persistence.
+          models.py: Activity log and goal document shapes.
+
+      coaching:
+        description: Coach–client relationship — programs, check-ins, feedback.
+        files:
+          module.yaml: Module identity, coaching actions.
+          events.yaml: check_in.submitted.
+          notifications.yaml: Check-in and feedback notifications.
+          handler.py: Program create, assign, check-in actions.
+          service.py: Coach assignment, program delivery.
+          repo.py: Coaching program and check-in persistence.
+          models.py: Coaching program and check-in document shapes.
+
+      nutrition:
+        description: Meal logging, macro tracking, and food database.
+        files:
+          module.yaml: Module identity, nutrition tracking actions.
+          events.yaml: meal.logged.
+          handler.py: Log meal and query nutrition actions.
+          service.py: Macro calculation, daily target evaluation.
+          repo.py: Meal log and food item persistence.
+          models.py: Meal log and food item document shapes.
+          queries.py: Daily and weekly nutrition summary queries.
+
+  real_estate_property:
+    description: Property listings, searches, transactions, and property management.
+    common_app_types:
+      - property listing
+      - real estate CRM
+      - rental management
+      - property investment
+    modules:
+      listings:
+        description: Property listings — details, media, pricing, and availability status.
+        files:
+          module.yaml: Module identity, listing CRUD actions.
+          events.yaml: listing.published, listing.price_changed, listing.sold.
+          admin.yaml: Listing management and moderation.
+          handler.py: Listing CRUD and search actions.
+          service.py: Listing validation, status management.
+          repo.py: Listing persistence.
+          models.py: Listing and property detail document shapes.
+          pricing.py: Market-adjusted pricing and fee calculation.
+
+      inquiries:
+        description: Buyer or renter inquiries — lead capture and agent routing.
+        files:
+          module.yaml: Module identity, inquiry actions.
+          events.yaml: inquiry.submitted.
+          notifications.yaml: Inquiry notification to agent.
+          handler.py: Submit and list inquiry actions.
+          service.py: Inquiry routing, duplicate detection.
+          repo.py: Inquiry persistence.
+          models.py: Inquiry document shapes.
+
+      transactions:
+        description: Property transactions — offer, acceptance, escrow, closing.
+        files:
+          module.yaml: Module identity, transaction actions.
+          events.yaml: offer.submitted, offer.accepted, transaction.closed.
+          notifications.yaml: Offer and closing status notifications.
+          handler.py: Offer, accept, and close transaction actions.
+          service.py: Offer validation, escrow coordination.
+          repo.py: Transaction record persistence.
+          models.py: Offer and transaction document shapes.
+          state_machine.py: Transaction lifecycle states.
+
+      property_management:
+        description: Rental property management — tenants, leases, maintenance.
+        files:
+          module.yaml: Module identity, property management actions.
+          events.yaml: lease.started, lease.expiring, maintenance.requested.
+          notifications.yaml: Lease expiry and maintenance update notifications.
+          admin.yaml: Tenant list, lease calendar, maintenance queue.
+          handler.py: Tenant, lease, and maintenance actions.
+          service.py: Lease lifecycle management, maintenance routing.
+          repo.py: Tenant, lease, and maintenance record persistence.
+          models.py: Tenant, lease, and maintenance document shapes.
+
+  logistics_delivery_fleet:
+    description: Logistics and fleet management — routes, drivers, shipments, tracking.
+    common_app_types:
+      - delivery platform
+      - fleet management
+      - last-mile delivery
+      - freight management
+    modules:
+      shipments:
+        description: Shipment lifecycle — creation, tracking, delivery confirmation.
+        files:
+          module.yaml: Module identity, shipment actions.
+          events.yaml: shipment.created, shipment.in_transit, shipment.delivered, shipment.exception.
+          notifications.yaml: Shipment status notifications.
+          admin.yaml: Shipment list, exception management.
+          handler.py: Create, update, track shipment actions.
+          service.py: Label generation, carrier selection, exception handling.
+          repo.py: Shipment record persistence.
+          models.py: Shipment and tracking event document shapes.
+          client.py: Carrier API client (EasyPost, FedEx, UPS).
+
+      routes:
+        description: Delivery route planning and optimization.
+        files:
+          module.yaml: Module identity, route management actions.
+          events.yaml: route.optimized, route.started, route.completed.
+          handler.py: Route create, optimize, and complete actions.
+          service.py: Route optimization, stop sequencing.
+          repo.py: Route and stop persistence.
+          models.py: Route and stop document shapes.
+          routing.py: TSP optimization and time-window constraint logic.
+          client.py: Mapping and routing API client (Google Maps, HERE).
+
+      drivers:
+        description: Driver profiles, availability, assignments, and performance.
+        files:
+          module.yaml: Module identity, driver management actions.
+          events.yaml: driver.assigned, driver.checked_in.
+          admin.yaml: Driver list, assignment board, performance dashboard.
+          handler.py: Driver profile, availability, and assignment actions.
+          service.py: Assignment logic, availability validation.
+          repo.py: Driver profile and assignment persistence.
+          models.py: Driver profile and assignment document shapes.
+
+      fleet:
+        description: Vehicle registry, maintenance schedules, and telematics.
+        files:
+          module.yaml: Module identity, fleet management actions.
+          events.yaml: vehicle.maintenance_due, vehicle.breakdown_reported.
+          notifications.yaml: Maintenance due and breakdown notifications.
+          admin.yaml: Fleet list, maintenance schedule, utilization report.
+          handler.py: Vehicle CRUD and telematics query actions.
+          service.py: Maintenance scheduling, utilization calculation.
+          repo.py: Vehicle and telematics record persistence.
+          models.py: Vehicle and telematics document shapes.
+
+  inventory_supply_chain:
+    description: Inventory and supply chain — stock management, purchasing, warehousing.
+    common_app_types:
+      - inventory management
+      - warehouse management
+      - supply chain visibility
+      - procurement platform
+    modules:
+      products:
+        description: Product master data — SKUs, categories, units of measure.
+        files:
+          module.yaml: Module identity, product master data actions.
+          events.yaml: product.created, product.updated, product.discontinued.
+          admin.yaml: Product list and master data editor.
+          handler.py: Product CRUD actions.
+          service.py: SKU generation, category assignment.
+          repo.py: Product record persistence.
+          models.py: Product and SKU document shapes.
+
+      stock_levels:
+        description: Real-time inventory levels across locations — adjustments and transfers.
+        files:
+          module.yaml: Module identity, stock level actions.
+          events.yaml: stock.adjusted, stock.transferred, stock.below_reorder_point.
+          notifications.yaml: Reorder point alert notification.
+          admin.yaml: Stock level dashboard, adjustment history.
+          handler.py: Stock query, adjust, and transfer actions.
+          service.py: Level calculation, reorder point evaluation.
+          repo.py: Stock level and adjustment persistence.
+          models.py: Stock level and adjustment document shapes.
+
+      purchase_orders:
+        description: Supplier purchase order lifecycle — creation, approval, receipt.
+        files:
+          module.yaml: Module identity, purchase order actions.
+          events.yaml: po.created, po.approved, po.received.
+          notifications.yaml: PO approval and receipt notifications.
+          admin.yaml: PO list, approval queue, supplier performance.
+          handler.py: PO create, approve, receive actions.
+          service.py: PO validation, receipt reconciliation.
+          repo.py: PO and line item persistence.
+          models.py: PO and receipt document shapes.
+          state_machine.py: Purchase order lifecycle stages.
+
+      warehouses:
+        description: Warehouse and location management — bins, zones, pick paths.
+        files:
+          module.yaml: Module identity, warehouse management actions.
+          admin.yaml: Warehouse map, location editor.
+          handler.py: Location CRUD and pick path actions.
+          service.py: Bin assignment, pick path optimization.
+          repo.py: Warehouse and location persistence.
+          models.py: Warehouse and bin document shapes.
+
+  erp_operations:
+    description: Enterprise resource planning — finance, procurement, HR, operations.
+    common_app_types:
+      - ERP
+      - operations platform
+      - business management suite
+      - SMB back-office
+    modules:
+      general_ledger:
+        description: Chart of accounts, journal entries, and financial reporting.
+        files:
+          module.yaml: Module identity, ledger actions.
+          events.yaml: journal_entry.posted, period.closed.
+          admin.yaml: Ledger dashboard, period close controls.
+          handler.py: Journal entry and report actions.
+          service.py: Double-entry validation, period close logic.
+          repo.py: Journal entry persistence.
+          models.py: Journal entry and account document shapes.
+          queries.py: Trial balance, P&L, and balance sheet query helpers.
+
+      accounts_payable:
+        description: Supplier invoices, approval, and payment scheduling.
+        files:
+          module.yaml: Module identity, AP actions.
+          events.yaml: invoice.received, invoice.approved, invoice.paid.
+          notifications.yaml: Invoice approval request and payment notifications.
+          admin.yaml: AP queue, aging report.
+          handler.py: Invoice receive, approve, pay actions.
+          service.py: Approval routing, payment scheduling.
+          repo.py: AP invoice persistence.
+          models.py: Supplier invoice and payment document shapes.
+          state_machine.py: AP invoice lifecycle stages.
+
+      accounts_receivable:
+        description: Customer invoicing, payment collection, and aging.
+        files:
+          module.yaml: Module identity, AR actions.
+          events.yaml: invoice.issued, payment.received.
+          notifications.yaml: Invoice delivery and overdue reminders.
+          admin.yaml: AR list, aging dashboard, write-off tools.
+          handler.py: Invoice issue, record payment, list AR actions.
+          service.py: Invoice generation, dunning logic.
+          repo.py: AR invoice and payment persistence.
+          models.py: Customer invoice and payment document shapes.
+
+      hr_employees:
+        description: Employee records, contracts, and HR lifecycle.
+        files:
+          module.yaml: Module identity, HR management actions.
+          events.yaml: employee.hired, employee.terminated.
+          admin.yaml: Employee directory, contract management.
+          handler.py: Employee CRUD and HR action endpoints.
+          service.py: Onboarding workflow, contract lifecycle.
+          repo.py: Employee record persistence.
+          models.py: Employee and contract document shapes.
+
+  legal_compliance:
+    description: Legal operations — contracts, compliance tracking, risk management.
+    common_app_types:
+      - contract management
+      - compliance platform
+      - legal ops
+      - risk management
+    modules:
+      contracts:
+        description: Contract lifecycle — drafting, review, signing, renewal.
+        files:
+          module.yaml: Module identity, contract actions.
+          events.yaml: contract.drafted, contract.signed, contract.expired.
+          notifications.yaml: Review request and expiry reminder notifications.
+          admin.yaml: Contract repository, expiry calendar.
+          handler.py: Contract CRUD and signing actions.
+          service.py: Template rendering, e-sign orchestration, renewal logic.
+          repo.py: Contract persistence.
+          models.py: Contract and signature document shapes.
+          state_machine.py: Contract lifecycle stages.
+          client.py: E-signature provider client (DocuSign, HelloSign).
+
+      compliance_items:
+        description: Compliance requirements — obligations, deadlines, evidence collection.
+        files:
+          module.yaml: Module identity, compliance tracking actions.
+          events.yaml: obligation.due, obligation.completed.
+          notifications.yaml: Upcoming deadline notifications.
+          admin.yaml: Compliance calendar, evidence repository.
+          handler.py: Obligation create, complete, list actions.
+          service.py: Deadline tracking, evidence validation.
+          repo.py: Obligation and evidence persistence.
+          models.py: Obligation and evidence document shapes.
+
+      risk_register:
+        description: Risk identification, assessment, and mitigation tracking.
+        files:
+          module.yaml: Module identity, risk management actions.
+          events.yaml: risk.identified, risk.mitigated.
+          admin.yaml: Risk register, heat map dashboard.
+          handler.py: Risk CRUD and assessment actions.
+          service.py: Risk scoring, mitigation assignment.
+          repo.py: Risk record persistence.
+          models.py: Risk and mitigation document shapes.
+
+  government_civic:
+    description: Government and civic platforms — services, permits, public records, participation.
+    common_app_types:
+      - citizen portal
+      - permit management
+      - public services
+      - civic engagement
+    modules:
+      service_requests:
+        description: Citizen service requests — submission, routing, status tracking.
+        files:
+          module.yaml: Module identity, service request actions.
+          events.yaml: request.submitted, request.assigned, request.resolved.
+          notifications.yaml: Submission confirmation and status update notifications.
+          admin.yaml: Request queue, assignment tools, resolution stats.
+          handler.py: Submit, track, and close request actions.
+          service.py: Routing rules, SLA tracking.
+          repo.py: Service request persistence.
+          models.py: Service request document shapes.
+          sla.py: Government SLA policy and breach detection.
+
+      permits:
+        description: Permit applications — submission, review, approval, and issuance.
+        files:
+          module.yaml: Module identity, permit actions.
+          events.yaml: permit.applied, permit.approved, permit.rejected, permit.expired.
+          notifications.yaml: Application status notifications.
+          admin.yaml: Permit review queue, issuance tools.
+          handler.py: Apply, review, and list permit actions.
+          service.py: Eligibility validation, review assignment.
+          repo.py: Permit application persistence.
+          models.py: Permit application document shapes.
+          state_machine.py: Permit lifecycle stages.
+
+      public_records:
+        description: Public record publication and search.
+        files:
+          module.yaml: Module identity, public record actions.
+          handler.py: Publish and search public record actions.
+          service.py: Redaction logic, index update.
+          repo.py: Public record persistence.
+          models.py: Public record document shapes.
+          queries.py: Full-text and category-filtered search helpers.
+
+  nonprofit_fundraising:
+    description: Nonprofit operations — donations, campaigns, donor management, grants.
+    common_app_types:
+      - fundraising platform
+      - donor CRM
+      - grant management
+      - volunteer platform
+    modules:
+      campaigns:
+        description: Fundraising campaigns — goal, timeline, story, and progress.
+        files:
+          module.yaml: Module identity, campaign actions.
+          events.yaml: campaign.launched, campaign.goal_reached, campaign.closed.
+          notifications.yaml: Campaign milestone and close notifications.
+          admin.yaml: Campaign dashboard, goal tracking.
+          handler.py: Campaign CRUD and progress actions.
+          service.py: Goal tracking, matching gift logic.
+          repo.py: Campaign persistence.
+          models.py: Campaign document shapes.
+
+      donations:
+        description: Donation processing — one-time and recurring, receipts, tax records.
+        files:
+          module.yaml: Module identity, donation actions.
+          events.yaml: donation.received, recurring.payment_processed.
+          notifications.yaml: Donation receipt and thank-you notifications.
+          admin.yaml: Donation list, recurring management, export.
+          handler.py: Donate, list, and cancel recurring actions.
+          service.py: Payment processing, receipt generation, tax record creation.
+          repo.py: Donation record persistence.
+          models.py: Donation and receipt document shapes.
+          payment_adapter.py: Donation-specific payment provider abstraction.
+
+      donors:
+        description: Donor profiles — giving history, segmentation, stewardship.
+        files:
+          module.yaml: Module identity, donor management actions.
+          events.yaml: donor.created, donor.lapsed.
+          admin.yaml: Donor list, segmentation, stewardship tools.
+          handler.py: Donor CRUD and history actions.
+          service.py: Lapsed donor detection, stewardship scheduling.
+          repo.py: Donor profile persistence.
+          models.py: Donor and giving history document shapes.
+
+      grants:
+        description: Grant applications — submissions, review, award, and reporting.
+        files:
+          module.yaml: Module identity, grant management actions.
+          events.yaml: grant.applied, grant.awarded, grant.report_due.
+          notifications.yaml: Grant status and report deadline notifications.
+          admin.yaml: Grant pipeline, award tracking.
+          handler.py: Grant application, award, and reporting actions.
+          service.py: Application review workflow, reporting deadline tracking.
+          repo.py: Grant and application persistence.
+          models.py: Grant and application document shapes.
+          state_machine.py: Grant application lifecycle stages.
+
+  iot_devices:
+    description: IoT platforms — device management, telemetry, rules, and remote control.
+    common_app_types:
+      - IoT management platform
+      - smart home
+      - industrial IoT
+      - connected product
+    modules:
+      devices:
+        description: Device registry — provisioning, metadata, connectivity status.
+        files:
+          module.yaml: Module identity, device management actions.
+          events.yaml: device.provisioned, device.online, device.offline.
+          admin.yaml: Device fleet dashboard, remote management.
+          handler.py: Device register, list, and decommission actions.
+          service.py: Provisioning flow, connectivity monitoring.
+          repo.py: Device registry persistence.
+          models.py: Device and provisioning document shapes.
+
+      telemetry:
+        description: Device telemetry ingestion — sensor readings, time-series storage.
+        files:
+          module.yaml: Module identity, telemetry ingest and query actions.
+          events.yaml: telemetry.anomaly_detected.
+          handler.py: Ingest and query telemetry actions.
+          service.py: Telemetry validation, anomaly detection.
+          repo.py: Time-series telemetry persistence.
+          models.py: Telemetry reading document shapes.
+          queries.py: Aggregation and time-window telemetry queries.
+
+      rules:
+        description: Automation rules — trigger conditions, device actions, notifications.
+        files:
+          module.yaml: Module identity, rule management actions.
+          events.yaml: rule.triggered.
+          notifications.yaml: Rule trigger notification.
+          handler.py: Rule CRUD and trigger history actions.
+          service.py: Rule evaluation engine, condition matching.
+          repo.py: Rule and trigger history persistence.
+          models.py: Rule and trigger document shapes.
+
+      firmware:
+        description: Firmware version management and OTA update orchestration.
+        files:
+          module.yaml: Module identity, firmware management actions.
+          events.yaml: firmware.update_available, firmware.update_completed.
+          notifications.yaml: Firmware update available notification.
+          admin.yaml: Firmware release management, device update status.
+          handler.py: Firmware release and OTA push actions.
+          service.py: Update eligibility, rollout orchestration.
+          repo.py: Firmware release and device update status persistence.
+          models.py: Firmware release document shapes.
+          client.py: OTA delivery provider or device gateway client.
+
+  gaming_interactive:
+    description: Gaming platforms — player accounts, matches, leaderboards, in-game economy.
+    common_app_types:
+      - multiplayer game backend
+      - gaming platform
+      - esports
+      - casual game
+    modules:
+      players:
+        description: Player profiles — stats, achievements, game history, and identity.
+        files:
+          module.yaml: Module identity, player actions.
+          events.yaml: player.registered, player.level_up, player.banned.
+          admin.yaml: Player management, ban tools, stat viewer.
+          handler.py: Player profile and stats actions.
+          service.py: Level-up logic, achievement evaluation.
+          repo.py: Player profile persistence.
+          models.py: Player and achievement document shapes.
+
+      matches:
+        description: Match lifecycle — creation, player assignment, result recording.
+        files:
+          module.yaml: Module identity, match actions.
+          events.yaml: match.started, match.completed.
+          handler.py: Create match, record result, list history actions.
+          service.py: Matchmaking logic, result validation, rating update.
+          repo.py: Match record persistence.
+          models.py: Match and result document shapes.
+
+      leaderboards:
+        description: Global and scoped leaderboards — rankings, score history.
+        files:
+          module.yaml: Module identity, leaderboard query actions.
+          subscriptions.yaml: Reacts to match.completed to update rankings.
+          handler.py: Leaderboard query and player rank actions.
+          service.py: Ranking algorithm, score aggregation.
+          repo.py: Leaderboard and score persistence.
+          models.py: Leaderboard and ranking document shapes.
+          ranking.py: ELO or skill-based ranking computation.
+
+      economy:
+        description: In-game economy — virtual currency, item purchases, inventory.
+        files:
+          module.yaml: Module identity, economy actions.
+          events.yaml: currency.credited, item.purchased.
+          handler.py: Balance query, purchase, and item list actions.
+          service.py: Purchase validation, inventory management, balance enforcement.
+          repo.py: Currency balance and item inventory persistence.
+          models.py: Currency balance and inventory document shapes.
+
+  directory_discovery:
+    description: Directory and discovery platforms — listings, profiles, search, reviews.
+    common_app_types:
+      - business directory
+      - professional network
+      - local discovery
+      - niche directory
+    modules:
+      profiles:
+        description: Listed entity profiles — businesses, professionals, venues.
+        files:
+          module.yaml: Module identity, profile CRUD actions.
+          events.yaml: profile.created, profile.claimed, profile.updated.
+          admin.yaml: Profile moderation, claim verification.
+          handler.py: Profile CRUD and browse actions.
+          service.py: Profile validation, claim verification.
+          repo.py: Profile persistence.
+          models.py: Profile and category document shapes.
+
+      search:
+        description: Location-aware and keyword search across directory listings.
+        files:
+          module.yaml: Module identity, search actions.
+          subscriptions.yaml: Reacts to profile events to update search index.
+          handler.py: Search and filter actions.
+          service.py: Query building, geo-proximity ranking.
+          repo.py: Search index reads.
+          models.py: Search result and filter document shapes.
+          ranking.py: Geo-distance, rating, and relevance scoring.
+
+      reviews:
+        description: User reviews and ratings for listed entities.
+        files:
+          module.yaml: Module identity, review actions.
+          events.yaml: review.submitted, review.responded.
+          notifications.yaml: New review notification to business owner.
+          admin.yaml: Review moderation queue.
+          handler.py: Submit, respond, and list review actions.
+          service.py: Review validation, rating aggregation.
+          repo.py: Review persistence.
+          models.py: Review and response document shapes.
+          moderation.py: Content policy enforcement and flagging.
+
+      claims:
+        description: Ownership claim flow for unclaimed profiles.
+        files:
+          module.yaml: Module identity, claim management actions.
+          events.yaml: claim.submitted, claim.approved.
+          notifications.yaml: Claim decision notification.
+          admin.yaml: Claim review queue.
+          handler.py: Submit claim, review, and approve actions.
+          service.py: Claim validation, verification evidence review.
+          repo.py: Claim record persistence.
+          models.py: Claim document shapes.
+
+  classifieds_auction:
+    description: Classifieds and auction platforms — listings, bids, payments, safety.
+    common_app_types:
+      - classifieds site
+      - online auction
+      - C2C marketplace
+      - equipment auction
+    modules:
+      listings:
+        description: Ad and auction item listings — creation, pricing, expiry.
+        files:
+          module.yaml: Module identity, listing actions.
+          events.yaml: listing.published, listing.expired, listing.sold.
+          admin.yaml: Listing moderation, featured placement.
+          handler.py: Listing CRUD and browse actions.
+          service.py: Listing validation, expiry scheduling.
+          repo.py: Listing persistence.
+          models.py: Listing and media document shapes.
+
+      bids:
+        description: Auction bidding — bid submission, outbid detection, winner selection.
+        files:
+          module.yaml: Module identity, bidding actions.
+          events.yaml: bid.placed, bid.outbid, auction.ended.
+          notifications.yaml: Outbid and auction end notifications.
+          handler.py: Place bid and bid history actions.
+          service.py: Bid validation, reserve price check, winner determination.
+          repo.py: Bid record persistence.
+          models.py: Bid document shapes.
+          state_machine.py: Auction states.
+
+      messages:
+        description: Buyer–seller messaging before transaction.
+        files:
+          module.yaml: Module identity, messaging actions.
+          events.yaml: message.sent.
+          notifications.yaml: New message notification.
+          handler.py: Send and list message actions.
+          service.py: Message validation, spam detection.
+          repo.py: Message persistence.
+          models.py: Message document shapes.
+
+  internal_tools:
+    description: Internal business tools — admin panels, operational dashboards, data management.
+    common_app_types:
+      - internal admin tool
+      - ops dashboard
+      - data management tool
+      - employee portal
+    modules:
+      data_management:
+        description: Bulk data import, export, and transformation tools.
+        files:
+          module.yaml: Module identity, data management actions.
+          admin.yaml: Import/export UI, job history.
+          handler.py: Import, export, and transform actions.
+          service.py: Validation, transformation pipeline, error handling.
+          repo.py: Import job and record persistence.
+          models.py: Import job and error document shapes.
+          tasks.py: Async bulk processing task.
+
+      reports:
+        description: Internal operational reports — scheduled and on-demand.
+        files:
+          module.yaml: Module identity, report actions.
+          admin.yaml: Report catalogue and scheduler.
+          handler.py: Run and download report actions.
+          service.py: Report generation, data assembly.
+          repo.py: Report definition and history persistence.
+          models.py: Report definition document shapes.
+          queries.py: Operational query helpers.
+          tasks.py: Async scheduled report task.
+
+      approvals:
+        description: Internal approval workflows — requests, reviewers, decisions.
+        files:
+          module.yaml: Module identity, approval actions.
+          events.yaml: approval.requested, approval.approved, approval.rejected.
+          notifications.yaml: Approval request and decision notifications.
+          admin.yaml: Approval queue and history.
+          handler.py: Request, approve, reject actions.
+          service.py: Reviewer assignment, escalation logic.
+          repo.py: Approval request persistence.
+          models.py: Approval request and decision document shapes.
+          state_machine.py: Approval workflow states.
+
+      config_management:
+        description: Operational configuration — feature toggles, system parameters.
+        files:
+          module.yaml: Module identity, config management actions.
+          settings.yaml: System-wide configurable parameters.
+          admin.yaml: Config editor, change history.
+          handler.py: Config read and write actions.
+          service.py: Config validation, change auditing.
+          repo.py: Config record persistence.
+          models.py: Config document shapes.
+
+  collaboration_productivity:
+    description: Team collaboration — documents, whiteboards, calendars, task lists.
+    common_app_types:
+      - collaboration suite
+      - team workspace
+      - productivity app
+      - shared workspace
+    modules:
+      documents:
+        description: Collaborative document editing — real-time, versioning, sharing.
+        files:
+          module.yaml: Module identity, document actions.
+          events.yaml: document.created, document.updated, document.shared.
+          handler.py: Document CRUD and share actions.
+          service.py: Version management, permission resolution.
+          repo.py: Document and version persistence.
+          models.py: Document and version document shapes.
+          channels.yaml: Real-time collaboration WebSocket channel definitions.
+
+      calendars:
+        description: Shared team calendars — events, availability, scheduling.
+        files:
+          module.yaml: Module identity, calendar actions.
+          events.yaml: calendar_event.created, calendar_event.updated.
+          notifications.yaml: Event invitation and reminder notifications.
+          handler.py: Event CRUD and availability query actions.
+          service.py: Conflict detection, invite management.
+          repo.py: Calendar event persistence.
+          models.py: Calendar event and invite document shapes.
+          client.py: External calendar sync client (Google Calendar, Outlook).
+
+      tasks:
+        description: Personal and shared task lists with due dates and assignments.
+        files:
+          module.yaml: Module identity, task actions.
+          events.yaml: task.created, task.completed.
+          notifications.yaml: Assignment and due date reminder notifications.
+          handler.py: Task CRUD and assignment actions.
+          service.py: Completion logic, reminder scheduling.
+          repo.py: Task persistence.
+          models.py: Task document shapes.

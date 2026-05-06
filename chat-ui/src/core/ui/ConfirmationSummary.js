@@ -1,5 +1,5 @@
 import { Alert, Badge, Button, Card } from '../../ui/primitives/index.js';
-import { normalizeActions, normalizeSummaryItems, sendPrimitiveResponse } from './workflowPrimitiveUtils.js';
+import { normalizePrimitiveActions, normalizeSummaryItems, sendPrimitiveResponse } from './workflowPrimitiveUtils.js';
 
 const fallbackActions = [
   { id: 'confirm', label: 'Confirm', variant: 'primary', approved: true },
@@ -8,7 +8,7 @@ const fallbackActions = [
 
 export default function ConfirmationSummary({ payload = {}, onResponse, onCancel }) {
   const items = normalizeSummaryItems(payload.items || payload.fields);
-  const actions = normalizeActions(payload.actions, fallbackActions);
+  const actions = normalizePrimitiveActions(payload, fallbackActions);
 
   return (
     <Card

@@ -23,8 +23,8 @@ from mozaiksai.core.workflow.generator_support.agent_endpoints import (
 )
 from mozaiksai.core.workflow.generator_support.workflow_artifacts import record_workflow_artifacts
 from mozaiksai.core.workflow.generator_support.workflow_exports import record_workflow_export
-from workflows.AgentGenerator.tools.export_agent_workflow import export_agent_workflow_to_github
-from workflows.AgentGenerator.tools.workflow_converter import create_workflow_files, promote_generated_workflow
+from .export_agent_workflow import export_agent_workflow_to_github
+from .workflow_converter import create_workflow_files, promote_generated_workflow
 
 try:
     from logs.tools_logs import get_tool_logger as _get_tool_logger, log_tool_event as _log_tool_event  # type: ignore
@@ -778,7 +778,7 @@ async def generate_and_download(
         if tlog and _log_tool_event:
             _log_tool_event(tlog, action="emit_ui", status="start", agent_message_id=agent_message_id)
         response = await use_ui_tool(
-            tool_id="FileDownloadCenter",
+            tool_id="DownloadCenter",
             payload=ui_payload,
             chat_id=chat_id,
             workflow_name=wf_name,
@@ -896,7 +896,7 @@ async def generate_and_download(
         except Exception as ctx_err:
             wf_logger.warning(f"⚠️ Failed to set download_complete context variable: {ctx_err}")
 
-    # Optional GitHub export (triggered by FileDownloadCenter action)
+    # Optional GitHub export (triggered by DownloadCenter action)
     deployment_result: Optional[Dict[str, Any]] = None
     try:
         action = None
@@ -914,13 +914,16 @@ async def generate_and_download(
 
             repo_name = None
             commit_message = "Initial code generation from Mozaiks AI"
-            if isinstance(response, dict) and isinstance(response.get("data"), dict):
-                repo_name = response["data"].get("repo_name") or response["data"].get("repoName")
-                commit_message = (
-                    response["data"].get("commit_message")
-                    or response["data"].get("commitMessage")
-                    or commit_message
-                )
+            if isinstance(response, dict):
+                repo_name = response.get("repo_name") or response.get("repoName")
+                commit_message = response.get("commit_message") or response.get("commitMessage") or commit_message
+                if isinstance(response.get("data"), dict):
+                    repo_name = response["data"].get("repo_name") or response["data"].get("repoName") or repo_name
+                    commit_message = (
+                        response["data"].get("commit_message")
+                        or response["data"].get("commitMessage")
+                        or commit_message
+                    )
 
             if not zip_bundle_path:
                 deployment_result = {"success": False, "error": "ZIP bundle path not available for export."}

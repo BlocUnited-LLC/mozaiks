@@ -31,13 +31,13 @@ from mozaiksai.core.workflow.generator_support.workflow_exports import get_lates
 from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
 from logs.logging_config import get_workflow_logger
 
-from workflows.AppGenerator.tools.export_app_code import (
+from factory_app.workflows.AppGenerator.tools.export_app_code import (
     export_app_code_to_github,
     resolve_export_gate,
 )
-from workflows.AppGenerator.tools.requirements_scanner import scan_requirements
-from workflows.AppGenerator.tools.update_app_record import update_build_status
-from workflows.AppGenerator.tools.schema_migration import inject_migration_into_bundle
+from factory_app.workflows.AppGenerator.tools.requirements_scanner import scan_requirements
+from factory_app.workflows.AppGenerator.tools.update_app_record import update_build_status
+from factory_app.workflows.AppGenerator.tools.schema_migration import inject_migration_into_bundle
 
 try:
     from logs.tools_logs import get_tool_logger as _get_tool_logger, log_tool_event as _log_tool_event  # type: ignore

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 import logging
+from copy import deepcopy
 from typing import Dict, Any, Optional
 import datetime as _dt
 
@@ -58,6 +59,86 @@ def is_ui_tool(tool_id: str) -> bool:
         return False
     return False
 
+
+def _format_action_label(action_id: str) -> str:
+    parts = [part for part in str(action_id or "").replace("-", "_").split("_") if part]
+    if not parts:
+        return "Action"
+    return " ".join(part.capitalize() for part in parts)
+
+
+def _normalize_manifest_action(action: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not isinstance(action, dict):
+        return None
+    action_id = str(action.get("id") or "").strip()
+    if not action_id:
+        return None
+    normalized: Dict[str, Any] = {
+        "id": action_id,
+        "label": str(action.get("label") or _format_action_label(action_id)).strip(),
+    }
+    description = str(action.get("description") or "").strip()
+    if description:
+        normalized["description"] = description
+    variant = str(action.get("variant") or "").strip()
+    if variant:
+        normalized["variant"] = variant
+    if isinstance(action.get("approved"), bool):
+        normalized["approved"] = action["approved"]
+    payload_schema = action.get("payload_schema")
+    if isinstance(payload_schema, dict) and payload_schema:
+        normalized["payload_schema"] = deepcopy(payload_schema)
+    payload = action.get("payload")
+    if isinstance(payload, dict) and payload:
+        normalized["payload"] = deepcopy(payload)
+    return normalized
+
+
+def _enrich_payload_with_ui_contract(
+    tool_id: str,
+    payload: Dict[str, Any],
+    wf_logger,
+) -> tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    enriched_payload = dict(payload if isinstance(payload, dict) else {})
+    tool_record = workflow_manager.get_ui_tool_record(tool_id)
+    if not tool_record:
+        return enriched_payload, None
+
+    component_name = str(tool_record.get("component") or tool_id).strip() or tool_id
+    workflow_primitive = str(tool_record.get("workflow_primitive") or "").strip()
+    realization = str(tool_record.get("realization") or "").strip()
+    if component_name:
+        enriched_payload["component_type"] = component_name
+    if workflow_primitive:
+        enriched_payload["workflow_primitive"] = workflow_primitive
+    if realization:
+        enriched_payload["ui_realization"] = realization
+
+    ui_contract = tool_record.get("ui_contract")
+    if isinstance(ui_contract, dict) and ui_contract:
+        normalized_contract = deepcopy(ui_contract)
+        actions_schema = normalized_contract.get("actions_schema")
+        normalized_actions = []
+        if isinstance(actions_schema, list):
+            for action in actions_schema:
+                normalized = _normalize_manifest_action(action)
+                if normalized is not None:
+                    normalized_actions.append(normalized)
+            normalized_contract["actions_schema"] = normalized_actions
+
+        enriched_payload["ui_contract"] = normalized_contract
+        if normalized_actions and not isinstance(enriched_payload.get("actions"), list):
+            enriched_payload["actions"] = [deepcopy(action) for action in normalized_actions]
+
+        wf_logger.debug(
+            "🔍 Enriched UI payload from manifest: tool=%s primitive=%s actions=%d",
+            tool_id,
+            workflow_primitive or "<none>",
+            len(normalized_actions),
+        )
+
+    return enriched_payload, tool_record
+
 async def _emit_tool_call_core(
     tool_id: str,
     payload: Dict[str, Any],
@@ -66,6 +147,7 @@ async def _emit_tool_call_core(
     workflow_name: str = "unknown",
     agent_name: Optional[str] = None,
     awaiting_response: bool = True,
+    component_name: Optional[str] = None,
 ) -> str:
     """
     Core function to emit a response-aware tool_call to the frontend.
@@ -114,7 +196,7 @@ async def _emit_tool_call_core(
             event_id=event_id,
             chat_id=chat_id,
             tool_name=tool_id,  # use actual tool id
-            component_name=tool_id,
+            component_name=component_name or tool_id,
             display_type=display,
             payload=payload_to_send,
             agent_name=agent_name,
@@ -212,17 +294,20 @@ async def use_ui_tool(
     """
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id)
     start = _dt.datetime.now(_dt.timezone.utc)
-    agent_name = _resolve_ui_tool_owner(tool_id, payload, wf_logger)
+    enriched_payload, tool_record = _enrich_payload_with_ui_contract(tool_id, payload, wf_logger)
+    component_name = str((tool_record or {}).get("component") or tool_id).strip() or tool_id
+    agent_name = _resolve_ui_tool_owner(tool_id, enriched_payload, wf_logger)
     resolved_display = _resolve_ui_display(tool_id, display, wf_logger)
     
     event_id = await _emit_tool_call_core(
         tool_id=tool_id,
-        payload=payload,
+        payload=enriched_payload,
         display=resolved_display,
         chat_id=chat_id,
         workflow_name=workflow_name,
         agent_name=agent_name,
         awaiting_response=True,
+        component_name=component_name,
     )
 
     # Persist UI tool metadata to enable restoration after reconnect/resume.
@@ -253,12 +338,12 @@ async def use_ui_tool(
                         metadata={
                             "tool_name": tool_id,
                             "tool_call_id": event_id,
-                            "component_type": tool_id,
+                            "component_type": component_name,
                             "display": resolved_display,
                             "tool_call_completed": False,
                             "tool_call_status": "pending",
                             "awaiting_response": True,
-                            "payload": payload,
+                            "payload": enriched_payload,
                             "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
                         },
                     ),
@@ -367,17 +452,20 @@ async def emit_ui_surface(
     render the component but no user response is required.
     """
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id)
-    resolved_agent_name = agent_name or _resolve_ui_tool_owner(tool_id, payload, wf_logger)
+    enriched_payload, tool_record = _enrich_payload_with_ui_contract(tool_id, payload, wf_logger)
+    component_name = str((tool_record or {}).get("component") or tool_id).strip() or tool_id
+    resolved_agent_name = agent_name or _resolve_ui_tool_owner(tool_id, enriched_payload, wf_logger)
     resolved_display = _resolve_ui_display(tool_id, display, wf_logger)
 
     event_id = await _emit_tool_call_core(
         tool_id=tool_id,
-        payload=payload,
+        payload=enriched_payload,
         display=resolved_display,
         chat_id=chat_id,
         workflow_name=workflow_name,
         agent_name=resolved_agent_name,
         awaiting_response=False,
+        component_name=component_name,
     )
 
     try:

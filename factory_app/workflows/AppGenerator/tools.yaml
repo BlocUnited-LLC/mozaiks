@@ -35,6 +35,48 @@ tools:
     component: AppWorkbench
     mode: artifact
     workflow_primitive: artifact_workbench
+    realization: workflow_wrapper
+  ui_contract:
+    surface_kind: agent_tool
+    payload_schema:
+      type: object
+      properties:
+        title:
+          type: string
+        workbench:
+          type: object
+        files:
+          type: array
+      additionalProperties: true
+    actions_schema:
+    - id: download_complete
+      label: Continue
+      variant: primary
+      approved: true
+      payload_schema:
+        type: object
+        properties:
+          download_accepted:
+            type: boolean
+        additionalProperties: true
+    - id: export_to_github
+      label: Export to GitHub
+      variant: secondary
+      payload_schema:
+        type: object
+        properties:
+          repo_name:
+            type: string
+          commit_message:
+            type: string
+        additionalProperties: true
+    - id: close
+      label: Close
+      variant: ghost
+      payload_schema:
+        type: object
+        properties: {}
+        additionalProperties: true
 - agent: AppValidationAgent
   file: app_validation.py
   function: validate_app_build
@@ -53,6 +95,16 @@ tools:
   function: run_integration_tests
   description: Run lightweight integration checks between the generated frontend app
     and the agent backend context (env var wiring, endpoint availability).
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: IntegrationTestAgent
+  file: validate_wiring.py
+  function: validate_wiring
+  description: >
+    Cross-reference every page api_endpoint field against the known module action
+    registry (capability_packs + modules/*/module.yaml). Flags orphaned page
+    endpoints (blocking) and unreferenced module actions (advisory). Must be called
+    alongside run_integration_tests before finalizing the build.
   tool_type: Agent_Tool
   auto_tool_call: false
 - agent: ConfigMiddlewareAgent

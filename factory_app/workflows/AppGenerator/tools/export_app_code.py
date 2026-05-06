@@ -19,7 +19,7 @@ from mozaiksai.core.workflow.generator_support.workflow_exports import (
     get_latest_workflow_export,
     record_workflow_export,
 )
-from workflows.AgentGenerator.tools.export_to_github import export_to_github_tool
+from factory_app.workflows.AgentGenerator.tools.export_to_github import export_to_github_tool
 
 
 ALLOWED_EXPORT_VALIDATION_STATUSES = {"passed", "skipped"}

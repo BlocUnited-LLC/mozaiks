@@ -16,20 +16,33 @@ Modules support workflows — they provide the action surface that AI agents cal
 
 ```
 app/modules/{name}/
-├── module.yaml           ← actions, permissions, capabilities, emits
+├── module.yaml           ← actions, permissions, capabilities, emits, type
 ├── events.yaml           ← domain events this module may publish
 ├── subscriptions.yaml    ← event reactions owned by this module
 ├── notifications.yaml    ← notification rules derived from events
 ├── settings.yaml         ← user/app settings schema (empty list if none)
 ├── admin.yaml            ← admin panels (omit file if none)
+│
+│   # type: messaging only
+├── channels.yaml         ← transport/delivery channel definitions (WebSocket, push)
+│
+│   # type: workflow only
+├── states.yaml           ← named states + initial state
+├── transitions.yaml      ← valid transitions, required roles, emitted events
+│
 └── backend/
     ├── __init__.py
     ├── handler.py        ← required — thin dispatch, one method per action
     ├── service.py        ← recommended — all business logic and event emission
     ├── repo.py           ← recommended — MongoDB access, no logic
     ├── policy.py         ← recommended — multi-tenancy query scoping
-    └── schemas.py        ← recommended — typed shapes + pure helpers
+    └── models.py         ← recommended — typed shapes + pure helpers
 ```
+
+The `type` field in `module.yaml` selects the scaffold pattern:
+`standard` (default), `messaging`, `workflow`, or `transactional`.
+Type-specific YAML files and backend conventions are documented in
+`docs/architecture/foundations/module-type-taxonomy.md`.
 
 The runtime auto-discovers and registers all modules at startup.
 Module routes are auto-mounted at `/api/modules/{name}/{action_id}`.
@@ -46,6 +59,7 @@ module:
   id: {name}
   display_name: {Display Name}
   version: 1.0.0
+  type: standard   # standard | messaging | workflow | transactional
   description: What this module does.
   owner: mozaiks
   visibility: hosted
@@ -137,7 +151,7 @@ schema_version: mozaiks.settings.v1
 settings: []
 ```
 
-### 6. Write `backend/schemas.py`
+### 6. Write `backend/models.py`
 
 TypedDicts for MongoDB document shapes. Pure helpers. No I/O.
 
@@ -245,7 +259,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from .schemas import {Name}Record, coerce_limit, timestamp_now
+from .models import {Name}Record, coerce_limit, timestamp_now
 from .policy import owner_id_from_context, scoped_owner_query, scoped_record_query
 from .repo import {Name}Repo
 
@@ -324,7 +338,7 @@ Modules are loaded at startup. No registration step needed.
 | `service.py` | Validate, call repo, call ctx.emit after commit | ctx.db direct access, HTTP calls |
 | `repo.py` | MongoDB queries, cursor iteration | Business logic, event emission, validation |
 | `policy.py` | Build query dicts from ctx | DB access, side effects |
-| `schemas.py` | TypedDicts, timestamp_now, coerce_limit | I/O, imports from service/repo |
+| `models.py` | TypedDicts, timestamp_now, coerce_limit | I/O, imports from service/repo |
 
 ---
 

@@ -2,18 +2,26 @@
 title: Refinement Control Plane
 status: Authoritative - Pre-Production, No Backward Compat
 created: 2026-04-13
-depends_on: workflow-routing-gates.md, WORKFLOW_TRIGGERS_SPEC.md, ../foundations/event-system.md, ../../reference/deep-dives/universal-orchestrator.md
+depends_on: workflow-routing-gates.md, WORKFLOW_TRIGGERS_SPEC.md, ../foundations/event-system.md, ../../reference/deep-dives/universal-orchestrator.md, ../../../factory_app/docs/database-intent-and-revision-contract.md
 ---
 
 # Refinement Control Plane
 
 This document defines how Mozaiks handles post-generation changes without forcing users back through full generation workflows for every adjustment.
 
+In the canonical orchestration model, this document covers the builder session
+loop and the refinement worker loop. It does not redefine workflow-local AG2
+handoffs.
+
 The goal is simple:
 
 - initial generation workflows create the first canonical shape
 - refinement workflows adjust that shape safely and quickly
 - the control plane decides when a change is small, scoped, design-only, or concept-breaking
+
+The refinement control plane is enabled and configured at the app level through
+`app/config/ai.json -> control_plane`. The classifier and future coding worker
+do not read workflow-local AG2 config for this.
 
 This is a pre-production design. There is no backward-compatibility requirement.
 
@@ -39,6 +47,7 @@ Refinement is the edit path:
 
 Do **not** re-run `AgentGenerator` or `AppGenerator` from the top for every tweak.
 Do **not** let E2B become the source of truth.
+Do **not** treat global refinement routing as just another AG2 handoff graph.
 
 ---
 
@@ -61,6 +70,14 @@ The existing platform already has the right raw ingredients:
 - App validation and preview already run in E2B-backed tooling.
 
 That means refinement does **not** need a brand-new reasoning model. It needs a control plane and durable state model around the artifacts the generators already produce.
+
+Database refinements should follow the companion contract in
+`factory_app/docs/database-intent-and-revision-contract.md`:
+
+- compare previous and target `database_intent` artifacts
+- generate a typed migration plan
+- auto-apply additive-safe changes only
+- block destructive changes unless explicitly escalated
 
 ---
 
@@ -128,6 +145,93 @@ Canonical app-build events:
 - `app.core_change_requested`
 
 The same shape should be used later for workflow-bundle refinement with a parallel family rather than overloading app events.
+
+Important:
+
+- this is not a single global prompt wrapped around every product request
+- this is a builder-session harness step for refinement and other
+  build-affecting requests
+- the current backend entrypoint is `OrchestrationControlHarness`, which owns
+  builder-context interception and delegates to narrower analyzers such as the
+  refinement classifier
+
+Current runtime binding:
+
+```text
+Studio /api/workflows/trigger
+  -> OrchestrationControlHarness
+  -> LLMChangeClassifier
+  -> RefinementTriggerRouteResolver
+  -> SessionRouter
+  -> selected workflow run
+```
+
+Current app-level config contract:
+
+```json
+{
+  "control_plane": {
+    "enabled": true,
+    "classifier": {
+      "enabled": true,
+      "llm_config": {
+        "model": "gpt-4o-mini",
+        "temperature": 0.0
+      }
+    },
+    "coding": {
+      "enabled": false,
+      "llm_config": {
+        "model": "gpt-5.2-codex",
+        "temperature": 0.1
+      }
+    }
+  }
+}
+```
+
+Rules:
+
+- `control_plane.enabled` gates the harness as a whole
+- `classifier.llm_config` selects the authoritative refinement-classification model
+- `coding.llm_config` is reserved for the refinement worker loop, not for workflow-local AG2 execution
+
+---
+
+## Current Typed Control-Plane Contracts
+
+The control plane should operate on four typed artifacts:
+
+| Contract | Purpose |
+|---|---|
+| `RefinementRequest` | Canonical incoming refinement payload: optional route hint, artifact lineage, raw request text, source surface |
+| `ChangeIntent` | Typed classification result used for routing and later review/persistence |
+| `ImpactSet` | Typed downstream scope summary: affected workflows, declarative families, restart point, replanning/rebuild flags |
+| `RefinementRoutingDecision` | Deterministic re-entry decision plus workflow seed context |
+
+These contracts live above workflow-local AG2 handoffs.
+
+The runtime may still seed workflow context with convenience fields such as:
+
+- `change_class`
+- `artifact_kind`
+- `artifact_version_id`
+- `refinement_request`
+
+But the control plane itself should reason from the typed contracts, not from a
+loose bundle of free-form strings.
+
+`declared_change_class` inside `RefinementRequest` is advisory only.
+
+It may be supplied by UI as a route hint, but the authoritative classification
+comes from the backend control-plane model call.
+
+`ChangeIntent.source` should stay explicit:
+
+- `llm` when the backend classifier produced the authoritative class used for routing
+
+The typed contract should stay stable even if the model prompt or provider
+changes later.
 
 ---
 
@@ -236,6 +340,9 @@ Their prompt responsibilities are:
 ### Refinement workflows
 
 Refinement should use dedicated agents or dedicated workflow modes.
+
+Those agents may still run through AG2, but they run only after the control
+plane has already classified the change and chosen the refinement scope.
 
 Their prompts should:
 
@@ -384,16 +491,16 @@ refinement routing.
 from factory_app.app.modules.factory_control_plane.backend.refinement_router import (
     ChangeClass,     # Enum: patch | design | feature | core
     ArtifactKind,    # Enum: app_bundle | workflow_bundle | design_docs | concept
-    ChangeRequest,   # Input dataclass
+    RefinementRequest,
     RefinementTriggerRouteResolver,
     get_refinement_trigger_route_resolver,
 )
 
 resolver = get_refinement_trigger_route_resolver()  # module-level singleton
 
-decision = resolver.route(ChangeRequest(
-    change_class=ChangeClass.PATCH,
+decision = await resolver.route(RefinementRequest(
     artifact_kind=ArtifactKind.APP_BUNDLE,
+    artifact_key="app_bundle",
     artifact_version_id="v3",
     raw_user_request="Fix the login redirect",
     app_id="abc123",
@@ -405,15 +512,16 @@ decision = resolver.route(ChangeRequest(
 # decision.is_full_restart  → False
 ```
 
-**`ChangeRequest` fields:**
+**`RefinementRequest` fields:**
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `change_class` | `ChangeClass` | Yes | patch / design / feature / core |
 | `artifact_kind` | `ArtifactKind` | Yes | app_bundle / workflow_bundle / design_docs / concept |
+| `artifact_key` | `str` | No | Defaults to the artifact kind when omitted |
 | `artifact_version_id` | `str` | No | Version to load in re-entry workflow |
 | `raw_user_request` | `str` | No | Passed as `refinement_request` context variable |
 | `app_id` | `str` | No | For logging and audit record |
+| `declared_change_class` | `ChangeClass` | No | Optional UI hint only; not authoritative |
 
 **`RoutingDecision` fields:**
 
@@ -477,10 +585,12 @@ POST /api/workflows/trigger
 {
   "trigger_source": "refinement",
   "trigger_payload": {
-    "change_class": "patch",
-    "artifact_kind": "app_bundle",
-    "artifact_version_id": "v3",
-    "raw_user_request": "Fix the login redirect"
+    "refinement_request": {
+      "artifact_kind": "app_bundle",
+      "artifact_key": "app_bundle",
+      "artifact_version_id": "v3",
+      "raw_user_request": "Fix the login redirect"
+    }
   },
   "app_id": "abc123"
 }

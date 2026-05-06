@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Alert, Badge, Button, Card } from '../../ui/primitives/index.js';
-import { normalizeActions, sendPrimitiveResponse } from './workflowPrimitiveUtils.js';
+import { normalizePrimitiveActions, sendPrimitiveResponse } from './workflowPrimitiveUtils.js';
 
 const fallbackActions = [
   { id: 'approve', label: 'Approve', variant: 'primary', approved: true },
@@ -10,7 +10,7 @@ const fallbackActions = [
 export default function ApprovalCard({ payload = {}, onResponse, onCancel, workflowName }) {
   const [rationale, setRationale] = useState('');
   const [submittingAction, setSubmittingAction] = useState('');
-  const actions = normalizeActions(payload.actions, fallbackActions);
+  const actions = normalizePrimitiveActions(payload, fallbackActions);
   const checkpoints = Array.isArray(payload.checkpoints) ? payload.checkpoints : payload.items || [];
 
   const submit = async (action) => {

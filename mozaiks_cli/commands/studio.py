@@ -65,7 +65,7 @@ def _print_studio_home(summary: dict) -> None:
     print(f"Provider / Model:  {ai['provider'] or 'not configured'} / {ai['model'] or 'not configured'}")
     print(f"Theme:             {theme['primary'] or 'not configured'}")
     print(f"Tagline:           {theme['tagline'] or 'not configured'}")
-    print(f"Admin Emails:      {', '.join(admin['admin_emails']) if admin['admin_emails'] else 'none'}")
+    print(f"Admins:            {', '.join(admin['admins']) if admin['admins'] else 'none'}")
     print(f"Pages:             {workspace['page_count']}")
     print(f"Workflows:         {workspace['workflow_count']}")
     print(f"Entry Point:       {workspace['entry_point'] or 'not configured'}")

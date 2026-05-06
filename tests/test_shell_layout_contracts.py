@@ -58,6 +58,6 @@ def test_platform_transitions_stay_declarative() -> None:
                 assert isinstance(option["context_variables"], dict)
     assert (_workspace() / "factory_app" / "workflows" / "extended_orchestration" / "ui").exists()
     # App workspace overlay should not have a UI bundle (shared factory owns it)
-    from conftest import active_app_root
+    from tests.import_utils import active_app_root
     app_root = active_app_root()
     assert not (app_root / "workflows" / "extended_orchestration" / "ui" / "index.js").exists()

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mozaiks"
 dynamic = ["version"]
-description = "Mozaiks AG2 Runtime — production-ready multi-tenant workflow execution backend"
+description = "Mozaiks AG2 runtime and Studio-driven app framework"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

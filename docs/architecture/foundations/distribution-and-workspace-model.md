@@ -91,9 +91,9 @@ Current implementation state:
 
 - `factory_app/app/` is the current first-party Studio app bundle
 - shared builder workflows live under `factory_app/workflows/`
-- active app workspaces consume that factory layer through multi-root workflow
-  loading; any product-owned overlay registry lives in the product workspace,
-  not in this repo
+- Studio binds to the shared builder workflow root at `factory_app/workflows/`
+- app/product hosts bind to the active app root's `workflows/` directory; any
+   product-owned overlay registry lives in the product workspace, not in this repo
 
 ### 4. App workspace
 
@@ -171,10 +171,10 @@ This is the important boundary:
 Current composition rule in this repo:
 
 - the active app workspace is resolved first
-- that app root's `workflows/` load first
-- `factory_app/workflows/` loads second as the shared builder layer
-- product-owned overlay workflows stay under the active app root's
-  `workflows/` directory
+- Studio uses `factory_app/workflows/` as its builder workflow root
+- app/product hosts use the active app root's `workflows/` directory
+- product-owned workflows stay under the active app root's `workflows/`
+   directory
 
 That is the same composition model that should survive when a hosted product
 workspace lives in its own repository.

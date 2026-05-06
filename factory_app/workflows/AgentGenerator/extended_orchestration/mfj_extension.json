@@ -3,7 +3,7 @@
   "mid_flight_journeys": [
     {
       "id": "workflow_generation",
-      "description": "One PatternAgent decomposition powers two sequential fan-out phases. Stage 1: each workflow runs planning agents in parallel (WorkflowStrategyAgent → ProjectOverviewAgent); fan-in renders the N-tab ActionPlan for user review. Stage 2: after user approval via ContextVariablesAgent, each workflow runs implementation agents (ToolsManagerAgent → OrchestratorAgent); fan-in assembles the download bundle at PackMetadataAgent.",
+      "description": "One PatternAgent decomposition powers two sequential fan-out phases. Stage 1: each workflow runs planning agents in parallel (WorkflowStrategyAgent → ProjectOverviewAgent); planning artifacts are reviewed through the artifact/composer lane before implementation. Stage 2: after user approval via ContextVariablesAgent, each workflow runs implementation agents (ToolsManagerAgent → OrchestratorAgent); fan-in assembles the download bundle at PackMetadataAgent.",
       "decomposition_agent": "PatternAgent",
       "fan_out": {
         "spawn_mode": "workflow",

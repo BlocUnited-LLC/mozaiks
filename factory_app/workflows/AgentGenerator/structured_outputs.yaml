@@ -175,9 +175,10 @@ models:
         type: literal
         values:
         - agent_text
+        - user_text
         - ui_response
-        description: 'Trigger mode: agent_text (passive detection) or ui_response
-          (active UI tool response).'
+        description: 'Trigger mode: agent_text (passive detection), user_text
+          (free-form composer reply), or ui_response (active UI tool response).'
       agent:
         type: union
         variants:
@@ -189,8 +190,8 @@ models:
         variants:
         - DerivedTriggerMatch
         - 'null'
-        description: Match conditions for agent_text triggers. Must be omitted for
-          ui_response triggers.
+        description: Match conditions for agent_text and user_text triggers. Must
+          be omitted for ui_response triggers.
       tool:
         type: union
         variants:
@@ -386,7 +387,8 @@ models:
         type: list
         items: DerivedTrigger
         description: Trigger definitions for state sources. Use agent_text for coordination
-          tokens, ui_response for UI tool responses. Use [] for non-state types.
+          tokens, user_text for plain composer replies, and ui_response for UI tool
+          responses. Use [] for non-state types.
         default: []
   ContextVariableDefinitionEntry:
     type: model
@@ -469,6 +471,13 @@ models:
     - comparison_board
     - diagram_viewer
     - table_review
+  WorkflowUIRealizationId:
+    type: literal
+    values:
+    - shell_builtin
+    - shipped_component
+    - workflow_wrapper
+    - generated_component
   UIConfig:
     type: model
     fields:
@@ -491,18 +500,46 @@ models:
         - WorkflowRenderablePrimitiveId
         - 'null'
         description: Canonical workflow UI primitive pattern selected upstream. Null for non-UI tools.
+      realization:
+        type: union
+        variants:
+        - WorkflowUIRealizationId
+        - 'null'
+        description: >
+          Realization strategy for this UI surface. Use `shipped_component` when `component`
+          is the canonical shared workflow component, `workflow_wrapper` when a workflow-local
+          wrapper sits on top of a shipped component, `generated_component` for true workflow-local
+          custom React, and `shell_builtin` only for planning-time `composer_reply`.
   UIToolAction:
     type: model
     fields:
       id:
         type: str
         description: Stable action id emitted by the UI component (e.g., approve, reject, submit).
+      label:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional button label for shipped shared workflow components. If omitted, runtime derives a label from `id`.
       description:
         type: union
         variants:
         - str
         - 'null'
         description: Optional description of what this action represents.
+      variant:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional button variant hint (for example primary, secondary, outline, ghost, danger).
+      approved:
+        type: union
+        variants:
+        - bool
+        - 'null'
+        description: Optional approval semantic used by approval-style shared primitives.
       payload_schema:
         type: dict
         description: JSON-schema-like object describing expected payload shape for this action.
@@ -978,8 +1015,9 @@ models:
         type: str
         description: Relative path (using forward slashes) where this file should
           be written. Generated workflow code must be workflow-local; use tools/<name>.py
-          for Python tools and ui/components/<Component>.jsx for React UI. Do not
-          emit paths containing _shared, parent traversal, sibling workflows, or
+          for Python tools and ui/<workflow-local-path>.jsx for workflow UI. Keep
+          workflow-local React under the workflow's own ui/ tree. Do not emit
+          paths containing _shared, parent traversal, sibling workflows, or
           app.workflows._shared/workflows._shared references. Every emitted file
           must satisfy a declared tool, hook, transition, or runtime-extension contract.
       content:
@@ -1085,6 +1123,13 @@ models:
           Canonical workflow UI primitive selected for this interaction checkpoint.
           Use `composer_reply` for plain natural-language feedback routed through the
           shell composer. Use the other values for structured workflow-local UI surfaces.
+      realization:
+        type: WorkflowUIRealizationId
+        description: >
+          Realization strategy for this checkpoint. Use `shell_builtin` for
+          `composer_reply`, `shipped_component` for direct shared workflow primitives,
+          `workflow_wrapper` for workflow-local wrappers over shipped primitives,
+          and `generated_component` for true workflow-local custom React.
       component:
         type: union
         variants:

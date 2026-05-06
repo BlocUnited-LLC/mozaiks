@@ -16,7 +16,7 @@ MOZAIKS_APP_WORKSPACE_PATH is not set.
 import json
 import pytest
 
-from conftest import active_app_root
+from tests.import_utils import active_app_root
 
 ROOT_WORKSPACE = None  # resolved lazily to avoid skip at import time
 

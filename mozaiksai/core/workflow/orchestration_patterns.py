@@ -506,6 +506,11 @@ async def _create_ag2_pattern(
             else:
                 from .agents.handoffs import wire_handoffs_with_debugging
                 wire_handoffs_with_debugging(workflow_name, agents)
+            if user_proxy_agent is not None and not hasattr(user_proxy_agent, "_group_is_established"):
+                from autogen.agentchat.group.group_utils import establish_group_agent
+
+                establish_group_agent(user_proxy_agent)
+                wf_logger.info(" [HANDOFFS] Established user proxy as a group agent for user-source handoffs")
         except Exception as he:
             wf_logger.warning(f"Handoffs wiring failed: {he}")
     return pattern, ag2_context
@@ -1357,7 +1362,11 @@ async def run_workflow_orchestration(
     finally:
         # Transport cleanup: ensure per-chat trigger managers are released.
         try:
-            if transport and hasattr(transport, "unregister_derived_context_manager"):
+            current_stream_state = locals().get("stream_state")
+            keep_derived_context_manager = bool(
+                isinstance(current_stream_state, dict) and current_stream_state.get("awaiting_user_input")
+            )
+            if transport and hasattr(transport, "unregister_derived_context_manager") and not keep_derived_context_manager:
                 transport.unregister_derived_context_manager(chat_id)
         except Exception:  # pragma: no cover
             pass

@@ -12,8 +12,3 @@ def resolve_admin_app_root() -> Path:
 def resolve_platform_root() -> Path:
     """Backward-compatible alias for resolve_admin_app_root()."""
     return resolve_admin_app_root()
-
-
-def resolve_admin_config_path() -> Path:
-    """Resolve admin.json relative to the active app root."""
-    return resolve_admin_app_root() / "config" / "admin.json"

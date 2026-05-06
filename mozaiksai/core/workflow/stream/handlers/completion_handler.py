@@ -93,8 +93,21 @@ class CompletionHandler(BaseEventHandler):
         except Exception as diag_err:
             ctx.wf_logger.debug(f"Early termination diagnostics failed: {diag_err}")
 
-        awaiting_user_input = bool(state.pending_input_requests)
+        awaiting_user_input = bool(state.awaiting_user_input or state.pending_input_requests)
         workflow_complete = not awaiting_user_input
+
+        if workflow_complete:
+            state.awaiting_user_input = False
+            state.pending_input_requests.clear()
+            try:
+                await ctx.persistence_manager.clear_pending_input_request(
+                    chat_id=ctx.chat_id,
+                    app_id=ctx.app_id,
+                )
+            except Exception as clear_err:
+                ctx.wf_logger.debug(
+                    f"Failed clearing pending input request on completion for {ctx.chat_id}: {clear_err}"
+                )
 
         # Log completion summary
         ctx.wf_logger.info(

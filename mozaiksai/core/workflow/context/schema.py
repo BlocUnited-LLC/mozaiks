@@ -61,7 +61,7 @@ class ContextTriggerMatch(ContextModel):
 class ContextTriggerSpec(ContextModel):
     """Declarative trigger definition for state variables."""
 
-    type: Literal["agent_text", "ui_response"]
+    type: Literal["agent_text", "ui_response", "user_text"]
     agent: Optional[str] = None
     match: Optional[ContextTriggerMatch] = None
     tool: Optional[str] = None
@@ -80,6 +80,9 @@ class ContextTriggerSpec(ContextModel):
                 raise ValueError("agent_text trigger requires 'agent'")
             if not self.match:
                 raise ValueError("agent_text trigger requires 'match'")
+        if self.type == "user_text":
+            if not self.match:
+                raise ValueError("user_text trigger requires 'match'")
         if self.type == "ui_response":
             if not self.tool:
                 raise ValueError("ui_response trigger requires 'tool'")

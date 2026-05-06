@@ -116,7 +116,7 @@ export default function StudioHomePage() {
               <div>
                 <span className="font-semibold text-foreground">Admin: </span>
                 {admin.enabled
-                  ? (admin.admin_emails?.length ? admin.admin_emails.join(', ') : 'enabled — no emails set')
+                  ? (admin.admins?.length ? admin.admins.join(', ') : 'framework shell active — no admins set')
                   : 'not enabled'}
               </div>
               {app.existing_app_url && (

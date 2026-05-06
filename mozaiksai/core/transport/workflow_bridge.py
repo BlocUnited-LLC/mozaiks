@@ -50,6 +50,135 @@ class WorkflowBridgeMixin:
     # API-DRIVEN WORKFLOW EXECUTION
     # ==================================================================================
 
+    def _ui_run_complete_registry(self) -> Dict[str, bool]:
+        registry = getattr(self, "_ui_run_complete_sent", None)
+        if not isinstance(registry, dict):
+            registry = {}
+            setattr(self, "_ui_run_complete_sent", registry)
+        return registry
+
+    def _has_ui_run_complete_sent(self, chat_id: str) -> bool:
+        registry = self._ui_run_complete_registry()
+        if bool(registry.get(chat_id)):
+            return True
+        conn = getattr(self, "connections", {}).get(chat_id)
+        return bool(isinstance(conn, dict) and conn.get("ui_run_complete_sent"))
+
+    def _mark_ui_run_complete_sent(self, chat_id: str) -> None:
+        self._ui_run_complete_registry()[chat_id] = True
+        conn = getattr(self, "connections", {}).get(chat_id)
+        if isinstance(conn, dict):
+            conn["ui_run_complete_sent"] = True
+
+    async def _emit_synthetic_run_complete_if_needed(
+        self,
+        *,
+        chat_id: str,
+        workflow_name: str,
+        run_status_value: str,
+    ) -> None:
+        if str(run_status_value).strip().lower() != "completed":
+            return
+        if self._has_ui_run_complete_sent(chat_id):
+            return
+        pending_registry = getattr(self, "_input_request_registries", {}).get(chat_id)
+        if isinstance(pending_registry, dict) and pending_registry:
+            return
+        persistence_manager = None
+        if hasattr(self, "_get_or_create_persistence_manager"):
+            try:
+                persistence_manager = self._get_or_create_persistence_manager()
+            except Exception:
+                persistence_manager = None
+        if persistence_manager is not None:
+            conn = getattr(self, "connections", {}).get(chat_id) or {}
+            app_id = conn.get("app_id")
+            if app_id:
+                try:
+                    pending_input = await persistence_manager.get_pending_input_request(
+                        chat_id=chat_id,
+                        app_id=str(app_id),
+                    )
+                except Exception:
+                    pending_input = None
+                if isinstance(pending_input, dict) and pending_input:
+                    return
+        await self.send_event_to_ui(
+            {
+                "kind": "run_complete",
+                "agent": workflow_name or "workflow",
+                "chat_id": chat_id,
+                "status": 1,
+                "reason": "finished",
+                "awaiting_user_input": False,
+                "metadata": {"source": "workflow_bridge.synthetic_completion"},
+            },
+            chat_id,
+        )
+
+    async def _apply_user_text_context_updates(
+        self,
+        *,
+        chat_id: str,
+        workflow_name: Optional[str],
+        app_id: Optional[str],
+        user_input: Optional[str],
+    ) -> Dict[str, Any]:
+        """Apply declarative user_text triggers before resuming a paused workflow."""
+
+        candidate = str(user_input or "").strip()
+        if not candidate or not workflow_name or not app_id:
+            return {}
+
+        persistence_manager = None
+        if hasattr(self, "_get_or_create_persistence_manager"):
+            try:
+                persistence_manager = self._get_or_create_persistence_manager()
+            except Exception:
+                persistence_manager = None
+
+        manager = getattr(self, "_derived_context_managers", {}).get(chat_id)
+        if manager is None:
+            try:
+                from mozaiksai.core.workflow.context.adapter import create_context_container
+                from mozaiksai.core.workflow.context.derived import DerivedContextManager
+
+                persisted_context: Dict[str, Any] = {}
+                if persistence_manager is not None:
+                    persisted_context = await persistence_manager.fetch_chat_session_extra_context(
+                        chat_id=chat_id,
+                        app_id=str(app_id),
+                    )
+                manager = DerivedContextManager(
+                    str(workflow_name),
+                    {},
+                    create_context_container(initial=persisted_context),
+                )
+            except Exception as err:
+                logger.debug(f"[SMART_ROUTING] Failed to build user_text manager for {chat_id}: {err}")
+                manager = None
+
+        if manager is None or not hasattr(manager, "apply_user_text"):
+            return {}
+
+        try:
+            updated = manager.apply_user_text(candidate)
+        except Exception as err:
+            logger.debug(f"[SMART_ROUTING] user_text trigger apply failed for {chat_id}: {err}")
+            return {}
+
+        if updated and persistence_manager is not None:
+            try:
+                await persistence_manager.persist_context_variables(
+                    chat_id=chat_id,
+                    app_id=str(app_id),
+                    variables=updated,
+                )
+            except Exception as err:
+                logger.debug(f"[SMART_ROUTING] Failed persisting user_text updates for {chat_id}: {err}")
+
+        return updated
+
     async def handle_user_input_from_api(
         self,
         chat_id: str,
@@ -67,6 +196,11 @@ class WorkflowBridgeMixin:
         """
         try:
             starting_new_workflow = False
+            is_resume_request = bool(
+                isinstance(initial_agent_name_override, str)
+                and initial_agent_name_override.strip()
+                and not (isinstance(message, str) and message.strip())
+            )
 
             # Load workflow-declared lifecycle hooks (modular, per-workflow)
             lifecycle = get_workflow_lifecycle_hooks(workflow_name)
@@ -127,9 +261,40 @@ class WorkflowBridgeMixin:
             from mozaiksai.core.adapters.ag2_orchestration import get_ag2_adapter
             from mozaiksai.core.ports.orchestration import ResumeRequest, RunRequest
 
+            if message or is_resume_request:
+                try:
+                    pm = self._get_or_create_persistence_manager()
+                    pending = await pm.get_pending_input_request(
+                        chat_id=chat_id,
+                        app_id=app_id,
+                    )
+                    if pending:
+                        await pm.clear_pending_input_request(
+                            chat_id=chat_id,
+                            app_id=app_id,
+                        )
+                        logger.info(
+                            "[SMART_ROUTING] Cleared persisted pending input request %s before launching workflow for chat %s",
+                            pending.get("request_id"),
+                            chat_id,
+                        )
+                except Exception as clear_err:
+                    logger.debug(
+                        f"[SMART_ROUTING] Failed clearing persisted pending input request for {chat_id}: {clear_err}"
+                    )
+
             # Only persist and echo user message when starting NEW workflows
             # For existing sessions, the message goes directly to AG2 via callback
             if message:
+                try:
+                    await self._apply_user_text_context_updates(
+                        chat_id=chat_id,
+                        workflow_name=workflow_name,
+                        app_id=app_id,
+                        user_input=message,
+                    )
+                except Exception as trigger_err:
+                    logger.debug(f"[SMART_ROUTING] user_text trigger update skipped for new run {chat_id}: {trigger_err}")
                 try:
                     await self.process_incoming_user_message(
                         chat_id=chat_id,
@@ -159,11 +324,6 @@ class WorkflowBridgeMixin:
             # A missing message plus an explicit initial-agent override means the
             # caller is resuming an existing chat, not starting a fresh run.
             adapter = get_ag2_adapter()
-            is_resume_request = bool(
-                isinstance(initial_agent_name_override, str)
-                and initial_agent_name_override.strip()
-                and not (isinstance(message, str) and message.strip())
-            )
             if is_resume_request:
                 run_result = await adapter.resume(ResumeRequest(
                     workflow_name=workflow_name,
@@ -198,6 +358,12 @@ class WorkflowBridgeMixin:
                     )
                 except Exception:
                     pass
+
+            await self._emit_synthetic_run_complete_if_needed(
+                chat_id=chat_id,
+                workflow_name=workflow_name,
+                run_status_value=run_status_value,
+            )
 
             route = "workflow_resume" if is_resume_request else "new_workflow"
             message_text = "Workflow resumed successfully." if is_resume_request else "Workflow started successfully."

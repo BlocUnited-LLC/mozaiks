@@ -4,7 +4,7 @@
       "src": "mozaik_logo.svg",
       "wordmark": "mozaik.png",
       "alt": "Mozaiks logo",
-      "href": "/marketplace"
+      "href": "/create"
     },
     "pages": [],
     "actions": [
@@ -18,19 +18,6 @@
           "default": "/create"
         },
         "variant": "primary",
-        "visible": true
-      },
-      {
-        "id": "discover",
-        "label": "Discover",
-        "icon": "sparkle.svg",
-        "path": "/marketplace",
-        "path_by_role": {
-          "admin": "/marketplace",
-          "investor": "/marketplace",
-          "default": "/marketplace"
-        },
-        "variant": "gradient",
         "visible": true
       }
     ]

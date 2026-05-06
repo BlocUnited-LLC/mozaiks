@@ -70,6 +70,194 @@ models:
         items: DesignSurface
         description: Realization surfaces declared for the app.
 
+  DatabaseIntentField:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Stable field name stored in the collection.
+      type:
+        type: str
+        description: Logical data type such as string, boolean, number, object, array, or datetime.
+      required:
+        type: bool
+        description: True when the field must exist on inserted records.
+      default:
+        type: union
+        variants:
+        - str
+        - int
+        - float
+        - bool
+        - list
+        - dict
+        - 'null'
+        description: Optional default value applied when a record omits the field.
+      enum:
+        type: optional_list
+        items: str
+        description: Optional finite set of allowed string values.
+      nullable:
+        type: union
+        variants:
+        - bool
+        - 'null'
+        description: Null or true when the field may be set to null.
+
+  DatabaseIntentIndex:
+    type: model
+    fields:
+      keys:
+        type: list
+        items: list
+        description: Ordered Mongo index key pairs, for example [["app_id", 1], ["campaign_id", 1]].
+      unique:
+        type: union
+        variants:
+        - bool
+        - 'null'
+        description: Null or true when the index must enforce uniqueness.
+      sparse:
+        type: union
+        variants:
+        - bool
+        - 'null'
+        description: Null or true when the index should be sparse.
+      name:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Null or explicit Mongo index name.
+
+  DatabaseIntentOwnership:
+    type: model
+    fields:
+      surface_id:
+        type: str
+        description: Surface id that owns the collection.
+      surface_kind:
+        type: literal
+        values:
+        - module
+        - workflow
+        - control_plane
+        - external_integration
+        - ui_only
+        description: Surface kind that owns the collection.
+
+  DatabaseIntentLifecycle:
+    type: model
+    fields:
+      write_mode:
+        type: literal
+        values:
+        - module_action
+        - workflow_write
+        - platform_sync
+        description: Primary mechanism allowed to write durable records.
+      migration_policy:
+        type: literal
+        values:
+        - additive_only
+        - review_required
+        - destructive_allowed
+        description: Allowed migration policy for future revisions.
+
+  DatabaseIntentCollection:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Canonical Mongo collection name.
+      scope:
+        type: literal
+        values:
+        - app
+        - platform
+        - hosted
+        description: Scope of the collection namespace.
+      ownership:
+        type: DatabaseIntentOwnership
+        description: Surface ownership for the collection.
+      fields:
+        type: list
+        items: DatabaseIntentField
+        description: Declared document fields for the collection.
+      indexes:
+        type: optional_list
+        items: DatabaseIntentIndex
+        description: Declared Mongo indexes for the collection.
+      search_by:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Null or primary lookup field used for updates.
+      lifecycle:
+        type: DatabaseIntentLifecycle
+        description: Write and migration rules for this collection.
+
+  DatabaseIntentSurface:
+    type: model
+    fields:
+      surface_id:
+        type: str
+        description: Stable surface id owning the collections.
+      surface_kind:
+        type: literal
+        values:
+        - module
+        - workflow
+        - control_plane
+        - external_integration
+        - ui_only
+        description: Surface kind mirrored from surface_map.
+      collections:
+        type: list
+        items: DatabaseIntentCollection
+        description: Collection intents owned by the surface.
+
+  DatabaseIntentPolicies:
+    type: model
+    fields:
+      default_scope_field:
+        type: str
+        description: Field used for default app scoping across collections.
+      allow_destructive_migrations:
+        type: bool
+        description: False unless the product explicitly permits destructive migrations.
+
+  DatabaseIntentBundle:
+    type: model
+    fields:
+      version:
+        type: str
+        description: Artifact contract version, typically "1".
+      app_id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Null or app id when already known at design time.
+      artifact_version_id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Null during greenfield design passes or the artifact version being refined.
+      surfaces:
+        type: list
+        items: DatabaseIntentSurface
+        description: Database ownership grouped by realization surface.
+      shared_collections:
+        type: optional_list
+        items: DatabaseIntentCollection
+        description: Collections intentionally shared outside a single owning surface.
+      policies:
+        type: DatabaseIntentPolicies
+        description: Global migration and scoping policies for the app.
+
   DesignDocsBundle:
     type: model
     fields:
@@ -91,3 +279,6 @@ models:
       surface_map:
         type: DesignSurfaceMap
         description: Canonical typed surface realization contract mirrored into the saved backend and ui_schema docs.
+      database_intent_bundle:
+        type: DatabaseIntentBundle
+        description: Canonical typed database ownership and migration contract persisted separately and staged into generated app bundles.

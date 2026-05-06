@@ -1425,123 +1425,6 @@ def inject_workflow_architect_guidance(agent, messages: List[Dict[str, Any]]) ->
         logger.error(f"Error in inject_workflow_architect_guidance: {e}", exc_info=True)
 
 
-def inject_workflow_implementation_guidance(agent, messages: List[Dict[str, Any]]) -> None:
-    """
-    AG2 update_agent_state hook for WorkflowImplementationAgent.
-    Injects pattern-specific agent coordination guidance into system message.
-
-    WorkflowImplementationAgent OUTPUT FORMAT (StageAgentsOutput JSON):
-    {
-      "StageAgents": [
-        {
-          "stage_index": <int>,
-          "agents": [
-            {
-              "agent_name": "<string>",
-              "objective": "<string>",
-              "human_interaction": "none|context|approval|feedback|single",
-              "generation_mode": "<string>|null",
-              "max_consecutive_auto_reply": <int>,
-              "agent_tools": [
-                {
-                  "name": "<string>",
-                  "integration": "<string>|null",
-                  "purpose": "<string>",
-                  "interaction_mode": "inline|artifact|none"  // Optional, defaults to "none" when omitted
-                }
-              ],
-              "lifecycle_tools": [
-                {
-                  "name": "<string>",
-                  "integration": "<string>|null",
-                  "purpose": "<string>",
-                  "trigger": "before_chat|after_chat|before_agent|after_agent"
-                }
-              ],
-              "system_hooks": [
-                {
-                  "name": "<string>",
-                  "purpose": "<string>"
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    }
-
-    NOTE: `integration` inside StageAgents is planning metadata only. It helps
-    downstream code generators understand external dependencies, but it MUST NOT
-    be copied into final `tools.yaml` manifests.
-
-    NOTE: Pattern-specific examples are loaded from docs/pattern_examples/pattern_<id>_*.yaml
-    """
-    try:
-        pattern = _get_pattern_from_context(agent)
-        if not pattern:
-            logger.debug(f"No pattern available for {agent.name}, skipping guidance injection")
-            return
-
-        pattern_id = pattern.get('id')
-        pattern_name = pattern.get('name')
-        pattern_display_name = pattern.get('display_name', pattern_name)
-
-        # Interaction Matrix Rules for Implementation
-        matrix_rules = """
-[PLANNING CONTRACT]
-`integration` fields in StageAgents are planning hints only.
-Use them to reason about dependencies and imports.
-Do NOT copy `integration` into final `tools.yaml`.
-
-[INTERACTION MATRIX RULES]
-You MUST align your`human_interaction` with the TechnicalBlueprint:
-
-IF TechnicalBlueprint has a UI component for an agent, set `agent_tools[].interaction_mode` to match the component's `display` (`inline` or `artifact`).
-"""
-
-        # Load pattern example from external JSON file
-        example_json = _load_pattern_example_str(pattern_id)
-
-        if not example_json:
-            logger.warning(f"No implementation example found for pattern_id {pattern_id}")
-            return
-
-        # Semantic Context Injection
-        strategy = _get_upstream_context(agent, 'WorkflowStrategy')
-        blueprint = _get_upstream_context(agent, 'TechnicalBlueprint')
-        
-        semantic_context = ""
-        if strategy or blueprint:
-            semantic_context = "\n[UPSTREAM CONTEXT: STRATEGY & BLUEPRINT]\n"
-            
-            if strategy:
-                workflow_stages = strategy.get('workflow_stages', [])
-                stage_summary = "\n".join([f"- Stage {m.get('stage_index')}: {m.get('stage_name')}" for m in workflow_stages])
-                semantic_context += f"Defined Workflow Stages (You MUST create agents for these workflow stages):\n{stage_summary}\n\n"
-                
-            if blueprint:
-                components = blueprint.get('ui_components', [])
-                if components:
-                    comp_summary = "\n".join([f"- Stage '{c.get('stage_name')}': Agent '{c.get('agent')}' uses tool '{c.get('tool')}'" for c in components])
-                    semantic_context += f"Defined UI Components (Ensure these agents and tools exist):\n{comp_summary}\n"
-
-        guidance = (
-            f"{matrix_rules}\n\n"
-            f"{semantic_context}"
-            f"[PATTERN EXAMPLE - {pattern_display_name}]\n"
-            f"Here is a complete StageAgents example showing a runtime workflow aligned with the {pattern_display_name} pattern.\n\n"
-            f"```json\n{example_json}\n```\n"
-        )
-        
-        if _apply_pattern_guidance(agent, guidance):
-            logger.info(f"✓ Injected implementation guidance for {pattern_display_name} into {agent.name}")
-        else:
-            logger.warning(f"Pattern guidance injection failed for {agent.name}")
-
-    except Exception as e:
-        logger.error(f"Error in inject_workflow_implementation_guidance: {e}", exc_info=True)
-
-
 def inject_agent_tools_file_generator_guidance(agent, messages: List[Dict[str, Any]]) -> None:
     """
     AG2 update_agent_state hook for AgentToolsFileGenerator.
@@ -2315,9 +2198,10 @@ def inject_ui_file_generator_guidance(agent, messages: List[Dict[str, Any]]) -> 
             "- Do not call low-level `send_tool_call_event` directly, or subscribe via `useAppEventBus` in generated React.\\n"
             "- `use_ui_tool(...)` emits a session-scoped `chat.tool_call`; generated React should assume the shell mounts it from that workflow UI lane, not from legacy `ui_tool_event` transport semantics.\\n"
             "- Generated React components are mounted by `WorkflowUIRouter` and receive props like `payload`, `onResponse`, `onCancel`, `toolName`, `toolCallId`, `workflowName`, and `componentId`.\\n"
-            "- `ToolsManifest.ui.workflow_primitive` is the canonical interaction pattern; implement that pattern and treat `ui.component` as the workflow-local realization.\\n"
-            "- Some workflow primitives resolve to shipped shared components. If `ui.component` already uses that canonical shipped component name, do not generate custom React for it.\\n"
-            "- If a shipped shared component needs workflow-local naming, generate only a thin wrapper or re-export around the shipped component.\\n"
+            "- `ToolsManifest.ui.workflow_primitive` is the canonical interaction pattern, and `ToolsManifest.ui.realization` declares whether the component is shell-owned, direct shipped, a workflow wrapper, or a generated custom surface.\\n"
+            "- If `ui.realization`=`shipped_component`, do not generate custom React for it; those shipped shared components already exist in `chat-ui`.\\n"
+            "- If `ui.realization`=`workflow_wrapper`, generate only a thin wrapper or re-export around the shipped component.\\n"
+            "- If `ui.realization`=`generated_component`, generate the full workflow-local React surface.\\n"
             "- The `use_ui_tool(...)` identifier must match the declared `ui.component` value so runtime lookup resolves correctly.\\n"
             "- Do not generate an inline text box just to collect ordinary chat feedback. Plain free-text user reply should use the shell composer/input-request lane unless the interaction is structured enough to require a dedicated component.\\n"
             "- Compose only the shipped `chat-ui` primitives declared in `[SHIPPED UI PRIMITIVES]`.\\n\\n"
@@ -3034,7 +2918,7 @@ def inject_context_variables_guidance(agent, messages: List[Dict[str, Any]]) -> 
               "value": "<static_value>",
               "triggers": [
                 {
-                  "type": "agent_text|ui_response",
+                  "type": "agent_text|user_text|ui_response",
                   "agent": "<AgentName>",
                   "match": {"contains": "<substring>"},
                   "tool": "<tool_name>",
@@ -3922,7 +3806,7 @@ def inject_project_overview_guidance(agent, messages: List[Dict[str, Any]]) -> N
     "mermaid_diagram": "sequenceDiagram\\n    participant User\\n    participant RouterAgent as Router Agent (Intake)\\n    participant RoutingOrchestrator as Routing Orchestrator\\n    participant SupportSpecialist as Support Specialist\\n\\n    Note over Agents: Phase 0: Automated Intake & Signal Capture\\n    User->>RouterAgent: I have a billing issue\\n    RouterAgent->>RouterAgent: verify_account_details, classify_intent\\n    Note over RouterAgent: Verify Account (inline)\\n    RouterAgent->>User: Verify Account\\n    alt Approved\\n        RouterAgent->>RoutingOrchestrator: Proceed\\n    else Rejected\\n        RouterAgent->>RouterAgent: Revise\\n    end\\n\\n    Note over Agents: Phase 1: Specialist Routing & Engagement\\n    RoutingOrchestrator->>RoutingOrchestrator: check_queue_availability, assign_specialist\\n    RoutingOrchestrator->>SupportSpecialist: Handoff session\\n    SupportSpecialist->>User: Hi, I can help with billing.\\n    SupportSpecialist->>SupportSpecialist: search_knowledge_base, run_diagnostic\\n\\n    Note over Agents: Phase 2: Resolution & Post-Chat Summary\\n    SupportSpecialist->>RouterAgent: Handoff for closure\\n    Note over RouterAgent: Rate Support Experience (artifact)\\n    RouterAgent->>User: Rate Support Experience\\n    RouterAgent->>RouterAgent: close_ticket",
     "legend": []
   },
-  "agent_message": "Ready to build this routing workflow? Review the Action Plan above, then click Approve to proceed with implementation."
+  "agent_message": "Ready to build this routing workflow? Review the sequence diagram, then reply in chat with approval or requested changes."
 }
 
 // EXAMPLE 2: Internal IT Helpdesk Concierge
@@ -3932,7 +3816,7 @@ def inject_project_overview_guidance(agent, messages: List[Dict[str, Any]]) -> N
     "mermaid_diagram": "sequenceDiagram\\n    participant User\\n    participant ConciergeAgent as Concierge Agent (Intake)\\n    participant IssueClassifier as Issue Classifier\\n    participant HardwareSpecialist as Hardware Specialist\\n\\n    Note over Agents: Phase 0: Employee Request Intake\\n    User->>ConciergeAgent: My laptop screen is flickering\\n    ConciergeAgent->>ConciergeAgent: create_draft_ticket\\n    Note over ConciergeAgent: Confirm Issue Details (inline)\\n    ConciergeAgent->>User: Confirm Issue Details\\n    alt Approved\\n        ConciergeAgent->>IssueClassifier: Proceed\\n    else Rejected\\n        ConciergeAgent->>ConciergeAgent: Revise\\n    end\\n\\n    Note over Agents: Phase 1: Issue Classification\\n    IssueClassifier->>IssueClassifier: classify_ticket_category, route_to_tier\\n    IssueClassifier->>HardwareSpecialist: Handoff to tier\\n\\n    Note over Agents: Phase 2: Support Execution\\n    Note over HardwareSpecialist: Grant Remote Access (inline)\\n    HardwareSpecialist->>User: Grant Remote Access\\n    alt Approved\\n        HardwareSpecialist->>HardwareSpecialist: diagnose_hardware\\n    else Rejected\\n        HardwareSpecialist->>HardwareSpecialist: Request alternative method\\n    end",
     "legend": []
   },
-  "agent_message": "The IT Helpdesk workflow is mapped out with 3 phases coordinating 3 agents. Review the sequence diagram and approve to begin building your automation."
+  "agent_message": "The IT Helpdesk workflow is mapped out with 3 phases coordinating 3 agents. Review the sequence diagram, then reply in chat with approval or requested changes."
 }""",
             2: """{
   "MermaidSequenceDiagram": {
@@ -3940,7 +3824,7 @@ def inject_project_overview_guidance(agent, messages: List[Dict[str, Any]]) -> N
     "mermaid_diagram": "sequenceDiagram\\n    participant System as Monitoring System\\n    participant TriageAgent as Triage Agent (Automated Diagnostics)\\n    participant EscalationCoordinator as Escalation Coordinator\\n    participant SRELead as SRE Lead (Expert Mitigation)\\n    participant User as Incident Commander\\n\\n    Note over System,TriageAgent: Phase 0: Alert Intake & Baseline Diagnostics\\n    System->>TriageAgent: P1 outage alert via webhook\\n    TriageAgent->>TriageAgent: Correlate recent deployments\\n    TriageAgent->>TriageAgent: Execute scripted remediation steps\\n    Note over TriageAgent: Incident intake confirmation (inline interaction)\\n    TriageAgent->>User: Present incident brief for confirmation\\n    User->>TriageAgent: Acknowledge incident details\\n\\n    Note over TriageAgent,EscalationCoordinator: Phase 1: Tier Promotion & Context Packaging\\n    TriageAgent->>EscalationCoordinator: Assess recovery confidence\\n    alt Confidence < 0.85\\n        EscalationCoordinator->>SRELead: Escalate with bundled findings\\n    else Confidence >= 0.85\\n        EscalationCoordinator->>TriageAgent: Continue automated recovery\\n    end\\n\\n    Note over SRELead,User: Phase 2: Expert Mitigation & Stakeholder Updates\\n    SRELead->>SRELead: Execute advanced playbooks\\n    SRELead->>User: Request approval for rollback decision\\n    alt User Approves Rollback\\n        User->>SRELead: Approve rollback\\n        SRELead->>SRELead: Execute rollback\\n    else User Rejects\\n        User->>SRELead: Continue mitigation\\n    end\\n    SRELead->>User: Share postmortem outline (artifact - delivered to tray)\\n    User->>SRELead: Acknowledge wrap-up",
     "legend": []
   },
-  "agent_message": "The escalation workflow is mapped with 3 phases coordinating automated triage through expert mitigation. Review the sequence diagram and approve to begin building your incident response automation."
+  "agent_message": "The escalation workflow is mapped with 3 phases coordinating automated triage through expert mitigation. Review the sequence diagram, then reply in chat with approval or requested changes."
 }""",
             3: """{
   "MermaidSequenceDiagram": {
@@ -3948,7 +3832,7 @@ def inject_project_overview_guidance(agent, messages: List[Dict[str, Any]]) -> N
     "mermaid_diagram": "sequenceDiagram\\n    participant User as Marketing Stakeholder\\n    participant FacilitatorAgent as Facilitator Agent\\n    participant AuthoringAgent as Authoring Agent\\n    participant ReviewAgent as Review Agent (PMM)\\n\\n    Note over User,FacilitatorAgent: Phase 0: Brief Capture & Acceptance Criteria\\n    User->>FacilitatorAgent: Request launch copy for campaign\\n    FacilitatorAgent->>User: Collect campaign goals, tone, audience data\\n    User->>FacilitatorAgent: Provide brief details\\n    FacilitatorAgent->>FacilitatorAgent: Define done criteria with stakeholders\\n\\n    Note over AuthoringAgent: Phase 1: Draft Creation\\n    FacilitatorAgent->>AuthoringAgent: Hand off campaign brief\\n    AuthoringAgent->>AuthoringAgent: Generate initial announcement copy\\n    AuthoringAgent->>User: Present draft with rationale\\n\\n    Note over ReviewAgent,User: Phase 2: Structured Review\\n    User->>ReviewAgent: Submit for stakeholder review\\n    Note over ReviewAgent: Feedback collection (artifact - multi-step interaction)\\n    ReviewAgent->>User: Open feedback form in tray (Step 1: Score pillars, Step 2: Add comments, Step 3: Submit)\\n    User->>ReviewAgent: Submit structured feedback\\n\\n    Note over AuthoringAgent,User: Phase 3: Revision & Approval\\n    loop Until Approved\\n        ReviewAgent->>AuthoringAgent: Forward feedback for revision\\n        AuthoringAgent->>AuthoringAgent: Apply accepted feedback\\n        AuthoringAgent->>User: Present revised copy\\n        Note over User: Approval gate (inline interaction)\\n        alt User Approves\\n            User->>AuthoringAgent: Approve for launch\\n        else User Requests Revisions\\n            User->>AuthoringAgent: Request final revisions\\n            AuthoringAgent->>AuthoringAgent: Apply additional feedback\\n        end\\n    end\\n    AuthoringAgent->>User: Deliver final approved copy",
     "legend": []
   },
-  "agent_message": "Action Plan complete: 4-phase feedback loop with structured review and approval gates. Confirm to move forward with agent implementation and tool generation."
+  "agent_message": "The workflow is mapped as a 4-phase feedback loop with structured review and approval gates. Review the sequence diagram, then reply in chat with approval or requested changes."
 }""",
             4: """{
   "MermaidSequenceDiagram": {
@@ -3956,7 +3840,7 @@ def inject_project_overview_guidance(agent, messages: List[Dict[str, Any]]) -> N
     "mermaid_diagram": "sequenceDiagram\\n    participant User as Executive Team\\n    participant StrategyLead as Strategy Lead (Executive)\\n    participant DemandManager as Demand Analysis Manager\\n    participant CompetitorManager as Competitor Analysis Manager\\n    participant RegulatoryManager as Regulatory Analysis Manager\\n    participant DemandSpecialist as Demand Specialist\\n    participant CompetitorSpecialist as Competitor Specialist\\n    participant RegulatorySpecialist as Regulatory Specialist\\n\\n    Note over User,StrategyLead: Phase 0: Executive Briefing & Workstream Plan\\n    User->>StrategyLead: Explore new market entry\\n    StrategyLead->>StrategyLead: Clarify objectives, split into workstreams\\n    StrategyLead->>User: Share strategy overview (artifact - delivered to tray)\\n    StrategyLead->>DemandManager: Assign demand workstream\\n    StrategyLead->>CompetitorManager: Assign competitor workstream\\n    StrategyLead->>RegulatoryManager: Assign regulatory workstream\\n\\n    Note over DemandManager,RegulatorySpecialist: Phase 1: Manager Task Framing\\n    par Parallel Manager Planning\\n        DemandManager->>DemandManager: Design research backlog, define metrics\\n        CompetitorManager->>CompetitorManager: Design research backlog, define metrics\\n        RegulatoryManager->>RegulatoryManager: Design research backlog, define metrics\\n    end\\n\\n    Note over DemandSpecialist,RegulatorySpecialist: Phase 2: Specialist Deep Dives\\n    par Parallel Specialist Execution\\n        DemandManager->>DemandSpecialist: Assign analysis tasks\\n        DemandSpecialist->>DemandSpecialist: Execute demand analysis\\n        DemandSpecialist->>DemandManager: Share interim findings\\n        CompetitorManager->>CompetitorSpecialist: Assign analysis tasks\\n        CompetitorSpecialist->>CompetitorSpecialist: Execute competitor analysis\\n        CompetitorSpecialist->>CompetitorManager: Share interim findings\\n        RegulatoryManager->>RegulatorySpecialist: Assign analysis tasks\\n        RegulatorySpecialist->>RegulatorySpecialist: Execute regulatory analysis\\n        RegulatorySpecialist->>RegulatoryManager: Share interim findings\\n    end\\n\\n    Note over StrategyLead,User: Phase 3: Executive Synthesis & Go/No-Go\\n    DemandManager->>StrategyLead: Submit demand insights\\n    CompetitorManager->>StrategyLead: Submit competitor insights\\n    RegulatoryManager->>StrategyLead: Submit regulatory insights\\n    StrategyLead->>StrategyLead: Aggregate insights, prepare narrative deck\\n    StrategyLead->>User: Present market decision recommendation\\n    alt User Approves Go\\n        User->>StrategyLead: Approve market entry\\n    else User Rejects\\n        User->>StrategyLead: Decline market entry\\n    end",
     "legend": []
   },
-  "agent_message": "The hierarchical workflow cascades research through 3 manager layers and specialist pods. Review and approve to proceed with building your market intelligence automation."
+  "agent_message": "The hierarchical workflow cascades research through 3 manager layers and specialist pods. Review the sequence diagram, then reply in chat with approval or requested changes."
 }""",
             5: """{
   "MermaidSequenceDiagram": {
@@ -3964,7 +3848,7 @@ def inject_project_overview_guidance(agent, messages: List[Dict[str, Any]]) -> N
     "mermaid_diagram": "sequenceDiagram\\n    participant User as Marketing Team\\n    participant FacilitatorAgent as Facilitator Agent\\n    participant IdeationAgent as Ideation Agent\\n    participant CopyAgent as Copy Contributor\\n    participant DesignAgent as Design Contributor\\n    participant GrowthAgent as Growth Contributor\\n    participant ContentAssembler as Content Assembler\\n    participant ReviewerAgent as Reviewer Agent\\n\\n    Note over User,FacilitatorAgent: Phase 0: Brief Alignment & Inspiration\\n    User->>FacilitatorAgent: Launch campaign sprint\\n    FacilitatorAgent->>User: Gather campaign goals, personas, messaging\\n    User->>FacilitatorAgent: Provide brief details\\n    FacilitatorAgent->>FacilitatorAgent: Seed room with high-performing assets\\n\\n    Note over IdeationAgent,GrowthAgent: Phase 1: Collaborative Concept Jam\\n    FacilitatorAgent->>IdeationAgent: Initiate brainstorm session\\n    par Open Brainstorming\\n        User->>IdeationAgent: Submit campaign idea (inline interaction)\\n        CopyAgent->>IdeationAgent: Share copy hook concepts\\n        DesignAgent->>IdeationAgent: Share visual themes\\n        GrowthAgent->>IdeationAgent: Share growth tactics\\n    end\\n    IdeationAgent->>IdeationAgent: Capture hooks, tag themes, surface gaps\\n    IdeationAgent->>User: Present consolidated idea pool\\n\\n    Note over ContentAssembler,User: Phase 2: Asset Assembly & Channel Packaging\\n    IdeationAgent->>ContentAssembler: Hand off strongest concepts\\n    ContentAssembler->>ContentAssembler: Compile email, social, landing page drafts\\n    ContentAssembler->>ReviewerAgent: Route for stakeholder preview\\n    Note over ReviewerAgent: Creative review (artifact - delivered to tray)\\n    ReviewerAgent->>User: Share creative board with variants for review\\n    User->>ReviewerAgent: Select variants to advance\\n    ReviewerAgent->>User: Deliver approved campaign package",
     "legend": []
   },
-  "agent_message": "Ready to build this collaborative content workflow? Review the Action Plan above, then click Approve to proceed with implementation."
+  "agent_message": "Ready to build this collaborative content workflow? Review the sequence diagram, then reply in chat with approval or requested changes."
 }""",
             6: """{
   "MermaidSequenceDiagram": {
@@ -3972,7 +3856,7 @@ def inject_project_overview_guidance(agent, messages: List[Dict[str, Any]]) -> N
     "mermaid_diagram": "sequenceDiagram\\n    participant User as Borrower\\n    participant IntakeAgent as Intake Agent (Validation)\\n    participant RiskAgent as Risk Screening Agent\\n    participant ComplianceAgent as Compliance Agent\\n    participant UnderwritingAgent as Underwriting Agent\\n    participant FulfillmentAgent as Fulfillment Agent\\n\\n    Note over User,IntakeAgent: Phase 0: Intake Validation\\n    User->>IntakeAgent: Submit loan application form\\n    Note over IntakeAgent: Document checklist (inline multi-step interaction)\\n    IntakeAgent->>User: Request supporting documents (Step 1: ID, Step 2: Income, Step 3: Banking)\\n    User->>IntakeAgent: Upload financial documents\\n    IntakeAgent->>IntakeAgent: Verify required fields, normalize data\\n    alt Missing Documents\\n        IntakeAgent->>User: Halt - request missing documents\\n    else All Complete\\n        IntakeAgent->>RiskAgent: Proceed to risk screening\\n    end\\n\\n    Note over RiskAgent,ComplianceAgent: Phase 1: Risk & Compliance Screening\\n    RiskAgent->>RiskAgent: Run credit check\\n    RiskAgent->>ComplianceAgent: Hand off for KYC\\n    ComplianceAgent->>ComplianceAgent: Execute fraud and KYC checks\\n    ComplianceAgent->>UnderwritingAgent: Annotate application with risk scores\\n\\n    Note over UnderwritingAgent: Phase 2: Underwriting Decision\\n    UnderwritingAgent->>UnderwritingAgent: Evaluate policy rules, calculate terms\\n    alt Edge Case Detected\\n        UnderwritingAgent->>UnderwritingAgent: Flag for manual review\\n    else Standard Case\\n        UnderwritingAgent->>FulfillmentAgent: Approve with calculated terms\\n    end\\n\\n    Note over FulfillmentAgent,User: Phase 3: Offer & Fulfillment\\n    FulfillmentAgent->>FulfillmentAgent: Generate offer packet\\n    Note over FulfillmentAgent: Decision summary (artifact - delivered to tray)\\n    FulfillmentAgent->>User: Share underwriting decision package for review\\n    User->>FulfillmentAgent: Acknowledge decision\\n    FulfillmentAgent->>FulfillmentAgent: Sync status to servicing systems",
     "legend": []
   },
-  "agent_message": "The pipeline workflow sequences 4 phases from intake validation through offer fulfillment. Confirm to move forward with agent implementation."
+  "agent_message": "The pipeline workflow sequences 4 phases from intake validation through offer fulfillment. Review the sequence diagram, then reply in chat with approval or requested changes."
 }""",
             7: """{
   "MermaidSequenceDiagram": {
@@ -3980,7 +3864,7 @@ def inject_project_overview_guidance(agent, messages: List[Dict[str, Any]]) -> N
     "mermaid_diagram": "sequenceDiagram\\n    participant System as Planning Scheduler\\n    participant CoordinatorAgent as Coordinator Agent\\n    participant StatisticalAgent as Statistical Forecast Agent\\n    participant CausalAgent as Causal Forecast Agent\\n    participant HeuristicAgent as Heuristic Forecast Agent\\n    participant EvaluatorAgent as Evaluator Agent\\n    participant User as Planning Stakeholder\\n\\n    Note over System,CoordinatorAgent: Phase 0: Scenario Brief\\n    System->>CoordinatorAgent: Trigger weekly planning cycle\\n    CoordinatorAgent->>CoordinatorAgent: Summarize sales window, constraints, metrics\\n    CoordinatorAgent->>StatisticalAgent: Distribute scenario brief\\n    CoordinatorAgent->>CausalAgent: Distribute scenario brief\\n    CoordinatorAgent->>HeuristicAgent: Distribute scenario brief\\n\\n    Note over StatisticalAgent,HeuristicAgent: Phase 1: Parallel Forecast Generation\\n    par Independent Forecasting\\n        StatisticalAgent->>StatisticalAgent: Build statistical model with assumptions\\n        Note over StatisticalAgent: Forecast upload (inline multi-step interaction)\\n        StatisticalAgent->>CoordinatorAgent: Submit forecast bundle\\n        CausalAgent->>CausalAgent: Build causal model with assumptions\\n        CausalAgent->>CoordinatorAgent: Submit forecast bundle\\n        HeuristicAgent->>HeuristicAgent: Build heuristic model with assumptions\\n        HeuristicAgent->>CoordinatorAgent: Submit forecast bundle\\n    end\\n\\n    Note over EvaluatorAgent,User: Phase 2: Comparative Evaluation\\n    CoordinatorAgent->>EvaluatorAgent: Hand off all forecast submissions\\n    EvaluatorAgent->>EvaluatorAgent: Score accuracy, volatility, narrative fit\\n    Note over EvaluatorAgent: Forecast comparison (artifact - delivered to tray)\\n    EvaluatorAgent->>User: Share forecast comparison artifact\\n    alt Forecasts Diverge\\n        User->>EvaluatorAgent: Review divergence and select\\n    else Forecasts Align\\n        EvaluatorAgent->>CoordinatorAgent: Auto-select highest scoring\\n    end\\n\\n    Note over CoordinatorAgent,User: Phase 3: Recommendation Delivery\\n    EvaluatorAgent->>CoordinatorAgent: Report selected forecast\\n    CoordinatorAgent->>CoordinatorAgent: Document rationale\\n    CoordinatorAgent->>User: Distribute planning brief to stakeholders",
     "legend": []
   },
-  "agent_message": "Action Plan complete: Redundant forecasting with 3 parallel models and comparative evaluation. Review and approve to begin building."
+  "agent_message": "The workflow uses redundant forecasting with 3 parallel models and comparative evaluation. Review the sequence diagram, then reply in chat with approval or requested changes."
 }""",
             8: """{
   "MermaidSequenceDiagram": {
@@ -3988,7 +3872,7 @@ def inject_project_overview_guidance(agent, messages: List[Dict[str, Any]]) -> N
     "mermaid_diagram": "sequenceDiagram\\n    participant User as Vendor Requester\\n    participant CoordinatorAgent as Coordinator Agent (Hub)\\n    participant FinanceSpoke as Finance Spoke\\n    participant SecuritySpoke as Security Spoke\\n    participant LegalSpoke as Legal Spoke\\n\\n    Note over User,CoordinatorAgent: Phase 0: Hub Intake\\n    User->>CoordinatorAgent: Submit vendor onboarding form\\n    Note over CoordinatorAgent: Vendor profile capture (inline multi-step interaction)\\n    CoordinatorAgent->>User: Enter vendor profile details\\n    User->>CoordinatorAgent: Provide vendor information\\n    CoordinatorAgent->>CoordinatorAgent: Validate details, determine required spokes\\n    CoordinatorAgent->>CoordinatorAgent: Package briefing packets\\n\\n    Note over FinanceSpoke,LegalSpoke: Phase 1: Spoke Reviews\\n    CoordinatorAgent->>FinanceSpoke: Dispatch finance review\\n    CoordinatorAgent->>SecuritySpoke: Dispatch security review\\n    CoordinatorAgent->>LegalSpoke: Dispatch legal review\\n    par Independent Spoke Assessments\\n        FinanceSpoke->>FinanceSpoke: Perform financial assessment\\n        FinanceSpoke->>CoordinatorAgent: Post status update\\n        SecuritySpoke->>SecuritySpoke: Perform security assessment\\n        SecuritySpoke->>CoordinatorAgent: Post status update\\n        LegalSpoke->>LegalSpoke: Perform legal assessment\\n        LegalSpoke->>CoordinatorAgent: Post status update\\n    end\\n\\n    Note over CoordinatorAgent: Phase 2: Risk Alignment\\n    CoordinatorAgent->>CoordinatorAgent: Monitor spoke progress\\n    alt Conflicts Detected\\n        CoordinatorAgent->>CoordinatorAgent: Resolve conflicts\\n    else All Clear\\n        CoordinatorAgent->>CoordinatorAgent: Summarize findings\\n    end\\n\\n    Note over CoordinatorAgent,User: Phase 3: Hub Approval & Handoff\\n    CoordinatorAgent->>CoordinatorAgent: Compile approvals\\n    Note over CoordinatorAgent: Risk clearance (artifact - delivered to tray)\\n    CoordinatorAgent->>User: Share consolidated risk clearance artifact\\n    alt User Approves\\n        User->>CoordinatorAgent: Approve onboarding\\n        CoordinatorAgent->>CoordinatorAgent: Trigger account provisioning\\n    else User Rejects\\n        User->>CoordinatorAgent: Request additional review\\n    end\\n    CoordinatorAgent->>User: Deliver final onboarding summary",
     "legend": []
   },
-  "agent_message": "The star workflow routes vendor checks to 3 independent spokes with hub coordination. Review the sequence diagram and approve to proceed."
+  "agent_message": "The star workflow routes vendor checks to 3 independent spokes with hub coordination. Review the sequence diagram, then reply in chat with approval or requested changes."
 }""",
             9: """{
   "MermaidSequenceDiagram": {
@@ -3996,7 +3880,7 @@ def inject_project_overview_guidance(agent, messages: List[Dict[str, Any]]) -> N
     "mermaid_diagram": "sequenceDiagram\\n    participant User as Dreamer\\n    participant DreamTriageAgent as Dream Triage Agent\\n    participant DreamRealizerAgent as Dream Realizer Agent\\n\\n    Note over User,DreamTriageAgent: Phase 0: Dream Intake & Triage\\n    User->>DreamTriageAgent: Shares dream description\\n    DreamTriageAgent->>DreamTriageAgent: Analyze content & check subscription\\n    alt Premium User\\n        DreamTriageAgent->>DreamTriageAgent: Flag for Deep Analysis + 4K Video\\n    else Standard User\\n        DreamTriageAgent->>DreamTriageAgent: Flag for Standard Video only\\n    end\\n    DreamTriageAgent->>DreamRealizerAgent: Hand off dream bundle\\n\\n    Note over DreamRealizerAgent: Phase 1: Visualization & Analysis\\n    DreamRealizerAgent->>DreamRealizerAgent: Generate video prompts\\n    DreamRealizerAgent->>DreamRealizerAgent: Call Video Gen API\\n    alt Premium Bundle\\n        DreamRealizerAgent->>DreamRealizerAgent: Perform Jungian analysis\\n        DreamRealizerAgent->>DreamRealizerAgent: Generate interpretation report\\n    end\\n\\n    Note over DreamRealizerAgent,User: Phase 2: Delivery\\n    DreamRealizerAgent->>User: Deliver video link\\n    alt Premium Bundle\\n        DreamRealizerAgent->>User: Deliver analysis report\\n    end\\n    User->>DreamRealizerAgent: Feedback / Request refinement",
     "legend": []
   },
-  "agent_message": "Ready to build the DreamWeaver pipeline? Review the sequence diagram above and click Approve to proceed."
+  "agent_message": "Ready to build the DreamWeaver pipeline? Review the sequence diagram, then reply in chat with approval or requested changes."
 }"""
         }
         

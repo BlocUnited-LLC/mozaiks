@@ -113,6 +113,9 @@ def test_emit_ui_surface_uses_registry_resolved_display_and_no_response() -> Non
     workflow_manager.records["ConceptBlueprint"] = {
         "mode": "artifact",
         "agent": "GapAnalysisAgent",
+        "component": "ConceptBlueprint",
+        "workflow_primitive": "document_preview",
+        "realization": "generated_component",
     }
 
     captured = {}
@@ -137,12 +140,31 @@ def test_emit_ui_surface_uses_registry_resolved_display_and_no_response() -> Non
     assert captured["display"] == "artifact"
     assert captured["agent_name"] == "GapAnalysisAgent"
     assert captured["awaiting_response"] is False
+    assert captured["component_name"] == "ConceptBlueprint"
+    assert captured["payload"]["workflow_primitive"] == "document_preview"
+    assert captured["payload"]["ui_realization"] == "generated_component"
 
 
 def test_use_ui_tool_requests_response_and_returns_event_id() -> None:
     workflow_manager.records["ActionPlan"] = {
         "mode": "inline",
         "agent": "DownloadAgent",
+        "component": "ActionPlan",
+        "workflow_primitive": "action_plan_review",
+        "realization": "generated_component",
+        "ui_contract": {
+            "surface_kind": "agent_tool",
+            "payload_schema": {"type": "object", "properties": {"title": {"type": "string"}}, "additionalProperties": True},
+            "actions_schema": [
+                {
+                    "id": "approve",
+                    "label": "Approve Plan",
+                    "variant": "primary",
+                    "approved": True,
+                    "payload_schema": {"type": "object", "properties": {}, "additionalProperties": True},
+                }
+            ],
+        },
     }
 
     captured = {}
@@ -173,3 +195,56 @@ def test_use_ui_tool_requests_response_and_returns_event_id() -> None:
     assert captured["display"] == "inline"
     assert captured["agent_name"] == "DownloadAgent"
     assert captured["awaiting_response"] is True
+    assert captured["component_name"] == "ActionPlan"
+    assert captured["payload"]["workflow_primitive"] == "action_plan_review"
+    assert captured["payload"]["ui_realization"] == "generated_component"
+    assert captured["payload"]["ui_contract"]["actions_schema"][0]["label"] == "Approve Plan"
+    assert captured["payload"]["actions"][0]["id"] == "approve"
+    assert captured["payload"]["actions"][0]["variant"] == "primary"
+
+
+def test_use_ui_tool_resolves_manifest_component_when_called_by_function_name() -> None:
+    workflow_manager.records["build_plan_card"] = {
+        "mode": "inline",
+        "agent": "PlannerAgent",
+        "fn": "build_plan_card",
+        "component": "ApprovalCard",
+        "workflow_primitive": "approval_card",
+        "realization": "shipped_component",
+        "ui_contract": {
+            "surface_kind": "agent_tool",
+            "payload_schema": {"type": "object", "properties": {}, "additionalProperties": True},
+            "actions_schema": [
+                {"id": "approve", "payload_schema": {"type": "object", "properties": {}, "additionalProperties": True}},
+            ],
+        },
+    }
+
+    captured = {}
+
+    async def _fake_emit(**kwargs):
+        captured.update(kwargs)
+        return "evt_component_lookup"
+
+    async def _fake_wait(event_id, timeout=None):
+        assert event_id == "evt_component_lookup"
+        return {"status": "ok"}
+
+    ui_tools_module._emit_tool_call_core = _fake_emit
+    ui_tools_module._wait_for_tool_call_response_internal = _fake_wait
+
+    response = asyncio.run(
+        ui_tools_module.use_ui_tool(
+            "build_plan_card",
+            {"title": "Review"},
+            chat_id="chat_789",
+            workflow_name="PlannerFlow",
+        )
+    )
+
+    assert response["ui_event_id"] == "evt_component_lookup"
+    assert captured["tool_id"] == "build_plan_card"
+    assert captured["component_name"] == "ApprovalCard"
+    assert captured["payload"]["component_type"] == "ApprovalCard"
+    assert captured["payload"]["workflow_primitive"] == "approval_card"
+    assert captured["payload"]["ui_realization"] == "shipped_component"

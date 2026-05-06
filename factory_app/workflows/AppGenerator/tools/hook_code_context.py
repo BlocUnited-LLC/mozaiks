@@ -1,6 +1,6 @@
 import logging
 from typing import Dict, Any, List, Optional
-from .code_context.tools import get_code_context_for_agent
+from factory_app.workflows.AppGenerator.tools.code_context.tools import get_code_context_for_agent
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +28,21 @@ def inject_code_context(agent, messages: List[Dict[str, Any]]) -> None:
             return
 
         # 2. Retrieve Context
-        # We pass context_variables just in case, but mainly rely on explicit IDs
-        context_str = get_code_context_for_agent(
+        context_payload = get_code_context_for_agent(
             agent_name=agent.name,
             app_id=app_id,
             workspace_id=workspace_id,
-            context_variables=context_variables
         )
+        if not isinstance(context_payload, dict):
+            return
+        if not context_payload.get("success"):
+            logger.debug(
+                "[%s] Code context unavailable: %s",
+                agent.name,
+                context_payload.get("message"),
+            )
+            return
+        context_str = str(context_payload.get("context") or "").strip()
         
         if not context_str:
             # No context found or needed for this agent

@@ -14,6 +14,10 @@ Internal routing may switch between specialized workflows, but that switching
 must be driven by typed state and control events rather than ad hoc prompt
 logic.
 
+This document describes the builder-session loop only. It is separate from the
+workflow execution loop that runs one AG2 workflow and from the refinement
+worker loop that performs scoped repair.
+
 ## Builder Session States
 
 Recommended visible states:
@@ -29,8 +33,8 @@ Recommended visible states:
 - `completed`
 - `failed`
 
-These states should map onto the generic control-plane states in
-[runtime-state-and-control-events.md](../../architecture/foundations/runtime-state-and-control-events.md).
+These states should map onto the builder-session responsibilities defined in
+[orchestration-control-loops.md](../../docs/architecture/foundations/orchestration-control-loops.md).
 
 ## Internal Routing Targets
 
@@ -111,6 +115,6 @@ This layer is the missing product control plane.
 
 ## Cross References
 
-- [runtime-state-and-control-events.md](../../architecture/foundations/runtime-state-and-control-events.md)
+- [orchestration-control-loops.md](../../docs/architecture/foundations/orchestration-control-loops.md)
 - [builder-orchestration-taxonomy.md](builder-orchestration-taxonomy.md)
 - [builder-execution-model.md](builder-execution-model.md)

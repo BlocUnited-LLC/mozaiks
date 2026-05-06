@@ -58,6 +58,18 @@ This repo is **not in production**. Optimize for the cleanest canonical implemen
 
 If you see a conflict between "keep old behavior around" and "make the architecture clean," prefer the clean replacement unless the user explicitly asks for compatibility.
 
+## Release Hold
+
+Do **not** publish Mozaiks yet.
+
+- Do not create or push release tags like `v0.1.0` or `v1.0.0`.
+- Do not trigger `.github/workflows/release.yml`.
+- Do not publish to PyPI or create a GitHub release.
+- Do not interpret configured PyPI trusted publishing or a GitHub `pypi`
+  environment as permission to release.
+- Only prepare or execute a public release after the user explicitly says the
+  repo is production-ready and wants to publish.
+
 ## Development Commands
 
 ### Setup
@@ -185,15 +197,10 @@ Shared factory workflows live in `factory_app/workflows/`. Generator workflows
 generate app bundles and workflow bundles, but they must not write those
 outputs into active runtime paths.
 
-Workflow loading is multi-root by default:
-
-- active app root `workflows/` first
-- shared `factory_app/workflows/` second
-- `MOZAIKS_WORKFLOW_ROOTS` may override that order explicitly
-
-That allows an app workspace to reference both shared generator workflows and
-app-owned overlay workflows through the active app root without copying shared
-workflow directories back into the workspace.
+Workflow resolution is single-root by default. A running host binds to one
+workflow root via `MOZAIKS_WORKFLOWS_PATH` rather than auto-merging app and
+factory roots. Studio defaults to `factory_app/workflows/`; app/product hosts
+use the active app root's `workflows/` when present.
 
 Use `MOZAIKS_GENERATED_ARTIFACTS_PATH`, defaulting to:
 

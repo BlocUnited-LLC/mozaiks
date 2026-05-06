@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Badge, Button, Card } from '../../ui/primitives/index.js';
-import { normalizeActions, sendPrimitiveResponse } from './workflowPrimitiveUtils.js';
+import { normalizePrimitiveActions, sendPrimitiveResponse } from './workflowPrimitiveUtils.js';
 
 const fallbackActions = [
   { id: 'approve', label: 'Approve', variant: 'primary', approved: true },
@@ -13,7 +13,7 @@ export default function ArtifactWorkbench({ payload = {}, onResponse, onCancel }
     [payload.sections],
   );
   const [activeSectionId, setActiveSectionId] = useState(sections[0]?.id || '');
-  const actions = normalizeActions(payload.actions, fallbackActions);
+  const actions = normalizePrimitiveActions(payload, fallbackActions);
   const activeSection = sections.find((section) => String(section.id) === String(activeSectionId)) || sections[0] || null;
 
   return (

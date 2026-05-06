@@ -2,7 +2,7 @@ tools:
 - agent: DesignDocsAgent
   file: save_design_doc.py
   function: save_design_docs_bundle
-  description: Persist the validated DesignDocsBundle and canonical surface_map contract for the current app_id.
+  description: Persist the validated DesignDocsBundle plus the canonical surface_map and database_intent_bundle contracts for the current app_id.
   tool_type: Agent_Tool
   auto_tool_call: true
 lifecycle_tools: []

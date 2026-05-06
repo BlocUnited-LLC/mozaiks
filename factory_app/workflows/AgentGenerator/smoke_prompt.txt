@@ -1,0 +1,1 @@
+Design a minimal single workflow for an internal helpdesk lead. The workflow should intake a support ticket, classify urgency, draft a resolution summary, and ask for human approval before closing. Do not use external APIs or third-party integrations.

@@ -134,6 +134,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
 
         # AG2-aligned input request callback registry
         self._input_request_registries: Dict[str, Dict[str, Any]] = {}
+        self._recent_input_submit_chats: set[str] = set()
 
     # T-series: WebSocket protocol support structures
         self._sequence_counters: Dict[str, int] = {}          # T3
@@ -148,11 +149,13 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         self._pre_connection_buffers: Dict[str, List[Dict[str, Any]]] = {}
         self._max_pre_connection_buffer = 200
         self._scheduled_flush_tasks: Dict[str, asyncio.Task] = {}
+        self._pre_connection_buffer_overflow_counts: Dict[str, int] = {}
 
         # UI tool response correlation
         self.pending_tool_call_responses: Dict[str, asyncio.Future] = {}
         self._buffered_tool_call_responses: Dict[str, Dict[str, Any]] = {}
         self._ui_tool_metadata: Dict[str, Dict[str, Any]] = {}
+        self._resolved_tool_call_ids: Dict[str, None] = {}
         self._owner_loop = None
 
         # Runtime context trigger managers (per chat)
@@ -257,6 +260,18 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 logger.info(f"✅ [INPUT_SUBMIT] Found callback for {input_request_id} in chat {chat_id}")
             if respond_cb:
                 try:
+                    if user_input and user_input != SYSTEM_RESUME_SIGNAL:
+                        try:
+                            pm = self._get_or_create_persistence_manager()
+                            app_id, workflow_name = await self._resolve_chat_context(chat_id, pm=pm)
+                            await self._apply_user_text_context_updates(
+                                chat_id=chat_id,
+                                workflow_name=workflow_name,
+                                app_id=app_id,
+                                user_input=user_input,
+                            )
+                        except Exception as trigger_err:
+                            logger.debug(f"[INPUT_SUBMIT] user_text trigger update skipped for {chat_id}: {trigger_err}")
                     logger.info(f"🚀 [INPUT_SUBMIT] Invoking respond callback with user_input='{user_input[:50]}...'")
                     # Support both async and sync lambdas assigned by AG2
                     result = respond_cb(user_input)
@@ -264,6 +279,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                         await result
                     handled = True
                     ack_chat_id = chat_id
+                    self._recent_input_submit_chats.add(chat_id)
                     logger.info(f"✅ [INPUT] Respond callback invoked for request {input_request_id} (chat {chat_id})")
                 except Exception as e:
                     logger.error(f"❌ [INPUT] Respond callback failed {input_request_id}: {e}", exc_info=True)
@@ -279,7 +295,15 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             if ack_chat_id:
                 try:
                     pm = self._get_or_create_persistence_manager()
-                    await pm.clear_pending_input_request(chat_id=ack_chat_id)
+                    app_id, _workflow_name = await self._resolve_chat_context(
+                        ack_chat_id,
+                        pm=pm,
+                    )
+                    if app_id:
+                        await pm.clear_pending_input_request(
+                            chat_id=ack_chat_id,
+                            app_id=app_id,
+                        )
                 except Exception as e:
                     logger.debug(f"Failed to clear pending input request: {e}")
             # Emit chat.input_ack for B9/B10 protocol compliance
@@ -313,6 +337,12 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         self._input_request_registries[chat_id][normalized_id] = respond_cb
         logger.debug(f"Registered input request {normalized_id} for chat {chat_id}")
         return normalized_id
+
+    def consume_recent_input_submit(self, chat_id: str) -> bool:
+        if chat_id in self._recent_input_submit_chats:
+            self._recent_input_submit_chats.discard(chat_id)
+            return True
+        return False
 
     def _build_resume_signal(self, chat_id: str, request_id: str) -> str:
         """Produce a non-empty fallback message when resuming pending input requests.
@@ -627,6 +657,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             # Skip visibility filtering for select_speaker and response-required UI tool events
             skip_visibility_filter = (
                 envelope_type == 'chat.select_speaker'
+                or envelope_type == 'chat.run_complete'
+                or envelope_type == 'chat.activity'
                 or is_ui_tool_event
             )
             
@@ -747,6 +779,19 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             # ----------------------------------------------------------------
 
             logger.info(f"📤 [TRANSPORT] Sending envelope: type={envelope.get('type')}, chat_id={chat_id}")
+            try:
+                envelope_type = envelope.get('type') if isinstance(envelope, dict) else None
+                if envelope_type == 'chat.run_complete' and chat_id:
+                    registry = getattr(self, "_ui_run_complete_sent", None)
+                    if not isinstance(registry, dict):
+                        registry = {}
+                        setattr(self, "_ui_run_complete_sent", registry)
+                    registry[chat_id] = True
+                    conn = self.connections.get(chat_id)
+                    if isinstance(conn, dict):
+                        conn["ui_run_complete_sent"] = True
+            except Exception:
+                pass
             await self._broadcast_to_websockets(envelope, chat_id)
 
             # Runtime hook: surface run completion to the unified dispatcher so
@@ -785,20 +830,18 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         chat_id: str,
         stream_id: str,
     ) -> None:
-        """Split *content* into word-level tokens and emit each as chat.stream_chunk.
+        """Split *content* into adaptive text chunks and emit each as chat.stream_chunk.
 
-        Emitting one token per WebSocket message lets the browser render each
-        piece as it arrives, producing the typewriter effect. A minimal async
-        yield between chunks ensures React 18's automatic batching doesn't
-        collapse all updates into a single render.  The caller is responsible
-        for sending chat.stream_end afterwards.
+        Short responses keep the more granular word-by-word typewriter feel.
+        Longer responses are compacted into larger semantic chunks so transport
+        and harness logs do not get flooded with hundreds of single-word frames.
+
+        A minimal async yield between chunks ensures React 18's automatic
+        batching doesn't collapse all updates into a single render. The caller
+        is responsible for sending chat.stream_end afterwards.
         """
-        import re as _re
-        # Word + trailing whitespace so spaces are preserved between tokens
-        tokens = _re.findall(r'\S+\s*', content)
-        if not tokens:
-            tokens = [content]
-        for seq, token in enumerate(tokens):
+        chunks = self._chunk_text_for_stream(content)
+        for seq, token in enumerate(chunks):
             await self._broadcast_to_websockets(
                 {
                     "type": "chat.stream_chunk",
@@ -812,10 +855,58 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 chat_id or None,
             )
             # Minimal delay to allow browser render cycles between chunks.
-            # Without this, React 18's automatic batching may collapse all
-            # state updates into a single render, defeating the typewriter effect.
-            if seq < len(tokens) - 1:  # No delay after the last chunk
+            if seq < len(chunks) - 1:  # No delay after the last chunk
                 await asyncio.sleep(0.015)  # 15ms between chunks
+
+    def _chunk_text_for_stream(self, content: str) -> List[str]:
+        """Return adaptive websocket chunks for a visible assistant message.
+
+        The chunker stays workflow-agnostic: it looks only at text length and
+        punctuation. Short messages preserve the stronger typewriter effect,
+        while longer messages are grouped to keep event volume reasonable.
+        """
+        import re as _re
+
+        tokens = _re.findall(r"\S+\s*", content)
+        if not tokens:
+            return [content]
+        if len(content) <= 80:
+            return tokens
+
+        if len(content) <= 220:
+            target_chars = 20
+            hard_max = 36
+        elif len(content) <= 600:
+            target_chars = 36
+            hard_max = 64
+        else:
+            target_chars = 52
+            hard_max = 88
+
+        chunks: List[str] = []
+        current = ""
+        punctuation_endings = (".", "!", "?", ";", ":", "\n")
+
+        for token in tokens:
+            if not current:
+                current = token
+                continue
+
+            candidate = current + token
+            if len(candidate) > hard_max:
+                chunks.append(current)
+                current = token
+                continue
+
+            current = candidate
+            if len(current) >= target_chars and current.rstrip().endswith(punctuation_endings):
+                chunks.append(current)
+                current = ""
+
+        if current:
+            chunks.append(current)
+
+        return chunks
 
     async def _broadcast_to_websockets(self, event_data: Dict[str, Any], target_chat_id: Optional[str] = None) -> None:
         """Broadcast event data to relevant WebSocket connections."""
@@ -836,7 +927,23 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     # Drop oldest while keeping newest insight
                     overflow = len(buf) - self._max_pre_connection_buffer
                     del buf[0:overflow]
-                    logger.warning(f"🧹 Dropped {overflow} pre-connection buffered messages for {target_chat_id}")
+                    total_overflow = self._pre_connection_buffer_overflow_counts.get(target_chat_id, 0) + overflow
+                    self._pre_connection_buffer_overflow_counts[target_chat_id] = total_overflow
+                    if total_overflow == overflow:
+                        logger.warning(
+                            "🧹 Dropped %d pre-connection buffered messages for %s; "
+                            "suppressing repeated overflow logs until the connection is restored",
+                            overflow,
+                            target_chat_id,
+                        )
+                    else:
+                        logger.debug(
+                            "Suppressed pre-connection buffer overflow log for %s "
+                            "(additional_dropped=%d total_dropped=%d)",
+                            target_chat_id,
+                            overflow,
+                            total_overflow,
+                        )
                 logger.debug(f"🕑 Buffered pre-connection message for {target_chat_id} (size={len(buf)})")
             return
 
@@ -1353,6 +1460,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 for msg in buffered:
                     await self._queue_message_with_backpressure(chat_id, msg)
                 await self._flush_message_queue(chat_id)
+        self._pre_connection_buffer_overflow_counts.pop(chat_id, None)
 
         # H5: Auto-resume for IN_PROGRESS chats (check status and restore chat history)
         await self._auto_resume_if_needed(chat_id, websocket, app_id)

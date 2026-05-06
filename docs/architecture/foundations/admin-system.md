@@ -21,7 +21,7 @@ separate product routes, not admin sections.
 
 | Source | Owner | Declared In | Data/API |
 |---|---|---|---|
-| Runtime/operator panels | platform host | `app/config/admin.json` | same-host `/api/admin/*` |
+| Runtime/operator panels | platform host | framework admin contract plus `app/app.json` `admins` for access | same-host `/api/admin/*` |
 | Feature panels | module contract | `modules/{module}/admin.yaml` | module actions and optional `backend/admin.py` hooks |
 | App-business panels | optional connected app backend | `app_backend_url/api/admin/config` | `app_backend_url/api/admin/*` |
 
@@ -29,46 +29,82 @@ The platform host owns the shell and access model. Modules own feature admin
 panels. An app backend may add app-business panels, but it does not replace the
 host-owned `/admin` shell.
 
-## Host Config
+## Canonical Model
 
-`app/config/admin.json` is host-owned. It controls:
+The admin system has four distinct layers. Keep them separate:
 
-- whether admin is enabled
-- admin email allowlist
-- section visibility and ordering
-- runtime/operator panel visibility
+1. `app/app.json` `admins` is the admin bootstrap/access allowlist for the app.
+2. The built-in admin section registry is framework-owned and defines the
+  semantic section ids, default labels, route paths, and default ordering for
+  the `/admin` route family.
+3. `modules/{module}/admin.yaml` contributes feature-owned panels into those
+  semantic sections.
+4. An optional connected app backend may contribute app-business panels through
+  `GET {app_backend_url}/api/admin/config`.
 
-It does not declare feature panels.
+The shell should render a resolved navigation model from those contracts. It
+should not invent a second private set of section ids, paths, or drawer items
+inside the frontend.
+
+## Admin Bootstrap
+
+There is no app-level `admin.json` contract anymore.
+
+Admin bootstrap and access are owned by `app/app.json` `admins` plus the normal
+auth role model.
+
+Runtime/operator panels are framework-owned defaults surfaced by same-host
+`/api/admin/*` endpoints. Feature panels and app-business panels use their own
+contracts described above.
+
+That means:
+
+- generated apps should set `app/app.json` `admins` for bootstrap access
+- generators should not emit `app/config/admin.json`
+- runtime/operator panels remain framework-owned
+- Studio, Build, and other builder/control-plane routes remain separate product
+  surfaces, not admin sections
 
 Example:
 
 ```json
 {
-  "schema_version": "mozaiks.admin.host.v1",
-  "enabled": true,
-  "admin_emails": ["builder@example.com"],
-  "sections": {
-    "overview": { "label": "Overview", "enabled": true, "order": 999 },
-    "users": { "label": "Users", "enabled": true, "order": 1000 },
-    "billing": { "label": "Billing", "enabled": false, "order": 1001 },
-    "usage": { "label": "Usage", "enabled": true, "order": 1002 },
-    "activity": { "label": "Activity", "enabled": true, "order": 1003 },
-    "settings": { "label": "Settings", "enabled": true, "order": 1004 },
-    "integrations": { "label": "Integrations", "enabled": true, "order": 1005 },
-    "support": { "label": "Support", "enabled": true, "order": 1006 }
-  },
-  "runtime_panels": [
-    { "id": "stats", "label": "Usage Stats", "section": "usage" },
-    { "id": "runs", "label": "Active Runs", "section": "usage" },
-    { "id": "sessions", "label": "Recent Sessions", "section": "activity" }
-  ]
+  "appName": "Builder Workspace",
+  "admins": ["builder@example.com"]
 }
 ```
 
-When this file exists and `enabled` is true, the platform shell injects the
-`/admin` route family with the `AdminPortal` component. Generators must not
-create a separate admin page, `/app-admin` route, page schema, or admin React
-shell.
+The platform injects the `/admin` route family with the `AdminPortal`
+component. Generators must not create a separate admin page, `/app-admin`
+route, page schema, or admin React shell.
+
+## Built-In Section Registry
+
+The built-in admin sections are framework-owned. They provide the semantic
+taxonomy for:
+
+- `/admin` shell route injection
+- sidebar and drawer navigation
+- section-level rendering inside `AdminPortal`
+- placement of runtime, module, and app-backend panels
+
+The canonical built-in ids are:
+
+```text
+overview | users | billing | usage | activity | settings | integrations | support
+```
+
+The taxonomy is fixed by the framework today. If a future product genuinely
+needs bounded app-level section overrides, add a new explicit contract rather
+than reintroducing `app/config/admin.json`.
+
+Implementation rule:
+
+- runtime/platform code owns the canonical section metadata
+- frontend admin shells must derive navigation and section routing from that
+  canonical metadata or from a payload resolved from it
+- do not maintain separate hardcoded copies of section ids, paths, labels, and
+  order in multiple frontend files
 
 ## Feature Admin Contract
 
@@ -124,6 +160,40 @@ express the panel cleanly. In that case:
 Optional Python support for complex panel data belongs in
 `modules/{module}/backend/admin.py`.
 
+## Custom Admin UI vs Custom Admin Routes
+
+Mozaiks must allow agent-generated custom admin UI, but the default path is to
+generate panels inside the host-owned `/admin` shell, not to generate a second
+admin shell.
+
+Use this order of preference:
+
+1. `renderer: schema` for panels that can be expressed through the shipped
+   primitive system
+2. `renderer: custom_component` for bounded React customization when schema is
+   not sufficient
+3. only introduce standalone generated admin route families through a future,
+   explicit contract if the product truly needs them
+
+Do not overload `app/app.json`, `modules/{module}/admin.yaml`, or any other
+existing contract into a general admin-page generator.
+If Mozaiks later supports agent-generated standalone admin subroutes, that must
+be a new contract with explicit ownership, registration, and validation rules.
+
+## Componentization Rule
+
+"Fully componentized" in the admin system means:
+
+- the shell is presentation-first and consumes a resolved navigation model
+- built-in section ids and routes come from one canonical registry
+- module and app-backend panels plug into those sections through explicit
+  contracts
+- custom React is a bounded extension point declared by contract, not an ad hoc
+  frontend escape hatch
+
+It does not mean that agents may emit arbitrary admin React pages or bypass the
+host-owned `/admin` shell by default.
+
 ## App-Backend Panels
 
 A connected app backend may contribute app-business admin panels through
@@ -156,8 +226,7 @@ the host-owned `/admin` shell behavior described here.
 
 ## Generator Rules
 
-- Generate `app/config/admin.json` for admin access and runtime/operator panel
-  visibility only.
+- Populate `app/app.json` `admins` for admin bootstrap access.
 - Generate `modules/{module}/admin.yaml` for feature-owned admin panels.
 - Every generated admin panel must set `section` to one of the semantic admin
   sections listed above.
@@ -167,14 +236,14 @@ the host-owned `/admin` shell behavior described here.
 - Mark admin-only module actions in `module.yaml.actions[]` with admin
   permissions.
 - Do not generate admin page schemas, `/app-admin`, standalone admin servers,
-  or frontend admin shells.
+  frontend admin shells, or ad hoc admin route families.
 
 ## Access
 
 Admin access follows the platform auth rules:
 
 1. JWT role includes `admin`
-2. user email matches `admin_emails` in `app/config/admin.json`
+2. user email matches an entry in `app/app.json` `admins`
 3. local dev auth mode allows admin access
 
 The unified UI does not collapse authority:

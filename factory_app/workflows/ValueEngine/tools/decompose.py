@@ -13,11 +13,11 @@ logger = logging.getLogger(__name__)
 
 # Use mozaiks runtime persistence
 try:
-    from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+    from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
     _HAS_PERSISTENCE = True
 except ImportError:
     _HAS_PERSISTENCE = False
-    AG2PersistenceManager = None
+    BuilderArtifactStore = None
 
 
 def _normalize_object_list(value: Any) -> List[Dict[str, Any]]:
@@ -99,18 +99,11 @@ async def save_build_plan(
     }
 
     # Persist to MongoDB via mozaiks runtime
-    if _HAS_PERSISTENCE and AG2PersistenceManager:
+    if _HAS_PERSISTENCE and BuilderArtifactStore:
         try:
-            pm = AG2PersistenceManager()
-            await pm._ensure_client()
-            if pm.client:
-                coll = pm.client["autogen_ai_agents"]["BuildPlans"]
-                await coll.update_one(
-                    {"app_id": str(app_id)},
-                    {"$set": build_plan},
-                    upsert=True,
-                )
-                logger.info(f"[ValueEngine] BuildPlan saved for app_id={app_id}")
+            store = BuilderArtifactStore()
+            await store.save_build_plan(app_id=str(app_id), build_plan=build_plan)
+            logger.info(f"[ValueEngine] BuildPlan saved for app_id={app_id}")
         except Exception as e:
             logger.warning(f"[ValueEngine] Persistence failed: {e}")
 
@@ -149,16 +142,12 @@ async def get_build_plan(
             return {"success": True, "build_plan": cached}
 
     # Load from MongoDB
-    if _HAS_PERSISTENCE and AG2PersistenceManager:
+    if _HAS_PERSISTENCE and BuilderArtifactStore:
         try:
-            pm = AG2PersistenceManager()
-            await pm._ensure_client()
-            if pm.client:
-                coll = pm.client["autogen_ai_agents"]["BuildPlans"]
-                plan = await coll.find_one({"app_id": str(app_id)})
-                if plan:
-                    plan.pop("_id", None)
-                    return {"success": True, "build_plan": plan}
+            store = BuilderArtifactStore()
+            plan = await store.get_build_plan(app_id=str(app_id))
+            if plan:
+                return {"success": True, "build_plan": plan}
         except Exception as e:
             logger.warning(f"[ValueEngine] Load build plan failed: {e}")
 

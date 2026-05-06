@@ -23,3 +23,11 @@ hooks:
   hook_agent: ConfigMiddlewareAgent
   filename: hook_workflow_integration_contract.py
   function: inject_workflow_integration_contract
+- hook_type: update_agent_state
+  hook_agent: AppPlanAgent
+  filename: hook_domain_catalog_context.py
+  function: inject_domain_catalog_context
+- hook_type: update_agent_state
+  hook_agent: ConfigMiddlewareAgent
+  filename: hook_domain_catalog_context.py
+  function: inject_module_file_manifest_guard

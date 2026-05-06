@@ -2,6 +2,11 @@
 
 Mozaiks now has a tag-driven release workflow.
 
+For the first public package release, keep the version pre-`1.0.0`. The repo
+contracts, CLI UX, and Studio-first builder flow are still settling, so a
+`0.x` release is the honest signal to users that breaking changes can still
+happen.
+
 The release entrypoint is:
 
 1. bump `mozaiksai/version.py`
@@ -13,10 +18,10 @@ Example:
 ```bash
 git checkout main
 git pull
-# edit mozaiksai/version.py -> __version__ = "1.0.1"
+# edit mozaiksai/version.py -> __version__ = "0.1.0"
 git add mozaiksai/version.py
-git commit -m "Release 1.0.1"
-git tag v1.0.1
+git commit -m "Release 0.1.0"
+git tag v0.1.0
 git push origin main --tags
 ```
 

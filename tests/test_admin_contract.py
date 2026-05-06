@@ -31,7 +31,6 @@ def test_admin_paths_resolve_platform_root_from_direct_app_root(monkeypatch, tmp
 
     assert admin_paths.resolve_admin_app_root() == app_root.resolve()
     assert admin_paths.resolve_platform_root() == app_root.resolve()
-    assert admin_paths.resolve_admin_config_path() == (app_root / "config" / "admin.json").resolve()
 
 
 def test_admin_paths_resolve_platform_root_from_workspace_root(monkeypatch, tmp_path: Path) -> None:
@@ -42,7 +41,6 @@ def test_admin_paths_resolve_platform_root_from_workspace_root(monkeypatch, tmp_
 
     assert admin_paths.resolve_admin_app_root() == app_root.resolve()
     assert admin_paths.resolve_platform_root() == app_root.resolve()
-    assert admin_paths.resolve_admin_config_path() == (app_root / "config" / "admin.json").resolve()
 
 
 def test_admin_paths_resolve_platform_root_from_workspace_env(monkeypatch, tmp_path: Path) -> None:
@@ -54,19 +52,11 @@ def test_admin_paths_resolve_platform_root_from_workspace_env(monkeypatch, tmp_p
 
     assert admin_paths.resolve_admin_app_root() == app_root.resolve()
     assert admin_paths.resolve_platform_root() == app_root.resolve()
-    assert admin_paths.resolve_admin_config_path() == (app_root / "config" / "admin.json").resolve()
 
 
-def test_email_promotion_reads_active_app_admin_config(monkeypatch, tmp_path: Path) -> None:
+def test_email_promotion_reads_active_app_admins(monkeypatch, tmp_path: Path) -> None:
     app_root = tmp_path / "standalone-app"
-    _write_json(app_root / "app.json", {"appName": "Standalone"})
-    _write_json(
-        app_root / "config" / "admin.json",
-        {
-            "enabled": True,
-            "admin_emails": ["Owner@Example.com", "ops@example.com"],
-        },
-    )
+    _write_json(app_root / "app.json", {"appName": "Standalone", "admins": ["Owner@Example.com", "ops@example.com"]})
     monkeypatch.setenv("PLATFORM_PATH", str(app_root))
 
     assert email_promotion.get_admin_emails() == ["owner@example.com", "ops@example.com"]

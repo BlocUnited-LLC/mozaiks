@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -20,7 +18,7 @@ from .schema import (
     parse_global_pack_graph,
     parse_workflow_pack_graph,
 )
-from ..paths import normalize_workflow_roots, primary_workflows_root, resolve_active_app_root, resolve_workflow_path
+from ..paths import normalize_workflow_roots, primary_workflows_root, resolve_workflow_path
 
 
 @dataclass
@@ -36,19 +34,16 @@ def _workflows_root() -> Path:
     """Resolve canonical workflows root.
 
     Resolution order:
-      1. First entry in MOZAIKS_WORKFLOW_ROOTS
-      2. MOZAIKS_WORKFLOWS_PATH
-            3. active app root workflows
+      1. MOZAIKS_WORKFLOWS_PATH
+      2. First entry in legacy MOZAIKS_WORKFLOW_ROOTS
+      3. active app root workflows
+      4. repo-local factory workflows fallback
     """
-    return primary_workflows_root(normalize_workflow_roots())
+    return primary_workflows_root()
 
 
 def get_global_pack_graph_path() -> Path:
-    """Resolve the highest-precedence global extension registry path."""
-    for root in normalize_workflow_roots():
-        candidate = (root / "extended_orchestration" / "extension_registry.json").resolve()
-        if candidate.exists():
-            return candidate
+    """Resolve the active global extension registry path."""
     return (_workflows_root() / "extended_orchestration" / "extension_registry.json").resolve()
 
 
@@ -78,115 +73,26 @@ def _load_json_file(path: Path) -> Optional[Dict[str, Any]]:
         raise ValueError(f"Failed loading pack graph {path}: {exc}") from exc
 
 
-def _load_global_pack_graph_sources() -> List[Path]:
-    sources: List[Path] = []
-    seen: set[Path] = set()
-    for root in normalize_workflow_roots():
-        candidate = (root / "extended_orchestration" / "extension_registry.json").resolve()
-        if candidate in seen or not candidate.exists():
-            continue
-        seen.add(candidate)
-        sources.append(candidate)
-    return sources
-
-
-def _merge_section_items(
-    current: List[Dict[str, Any]],
-    incoming: List[Dict[str, Any]],
-    *,
-    key_fields: Tuple[str, ...],
-) -> List[Dict[str, Any]]:
-    merged: List[Dict[str, Any]] = [deepcopy(item) for item in current if isinstance(item, dict)]
-    index_by_key: Dict[Tuple[str, str], int] = {}
-
-    def item_keys(item: Dict[str, Any]) -> List[Tuple[str, str]]:
-        keys: List[Tuple[str, str]] = []
-        for field in key_fields:
-            value = item.get(field)
-            if isinstance(value, str) and value.strip():
-                keys.append((field, value.strip()))
-        return keys
-
-    for index, item in enumerate(merged):
-        for key in item_keys(item):
-            index_by_key[key] = index
-
-    for item in incoming or []:
-        if not isinstance(item, dict):
-            continue
-        clone = deepcopy(item)
-        keys = item_keys(clone)
-        target_index = next((index_by_key[key] for key in keys if key in index_by_key), None)
-        if target_index is None:
-            target_index = len(merged)
-            merged.append(clone)
-        else:
-            merged[target_index] = clone
-        for key in item_keys(clone):
-            index_by_key[key] = target_index
-
-    return merged
-
-
-def _merge_global_pack_graph_dicts(raw_graphs: List[Dict[str, Any]]) -> Dict[str, Any]:
-    merged: Dict[str, Any] = {
-        "version": 3,
-        "workflows": [],
-        "entrypoints": [],
-        "workflow_sequences": [],
-        "transitions": [],
-    }
-    section_keys: Dict[str, Tuple[str, ...]] = {
-        "workflows": ("id",),
-        "entrypoints": ("id", "path"),
-        "workflow_sequences": ("id",),
-        "transitions": ("id",),
-    }
-
-    for raw in raw_graphs:
-        if "version" in raw:
-            merged["version"] = raw["version"]
-        for scalar in ("pack_name", "description"):
-            if scalar in raw and raw[scalar] is not None:
-                merged[scalar] = deepcopy(raw[scalar])
-        for section, key_fields in section_keys.items():
-            merged[section] = _merge_section_items(
-                merged.get(section, []),
-                raw.get(section) or [],
-                key_fields=key_fields,
-            )
-
-    return merged
-
-
 def load_global_pack_graph() -> Optional[GlobalPackGraph]:
-    """Load and validate the canonical global pack graph.
-
-    Shared generation-core orchestration is the base layer. App/workspace roots
-    may provide an overlay registry that augments or overrides entries by id.
-    """
+    """Load and validate the canonical global pack graph for the active root."""
     global _GLOBAL_CACHE
 
-    paths = _load_global_pack_graph_sources()
-    if not paths:
+    path = get_global_pack_graph_path()
+    if not path.exists():
         return None
 
-    signature = tuple((str(path), path.stat().st_mtime) for path in paths)
+    signature = ((str(path), path.stat().st_mtime),)
     cached = _GLOBAL_CACHE
     if cached and cached.source == signature:
         payload = cached.payload
         if isinstance(payload, GlobalPackGraph):
             return payload
 
-    raw_graphs: List[Dict[str, Any]] = []
-    for path in reversed(paths):
-        raw = _load_json_file(path)
-        if raw is not None:
-            raw_graphs.append(raw)
-    if not raw_graphs:
+    raw = _load_json_file(path)
+    if raw is None:
         return None
 
-    graph = parse_global_pack_graph(_merge_global_pack_graph_dicts(raw_graphs))
+    graph = parse_global_pack_graph(raw)
     _GLOBAL_CACHE = _CacheEntry(source=signature, payload=graph)
     return graph
 

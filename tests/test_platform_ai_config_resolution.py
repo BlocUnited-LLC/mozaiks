@@ -4,7 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from conftest import active_app_root
+from tests.import_utils import active_app_root
 
 
 def _workspace() -> Path:

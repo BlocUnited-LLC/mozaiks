@@ -166,6 +166,9 @@ definitions:
           ui_hidden: true
           match:
             equals: NEXT
+        - type: user_text
+          match:
+            contains: approved
   example_topic:
     type: string
     source:
@@ -182,6 +185,10 @@ agents:
 Rules:
 - `definitions` must be a mapping (`name -> definition`), not a list.
 - `agents` must be a mapping (`agent_name -> {variables: [...]}`), not a list.
+- Valid trigger types for `state` variables:
+  - `agent_text`
+  - `user_text`
+  - `ui_response`
 - Valid source types:
   - `config`
   - `data_reference`

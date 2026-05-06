@@ -62,7 +62,7 @@ class SessionRouter:
         is_full_restart = False
         lifecycle_state = SessionLifecycle.ACTIVE
 
-        route_contribution = self._trigger_route_resolver.resolve(trigger)
+        route_contribution = await self._trigger_route_resolver.resolve(trigger)
         if route_contribution is not None:
             context_seed.update(route_contribution.context_seed)
             explanation = route_contribution.explanation

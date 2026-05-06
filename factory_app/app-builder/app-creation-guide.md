@@ -6,6 +6,9 @@ bundle.
 The builder must decompose intent into separate reviewed models before it
 writes files.
 
+This guide assumes the builder session loop owns sequencing and refinement
+routing, while AG2 workflows remain bounded implementation workers.
+
 ## Core Rule
 
 Do not jump from:

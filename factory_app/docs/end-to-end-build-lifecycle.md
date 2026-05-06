@@ -197,12 +197,18 @@ This phase may write:
 - `ui/index.js`
 - `brand/theme_config.json`
 - `config/shell.json`
+- `config/database_intent.json`
+- optional `config/database_migrations/*.json`
 - generated module files
 
 Important rule:
 
 - generation should never mutate the live app root by default
 - the staged bundle is the reviewable build artifact
+- workflow UI code generation should stay deterministic: shared shipped workflow
+  primitives do not produce workflow-local React files, while genuine
+  workflow-local components are staged under the workflow `ui/` tree and get a
+  synthesized `ui/index.js` barrel during assembly
 
 ## Phase 6: Review And Validation
 
@@ -229,16 +235,19 @@ Important rule:
 - `mozaiks gen` may remain a convenience path
 - but canonical review/history/diff/promotion must live in Studio
 
-Canonical frontend/workflow UI validation target:
+Canonical frontend/workflow UI validation targets:
 
 - `factory_app/workflows/WorkflowPrimitiveAcceptance`
+- `factory_app/workflows/AgentGenerator`
 
 Use it when validating changes to:
 
 - AgentGenerator workflow UI planning
 - `ui.workflow_primitive` manifest contracts
+- `ui.realization` workflow UI assembly contracts
 - `chat.tool_call` / `tool_call_response` workflow UI transport
 - workflow-local React component generation rules
+- real AG2 multi-turn workflow generation and review flows
 
 Recommended smoke command:
 
@@ -247,6 +256,13 @@ python scripts/run_live_mfj_smoke.py \
   --workflow WorkflowPrimitiveAcceptance \
   --workflows-root factory_app/workflows \
   --tool-response-file factory_app/workflows/WorkflowPrimitiveAcceptance/smoke_responses.json
+
+python scripts/run_live_mfj_smoke.py \
+  --workflow AgentGenerator \
+  --workflows-root factory_app/workflows \
+  --prompt-file factory_app/workflows/AgentGenerator/smoke_prompt.txt \
+  --tool-response-file factory_app/workflows/AgentGenerator/smoke_responses.json \
+  --timeout-seconds 300
 ```
 
 ## Phase 7: Promotion
@@ -416,6 +432,8 @@ These are the remaining lifecycle gaps.
 
 - `surface-realization-refactor.md`
   - defines decomposition and `surface_kind`
+- `database-intent-and-revision-contract.md`
+  - defines canonical database intent, staged database artifacts, and revision-time migration rules
 - `mozaiks-app/docs/hosted-platform-rebuild.md`
   - defines hosted product boundaries built around this lifecycle
 

@@ -16,9 +16,9 @@ class TriggerRoutingContribution:
 
 
 class TriggerRouteResolver(Protocol):
-    def resolve(self, trigger: TriggerInput) -> Optional[TriggerRoutingContribution]: ...
+    async def resolve(self, trigger: TriggerInput) -> Optional[TriggerRoutingContribution]: ...
 
 
 class NullTriggerRouteResolver:
-    def resolve(self, trigger: TriggerInput) -> Optional[TriggerRoutingContribution]:
+    async def resolve(self, trigger: TriggerInput) -> Optional[TriggerRoutingContribution]:
         return None

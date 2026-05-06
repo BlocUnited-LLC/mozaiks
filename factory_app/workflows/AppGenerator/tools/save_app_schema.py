@@ -204,6 +204,30 @@ def _validate_asset_manifest(asset_manifest: Any) -> None:
             raise ValueError(f"{path} must include at least one of path or url")
 
 
+def _validate_database_intent_bundle(database_intent_bundle: Any) -> None:
+    if database_intent_bundle is None:
+        return
+    if not isinstance(database_intent_bundle, dict):
+        raise ValueError("database_intent_bundle must be an object")
+    if not _is_non_empty_string(database_intent_bundle.get("version")):
+        raise ValueError("database_intent_bundle.version is required")
+
+    surfaces = database_intent_bundle.get("surfaces")
+    if not isinstance(surfaces, list):
+        raise ValueError("database_intent_bundle.surfaces must be a list")
+
+    for index, surface in enumerate(surfaces):
+        path = f"database_intent_bundle.surfaces[{index}]"
+        if not isinstance(surface, dict):
+            raise ValueError(f"{path} must be an object")
+        if not _is_non_empty_string(surface.get("surface_id")):
+            raise ValueError(f"{path}.surface_id is required")
+        if not _is_non_empty_string(surface.get("surface_kind")):
+            raise ValueError(f"{path}.surface_kind is required")
+        if not isinstance(surface.get("collections"), list):
+            raise ValueError(f"{path}.collections must be a list")
+
+
 def _validate_custom_route_bundle(custom_route_bundle: Any) -> None:
     if custom_route_bundle is None:
         return
@@ -747,6 +771,7 @@ def _persist_to_filesystem(
     theme_config_patch: Optional[Dict[str, Any]],
     shell_config: Optional[Dict[str, Any]],
     asset_manifest: Optional[Dict[str, Any]],
+    database_intent_bundle: Optional[Dict[str, Any]],
     custom_route_bundle: Optional[Dict[str, Any]],
 ) -> List[str]:
     """Write app.json, ui/pages/*.yaml, optional custom route artifacts, and optional config artifacts.
@@ -841,6 +866,15 @@ def _persist_to_filesystem(
         manifest_path.write_text(json.dumps(existing_manifest, indent=2, ensure_ascii=False), encoding="utf-8")
         written.append("config/asset_manifest.json")
 
+    if database_intent_bundle and isinstance(database_intent_bundle, dict):
+        database_intent_path = output_dir / "config" / "database_intent.json"
+        database_intent_path.parent.mkdir(parents=True, exist_ok=True)
+        database_intent_path.write_text(
+            json.dumps(database_intent_bundle, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        written.append("config/database_intent.json")
+
     return written
 
 
@@ -908,6 +942,10 @@ def save_app_schema(
         Optional[Dict[str, Any]],
         Field(description="Optional asset manifest to merge into config/asset_manifest.json. None to skip."),
     ] = None,
+    database_intent_bundle: Annotated[
+        Optional[Dict[str, Any]],
+        Field(description="Optional canonical database intent bundle persisted to config/database_intent.json. None to skip."),
+    ] = None,
     custom_route_bundle: Annotated[
         Optional[Dict[str, Any]],
         Field(description="Optional bounded custom full-page React route bundle persisted to ui/route_manifest.json and ui/pages/custom/*.jsx."),
@@ -929,10 +967,11 @@ def save_app_schema(
       - brand/theme_config.json (merge)  → theme_config_patch when set
       - config/shell.json (merge)        → shell_config when set
       - config/asset_manifest.json       → asset_manifest when set
+      - config/database_intent.json      → database_intent_bundle when set or available in context
 
     Stores in context_variables:
       - app_manifest, app_pages, app_theme_config_patch, app_shell_config,
-        app_asset_manifest, app_custom_route_bundle, app_schema_ready
+        app_asset_manifest, app_database_intent_bundle, app_custom_route_bundle, app_schema_ready
 
     Tools are dumb — no reasoning, no transformation. AppSchemaAgent already
     produced correct typed output; this tool just persists it.
@@ -984,6 +1023,10 @@ def save_app_schema(
     _validate_custom_route_bundle(custom_route_bundle)
     _validate_manifest_against_pages(manifest_dict, page_list, custom_route_bundle)
     _validate_asset_manifest(asset_manifest)
+    resolved_database_intent_bundle = database_intent_bundle
+    if resolved_database_intent_bundle is None:
+        resolved_database_intent_bundle = _context_get(context_variables, "database_intent_bundle")
+    _validate_database_intent_bundle(resolved_database_intent_bundle)
 
     # Persist to context_variables for downstream agents
     if context_variables and hasattr(context_variables, "set"):
@@ -993,6 +1036,7 @@ def save_app_schema(
             context_variables.set("app_theme_config_patch", theme_config_patch)
             context_variables.set("app_shell_config", shell_config)
             context_variables.set("app_asset_manifest", asset_manifest)
+            context_variables.set("app_database_intent_bundle", resolved_database_intent_bundle)
             context_variables.set("app_custom_route_bundle", custom_route_bundle)
             context_variables.set("app_schema_ready", True)
             context_variables.set("available_page_primitives", list(get_page_ui_primitive_names()))
@@ -1016,6 +1060,7 @@ def save_app_schema(
             theme_config_patch,
             shell_config,
             asset_manifest,
+            resolved_database_intent_bundle,
             custom_route_bundle,
         )
         _logger.info(
@@ -1038,7 +1083,8 @@ def save_app_schema(
         f"Auth strategy: {manifest_dict.get('auth_strategy') or 'none'}\n"
         f"Theme config patch: {'yes' if theme_config_patch else 'no'}\n"
         f"Shell config: {'yes' if shell_config else 'no'}\n"
-        f"Asset manifest: {'yes' if asset_manifest else 'no'}"
+        f"Asset manifest: {'yes' if asset_manifest else 'no'}\n"
+        f"Database intent: {'yes' if resolved_database_intent_bundle else 'no'}"
         f"{files_written}"
     )
 

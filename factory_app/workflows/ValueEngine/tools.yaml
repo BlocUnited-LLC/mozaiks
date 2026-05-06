@@ -15,6 +15,7 @@ tools:
     component: ConceptBlueprint
     mode: artifact
     workflow_primitive: document_preview
+    realization: generated_component
 
 - agent: GapAnalysisAgent
   file: manifest.py

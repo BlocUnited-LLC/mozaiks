@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from tests.import_utils import import_module_directly
@@ -8,8 +10,11 @@ _schema = import_module_directly("mozaiksai.core.workflow.pack.schema")
 _session_model = import_module_directly("mozaiksai.core.session.model")
 _session_persist = import_module_directly("mozaiksai.core.session.persistence")
 _session_router = import_module_directly("mozaiksai.core.session.router")
+_orchestration_control = import_module_directly(
+    "factory_app.control_plane.orchestration_control"
+)
 _refinement_router = import_module_directly(
-    "factory_app.app.modules.factory_control_plane.backend.refinement_router"
+    "factory_app.control_plane.refinement_router"
 )
 _data_models = import_module_directly("mozaiksai.core.data.models")
 
@@ -19,6 +24,27 @@ SessionRouter = _session_router.SessionRouter
 SessionStateStore = _session_persist.SessionStateStore
 WorkflowStatus = _data_models.WorkflowStatus
 get_refinement_trigger_route_resolver = _refinement_router.get_refinement_trigger_route_resolver
+get_orchestration_control_harness = _orchestration_control.get_orchestration_control_harness
+
+
+class _FakeChangeClassifier:
+    def __init__(
+        self,
+        *,
+        change_class: str,
+        rationale: str,
+        confidence: float = 0.91,
+        signals: list[str] | None = None,
+    ) -> None:
+        self._result = SimpleNamespace(
+            change_class=change_class,
+            rationale=rationale,
+            confidence=confidence,
+            signals=list(signals or []),
+        )
+
+    async def classify(self, **kwargs):  # noqa: ANN003
+        return self._result
 
 
 class _MemoryCollection:
@@ -151,10 +177,20 @@ async def test_route_trigger_keeps_requested_workflow_when_dependencies_met(monk
 async def test_route_trigger_refinement_uses_injected_trigger_route_resolver(monkeypatch):
     persistence = _FakePersistence()
     store = SessionStateStore(persistence)
+    resolver = get_refinement_trigger_route_resolver()
+    monkeypatch.setattr(
+        resolver,
+        "_classifier",
+        _FakeChangeClassifier(
+            change_class="patch",
+            rationale="Scoped patch to the workflow bundle.",
+            signals=["bug_fix", "local_change"],
+        ),
+    )
     router = SessionRouter(
         persistence=persistence,
         store=store,
-        trigger_route_resolver=get_refinement_trigger_route_resolver(),
+        trigger_route_resolver=resolver,
     )
     pack = _make_pack()
     monkeypatch.setattr(_session_router, "load_global_pack_graph", lambda: pack)
@@ -166,11 +202,16 @@ async def test_route_trigger_refinement_uses_injected_trigger_route_resolver(mon
             trigger_source="refinement",
             workflow_id=None,
             trigger_payload={
-                "change_class": "patch",
-                "artifact_kind": "workflow_bundle",
-                "artifact_version_id": "v1",
-                "raw_user_request": "Update workflow naming",
+                "refinement_request": {
+                    "declared_change_class": "patch",
+                    "artifact_kind": "workflow_bundle",
+                    "artifact_key": "workflow_bundle",
+                    "artifact_version_id": "v1",
+                    "raw_user_request": "Update workflow naming",
+                    "source_surface": "studio_create",
+                }
             },
+            context_variables={"screen": "studio-create"},
         )
     )
 
@@ -182,6 +223,102 @@ async def test_route_trigger_refinement_uses_injected_trigger_route_resolver(mon
     assert decision.context_seed.get("change_class") == "patch"
     assert decision.context_seed.get("artifact_kind") == "workflow_bundle"
     assert decision.context_seed.get("artifact_version_id") == "v1"
+    assert decision.context_seed.get("change_intent", {}).get("change_class") == "patch"
+    assert decision.context_seed.get("change_intent", {}).get("source") == "llm"
+    assert decision.context_seed.get("impact_set", {}).get("restart_from") == "AgentGenerator"
+
+
+@pytest.mark.asyncio
+async def test_route_trigger_refinement_classifier_uses_authoritative_llm_result(monkeypatch):
+    persistence = _FakePersistence()
+    store = SessionStateStore(persistence)
+    resolver = get_refinement_trigger_route_resolver()
+    monkeypatch.setattr(
+        resolver,
+        "_classifier",
+        _FakeChangeClassifier(
+            change_class="core",
+            rationale="The request changes the product identity and must reopen ValueEngine.",
+            signals=["concept_shift", "business_model_change"],
+        ),
+    )
+    router = SessionRouter(
+        persistence=persistence,
+        store=store,
+        trigger_route_resolver=resolver,
+    )
+    pack = _make_pack()
+    monkeypatch.setattr(_session_router, "load_global_pack_graph", lambda: pack)
+
+    decision = await router.route_trigger(
+        TriggerInput(
+            app_id="app_1",
+            user_id="user_1",
+            trigger_source="refinement",
+            workflow_id=None,
+            trigger_payload={
+                "refinement_request": {
+                    "declared_change_class": "patch",
+                    "artifact_kind": "app_bundle",
+                    "artifact_key": "app_bundle",
+                    "artifact_version_id": "v9",
+                    "raw_user_request": "Actually pivot this into a blockchain marketplace instead of an internal ops tool.",
+                }
+            },
+        )
+    )
+
+    assert decision.requested_workflow_id == "ValueEngine"
+    assert decision.workflow_id == "ValueEngine"
+    assert decision.is_full_restart is True
+    assert decision.lifecycle_state == _session_model.SessionLifecycle.STALE
+    assert decision.context_seed.get("change_class") == "core"
+    assert decision.context_seed.get("change_intent", {}).get("source") == "llm"
+    assert "concept_shift" in decision.context_seed.get("change_intent", {}).get("signals", [])
+
+
+@pytest.mark.asyncio
+async def test_orchestration_control_harness_delegates_refinement_into_session_router(monkeypatch):
+    persistence = _FakePersistence()
+    store = SessionStateStore(persistence)
+    harness = get_orchestration_control_harness()
+    monkeypatch.setattr(
+        harness._refinement_resolver,
+        "_classifier",
+        _FakeChangeClassifier(
+            change_class="feature",
+            rationale="Adding a workflow stays within the current concept.",
+            signals=["workflow_expansion", "new_capability"],
+        ),
+    )
+    router = SessionRouter(
+        persistence=persistence,
+        store=store,
+        trigger_route_resolver=harness,
+    )
+    pack = _make_pack()
+    monkeypatch.setattr(_session_router, "load_global_pack_graph", lambda: pack)
+
+    decision = await router.route_trigger(
+        TriggerInput(
+            app_id="app_1",
+            user_id="user_1",
+            trigger_source="refinement",
+            workflow_id=None,
+            trigger_payload={
+                "refinement_request": {
+                    "artifact_kind": "app_bundle",
+                    "artifact_key": "app_bundle",
+                    "artifact_version_id": "v11",
+                    "raw_user_request": "Add a workflow that handles premium escalations.",
+                }
+            },
+        )
+    )
+
+    assert decision.requested_workflow_id == "AppGenerator"
+    assert decision.context_seed.get("change_class") == "feature"
+    assert decision.context_seed.get("change_intent", {}).get("source") == "llm"
 
 
 @pytest.mark.asyncio

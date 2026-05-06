@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from mozaiksai.core.core_config import get_mongo_client
+from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, PlatformCollections
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id
 from logs.logging_config import get_core_logger
 
@@ -15,13 +16,13 @@ _INDEX_READY = False
 
 
 def _db_name() -> str:
-    return (os.getenv("MOZAIKS_PLATFORM_OUTBOX_DB") or "MozaiksAI").strip() or "MozaiksAI"
+    return (os.getenv("MOZAIKS_PLATFORM_OUTBOX_DB") or SYSTEM_DATABASE).strip() or SYSTEM_DATABASE
 
 
 def _collection_name() -> str:
     return (
-        os.getenv("MOZAIKS_PLATFORM_BUILD_EVENTS_OUTBOX_COLLECTION") or "PlatformBuildEventsOutbox"
-    ).strip() or "PlatformBuildEventsOutbox"
+        os.getenv("MOZAIKS_PLATFORM_BUILD_EVENTS_OUTBOX_COLLECTION") or PlatformCollections.BUILD_EVENTS_OUTBOX
+    ).strip() or PlatformCollections.BUILD_EVENTS_OUTBOX
 
 
 def _utc_now() -> datetime:

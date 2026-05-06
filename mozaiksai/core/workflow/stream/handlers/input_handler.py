@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Set, Type
 
 from .base import BaseEventHandler
 from mozaiksai.core.events.event_serialization import serialize_event_content
+from mozaiksai.core.workflow.runtime_signals import SYSTEM_RESUME_SIGNAL
 
 if TYPE_CHECKING:
     from ..context import StreamContext, StreamState
@@ -77,6 +78,47 @@ def _extract_request_payload(request_obj: Any) -> Dict[str, Any]:
         return serialized if isinstance(serialized, dict) else {}
     except Exception:
         return {}
+
+
+async def _emit_awaiting_reply_event(
+    *,
+    ctx: "StreamContext",
+    state: "StreamState",
+    prompt: str,
+) -> None:
+    if not ctx.transport:
+        return
+    try:
+        await ctx.transport.send_event_to_ui(
+            {
+                "kind": "awaiting_reply",
+                "agent": state.turn_agent or "Agent",
+                "chat_id": ctx.chat_id,
+                "workflow_name": ctx.workflow_name,
+                "display": "composer",
+                "interaction_type": "input_request",
+                "reason": "awaiting_user_reply",
+                "prompt": prompt,
+                "source_agent": state.turn_agent or "Agent",
+                "metadata": {
+                    "source": "ag2_group_feedback_compat",
+                },
+            },
+            ctx.chat_id,
+        )
+    except Exception as emit_err:
+        ctx.wf_logger.debug(
+            f"Failed to emit awaiting_reply event for {ctx.chat_id}: {emit_err}"
+        )
+
+
+async def _invoke_respond_callback(respond_cb: Any, response_value: str) -> bool:
+    if not callable(respond_cb):
+        return False
+    result = respond_cb(response_value)
+    if hasattr(result, "__await__"):
+        await result
+    return True
 
 
 class InputRequestHandler(BaseEventHandler):
@@ -162,19 +204,86 @@ class InputRequestHandler(BaseEventHandler):
                     f"for input request {request_id}"
                 )
 
+        async def _clear_auto_resumed_pending_input() -> None:
+            state.pending_input_requests.pop(request_id, None)
+            try:
+                await ctx.persistence_manager.clear_pending_input_request(
+                    chat_id=ctx.chat_id,
+                    app_id=ctx.app_id,
+                )
+            except Exception as e:
+                ctx.wf_logger.debug(
+                    f"Failed clearing auto-resumed pending input request {request_id}: {e}"
+                )
+
+        if suppressed_generic_prompt and callable(respond_cb):
+            if ctx.transport and hasattr(ctx.transport, "consume_recent_input_submit"):
+                try:
+                    if bool(ctx.transport.consume_recent_input_submit(ctx.chat_id)):
+                        await _invoke_respond_callback(respond_cb, SYSTEM_RESUME_SIGNAL)
+                        await _clear_auto_resumed_pending_input()
+                        ctx.wf_logger.info(
+                            f" [{ctx.workflow_name_upper}] Auto-resumed suppressed AG2 feedback prompt "
+                            f"after recent user input for request {request_id}"
+                        )
+                        state.awaiting_user_input = False
+                        return None
+                except Exception as e:
+                    ctx.wf_logger.debug(
+                        f"Failed checking recent input submit marker for {request_id}: {e}"
+                    )
+
+            latest_role = str(getattr(state, "last_text_role", None) or "").strip().lower()
+            latest_content = str(getattr(state, "last_text_content", None) or "").strip()
+            if not latest_role and not latest_content:
+                latest_message: Dict[str, Any] = {}
+                try:
+                    latest = await ctx.persistence_manager.get_latest_message(
+                        chat_id=ctx.chat_id,
+                        app_id=ctx.app_id,
+                    )
+                    latest_message = latest if isinstance(latest, dict) else {}
+                except Exception as e:
+                    ctx.wf_logger.debug(
+                        f"Failed reading latest persisted message for input request {request_id}: {e}"
+                    )
+                latest_role = str(latest_message.get("role") or "").strip().lower()
+                latest_content = str(latest_message.get("content") or "").strip()
+            if latest_role != "assistant" or not latest_content:
+                try:
+                    await _invoke_respond_callback(respond_cb, SYSTEM_RESUME_SIGNAL)
+                    await _clear_auto_resumed_pending_input()
+                    ctx.wf_logger.info(
+                        f" [{ctx.workflow_name_upper}] Auto-resumed suppressed AG2 feedback prompt "
+                        f"for input request {request_id}"
+                    )
+                    state.awaiting_user_input = False
+                    return None
+                except Exception as e:
+                    ctx.wf_logger.debug(
+                        f"Failed auto-resuming suppressed AG2 feedback prompt for {request_id}: {e}"
+                    )
+
         state.awaiting_user_input = True
 
         if callable(respond_cb):
-            state.pending_input_requests[request_id] = respond_cb
+            async def _tracked_respond(response_value: str) -> None:
+                try:
+                    await _invoke_respond_callback(respond_cb, response_value)
+                finally:
+                    state.pending_input_requests.pop(request_id, None)
+                    state.awaiting_user_input = bool(state.pending_input_requests)
+
+            state.pending_input_requests[request_id] = _tracked_respond
 
             try:
                 if ctx.transport:
                     registered_id = ctx.transport.register_input_request(
-                        ctx.chat_id, request_id, respond_cb
+                        ctx.chat_id, request_id, _tracked_respond
                     )
                     if registered_id and registered_id != request_id:
                         state.pending_input_requests.pop(request_id, None)
-                        state.pending_input_requests[registered_id] = respond_cb
+                        state.pending_input_requests[registered_id] = _tracked_respond
                         setattr(event, "_mozaiks_request_id", registered_id)
                         request_id = registered_id
             except Exception as e:
@@ -212,6 +321,10 @@ class InputRequestHandler(BaseEventHandler):
             "mode": request_payload.get("mode") or request_payload.get("display") or display_mode,
             "interaction_type": "input_request",
         }
+        if suppressed_generic_prompt:
+            normalized_payload.setdefault("resume_ui_kind", "awaiting_reply")
+            normalized_payload.setdefault("metadata_source", metadata_source)
+            normalized_payload.setdefault("generic_feedback_prompt_suppressed", True)
 
         # Persist pending input request for resume support
         try:
@@ -227,10 +340,17 @@ class InputRequestHandler(BaseEventHandler):
                 display=display_mode,
                 interaction_type="input_request",
                 password=password,
-                raw_payload=request_payload,
+                raw_payload=normalized_payload,
             )
         except Exception as e:
             ctx.wf_logger.debug(f"Failed to persist pending input request: {e}")
+
+        if suppressed_generic_prompt:
+            await _emit_awaiting_reply_event(
+                ctx=ctx,
+                state=state,
+                prompt=prompt_hint or "",
+            )
 
         # Build response-required workflow UI payload for transport.
         return {

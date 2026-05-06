@@ -11,6 +11,10 @@ hooks:
   hook_agent: UIFileGenerator
   filename: hook_primitive_catalog.py
   function: inject_primitive_catalog
+- hook_type: update_agent_state
+  hook_agent: ToolsManagerAgent
+  filename: hook_primitive_catalog.py
+  function: inject_primitive_catalog
 - hook_type: process_message_before_send
   hook_agent: DownloadAgent
   filename: hook_tokengate.py
@@ -20,7 +24,7 @@ hooks:
   filename: update_agent_state_pattern.py
   function: inject_workflow_strategy_guidance
 - hook_type: update_agent_state
-  hook_agent: AgentRosterAgent
+  hook_agent: AgentsAgent
   filename: update_agent_state_pattern.py
   function: inject_agents_agent_guidance
 - hook_type: update_agent_state

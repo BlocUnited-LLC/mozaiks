@@ -39,9 +39,9 @@ async def show_acceptance_diagram(context_variables: Any = None) -> Dict[str, An
                 "",
                 "    IntakeAgent->>User: Ask one discovery question",
                 "    User->>IntakeAgent: Reply through composer",
-                "    ReviewAgent->>UI: Emit AcceptanceApprovalCard",
+                "    ReviewAgent->>UI: Emit ApprovalCard",
                 "    UI->>ReviewAgent: Return structured approval",
-                "    ReviewAgent->>UI: Emit AcceptanceDiagramViewer artifact",
+                "    ReviewAgent->>UI: Emit DiagramViewer artifact",
             ]
         ),
         "checkpoints": [

@@ -175,6 +175,7 @@ const ModernChatInterface = ({
   onArtifactAction = null,
   actionStatusMap = null,
   pendingComposerInputToolCall = null,
+  pendingComposerReply = null,
   onPendingComposerInputSkip = null,
 }) => {
   const [message, setMessage] = useState('');
@@ -226,15 +227,31 @@ const ModernChatInterface = ({
 
   const { appId } = useParams();
   const pendingComposerPrompt = String(
-    pendingComposerInputToolCall?.payload?.prompt || ''
+    pendingComposerInputToolCall?.payload?.prompt
+      || pendingComposerReply?.prompt
+      || ''
   ).trim();
   const pendingComposerAgent = (
     pendingComposerInputToolCall?.agent
     || pendingComposerInputToolCall?.payload?.agent
     || pendingComposerInputToolCall?.payload?.agent_name
+    || pendingComposerReply?.agent
     || 'Agent'
   );
-  const composerPlaceholder = pendingComposerInputToolCall
+  // Only show the "Awaiting Workflow Reply" banner when the agent explicitly
+  // requested a custom interaction — either a non-empty prompt or a named
+  // component (not the generic UserInputRequest fallback).  Bare AG2
+  // conversational turns produce a UserInputRequest with no prompt; those
+  // should route transparently through the textarea without visual noise.
+  const showComposerBanner = Boolean(
+    (pendingComposerInputToolCall || pendingComposerReply) && (
+      pendingComposerPrompt ||
+      pendingComposerReply ||
+      (pendingComposerInputToolCall?.tool_name &&
+       pendingComposerInputToolCall.tool_name !== 'UserInputRequest')
+    )
+  );
+  const composerPlaceholder = (pendingComposerInputToolCall || pendingComposerReply)
     ? 'Reply to continue the workflow...'
     : 'Transmit your message...';
 
@@ -268,7 +285,7 @@ const ModernChatInterface = ({
   const onUploadClick = () => {
     if (!onUploadFile) return;
     if (buttonText === 'NEXT') return;
-    if (pendingComposerInputToolCall) return;
+    if (pendingComposerInputToolCall || pendingComposerReply) return;
     try {
       fileInputRef.current?.click?.();
     } catch {}
@@ -656,7 +673,7 @@ const ModernChatInterface = ({
 
   {/* Fixed Transmission Input Area - Never moves */}
             <div className={`flex-shrink-0 p-2 sm:p-2.5 md:p-3 border-t border-[rgba(var(--color-primary-light-rgb),0.2)] bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.05)] to-[rgba(var(--color-secondary-rgb),0.05)] backdrop-blur-xl shadow-lg transition-all duration-500 transmission-input-tight rounded-b-[inherit]`}>
-        {pendingComposerInputToolCall && (
+        {showComposerBanner && (
           <div className="mb-2 rounded-xl border border-[rgba(var(--color-primary-light-rgb),0.3)] bg-[rgba(var(--color-primary-rgb),0.08)] px-3 py-2 backdrop-blur-sm">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -667,7 +684,7 @@ const ModernChatInterface = ({
                   {pendingComposerPrompt || `${pendingComposerAgent} is waiting for your reply. Your next message will be sent directly to this workflow step.`}
                 </div>
               </div>
-              {typeof onPendingComposerInputSkip === 'function' && (
+              {typeof onPendingComposerInputSkip === 'function' && pendingComposerInputToolCall && (
                 <button
                   type="button"
                   onClick={() => {
@@ -726,7 +743,7 @@ const ModernChatInterface = ({
             <button
               type="button"
               onClick={onUploadClick}
-              disabled={buttonText === 'NEXT' || isUploadingFile || !!pendingComposerInputToolCall}
+              disabled={buttonText === 'NEXT' || isUploadingFile || !!pendingComposerInputToolCall || !!pendingComposerReply}
               className={
                 `px-2 py-1.5 rounded-md transition-all duration-300 min-w-[36px] sm:min-w-[40px] w-auto h-8 sm:h-9 oxanium font-bold text-[13px] flex items-center justify-center letter-spacing-wide border-2 flex-shrink-0 ` +
                 `${(buttonText === 'NEXT' || isUploadingFile)

@@ -1,4 +1,9 @@
 import {
+  ActionButton,
+  IconButton,
+  StatusPill,
+} from './StudioPrimitives.jsx'
+import {
   getRefinementRequestPlaceholder,
   REFINEMENT_CHANGE_CLASSES,
 } from './refinement.js'
@@ -16,17 +21,23 @@ export function RefinementControls({
   error = null,
   showRequestInput = true,
   title = 'Refine this artifact',
-  description = 'Choose how much to change, then describe what you want.',
+  description = 'Describe the change you want. Mozaiks classifies and routes the refinement automatically; the cards below are optional route hints.',
   helperText = null,
   submitLabel = 'Apply refinement',
+  surface = 'card',
+  showHeader = true,
+  showActions = true,
 }) {
   const selectedMode = modes.find((mode) => mode.id === selectedClass || mode.changeClass === selectedClass) || null
   const normalizedRequest = typeof request === 'string' ? request : ''
-  const canSubmit = Boolean(selectedClass) && normalizedRequest.trim().length > 0 && !busy && selectedMode?.available !== false
+  const canSubmit = normalizedRequest.trim().length > 0 && !busy && (selectedMode?.available !== false)
+  const wrapperClass = surface === 'plain'
+    ? 'w-full'
+    : 'w-full rounded-3xl border border-border bg-background/70 p-5'
 
   const handleSubmit = () => {
     if (!canSubmit || typeof onSubmit !== 'function') return
-    onSubmit(selectedClass)
+    onSubmit(selectedClass || null)
   }
 
   const handleSelect = (value) => {
@@ -38,74 +49,73 @@ export function RefinementControls({
   }
 
   return (
-    <div className="w-full rounded-3xl border border-border bg-background/70 p-5">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h3 className="text-base font-semibold text-foreground">{title}</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {description}
-          </p>
+    <div className={wrapperClass}>
+      {showHeader && (
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">{title}</h3>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p>
+          </div>
+          {onDismiss && <IconButton onClick={onDismiss} label="Dismiss refinement controls" />}
         </div>
-        {onDismiss && (
-          <button
-            onClick={onDismiss}
-            className="text-muted-foreground hover:text-foreground transition-colors p-1"
-            aria-label="Dismiss"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        )}
-      </div>
+      )}
 
-      <div className="grid grid-cols-2 gap-2 mb-4">
+      <div className="grid gap-3 sm:grid-cols-2">
         {modes.map((mode) => {
           const modeId = mode.id || mode.changeClass
           const isSelected = selectedClass === modeId
+          const badge = isSelected
+            ? { label: 'Selected', tone: mode.isDestructive ? 'destructive' : 'primary' }
+            : mode.available === false
+            ? { label: 'Missing', tone: 'warning' }
+            : mode.available === true
+            ? { label: 'Ready', tone: 'success' }
+            : null
+
           return (
             <button
               key={modeId}
+              type="button"
               onClick={() => handleSelect(modeId)}
               className={[
-                'text-left p-3 rounded-lg border transition-all duration-150',
+                'rounded-3xl border p-4 text-left transition-all duration-150',
                 mode.available === false
-                  ? 'border-border bg-muted/50 text-muted-foreground'
-                  : isSelected && !mode.isDestructive
-                  ? 'border-primary bg-primary/10 text-foreground'
+                  ? 'border-border bg-muted/35 text-muted-foreground'
                   : isSelected && mode.isDestructive
-                  ? 'border-destructive bg-destructive/10 text-foreground'
-                  : 'border-border bg-card text-foreground hover:border-primary/50 hover:bg-muted',
+                  ? 'border-destructive/40 bg-destructive/10 text-foreground shadow-sm'
+                  : isSelected
+                  ? 'border-primary/40 bg-primary/10 text-foreground shadow-sm'
+                  : 'border-border bg-card text-foreground hover:border-primary/40 hover:bg-muted/60',
               ].join(' ')}
             >
-              <div className="flex items-center justify-between gap-2 mb-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-base leading-none">{mode.icon}</span>
-                  <span
-                    className={[
-                      'text-sm font-semibold',
-                      mode.available === false
-                        ? 'text-muted-foreground'
-                        : isSelected && mode.isDestructive
-                        ? 'text-destructive'
-                        : isSelected
-                        ? 'text-primary'
-                        : 'text-foreground',
-                    ].join(' ')}
-                  >
-                    {mode.label || mode.title}
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-border bg-background/70 text-lg leading-none">
+                    {mode.icon}
                   </span>
+                  <div>
+                    <div
+                      className={[
+                        'text-sm font-semibold',
+                        mode.available === false
+                          ? 'text-muted-foreground'
+                          : isSelected && mode.isDestructive
+                          ? 'text-destructive'
+                          : isSelected
+                          ? 'text-primary'
+                          : 'text-foreground',
+                      ].join(' ')}
+                    >
+                      {mode.label || mode.title}
+                    </div>
+                    {mode.workflowId && (
+                      <div className="mt-1 font-mono text-[11px] text-muted-foreground">{mode.workflowId}</div>
+                    )}
+                  </div>
                 </div>
-                {mode.available === false ? (
-                  <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-warning">Missing</span>
-                ) : mode.available === true ? (
-                  <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-success">Ready</span>
-                ) : null}
+                {badge && <StatusPill tone={badge.tone}>{badge.label}</StatusPill>}
               </div>
-              {mode.workflowId && (
-                <div className="mb-1 text-[11px] font-mono text-muted-foreground">{mode.workflowId}</div>
-              )}
-              <p className="text-xs text-muted-foreground leading-snug">{mode.description}</p>
+              <p className="mt-3 text-sm leading-6 text-muted-foreground">{mode.description}</p>
             </button>
           )
         })}
@@ -117,42 +127,34 @@ export function RefinementControls({
           onChange={handleRequestChange}
           placeholder={getRefinementRequestPlaceholder(selectedClass)}
           rows={3}
-          className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:border-primary/60 transition-colors mb-3"
+          className="mt-4 min-h-28 w-full resize-none rounded-2xl border border-border bg-card px-4 py-3 text-sm leading-7 text-foreground placeholder:text-muted-foreground outline-none transition-colors focus:border-primary/60"
         />
       )}
 
       {helperText && (
-        <div className="mb-3 text-sm text-muted-foreground leading-6">{helperText}</div>
+        <div className="mt-4 rounded-2xl border border-border bg-background/60 px-4 py-3 text-sm leading-6 text-muted-foreground">
+          {helperText}
+        </div>
       )}
 
       {error && (
-        <div className="mb-3 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs">
+        <div className="mt-4 rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {error}
         </div>
       )}
 
-      <div className="flex items-center justify-end gap-2">
-        {onDismiss && (
-          <button
-            onClick={onDismiss}
-            className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground border border-border rounded-lg hover:border-primary/40 transition-colors"
-          >
-            Cancel
-          </button>
-        )}
-        <button
-          onClick={handleSubmit}
-          disabled={!canSubmit}
-          className={[
-            'px-4 py-1.5 text-sm font-medium rounded-lg transition-all duration-150',
-            canSubmit
-              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-              : 'bg-muted text-muted-foreground cursor-not-allowed',
-          ].join(' ')}
-        >
-          {busy ? 'Starting...' : submitLabel}
-        </button>
-      </div>
+      {showActions && (
+        <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
+          {onDismiss && (
+            <ActionButton onClick={onDismiss} variant="secondary">
+              Cancel
+            </ActionButton>
+          )}
+          <ActionButton onClick={handleSubmit} disabled={!canSubmit}>
+            {busy ? 'Starting...' : submitLabel}
+          </ActionButton>
+        </div>
+      )}
     </div>
   )
 }

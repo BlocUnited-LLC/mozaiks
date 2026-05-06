@@ -29,3 +29,30 @@ async def test_gather_latest_agent_jsons_ignores_user_messages(caplog) -> None:
 
     assert result == {"PresenterAgent": {"summary": "done"}}
     assert "No JSON found in user message" not in caplog.text
+
+
+def test_extract_json_from_wrapped_text_event_content() -> None:
+    wrapped = (
+        "uuid=UUID('evt-1') "
+        "content='{\\n"
+        "  \"PatternSelection\": {\\n"
+        "    \"is_multi_workflow\": false,\\n"
+        "    \"pack_name\": \"Internal Helpdesk Ticket Resolution\"\\n"
+        "  }\\n"
+        "}' "
+        "sender='PatternAgent' models_usage=None"
+    )
+
+    normalized = AG2PersistenceManager._normalize_wrapped_text_content(wrapped)
+    parsed = AG2PersistenceManager._extract_json_from_text(wrapped, agent_name="PatternAgent")
+
+    assert normalized == (
+        '{"PatternSelection": {"is_multi_workflow": false, '
+        '"pack_name": "Internal Helpdesk Ticket Resolution"}}'
+    )
+    assert parsed == {
+        "PatternSelection": {
+            "is_multi_workflow": False,
+            "pack_name": "Internal Helpdesk Ticket Resolution",
+        }
+    }

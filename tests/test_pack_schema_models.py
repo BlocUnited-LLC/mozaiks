@@ -18,7 +18,6 @@ def test_pack_metadata_structured_output_transition_options_match_runtime_contra
     path = (
         Path(__file__).resolve().parents[1]
         / "factory_app"
-        / "app"
         / "workflows"
         / "AgentGenerator"
         / "structured_outputs.yaml"
@@ -32,7 +31,6 @@ def test_pack_metadata_structured_output_entrypoints_match_runtime_contract() ->
     path = (
         Path(__file__).resolve().parents[1]
         / "factory_app"
-        / "app"
         / "workflows"
         / "AgentGenerator"
         / "structured_outputs.yaml"

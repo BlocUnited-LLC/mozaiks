@@ -31,8 +31,27 @@ definitions:
     type: string
     description: >
       Raw user-supplied refinement request text, passed through from the
-      ChangeRequest. Agents read this instead of re-interviewing when
+      canonical RefinementRequest. Agents read this instead of re-interviewing when
       refinement_mode is true.
+    source:
+      type: state
+      default: null
+  change_intent:
+    type: object
+    description: >
+      Typed refinement classification emitted by the control plane. Contains the
+      final `change_class`, rationale, and layer-touch information so agents can
+      understand whether the request is local, design-scoped, feature-extending,
+      or concept-revising.
+    source:
+      type: state
+      default: null
+  impact_set:
+    type: object
+    description: >
+      Typed downstream impact summary emitted by the control plane. Contains
+      affected workflows, affected declarative families, restart_from, and
+      rebuild/replanning flags for the current refinement request.
     source:
       type: state
       default: null
@@ -50,20 +69,20 @@ definitions:
     description: Main project description and overview from the database
     source:
       type: data_reference
-      database_name: autogen_ai_agents
-      collection: Concepts
+      database_name: mozaiksai
+      collection: BuilderConcepts
       query_template:
         app_id: '{{runtime.app_id}}'
       fields:
       - ConceptOverview
   concept_api_endpoints:
     type: array
-    description: Optional API endpoints blueprint from the Concepts collection (produced
+    description: Optional API endpoints blueprint from the BuilderConcepts collection (produced
       by ValueEngine).
     source:
       type: data_reference
-      database_name: autogen_ai_agents
-      collection: Concepts
+      database_name: mozaiksai
+      collection: BuilderConcepts
       query_template:
         app_id: '{{runtime.app_id}}'
       fields:
@@ -71,12 +90,12 @@ definitions:
       default: []
   concept_blueprint:
     type: object
-    description: Optional structured blueprint from the Concepts collection (produced
+    description: Optional structured blueprint from the BuilderConcepts collection (produced
       by ValueEngine).
     source:
       type: data_reference
-      database_name: autogen_ai_agents
-      collection: Concepts
+      database_name: mozaiksai
+      collection: BuilderConcepts
       query_template:
         app_id: '{{runtime.app_id}}'
       fields:
@@ -89,7 +108,7 @@ definitions:
       workflow/event rationale and API intent.
     source:
       type: data_reference
-      database_name: MozaiksAI
+      database_name: mozaiksai
       collection: DesignDocuments
       query_template:
         app_id: '{{runtime.app_id}}'
@@ -106,7 +125,7 @@ definitions:
       workflow touchpoints.
     source:
       type: data_reference
-      database_name: MozaiksAI
+      database_name: mozaiksai
       collection: DesignDocuments
       query_template:
         app_id: '{{runtime.app_id}}'
@@ -123,7 +142,7 @@ definitions:
       are workflows versus modules, control-plane concerns, integrations, or UI-only.
     source:
       type: data_reference
-      database_name: MozaiksAI
+      database_name: mozaiksai
       collection: DesignDocuments
       query_template:
         app_id: '{{runtime.app_id}}'
@@ -166,13 +185,30 @@ definitions:
         ui_hidden: true
         match:
           equals: NEXT
-  action_plan_acceptance:
-    type: string
-    description: 'User''s response to the tool and UX plan: ''accepted'', ''adjustments_requested'',
-      or ''pending''. Set after user reviews and approves the ToolPlanningAgent output.'
+  workflow_review_approved:
+    type: boolean
+    description: >
+      True when the user explicitly approves the ProjectOverviewAgent review step
+      and wants generation to continue without further diagram changes.
     source:
       type: state
-      default: pending
+      default: false
+      triggers:
+      - type: user_text
+        match:
+          regex: (?i)\b(approved?|looks good|sequence diagram looks good|proceed with implementation)\b
+  workflow_review_revision_requested:
+    type: boolean
+    description: >
+      True when the user asks for revisions after the ProjectOverviewAgent review
+      step instead of approving the current workflow design.
+    source:
+      type: state
+      default: false
+      triggers:
+      - type: user_text
+        match:
+          regex: (?i)((sequence diagram|workflow design|agent flow|diagram).*(revise|revision|change|changes|adjust|adjustments|modify|modification|feedback|different))|((revise|revision|change|changes|adjust|adjustments|modify|modification|feedback|different).*(sequence diagram|workflow design|agent flow|diagram))
   action_plan:
     type: object
     description: The complete workflow-stage-based Action Plan workflow object used
@@ -187,6 +223,37 @@ definitions:
     source:
       type: computed
       default: null
+  connector_inventory:
+    type: object
+    description: >
+      App-scoped connector inventory derived from platform-owned connector metadata.
+      Summarizes which required integrations are already ready, which are metadata-only,
+      and which are still missing for this workflow run.
+    source:
+      type: computed
+      default: null
+  required_connector_services:
+    type: array
+    description: Normalized list of third-party services required by the approved action plan.
+    source:
+      type: computed
+      default: []
+  ready_connector_services:
+    type: array
+    description: >
+      Normalized list of required services that already have reusable connector secrets
+      available to this runtime.
+    source:
+      type: computed
+      default: []
+  missing_connector_services:
+    type: array
+    description: >
+      Normalized list of required services that still need user input or durable
+      secret storage before the workflow can use them directly.
+    source:
+      type: computed
+      default: []
   strategy_ready:
     type: boolean
     description: True when WorkflowStrategyAgent has stored the high-level plan for
@@ -220,7 +287,7 @@ definitions:
       vs bundled, and by downstream agents to tag intent/bundle_path.
     source:
       type: data_reference
-      database_name: MozaiksAI
+      database_name: mozaiksai
       collection: ChatSessions
       query_template:
         app_id: '{{runtime.app_id}}'
@@ -291,6 +358,8 @@ agents:
     - change_class
     - artifact_version_id
     - refinement_request
+    - change_intent
+    - impact_set
     - context_aware
     - concept_overview
     - concept_api_endpoints
@@ -339,6 +408,9 @@ agents:
     - refinement_mode
     - change_class
     - artifact_version_id
+    - refinement_request
+    - change_intent
+    - impact_set
     - is_multi_workflow
     - pack_name
     - workflows_spec

@@ -12,7 +12,7 @@
 </div>
 
 ## 🎯 What is MozaiksAI?
-Production-ready declarative orchestration engine for AG2 (formerly Microsoft Autogen):
+Declarative orchestration runtime and Studio-driven app framework for AG2 (formerly Microsoft Autogen):
 
 - ✅ **Event-Driven Architecture** — Runtime, app, workflow, UI, and hosted events stay separated by contract
 - ✅ **Mid-Flight Journeys (MFJ)** — Run parallel workflows by fork/join with deterministic parent resume

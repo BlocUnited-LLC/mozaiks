@@ -50,7 +50,7 @@ def _extract_code_files(collected: Dict[str, Any]) -> Dict[str, str]:
 async def _resolve_files(
     *,
     files: Optional[Dict[str, str]],
-    context_variables: Optional[Any],
+    context_variables: Optional[Dict[str, Any]],
 ) -> Tuple[Dict[str, str], Optional[str], Optional[str]]:
     if isinstance(files, dict) and files:
         safe_files: Dict[str, str] = {}
@@ -119,7 +119,7 @@ def _parse_env_value(env_text: str, key: str) -> Optional[str]:
 async def run_integration_tests(
     files: Dict[str, str],
     agent_context: Optional[Dict[str, Any]] = None,
-    context_variables: Optional[Any] = None,
+    context_variables: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     workflow_name = "AppGenerator"
     chat_id = None

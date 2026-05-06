@@ -198,6 +198,44 @@ def _custom_route_bundle():
     }
 
 
+def _database_intent_bundle():
+    return {
+        "version": "1",
+        "app_id": "app_123",
+        "artifact_version_id": None,
+        "surfaces": [
+            {
+                "surface_id": "users",
+                "surface_kind": "module",
+                "collections": [
+                    {
+                        "name": "users",
+                        "scope": "app",
+                        "ownership": {"surface_id": "users", "surface_kind": "module"},
+                        "fields": [
+                            {"name": "app_id", "type": "string", "required": True},
+                            {"name": "user_id", "type": "string", "required": True},
+                        ],
+                        "indexes": [
+                            {"keys": [["app_id", 1], ["user_id", 1]], "unique": True}
+                        ],
+                        "search_by": "user_id",
+                        "lifecycle": {
+                            "write_mode": "module_action",
+                            "migration_policy": "additive_only",
+                        },
+                    }
+                ],
+            }
+        ],
+        "shared_collections": [],
+        "policies": {
+            "default_scope_field": "app_id",
+            "allow_destructive_migrations": False,
+        },
+    }
+
+
 def test_save_app_schema_rejects_unknown_top_level_primitive(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     page = _base_page()
@@ -525,6 +563,22 @@ def test_save_app_schema_writes_and_merges_asset_manifest(monkeypatch, tmp_path:
     assert merged_manifest["assets"][0]["asset_id"] == "landing-hero"
     assert context.data["app_asset_manifest"]["assets"][0]["asset_id"] == "landing-hero"
     assert "config/asset_manifest.json" in result
+
+
+def test_save_app_schema_writes_database_intent_from_context(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    context = _Context({"database_intent_bundle": _database_intent_bundle()})
+
+    result = save_app_schema_module.save_app_schema(
+        manifest=_base_manifest(),
+        pages=[_base_page()],
+        context_variables=context,
+    )
+
+    database_intent = json.loads((tmp_path / "config" / "database_intent.json").read_text(encoding="utf-8"))
+    assert database_intent["surfaces"][0]["surface_id"] == "users"
+    assert context.data["app_database_intent_bundle"]["policies"]["default_scope_field"] == "app_id"
+    assert "config/database_intent.json" in result
 
 
 def test_save_app_schema_rejects_invalid_asset_manifest(monkeypatch, tmp_path: Path) -> None:

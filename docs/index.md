@@ -13,7 +13,7 @@
 
 > **Note**: This is the unified Mozaiks stack. BlocUnited offers a managed platform with app generation tools at [mozaiks.ai](https://mozaiks.ai), but you're welcome to self-host and build everything yourself.
 
-> **Start Here**: New to Mozaiks? Start with the [Getting Started guide](getting-started.md), then use [Install Modes](install-modes.md) if you need to choose between the builder path and the lower-level framework path.
+> **Start Here**: New to Mozaiks? Start with the [Getting Started guide](getting-started.md), then use [User Configuration](user-configuration.md) for the exact env/runtime knobs, and [Install Modes](install-modes.md) if you need to choose between the builder path and the lower-level framework path.
 
 > **Maintainers**: Use [Releasing](releasing.md) for the tag-driven package publish flow.
 
@@ -74,6 +74,14 @@ Choose the path that matches what you need to do.
     Clone the repo, configure the environment, and boot Studio through the builder quickstart path.
 
     [:octicons-arrow-right-24: Getting Started](getting-started.md)
+
+-   :material-tune-variant: **Know What To Configure**
+
+    ---
+
+    See the minimum required env for local building, plus the optional vault and deployment settings.
+
+    [:octicons-arrow-right-24: User Configuration](user-configuration.md)
 
 -   :material-source-branch: **Choose Your Install Path**
 

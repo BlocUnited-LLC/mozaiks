@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 import sys
 
@@ -14,6 +15,7 @@ _session_persist = import_module_directly("mozaiksai.core.session.persistence")
 _session_router = import_module_directly("mozaiksai.core.session.router")
 _session_launcher = import_module_directly("mozaiksai.core.session.launcher")
 _data_models = import_module_directly("mozaiksai.core.data.models")
+_workflow_manager = import_module_directly("mozaiksai.core.workflow.workflow_manager")
 
 parse_global_pack_graph = _schema.parse_global_pack_graph
 SessionRouter = _session_router.SessionRouter
@@ -96,6 +98,30 @@ class _ChatSessionPersistenceAdapter:
         if isinstance(extra_fields, dict):
             doc.update(extra_fields)
         coll._docs[chat_id] = doc
+
+
+def test_validate_context_for_workflow_keeps_refinement_launch_keys_for_appgenerator() -> None:
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+
+    _workflow_manager.UnifiedWorkflowManager._instance = None
+    _workflow_manager.initialize_workflows(base_path=str(workflows_root))
+
+    validated = _session_launcher.validate_context_for_workflow(
+        "AppGenerator",
+        {
+            "artifact_kind": "app_bundle",
+            "artifact_version_id": "av_123",
+            "refinement_request_meta": {"artifact_key": "app_bundle"},
+            "screen": "studio-create",
+        },
+    )
+
+    assert validated == {
+        "artifact_kind": "app_bundle",
+        "artifact_version_id": "av_123",
+        "refinement_request_meta": {"artifact_key": "app_bundle"},
+        "screen": "studio-create",
+    }
 
 
 @pytest.mark.asyncio

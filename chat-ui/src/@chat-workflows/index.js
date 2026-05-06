@@ -10,18 +10,11 @@
 //   their exports in the component registry.
 // ==============================================================================
 
-const secondaryWorkflowModules = import.meta.glob(
-  '@chat-workflows-root-secondary/*/ui/index.{js,jsx}',
-  { eager: true }
-);
 const primaryWorkflowModules = import.meta.glob(
   '@chat-workflows-root/*/ui/index.{js,jsx}',
   { eager: true }
 );
-const workflowModules = {
-  ...secondaryWorkflowModules,
-  ...primaryWorkflowModules,
-};
+const workflowModules = primaryWorkflowModules;
 
 // Build WORKFLOW_REGISTRY from the injected workflow root.
 // Key   -> workflow folder name

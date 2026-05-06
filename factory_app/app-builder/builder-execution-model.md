@@ -13,6 +13,8 @@ typed contracts and hidden authoring workflows.
 - decomposition happens before file generation
 - app substrate, automation, and workflows stay separate models
 - AG2 workflows are implementation workers, not the source of truth
+- build sequencing and refinement routing belong to the builder session loop,
+  not to workflow-local AG2 handoffs
 
 ## The Pipeline
 
@@ -104,6 +106,14 @@ That is compatible with this model only if:
 - AG2 workflows consume typed contracts
 - AG2 workflows emit bounded authoring results
 - AG2 workflows do not improvise the architecture after approval
+
+The builder therefore needs three separate execution concerns:
+
+- workflow execution loop: one AG2 workflow run such as `ValueEngine` or `AppGenerator`
+- builder session loop: the control plane that sequences workflows, validates staged artifacts, and decides re-entry
+- refinement worker loop: scoped repair or regeneration after the first pass
+
+Do not collapse those concerns into one global handoff mesh.
 
 Mozaiks NL app generator can absolutely be "an AG2 workflow that writes code,"
 but only after the system has already decided what that workflow is allowed to
@@ -241,3 +251,4 @@ change.
 - [builder-orchestration-taxonomy.md](builder-orchestration-taxonomy.md)
 - [app-planning-contracts.md](app-planning-contracts.md)
 - [app-builder-architecture.md](app-builder-architecture.md)
+- [../../docs/architecture/foundations/orchestration-control-loops.md](../../docs/architecture/foundations/orchestration-control-loops.md)

@@ -17,6 +17,7 @@ tools:
     component: ThemePreviewCard
     mode: artifact
     workflow_primitive: document_preview
+    realization: generated_component
 
 lifecycle_tools:
 - trigger: before_chat

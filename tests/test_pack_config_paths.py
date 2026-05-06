@@ -61,7 +61,7 @@ def test_load_global_pack_graph_uses_canonical_file(monkeypatch) -> None:
     }
 
 
-def test_active_app_root_registry_overlays_shared_registry(monkeypatch, tmp_path) -> None:
+def test_single_root_registry_path_uses_explicit_override_without_factory_merge(monkeypatch, tmp_path) -> None:
     _use_repo_factory_workflows(monkeypatch)
 
     app_root = tmp_path / "app"
@@ -82,12 +82,8 @@ def test_active_app_root_registry_overlays_shared_registry(monkeypatch, tmp_path
         encoding="utf-8",
     )
 
-    monkeypatch.setenv("PLATFORM_PATH", str(app_root))
-    monkeypatch.setenv(
-        "MOZAIKS_WORKFLOW_ROOTS",
-        f"{app_root / 'workflows'}{os.pathsep}{Path(__file__).resolve().parents[1] / 'factory_app' / 'workflows'}",
-    )
-    monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+    monkeypatch.delenv("MOZAIKS_WORKFLOW_ROOTS", raising=False)
+    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(app_root / "workflows"))
     _config._GLOBAL_CACHE = None
 
     path = get_global_pack_graph_path()
@@ -95,8 +91,8 @@ def test_active_app_root_registry_overlays_shared_registry(monkeypatch, tmp_path
 
     graph = load_global_pack_graph()
     assert graph is not None
-    assert any(journey.id == "build" for journey in graph.journeys)
-    assert {workflow.id for workflow in graph.workflows}.issuperset({"HostedOnly", "ValueEngine", "AppGenerator"})
+    assert {workflow.id for workflow in graph.workflows} == {"HostedOnly"}
+    assert graph.journeys == []
 
 
 def test_load_workflow_pack_graph_uses_canonical_file(monkeypatch) -> None:
@@ -134,7 +130,7 @@ def test_list_workflow_sequences_returns_declared_sequences(monkeypatch) -> None
     ]
 
 
-def test_workflow_pack_graph_path_uses_first_matching_root(monkeypatch, tmp_path: Path) -> None:
+def test_legacy_multi_root_env_uses_first_declared_root_only(monkeypatch, tmp_path: Path) -> None:
     local_root = tmp_path / "local"
     shared_root = tmp_path / "shared"
     local_graph_dir = local_root / "LocalOnly" / "extended_orchestration"
@@ -143,9 +139,11 @@ def test_workflow_pack_graph_path_uses_first_matching_root(monkeypatch, tmp_path
     shared_graph_dir.mkdir(parents=True)
 
     local_graph = local_graph_dir / "mfj_extension.json"
-    shared_graph = shared_graph_dir / "mfj_extension.json"
     local_graph.write_text(json.dumps({"version": 3, "mid_flight_journeys": []}), encoding="utf-8")
-    shared_graph.write_text(json.dumps({"version": 3, "mid_flight_journeys": []}), encoding="utf-8")
+    (shared_graph_dir / "mfj_extension.json").write_text(
+        json.dumps({"version": 3, "mid_flight_journeys": []}),
+        encoding="utf-8",
+    )
     (local_root / "LocalOnly" / "orchestrator.yaml").write_text("workflow_name: LocalOnly\n", encoding="utf-8")
     (shared_root / "SharedOnly" / "orchestrator.yaml").write_text("workflow_name: SharedOnly\n", encoding="utf-8")
 
@@ -155,8 +153,8 @@ def test_workflow_pack_graph_path_uses_first_matching_root(monkeypatch, tmp_path
     _config._GLOBAL_CACHE = None
     _config._WORKFLOW_CACHE = {}
 
+    assert _paths.normalize_workflow_roots() == [local_root.resolve()]
     assert get_workflow_pack_graph_path("LocalOnly") == local_graph.resolve()
-    assert get_workflow_pack_graph_path("SharedOnly") == shared_graph.resolve()
 
 
 def test_single_root_override_does_not_inject_factory_fallback(monkeypatch, tmp_path: Path) -> None:
@@ -181,7 +179,7 @@ def test_default_roots_use_repo_factory_workflows_when_no_active_app(monkeypatch
     roots = _paths.normalize_workflow_roots()
 
     assert roots
-    assert (repo_root / "factory_app" / "workflows").resolve() in roots
+    assert roots == [(repo_root / "factory_app" / "workflows").resolve()]
     assert all("__no_active_app__" not in str(root) for root in roots)
 
 

@@ -13,6 +13,7 @@ Clean implementation aligned with AG2 event system:
 from __future__ import annotations
 
 import asyncio
+import ast
 import json
 import os
 from datetime import datetime, UTC
@@ -25,6 +26,7 @@ from uuid import uuid4
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id, dual_write_app_scope
+from .namespaces import SYSTEM_DATABASE, RuntimeCollections
 from autogen.events.agent_events import TextEvent
 from autogen.events.base_event import BaseEvent
 from ..models import WorkflowStatus
@@ -65,8 +67,8 @@ def _resolve_agent_log_limit(env_key: str, default: Optional[int]) -> Optional[i
 _AGENT_CONV_JSON_MAX_LEN = _resolve_agent_log_limit("AGENT_CONV_JSON_MAX_LEN", None)
 _AGENT_CONV_TEXT_MAX_LEN = _resolve_agent_log_limit("AGENT_CONV_TEXT_MAX_LEN", None)
 
-_GENERAL_CHAT_COLLECTION = "GeneralChatSessions"
-_GENERAL_CHAT_COUNTER_COLLECTION = "GeneralChatCounters"
+_GENERAL_CHAT_COLLECTION = RuntimeCollections.GENERAL_CHAT_SESSIONS
+_GENERAL_CHAT_COUNTER_COLLECTION = RuntimeCollections.GENERAL_CHAT_COUNTERS
 
 
 class PersistenceManager:
@@ -86,7 +88,7 @@ class PersistenceManager:
             self.client = get_mongo_client()
             try:
                 # Primary chat session collection (canonical)
-                coll = self.client["mozaiksai"]["ChatSessions"]
+                coll = self.client[SYSTEM_DATABASE][RuntimeCollections.CHAT_SESSIONS]
                 # Check if index already exists before creating
                 existing_indexes = await coll.list_indexes().to_list(length=None)
                 index_names = [idx["name"] for idx in existing_indexes]
@@ -141,7 +143,7 @@ class PersistenceManager:
                 # were removed to reduce collection noise; WorkflowStats now holds
                 # live rollup documents (mon_ prefix) only, so no per-event index is needed.
 
-                general_coll = self.client["mozaiksai"][_GENERAL_CHAT_COLLECTION]
+                general_coll = self.client[SYSTEM_DATABASE][_GENERAL_CHAT_COLLECTION]
                 general_indexes = await general_coll.list_indexes().to_list(length=None)
                 general_index_names = [idx["name"] for idx in general_indexes]
                 app_user_created_keys = [("app_id", 1), ("user_id", 1), ("created_at", -1)]
@@ -162,7 +164,7 @@ class PersistenceManager:
                     await general_coll.create_index("status", name="gc_status")
                     logger.debug("Created general chat status index")
 
-                counter_coll = self.client["mozaiksai"][_GENERAL_CHAT_COUNTER_COLLECTION]
+                counter_coll = self.client[SYSTEM_DATABASE][_GENERAL_CHAT_COUNTER_COLLECTION]
                 counter_indexes = await counter_coll.list_indexes().to_list(length=None)
                 counter_names = [idx["name"] for idx in counter_indexes]
                 app_user_counter_keys = [("app_id", 1), ("user_id", 1)]
@@ -203,12 +205,12 @@ class AG2PersistenceManager:
     async def _coll(self):
         await self.persistence._ensure_client()
         assert self.persistence.client is not None, "Mongo client not initialized"
-        return self.persistence.client["mozaiksai"]["ChatSessions"]
+        return self.persistence.client[SYSTEM_DATABASE][RuntimeCollections.CHAT_SESSIONS]
 
     async def _workflow_stats_coll(self):
         await self.persistence._ensure_client()
         assert self.persistence.client is not None, "Mongo client not initialized"
-        coll = self.persistence.client["mozaiksai"]["WorkflowStats"]
+        coll = self.persistence.client[SYSTEM_DATABASE][RuntimeCollections.WORKFLOW_STATS]
         if not getattr(self, "_workflow_stats_indexes_checked", False):
             await self._ensure_workflow_stats_indexes(coll)
         return coll
@@ -235,12 +237,12 @@ class AG2PersistenceManager:
     async def _general_coll(self):
         await self.persistence._ensure_client()
         assert self.persistence.client is not None, "Mongo client not initialized"
-        return self.persistence.client["mozaiksai"][_GENERAL_CHAT_COLLECTION]
+        return self.persistence.client[SYSTEM_DATABASE][_GENERAL_CHAT_COLLECTION]
 
     async def _general_counter_coll(self):
         await self.persistence._ensure_client()
         assert self.persistence.client is not None, "Mongo client not initialized"
-        return self.persistence.client["mozaiksai"][_GENERAL_CHAT_COUNTER_COLLECTION]
+        return self.persistence.client[SYSTEM_DATABASE][_GENERAL_CHAT_COUNTER_COLLECTION]
 
     async def get_or_assign_cache_seed(
         self,
@@ -1103,24 +1105,7 @@ class AG2PersistenceManager:
             # we attempt to parse & re-dump for clean storage.
             # --------------------------------------------------
             try:
-                # Fast check to avoid regex cost when pattern absent
-                if "content=" in content_str and " sender=" in content_str:
-                    import re
-                    import json as _json
-                    # Non-greedy capture between content=quote and the next quote before sender=
-                    m = re.search(r"content=(?:'|\")(?P<inner>.*?)(?:'|\")\s+sender=", content_str, re.DOTALL)
-                    if m:
-                        inner = m.group("inner").strip()
-                        cleaned: Any = inner
-                        if inner.startswith("{") or inner.startswith("["):
-                            try:
-                                parsed = _json.loads(inner)
-                                # Re-dump to normalized string with no escaping issues
-                                cleaned = _json.dumps(parsed, ensure_ascii=False)
-                            except Exception:
-                                # leave as raw string if JSON parse fails
-                                pass
-                        content_str = cleaned if isinstance(cleaned, str) else _json.dumps(cleaned, ensure_ascii=False)
+                content_str = self._normalize_wrapped_text_content(content_str)
             except Exception as _ce:  # pragma: no cover
                 logger.debug(f"Content clean failed: {_ce}")
             ts = getattr(event, "timestamp", None)
@@ -1491,6 +1476,51 @@ class AG2PersistenceManager:
     # used for generate_and_download
 #############################################
     @staticmethod
+    def _normalize_wrapped_text_content(text: Any) -> str:
+        """Unwrap AG2 repr strings like ``content='...' sender='Agent'``.
+
+        When AG2 serializes TextEvent content through object repr strings, the inner
+        JSON body is Python-escaped. That leaves structured-output payloads looking
+        like ``{\\n  \\\"Field\\\": ...}`` in persistence, which later parse attempts
+        reject. This helper decodes that one wrapper layer and returns canonical JSON
+        text when the payload is JSON-shaped.
+        """
+        if text is None:
+            return ""
+        if not isinstance(text, str):
+            return str(text)
+        if "content=" not in text or " sender=" not in text:
+            return text
+
+        try:
+            import re
+
+            match = re.search(
+                r"content=(?P<quote>'|\")(?P<inner>.*?)(?P=quote)\s+sender=",
+                text,
+                re.DOTALL,
+            )
+            if not match:
+                return text
+
+            quote = match.group("quote")
+            inner = match.group("inner")
+            try:
+                inner = ast.literal_eval(f"{quote}{inner}{quote}")
+            except Exception:
+                pass
+
+            normalized = inner.strip() if isinstance(inner, str) else str(inner)
+            if normalized.startswith("{") or normalized.startswith("["):
+                parsed = AG2PersistenceManager._extract_json_from_text(normalized)
+                if parsed is not None:
+                    return json.dumps(parsed, ensure_ascii=False)
+            return normalized
+        except Exception as exc:  # pragma: no cover
+            logger.debug(f"Wrapped content normalization failed: {exc}")
+            return text
+
+    @staticmethod
     def _extract_json_from_text(text: Any, agent_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Extract JSON from text, with cleaning to handle common agent output issues.
@@ -1515,7 +1545,7 @@ class AG2PersistenceManager:
                     logger.info(f"[JSON_PARSE] {agent_name}: text is a list, returning None")
                 return None
             
-            s = text if isinstance(text, str) else str(text)
+            s = AG2PersistenceManager._normalize_wrapped_text_content(text)
             s_strip = s.strip()
             
             if agent_name:
@@ -1942,6 +1972,30 @@ class AG2PersistenceManager:
             return None
         except Exception as e:
             logger.error(f"[PENDING_INPUT] Failed to get pending input request for {chat_id}: {e}")
+            return None
+
+    async def get_latest_message(
+        self,
+        *,
+        chat_id: str,
+        app_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return the latest persisted chat message, if any."""
+        resolved_app_id = coalesce_app_id(app_id=app_id)
+        if not resolved_app_id:
+            return None
+        try:
+            coll = await self._coll()
+            doc = await coll.find_one(
+                {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
+                {"messages": {"$slice": -1}},
+            )
+            messages = (doc or {}).get("messages")
+            if isinstance(messages, list) and messages and isinstance(messages[-1], dict):
+                return messages[-1]
+            return None
+        except Exception as e:
+            logger.error(f"[MESSAGES] Failed to get latest message for {chat_id}: {e}")
             return None
 
 #############################################

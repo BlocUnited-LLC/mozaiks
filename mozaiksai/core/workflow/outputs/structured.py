@@ -3,8 +3,9 @@
 # DESCRIPTION: Clean, simplified structured output models for AG2 workflows
 # ==============================================================================
 
+import logging
 from pydantic import BaseModel, Field, create_model
-from typing import List, Dict, Any, Optional, Union, Tuple, Set
+from typing import List, Dict, Any, Optional, Union, Tuple, Set, get_args, get_origin
 from enum import Enum
 from ..llm_config import get_llm_config
 from ..workflow_manager import workflow_manager
@@ -14,6 +15,7 @@ _workflow_models: Dict[str, Dict[str, type]] = {}
 _workflow_registries: Dict[str, Dict[str, type]] = {}
 # Cache of workflow -> set(agent_names) that have structured output models
 _workflow_structured_agents: Dict[str, Set[str]] = {}
+logger = logging.getLogger(__name__)
 
 # Type mapping for consistent field resolution
 TYPE_MAP = {
@@ -134,13 +136,20 @@ def _inline_schema_refs(node: Any, defs: Dict[str, Any], stack: Optional[Set[str
 
 
 def _add_additional_properties(schema: Any) -> Any:
-    """Recursively add additionalProperties: false to all object-type properties for OpenAI strict mode."""
+    """Recursively normalize object schemas for OpenAI strict structured outputs."""
     if isinstance(schema, dict):
-        # If this is an object type, ensure additionalProperties explicitly false when unspecified or True
+        # OpenAI strict structured outputs require every object schema to:
+        # 1. set additionalProperties explicitly
+        # 2. provide a required array that includes every declared property
         if schema.get('type') == 'object':
             if schema.get('additionalProperties') is True or 'additionalProperties' not in schema:
                 schema['additionalProperties'] = False
-        
+            properties = schema.get('properties')
+            if isinstance(properties, dict):
+                schema['required'] = list(properties.keys())
+            elif 'required' not in schema:
+                schema['required'] = []
+
         # Recursively process all nested schemas
         return {k: _add_additional_properties(v) for k, v in schema.items()}
     elif isinstance(schema, list):
@@ -165,6 +174,86 @@ def _patch_model_schema(model_cls: type[BaseModel]) -> None:
 
     model_cls.model_json_schema = classmethod(_model_json_schema)  # type: ignore[assignment]
     setattr(model_cls, "__mozaiks_schema_patched", True)
+
+
+def _is_pydantic_model(value: Any) -> bool:
+    try:
+        return isinstance(value, type) and issubclass(value, BaseModel)
+    except Exception:
+        return False
+
+
+def _find_open_ended_object_path(
+    annotation: Any,
+    *,
+    path: str,
+    visited_models: Optional[Set[type[BaseModel]]] = None,
+) -> Optional[str]:
+    """Return the first path that contains a freeform object/dict annotation."""
+    visited_models = visited_models or set()
+
+    origin = get_origin(annotation)
+    if origin in (dict, Dict):
+        return path
+
+    if origin in (list, List, set, tuple):
+        for arg in get_args(annotation):
+            found = _find_open_ended_object_path(
+                arg,
+                path=f"{path}[]",
+                visited_models=visited_models,
+            )
+            if found:
+                return found
+        return None
+
+    if origin is Union:
+        for arg in get_args(annotation):
+            if arg is type(None):
+                continue
+            found = _find_open_ended_object_path(
+                arg,
+                path=path,
+                visited_models=visited_models,
+            )
+            if found:
+                return found
+        return None
+
+    if _is_pydantic_model(annotation):
+        model_cls = annotation
+        if model_cls in visited_models:
+            return None
+        visited_models.add(model_cls)
+        try:
+            model_fields = getattr(model_cls, "model_fields", {})
+        except Exception:
+            model_fields = {}
+        for field_name, field_info in model_fields.items():
+            field_annotation = getattr(field_info, "annotation", None)
+            found = _find_open_ended_object_path(
+                field_annotation,
+                path=f"{path}.{field_name}",
+                visited_models=visited_models,
+            )
+            if found:
+                return found
+        return None
+
+    return None
+
+
+def supports_provider_response_format(model_cls: type[BaseModel]) -> tuple[bool, Optional[str]]:
+    """Return whether a model is safe for provider-enforced strict response_format.
+
+    OpenAI strict structured outputs do not support open-ended object blobs like
+    Dict[str, Any]. Those remain valid for Mozaiks runtime-side parsing and
+    validation, but they should not be sent as provider response_format schemas.
+    """
+    offending_path = _find_open_ended_object_path(model_cls, path=model_cls.__name__)
+    if offending_path:
+        return False, offending_path
+    return True, None
 
 
 def resolve_field_type(
@@ -497,7 +586,17 @@ async def get_llm_for_workflow(
         
         if lookup_key in structured_registry:
             model_cls = structured_registry[lookup_key]
-            return await get_llm_config(response_format=model_cls, extra_config=extra_config)
+            supports_strict, offending_path = supports_provider_response_format(model_cls)
+            if supports_strict:
+                return await get_llm_config(response_format=model_cls, extra_config=extra_config)
+
+            logger.warning(
+                "[STRUCTURED_OUTPUTS] Provider strict response_format disabled for %s/%s (%s uses open-ended object fields)",
+                workflow_name,
+                lookup_key,
+                offending_path,
+            )
+            return await get_llm_config(extra_config=extra_config)
     except (ValueError, FileNotFoundError):
         pass
     

@@ -1,4 +1,5 @@
 import { Alert, Badge, Card, Form } from '../../ui/primitives/index.js';
+import { getPrimaryPrimitiveAction, sendPrimitiveResponse } from './workflowPrimitiveUtils.js';
 
 function applyInitialValues(fields, values) {
   if (!Array.isArray(fields)) {
@@ -18,6 +19,11 @@ function applyInitialValues(fields, values) {
 
 export default function FormCard({ payload = {}, onResponse, onCancel }) {
   const fields = applyInitialValues(payload.fields, payload.values);
+  const submitAction = getPrimaryPrimitiveAction(payload, {
+    id: payload.submit_action || 'submit',
+    label: payload.submit_label || 'Submit',
+    variant: 'primary',
+  });
 
   return (
     <Card
@@ -38,12 +44,10 @@ export default function FormCard({ payload = {}, onResponse, onCancel }) {
           fields={fields}
           layout={payload.layout || 'vertical'}
           columns={payload.columns || 2}
-          submit_label={payload.submit_label || 'Submit'}
+          submit_label={submitAction?.label || payload.submit_label || 'Submit'}
           cancel_label={payload.cancel_label || 'Cancel'}
           onSubmit={async (values) => {
-            await onResponse?.({
-              status: 'submitted',
-              action: payload.submit_action || 'submit',
+            await sendPrimitiveResponse(onResponse, submitAction || { id: payload.submit_action || 'submit' }, {
               values,
             });
           }}

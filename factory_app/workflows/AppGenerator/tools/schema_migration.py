@@ -151,7 +151,7 @@ def generate_migration(
     Generate a migration document from a schema diff.
 
     The migration is written to:
-      backend/database/migrations/migration_{timestamp}.json
+      config/database_migrations/migration_{timestamp}.json
 
     It is NOT applied here — call apply_migration_safe() or pass it to
     apply_schema_migration() in backend_tools.py.
@@ -197,7 +197,7 @@ def _build_new_collection_ops(
 
 def migration_file_path(migration_id: str) -> str:
     """Return the relative path for the migration file in the app bundle."""
-    return f"backend/database/migrations/{migration_id}.json"
+    return f"config/database_migrations/{migration_id}.json"
 
 
 # ---------------------------------------------------------------------------
@@ -307,10 +307,10 @@ def inject_migration_into_bundle(
 ) -> None:
     """
     Write the migration JSON into the generated app bundle (files_map in-place).
-    Also ensures backend/database/migrations/.gitkeep exists.
+    Also ensures config/database_migrations/.gitkeep exists.
     """
     path = migration_file_path(migration["migration_id"])
     files_map[path] = json.dumps(migration, indent=2)
-    gitkeep = "backend/database/migrations/.gitkeep"
+    gitkeep = "config/database_migrations/.gitkeep"
     if gitkeep not in files_map:
         files_map[gitkeep] = ""

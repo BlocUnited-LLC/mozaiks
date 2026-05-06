@@ -18,11 +18,14 @@
 #   NOTE: UI interaction handling logic lives in ui_tools.py.
 # ============================================================================
 from __future__ import annotations
+import contextlib
 import logging
 import importlib
+import importlib.machinery
 import importlib.util
 import sys
 import inspect
+import types
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -36,13 +39,60 @@ logger = logging.getLogger(__name__)
 
 def _ensure_workflow_import_paths(*, base_dir: Path, file_path: Path) -> None:
     """Expose workflow package and sibling tool modules during dynamic imports."""
-    for candidate in (base_dir.parent.parent, base_dir.parent, base_dir, file_path.parent):
+    desired_order = (
+        base_dir.parent.parent,
+        base_dir.parent,
+        base_dir,
+        file_path.parent,
+    )
+    normalized: List[str] = []
+    for candidate in desired_order:
         try:
             value = str(candidate.resolve())
         except Exception:
             value = str(candidate)
-        if value and value not in sys.path:
+        if value:
+            normalized.append(value)
+    for value in reversed(normalized):
+        with contextlib.suppress(ValueError):
+            sys.path.remove(value)
+        if value:
             sys.path.insert(0, value)
+
+
+def _reset_workflow_package_namespace(*, base_dir: Path, workflow_name: str) -> None:
+    """Bind ``workflows.<workflow_name>`` imports to the active repo workflow root.
+
+    Some local environments have another checkout on ``sys.path`` that also exposes a
+    top-level ``workflows`` package. Tool modules use relative imports like
+    ``from .workflow_converter import ...``; if Python resolves the parent package from
+    the wrong checkout, the live workflow pulls stale code. Rebinding the workflow
+    package namespace here keeps dynamic tool imports pinned to the active root.
+    """
+
+    workflows_root = base_dir.parent
+    tools_root = base_dir / "tools"
+    package_roots = {
+        "workflows": workflows_root,
+        f"workflows.{workflow_name}": base_dir,
+    }
+    if tools_root.exists():
+        package_roots[f"workflows.{workflow_name}.tools"] = tools_root
+
+    workflow_prefix = f"workflows.{workflow_name}"
+    for module_name in list(sys.modules):
+        if module_name == "workflows" or module_name == workflow_prefix or module_name.startswith(f"{workflow_prefix}."):
+            sys.modules.pop(module_name, None)
+
+    for package_name, package_root in package_roots.items():
+        module = types.ModuleType(package_name)
+        module.__file__ = str(package_root / "__init__.py")
+        module.__package__ = package_name
+        module.__path__ = [str(package_root)]
+        spec = importlib.machinery.ModuleSpec(package_name, loader=None, is_package=True)
+        spec.submodule_search_locations = module.__path__
+        module.__spec__ = spec
+        sys.modules[package_name] = module
 
 
 def _wrap_with_validation(
@@ -301,6 +351,7 @@ def load_agent_tool_functions(workflow_name: str) -> Dict[str, List[Callable]]:
         module = None
         try:
             _ensure_workflow_import_paths(base_dir=base_dir, file_path=file_path)
+            _reset_workflow_package_namespace(base_dir=base_dir, workflow_name=workflow_name)
             module_name = f"workflows.{workflow_name}.tools.{file_path.stem}"
             spec = importlib.util.spec_from_file_location(module_name, file_path)
             if spec and spec.loader:

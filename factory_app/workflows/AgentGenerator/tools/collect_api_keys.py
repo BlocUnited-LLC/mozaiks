@@ -15,8 +15,9 @@ Flow:
 1. Extract Action Plan from context (action_plan context variable)
 2. Parse all integrations from workflow phases/agents
 3. Deduplicate and normalize service names
-4. Prompt the user once for all required API keys via the consolidated UI tool
-5. Store collected keys in context for ContextVariablesAgent to use
+4. Reuse any app-scoped connectors that are already runtime-ready
+5. Prompt the user only for missing or non-ready integrations via the consolidated UI tool
+6. Cache connector inventory in context for downstream agents
 """
 
 import asyncio
@@ -26,6 +27,7 @@ from datetime import datetime, UTC
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.transport.simple_transport import SimpleTransport
+from mozaiksai.core.workflow.generator_support.connector_service import get_connector_inventory
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +35,30 @@ logger = logging.getLogger(__name__)
 __all__ = ["collect_api_keys_from_action_plan"]
 
 
+def _cache_context_value(context_variables: Any, key: str, value: Any) -> None:
+    if not context_variables:
+        return
+    try:
+        setter = getattr(context_variables, "set", None)
+        if callable(setter):
+            setter(key, value)
+            return
+    except Exception:
+        pass
+
+    try:
+        data = getattr(context_variables, "data", None)
+        if isinstance(data, dict):
+            data[key] = value
+    except Exception:
+        pass
+
+
 def _normalize_service_name(service: str) -> str:
-    """Normalize service name to lowercase snake_case."""
+    """Normalize service name to the connector-service identifier format."""
     if not service:
         return ""
-    # Convert PascalCase to snake_case
-    import re
-    s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', service)
-    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+    return str(service).strip().lower().replace(" ", "_")
 
 def _extract_integrations_from_action_plan(action_plan: Dict[str, Any]) -> List[Dict[str, str]]:
     """
@@ -128,6 +146,7 @@ async def collect_api_keys_from_action_plan(context_variables: Any = None) -> Di
     data = getattr(context_variables, 'data', {})
     workflow_name = data.get('workflow_name', 'AgentGenerator')
     chat_id = data.get('chat_id')
+    app_id = data.get('app_id')
     
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id)
     
@@ -142,6 +161,10 @@ async def collect_api_keys_from_action_plan(context_variables: Any = None) -> Di
 
     if not services:
         wf_logger.info("✓ No integrations requiring API keys found in Action Plan - skipping collection")
+        _cache_context_value(context_variables, "required_connector_services", [])
+        _cache_context_value(context_variables, "ready_connector_services", [])
+        _cache_context_value(context_variables, "missing_connector_services", [])
+        _cache_context_value(context_variables, "connector_inventory", {"required_services": []})
         return {"status": "no_services_required", "services_collected": []}
     
     wf_logger.info(
@@ -149,10 +172,31 @@ async def collect_api_keys_from_action_plan(context_variables: Any = None) -> Di
         len(services),
         [svc["display_name"] for svc in services],
     )
+
+    required_services = [svc["service"] for svc in services if svc.get("service")]
+    inventory_before = await get_connector_inventory(app_id, required_services=required_services) if app_id else {
+        "required_services": required_services,
+        "ready_services": [],
+        "known_services": [],
+        "missing_required_services": required_services,
+        "known_but_unready_required_services": [],
+        "entirely_missing_required_services": required_services,
+        "status_buckets": {},
+        "display_names": {svc["service"]: svc.get("display_name") for svc in services if svc.get("service")},
+        "connectors": [],
+    }
+    _cache_context_value(context_variables, "required_connector_services", inventory_before.get("required_services", []))
+    _cache_context_value(context_variables, "ready_connector_services", inventory_before.get("ready_services", []))
+    _cache_context_value(context_variables, "missing_connector_services", inventory_before.get("missing_required_services", []))
+    _cache_context_value(context_variables, "connector_inventory", inventory_before)
+
+    ready_services = set(inventory_before.get("ready_services", []))
+    if ready_services:
+        wf_logger.info("✓ Reusing ready app connectors: %s", sorted(ready_services))
     
     # Import consolidated API key bundle helper
     try:
-        from workflows.AgentGenerator.tools.request_api_key import request_api_keys_bundle
+        from .request_api_key import request_api_keys_bundle
     except ImportError:
         wf_logger.error("Failed to import request_api_keys_bundle - cannot collect API keys")
         return {"status": "import_error", "services_collected": []}
@@ -162,6 +206,8 @@ async def collect_api_keys_from_action_plan(context_variables: Any = None) -> Di
     for service in services:
         service_identifier = (service.get("service") or "").strip()
         if not service_identifier:
+            continue
+        if service_identifier in ready_services:
             continue
         display_name = service.get("display_name") or service_identifier.replace('_', ' ').title()
         bundle_services.append(
@@ -176,8 +222,18 @@ async def collect_api_keys_from_action_plan(context_variables: Any = None) -> Di
         )
 
     if not bundle_services:
-        wf_logger.info("No valid services resolved for API key bundle request - skipping collection")
-        return {"status": "no_services_required", "services_collected": [], "services_failed": []}
+        wf_logger.info("✓ All required integrations already have ready connectors - skipping key collection")
+        inventory_after = await get_connector_inventory(app_id, required_services=required_services) if app_id else inventory_before
+        _cache_context_value(context_variables, "required_connector_services", inventory_after.get("required_services", []))
+        _cache_context_value(context_variables, "ready_connector_services", inventory_after.get("ready_services", []))
+        _cache_context_value(context_variables, "missing_connector_services", inventory_after.get("missing_required_services", []))
+        _cache_context_value(context_variables, "connector_inventory", inventory_after)
+        return {
+            "status": "already_configured",
+            "services_collected": inventory_after.get("ready_services", []),
+            "services_failed": [],
+            "connector_inventory": inventory_after,
+        }
 
     collected_services: List[str] = []
     failed_services: List[str] = []
@@ -187,8 +243,8 @@ async def collect_api_keys_from_action_plan(context_variables: Any = None) -> Di
     try:
         bundle_result = await request_api_keys_bundle(
             services=bundle_services,
-            agent_message="Please provide the required API keys so we can configure your workflow.",
-            description="We never persist your secrets—only minimal metadata for auditing.",
+            agent_message="Please provide the required API keys for the integrations that are not already connected.",
+            description="We will reuse active app connectors when they already exist. Raw secrets are never persisted in MongoDB; only sanitized metadata and optional vault-backed storage are used.",
             context_variables=context_variables,
         )
     except Exception as bundle_error:  # pragma: no cover - defensive guard
@@ -278,6 +334,12 @@ async def collect_api_keys_from_action_plan(context_variables: Any = None) -> Di
         len(failed_services),
     )
 
+    inventory_after = await get_connector_inventory(app_id, required_services=required_services) if app_id else inventory_before
+    _cache_context_value(context_variables, "required_connector_services", inventory_after.get("required_services", []))
+    _cache_context_value(context_variables, "ready_connector_services", inventory_after.get("ready_services", []))
+    _cache_context_value(context_variables, "missing_connector_services", inventory_after.get("missing_required_services", []))
+    _cache_context_value(context_variables, "connector_inventory", inventory_after)
+
     data['api_keys_bundle_result'] = bundle_result
     data['api_keys_bundle_status'] = bundle_status
 
@@ -325,12 +387,6 @@ async def collect_api_keys_from_action_plan(context_variables: Any = None) -> Di
     except Exception as env_err:  # pragma: no cover - defensive guard
         wf_logger.debug(f"[API_KEYS] Failed to build env attachment: {env_err}")
 
-    # Ensure acceptance flag stays affirmed after collection
-    try:
-        context_variables.set('action_plan_acceptance', "accepted")  # type: ignore[attr-defined]
-    except Exception:
-        pass
-
     # Kick the orchestrator so ContextVariablesAgent can resume
     try:
         transport = await SimpleTransport.get_instance()
@@ -358,4 +414,5 @@ async def collect_api_keys_from_action_plan(context_variables: Any = None) -> Di
             "failed": failed_details,
         },
         "bundle_result": bundle_result,
+        "connector_inventory": inventory_after,
     }

@@ -6,13 +6,14 @@ import contextlib
 from collections import deque
 import json
 import os
+import re
 import socket
 import sys
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional
 
 import uvicorn
 import websockets
@@ -111,6 +112,17 @@ def _find_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def _build_uvicorn_config(app: Any, port: int, *, lifespan: str = "off") -> uvicorn.Config:
+    return uvicorn.Config(
+        app,
+        host="127.0.0.1",
+        port=port,
+        log_level="warning",
+        access_log=False,
+        lifespan=lifespan,
+    )
+
+
 def _require_env() -> None:
     missing = [name for name in ("OPENAI_API_KEY", "MONGO_URI") if not str(os.getenv(name) or "").strip()]
     if missing:
@@ -196,6 +208,31 @@ def _build_tool_call_response_payload(response_text: str) -> Dict[str, Any]:
     }
 
 
+def _build_workflow_user_reply_message(chat_id: str, response_text: str) -> Dict[str, Any]:
+    normalized = str(response_text or "")
+    return {
+        "type": "user.input.submit",
+        "chat_id": chat_id,
+        "text": normalized,
+        "context": {
+            "source": "live_mfj_smoke",
+            "conversation_mode": "workflow",
+        },
+    }
+
+
+def _is_terminal_completion_event(event: Dict[str, Any]) -> bool:
+    event_type = str(event.get("type") or "")
+    if event_type not in {"chat.run_complete", "chat.workflow_complete", "chat.workflow_completed", "chat.completed"}:
+        return False
+    data = event.get("data") or {}
+    status = data.get("status")
+    normalized_status = str(status).strip().lower()
+    if status == 1 or normalized_status == "1":
+        return True
+    return normalized_status in {"completed", "complete", "success", "succeeded", "done", "ok"}
+
+
 def _normalize_tool_response_payload(raw_payload: Any) -> Dict[str, Any]:
     if isinstance(raw_payload, dict):
         normalized = dict(raw_payload)
@@ -217,10 +254,47 @@ def _load_tool_response_file(path: Path) -> Dict[str, Any]:
     if not isinstance(tool_responses, dict):
         raise ValueError("tool response file tool_responses must be an object keyed by tool/component name")
 
+    default_input_reply = payload.get("default_input_reply")
+    if default_input_reply is not None and not isinstance(default_input_reply, str):
+        raise ValueError("tool response file default_input_reply must be a string")
+
+    assistant_reply_rules = payload.get("assistant_reply_rules") or []
+    if not isinstance(assistant_reply_rules, list):
+        raise ValueError("tool response file assistant_reply_rules must be a list")
+    normalized_assistant_reply_rules: List[Dict[str, str]] = []
+    for raw_rule in assistant_reply_rules:
+        if not isinstance(raw_rule, dict):
+            raise ValueError("assistant_reply_rules entries must be objects")
+        reply = str(raw_rule.get("reply") or "").strip()
+        equals = str(raw_rule.get("equals") or "").strip()
+        contains = str(raw_rule.get("contains") or "").strip()
+        regex = str(raw_rule.get("regex") or "").strip()
+        if not reply:
+            raise ValueError("assistant_reply_rules entries must declare a non-empty reply")
+        if not (equals or contains or regex):
+            raise ValueError("assistant_reply_rules entries must declare equals, contains, or regex")
+        normalized_rule: Dict[str, str] = {"reply": reply}
+        if equals:
+            normalized_rule["equals"] = equals
+        if contains:
+            normalized_rule["contains"] = contains
+        if regex:
+            normalized_rule["regex"] = regex
+        normalized_assistant_reply_rules.append(normalized_rule)
+
     return {
         "input_replies": [str(item).strip() for item in input_replies if str(item).strip()],
         "tool_responses": tool_responses,
+        "default_input_reply": str(default_input_reply).strip() if isinstance(default_input_reply, str) else None,
+        "assistant_reply_rules": normalized_assistant_reply_rules,
     }
+
+
+def _load_prompt_file(path: Path) -> str:
+    prompt = path.read_text(encoding="utf-8").strip()
+    if not prompt:
+        raise ValueError("prompt file must contain non-empty text")
+    return prompt
 
 
 def _build_tool_response_queues(tool_responses: Optional[Dict[str, Any]]) -> Dict[str, Deque[Any]]:
@@ -295,6 +369,84 @@ def _is_input_request_tool_call(data: Dict[str, Any]) -> bool:
     )
 
 
+def _is_generic_feedback_pending_input(pending_input: Optional[Dict[str, Any]]) -> bool:
+    if not isinstance(pending_input, dict):
+        return False
+    raw_payload = pending_input.get("raw_payload")
+    raw_prompt = ""
+    if isinstance(raw_payload, dict):
+        raw_prompt = str(raw_payload.get("prompt") or "").strip()
+    prompt = str(pending_input.get("prompt") or "").strip()
+    candidate = raw_prompt or prompt
+    return candidate.lower().startswith("please give feedback to ")
+
+
+def _assistant_reply_matches(rule: Dict[str, str], message: str) -> bool:
+    candidate = str(message or "").strip()
+    if not candidate:
+        return False
+    equals = str(rule.get("equals") or "").strip()
+    contains = str(rule.get("contains") or "").strip()
+    regex = str(rule.get("regex") or "").strip()
+    if equals and candidate.lower() == equals.lower():
+        return True
+    if contains and contains.lower() in candidate.lower():
+        return True
+    if regex:
+        try:
+            return re.search(regex, candidate, re.IGNORECASE) is not None
+        except re.error:
+            return False
+    return False
+
+
+def _pop_assistant_reply(events: List[Dict[str, Any]], reply_rules: List[Dict[str, str]]) -> Optional[str]:
+    if not reply_rules:
+        return None
+    assistant_message = _extract_assistant_message(events)
+    if not assistant_message:
+        return None
+    for index, rule in enumerate(reply_rules):
+        if _assistant_reply_matches(rule, assistant_message):
+            matched = reply_rules.pop(index)
+            return matched["reply"]
+    return None
+
+
+def _pop_reply_for_assistant_message(
+    assistant_message: Optional[str],
+    reply_rules: List[Dict[str, str]],
+) -> Optional[str]:
+    candidate = str(assistant_message or "").strip()
+    if not candidate or not reply_rules:
+        return None
+    for index, rule in enumerate(reply_rules):
+        if _assistant_reply_matches(rule, candidate):
+            matched = reply_rules.pop(index)
+            return matched["reply"]
+    return None
+
+
+def _peek_input_reply(
+    *,
+    events: List[Dict[str, Any]],
+    reply_rules: List[Dict[str, str]],
+    reply_queue: Deque[str],
+    default_input_reply: Optional[str],
+    assistant_message: Optional[str] = None,
+) -> tuple[Optional[str], bool]:
+    reply_text = _pop_reply_for_assistant_message(assistant_message, reply_rules)
+    if reply_text is None:
+        reply_text = _pop_assistant_reply(events, reply_rules)
+    if reply_text is not None:
+        return reply_text, False
+    if reply_queue:
+        return reply_queue[0], True
+    if default_input_reply:
+        return default_input_reply, False
+    return None, False
+
+
 async def _wait_for_completed_document(
     coll: Any,
     *,
@@ -321,11 +473,23 @@ async def _collect_events(
     tool_response_text: Optional[str] = None,
     user_replies: Optional[List[str]] = None,
     tool_response_payloads: Optional[Dict[str, Any]] = None,
+    default_input_reply: Optional[str] = None,
+    assistant_reply_rules: Optional[List[Dict[str, str]]] = None,
+    pending_input_provider: Optional[Callable[[], Awaitable[Optional[Dict[str, Any]]]]] = None,
+    reply_state: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     events: List[Dict[str, Any]] = []
     responded_tool_calls: set[str] = set()
+    responded_pending_requests: set[str] = set()
     reply_queue = deque(str(reply).strip() for reply in (user_replies or []) if str(reply).strip())
     response_queues = _build_tool_response_queues(tool_response_payloads)
+    contextual_reply_rules = [dict(rule) for rule in (assistant_reply_rules or []) if isinstance(rule, dict)]
+    if reply_state is not None:
+        responded_tool_calls = reply_state.setdefault("responded_tool_calls", set())
+        responded_pending_requests = reply_state.setdefault("responded_pending_requests", set())
+        reply_state["reply_queue"] = reply_queue
+        reply_state["response_queues"] = response_queues
+        reply_state["assistant_reply_rules"] = contextual_reply_rules
 
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     completion_grace_deadline: Optional[float] = None
@@ -343,12 +507,57 @@ async def _collect_events(
             if grace_remaining <= 0:
                 return events
             remaining = min(remaining, grace_remaining)
+        if pending_input_provider is not None and events:
+            remaining = min(remaining, 1.0)
 
         try:
             raw = await asyncio.wait_for(websocket.recv(), timeout=remaining)
         except TimeoutError:
+            if pending_input_provider is not None and events:
+                pending_input = await pending_input_provider()
+                if isinstance(pending_input, dict):
+                    request_id = str(pending_input.get("request_id") or "").strip()
+                    if request_id and request_id not in responded_pending_requests:
+                        synthetic_data = {
+                            "tool_call_id": request_id,
+                            "tool_name": str(pending_input.get("tool_name") or "UserInputRequest"),
+                            "component_type": str(pending_input.get("component_type") or "UserInputRequest"),
+                            "interaction_type": str(pending_input.get("interaction_type") or "input_request"),
+                            "awaiting_response": True,
+                            "payload": {
+                                "interaction_type": str(pending_input.get("interaction_type") or "input_request"),
+                                "component_type": str(pending_input.get("component_type") or "UserInputRequest"),
+                                "prompt": str(pending_input.get("prompt") or ""),
+                            },
+                        }
+                        response_payload: Optional[Dict[str, Any]] = None
+                        reply_text, used_queue = _peek_input_reply(
+                            events=events,
+                            reply_rules=contextual_reply_rules,
+                            reply_queue=reply_queue,
+                            default_input_reply=default_input_reply,
+                            assistant_message=str(pending_input.get("assistant_message") or ""),
+                        )
+                        if reply_text is not None:
+                            response_payload = _build_tool_call_response_payload(reply_text)
+                        if response_payload is not None:
+                            responded_pending_requests.add(request_id)
+                            responded_tool_calls.add(request_id)
+                            if used_queue and reply_queue:
+                                reply_queue.popleft()
+                            await websocket.send(
+                                json.dumps(
+                                    {
+                                        "type": "tool_call_response",
+                                        "tool_call_id": request_id,
+                                        "response": response_payload,
+                                    }
+                                )
+                            )
+                            completion_grace_deadline = None
+                            continue
             if events:
-                return events
+                continue
             raise
         except ConnectionClosed:
             if events:
@@ -372,15 +581,23 @@ async def _collect_events(
             tool_call_id = str(data.get("tool_call_id") or "").strip()
             awaiting_response = bool(data.get("awaiting_response"))
             response_payload: Optional[Dict[str, Any]] = None
-            if reply_queue and _is_input_request_tool_call(data):
-                response_payload = _build_tool_call_response_payload(reply_queue[0])
+            used_queue = False
+            if _is_input_request_tool_call(data):
+                reply_text, used_queue = _peek_input_reply(
+                    events=events,
+                    reply_rules=contextual_reply_rules,
+                    reply_queue=reply_queue,
+                    default_input_reply=default_input_reply,
+                )
+                if reply_text is not None:
+                    response_payload = _build_tool_call_response_payload(reply_text)
             if response_payload is None:
                 response_payload = _pop_tool_response_payload(response_queues, data)
             if response_payload is None and tool_response_text is not None:
                 response_payload = _build_tool_call_response_payload(tool_response_text)
             if tool_call_id and awaiting_response and response_payload is not None and tool_call_id not in responded_tool_calls:
                 responded_tool_calls.add(tool_call_id)
-                if reply_queue and _is_input_request_tool_call(data):
+                if used_queue and reply_queue:
                     reply_queue.popleft()
                 await websocket.send(
                     json.dumps(
@@ -393,6 +610,49 @@ async def _collect_events(
                 )
                 if not reply_queue:
                     completion_grace_deadline = None
+            continue
+
+        if event_type == "chat.awaiting_reply":
+            reply_text, used_queue = _peek_input_reply(
+                events=events,
+                reply_rules=contextual_reply_rules,
+                reply_queue=reply_queue,
+                default_input_reply=default_input_reply,
+            )
+            if reply_text is not None:
+                if used_queue and reply_queue:
+                    reply_queue.popleft()
+                await websocket.send(
+                    json.dumps(_build_workflow_user_reply_message(chat_id, reply_text))
+                )
+                completion_grace_deadline = None
+                continue
+
+        if event_type in {"chat.run_complete", "chat.workflow_complete", "chat.workflow_completed", "chat.completed"}:
+            status_value = data.get("status") if isinstance(data, dict) else None
+            reason_value = str(data.get("reason") or "").strip().lower() if isinstance(data, dict) else ""
+            awaiting_user_input = bool(data.get("awaiting_user_input")) if isinstance(data, dict) else False
+            is_paused = (
+                awaiting_user_input
+                or str(status_value).strip() == "0"
+                or reason_value in {"awaiting_user_input", "paused"}
+            )
+            if is_paused:
+                reply_text, used_queue = _peek_input_reply(
+                    events=events,
+                    reply_rules=contextual_reply_rules,
+                    reply_queue=reply_queue,
+                    default_input_reply=default_input_reply,
+                )
+                if reply_text is not None:
+                    if used_queue and reply_queue:
+                        reply_queue.popleft()
+                    await websocket.send(
+                        json.dumps(_build_workflow_user_reply_message(chat_id, reply_text))
+                    )
+                    completion_grace_deadline = None
+                    continue
+            completion_grace_deadline = now + 1.0
             continue
 
         assistant_name = str(data.get("agent") or data.get("sender") or data.get("name") or "").strip()
@@ -412,8 +672,61 @@ async def _collect_events(
                 now + 10.0,
             )
 
-        if event_type in {"chat.workflow_complete", "chat.workflow_completed", "chat.completed"}:
-            completion_grace_deadline = now + 1.0
+
+async def _await_workflow_with_pending_input_fallback(
+    *,
+    workflow_wait_task: "asyncio.Task[Dict[str, Any]]",
+    transport: Any,
+    pending_input_provider: Optional[Callable[[], Awaitable[Optional[Dict[str, Any]]]]],
+    events: List[Dict[str, Any]],
+    reply_state: Dict[str, Any],
+    default_input_reply: Optional[str],
+) -> Dict[str, Any]:
+    responded_pending_requests = reply_state.setdefault("responded_pending_requests", set())
+    responded_tool_calls = reply_state.setdefault("responded_tool_calls", set())
+
+    while True:
+        try:
+            return await asyncio.wait_for(asyncio.shield(workflow_wait_task), timeout=1.0)
+        except TimeoutError:
+            if pending_input_provider is None:
+                continue
+            pending_input = await pending_input_provider()
+            if not isinstance(pending_input, dict):
+                continue
+
+            request_id = str(pending_input.get("request_id") or "").strip()
+            if not request_id or request_id in responded_pending_requests or request_id in responded_tool_calls:
+                continue
+
+            reply_queue = reply_state.get("reply_queue")
+            if not isinstance(reply_queue, deque):
+                reply_queue = deque()
+                reply_state["reply_queue"] = reply_queue
+            reply_rules = reply_state.get("assistant_reply_rules")
+            if not isinstance(reply_rules, list):
+                reply_rules = []
+                reply_state["assistant_reply_rules"] = reply_rules
+
+            reply_text, used_queue = _peek_input_reply(
+                events=events,
+                reply_rules=reply_rules,
+                reply_queue=reply_queue,
+                default_input_reply=default_input_reply,
+                assistant_message=str(pending_input.get("assistant_message") or ""),
+            )
+            if reply_text is None:
+                continue
+
+            submitted = await transport.submit_tool_call_response(
+                request_id,
+                _build_tool_call_response_payload(reply_text),
+            )
+            if submitted:
+                responded_pending_requests.add(request_id)
+                responded_tool_calls.add(request_id)
+                if used_queue and reply_queue:
+                    reply_queue.popleft()
 
 
 async def run_live_mfj_smoke(
@@ -425,6 +738,8 @@ async def run_live_mfj_smoke(
     tool_response_text: Optional[str] = None,
     user_replies: Optional[List[str]] = None,
     tool_response_payloads: Optional[Dict[str, Any]] = None,
+    default_input_reply: Optional[str] = None,
+    assistant_reply_rules: Optional[List[Dict[str, str]]] = None,
 ) -> SmokeResult:
     load_dotenv(REPO_ROOT / ".env")
     _require_env()
@@ -433,8 +748,8 @@ async def run_live_mfj_smoke(
     _ensure_workflow_exists(effective_root, workflow_name)
 
     # Force the smoke run to target the intended workflows root regardless of caller env.
-    os.environ["MOZAIKS_WORKFLOW_ROOTS"] = str(effective_root)
     os.environ["MOZAIKS_WORKFLOWS_PATH"] = str(effective_root)
+    os.environ.pop("MOZAIKS_WORKFLOW_ROOTS", None)
     os.environ["WORKFLOW_DIR"] = str(effective_root)
 
     await _verify_mongo_available()
@@ -454,9 +769,7 @@ async def run_live_mfj_smoke(
 
     app = create_mozaiks_app(workflow_dir=str(effective_root), debug=False)
     port = _find_free_port()
-    server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", access_log=False)
-    )
+    server = uvicorn.Server(_build_uvicorn_config(app, port))
     serve_task = asyncio.create_task(server.serve())
 
     pm = AG2PersistenceManager()
@@ -478,7 +791,42 @@ async def run_live_mfj_smoke(
 
         ws_url = f"ws://127.0.0.1:{port}/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}"
         run_task: Optional[asyncio.Task] = None
-        async with websockets.connect(ws_url, open_timeout=20, close_timeout=5, max_size=2**20) as websocket:
+        async with websockets.connect(
+            ws_url,
+            open_timeout=20,
+            close_timeout=5,
+            max_size=2**20,
+            ping_interval=None,
+        ) as websocket:
+            reply_state: Dict[str, Any] = {}
+
+            async def _pending_input_provider() -> Optional[Dict[str, Any]]:
+                coll = await pm._coll()
+                doc = await coll.find_one(
+                    {"_id": chat_id, "app_id": app_id},
+                    {"pending_input_request": 1, "messages": 1},
+                )
+                pending_input = (doc or {}).get("pending_input_request")
+                if not isinstance(pending_input, dict):
+                    return None
+
+                assistant_message = None
+                for message in reversed((doc or {}).get("messages") or []):
+                    if not isinstance(message, dict):
+                        continue
+                    role = str(message.get("role") or "").strip().lower()
+                    if role == "user":
+                        continue
+                    content = message.get("content")
+                    if isinstance(content, str) and content.strip():
+                        assistant_message = content.strip()
+                        break
+
+                enriched = dict(pending_input)
+                if assistant_message:
+                    enriched["assistant_message"] = assistant_message
+                return enriched
+
             ws_conn = app.state.transport.connections.get(chat_id) or {}
             ws_id = ws_conn.get("ws_id")
             if ws_id is None:
@@ -502,6 +850,10 @@ async def run_live_mfj_smoke(
                     tool_response_text=tool_response_text,
                     user_replies=user_replies,
                     tool_response_payloads=tool_response_payloads,
+                    default_input_reply=default_input_reply,
+                    assistant_reply_rules=assistant_reply_rules,
+                    pending_input_provider=_pending_input_provider,
+                    reply_state=reply_state,
                 )
             )
             workflow_wait_task = asyncio.create_task(asyncio.wait_for(run_task, timeout=timeout_seconds))
@@ -510,36 +862,74 @@ async def run_live_mfj_smoke(
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
-            if collect_task in done:
-                events = collect_task.result()
+            if workflow_wait_task in done:
                 workflow_result = await workflow_wait_task
+                slice_status = str((workflow_result or {}).get("run_status") or "").strip().lower()
+                if slice_status == "completed":
+                    if not collect_task.done():
+                        with contextlib.suppress(Exception):
+                            await websocket.close()
+                        events = await asyncio.wait_for(collect_task, timeout=15.0)
+                    else:
+                        events = collect_task.result()
+                else:
+                    events = await collect_task
             else:
-                workflow_result = await workflow_wait_task
-                if not collect_task.done():
-                    with contextlib.suppress(Exception):
-                        await websocket.close()
-                events = await asyncio.wait_for(collect_task, timeout=15.0)
+                events = collect_task.result()
+                workflow_result = await _await_workflow_with_pending_input_fallback(
+                    workflow_wait_task=workflow_wait_task,
+                    transport=app.state.transport,
+                    pending_input_provider=_pending_input_provider,
+                    events=events,
+                    reply_state=reply_state,
+                    default_input_reply=default_input_reply,
+                )
 
-        run_status = str((workflow_result or {}).get("run_status") or "completed").strip().lower() or "completed"
-        if run_status != "completed":
-            raise RuntimeError(f"Workflow ended without terminal completion (run_status={run_status})")
-
+        final_doc: Optional[Dict[str, Any]] = None
         structured_output: Dict[str, Any] = {}
         try:
             coll = await pm._coll()
-            doc = await _wait_for_completed_document(
-                coll,
-                chat_id=chat_id,
-                app_id=app_id,
-                timeout_seconds=timeout_seconds,
-            )
-            structured_output = _extract_latest_structured_output(doc)
+            run_status_value = str((workflow_result or {}).get("run_status") or "").strip().lower()
+            if run_status_value == "paused":
+                pending_input = await _pending_input_provider()
+                if _is_generic_feedback_pending_input(pending_input):
+                    try:
+                        workflow_result = await asyncio.wait_for(
+                            app.state.transport.handle_user_input_from_api(
+                                chat_id=chat_id,
+                                user_id=user_id,
+                                workflow_name=workflow_name,
+                                message="",
+                                app_id=app_id,
+                            ),
+                            timeout=60.0,
+                        )
+                    except Exception:
+                        pass
+
+            final_doc = await coll.find_one({"_id": chat_id, "app_id": app_id})
+            saw_terminal_completion = any(_is_terminal_completion_event(event) for event in events)
+            workflow_completed = str((workflow_result or {}).get("run_status") or "").strip().lower() == "completed"
+            if (not isinstance(final_doc, dict) or int(final_doc.get("status", 0)) != 1) and (
+                saw_terminal_completion or workflow_completed
+            ):
+                final_doc = await _wait_for_completed_document(
+                    coll,
+                    chat_id=chat_id,
+                    app_id=app_id,
+                    timeout_seconds=15.0,
+                )
+            structured_output = _extract_latest_structured_output(final_doc)
         except Exception:
             structured_output = {}
 
         observed_event_types = [str(event.get("type") or "") for event in events]
         assistant_message = _resolve_assistant_message(events, structured_output)
-        completed_successfully = bool(structured_output) or bool(assistant_message)
+        final_status = int((final_doc or {}).get("status", 0)) if isinstance(final_doc, dict) else 0
+        completed_successfully = final_status == 1 and (bool(structured_output) or bool(assistant_message))
+        if not completed_successfully:
+            run_status = str((workflow_result or {}).get("run_status") or "paused").strip().lower() or "paused"
+            raise RuntimeError(f"Workflow ended without terminal completion (run_status={run_status})")
         return SmokeResult(
             success=completed_successfully,
             app_id=app_id,
@@ -600,6 +990,11 @@ def main() -> int:
         help="Prompt to send into the workflow.",
     )
     parser.add_argument(
+        "--prompt-file",
+        default=None,
+        help="Optional text file containing the prompt to send into the workflow.",
+    )
+    parser.add_argument(
         "--workflows-root",
         default=str(_resolve_default_workflows_root()),
         help="Root directory containing workflow folders.",
@@ -630,19 +1025,28 @@ def main() -> int:
 
     scripted_responses = None
     scripted_replies: List[str] = list(args.user_reply or [])
+    default_input_reply = None
+    assistant_reply_rules = None
+    prompt = str(args.prompt)
+    if args.prompt_file:
+        prompt = _load_prompt_file(Path(args.prompt_file))
     if args.tool_response_file:
         scripted_responses = _load_tool_response_file(Path(args.tool_response_file))
         scripted_replies = list(scripted_responses.get("input_replies") or []) + scripted_replies
+        default_input_reply = scripted_responses.get("default_input_reply")
+        assistant_reply_rules = scripted_responses.get("assistant_reply_rules")
 
     result = asyncio.run(
         run_live_mfj_smoke(
-            prompt=args.prompt,
+            prompt=prompt,
             timeout_seconds=args.timeout_seconds,
             workflow_name=args.workflow,
             workflows_root=Path(args.workflows_root),
             tool_response_text=args.tool_response_text,
             user_replies=scripted_replies or None,
             tool_response_payloads=(scripted_responses or {}).get("tool_responses"),
+            default_input_reply=default_input_reply,
+            assistant_reply_rules=assistant_reply_rules,
         )
     )
     exit_code = 0 if result.success else 1

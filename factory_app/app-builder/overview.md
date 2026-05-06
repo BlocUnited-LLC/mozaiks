@@ -13,6 +13,9 @@ Use these docs for builder-specific behavior such as:
 Keep runtime and platform architecture concerns in
 `docs/architecture/foundations/`.
 
+In particular, these builder docs assume the canonical three-loop model in
+`docs/architecture/foundations/orchestration-control-loops.md`.
+
 ## Recommended Reading Order
 
 1. [App Builder Architecture](app-builder-architecture.md)

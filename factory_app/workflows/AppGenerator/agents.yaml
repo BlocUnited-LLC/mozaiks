@@ -53,13 +53,11 @@ agents:
          - entities and CRUD operations
          - user roles and auth requirements
          - external integrations and API usage
-         - admin/operator surfaces: clarify WHO needs admin access and WHAT they manage
-           (if `platform_user_email` context variable is non-null, the admin email is already
-           known — do NOT ask for it; only ask if `platform_user_email` is null and admin_pack
-           is needed; the platform provides the admin portal automatically at /admin — no custom page)
          - visual/style constraints that affect file generation
          - whether the app must integrate with an upstream generated agent backend
          - whether any requested behavior is agentic augmentation rather than deterministic product behavior
+         - admin/operator surfaces: **only ask about this if the user already mentioned admin access, ops tooling, or back-office management** — do not proactively raise it. If admin is relevant, clarify WHO needs access and WHAT they manage. The platform provides `/admin` automatically; do not ask the user to build it.
+           (if `platform_user_email` is non-null, the admin email is already known — do NOT ask for it)
       6. Ask one concise question at a time when information is missing.
       7. If the scope is already complete enough to proceed, respond with exactly `NEXT` and nothing else.
 
@@ -212,6 +210,7 @@ agents:
         - `surface_kind = control_plane` packs should use app-level orchestration tasks such as `backend_foundation` or `api_surface`, not `module_contract`.
         - `surface_kind = external_integration` packs should use `api_surface` or `agent_backend_integration` tasks, not `module_contract`.
         - Connector credentials, API-key metadata, and Studio adapter records are platform-owned integration state. Do not turn them into app-owned module entities or collections.
+        - Use the app connector inventory as the source of truth for which third-party integrations are already ready. If the plan references Stripe, Twilio, SendGrid, or similar services that are not ready in the connector inventory, keep the integration in the product plan but explicitly mark it as a missing configuration dependency.
         - `surface_kind = ui_only` packs should use `page_bundle` tasks only unless another surface owns their backend mutations.
       12c. **module_contract rule**: For every capability pack with `surface_kind = module`, include a `task_type: module_contract` build task:
         - This task produces the canonical module contract files that wire the capability into platform_app.
@@ -221,8 +220,9 @@ agents:
           - `modules/{pack_name}/subscriptions.yaml` — event reactions to handlers, capabilities, or notifications
           - `modules/{pack_name}/notifications.yaml` — notification intents per event
           - `modules/{pack_name}/settings.yaml` — module-local settings and feature flags
-          - `modules/{pack_name}/admin.yaml` — feature-specific admin panels mounted inside user-facing sections of the unified `/admin` shell
+          - `modules/{pack_name}/admin.yaml` — admin panel contract for this module (default: empty panels; only populate if admin surfaces were explicitly requested for this module)
         - `initial_message` must include: the capability pack's entities, actions, capability ids, events it may publish, event subscriptions/reactions, notification needs, settings/feature flags, required Python hook files, backend layering expectations (`handler/service/repo/policy/models`), and `app_backend_url` from context (null = schema-only, non-null = active backend).
+        - **admin panels are opt-in**: only include admin panel requirements in `initial_message` if the product brief or interview explicitly asked for admin/operator views for this module. Do not invent admin panels by default.
         - `initial_agent` for this task is `ConfigMiddlewareAgent`.
         - Do NOT generate Python implementation code here. YAML declares the contract; ServiceAgent implements `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, `backend/models.py`, and any optional hook stubs such as `backend/settings.py`, `backend/subscriptions.py`, and `backend/notifications.py`.
         - `module_contract` tasks run in the `backend-foundation` phase, before `data-models`.
@@ -851,14 +851,22 @@ agents:
       - Previous Validation Errors: if this is a retry, review chat history and fix them.
 
       **Module contract file set (Mode A)**:
+
+      Include only the files this module actually needs. Do NOT emit all six by default.
+
       ```
-      modules/{pack_name}/module.yaml          — identity + permissions + actions + public capabilities + handler path
-      modules/{pack_name}/events.yaml          — namespaced domain event declarations + payload schemas
-      modules/{pack_name}/subscriptions.yaml   — event reactions to handlers, capabilities, or notifications
-      modules/{pack_name}/notifications.yaml   — notification intents per event
-      modules/{pack_name}/settings.yaml        — module-local settings and feature flags
-      modules/{pack_name}/admin.yaml           — feature-owned admin panels mounted inside user-facing /admin sections
+      modules/{pack_name}/module.yaml          — ALWAYS include. Identity, permissions, actions, capabilities, handler path.
+      modules/{pack_name}/events.yaml          — ONLY if this module publishes domain events.
+      modules/{pack_name}/subscriptions.yaml   — ONLY if this module reacts to events from other modules.
+      modules/{pack_name}/notifications.yaml   — ONLY if module events should trigger user-facing notifications.
+      modules/{pack_name}/settings.yaml        — ONLY if the module has configurable behavior or feature flags.
+      modules/{pack_name}/admin.yaml           — ONLY if the module needs admin or backoffice panels.
+      modules/{pack_name}/channels.yaml        — ONLY for messaging-type modules requiring real-time WebSocket or push delivery.
       ```
+
+      Omit any file whose content would be an empty array or null object. A module
+      that publishes no events should not have an events.yaml. A module with no
+      configurable behavior should not have a settings.yaml. Sparse is correct.
 
       **Customization boundary (Mode A)**:
       - YAML may reference bounded helper/customization stubs only through explicit contract fields such as `module.handler`, subscription `target.handler`, setting `validator`, setting `on_change`, notification `audience.resolver`, notification `renderer`, and `admin.yaml hooks`.
@@ -914,13 +922,22 @@ agents:
       ```
 
       **Admin.yaml contract**:
+
+      Default (no admin panels requested):
+      ```yaml
+      schema_version: mozaiks.admin.v2
+      panels: []
+      hooks: []
+      ```
+
+      When admin panels are explicitly requested for this module:
       ```yaml
       schema_version: mozaiks.admin.v2
       panels:
         - id: task_manager.overview
           label: Tasks
           description: Review and manage task activity.
-          section: overview
+          section: usage
           order: 20
           renderer: schema
           layout: full-width
@@ -954,7 +971,7 @@ agents:
          - If `generated_workflow_trigger_events` is non-empty, generate one subscription entry per trigger event that routes the matching domain event to the workflow capability using `generated_workflow_capability_id` as the target. Do not use the raw workflow name — the capability id is the stable platform-resolvable identifier.
       8. **notifications.yaml**: include `schema_version: mozaiks.notifications.v1` and one rule per event that warrants a notification. Use `in_app` by default; add `email` only for high-value events. Use `audience.resolver` or `renderer` only when static roles/permissions and plain templates are insufficient, and mirror those entrypoints in `python_stubs`.
       9. **settings.yaml**: include `schema_version: mozaiks.settings.v1`, module-local `settings[]`, and `features[]`. Settings may reference optional Python hooks (`validator`, `on_change`) but must not contain secrets. Every hook reference must be module-local and mirrored in `python_stubs`.
-      10. **admin.yaml**: include `schema_version: mozaiks.admin.v2` and `panels[]` for any app-owner administration this capability needs. Panels render inside `/admin`; do not create admin pages. Every panel must set `section` to one of `overview`, `users`, `billing`, `usage`, `activity`, `settings`, `integrations`, or `support`. Use `renderer: schema` unless a developer-supplied custom component is explicitly required.
+      10. **admin.yaml**: always emit `schema_version: mozaiks.admin.v2`. Default to `panels: []` and `hooks: []` — **do not invent admin panels**. Only populate `panels[]` if the build task's `initial_message` explicitly describes admin panel requirements for this module (e.g. the user asked for an ops dashboard, back-office view, or admin table for this capability). When panels are explicitly required: every panel must set `section` to one of `overview`, `users`, `billing`, `usage`, `activity`, `settings`, `integrations`, or `support`; use `renderer: schema` unless a custom component was explicitly requested; bind data through `config.api_endpoint` pointing at the canonical module API. When declaring `hooks`, use the format `module.path:function_name` (e.g. `backend.admin:resolve_campaign_metrics`); every hook must be module-local and mirrored in `python_stubs`.
          - `renderer: schema` means the panel must declare `layout` plus `sections[]`, reusing the same primitive section contract as `ui/pages/*.yaml`.
          - Bind schema panels through section-level `config.api_endpoint` values that call the canonical host module API (`/api/modules/{module_id}/{action_id}`).
          - Put panel actions inside section configs (for example DataTable toolbar actions or Form submit actions), not as ad hoc top-level panel fields.
@@ -1644,7 +1661,7 @@ agents:
       - Prefer the generic platform module action API over bespoke routes.
       - Generate `modules/{pack_name}/backend/api.py` only when the build task explicitly asks for a custom external REST projection.
       - Any generated API adapter must call action methods from `backend/handler.py` and must not introduce actions missing from `module.yaml`.
-      - If the build task owns `backend/admin_config.py` and `backend/routes/admin.py`, generate the split app-backend admin config surface using the canonical helper contract instead of inventing ad hoc admin routes.
+      - If the build task owns `backend/admin_config.py` and `backend/routes/admin.py`, emit a typed `app_backend_admin_config` object and let the codegen step materialise those two self-contained files — do not invent ad hoc admin routes or import mozaiksai in the generated files.
   - id: context
     heading: '[CONTEXT]'
     content: |-

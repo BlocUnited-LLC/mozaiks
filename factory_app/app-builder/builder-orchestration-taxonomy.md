@@ -143,6 +143,9 @@ switches.
 The user should experience one build session even if the system uses many AG2
 groupchats behind the scenes.
 
+`BuildSession` is the builder-session control loop, not the workflow execution
+loop and not the refinement worker loop.
+
 ## Core Distinctions
 
 ### Concept versus intent
@@ -190,3 +193,4 @@ parallelize.
 - [app-planning-contracts.md](app-planning-contracts.md)
 - [builder-execution-model.md](builder-execution-model.md)
 - [app-builder-architecture.md](app-builder-architecture.md)
+- [../../docs/architecture/foundations/orchestration-control-loops.md](../../docs/architecture/foundations/orchestration-control-loops.md)

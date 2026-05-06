@@ -24,7 +24,12 @@ def _resolve_env_dir(env_name: str) -> Path | None:
 
 
 def _resolve_package_dir(package_name: str) -> Path | None:
-    spec = find_spec(package_name)
+    try:
+        spec = find_spec(package_name)
+    except ValueError:
+        # Some tests and dynamic import paths leave a module entry behind with
+        # __spec__ unset. Fall back to repo/env resolution instead of failing.
+        spec = None
     if spec is None:
         return None
     if spec.submodule_search_locations:

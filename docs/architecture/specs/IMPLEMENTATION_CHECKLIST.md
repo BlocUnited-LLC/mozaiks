@@ -89,8 +89,8 @@ TARGET STATE:
 **Status:** Canonical workflow roots, keep clean
 
 - Shared generation-core workflows live under `factory_app/workflows/`
-- App-owned workflows live under the active app root's `app/workflows/`
-- `factory_app/app/workflows/` should stay empty until the factory app has a real app-owned overlay workflow
+- App-owned workflows live under the active app root's `workflows/`
+- `factory_app/app/workflows/` should not be checked in until the factory app has a real app-owned overlay workflow
 - No legacy demo/sample workflows in the canonical roots
 
 ### Layered FastAPI Hosts

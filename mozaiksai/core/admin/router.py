@@ -5,7 +5,6 @@
 # ==============================================================================
 from __future__ import annotations
 
-import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Optional
@@ -16,16 +15,13 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse
 
 from mozaiksai.core.admin.contract import (
-    build_default_host_admin_config,
+    build_default_admin_shell_config,
     build_default_runtime_panels,
     normalize_admin_section_name,
-    normalize_host_admin_sections,
+    normalize_admin_shell_sections,
 )
 from mozaiksai.core.auth.dependencies import require_user, UserPrincipal
-from mozaiksai.core.admin.paths import (
-    resolve_admin_app_root as resolve_admin_app_root_path,
-    resolve_admin_config_path,
-)
+from mozaiksai.core.admin.paths import resolve_admin_app_root as resolve_admin_app_root_path
 from mozaiksai.core.auth.adapters.registry import is_auth_enabled
 from mozaiksai.core.admin.email_promotion import is_admin_by_email
 from mozaiksai.core.observability.performance_manager import get_performance_manager
@@ -39,7 +35,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 _bearer = HTTPBearer(auto_error=False)
 
 
-DEFAULT_ADMIN_CONFIG = build_default_host_admin_config()
+DEFAULT_ADMIN_SHELL_CONFIG = build_default_admin_shell_config()
 
 
 async def _require_admin(
@@ -50,7 +46,7 @@ async def _require_admin(
     Admin gate with three escalating checks:
 
     1. Auth provider granted "admin" role in the JWT          (production)
-    2. User's email is in admin.json admin_emails allowlist   (default path)
+    2. User's email is in app.json admins allowlist           (default path)
     3. Auth is disabled (dev mode) — pass through             (local dev)
 
     Any of the three is sufficient. All three can coexist.
@@ -173,26 +169,16 @@ async def get_admin_sessions(
 
 
 # ---------------------------------------------------------------------------
-# Config — read the declarative admin.json
+# Config — read the framework-owned admin shell config
 # ---------------------------------------------------------------------------
 
 @router.get("/config")
 async def get_admin_config(
     user: UserPrincipal = Depends(_require_admin),
 ):
-    """Return the active admin config, including feature admin panel manifests."""
-    config_path = _resolve_admin_config_path()
+    """Return the active admin shell config, including feature admin panel manifests."""
     app_root = _resolve_admin_app_root()
-    if not config_path.exists():
-        return _merge_module_admin_panels(deepcopy(DEFAULT_ADMIN_CONFIG), app_root)
-    try:
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-        if not isinstance(config, dict):
-            config = deepcopy(DEFAULT_ADMIN_CONFIG)
-        return _merge_module_admin_panels(config, app_root)
-    except Exception as e:
-        logger.warning(f"[admin] failed to read admin.json: {e}")
-        return _merge_module_admin_panels(deepcopy(DEFAULT_ADMIN_CONFIG), app_root)
+    return _merge_module_admin_panels(deepcopy(DEFAULT_ADMIN_SHELL_CONFIG), app_root)
 
 
 # ---------------------------------------------------------------------------
@@ -213,11 +199,6 @@ async def get_admin_health(
 def _resolve_admin_app_root() -> Path:
     """Find the active app root without importing the platform host."""
     return resolve_admin_app_root_path()
-
-
-def _resolve_admin_config_path() -> Path:
-    """Find admin.json relative to the active app root."""
-    return resolve_admin_config_path()
 
 
 def _load_module_admin_panels(app_root: Path) -> list[dict]:
@@ -320,18 +301,9 @@ def _normalize_runtime_panel(panel: dict) -> dict | None:
     return normalized
 
 
-def _normalize_host_admin_config(config: dict) -> dict:
-    normalized = build_default_host_admin_config()
-    normalized["enabled"] = bool(config.get("enabled", True))
-
-    admin_emails = config.get("admin_emails")
-    normalized["admin_emails"] = [
-        email.strip().lower()
-        for email in admin_emails
-        if isinstance(email, str) and email.strip()
-    ] if isinstance(admin_emails, list) else []
-
-    normalized["sections"] = normalize_host_admin_sections(config.get("sections"))
+def _normalize_admin_shell_config(config: dict) -> dict:
+    normalized = build_default_admin_shell_config()
+    normalized["sections"] = normalize_admin_shell_sections(config.get("sections"))
 
     runtime_panels = config.get("runtime_panels")
     if isinstance(runtime_panels, list):
@@ -350,7 +322,7 @@ def _normalize_host_admin_config(config: dict) -> dict:
 
 
 def _merge_module_admin_panels(config: dict, app_root: Path) -> dict:
-    config = _normalize_host_admin_config(config)
+    config = _normalize_admin_shell_config(config)
     module_panels = _load_module_admin_panels(app_root)
     if not module_panels:
         return config

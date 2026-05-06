@@ -67,7 +67,7 @@ app/
 │       │   ├── service.py      # recommended — all business logic and event emission
 │       │   ├── repo.py         # recommended — MongoDB access layer, no logic
 │       │   ├── policy.py       # recommended — query scoping for multi-tenancy
-│       │   ├── schemas.py      # recommended — typed request/response + document shapes
+│       │   ├── models.py       # recommended — TypedDict shapes + helper functions
 │       │   ├── settings.py     # optional — settings hook implementations
 │       │   ├── subscriptions.py# optional — subscription handler implementations
 │       │   ├── notifications.py# optional — notification hook implementations
@@ -97,13 +97,16 @@ It follows the same top-level active app root contract:
 - `app.json`
 - `config/`
 - `ui/`
-- `workflows/`
+- optional `workflows/` overlay root when the app owns local workflows
 - `modules/`
 - `brand/`
 
-Inside that workspace contract, `factory_app/app/workflows/` is now reserved
-for app-local overlays only. Shared generation-core workflows no longer live
-there; they live under `factory_app/workflows/`.
+Inside that workspace contract, `<active app root>/workflows/` is reserved for
+app-local overlays only. Shared generation-core workflows do not live there;
+they live under `factory_app/workflows/`. The first-party `factory_app/app`
+bundle currently owns no app-local workflow overlays, so
+`factory_app/app/workflows/` should be absent rather than kept around as an
+empty checked-in seam.
 
 That is deliberate. The factory workspace is the first-party dogfood app for the
 builder/control-plane layer, so it should stay close to the same workspace
@@ -163,18 +166,18 @@ defines the shared build journeys and entrypoints and
 adds product-specific workflow overlays.
 
 The same boundary applies to `factory_app/app/workflows/`: it is an app-local
-overlay surface and may legitimately stay empty when the factory app does not
-own any workflow beyond the shared builder layer.
+overlay surface that should only exist once the factory app owns a workflow
+that is not part of the shared builder layer.
 
-Runtime workflow loading is multi-root. By default the runtime searches:
+Runtime workflow loading is single-root. A running host selects one active
+workflow root:
 
-1. `<active app root>/workflows`
-2. the shared generation-core workflow root
+1. Studio defaults to `factory_app/workflows/`
+2. app/product hosts use `<active app root>/workflows` when that directory is
+  present
+3. `MOZAIKS_WORKFLOWS_PATH` may override the selected root explicitly
 
-If needed, `MOZAIKS_WORKFLOW_ROOTS` can override that order explicitly.
-That is what allows a product workspace registry to reference both shared
-generation workflows and product-owned workflows such as `AppMarketing` and
-`InvestorMarketplace`.
+The runtime does not auto-merge app and factory workflow roots.
 
 For generated OSS-style bundles, bounded frontend customization lives inside the
 active app root at `app/ui/index.js`. That file is the app-owned extension
@@ -343,8 +346,19 @@ The canonical target is:
 - shared generation core outside app workspaces
 - hosted product workspaces consuming the same workspace contract
 
+## Module Types
+
+The base module structure above applies to all modules. The `type` field in
+`module.yaml` declares which of four canonical patterns the module follows:
+`standard`, `messaging`, `workflow`, or `transactional`. Each type may add
+additional YAML files (e.g., `channels.yaml` for `messaging`, `states.yaml`
+and `transitions.yaml` for `workflow`) and carries its own backend conventions.
+
+See [module-type-taxonomy.md](module-type-taxonomy.md) for the full reference.
+
 ## Cross References
 
 - [overview.md](overview.md)
+- [module-type-taxonomy.md](module-type-taxonomy.md)
 - [app-bundle-declaratives.md](app-bundle-declaratives.md)
 - [distribution-and-workspace-model.md](distribution-and-workspace-model.md)

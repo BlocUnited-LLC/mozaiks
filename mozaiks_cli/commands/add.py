@@ -116,7 +116,7 @@ def _show_next_steps(feature_or_preset, app_root_label: str):
 
     if feature_or_preset == "admin" or feature_or_preset == "full":
         print("  - Access admin portal at /admin (requires auth)")
-        print(f"  - Configure {app_root_label}/config/admin.json and {app_root_label}/app.json admins")
+        print(f"  - Configure {app_root_label}/app.json admins")
 
     if feature_or_preset == "chat_ui" or feature_or_preset in ["chat", "integrated", "full"]:
         print("  - Chat UI will be available at root path")

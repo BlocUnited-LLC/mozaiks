@@ -112,6 +112,10 @@ That is acceptable only if they stay behind typed builder contracts such as:
 - `BuildGraph`
 - `ImpactSet`
 
+Those AG2 workflows are only one control loop in the system. The builder still
+needs a separate session-level control plane above them and a scoped refinement
+worker loop below them for localized repair.
+
 ## Required Review Artifacts
 
 Before a build starts, the builder should be able to show:
@@ -161,3 +165,4 @@ During build, those families are written first under
 - [builder-execution-model.md](builder-execution-model.md)
 - [app-planning-contracts.md](app-planning-contracts.md)
 - [canonical-app-structure.md](../../architecture/foundations/canonical-app-structure.md)
+- [../../docs/architecture/foundations/orchestration-control-loops.md](../../docs/architecture/foundations/orchestration-control-loops.md)

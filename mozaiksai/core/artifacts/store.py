@@ -18,7 +18,10 @@ from .models import (
     ArtifactValidationStatus,
     ArtifactVersionDoc,
     ChangeClassification,
+    ChangeIntentDoc,
     ChangeRequestDoc,
+    ImpactSetDoc,
+    RefinementRequestPayload,
     RefinementSessionDoc,
     RefinementSessionStatus,
 )
@@ -346,16 +349,33 @@ class ArtifactStore:
         app_id: str,
         artifact_kind: str,
         artifact_key: str,
-        artifact_version_id: str,
+        artifact_version_id: Optional[str],
         raw_user_request: str,
         classification: ChangeClassification,
-        scope: Optional[Dict[str, Any]] = None,
+        refinement_request: Dict[str, Any] | RefinementRequestPayload,
+        change_intent: Dict[str, Any] | ChangeIntentDoc,
+        impact_set: Dict[str, Any] | ImpactSetDoc,
         router_decision: Optional[Dict[str, Any]] = None,
         created_by_user_id: Optional[str] = None,
     ) -> ChangeRequestDoc:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             raise ValueError("app_id is required")
+        refinement_request_doc = (
+            refinement_request
+            if isinstance(refinement_request, RefinementRequestPayload)
+            else RefinementRequestPayload.model_validate(refinement_request)
+        )
+        change_intent_doc = (
+            change_intent
+            if isinstance(change_intent, ChangeIntentDoc)
+            else ChangeIntentDoc.model_validate(change_intent)
+        )
+        impact_set_doc = (
+            impact_set
+            if isinstance(impact_set, ImpactSetDoc)
+            else ImpactSetDoc.model_validate(impact_set)
+        )
         doc = ChangeRequestDoc(
             _id=f"cr_{uuid4().hex[:24]}",
             app_id=resolved_app_id,
@@ -364,7 +384,9 @@ class ArtifactStore:
             artifact_version_id=artifact_version_id,
             raw_user_request=raw_user_request,
             classification=classification,
-            scope=dict(scope or {}),
+            refinement_request=refinement_request_doc,
+            change_intent=change_intent_doc,
+            impact_set=impact_set_doc,
             router_decision=dict(router_decision or {}),
             created_by_user_id=created_by_user_id,
         )
