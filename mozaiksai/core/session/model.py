@@ -50,6 +50,7 @@ class TriggerInput:
     user_id: str
     trigger_source: str
     workflow_id: Optional[str] = None
+    journey_id: Optional[str] = None
     context_variables: Dict[str, Any] = field(default_factory=dict)
     trigger_payload: Dict[str, Any] = field(default_factory=dict)
 
@@ -58,6 +59,7 @@ class TriggerInput:
 class RoutingDecision:
     workflow_id: str
     requested_workflow_id: Optional[str]
+    journey_id: Optional[str] = None
     context_seed: Dict[str, Any] = field(default_factory=dict)
     explanation: str = ""
     is_full_restart: bool = False
@@ -72,6 +74,7 @@ class TransitionResolution:
     transition_id: str
     target_id: str
     route_type: str  # "transition" | "workflow"
+    journey_id: Optional[str] = None
     context_seed: Dict[str, Any] = field(default_factory=dict)
     option_id: Optional[str] = None
     routing_decision: Optional[RoutingDecision] = None

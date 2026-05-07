@@ -575,6 +575,7 @@ class TriggerWorkflowRequest(BaseModel):
 
     user_id: str = Field(..., description="User ID to run workflow as")
     app_id: Optional[str] = Field(None, description="Application ID")
+    journey_id: Optional[str] = Field(None, description="Optional workflow sequence to bind the run to")
     context: Optional[Dict[str, Any]] = Field(None, description="Initial context variables")
     webhook_url: Optional[str] = Field(None, description="Optional completion notification URL")
 
@@ -613,6 +614,20 @@ async def trigger_workflow(
         extra_fields=extra_fields,
     )
 
+    if body.journey_id:
+        try:
+            from mozaiksai.core.session.router import get_session_router
+
+            await get_session_router().bind_workflow_session(
+                app_id=app_id,
+                user_id=user_id,
+                workflow_id=workflow_name,
+                chat_id=chat_id,
+                journey_id=body.journey_id,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid journey binding: {exc}") from exc
+
     try:
         perf_mgr = await get_performance_manager()
         await perf_mgr.record_workflow_start(chat_id, app_id, workflow_name, user_id)
@@ -626,6 +641,7 @@ async def trigger_workflow(
         "workflow_name": workflow_name,
         "app_id": app_id,
         "user_id": user_id,
+        "journey_id": body.journey_id,
         "websocket_url": f"/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}",
         "message": "Workflow session created. Connect via WebSocket or submit input to execute.",
     }

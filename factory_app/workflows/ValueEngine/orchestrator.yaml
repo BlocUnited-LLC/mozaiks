@@ -8,3 +8,6 @@ initial_message: 'ValueInterviewAgent: start a focused interview. First ask whet
   user already has an idea; if not, propose a short list of monetizable niches and
   ask them to pick one. Ask one question at a time.'
 initial_agent: ValueInterviewAgent
+runtime_extensions:
+  - kind: lifecycle_hooks
+    entrypoint: workflows.AppGenerator.tools.platform.build_lifecycle:get_hooks

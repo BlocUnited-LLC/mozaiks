@@ -30,6 +30,85 @@ definitions:
 # ============================================================================
 # STATE - Workflow orchestration triggers
 # ============================================================================
+  refinement_mode:
+    type: boolean
+    description: >
+      True when ValueEngine was reopened by the refinement control plane rather
+      than launched as a fresh greenfield interview. Use this to treat the
+      current request as a concept revision instead of a blank-slate ideation run.
+    source:
+      type: state
+      default: false
+  change_class:
+    type: string
+    description: >
+      Refinement change class: patch | design | feature | core. When present,
+      it describes why the control plane re-entered ValueEngine.
+    source:
+      type: state
+      default: null
+  artifact_kind:
+    type: string
+    description: >
+      Artifact family that triggered the current reroute, such as app_bundle or
+      workflow_bundle. Useful for understanding whether the revision originated
+      from app, workflow, or design refinement.
+    source:
+      type: state
+      default: null
+  artifact_version_id:
+    type: string
+    description: >
+      Version id of the downstream artifact that triggered the reroute. Null
+      for fresh greenfield starts.
+    source:
+      type: state
+      default: null
+  refinement_request:
+    type: string
+    description: >
+      Raw user-supplied refinement request text passed through from the
+      canonical RefinementRequest. When present, this is the concept revision
+      request ValueInterviewAgent should anchor to first.
+    source:
+      type: state
+      default: null
+  refinement_request_meta:
+    type: object
+    description: >
+      Full typed RefinementRequest payload persisted by the control plane.
+      Useful when agents need artifact ids, source surface, or other request
+      metadata beyond the raw refinement text.
+    source:
+      type: state
+      default: null
+  screen:
+    type: string
+    description: >
+      Builder surface or screen identifier that launched the current refinement
+      request, such as studio-create. Preserved for analytics and future
+      surface-aware prompt shaping.
+    source:
+      type: state
+      default: null
+  change_intent:
+    type: object
+    description: >
+      Typed refinement classification emitted by the control plane. Contains the
+      final `change_class`, rationale, and layer-touch information so
+      ValueEngine can treat reroutes as deliberate concept revisions.
+    source:
+      type: state
+      default: null
+  impact_set:
+    type: object
+    description: >
+      Typed downstream impact summary emitted by the control plane. Contains
+      affected workflows, affected declarative families, restart_from, and
+      rebuild/replanning flags for the current refinement request.
+    source:
+      type: state
+      default: null
   interview_complete:
     type: boolean
     description: True when ValueInterviewAgent signals completion (NEXT).
@@ -110,14 +189,39 @@ agents:
     - app_type
     - context_aware
     - monetization_enabled
+    - refinement_mode
+    - change_class
+    - artifact_kind
+    - artifact_version_id
+    - refinement_request
+    - refinement_request_meta
+    - screen
+    - change_intent
+    - impact_set
     - interview_complete
   ResearchAgent:
     variables:
+    - refinement_mode
+    - change_class
+    - artifact_kind
+    - artifact_version_id
+    - refinement_request
+    - refinement_request_meta
+    - change_intent
+    - impact_set
     - interview_complete
     - concept_presented
     - app_type
   GapAnalysisAgent:
     variables:
+    - refinement_mode
+    - change_class
+    - artifact_kind
+    - artifact_version_id
+    - refinement_request
+    - refinement_request_meta
+    - change_intent
+    - impact_set
     - concept_presented
     - concept_blueprint
     - concept_overview

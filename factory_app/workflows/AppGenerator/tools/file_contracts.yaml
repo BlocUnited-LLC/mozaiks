@@ -1,0 +1,98 @@
+version: 1
+
+description: >
+  Advisory file contract catalog for AppGenerator. This file separates task
+  ownership and canonical output families from domain priors so agents can
+  build cookie-cutter YAML and Python/JS stubs across domains without
+  treating the domain catalog as runtime truth. Runtime truth remains the
+  structured outputs, build_tasks, owned_paths, and runtime loaders.
+
+task_contracts:
+  page_bundle:
+    owner_agent: AppSchemaAgent
+    summary: Declarative persistent app UI bundle owned by AppSchemaAgent.
+    required_outputs:
+      - app.json
+      - ui/pages/*.yaml
+    optional_outputs:
+      - ui/route_manifest.json
+      - ui/pages/custom/*.jsx
+      - ui/index.js
+      - brand/theme_config.json
+      - config/shell.json
+      - config/asset_manifest.json
+    hard_constraints:
+      - Persistent app pages stay declarative by default.
+      - "Workflow launches from pages use action_type: workflow."
+      - Durable page mutations bind through declared api_endpoint values or canonical module actions.
+      - Do not emit raw frontend source outside the bounded custom route bundle.
+
+  module_contract:
+    owner_agent: ConfigMiddlewareAgent
+    summary: Canonical module contract bundle that declares module behavior before Python or JS implementation.
+    required_outputs:
+      - modules/{pack_name}/module.yaml
+    optional_outputs:
+      - modules/{pack_name}/events.yaml
+      - modules/{pack_name}/subscriptions.yaml
+      - modules/{pack_name}/notifications.yaml
+      - modules/{pack_name}/settings.yaml
+      - modules/{pack_name}/admin.yaml
+      - modules/{pack_name}/channels.yaml
+    downstream_python_defaults:
+      - backend/handler.py
+      - backend/service.py
+      - backend/repo.py
+      - backend/policy.py
+      - backend/models.py
+    optional_python_hooks:
+      - backend/settings.py
+      - backend/subscriptions.py
+      - backend/notifications.py
+      - backend/admin.py
+    optional_js_stubs:
+      - ui/admin/*.jsx
+      - ui/index.js
+    hard_constraints:
+      - module.yaml is always required.
+      - Emit only files declared by owned_paths or explicit file_manifest.
+      - Omit YAML files that would serialize to empty arrays or null objects.
+      - YAML declares the contract; downstream agents implement Python and JS stubs.
+      - JS stubs are allowed only for declared customization surfaces.
+
+  backend_foundation:
+    owner_agent: ConfigMiddlewareAgent
+    summary: App-level backend glue and scaffold files for the active app host.
+    required_outputs: []
+    optional_outputs:
+      - task-owned backend glue files
+    hard_constraints:
+      - Stay within current_build_task.owned_paths.
+      - Emit integration glue only.
+      - Do not generate a standalone platform or alternate host.
+
+  api_surface:
+    owner_agent: ControllerAgent
+    summary: Optional external API adapter lane. Default app behavior uses the platform module API.
+    required_outputs: []
+    optional_outputs:
+      - modules/{pack_name}/backend/api.py
+      - backend/admin_config.py
+      - backend/routes/admin.py
+    hard_constraints:
+      - Default module access is /api/modules/{module_name}/{action_name}.
+      - Emit bespoke REST adapters only when explicitly requested.
+      - Delegate behavior to backend/handler.py instead of duplicating business logic.
+      - App-backend admin config is a separate contract and must expose only GET /api/admin/config.
+
+  agent_backend_integration:
+    owner_agent: AppPlanAgent
+    summary: Planning lane for wiring an existing agent backend into the generated app.
+    required_outputs: []
+    optional_outputs:
+      - workflow touchpoints in page schemas
+      - build task initial_message context for downstream agents
+    hard_constraints:
+      - Treat upstream agent metadata as exact values, not inferred values.
+      - Persistent pages launch workflows declaratively; live workflow UI stays workflow-owned.
+      - Do not convert agent integrations into app-owned module collections by default.

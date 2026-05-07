@@ -114,8 +114,9 @@ const ComponentNotFound = ({ componentName }) => (
  *   - next transition -> mount it
  *   - workflow target -> backend creates the chat session and returns chat_id
  *
- * Shell entry points use route.transition. Workflow sequencing metadata stays
- * runtime-only and does not drive route UI.
+ * Shell entry points use route.transition. When a route enters a workflow
+ * sequence, the route-level sequence id is forwarded so branch transitions can
+ * keep or override the active journey explicitly.
  */
 function TransitionRoute({ route }) {
   const navigate = useNavigate();
@@ -143,6 +144,7 @@ function TransitionRoute({ route }) {
           body: JSON.stringify({
             transition_id: currentTransitionId,
             option_id,
+            journey_id: route.sequence || null,
             context_variables: mergedContext,
             app_id: resolvedAppId,
             user_id: resolvedUserId,
@@ -202,6 +204,7 @@ function WorkflowEntryRoute({ route }) {
           body: JSON.stringify({
             workflow_id: workflowId,
             trigger_source: 'route',
+            journey_id: route.sequence || null,
             context_variables: route.context_variables || {},
             app_id: resolvedAppId,
             user_id: resolvedUserId,

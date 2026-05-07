@@ -24,7 +24,7 @@ def test_pack_metadata_structured_output_transition_options_match_runtime_contra
     )
     spec = yaml.safe_load(path.read_text(encoding="utf-8"))
     fields = spec["models"]["PackGraphTransitionOption"]["fields"]
-    assert set(fields.keys()) == {"id", "route_to", "context_variables"}
+    assert set(fields.keys()) == {"id", "route_to", "sequence", "context_variables"}
 
 
 def test_pack_metadata_structured_output_entrypoints_match_runtime_contract() -> None:
@@ -105,6 +105,92 @@ def test_parse_global_pack_graph_allows_workflow_entrypoints() -> None:
 
     assert graph.entrypoints[0].path == "/create"
     assert graph.entrypoints[0].transition == "app_type_selector"
+
+
+def test_parse_global_pack_graph_allows_transition_option_sequence_override() -> None:
+    graph = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [{"id": "ValueEngine"}, {"id": "ExistingAppDiscovery"}],
+            "entrypoints": [
+                {
+                    "id": "create_app",
+                    "path": "/create",
+                    "label": "Create App",
+                    "transition": "app_type_selector",
+                    "sequence": "build",
+                }
+            ],
+            "workflow_sequences": [
+                {
+                    "id": "build",
+                    "steps": [
+                        {"transition": "app_type_selector"},
+                        {"workflows": ["ValueEngine"]},
+                    ],
+                },
+                {
+                    "id": "brownfield_app_adoption",
+                    "steps": [
+                        {"transition": "app_type_selector"},
+                        {"workflows": ["ExistingAppDiscovery"]},
+                    ],
+                },
+            ],
+            "transitions": [
+                {
+                    "id": "app_type_selector",
+                    "transition_type": "user_choice_context",
+                    "ui": {"component": "AppTypeSelector", "mode": "screen"},
+                    "options": [
+                        {"id": "greenfield_app", "route_to": "ValueEngine", "sequence": "build"},
+                        {
+                            "id": "brownfield_app",
+                            "route_to": "ExistingAppDiscovery",
+                            "sequence": "brownfield_app_adoption",
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+
+    option_map = {option.id: option for option in graph.transitions[0].options}
+    assert option_map["greenfield_app"].sequence == "build"
+    assert option_map["brownfield_app"].sequence == "brownfield_app_adoption"
+
+
+def test_parse_global_pack_graph_rejects_unknown_transition_option_sequence() -> None:
+    with pytest.raises(ValueError):
+        parse_global_pack_graph(
+            {
+                "version": 3,
+                "workflows": [{"id": "ValueEngine"}],
+                "workflow_sequences": [
+                    {
+                        "id": "build",
+                        "steps": [
+                            {"transition": "app_type_selector"},
+                            {"workflows": ["ValueEngine"]},
+                        ],
+                    }
+                ],
+                "transitions": [
+                    {
+                        "id": "app_type_selector",
+                        "transition_type": "user_choice_context",
+                        "ui": {"component": "AppTypeSelector", "mode": "screen"},
+                        "options": [
+                            {
+                                "id": "greenfield_app",
+                                "route_to": "ValueEngine",
+                                "sequence": "missing_sequence",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
 
 
 def test_parse_global_pack_graph_rejects_entrypoint_unknown_transition() -> None:

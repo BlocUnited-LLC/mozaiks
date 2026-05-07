@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from mozaiksai.core.control_plane import (
+from mozaiksai.control_plane import (
     ControlPlaneConfig,
     load_control_plane_config,
 )
@@ -14,12 +14,13 @@ def test_factory_app_ai_config_enables_control_plane() -> None:
     config = load_control_plane_config(app_root)
 
     assert config.enabled is True
+    assert config.profile == "default"
     assert config.classifier.enabled is True
     assert config.classifier.llm_config == {
         "model": "gpt-4o-mini",
         "temperature": 0.0,
     }
-    assert config.coding.enabled is False
+    assert config.coding.enabled is True
     assert config.coding.llm_config == {
         "model": "gpt-5.2-codex",
         "temperature": 0.1,

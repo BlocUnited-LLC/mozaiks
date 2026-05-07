@@ -8,3 +8,6 @@ initial_message: You are part of a collaborative effort to generate a multi-agen
   workflow per AG2 (formerly autogen). InterviewAgent, greet the user and ask your
   first clarifying question.
 initial_agent: InterviewAgent
+runtime_extensions:
+  - kind: lifecycle_hooks
+    entrypoint: workflows.AppGenerator.tools.platform.build_lifecycle:get_hooks

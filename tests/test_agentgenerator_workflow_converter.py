@@ -602,3 +602,124 @@ def test_create_workflow_files_assembles_canonical_codefiles(monkeypatch, tmp_pa
         "export { default as BrandedApprovalCard } from './review/BrandedApprovalCard.jsx';"
         in (workflow_dir / "ui" / "index.js").read_text(encoding="utf-8")
     )
+
+
+def test_create_workflow_files_ignores_malformed_orchestrator_output(monkeypatch, tmp_path: Path) -> None:
+    generated_root = tmp_path / "generated"
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
+    context = _Context({"app_id": "demo-app", "chat_id": "build-456"})
+
+    result = asyncio.run(
+        workflow_converter.create_workflow_files(
+            {
+                "workflow_name": "FallbackWorkflow",
+                "orchestrator_output": "{not valid json}",
+                "agents_output": {
+                    "agents": [
+                        {
+                            "name": "FallbackAgent",
+                            "prompt_sections": [],
+                        }
+                    ]
+                },
+            },
+            context_variables=context,
+        )
+    )
+
+    assert result["status"] == "success"
+    config = result["workflow_config"]
+    assert config["max_turns"] == 25
+    assert config["orchestration_pattern"] == "DefaultPattern"
+    assert config["startup_mode"] == "BackendOnly"
+    assert config["initial_message"] == "Initialize workflow sequence."
+    assert config["initial_message_to_user"] is None
+    assert config["initial_agent"] == "FallbackAgent"
+
+
+def test_create_workflow_files_skips_invalid_decomposition_graph_payload(monkeypatch, tmp_path: Path) -> None:
+    generated_root = tmp_path / "generated"
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
+    context = _Context({"app_id": "demo-app", "chat_id": "build-789"})
+
+    result = asyncio.run(
+        workflow_converter.create_workflow_files(
+            {
+                "workflow_name": "InvalidDecompositionWorkflow",
+                "orchestrator_output": {
+                    "workflow_name": "InvalidDecompositionWorkflow",
+                    "startup_mode": "BackendOnly",
+                },
+                "agents_output": {
+                    "agents": [
+                        {
+                            "name": "ReviewAgent",
+                            "prompt_sections": [],
+                        }
+                    ]
+                },
+                "workflow_strategy_output": {
+                    "WorkflowStrategy": {
+                        "workflow_name": "Invalid Decomposition Workflow",
+                        "decomposition": {
+                            "required": True,
+                            "mode": "single_stage_mfj",
+                            "work_unit": "document",
+                            "decomposition_agent": "DecompositionAgent",
+                        },
+                    }
+                },
+            },
+            context_variables=context,
+        )
+    )
+
+    assert result["status"] == "success"
+    assert "extended_orchestration/mfj_extension.json" not in result["files"]
+    assert not (
+        Path(result["workflow_dir"]) / "extended_orchestration" / "mfj_extension.json"
+    ).exists()
+    extra_files = result["workflow_config"].get("extra_files") or []
+    assert all(
+        (item.get("filename") or item.get("path")) != "extended_orchestration/mfj_extension.json"
+        for item in extra_files
+        if isinstance(item, dict)
+    )
+
+
+def test_create_workflow_files_ignores_malformed_mapping_sections(monkeypatch, tmp_path: Path) -> None:
+    generated_root = tmp_path / "generated"
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
+    context = _Context({"app_id": "demo-app", "chat_id": "build-999"})
+
+    result = asyncio.run(
+        workflow_converter.create_workflow_files(
+            {
+                "workflow_name": "MalformedSectionsWorkflow",
+                "orchestrator_output": {
+                    "workflow_name": "MalformedSectionsWorkflow",
+                    "startup_mode": "BackendOnly",
+                    "initial_agent": "StarterAgent",
+                },
+                "agents_output": "agents",
+                "handoffs_output": "handoff_rules",
+                "hooks_output": "hooks",
+                "context_variables_output": "context_variables",
+                "structured_outputs": "{not valid json}",
+                "structured_outputs_agent_output": "{not valid json}",
+                "tools_manager_output": "tools",
+                "ui_config": "ui_config",
+            },
+            context_variables=context,
+        )
+    )
+
+    assert result["status"] == "success"
+    config = result["workflow_config"]
+    assert config["initial_agent"] == "StarterAgent"
+    assert "agents" not in config
+    assert "handoffs" not in config
+    assert "hooks" not in config
+    assert "context_variables" not in config
+    assert "tools" not in config
+    assert config["structured_outputs"] == {"models": {}, "registry": {}}

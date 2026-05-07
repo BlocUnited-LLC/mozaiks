@@ -1,159 +1,151 @@
 # Control-Plane Harness Architecture
 
-This document defines the target architecture for the Mozaiks control-plane
-harness.
+This document describes the canonical control-plane shape for Mozaiks.
 
-The harness is the missing layer above workflow-local AG2 execution and below
-Studio/build session UX. It exists because some user requests are:
+The control plane is the framework layer that sits above workflow-local AG2
+execution and decides what should happen when a harnessed request or checkpoint
+event arrives.
 
-- not ordinary runtime chat
-- not workflow-local handoff decisions
-- not MFJ fan-out/fan-in
-- not just static workflow-sequence routing
+It is the piece that makes the Mozaiks build and refinement UX feel
+intent-aware without turning every workflow into a giant router.
+
+## Purpose
+
+The harness exists for requests that are not well modeled as:
+
+- normal runtime chat
+- workflow-local handoffs
+- MFJ decomposition
+- static `route_to` transitions
 
 Examples:
 
 - "Fix this generated dashboard."
-- "Add an approval workflow."
-- "Actually make this investor-facing instead of internal."
-- "This should go back to concept/design."
+- "Add export controls to the current app."
+- "Restart this from concept."
+- "This should become investor-facing."
 
-Those requests need a builder-context interpreter that sees artifact lineage,
-current build state, and upstream/downstream ownership before choosing the next
-action.
+Those requests need:
 
-## Core Rule
+- persisted app/build/artifact context
+- intent interpretation
+- deterministic continuation policy
+- optional coding refinement
+- clear user-facing decisions
 
-The control-plane harness is:
+That is the control plane.
 
-- a control-plane capability
-- configurable per app/workspace
-- host-injected above workflow execution
-- modular in the same declarative spirit as workflow packs
-- not AG2 workflow-local orchestration
-- not a dynamic app module handler
+## Ownership Model
 
-## Final Layer Split
+### `mozaiksai/core/`
 
-### 1. `mozaiksai/core/control_plane/`
+Framework-wide primitives that are not specific to the control plane itself.
 
-This package owns framework-level, app/workflow-agnostic control-plane
-contracts and loaders.
+Examples:
 
-It should contain:
+- generic runtime utilities
+- session/runtime internals
+- workflow/runtime foundations
 
-- typed contracts
-  - `ControlPlaneConfig`
-  - `HarnessRequest`
-  - `HarnessDecision`
-  - `ChangeIntent`
-  - `ImpactSet`
-  - `RoutingDecision`
-- ports/interfaces
-  - `ChangeClassifierPort`
-  - `RoutingPolicyPort`
-  - `CodingWorkerPort`
-  - `ControlPlaneToolExecutorPort`
-- declarative loaders/validators
-  - `control_plane.yaml`
-  - `prompts.yaml`
-  - `tools.yaml`
-  - optional `policies.yaml`
-- config loading from `app/config/ai.json`
-- generic profile resolution
-- generic tool manifest validation and execution boundaries
+### `mozaiksai/control_plane/`
 
-It must not contain:
-
-- factory-specific prompts
-- `ValueEngine` / `DesignDocs` / `AgentGenerator` / `AppGenerator` routing
-- Studio-only policy prose
-- first-party refinement taxonomy beyond the generic contracts
-
-### 2. `factory_app/control_plane/`
-
-This package owns the first-party Mozaiks builder/control-plane implementation.
-
-It should contain:
-
-- `orchestration_control.py`
-- `change_classifier.py`
-- `refinement_router.py`
-- first-party prompt profiles
-- first-party control-plane tools
-- first-party routing policy
-- future coding-worker integration
-
-This layer is allowed to know:
-
-- the factory build workflow sequence
-- `patch | design | feature | core`
-- `ValueEngine -> DesignDocs -> AgentGenerator -> AppGenerator`
-- first-party builder semantics
-
-### 3. `app/control_plane/`
-
-This is the optional app-local override layer for apps that intentionally opt
-into harnessed control-plane behavior.
-
-It should allow:
-
-- profile overrides
-- custom prompts
-- custom control-plane tools
-- custom routing policy components
-
-It should not be required for ordinary apps.
-
-## Final Declarative Shape
-
-The harness should be modular in the same spirit as workflow packs, but it is
-not itself a workflow pack.
-
-Recommended pack shape:
+The canonical control-plane subsystem.
 
 ```text
-factory_app/control_plane/default/
-  control_plane.yaml
-  prompts.yaml
-  tools.yaml
-  policies.yaml
+mozaiksai/control_plane/
+  __init__.py
+  config.py
+  contracts.py
+  executor.py
+  loader.py
+  ports.py
+  runtime.py
+  schema.py
   implementations/
-    orchestration_control.py
     change_classifier.py
     refinement_router.py
-    tools/
-      get_concept_overview.py
-      get_design_summary.py
-      get_artifact_summary.py
-      run_scoped_validation.py
+    harness_decision.py
+    scope_proposer.py
+    coding_worker.py
+    orchestration_control.py
 ```
 
-Optional app-local override:
+This layer owns:
+
+- control-plane runtime
+- checkpoint dispatch
+- config/schema/loader/contracts
+- generic tool execution boundaries
+- first-party Mozaiks checkpoint handlers
+
+This is the canonical runtime package.
+
+### `factory_app/control_plane/`
+
+App-zero declaratives and builder-specific tools.
 
 ```text
-app/control_plane/custom/
-  control_plane.yaml
-  prompts.yaml
-  tools.yaml
-  policies.yaml
-  implementations/
-    ...
+factory_app/control_plane/
+  config/
+    control_plane.yaml
+    tools.yaml
+    policies.yaml
+  prompts/
+    change_classifier_system.yaml
+    coding_scope_selection_system.yaml
+    coding_refinement_system.yaml
+  tools/
+    get_concept_overview.py
+    get_design_summary.py
+    get_build_state.py
+    get_artifact_summary.py
+    get_artifact_workspace_catalog.py
+    get_artifact_workspace_scope.py
+    _artifact_workspace.py
+    _shared.py
+  ui/
 ```
 
-## Final `ai.json` Role
+`factory_app` is app-zero. It should feel like an authored app surface, not the
+owner of the framework runtime.
 
-`app/config/ai.json` should select the control-plane profile and the model
-config for each harness capability. It should not embed raw code paths or giant
-prompt bodies.
+This layer owns:
 
-Recommended direction:
+- the first-party declarative control-plane pack
+- builder-specific prompt text
+- builder-specific context tools
+- future control-plane UI surfaces
+
+It should not own the runtime engines.
+
+## What The Harness Is Not
+
+The harness is not:
+
+- a workflow
+- an AG2 groupchat
+- a module handler under `app/modules/*`
+- a global prompt wrapped around every message
+- a replacement for `extension_registry.json`
+
+The split is:
+
+- control plane
+  - interprets checkpoint events
+  - decides continuation
+- extension graph
+  - defines legal workflow movement
+- AG2/workflows
+  - execute once a workflow is selected
+
+## Pack Model
+
+The app-level switch lives in `app/config/ai.json`:
 
 ```json
 {
   "control_plane": {
     "enabled": true,
-    "profile": "default",
     "classifier": {
       "enabled": true,
       "llm_config": {
@@ -162,7 +154,7 @@ Recommended direction:
       }
     },
     "coding": {
-      "enabled": false,
+      "enabled": true,
       "llm_config": {
         "model": "gpt-5.2-codex",
         "temperature": 0.1
@@ -172,225 +164,273 @@ Recommended direction:
 }
 ```
 
-Rules:
+That config only enables capabilities and provides model config. It does not
+point to Python implementation files.
 
-- `enabled` gates the harness as a whole
-- `profile` selects the declarative control-plane pack
-- `classifier.llm_config` configures the authoritative request-analysis model
-- `coding.llm_config` configures the refinement worker model
-- secrets still belong in environment variables or the connector/secret system
+The declarative pack lives under `factory_app/control_plane/` or an app-local
+override at `<workspace>/control_plane/`.
 
-## Final Control-Plane Tool System
+## Declarative Files
 
-The harness should support tools the same way workflows support tools:
+### `config/control_plane.yaml`
 
-- declarative tool entries in `tools.yaml`
-- Python implementations behind declared entrypoints
-- loader/validator in `mozaiksai/core/control_plane/`
-- execution boundaries enforced by the harness/tool executor
+Declares:
 
-These are not AG2 agent tools and not module actions.
+- harness entrypoint
+- checkpoint events
+- handler entrypoints
+- prompt ids
+- tool ids
 
-They are harness-owned tools.
+Example:
+
+```yaml
+schema_version: mozaiks.control_plane.v1
+profile:
+  id: factory_app
+  display_name: Factory App Harness
+  description: App-zero declarative control-plane pack for the first-party Mozaiks build experience.
+harness:
+  implementation: mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness
+  supported_trigger_sources:
+    - refinement
+checkpoints:
+  - id: request_intake
+    event: request_submitted
+    entrypoint: mozaiksai.control_plane.implementations.change_classifier:LLMChangeClassifier
+    prompt_id: change_classifier_system
+    tool_ids:
+      - get_concept_overview
+      - get_design_summary
+      - get_artifact_summary
+      - get_build_state
+
+  - id: route
+    event: route_requested
+    entrypoint: mozaiksai.control_plane.implementations.refinement_router:RefinementTriggerRouteResolver
+
+  - id: decision
+    event: decision_requested
+    entrypoint: mozaiksai.control_plane.implementations.harness_decision:FirstPartyHarnessDecisionPolicy
+```
+
+### `config/tools.yaml`
+
+Declares harness-owned tools.
+
+Example:
+
+```yaml
+tools:
+  - id: get_artifact_summary
+    kind: context_tool
+    description: Load artifact lineage and version metadata.
+    entrypoint: factory_app.control_plane.tools.get_artifact_summary:get_artifact_summary
+    available_to:
+      - request_submitted
+      - route_requested
+```
+
+### `prompts/*.yaml`
+
+One prompt per file.
+
+Example:
+
+```yaml
+id: change_classifier_system
+content: |
+  You are the authoritative Mozaiks refinement change classifier.
+```
+
+### `config/policies.yaml`
+
+Declares deterministic bounds.
+
+Current first use:
+
+- scope size limits
+- auto-apply thresholds
+- overflow behavior
+
+## Checkpoint Model
+
+The control plane is checkpoint-driven.
+
+Current first-party checkpoints:
+
+- `request_submitted`
+- `route_requested`
+- `decision_requested`
+- `scope_requested`
+- `coding_requested`
+
+These are the harness-native units of execution.
+
+### `request_submitted`
+
+LLM-backed interpretation of the request.
+
+Current first-party handler:
+
+- `mozaiksai/control_plane/implementations/change_classifier.py`
+
+### `route_requested`
+
+Deterministic workflow-route selection from typed request intent.
+
+Current first-party handler:
+
+- `mozaiksai/control_plane/implementations/refinement_router.py`
+
+### `decision_requested`
+
+Deterministic user-facing decision shaping.
+
+Examples:
+
+- `workflow_reentry`
+- `core_restart`
+- `auto_patch`
+- `clarify_scope`
+- `fallback_workflow`
+
+Current first-party handler:
+
+- `mozaiksai/control_plane/implementations/harness_decision.py`
+
+### `scope_requested`
+
+LLM-backed file-scope proposal when explicit coding scope is missing.
+
+Current first-party handler:
+
+- `mozaiksai/control_plane/implementations/scope_proposer.py`
+
+### `coding_requested`
+
+Scoped coding-worker execution for eligible patch refinements.
+
+Current first-party handler:
+
+- `mozaiksai/control_plane/implementations/coding_worker.py`
+
+## Tool Model
+
+Control-plane tools are leaf capabilities used by checkpoints.
+
+They are not:
+
+- AG2 agent tools
+- workflow-local lifecycle tools
+- module actions
 
 Examples:
 
 - `get_concept_overview`
 - `get_design_summary`
-- `get_artifact_summary`
 - `get_build_state`
-- `run_scoped_validation`
-- `invoke_coding_worker`
+- `get_artifact_summary`
+- `get_artifact_workspace_catalog`
+- `get_artifact_workspace_scope`
 
-Recommended `tools.yaml` direction:
+The current first-party tools live under:
 
-```yaml
-tools:
-  - id: get_concept_overview
-    kind: context_tool
-    description: Load the current concept overview for the active app/build.
-    entrypoint: implementations.tools.get_concept_overview:get_concept_overview
-    available_to:
-      - classifier
+- `factory_app/control_plane/tools/*`
 
-  - id: get_design_summary
-    kind: context_tool
-    description: Load the latest design summary for the active app/build.
-    entrypoint: implementations.tools.get_design_summary:get_design_summary
-    available_to:
-      - classifier
+## Runtime Flow
 
-  - id: get_artifact_summary
-    kind: context_tool
-    description: Load artifact lineage and current version metadata.
-    entrypoint: implementations.tools.get_artifact_summary:get_artifact_summary
-    available_to:
-      - classifier
-      - router
-```
+At runtime:
 
-## Final Runtime Flow
+1. the host loads `control_plane` settings from `app/config/ai.json`
+2. `mozaiksai/control_plane/loader.py` resolves the active pack
+3. `mozaiksai/control_plane/runtime.py` builds a checkpoint runtime
+4. the harness entrypoint is instantiated from `harness.implementation`
+5. the harness binds and runs the checkpoints it needs
 
-The harness belongs above workflow execution.
-
-Canonical flow:
+Current Studio refinement flow:
 
 ```text
-user builder-context request
-  -> host surface
-  -> control-plane harness
-  -> control-plane tools gather context
-  -> classifier decides intent
-  -> routing policy computes re-entry point
-  -> SessionRouter enforces dependencies / persists lifecycle
-  -> workflow run or refinement worker starts
-  -> validation / preview / promotion loop continues
-```
-
-Current first-party path is an early form of this:
-
-```text
-Studio /api/workflows/trigger
+Studio trigger
   -> OrchestrationControlHarness
-  -> LLMChangeClassifier
-  -> RefinementTriggerRouteResolver
-  -> SessionRouter
+  -> request_submitted
+  -> route_requested
+  -> decision_requested
+  -> SessionRouter | coding worker | harness decision response
 ```
 
-The target architecture keeps that flow, but replaces hardcoded first-party
-placement and inline policy with a real control-plane pack system.
+If coding is eligible:
 
-## Final Relationship To Other Orchestration Layers
+```text
+... -> scope_requested -> coding_requested
+```
 
-The harness is different from:
+## Relation To Workflows And Extensions
 
-- AG2 handoffs
-  - workflow-local turn routing
-- MFJ
-  - workflow-local fan-out/fan-in
+The harness depends on the workflow graph, but it is not the graph.
+
 - `extension_registry.json`
-  - legal workflow sequence / transitions / dependencies
+  - legal transitions and workflow movement
+- control plane
+  - semantic interpretation and continuation choice
+- workflow runtime
+  - actual execution
 
-The harness owns:
+This is why the harness was required for the Mozaiks build UX. The extension
+graph alone cannot interpret `"make this a blockchain marketplace"` or decide
+between `clarify_scope`, `run_workflow`, or `restart_upstream`.
 
-- builder-context input interpretation
-- change/refinement classification
-- route selection above any single workflow
-- future coding-worker invocation
+## Host Model
 
-## Final Scope Rules
+Today the first-party harness is mounted by Studio.
 
-The harness should not wrap every message in every app session.
+That means:
 
-It should run only when:
+- Studio is the primary harnessed surface
+- platform/runtime apps should remain passthrough unless they opt in later
 
-1. the app/workspace has `control_plane.enabled = true`
-2. the current host/surface supports control-plane interception
-3. the request is in builder or artifact-refinement context
-4. the request may mutate generated artifacts or build direction
+Host-aware gating still matters, but the canonical runtime ownership is now
+correct.
 
-Ordinary runtime app chat should stay outside the harness unless an app
-explicitly opts into that behavior.
+## Module Stub
 
-## Current Transitional State
+This path still exists:
 
-Today the repo is in a bridge state:
+```text
+factory_app/app/modules/factory_control_plane/backend/
+```
 
-- the concept is correct
-- the file placement is still transitional
-- the classifier is live
-- the harness is live
-- the config contract is early
-- the tool/profile system does not exist yet
+It is only the dynamic-module stub.
 
-Current first-party implementation placement:
+It is not the harness runtime.
 
-- `factory_app/control_plane/*`
+## Canonical Paths
 
-That is the correct first-party implementation seam. The dynamic module system
-still does not load these files. They are injected by the Studio host and sit
-outside the module-runtime action contract.
+Use these paths as source of truth:
 
-## Implementation Checklist
+- `mozaiksai/control_plane/*`
+- `factory_app/control_plane/config/*`
+- `factory_app/control_plane/prompts/*`
+- `factory_app/control_plane/tools/*`
 
-### Phase 1: Establish core/control-plane boundary
+Do not treat these as canonical:
 
-- [x] Create `mozaiksai/core/control_plane/`
-- [x] Move generic control-plane config/contracts out of `factory_app`
-- [x] Define ports for classifier, router policy, coding worker, and tool executor
-- [x] Keep `factory_app` implementation-specific logic out of core
+- `factory_app/app/modules/factory_control_plane/backend/*`
+- any removed bridge-era `profiles/default/*` layout
+- any removed bridge-era `implementations/default/*` layout
+- old root-level `factory_app/control_plane/*.py` runtime handlers
 
-### Phase 2: Move first-party implementation
+## Guidance
 
-- [x] Create `factory_app/control_plane/`
-- [x] Move `orchestration_control.py` there
-- [x] Move `change_classifier.py` there
-- [x] Move `refinement_router.py` there
-- [x] Update Studio imports to use the new package
-- [x] Leave `factory_app/app/modules/factory_control_plane/` only for true module/admin/runtime concerns
+If you are changing framework runtime behavior:
 
-### Phase 3: Introduce control-plane pack declaratives
+- edit `mozaiksai/control_plane/*`
 
-- [ ] Define `control_plane.yaml` schema
-- [ ] Define `prompts.yaml` schema
-- [ ] Define `tools.yaml` schema
-- [ ] Decide whether `policies.yaml` is needed in v1
-- [ ] Add loader + validator for control-plane packs
+If you are changing the first-party builder pack:
 
-### Phase 4: Introduce control-plane tools
+- edit `factory_app/control_plane/config/*`
+- edit `factory_app/control_plane/prompts/*`
+- edit `factory_app/control_plane/tools/*`
 
-- [ ] Define the control-plane tool contract
-- [ ] Implement first-party context tools
-  - [ ] `get_concept_overview`
-  - [ ] `get_design_summary`
-  - [ ] `get_artifact_summary`
-  - [ ] `get_build_state`
-- [ ] Restrict tool availability by harness component
-- [ ] Add tests for manifest loading and tool execution
-
-### Phase 5: Refactor `ai.json` to profile selection
-
-- [ ] Add `control_plane.profile`
-- [ ] Make profile resolution load `factory_app/control_plane/<profile>/...`
-- [ ] Allow optional `app/control_plane/<profile>/...` overrides
-- [ ] Keep `classifier.llm_config` and `coding.llm_config` as capability-specific settings
-
-### Phase 6: Refine routing and state model
-
-- [ ] Feed classifier current concept/design/artifact summaries through tools instead of only raw request text
-- [ ] Keep `ChangeIntent`, `ImpactSet`, and routing decisions typed and persisted
-- [ ] Ensure dependency reroutes preserve needed refinement metadata into upstream workflows
-
-### Phase 7: Add coding-worker loop
-
-- [ ] Define `CodingWorkerPort` in core
-- [ ] Implement first-party coding worker integration in `factory_app/control_plane/`
-- [ ] Honor `control_plane.coding.enabled`
-- [ ] Add sandbox/validation boundaries
-- [ ] Keep coding-worker invocation subordinate to harness routing
-
-### Phase 8: Host and surface gating
-
-- [ ] Make harness mounting host-aware and config-aware
-- [ ] Keep ordinary `platform` runtime behavior non-harnessed by default
-- [ ] Allow future apps to opt into harnessed control-plane behavior intentionally
-
-### Phase 9: Acceptance and regression coverage
-
-- [ ] Add control-plane pack loader tests
-- [ ] Add control-plane tool manifest tests
-- [ ] Add live classifier smoke with profile-selected `llm_config`
-- [ ] Add routed refinement smoke through Studio
-- [ ] Add future coding-worker refinement smoke once implemented
-
-## Success Criteria
-
-The target architecture is achieved when:
-
-- control-plane logic lives outside dynamic module runtime handlers
-- reusable contracts live in `mozaiksai/core/control_plane/`
-- first-party builder policy lives in `factory_app/control_plane/`
-- apps can enable or disable the harness explicitly
-- control-plane prompts/tools/policies are declarative and swappable by profile
-- workflow-local AG2 orchestration remains separate from control-plane routing
-- coding agents operate as refinement workers behind the harness, not as the harness itself
+If you are looking at the module stub under `app/modules/...`, you are not in
+the live harness runtime.

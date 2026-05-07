@@ -175,6 +175,10 @@ Important rule:
 
 - decomposition decisions belong to `factory_app`, not to ad hoc logic in the
   CLI or hosted app shell
+- when later refinement re-enters one of these workflows, the control-plane
+  harness should preserve the shared refinement-context contract
+  (`change_class`, `refinement_request`, `change_intent`, `impact_set`, and
+  related artifact metadata) instead of relying on transcript reconstruction
 
 ## Phase 5: Staged Artifact Generation
 
@@ -229,6 +233,20 @@ Responsibilities:
 - allow approval, rejection, or refinement
 - run the workflow/frontend acceptance smoke when generator or workflow UI
   contracts changed
+
+Review state transitions:
+
+- newly generated refinement children are persisted as `draft`
+- `draft` children are reviewed in Studio with:
+  - changed-file diffs
+  - selected refinement scope
+  - validation outcome
+  - coding-worker rationale when applicable
+- `accept` promotes a validated `draft` child into the new `current` artifact
+  version for that artifact family and supersedes the prior current version
+- `reject` archives the `draft` child without changing the active artifact
+- refinement sessions move in parallel through `validated -> accepted |
+  rejected | promoted`
 
 Important rule:
 
@@ -292,6 +310,9 @@ Important rule:
 
 - promotion is explicit
 - it is not an incidental side effect of generation
+- promotion only runs against an accepted/current artifact version
+- promotion is the step that mutates the runnable app root; acceptance alone
+  only updates artifact lineage
 
 ## Phase 8: Runtime / Deployment
 
@@ -324,9 +345,23 @@ Use these terms consistently.
 | `app root` | The runnable app bundle directory, usually `<workspace>/app`. |
 | `build_registry_id` | Hosted control-plane/build-tracking record id. |
 | `app_id` | Logical app identity used across workflows and artifacts. |
-| `build_id` | Specific build/run identity for staged generation output. |
+| `build_id` | Specific build/run identity for staged generation output and lifecycle events. For routed workflow sequences this is the active `journey_instance_id`. |
+| `journey_instance_id` | Runtime sequence instance id shared across all chats in the same authored workflow sequence. |
 | `generated_app_dir` | Staged artifact directory under `generated/apps/.../app`. |
 | `promoted app` | App root after explicit promotion from staged artifacts. |
+
+## Build Lifecycle Events
+
+Runtime lifecycle hook events emitted from build workflows are sequence-scoped.
+
+- `build_started` is emitted from the first workflow step in the active sequence.
+- `build_completed` is emitted from the terminal workflow step in the active sequence.
+- `build_failed` may be emitted by any workflow that belongs to the active sequence.
+- Event payload `buildId` uses the active `journey_instance_id` when the workflow is part of a routed sequence.
+- Event payload `buildRegistryId` is included separately once the hosted control-plane record exists.
+
+This keeps lifecycle reporting aligned with the full routed build journey instead
+of treating each workflow chat id as an independent build.
 
 ## Recommended CLI Model
 

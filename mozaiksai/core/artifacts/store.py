@@ -88,6 +88,11 @@ class ArtifactStore:
             name="rs_app_version_started",
         )
         await refinement_sessions.create_index(
+            [("app_id", 1), ("result_artifact_version_id", 1), ("started_at", -1)],
+            name="rs_app_result_version_started",
+            sparse=True,
+        )
+        await refinement_sessions.create_index(
             [("app_id", 1), ("sandbox_id", 1)],
             name="rs_app_sandbox",
             sparse=True,
@@ -415,12 +420,132 @@ class ArtifactStore:
         rows = await cursor.to_list(length=max(1, int(limit)))
         return [ChangeRequestDoc.model_validate(row) for row in rows]
 
+    async def get_change_request(
+        self,
+        *,
+        app_id: str,
+        change_request_id: str,
+    ) -> Optional[ChangeRequestDoc]:
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        coll = await self._coll("ChangeRequests")
+        raw = await coll.find_one({"_id": change_request_id, **build_app_scope_filter(resolved_app_id)})
+        if not isinstance(raw, dict):
+            return None
+        return ChangeRequestDoc.model_validate(raw)
+
+    async def update_change_request_router_decision(
+        self,
+        *,
+        app_id: str,
+        change_request_id: str,
+        router_decision: Dict[str, Any],
+    ) -> bool:
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        coll = await self._coll("ChangeRequests")
+        result = await coll.update_one(
+            {"_id": change_request_id, **build_app_scope_filter(resolved_app_id)},
+            {"$set": {"router_decision": dict(router_decision or {})}},
+        )
+        return bool(result.modified_count)
+
+    async def set_artifact_lifecycle_status(
+        self,
+        *,
+        app_id: str,
+        artifact_version_id: str,
+        lifecycle_status: ArtifactLifecycleStatus,
+        invalidation_reason: Optional[str] = None,
+        invalidated_by_version_id: Optional[str] = None,
+    ) -> bool:
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        updates: Dict[str, Any] = {
+            "lifecycle_status": lifecycle_status.value,
+            "updated_at": _utc_now(),
+        }
+        if invalidation_reason is not None:
+            updates["invalidation_reason"] = invalidation_reason
+        if invalidated_by_version_id is not None:
+            updates["invalidated_by_version_id"] = invalidated_by_version_id
+        if lifecycle_status == ArtifactLifecycleStatus.STALE:
+            updates["stale_at"] = _utc_now()
+
+        versions = await self._coll("ArtifactVersions")
+        result = await versions.update_one(
+            {"_id": artifact_version_id, **build_app_scope_filter(resolved_app_id)},
+            {"$set": updates},
+        )
+        return bool(result.modified_count)
+
+    async def accept_artifact_version(
+        self,
+        *,
+        app_id: str,
+        artifact_version_id: str,
+    ) -> Optional[ArtifactVersionDoc]:
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        versions = await self._coll("ArtifactVersions")
+        raw = await versions.find_one({"_id": artifact_version_id, **build_app_scope_filter(resolved_app_id)})
+        if not isinstance(raw, dict):
+            return None
+        target = ArtifactVersionDoc.model_validate(raw)
+        now = _utc_now()
+
+        await versions.update_many(
+            {
+                "app_id": resolved_app_id,
+                "artifact_kind": target.artifact_kind,
+                "artifact_key": target.artifact_key,
+                "_id": {"$ne": target.id},
+                "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
+            },
+            {
+                "$set": {
+                    "lifecycle_status": ArtifactLifecycleStatus.SUPERSEDED.value,
+                    "updated_at": now,
+                }
+            },
+        )
+        await versions.update_one(
+            {"_id": target.id, **build_app_scope_filter(resolved_app_id)},
+            {
+                "$set": {
+                    "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
+                    "updated_at": now,
+                }
+            },
+        )
+        refreshed = await versions.find_one({"_id": target.id, **build_app_scope_filter(resolved_app_id)})
+        return ArtifactVersionDoc.model_validate(refreshed) if isinstance(refreshed, dict) else target
+
+    async def reject_artifact_version(
+        self,
+        *,
+        app_id: str,
+        artifact_version_id: str,
+        reason: str,
+    ) -> bool:
+        return await self.set_artifact_lifecycle_status(
+            app_id=app_id,
+            artifact_version_id=artifact_version_id,
+            lifecycle_status=ArtifactLifecycleStatus.ARCHIVED,
+            invalidation_reason=reason,
+        )
+
     async def create_refinement_session(
         self,
         *,
         app_id: str,
         artifact_version_id: str,
         change_request_id: str,
+        result_artifact_version_id: Optional[str] = None,
         provider: str = "e2b",
         sandbox_id: Optional[str] = None,
         status: RefinementSessionStatus = RefinementSessionStatus.PROVISIONING,
@@ -434,6 +559,7 @@ class ArtifactStore:
             _id=f"rs_{uuid4().hex[:24]}",
             app_id=resolved_app_id,
             artifact_version_id=artifact_version_id,
+            result_artifact_version_id=result_artifact_version_id,
             change_request_id=change_request_id,
             provider=provider,
             sandbox_id=sandbox_id,
@@ -452,6 +578,7 @@ class ArtifactStore:
         session_id: str,
         status: Optional[RefinementSessionStatus] = None,
         sandbox_id: Optional[str] = None,
+        result_artifact_version_id: Optional[str] = None,
         preview_url: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         ended_at: Optional[datetime] = None,
@@ -465,6 +592,8 @@ class ArtifactStore:
             set_doc["status"] = status.value
         if sandbox_id is not None:
             set_doc["sandbox_id"] = sandbox_id
+        if result_artifact_version_id is not None:
+            set_doc["result_artifact_version_id"] = result_artifact_version_id
         if preview_url is not None:
             set_doc["preview_url"] = preview_url
         if ended_at is not None:
@@ -478,6 +607,30 @@ class ArtifactStore:
             {"$set": set_doc},
         )
         return bool(result.modified_count)
+
+    async def list_refinement_sessions(
+        self,
+        *,
+        app_id: str,
+        artifact_version_id: Optional[str] = None,
+        result_artifact_version_id: Optional[str] = None,
+        change_request_id: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[RefinementSessionDoc]:
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        query: Dict[str, Any] = {"app_id": resolved_app_id}
+        if artifact_version_id:
+            query["artifact_version_id"] = artifact_version_id
+        if result_artifact_version_id:
+            query["result_artifact_version_id"] = result_artifact_version_id
+        if change_request_id:
+            query["change_request_id"] = change_request_id
+        coll = await self._coll("RefinementSessions")
+        cursor = coll.find(query).sort("started_at", -1).limit(max(1, int(limit)))
+        rows = await cursor.to_list(length=max(1, int(limit)))
+        return [RefinementSessionDoc.model_validate(row) for row in rows]
 
 
 _artifact_store: Optional[ArtifactStore] = None

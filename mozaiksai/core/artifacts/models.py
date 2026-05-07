@@ -40,6 +40,9 @@ class RefinementSessionStatus(str, Enum):
     RUNNING = "running"
     VALIDATED = "validated"
     COMMITTED = "committed"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    PROMOTED = "promoted"
     FAILED = "failed"
     TERMINATED = "terminated"
 
@@ -154,6 +157,7 @@ class RefinementSessionDoc(BaseModel):
     id: str = Field(alias="_id")
     app_id: str
     artifact_version_id: str
+    result_artifact_version_id: Optional[str] = None
     change_request_id: str
     provider: str = "e2b"
     sandbox_id: Optional[str] = None

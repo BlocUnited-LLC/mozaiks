@@ -1,0 +1,113 @@
+version: 1
+
+description: >
+  Advisory module archetypes used as prompt-time guidance for keeping module
+  contracts and backend stubs cookie-cutter across domains. Archetypes do not
+  change the canonical structured outputs. They guide selection of
+  module.type and the behavior conventions that follow from it.
+
+archetypes:
+  standard:
+    summary: Default deterministic module for CRUD and ordinary business logic.
+    select_when:
+      - The module owns standard business records and actions.
+      - No real-time messaging semantics are required.
+      - No ledger or named state-machine semantics are required.
+    canonical_yaml_family:
+      always:
+        - module.yaml
+      optional:
+        - events.yaml
+        - subscriptions.yaml
+        - notifications.yaml
+        - settings.yaml
+        - admin.yaml
+    python_stub_defaults:
+      - backend/handler.py
+      - backend/service.py
+      - backend/repo.py
+      - backend/policy.py
+      - backend/models.py
+    hard_constraints:
+      - Keep backend/handler.py thin.
+      - Put business logic in service.py, repo.py, policy.py, and models.py.
+      - Publish only declared domain events.
+
+  messaging:
+    summary: Deterministic module for real-time or threaded communication.
+    select_when:
+      - The module owns threads, direct messages, announcements, or read state.
+      - Delivery semantics and participant scoping are core behavior.
+    canonical_yaml_family:
+      always:
+        - module.yaml
+      optional:
+        - events.yaml
+        - subscriptions.yaml
+        - notifications.yaml
+        - settings.yaml
+        - admin.yaml
+        - channels.yaml
+    python_stub_defaults:
+      - backend/handler.py
+      - backend/service.py
+      - backend/repo.py
+      - backend/policy.py
+      - backend/models.py
+    hard_constraints:
+      - Message records carry thread_id and sender_id.
+      - Thread records carry participants and per-member read state.
+      - repo.py provides read-state update helpers.
+      - Event payloads include delivery metadata needed for real-time routing.
+
+  workflow:
+    summary: Deterministic module that manages a named state machine.
+    select_when:
+      - The module owns state transitions, approvals, queues, or lifecycle stages.
+      - Valid transitions and role-aware mutation rules are core behavior.
+    canonical_yaml_family:
+      always:
+        - module.yaml
+      optional:
+        - events.yaml
+        - subscriptions.yaml
+        - notifications.yaml
+        - settings.yaml
+        - admin.yaml
+    python_stub_defaults:
+      - backend/handler.py
+      - backend/service.py
+      - backend/repo.py
+      - backend/policy.py
+      - backend/models.py
+    hard_constraints:
+      - Managed documents carry a state field.
+      - policy.py exposes a validate_transition helper.
+      - service.py enforces transition validation before mutation.
+      - Transition events include from_state and to_state when declared.
+
+  transactional:
+    summary: Deterministic module for balances, wallets, ledgers, or append-only value tracking.
+    select_when:
+      - The module owns balances, transfers, credits, debits, or double-entry semantics.
+      - Append-only or audit-heavy writes are required.
+    canonical_yaml_family:
+      always:
+        - module.yaml
+      optional:
+        - events.yaml
+        - subscriptions.yaml
+        - notifications.yaml
+        - settings.yaml
+        - admin.yaml
+    python_stub_defaults:
+      - backend/handler.py
+      - backend/service.py
+      - backend/repo.py
+      - backend/policy.py
+      - backend/models.py
+    hard_constraints:
+      - State is derived from an append-only ledger.
+      - repo.py provides append_entry style writes instead of update_balance shortcuts.
+      - Multi-document writes use atomic operations.
+      - models.py separates balance projections from ledger entries.

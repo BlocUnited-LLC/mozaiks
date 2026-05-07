@@ -10,12 +10,7 @@ _schema = import_module_directly("mozaiksai.core.workflow.pack.schema")
 _session_model = import_module_directly("mozaiksai.core.session.model")
 _session_persist = import_module_directly("mozaiksai.core.session.persistence")
 _session_router = import_module_directly("mozaiksai.core.session.router")
-_orchestration_control = import_module_directly(
-    "factory_app.control_plane.orchestration_control"
-)
-_refinement_router = import_module_directly(
-    "factory_app.control_plane.refinement_router"
-)
+_control_plane = import_module_directly("mozaiksai.control_plane")
 _data_models = import_module_directly("mozaiksai.core.data.models")
 
 parse_global_pack_graph = _schema.parse_global_pack_graph
@@ -23,8 +18,8 @@ TriggerInput = _session_model.TriggerInput
 SessionRouter = _session_router.SessionRouter
 SessionStateStore = _session_persist.SessionStateStore
 WorkflowStatus = _data_models.WorkflowStatus
-get_refinement_trigger_route_resolver = _refinement_router.get_refinement_trigger_route_resolver
-get_orchestration_control_harness = _orchestration_control.get_orchestration_control_harness
+get_refinement_trigger_route_resolver = _control_plane.get_refinement_trigger_route_resolver
+get_orchestration_control_harness = _control_plane.get_orchestration_control_harness
 
 
 class _FakeChangeClassifier:
@@ -453,6 +448,109 @@ async def test_resolve_transition_routes_to_workflow_and_binds_session(monkeypat
     assert state.current_workflow_id == "DesignDocs"
     assert state.current_chat_id == "chat_design_1"
     assert state.pending_transition_id is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_transition_option_sequence_override_rebinds_journey(monkeypatch):
+    persistence = _FakePersistence()
+    store = SessionStateStore(persistence)
+    router = SessionRouter(persistence=persistence, store=store)
+    pack = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [
+                {"id": "ValueEngine"},
+                {"id": "ExistingAppDiscovery"},
+            ],
+            "transitions": [
+                {
+                    "id": "app_type_selector",
+                    "transition_type": "user_choice_context",
+                    "ui": {"component": "AppTypeSelector", "mode": "screen"},
+                    "options": [
+                        {
+                            "id": "greenfield_app",
+                            "route_to": "ValueEngine",
+                            "sequence": "build",
+                            "context_variables": {"app_type": "greenfield_app"},
+                        },
+                        {
+                            "id": "brownfield_app",
+                            "route_to": "ExistingAppDiscovery",
+                            "sequence": "brownfield_app_adoption",
+                            "context_variables": {"app_type": "brownfield_app"},
+                        },
+                    ],
+                }
+            ],
+            "workflow_sequences": [
+                {
+                    "id": "build",
+                    "steps": [
+                        {"transition": "app_type_selector"},
+                        {"workflows": ["ValueEngine"]},
+                    ],
+                },
+                {
+                    "id": "brownfield_app_adoption",
+                    "steps": [
+                        {"transition": "app_type_selector"},
+                        {"workflows": ["ExistingAppDiscovery"]},
+                    ],
+                },
+            ],
+        }
+    )
+    monkeypatch.setattr(_session_router, "load_global_pack_graph", lambda: pack)
+
+    resolution = await router.resolve_transition(
+        app_id="app_1",
+        user_id="user_1",
+        transition_id="app_type_selector",
+        option_id="brownfield_app",
+        journey_id="build",
+        context_seed={},
+    )
+
+    assert resolution.route_type == "workflow"
+    assert resolution.routing_decision is not None
+    assert resolution.routing_decision.workflow_id == "ExistingAppDiscovery"
+    assert resolution.routing_decision.journey_id == "brownfield_app_adoption"
+
+    state = await store.load(app_id="app_1", user_id="user_1")
+    assert state is not None
+    assert state.journey_key == "brownfield_app_adoption"
+    assert state.journey_position == 1
+
+
+@pytest.mark.asyncio
+async def test_bind_workflow_session_rejects_explicit_journey_mismatch(monkeypatch):
+    persistence = _FakePersistence()
+    store = SessionStateStore(persistence)
+    router = SessionRouter(persistence=persistence, store=store)
+    pack = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [{"id": "ValueEngine"}, {"id": "ExistingAppDiscovery"}],
+            "transitions": [],
+            "workflow_sequences": [
+                {
+                    "id": "build",
+                    "steps": [{"workflows": ["ValueEngine"]}],
+                }
+            ],
+        }
+    )
+    monkeypatch.setattr(_session_router, "load_global_pack_graph", lambda: pack)
+
+    with pytest.raises(ValueError, match="not part of journey"):
+        await router.bind_workflow_session(
+            app_id="app_1",
+            user_id="user_1",
+            workflow_id="ExistingAppDiscovery",
+            chat_id="chat_existing_1",
+            journey_id="build",
+        )
 
 
 @pytest.mark.asyncio

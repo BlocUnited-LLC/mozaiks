@@ -42,6 +42,7 @@ class WorkflowLaunchResult:
     trigger_source: str
     routing_explanation: str
     rerouted_by_dependency: bool
+    journey_id: Optional[str]
     validated_context: Dict[str, Any]
     trigger_meta: Dict[str, Any]
     routing_decision: RoutingDecision
@@ -53,6 +54,7 @@ class TransitionLaunchResult:
     transition_id: str
     option_id: Optional[str]
     context_variables: Dict[str, Any]
+    journey_id: Optional[str] = None
     next_transition_id: Optional[str] = None
     transition: Optional[WorkflowTransition] = None
     workflow_launch: Optional[WorkflowLaunchResult] = None
@@ -129,6 +131,8 @@ def _build_trigger_meta(
         "resolved_workflow_id": routing_decision.workflow_id,
         "rerouted_by_dependency": bool(routing_decision.rerouted_by_dependency),
     }
+    if routing_decision.journey_id:
+        trigger_meta["journey_id"] = routing_decision.journey_id
     for key, value in (extra_trigger_meta or {}).items():
         if value is None:
             continue
@@ -144,6 +148,7 @@ async def prepare_routed_workflow_launch(
     trigger_source: str = "chat",
     context_variables: Optional[Dict[str, Any]] = None,
     trigger_payload: Optional[Dict[str, Any]] = None,
+    journey_id: Optional[str] = None,
     session_router: Optional[Any] = None,
     extra_trigger_meta: Optional[Dict[str, Any]] = None,
 ) -> PreparedWorkflowLaunch:
@@ -156,6 +161,7 @@ async def prepare_routed_workflow_launch(
             user_id=user_id,
             trigger_source=trigger_source,
             workflow_id=workflow_id,
+            journey_id=journey_id,
             context_variables=context_variables or {},
             trigger_payload=trigger_payload or {},
         )
@@ -178,6 +184,7 @@ async def prepare_routed_workflow_launch(
         trigger_meta=trigger_meta,
         routing_decision=routing_decision,
         session_router=router,
+        journey_id=routing_decision.journey_id,
     )
 
 
@@ -201,6 +208,7 @@ async def launch_prepared_workflow(launch: PreparedWorkflowLaunch) -> WorkflowLa
         trigger_source=launch.trigger_source,
         routing_explanation=launch.routing_decision.explanation,
         rerouted_by_dependency=bool(launch.routing_decision.rerouted_by_dependency),
+        journey_id=launch.journey_id,
         validated_context=dict(launch.validated_context),
         trigger_meta=dict(launch.trigger_meta),
         routing_decision=launch.routing_decision,
@@ -215,6 +223,7 @@ async def launch_routed_workflow(
     trigger_source: str = "chat",
     context_variables: Optional[Dict[str, Any]] = None,
     trigger_payload: Optional[Dict[str, Any]] = None,
+    journey_id: Optional[str] = None,
     session_router: Optional[Any] = None,
     extra_trigger_meta: Optional[Dict[str, Any]] = None,
 ) -> WorkflowLaunchResult:
@@ -225,6 +234,7 @@ async def launch_routed_workflow(
         trigger_source=trigger_source,
         context_variables=context_variables,
         trigger_payload=trigger_payload,
+        journey_id=journey_id,
         session_router=session_router,
         extra_trigger_meta=extra_trigger_meta,
     )
@@ -238,6 +248,7 @@ async def launch_transition(
     transition_id: str,
     option_id: Optional[str] = None,
     context_variables: Optional[Dict[str, Any]] = None,
+    journey_id: Optional[str] = None,
     session_router: Optional[Any] = None,
     extra_trigger_meta: Optional[Dict[str, Any]] = None,
 ) -> TransitionLaunchResult:
@@ -249,6 +260,7 @@ async def launch_transition(
         user_id=user_id,
         transition_id=transition_id,
         option_id=option_id,
+        journey_id=journey_id,
         context_seed=context_variables or {},
     )
 
@@ -263,6 +275,7 @@ async def launch_transition(
             resolution_type="transition",
             transition_id=transition_id,
             option_id=resolution.option_id,
+            journey_id=resolution.journey_id,
             next_transition_id=resolution.target_id,
             transition=next_transition,
             context_variables=dict(resolution.context_seed),
@@ -278,6 +291,7 @@ async def launch_transition(
         user_id=user_id,
         trigger_source="transition",
         context_variables=dict(resolution.context_seed),
+        journey_id=route_decision.journey_id,
         session_router=router,
         extra_trigger_meta={
             "transition_id": transition_id,
@@ -290,6 +304,7 @@ async def launch_transition(
         transition_id=transition_id,
         option_id=resolution.option_id,
         context_variables=dict(resolution.context_seed),
+        journey_id=resolution.journey_id,
         workflow_launch=workflow_launch,
     )
 

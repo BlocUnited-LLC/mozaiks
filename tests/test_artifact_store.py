@@ -153,6 +153,7 @@ async def test_create_change_request_and_refinement_session_persist_structured_r
     refinement_session = await store.create_refinement_session(
         app_id="app-1",
         artifact_version_id="av_123",
+        result_artifact_version_id="av_child_1",
         change_request_id=change_request.id,
         provider="e2b",
         sandbox_id="sbx_123",
@@ -173,4 +174,105 @@ async def test_create_change_request_and_refinement_session_persist_structured_r
     assert inserted_change["router_decision"]["reentry"] == "feature_refinement"
     assert inserted_change["refinement_request"]["declared_change_class"] == "feature"
     assert inserted_change["impact_set"]["restart_from"] == "AppGenerator"
+    assert inserted_session["result_artifact_version_id"] == "av_child_1"
     assert inserted_session["status"] == RefinementSessionStatus.PROVISIONING.value
+
+
+@pytest.mark.asyncio
+async def test_update_change_request_router_decision_updates_only_router_metadata() -> None:
+    store = ArtifactStore.__new__(ArtifactStore)
+    change_coll = MagicMock()
+    change_coll.update_one = AsyncMock(return_value=MagicMock(modified_count=1))
+    store._coll = AsyncMock(return_value=change_coll)
+
+    updated = await store.update_change_request_router_decision(
+        app_id="app-1",
+        change_request_id="cr_123",
+        router_decision={
+            "workflow_id": "AppGenerator",
+            "requested_workflow_id": None,
+            "execution_mode": "workflow",
+        },
+    )
+
+    assert updated is True
+    query, update = change_coll.update_one.await_args.args
+    assert query["_id"] == "cr_123"
+    assert query["app_id"] == "app-1"
+    assert update["$set"]["router_decision"]["workflow_id"] == "AppGenerator"
+    assert update["$set"]["router_decision"]["execution_mode"] == "workflow"
+
+
+@pytest.mark.asyncio
+async def test_accept_artifact_version_supersedes_prior_current_version() -> None:
+    store = ArtifactStore.__new__(ArtifactStore)
+    versions_coll = MagicMock()
+    current_raw = {
+        "_id": "av_child",
+        "app_id": "app-1",
+        "artifact_kind": "app_bundle",
+        "artifact_key": "primary",
+        "version_number": 2,
+        "parent_version_id": "av_parent",
+        "lineage_root_id": "av_parent",
+        "source_workflow": "AppGenerator",
+        "source_chat_id": "chat-1",
+        "canonical_inputs_version": {},
+        "lifecycle_status": ArtifactLifecycleStatus.DRAFT.value,
+        "validation_status": ArtifactValidationStatus.PASSED.value,
+        "files_manifest": [],
+        "commit_metadata": {"metadata": {}},
+    }
+    refreshed_raw = dict(current_raw)
+    refreshed_raw["lifecycle_status"] = ArtifactLifecycleStatus.CURRENT.value
+    versions_coll.find_one = AsyncMock(side_effect=[current_raw, refreshed_raw])
+    versions_coll.update_many = AsyncMock()
+    versions_coll.update_one = AsyncMock()
+    store._coll = AsyncMock(return_value=versions_coll)
+
+    accepted = await store.accept_artifact_version(app_id="app-1", artifact_version_id="av_child")
+
+    assert accepted is not None
+    assert accepted.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+    update_many_query, update_many_doc = versions_coll.update_many.await_args.args
+    assert update_many_query["artifact_kind"] == "app_bundle"
+    assert update_many_query["artifact_key"] == "primary"
+    assert update_many_doc["$set"]["lifecycle_status"] == ArtifactLifecycleStatus.SUPERSEDED.value
+    update_one_query, update_one_doc = versions_coll.update_one.await_args.args
+    assert update_one_query["_id"] == "av_child"
+    assert update_one_doc["$set"]["lifecycle_status"] == ArtifactLifecycleStatus.CURRENT.value
+
+
+@pytest.mark.asyncio
+async def test_list_refinement_sessions_filters_by_result_artifact_version_id() -> None:
+    store = ArtifactStore.__new__(ArtifactStore)
+    coll = MagicMock()
+    cursor = MagicMock()
+    cursor.sort.return_value = cursor
+    cursor.limit.return_value = cursor
+    cursor.to_list = AsyncMock(
+        return_value=[
+            {
+                "_id": "rs_1",
+                "app_id": "app-1",
+                "artifact_version_id": "av_parent",
+                "result_artifact_version_id": "av_child",
+                "change_request_id": "cr_1",
+                "provider": "control_plane_coding",
+                "status": RefinementSessionStatus.VALIDATED.value,
+                "metadata": {},
+            }
+        ]
+    )
+    coll.find.return_value = cursor
+    store._coll = AsyncMock(return_value=coll)
+
+    rows = await store.list_refinement_sessions(
+        app_id="app-1",
+        result_artifact_version_id="av_child",
+        limit=5,
+    )
+
+    assert len(rows) == 1
+    assert rows[0].result_artifact_version_id == "av_child"
+    coll.find.assert_called_once_with({"app_id": "app-1", "result_artifact_version_id": "av_child"})

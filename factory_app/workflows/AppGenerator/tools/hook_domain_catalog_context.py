@@ -7,7 +7,11 @@ AppPlanAgent hook  — inject_domain_catalog_context
   Reads domain_catalogs.yaml from the same tools/ directory, scores domains
   against the current app concept, and injects a compact [DOMAIN CATALOG CONTEXT]
   block into the agent system message. This gives AppPlanAgent realistic module
-  and file priors without dumping the entire catalog.
+    and domain priors without dumping the entire catalog.
+
+    The catalog now focuses on likely modules and recommended module archetypes.
+    File families and implementation defaults live in separate prompt-time
+    artifacts (`file_contracts.yaml` and `module_archetypes.yaml`).
 
   The catalog is advisory. AppPlanAgent must still reason about what the specific
   app actually needs — the catalog provides examples and suggests which files belong
@@ -62,10 +66,6 @@ _TOP_N_DOMAINS = 4
 
 # Maximum number of modules to show per domain in the injected block.
 _MAX_MODULES_PER_DOMAIN = 5
-
-# Maximum number of files to show per module in the injected block.
-_MAX_FILES_PER_MODULE = 6
-
 
 # ---------------------------------------------------------------------------
 # Shared utilities
@@ -211,24 +211,22 @@ def _format_global_base(catalog: Dict[str, Any]) -> str:
 
 
 def _format_domain_excerpt(domain_key: str, domain_data: Dict[str, Any]) -> str:
-    """Format a compact excerpt for one matched domain."""
+    """Format a compact planning excerpt for one matched domain."""
     description = domain_data.get("description") or ""
     modules: Dict[str, Any] = domain_data.get("modules") or {}
+    common_app_types = [str(item) for item in domain_data.get("common_app_types") or [] if str(item).strip()]
 
     lines = [f"Domain: {domain_key} — {description}"]
+    if common_app_types:
+        lines.append(f"  common_app_types: {', '.join(common_app_types[:4])}")
     for i, (mod_key, mod_data) in enumerate(modules.items()):
         if i >= _MAX_MODULES_PER_DOMAIN:
             remaining = len(modules) - _MAX_MODULES_PER_DOMAIN
             lines.append(f"    ... and {remaining} more modules")
             break
         mod_desc = (mod_data.get("description") or "").split(".")[0]
-        files: Dict[str, str] = mod_data.get("files") or {}
-        file_keys = list(files.keys())[:_MAX_FILES_PER_MODULE]
-        files_summary = ", ".join(file_keys)
-        if len(files) > _MAX_FILES_PER_MODULE:
-            files_summary += f" (+{len(files) - _MAX_FILES_PER_MODULE} more)"
-        lines.append(f"  {mod_key}: {mod_desc}")
-        lines.append(f"    files: {files_summary}")
+        recommended_type = str(mod_data.get("recommended_module_type") or "standard").strip()
+        lines.append(f"  {mod_key} [{recommended_type}]: {mod_desc}")
     return "\n".join(lines)
 
 
@@ -250,15 +248,18 @@ def _build_app_plan_body(
     )
 
     parts.append(
-        f"Top {len(top_domains)} matching domain(s) with module and file examples:"
+        f"Top {len(top_domains)} matching domain(s) with module and archetype priors:"
     )
     for domain_key, domain_data in top_domains:
         parts.append(_format_domain_excerpt(domain_key, domain_data))
 
     parts.append(
         "\n".join([
-            "Rules (catalog is advisory — not a mandatory file list):",
+            "Rules (catalog is advisory — not a mandatory module list):",
             "  - Use these domains as a starting point; adapt to what this specific app needs.",
+            "  - Treat recommended_module_type as a planning prior, not runtime truth.",
+            "  - Use the injected [FILE CONTRACTS CONTEXT] for task ownership and allowed file families.",
+            "  - Use the injected [MODULE ARCHETYPES CONTEXT] for cookie-cutter module.type conventions.",
             "  - Do NOT include all six YAML files by default for every module.",
             "  - Include module.yaml always.",
             "  - Include events.yaml only if the module publishes domain events.",

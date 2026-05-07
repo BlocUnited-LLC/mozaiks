@@ -18,6 +18,16 @@ definitions:
     source:
       type: state
       default: null
+  artifact_kind:
+    type: string
+    description: >
+      Artifact family currently being refined, such as workflow_bundle or
+      app_bundle. Seeded by the refinement control plane so AgentGenerator can
+      preserve workflow-bundle-local work and detect broader cross-artifact
+      reroutes.
+    source:
+      type: state
+      default: null
   artifact_version_id:
     type: string
     description: >
@@ -33,6 +43,24 @@ definitions:
       Raw user-supplied refinement request text, passed through from the
       canonical RefinementRequest. Agents read this instead of re-interviewing when
       refinement_mode is true.
+    source:
+      type: state
+      default: null
+  refinement_request_meta:
+    type: object
+    description: >
+      Full typed RefinementRequest payload persisted by the control plane.
+      Useful when downstream agents need artifact ids, source surface, or other
+      request metadata beyond the raw refinement text.
+    source:
+      type: state
+      default: null
+  screen:
+    type: string
+    description: >
+      Builder surface or screen identifier that launched the current refinement
+      request, such as studio-create. Preserved for analytics and future
+      surface-aware prompt shaping.
     source:
       type: state
       default: null
@@ -356,8 +384,11 @@ agents:
     variables:
     - refinement_mode
     - change_class
+    - artifact_kind
     - artifact_version_id
     - refinement_request
+    - refinement_request_meta
+    - screen
     - change_intent
     - impact_set
     - context_aware
@@ -407,8 +438,11 @@ agents:
     variables:
     - refinement_mode
     - change_class
+    - artifact_kind
     - artifact_version_id
     - refinement_request
+    - refinement_request_meta
+    - screen
     - change_intent
     - impact_set
     - is_multi_workflow

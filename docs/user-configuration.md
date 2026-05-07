@@ -76,6 +76,14 @@ Meaning:
   - reserves model settings for the refinement worker loop when coding-agent
     refinement is enabled later
 
+The first-party declarative control-plane pack lives under:
+
+- `factory_app/control_plane/config/control_plane.yaml`
+- `factory_app/control_plane/config/tools.yaml`
+- `factory_app/control_plane/config/policies.yaml`
+- `factory_app/control_plane/prompts/*.yaml`
+- `factory_app/control_plane/tools/*.py`
+
 Important:
 
 - this config does not replace workflow-local AG2 `llm_config`

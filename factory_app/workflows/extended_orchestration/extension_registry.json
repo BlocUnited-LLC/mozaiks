@@ -64,6 +64,7 @@
         {
           "id": "greenfield_app",
           "route_to": "ValueEngine",
+          "sequence": "build",
           "context_variables": {
             "app_type": "greenfield_app"
           }
@@ -71,6 +72,7 @@
         {
           "id": "brownfield_app",
           "route_to": "ExistingAppDiscovery",
+          "sequence": "brownfield_app_adoption",
           "context_variables": {
             "app_type": "brownfield_app"
           }

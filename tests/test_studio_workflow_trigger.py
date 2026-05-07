@@ -1,11 +1,133 @@
 from __future__ import annotations
 
 import sys
+import zipfile
+from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
-from mozaiksai.core.control_plane import ControlPlaneConfig
+from mozaiksai.control_plane import CodingWorkerResult, ControlPlaneConfig, ScopeProposal
+from mozaiksai.core.artifacts import (
+    ArtifactCommitMetadata,
+    ArtifactLifecycleStatus,
+    ArtifactValidationStatus,
+    ArtifactVersionDoc,
+    ChangeClassification,
+    ChangeIntentDoc,
+    ChangeRequestDoc,
+    ImpactSetDoc,
+    RefinementRequestPayload,
+    RefinementSessionDoc,
+    RefinementSessionStatus,
+)
+
+
+def _make_bundle_zip(zip_path: Path, files: dict[str, str]) -> None:
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for relative_path, content in files.items():
+            archive.writestr(relative_path, content)
+
+
+def _artifact_version(
+    *,
+    artifact_version_id: str,
+    zip_path: Path,
+    artifact_kind: str = "app_bundle",
+    artifact_key: str = "app_bundle",
+    version_number: int = 1,
+    parent_version_id: str | None = None,
+    lifecycle_status: ArtifactLifecycleStatus = ArtifactLifecycleStatus.DRAFT,
+    validation_status: ArtifactValidationStatus = ArtifactValidationStatus.PASSED,
+) -> ArtifactVersionDoc:
+    return ArtifactVersionDoc.model_validate(
+        {
+            "_id": artifact_version_id,
+            "app_id": "app_1",
+            "artifact_kind": artifact_kind,
+            "artifact_key": artifact_key,
+            "version_number": version_number,
+            "parent_version_id": parent_version_id,
+            "lineage_root_id": parent_version_id or artifact_version_id,
+            "source_workflow": "AppGenerator",
+            "source_chat_id": "chat_1",
+            "canonical_inputs_version": {},
+            "lifecycle_status": lifecycle_status.value,
+            "validation_status": validation_status.value,
+            "files_manifest": [],
+            "commit_metadata": ArtifactCommitMetadata(
+                message="Generated artifact",
+                source_workflow="AppGenerator",
+                source_chat_id="chat_1",
+                metadata={"artifact_path": str(zip_path)},
+            ).model_dump(mode="python"),
+        }
+    )
+
+
+def _change_request_doc(*, artifact_version_id: str) -> ChangeRequestDoc:
+    return ChangeRequestDoc.model_validate(
+        {
+            "_id": "cr_review_1",
+            "app_id": "app_1",
+            "artifact_kind": "app_bundle",
+            "artifact_key": "app_bundle",
+            "artifact_version_id": artifact_version_id,
+            "raw_user_request": "Update the dashboard title and export controls.",
+            "classification": ChangeClassification.PATCH.value,
+            "refinement_request": RefinementRequestPayload(
+                artifact_kind="app_bundle",
+                artifact_key="app_bundle",
+                artifact_version_id=artifact_version_id,
+                raw_user_request="Update the dashboard title and export controls.",
+                source_surface="studio_create",
+            ).model_dump(mode="python"),
+            "change_intent": ChangeIntentDoc(
+                change_class=ChangeClassification.PATCH,
+                source="llm",
+                signals=["dashboard_copy"],
+                rationale="A local dashboard patch is sufficient.",
+                confidence=0.92,
+                touches_app_bundle=True,
+            ).model_dump(mode="python"),
+            "impact_set": ImpactSetDoc(
+                affected_workflows=["AppGenerator"],
+                affected_bundle_paths=["src/App.jsx"],
+                affected_declarative_families=["app_bundle"],
+                requires_replanning=False,
+                requires_rebuild=True,
+                restart_from="AppGenerator",
+                scope_summary="Update the dashboard bundle output.",
+            ).model_dump(mode="python"),
+            "router_decision": {"execution_mode": "coding_worker"},
+        }
+    )
+
+
+def _refinement_session_doc(
+    *,
+    artifact_version_id: str,
+    result_artifact_version_id: str,
+    status: RefinementSessionStatus = RefinementSessionStatus.VALIDATED,
+) -> RefinementSessionDoc:
+    return RefinementSessionDoc.model_validate(
+        {
+            "_id": "rs_review_1",
+            "app_id": "app_1",
+            "artifact_version_id": artifact_version_id,
+            "result_artifact_version_id": result_artifact_version_id,
+            "change_request_id": "cr_review_1",
+            "provider": "control_plane_coding",
+            "status": status.value,
+            "metadata": {
+                "coding_worker": {
+                    "plan": {"summary": "Patch the dashboard title and export area."},
+                    "validation_result": {"validation_status": "passed", "preview_url": None},
+                    "metadata": {"selected_file_paths": ["src/App.jsx"]},
+                }
+            },
+        }
+    )
 
 
 def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch):
@@ -20,6 +142,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
 
     captured_prepare: dict = {}
     persisted_changes: list[dict] = []
+    updated_router_decisions: list[dict] = []
 
     async def fake_prepare_routed_workflow_launch(**kwargs):
         captured_prepare.update(kwargs)
@@ -38,6 +161,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
             chat_id="chat_refine_1",
             workflow_id=launch.workflow_id,
             requested_workflow_id="AppGenerator",
+            journey_id="journey_refine_1",
             websocket_url="/ws/AppGenerator/app_1/chat_refine_1/demo-user",
             trigger_source="refinement",
             routing_explanation=launch.routing_decision.explanation,
@@ -47,6 +171,11 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
     class _ArtifactStore:
         async def create_change_request(self, **kwargs):
             persisted_changes.append(kwargs)
+            return SimpleNamespace(id="cr_123")
+
+        async def update_change_request_router_decision(self, **kwargs):
+            updated_router_decisions.append(kwargs)
+            return True
 
     monkeypatch.setattr(studio_app, "prepare_routed_workflow_launch", fake_prepare_routed_workflow_launch)
     monkeypatch.setattr(studio_app, "launch_prepared_workflow", fake_launch_prepared_workflow)
@@ -84,13 +213,38 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
 
     assert response.status_code == 200
     assert response.json() == {
+        "execution_mode": "workflow",
         "chat_id": "chat_refine_1",
         "workflow_id": "AppGenerator",
         "requested_workflow_id": "AppGenerator",
+        "journey_id": "journey_refine_1",
         "websocket_url": "/ws/AppGenerator/app_1/chat_refine_1/demo-user",
         "trigger_source": "refinement",
         "routing_explanation": "refinement reroute",
         "rerouted_by_dependency": False,
+        "harness_decision": {
+            "decision_type": "workflow_reentry",
+            "message": "Recommended route: AppGenerator.",
+            "rationale": "Adding an export action extends the existing app bundle.",
+            "confidence": 0.88,
+            "recommended_workflow_id": "AppGenerator",
+            "selected_paths": [],
+            "clarification_question": None,
+            "requires_confirmation": False,
+            "actions": [
+                {
+                    "action_id": "run_recommended_workflow",
+                    "label": "Continue in AppGenerator",
+                    "action_type": "run_workflow",
+                    "workflow_id": "AppGenerator",
+                    "metadata": {},
+                }
+            ],
+            "metadata": {
+                "change_class": "feature",
+                "scope_summary": "Extend the existing app bundle within the approved concept using the owning workflow.",
+            },
+        },
     }
     assert captured_prepare["workflow_id"] is None
     assert captured_prepare["trigger_source"] == "refinement"
@@ -163,11 +317,72 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
             "router_decision": {
                 "workflow_id": "AppGenerator",
                 "requested_workflow_id": None,
+                "explanation": "Re-entering AppGenerator to extend the app bundle within the current concept.",
+                "is_full_restart": False,
+                "rerouted_by_dependency": False,
+                "execution_mode": "workflow",
+                "harness_decision": {
+                    "decision_type": "workflow_reentry",
+                    "message": "Recommended route: AppGenerator.",
+                    "rationale": "Adding an export action extends the existing app bundle.",
+                    "confidence": 0.88,
+                    "recommended_workflow_id": "AppGenerator",
+                    "selected_paths": [],
+                    "clarification_question": None,
+                    "requires_confirmation": False,
+                    "actions": [
+                        {
+                            "action_id": "run_recommended_workflow",
+                            "label": "Continue in AppGenerator",
+                            "action_type": "run_workflow",
+                            "workflow_id": "AppGenerator",
+                            "metadata": {},
+                        }
+                    ],
+                    "metadata": {
+                        "change_class": "feature",
+                        "scope_summary": "Extend the existing app bundle within the approved concept using the owning workflow.",
+                    },
+                },
+            },
+            "created_by_user_id": "demo-user",
+        }
+    ]
+    assert updated_router_decisions == [
+        {
+            "app_id": captured_prepare["app_id"],
+            "change_request_id": "cr_123",
+            "router_decision": {
+                "workflow_id": "AppGenerator",
+                "requested_workflow_id": None,
                 "explanation": "refinement reroute",
                 "is_full_restart": False,
                 "rerouted_by_dependency": False,
+                "execution_mode": "workflow",
+                "harness_decision": {
+                    "decision_type": "workflow_reentry",
+                    "message": "Recommended route: AppGenerator.",
+                    "rationale": "Adding an export action extends the existing app bundle.",
+                    "confidence": 0.88,
+                    "recommended_workflow_id": "AppGenerator",
+                    "selected_paths": [],
+                    "clarification_question": None,
+                    "requires_confirmation": False,
+                    "actions": [
+                        {
+                            "action_id": "run_recommended_workflow",
+                            "label": "Continue in AppGenerator",
+                            "action_type": "run_workflow",
+                            "workflow_id": "AppGenerator",
+                            "metadata": {},
+                        }
+                    ],
+                    "metadata": {
+                        "change_class": "feature",
+                        "scope_summary": "Extend the existing app bundle within the approved concept using the owning workflow.",
+                    },
+                },
             },
-            "created_by_user_id": "demo-user",
         }
     ]
 
@@ -235,6 +450,822 @@ def test_studio_trigger_endpoint_rejects_refinement_when_control_plane_disabled(
     assert "Control-plane harness is disabled" in response.json()["detail"]
 
 
+def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch):
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    sys.modules.pop("factory_app", None)
+
+    from mozaiksai.hosts import studio as studio_app
+
+    persisted_changes: list[dict] = []
+    persisted_sessions: list[dict] = []
+
+    async def fail_prepare(**kwargs):  # noqa: ANN003
+        raise AssertionError("workflow launch should not run for coding worker execution")
+
+    async def fail_launch(launch):  # noqa: ANN001
+        raise AssertionError("workflow launch should not run for coding worker execution")
+
+    class _ArtifactStore:
+        async def create_change_request(self, **kwargs):
+            persisted_changes.append(kwargs)
+            return SimpleNamespace(id="cr_code_1")
+
+        async def create_refinement_session(self, **kwargs):
+            persisted_sessions.append(kwargs)
+            return SimpleNamespace(id="rs_code_1")
+
+    monkeypatch.setattr(studio_app, "prepare_routed_workflow_launch", fail_prepare)
+    monkeypatch.setattr(studio_app, "launch_prepared_workflow", fail_launch)
+    monkeypatch.setattr(studio_app, "get_artifact_store", lambda: _ArtifactStore())
+    monkeypatch.setattr(
+        studio_app.get_orchestration_control_harness(),
+        "_config_loader",
+        lambda: ControlPlaneConfig(
+            enabled=True,
+            classifier={"enabled": True},
+            coding={"enabled": True, "llm_config": {"model": "gpt-5.2-codex", "temperature": 0.1}},
+        ),
+    )
+    monkeypatch.setattr(
+        studio_app.get_orchestration_control_harness()._refinement_resolver,
+        "_classifier",
+        SimpleNamespace(
+            classify=_async_classifier(
+                change_class="patch",
+                rationale="This is a narrow patch.",
+                confidence=0.95,
+                signals=["bug_fix"],
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        studio_app.get_orchestration_control_harness()._coding_worker,
+        "execute",
+        _async_coding_worker(
+            {
+                "eligible": True,
+                "execution_mode": "coding_worker",
+                "status": "validated",
+                "provider": "control_plane_coding",
+                "plan": {
+                    "summary": "Patch the dashboard component.",
+                    "owned_paths": ["app/ui/pages/Dashboard.jsx"],
+                    "validation_strategy": "skip",
+                    "validation_commands": [],
+                    "start_preview": False,
+                    "needs_human_review": False,
+                    "rationale": "Single-file UI fix.",
+                },
+                "validation_result": {"validation_status": "skipped", "preview_url": None},
+                "blocked_reason": None,
+                "error": None,
+                "metadata": {"artifact_version_id": "av_child_code_1"},
+            }
+        ),
+    )
+
+    client = TestClient(studio_app.app)
+    response = client.post(
+        "/api/workflows/trigger",
+        json={
+            "trigger_source": "refinement",
+            "trigger_payload": {
+                "refinement_request": {
+                    "artifact_kind": "app_bundle",
+                    "artifact_key": "app_bundle",
+                    "artifact_version_id": "av_456",
+                    "raw_user_request": "Fix the dashboard spacing",
+                    "source_surface": "studio_create",
+                },
+                "coding_request": {
+                    "files": {"app/ui/pages/Dashboard.jsx": "export default function Dashboard() {}"},
+                    "validation_strategy": "skip",
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "execution_mode": "coding_worker",
+        "chat_id": None,
+        "workflow_id": "AppGenerator",
+        "requested_workflow_id": "AppGenerator",
+        "websocket_url": None,
+        "trigger_source": "refinement",
+        "routing_explanation": "Re-entering AppGenerator to apply a scoped patch to the app bundle.",
+        "rerouted_by_dependency": False,
+        "refinement_session_id": "rs_code_1",
+            "harness_decision": {
+                "decision_type": "auto_patch",
+                "message": "Scoped patch applied.",
+                "rationale": "This is a narrow patch.",
+                "confidence": 0.95,
+                "recommended_workflow_id": "AppGenerator",
+                "selected_paths": [
+                    "app/ui/pages/Dashboard.jsx",
+                ],
+                "clarification_question": None,
+                "requires_confirmation": False,
+                "actions": [
+                    {
+                        "action_id": "review_patch",
+                        "label": "Review patch",
+                        "action_type": "review_patch",
+                        "workflow_id": "AppGenerator",
+                        "metadata": {},
+                    }
+                ],
+                "metadata": {
+                    "scope_origin": "applied",
+                },
+            },
+            "coding_worker": {
+                "eligible": True,
+                "execution_mode": "coding_worker",
+                "status": "validated",
+                "provider": "control_plane_coding",
+                "plan": {
+                    "summary": "Patch the dashboard component.",
+                    "owned_paths": ["app/ui/pages/Dashboard.jsx"],
+                    "updated_files": {},
+                    "validation_strategy": "skip",
+                    "validation_commands": [],
+                    "start_preview": False,
+                    "needs_human_review": False,
+                    "rationale": "Single-file UI fix.",
+                },
+                "applied_files": {},
+                "validation_result": {"validation_status": "skipped", "preview_url": None},
+                "blocked_reason": None,
+                "error": None,
+                "metadata": {"artifact_version_id": "av_child_code_1"},
+            },
+    }
+    assert persisted_changes[0]["router_decision"]["execution_mode"] == "coding_worker"
+    assert persisted_sessions == [
+        {
+            "app_id": persisted_changes[0]["app_id"],
+            "artifact_version_id": "av_456",
+            "change_request_id": "cr_code_1",
+            "result_artifact_version_id": "av_child_code_1",
+            "provider": "control_plane_coding",
+            "status": studio_app.RefinementSessionStatus.VALIDATED,
+            "preview_url": None,
+            "metadata": {
+                "coding_worker": response.json()["coding_worker"],
+                "workflow_id": "AppGenerator",
+            },
+        }
+    ]
+
+
+def test_studio_trigger_endpoint_can_auto_scope_before_coding_worker(monkeypatch):
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    sys.modules.pop("factory_app", None)
+
+    from mozaiksai.hosts import studio as studio_app
+
+    persisted_changes: list[dict] = []
+
+    async def fail_prepare(**kwargs):  # noqa: ANN003
+        raise AssertionError("workflow launch should not run for coding worker execution")
+
+    async def fail_launch(launch):  # noqa: ANN001
+        raise AssertionError("workflow launch should not run for coding worker execution")
+
+    class _ArtifactStore:
+        async def create_change_request(self, **kwargs):
+            persisted_changes.append(kwargs)
+            return SimpleNamespace(id="cr_code_auto_1")
+
+        async def create_refinement_session(self, **kwargs):
+            return SimpleNamespace(id="rs_code_auto_1")
+
+    async def _fake_propose(**kwargs):  # noqa: ANN003
+        return ScopeProposal.model_validate(
+            {
+                "resolution": "scoped_files",
+                "selected_paths": ["app/ui/pages/Dashboard.jsx"],
+                "rationale": "Dashboard is the only affected surface.",
+                "confidence": 0.91,
+                "clarification_question": None,
+                "signals": ["dashboard_surface"],
+            }
+        )
+
+    async def _fake_materialize(**kwargs):  # noqa: ANN003
+        return {"app/ui/pages/Dashboard.jsx": "export default function Dashboard() {}"}
+
+    async def _fake_execute(request):  # noqa: ANN001
+        assert request.files == {"app/ui/pages/Dashboard.jsx": "export default function Dashboard() {}"}
+        assert request.metadata["scope_proposal"]["selected_paths"] == ["app/ui/pages/Dashboard.jsx"]
+        return CodingWorkerResult.model_validate(
+            {
+                "eligible": True,
+                "execution_mode": "coding_worker",
+                "status": "validated",
+                "provider": "control_plane_coding",
+                "plan": {
+                    "summary": "Patch the dashboard component.",
+                    "owned_paths": ["app/ui/pages/Dashboard.jsx"],
+                    "updated_files": {
+                        "app/ui/pages/Dashboard.jsx": 'export default function Dashboard() { return "patched"; }'
+                    },
+                    "validation_strategy": "skip",
+                    "validation_commands": [],
+                    "start_preview": False,
+                    "needs_human_review": False,
+                    "rationale": "Single-file UI fix.",
+                },
+                "applied_files": {
+                    "app/ui/pages/Dashboard.jsx": 'export default function Dashboard() { return "patched"; }'
+                },
+                "validation_result": {"validation_status": "skipped", "preview_url": None},
+                "blocked_reason": None,
+                "error": None,
+                "metadata": {},
+            }
+        )
+
+    monkeypatch.setattr(studio_app, "prepare_routed_workflow_launch", fail_prepare)
+    monkeypatch.setattr(studio_app, "launch_prepared_workflow", fail_launch)
+    monkeypatch.setattr(studio_app, "get_artifact_store", lambda: _ArtifactStore())
+    monkeypatch.setattr(
+        studio_app.get_orchestration_control_harness(),
+        "_config_loader",
+        lambda: ControlPlaneConfig(
+            enabled=True,
+            classifier={"enabled": True},
+            coding={"enabled": True, "llm_config": {"model": "gpt-5.2-codex", "temperature": 0.1}},
+        ),
+    )
+    monkeypatch.setattr(
+        studio_app.get_orchestration_control_harness()._refinement_resolver,
+        "_classifier",
+        SimpleNamespace(
+            classify=_async_classifier(
+                change_class="patch",
+                rationale="This is a narrow patch.",
+                confidence=0.95,
+                signals=["bug_fix"],
+            )
+        ),
+    )
+    monkeypatch.setattr(studio_app.get_orchestration_control_harness()._scope_proposer, "propose", _fake_propose)
+    monkeypatch.setattr(
+        studio_app.get_orchestration_control_harness()._scope_proposer,
+        "materialize_files",
+        _fake_materialize,
+    )
+    monkeypatch.setattr(
+        studio_app.get_orchestration_control_harness()._coding_worker,
+        "execute",
+        _fake_execute,
+    )
+
+    client = TestClient(studio_app.app)
+    response = client.post(
+        "/api/workflows/trigger",
+        json={
+            "trigger_source": "refinement",
+            "trigger_payload": {
+                "refinement_request": {
+                    "artifact_kind": "app_bundle",
+                    "artifact_key": "app_bundle",
+                    "artifact_version_id": "av_789",
+                    "raw_user_request": "Fix the dashboard spacing",
+                    "source_surface": "studio_create",
+                },
+                "coding_request": {
+                    "validation_strategy": "skip",
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["execution_mode"] == "coding_worker"
+    assert persisted_changes[0]["router_decision"]["execution_mode"] == "coding_worker"
+
+
+def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypatch):
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    sys.modules.pop("factory_app", None)
+
+    from mozaiksai.hosts import studio as studio_app
+
+    persisted_changes: list[dict] = []
+
+    async def fail_prepare(**kwargs):  # noqa: ANN003
+        raise AssertionError("workflow launch should not run for coding worker execution")
+
+    async def fail_launch(launch):  # noqa: ANN001
+        raise AssertionError("workflow launch should not run for coding worker execution")
+
+    class _ArtifactStore:
+        async def create_change_request(self, **kwargs):
+            persisted_changes.append(kwargs)
+            return SimpleNamespace(id=f"cr_scope_{len(persisted_changes)}")
+
+        async def create_refinement_session(self, **kwargs):
+            return SimpleNamespace(id="rs_scope_1")
+
+    async def _fake_propose(**kwargs):  # noqa: ANN003
+        return ScopeProposal.model_validate(
+            {
+                "resolution": "scoped_files",
+                "selected_paths": [
+                    "app/ui/pages/Dashboard.jsx",
+                    "app/ui/components/ExportPanel.jsx",
+                ],
+                "rationale": "Both the dashboard page and export panel need the copy update.",
+                "confidence": 0.91,
+                "clarification_question": None,
+                "signals": ["multi_file_scope"],
+            }
+        )
+
+    async def _fake_materialize(**kwargs):  # noqa: ANN003
+        return {
+            "app/ui/pages/Dashboard.jsx": 'export default function Dashboard() { return "old"; }',
+            "app/ui/components/ExportPanel.jsx": 'export function ExportPanel() { return "old"; }',
+        }
+
+    async def _fake_execute(request):  # noqa: ANN001
+        assert sorted(request.files.keys()) == [
+            "app/ui/components/ExportPanel.jsx",
+            "app/ui/pages/Dashboard.jsx",
+        ]
+        return CodingWorkerResult.model_validate(
+            {
+                "eligible": True,
+                "execution_mode": "coding_worker",
+                "status": "validated",
+                "provider": "control_plane_coding",
+                "plan": {
+                    "summary": "Patch the dashboard title and export panel copy.",
+                    "owned_paths": [
+                        "app/ui/pages/Dashboard.jsx",
+                        "app/ui/components/ExportPanel.jsx",
+                    ],
+                    "updated_files": {
+                        "app/ui/pages/Dashboard.jsx": 'export default function Dashboard() { return "patched"; }',
+                        "app/ui/components/ExportPanel.jsx": 'export function ExportPanel() { return "patched"; }',
+                    },
+                    "validation_strategy": "skip",
+                    "validation_commands": [],
+                    "start_preview": False,
+                    "needs_human_review": False,
+                    "rationale": "Two-file UI patch.",
+                },
+                "applied_files": {
+                    "app/ui/pages/Dashboard.jsx": 'export default function Dashboard() { return "patched"; }',
+                    "app/ui/components/ExportPanel.jsx": 'export function ExportPanel() { return "patched"; }',
+                },
+                "validation_result": {"validation_status": "skipped", "preview_url": None},
+                "blocked_reason": None,
+                "error": None,
+                "metadata": {"artifact_version_id": "av_child_multi_1"},
+            }
+        )
+
+    monkeypatch.setattr(studio_app, "prepare_routed_workflow_launch", fail_prepare)
+    monkeypatch.setattr(studio_app, "launch_prepared_workflow", fail_launch)
+    monkeypatch.setattr(studio_app, "get_artifact_store", lambda: _ArtifactStore())
+    monkeypatch.setattr(
+        studio_app.get_orchestration_control_harness(),
+        "_config_loader",
+        lambda: ControlPlaneConfig(
+            enabled=True,
+            classifier={"enabled": True},
+            coding={"enabled": True, "llm_config": {"model": "gpt-5.2-codex", "temperature": 0.1}},
+        ),
+    )
+    monkeypatch.setattr(
+        studio_app.get_orchestration_control_harness()._refinement_resolver,
+        "_classifier",
+        SimpleNamespace(
+            classify=_async_classifier(
+                change_class="patch",
+                rationale="This is still a patch, but it spans two nearby files.",
+                confidence=0.95,
+                signals=["multi_file_scope"],
+            )
+        ),
+    )
+    monkeypatch.setattr(studio_app.get_orchestration_control_harness()._scope_proposer, "propose", _fake_propose)
+    monkeypatch.setattr(
+        studio_app.get_orchestration_control_harness()._scope_proposer,
+        "materialize_files",
+        _fake_materialize,
+    )
+    monkeypatch.setattr(
+        studio_app.get_orchestration_control_harness()._coding_worker,
+        "execute",
+        _fake_execute,
+    )
+
+    client = TestClient(studio_app.app)
+    first = client.post(
+        "/api/workflows/trigger",
+        json={
+            "trigger_source": "refinement",
+            "trigger_payload": {
+                "refinement_request": {
+                    "artifact_kind": "app_bundle",
+                    "artifact_key": "app_bundle",
+                    "artifact_version_id": "av_scope_1",
+                    "raw_user_request": "Update the dashboard and export panel copy",
+                    "source_surface": "studio_create",
+                },
+                "coding_request": {
+                    "validation_strategy": "skip",
+                },
+            },
+        },
+    )
+
+    assert first.status_code == 200
+    first_body = first.json()
+    assert first_body["execution_mode"] == "harness_decision"
+    assert first_body["harness_decision"]["decision_type"] == "clarify_scope"
+    assert first_body["harness_decision"]["actions"][0]["action_id"] == "apply_proposed_scope"
+
+    second = client.post(
+        "/api/workflows/trigger",
+        json={
+            "trigger_source": "refinement",
+            "trigger_payload": {
+                "refinement_request": {
+                    "artifact_kind": "app_bundle",
+                    "artifact_key": "app_bundle",
+                    "artifact_version_id": "av_scope_1",
+                    "raw_user_request": "Update the dashboard and export panel copy",
+                    "source_surface": "studio_create",
+                },
+                "coding_request": {
+                    "validation_strategy": "skip",
+                },
+                "harness_action": {
+                    "action_id": "apply_proposed_scope",
+                },
+            },
+        },
+    )
+
+    assert second.status_code == 200
+    second_body = second.json()
+    assert second_body["execution_mode"] == "coding_worker"
+    assert second_body["coding_worker"]["metadata"]["artifact_version_id"] == "av_child_multi_1"
+
+
+def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(monkeypatch):
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    sys.modules.pop("factory_app", None)
+
+    from mozaiksai.hosts import studio as studio_app
+
+    async def fail_prepare(**kwargs):  # noqa: ANN003
+        raise AssertionError("workflow launch should not run before a core confirmation")
+
+    async def fail_launch(launch):  # noqa: ANN001
+        raise AssertionError("workflow launch should not run before a core confirmation")
+
+    class _ArtifactStore:
+        async def create_change_request(self, **kwargs):
+            return SimpleNamespace(id="cr_core_1")
+
+    monkeypatch.setattr(studio_app, "prepare_routed_workflow_launch", fail_prepare)
+    monkeypatch.setattr(studio_app, "launch_prepared_workflow", fail_launch)
+    monkeypatch.setattr(studio_app, "get_artifact_store", lambda: _ArtifactStore())
+    monkeypatch.setattr(
+        studio_app.get_orchestration_control_harness()._refinement_resolver,
+        "_classifier",
+        SimpleNamespace(
+            classify=_async_classifier(
+                change_class="core",
+                rationale="Adding blockchain changes the product direction.",
+                confidence=0.94,
+                signals=["concept_shift", "new_capability"],
+            )
+        ),
+    )
+
+    client = TestClient(studio_app.app)
+    response = client.post(
+        "/api/workflows/trigger",
+        json={
+            "trigger_source": "refinement",
+            "trigger_payload": {
+                "refinement_request": {
+                    "artifact_kind": "app_bundle",
+                    "artifact_key": "app_bundle",
+                    "artifact_version_id": "av_core_1",
+                    "raw_user_request": "Add blockchain support to the product.",
+                    "source_surface": "studio_create",
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "execution_mode": "harness_decision",
+        "chat_id": None,
+        "workflow_id": "ValueEngine",
+        "requested_workflow_id": "ValueEngine",
+        "websocket_url": None,
+        "trigger_source": "refinement",
+        "routing_explanation": "Core concept change detected for app bundle; restarting from ValueEngine.",
+        "rerouted_by_dependency": False,
+        "harness_decision": {
+            "decision_type": "core_restart",
+            "message": "This looks like a concept-level change. Recommended route: ValueEngine.",
+            "rationale": "Adding blockchain changes the product direction.",
+            "confidence": 0.94,
+            "recommended_workflow_id": "ValueEngine",
+            "selected_paths": [],
+            "clarification_question": None,
+            "requires_confirmation": True,
+            "actions": [
+                {
+                    "action_id": "confirm_recommended_workflow",
+                    "label": "Run ValueEngine",
+                    "action_type": "confirm_workflow",
+                    "workflow_id": "ValueEngine",
+                    "metadata": {},
+                }
+            ],
+            "metadata": {
+                "change_class": "core",
+                "scope_summary": "Restart from ValueEngine and invalidate downstream concept, design, workflow, and app artifacts.",
+            },
+        },
+    }
+
+
+class _ReviewArtifactStore:
+    def __init__(
+        self,
+        *,
+        parent_version: ArtifactVersionDoc,
+        child_version: ArtifactVersionDoc,
+        change_request: ChangeRequestDoc,
+        session: RefinementSessionDoc,
+    ) -> None:
+        self.parent_version = parent_version
+        self.child_version = child_version
+        self.change_request = change_request
+        self.session = session
+        self.update_calls: list[dict] = []
+
+    async def get_artifact_version(self, **kwargs):  # noqa: ANN003
+        artifact_version_id = kwargs.get("artifact_version_id")
+        if artifact_version_id == self.child_version.id:
+            return self.child_version
+        if artifact_version_id == self.parent_version.id:
+            return self.parent_version
+        return None
+
+    async def list_refinement_sessions(self, **kwargs):  # noqa: ANN003
+        if kwargs.get("result_artifact_version_id") == self.child_version.id:
+            return [self.session]
+        return []
+
+    async def get_change_request(self, **kwargs):  # noqa: ANN003
+        if kwargs.get("change_request_id") == self.change_request.id:
+            return self.change_request
+        return None
+
+    async def list_change_requests(self, **kwargs):  # noqa: ANN003
+        if kwargs.get("artifact_version_id") == self.parent_version.id:
+            return [self.change_request]
+        return []
+
+    async def accept_artifact_version(self, **kwargs):  # noqa: ANN003
+        self.child_version = self.child_version.model_copy(
+            update={"lifecycle_status": ArtifactLifecycleStatus.CURRENT}
+        )
+        return self.child_version
+
+    async def reject_artifact_version(self, **kwargs):  # noqa: ANN003
+        self.child_version = self.child_version.model_copy(
+            update={
+                "lifecycle_status": ArtifactLifecycleStatus.ARCHIVED,
+                "invalidation_reason": kwargs.get("reason"),
+            }
+        )
+        return True
+
+    async def update_refinement_session(self, **kwargs):  # noqa: ANN003
+        self.update_calls.append(dict(kwargs))
+        status = kwargs.get("status")
+        ended_at = kwargs.get("ended_at")
+        updates = {}
+        if status is not None:
+            updates["status"] = status
+        if ended_at is not None:
+            updates["ended_at"] = ended_at
+        if updates:
+            self.session = self.session.model_copy(update=updates)
+        return True
+
+
+def _build_review_store(tmp_path: Path, *, lifecycle_status: ArtifactLifecycleStatus) -> _ReviewArtifactStore:
+    parent_zip = tmp_path / "parent_bundle.zip"
+    child_zip = tmp_path / "child_bundle.zip"
+    _make_bundle_zip(
+        parent_zip,
+        {
+            "GeneratedApp/src/App.jsx": 'export default function App() { return <div>Old title</div>; }\n',
+            "GeneratedApp/package.json": '{"name":"demo"}\n',
+        },
+    )
+    _make_bundle_zip(
+        child_zip,
+        {
+            "GeneratedApp/src/App.jsx": 'export default function App() { return <div>Builder Workspace</div>; }\n',
+            "GeneratedApp/package.json": '{"name":"demo"}\n',
+        },
+    )
+    parent_version = _artifact_version(
+        artifact_version_id="av_parent_1",
+        zip_path=parent_zip,
+        version_number=1,
+        lifecycle_status=ArtifactLifecycleStatus.SUPERSEDED,
+    )
+    child_version = _artifact_version(
+        artifact_version_id="av_child_1",
+        zip_path=child_zip,
+        version_number=2,
+        parent_version_id="av_parent_1",
+        lifecycle_status=lifecycle_status,
+    )
+    change_request = _change_request_doc(artifact_version_id="av_parent_1")
+    session_status = (
+        RefinementSessionStatus.ACCEPTED
+        if lifecycle_status == ArtifactLifecycleStatus.CURRENT
+        else RefinementSessionStatus.VALIDATED
+    )
+    session = _refinement_session_doc(
+        artifact_version_id="av_parent_1",
+        result_artifact_version_id="av_child_1",
+        status=session_status,
+    )
+    return _ReviewArtifactStore(
+        parent_version=parent_version,
+        child_version=child_version,
+        change_request=change_request,
+        session=session,
+    )
+
+
+def test_studio_artifact_bundle_endpoint_returns_workbench_payload(monkeypatch, tmp_path: Path):
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    sys.modules.pop("factory_app", None)
+
+    from mozaiksai.hosts import studio as studio_app
+
+    store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.DRAFT)
+    monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
+
+    client = TestClient(studio_app.app)
+    response = client.get("/api/studio/artifacts/av_child_1/bundle")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["artifact_version_id"] == "av_child_1"
+    assert body["artifact_kind"] == "app_bundle"
+    assert body["generated_files"]["src/App.jsx"].startswith("export default function App")
+    assert body["generated_files"]["package.json"] == '{"name":"demo"}\n'
+    assert body["workbench"]["artifact_version_id"] == "av_child_1"
+    assert body["workbench"]["artifact_kind"] == "app_bundle"
+    assert body["review"]["changed_file_count"] == 1
+    assert body["review"]["selected_paths"] == ["src/App.jsx"]
+    assert body["change_request"]["classification"] == "patch"
+
+
+def test_studio_artifact_review_endpoint_returns_diff_and_session_context(monkeypatch, tmp_path: Path):
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    sys.modules.pop("factory_app", None)
+
+    from mozaiksai.hosts import studio as studio_app
+
+    store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.DRAFT)
+    monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
+
+    client = TestClient(studio_app.app)
+    response = client.get("/api/studio/artifacts/av_child_1/review")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["review"]["review_status"] == "validated"
+    assert body["review"]["can_accept"] is True
+    assert body["review"]["can_promote"] is False
+    assert body["review"]["changed_files"][0]["path"] == "src/App.jsx"
+    assert "Builder Workspace" in body["review"]["changed_files"][0]["diff_preview"]
+    assert body["refinement_session"]["status"] == "validated"
+
+
+def test_studio_artifact_accept_endpoint_marks_current_and_updates_session(monkeypatch, tmp_path: Path):
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    sys.modules.pop("factory_app", None)
+
+    from mozaiksai.hosts import studio as studio_app
+
+    store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.DRAFT)
+    monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
+
+    client = TestClient(studio_app.app)
+    response = client.post("/api/studio/artifacts/av_child_1/accept")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["accepted"] is True
+    assert body["review"]["lifecycle_status"] == "current"
+    assert store.child_version.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+    assert store.update_calls[-1]["status"] == RefinementSessionStatus.ACCEPTED
+
+
+def test_studio_artifact_reject_endpoint_archives_and_updates_session(monkeypatch, tmp_path: Path):
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    sys.modules.pop("factory_app", None)
+
+    from mozaiksai.hosts import studio as studio_app
+
+    store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.DRAFT)
+    monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
+
+    client = TestClient(studio_app.app)
+    response = client.post("/api/studio/artifacts/av_child_1/reject")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["rejected"] is True
+    assert body["review"]["lifecycle_status"] == "archived"
+    assert store.child_version.lifecycle_status == ArtifactLifecycleStatus.ARCHIVED
+    assert store.update_calls[-1]["status"] == RefinementSessionStatus.REJECTED
+
+
+def test_studio_artifact_promote_endpoint_restores_bundle_and_updates_session(monkeypatch, tmp_path: Path):
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    sys.modules.pop("factory_app", None)
+
+    from mozaiksai.hosts import studio as studio_app
+
+    store = _build_review_store(tmp_path, lifecycle_status=ArtifactLifecycleStatus.CURRENT)
+    runtime_root = tmp_path / "runtime_app"
+    monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
+    monkeypatch.setattr(studio_app, "resolve_app_root", lambda: runtime_root)
+
+    client = TestClient(studio_app.app)
+    response = client.post("/api/studio/artifacts/av_child_1/promote")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["promoted"] is True
+    assert body["target_path"] == str(runtime_root)
+    assert (runtime_root / "GeneratedApp" / "src" / "App.jsx").exists()
+    assert store.update_calls[-1]["status"] == RefinementSessionStatus.PROMOTED
+
+
 def _async_classifier(*, change_class: str, rationale: str, confidence: float, signals: list[str]):
     async def _run(**kwargs):  # noqa: ANN003
         return SimpleNamespace(
@@ -243,5 +1274,12 @@ def _async_classifier(*, change_class: str, rationale: str, confidence: float, s
             confidence=confidence,
             signals=signals,
         )
+
+    return _run
+
+
+def _async_coding_worker(result: dict):
+    async def _run(request):  # noqa: ANN001
+        return CodingWorkerResult.model_validate(result)
 
     return _run

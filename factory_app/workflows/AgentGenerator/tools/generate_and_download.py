@@ -679,14 +679,25 @@ async def generate_and_download(
                         "content_type": "application/zip",
                     })
                 artifact_store = get_artifact_store()
+                parent_version_id = None
+                if context_variables and hasattr(context_variables, "get"):
+                    try:
+                        parent_version_id = context_variables.get("artifact_version_id")
+                    except Exception:
+                        parent_version_id = None
                 artifact_version = await artifact_store.create_artifact_version(
                     app_id=str(app_id),
                     artifact_kind="workflow_bundle",
                     artifact_key=wf_name,
+                    parent_version_id=str(parent_version_id) if parent_version_id else None,
                     files_manifest=files_manifest,
                     source_workflow="AgentGenerator",
                     source_chat_id=chat_id,
-                    lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+                    lifecycle_status=(
+                        ArtifactLifecycleStatus.DRAFT
+                        if parent_version_id
+                        else ArtifactLifecycleStatus.CURRENT
+                    ),
                     validation_status=ArtifactValidationStatus.PENDING,
                     commit_metadata={
                         "message": f"AgentGenerator: {wf_name}",

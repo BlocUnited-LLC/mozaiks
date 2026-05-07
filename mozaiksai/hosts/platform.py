@@ -477,6 +477,8 @@ def _normalize_shell_page_entry(entry: dict, *, order_fallback: int) -> Optional
         page["transition"] = transition.strip()
     if isinstance(workflow, str) and workflow.strip():
         page["workflow"] = workflow.strip()
+    if isinstance(entry.get("sequence"), str) and entry["sequence"].strip():
+        page["sequence"] = entry["sequence"].strip()
     if isinstance(entry.get("schema"), str) and entry["schema"].strip():
         page["schema"] = entry["schema"].strip()
     return page
@@ -1189,6 +1191,7 @@ async def get_transition_by_id(transition_id: str):
 class TransitionResolveRequest(BaseModel):
     transition_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
     option_id: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    journey_id: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,128}$")
     context_variables: Dict[str, Any] = Field(default_factory=dict)
     app_id: Optional[str] = None
     user_id: Optional[str] = None
@@ -1231,6 +1234,7 @@ async def resolve_transition_route(
             user_id=user_id,
             transition_id=body.transition_id,
             option_id=body.option_id,
+            journey_id=body.journey_id,
             context_variables=body.context_variables or {},
         )
     except ValueError as route_err:
@@ -1246,6 +1250,7 @@ async def resolve_transition_route(
             "resolution_type": "transition",
             "transition_id": body.transition_id,
             "option_id": launch_result.option_id,
+            "journey_id": launch_result.journey_id,
             "next_transition_id": launch_result.next_transition_id,
             "transition": launch_result.transition.model_dump(exclude_none=True),
             "context_variables": launch_result.context_variables,
@@ -1261,6 +1266,7 @@ async def resolve_transition_route(
         "workflow_id": workflow_launch.workflow_id,
         "option_id": launch_result.option_id,
         "requested_workflow_id": workflow_launch.requested_workflow_id,
+        "journey_id": workflow_launch.journey_id,
         "websocket_url": workflow_launch.websocket_url,
         "routing_explanation": workflow_launch.routing_explanation,
         "rerouted_by_dependency": workflow_launch.rerouted_by_dependency,

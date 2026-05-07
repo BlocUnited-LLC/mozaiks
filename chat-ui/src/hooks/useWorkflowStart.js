@@ -10,7 +10,9 @@
  *
  * Behavior:
  *   - trigger_source "chat": navigates to /chat?workflow=X&context=Y (existing flow)
- *   - all other sources: POST /api/workflows/trigger → get chat_id → navigate to /chat/{chat_id}
+ *   - all other sources: POST /api/workflows/trigger
+ *     - if the response contains chat_id + workflow_id, navigate to that chat
+ *     - otherwise return the backend result to the caller without navigation
  *     This ensures trigger metadata is stored server-side and context is validated.
  *
  * Usage:
@@ -60,6 +62,7 @@ export function useWorkflowStart() {
         trigger_source = CHAT_TRIGGER_SOURCE,
         action_id = null,
         trigger_payload = null,
+        journey_id = null,
         app_id = null,
         user_id = null,
       } = options;
@@ -75,7 +78,7 @@ export function useWorkflowStart() {
           params.set('context', JSON.stringify(contextVariables));
         }
         navigate(`/chat?${params.toString()}`);
-        return;
+        return { execution_mode: 'chat_navigation', workflow_id };
       }
 
       // All other trigger sources — use the unified backend endpoint
@@ -90,6 +93,7 @@ export function useWorkflowStart() {
           // workflow_id is optional for refinement triggers — backend router resolves it
           ...(workflowId ? { workflow_id: workflowId } : {}),
           ...(action_id ? { action_id } : {}),
+          ...(journey_id ? { journey_id } : {}),
           ...(trigger_payload && Object.keys(trigger_payload).length > 0 ? { trigger_payload } : {}),
         };
 
@@ -104,12 +108,16 @@ export function useWorkflowStart() {
           throw new Error(err.detail || 'Failed to trigger workflow');
         }
 
-        const { chat_id, workflow_id } = await res.json();
-        // Navigate to the chat for this session
-        navigate(`/chat?workflow=${encodeURIComponent(workflow_id)}&chat_id=${encodeURIComponent(chat_id)}`);
+        const payload = await res.json();
+        const { chat_id, workflow_id } = payload || {};
+        if (chat_id && workflow_id) {
+          navigate(`/chat?workflow=${encodeURIComponent(workflow_id)}&chat_id=${encodeURIComponent(chat_id)}`);
+        }
+        return payload;
       } catch (err) {
         setError(err.message);
         console.error('[useWorkflowStart] trigger failed:', err);
+        return null;
       } finally {
         setStarting(false);
       }

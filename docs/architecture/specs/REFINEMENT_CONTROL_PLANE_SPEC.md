@@ -20,8 +20,8 @@ The goal is simple:
 - the control plane decides when a change is small, scoped, design-only, or concept-breaking
 
 The refinement control plane is enabled and configured at the app level through
-`app/config/ai.json -> control_plane`. The classifier and future coding worker
-do not read workflow-local AG2 config for this.
+`app/config/ai.json -> control_plane`. The classifier and coding worker do not
+read workflow-local AG2 config for this.
 
 This is a pre-production design. There is no backward-compatibility requirement.
 
@@ -154,17 +154,49 @@ Important:
 - the current backend entrypoint is `OrchestrationControlHarness`, which owns
   builder-context interception and delegates to narrower analyzers such as the
   refinement classifier
+- the current decision layer is deliberately separate from the classifier so
+  confirmation, clarification, and workflow fallback do not get buried inside
+  one prompt response
 
 Current runtime binding:
 
 ```text
 Studio /api/workflows/trigger
   -> OrchestrationControlHarness
-  -> LLMChangeClassifier
-  -> RefinementTriggerRouteResolver
-  -> SessionRouter
-  -> selected workflow run
+  -> request_submitted checkpoint
+  -> route_requested checkpoint
+  -> decision_requested checkpoint
+  -> SessionRouter or coding worker or harness decision response
 ```
+
+Runtime note:
+
+- core now constructs a generic checkpoint runtime from the selected
+  `control_plane.yaml`
+- the first-party harness binds `request_submitted`, `route_requested`,
+  `decision_requested`, `scope_requested`, and `coding_requested` through that
+  runtime
+- this keeps the checkpoint taxonomy declarative while still allowing the
+  harness to compose checkpoint handlers deterministically
+
+Current simplified pack taxonomy:
+
+- `config/control_plane.yaml`
+  - top-level `harness`
+  - inline `checkpoints[]`
+- `prompts/*.yaml`
+- `config/tools.yaml`
+- optional `config/policies.yaml`
+
+Each checkpoint declares:
+
+- `event`
+- `entrypoint`
+- optional `prompt_id`
+- optional `tool_ids`
+
+There is no extra user-facing control-plane `components` layer. The pack
+declares what should run at each checkpoint.
 
 Current app-level config contract:
 
@@ -196,11 +228,153 @@ Rules:
 - `classifier.llm_config` selects the authoritative refinement-classification model
 - `coding.llm_config` is reserved for the refinement worker loop, not for workflow-local AG2 execution
 
+Current first-party pack paths:
+
+- `factory_app/control_plane/config/control_plane.yaml`
+- `factory_app/control_plane/config/tools.yaml`
+- `factory_app/control_plane/config/policies.yaml`
+- `factory_app/control_plane/prompts/*.yaml`
+- `factory_app/control_plane/tools/*.py`
+
+Current default classifier grounding:
+
+- the selected control-plane pack declares a `request_submitted` checkpoint
+  with its own prompt and tool ids inline in `control_plane.yaml`
+- the first-party factory pack currently loads canonical context from:
+  - `get_concept_overview`
+  - `get_design_summary`
+  - `get_artifact_summary`
+  - `get_build_state`
+- that context is gathered before the model call and passed into the
+  classifier prompt as canonical persisted builder state
+- this keeps refinement classification above workflow-local AG2 logic and off
+  the individual workflow prompt surfaces
+
+Current first-party coding worker path:
+
+- `control_plane.coding.enabled` gates the worker independently from the
+  classifier
+- the first-party factory pack declares a `coding_requested` checkpoint with its own
+  prompt and tool access
+- the first-party factory pack also declares a `scope_requested` checkpoint with its
+  own prompt and tool access
+- Studio may short-circuit a refinement request into `execution_mode:
+  coding_worker` when all of these are true:
+  - the refinement is classified as a narrow `patch`
+  - the artifact kind is `app_bundle` or `workflow_bundle`
+  - `artifact_version_id` is present
+  - either the trigger includes an explicit scoped `coding_request.files`
+    payload or the `scope_requested` checkpoint can infer a bounded file set from
+    artifact workspace context
+- when it executes successfully, the worker returns concrete `updated_files`,
+  validates the merged workspace snapshot, and can persist a child artifact
+  version for the refined bundle
+- persisted child artifact versions enter Studio review as `draft`
+- Studio review is now a first-class lifecycle step with:
+  - diff preview against the parent artifact version
+  - selected scope and coding summary
+  - explicit `accept`, `reject`, and `promote` actions
+- `accept` marks the validated child as the new `current` artifact version and
+  supersedes the prior current version in that artifact family
+- `reject` archives the child artifact version without changing the active
+  runtime state
+- `promote` restores an accepted/current artifact bundle into the runnable app
+  root or workflow target and marks the linked refinement session as
+  `promoted`
+- the worker stays subordinate to control-plane routing and does not masquerade
+  as an AG2 workflow
+- explicit file scope can now come from persisted artifact-bundle workbenches,
+  not only from an in-flight workflow surface
+- when explicit file scope is missing, the default scope selector uses
+  `get_artifact_workspace_catalog` plus routing metadata to choose the
+  narrowest safe files before the worker runs
+- the selected control-plane pack now also declares `policies.yaml`, which
+  currently bounds inferred scope with:
+  - `scope.max_selected_paths`
+  - `scope.auto_apply_max_paths`
+  - `scope.overflow_behavior`
+- the default coding toolset now includes `get_artifact_workspace_scope`, which
+  gives the worker a safe file tree and related-file previews around the
+  selected files without collapsing into a full repo-global agent
+
+Current first-party harness decision layer:
+
+- after routing, the `decision_requested` checkpoint turns the typed route and
+  optional scope result into a typed `HarnessDecision`
+- Studio may now return `execution_mode: "harness_decision"` instead of
+  launching a workflow chat when the correct next step is:
+  - confirm a high-impact reroute such as `core_restart`
+  - clarify local file scope before patching
+  - continue into a recommended workflow fallback
+- `clarify_scope` is now actionable when a bounded inferred scope already
+  exists:
+  - the decision may include `apply_proposed_scope`
+  - a follow-up trigger with `harness_action.action_id=apply_proposed_scope`
+    can continue into the coding worker without forcing the user to manually
+    reselect files
+- current first-party `decision_type` values are:
+  - `workflow_reentry`
+  - `core_restart`
+  - `auto_patch`
+  - `clarify_scope`
+  - `fallback_workflow`
+- each decision carries typed `actions[]` instead of ad hoc popup logic
+- the current first-party action ids are:
+  - `confirm_recommended_workflow`
+  - `run_recommended_workflow`
+  - `clarify_scope`
+  - `review_patch`
+- builder surfaces round-trip those actions back through
+  `refinement_request.extra.harness_action`
+- the default control-plane pack now declares this behavior as a dedicated
+  `decision_requested` checkpoint in `control_plane.yaml`
+
+Current first-party artifact workbench bridge:
+
+- `AppGenerator` now registers `app_bundle` artifact versions for generated
+  bundles
+- Studio exposes `GET /api/studio/artifacts/{artifact_version_id}/bundle` to
+  reopen a persisted bundle as a text-file workbench payload
+- the Studio Create history surface can open that bundle in `AppWorkbench`
+- `AppWorkbench` can launch a scoped refinement request with
+  `coding_request.files` sourced from the selected file editor state
+- when no file is selected in `AppWorkbench`, the control-plane harness can
+  now fall back to scope proposal instead of forcing file selection first
+
+Current first-party workflow context contract:
+
+- `ValueEngine`, `DesignDocs`, `AgentGenerator`, and `AppGenerator` now all
+  declare the shared refinement-control-plane subset they are allowed to
+  receive on reroute
+- the current common subset is:
+  - `refinement_mode`
+  - `change_class`
+  - `artifact_kind`
+  - `artifact_version_id`
+  - `refinement_request`
+  - `refinement_request_meta`
+  - `screen`
+  - `change_intent`
+  - `impact_set`
+- this is what lets a confirmed `core_restart` into `ValueEngine` preserve the
+  request and typed control-plane rationale without tripping
+  `SESSION_LAUNCH_CONTEXT_KEY_REJECTED`
+
+This is intentionally different from the older `code_context` subsystem under
+`AppGenerator/tools/code_context/`:
+
+- `code_context` is a workflow-local, persisted semantic index for generator
+  agents
+- `get_artifact_workspace_catalog` is a control-plane tool for harness-time
+  file-scope proposal against persisted artifact workspaces
+- `get_artifact_workspace_scope` is a control-plane tool for harness-time
+  artifact inspection around an explicit scoped refinement request
+
 ---
 
 ## Current Typed Control-Plane Contracts
 
-The control plane should operate on four typed artifacts:
+The control plane should operate on five typed artifacts:
 
 | Contract | Purpose |
 |---|---|
@@ -208,6 +382,7 @@ The control plane should operate on four typed artifacts:
 | `ChangeIntent` | Typed classification result used for routing and later review/persistence |
 | `ImpactSet` | Typed downstream scope summary: affected workflows, declarative families, restart point, replanning/rebuild flags |
 | `RefinementRoutingDecision` | Deterministic re-entry decision plus workflow seed context |
+| `HarnessDecision` | Typed builder-surface continuation result: auto-run, clarify, fallback, or confirm before launch |
 
 These contracts live above workflow-local AG2 handoffs.
 
@@ -220,6 +395,14 @@ The runtime may still seed workflow context with convenience fields such as:
 
 But the control plane itself should reason from the typed contracts, not from a
 loose bundle of free-form strings.
+
+`HarnessDecision` is the bridge between control-plane reasoning and builder UX.
+It is what lets the platform render a structured decision card instead of
+falling back to:
+
+- a dropdown for `patch | design | feature | core`
+- a generic popup
+- or silent rerouting with no explanation
 
 `declared_change_class` inside `RefinementRequest` is advisory only.
 
@@ -480,7 +663,7 @@ That produces a better DX than forcing every change through `AgentGenerator` or 
 
 ### Python API
 
-**Location:** `factory_app/control_plane/refinement_router.py`
+**Location:** `mozaiksai/control_plane/implementations/refinement_router.py`
 
 The module exposes a framework-owned refinement resolver. Studio and Mozaiks wire
 it into SessionRouter through the runtime trigger-route resolver seam, so the
@@ -488,7 +671,7 @@ runtime stays policy-agnostic while the shared generation layer owns create and
 refinement routing.
 
 ```python
-from factory_app.control_plane.refinement_router import (
+from mozaiksai.control_plane import (
     ChangeClass,     # Enum: patch | design | feature | core
     ArtifactKind,    # Enum: app_bundle | workflow_bundle | design_docs | concept
     RefinementRequest,
@@ -597,6 +780,44 @@ POST /api/workflows/trigger
 ```
 
 `workflow_id` is optional — the router resolves it. The response includes `routing_explanation` so the caller can surface the routing decision to the user.
+
+If the harness decides a workflow should not launch immediately, the same
+endpoint may return:
+
+```json
+{
+  "execution_mode": "harness_decision",
+  "workflow_id": "ValueEngine",
+  "harness_decision": {
+    "decision_type": "core_restart",
+    "requires_confirmation": true,
+    "actions": [
+      {
+        "action_id": "confirm_recommended_workflow",
+        "label": "Run ValueEngine"
+      }
+    ]
+  }
+}
+```
+
+Builder surfaces can then confirm or continue by resubmitting the refinement
+request with:
+
+```json
+{
+  "trigger_payload": {
+    "refinement_request": {
+      "...": "...",
+      "extra": {
+        "harness_action": {
+          "action_id": "confirm_recommended_workflow"
+        }
+      }
+    }
+  }
+}
+```
 
 ### Generator Prompt Contract
 

@@ -14,6 +14,8 @@ import {
 } from './studio/StudioPrimitives.jsx'
 import { RefinementControls } from './studio/RefinementControls.jsx'
 import { buildRefinementTriggerPayload } from './studio/refinement.js'
+import AppWorkbench from '../../../../workflows/AppGenerator/ui/AppWorkbench.js'
+import HarnessDecisionCard from '../../components/HarnessDecisionCard.jsx'
 
 
 const REQUEST_KIND_OPTIONS = [
@@ -229,9 +231,23 @@ function RefinementSummaryCard({ selectedMode, readyCount, busy, onOpen }) {
   )
 }
 
-function ArtifactVersionRow({ version, onRevert, reverting }) {
+function ArtifactVersionRow({
+  version,
+  onRevert,
+  reverting,
+  onOpenWorkbench,
+  openingWorkbench,
+  onAccept,
+  onReject,
+  onPromote,
+  actionBusy = null,
+}) {
   const isCurrent = version.lifecycle_status === 'current'
   const hasPath = Boolean(version.commit_metadata?.metadata?.artifact_path)
+  const canAccept = version.lifecycle_status === 'draft' && ['passed', 'skipped'].includes(version.validation_status)
+  const canReject = version.lifecycle_status === 'draft'
+  const canPromote = isCurrent && hasPath && ['passed', 'skipped'].includes(version.validation_status)
+  const isBusy = (action) => actionBusy === `${action}:${version.id}`
 
   return (
     <div className={`rounded-2xl border px-4 py-3 text-sm ${isCurrent ? 'border-primary/30 bg-primary/5' : 'border-border bg-background/70'}`}>
@@ -244,6 +260,29 @@ function ArtifactVersionRow({ version, onRevert, reverting }) {
       <div className="mt-1 text-xs text-muted-foreground">
         v{version.version_number} · {formatTimestamp(version.created_at)}
       </div>
+      <div className="mt-2 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+        <span className="rounded-lg border border-border bg-background/70 px-2 py-0.5">Lifecycle {version.lifecycle_status}</span>
+        <span className="rounded-lg border border-border bg-background/70 px-2 py-0.5">Validation {version.validation_status}</span>
+      </div>
+      {(canAccept || canReject || canPromote) && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {canAccept && (
+            <ActionButton onClick={() => onAccept(version.id)} disabled={Boolean(actionBusy)} variant="secondary">
+              {isBusy('accept') ? 'Accepting...' : 'Accept'}
+            </ActionButton>
+          )}
+          {canReject && (
+            <ActionButton onClick={() => onReject(version.id)} disabled={Boolean(actionBusy)} variant="secondary">
+              {isBusy('reject') ? 'Rejecting...' : 'Reject'}
+            </ActionButton>
+          )}
+          {canPromote && (
+            <ActionButton onClick={() => onPromote(version.id)} disabled={Boolean(actionBusy)}>
+              {isBusy('promote') ? 'Promoting...' : 'Promote'}
+            </ActionButton>
+          )}
+        </div>
+      )}
       {!isCurrent && (
         <div className="mt-3">
           <ActionButton onClick={() => onRevert(version.id)} disabled={reverting || !hasPath} variant="secondary">
@@ -251,11 +290,29 @@ function ArtifactVersionRow({ version, onRevert, reverting }) {
           </ActionButton>
         </div>
       )}
+      <div className="mt-3">
+        <ActionButton onClick={() => onOpenWorkbench(version.id)} disabled={!hasPath || openingWorkbench} variant="secondary">
+          {openingWorkbench ? 'Opening...' : hasPath ? 'Open workbench' : 'No bundle stored'}
+        </ActionButton>
+      </div>
     </div>
   )
 }
 
-function CreateHistory({ currentPlan, recentRequests, history, onRevert, reverting, revertResult }) {
+function CreateHistory({
+  currentPlan,
+  recentRequests,
+  history,
+  onRevert,
+  reverting,
+  revertResult,
+  onOpenWorkbench,
+  openingWorkbench,
+  onAcceptArtifact,
+  onRejectArtifact,
+  onPromoteArtifact,
+  artifactActionBusy,
+}) {
   const hasPlan = currentPlan.summary || currentPlan.owned_paths?.length || currentPlan.acceptance_criteria?.length
   const hasRequests = recentRequests.length > 0
   const versions = history?.artifact_versions || []
@@ -267,7 +324,9 @@ function CreateHistory({ currentPlan, recentRequests, history, onRevert, reverti
           <div className={`rounded-2xl border px-4 py-3 text-sm ${revertResult.error ? 'border-destructive/30 bg-destructive/10 text-destructive' : 'border-success/30 bg-success/10 text-success'}`}>
             {revertResult.error
               ? `Revert failed: ${revertResult.error}`
-              : `Reverted to ${revertResult.artifact_key} v${revertResult.artifact_version_id?.slice(-6)}. Restart the server to apply.`
+              : revertResult.action === 'promote'
+                ? `Promoted ${revertResult.artifact_key} v${revertResult.artifact_version_id?.slice(-6)} to the app root. Restart the server to apply.`
+                : `Reverted to ${revertResult.artifact_key} v${revertResult.artifact_version_id?.slice(-6)}. Restart the server to apply.`
             }
           </div>
         )}
@@ -285,6 +344,12 @@ function CreateHistory({ currentPlan, recentRequests, history, onRevert, reverti
                   version={v}
                   onRevert={onRevert}
                   reverting={reverting === v.id}
+                  onOpenWorkbench={onOpenWorkbench}
+                  openingWorkbench={openingWorkbench === v.id}
+                  onAccept={onAcceptArtifact}
+                  onReject={onRejectArtifact}
+                  onPromote={onPromoteArtifact}
+                  actionBusy={artifactActionBusy}
                 />
               ))}
             </div>
@@ -350,6 +415,12 @@ export default function StudioCreatePage() {
   const [selectedRefinementClass, setSelectedRefinementClass] = useState(null)
   const [selectedValidationStrategy, setSelectedValidationStrategy] = useState(null)
   const [refinementOverlayOpen, setRefinementOverlayOpen] = useState(false)
+  const [artifactWorkbenchOpen, setArtifactWorkbenchOpen] = useState(false)
+  const [artifactWorkbenchLoading, setArtifactWorkbenchLoading] = useState(null)
+  const [artifactWorkbenchData, setArtifactWorkbenchData] = useState(null)
+  const [artifactWorkbenchError, setArtifactWorkbenchError] = useState(null)
+  const [harnessDecisionResponse, setHarnessDecisionResponse] = useState(null)
+  const [artifactActionBusy, setArtifactActionBusy] = useState(null)
   const { startWorkflow, starting, error: workflowError } = useWorkflowStart()
 
   const syncFromSummary = (payload) => {
@@ -378,9 +449,19 @@ export default function StudioCreatePage() {
     return () => { cancelled = true }
   }, [])
 
+  const loadHistory = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/studio/history?limit=10`)
+      if (!res.ok) return
+      const payload = await res.json()
+      setHistory(payload)
+    } catch {
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
-    async function loadHistory() {
+    async function loadInitialHistory() {
       try {
         const res = await fetch(`${API_BASE}/api/studio/history?limit=10`)
         if (res.ok) {
@@ -390,7 +471,7 @@ export default function StudioCreatePage() {
       } catch {
       }
     }
-    loadHistory()
+    loadInitialHistory()
     return () => { cancelled = true }
   }, [])
 
@@ -502,15 +583,52 @@ export default function StudioCreatePage() {
     }
   }
 
-  const handleRefinement = async (changeClass = null) => {
+  const handleOpenWorkbench = async (artifactVersionId) => {
+    setArtifactWorkbenchLoading(artifactVersionId)
+    setArtifactWorkbenchError(null)
+    try {
+      const res = await fetch(`${API_BASE}/api/studio/artifacts/${encodeURIComponent(artifactVersionId)}/bundle`)
+      const body = await res.json().catch(() => ({ detail: res.statusText }))
+      if (!res.ok) throw new Error(body.detail || 'Artifact bundle could not be loaded.')
+      setArtifactWorkbenchData(body)
+      setArtifactWorkbenchOpen(true)
+    } catch (err) {
+      setArtifactWorkbenchError(err instanceof Error ? err.message : 'Artifact bundle could not be loaded.')
+    } finally {
+      setArtifactWorkbenchLoading(null)
+    }
+  }
+
+  const handleArtifactLifecycleAction = async (artifactVersionId, action) => {
+    setArtifactActionBusy(`${action}:${artifactVersionId}`)
+    setRevertResult(null)
+    try {
+      const res = await fetch(`${API_BASE}/api/studio/artifacts/${encodeURIComponent(artifactVersionId)}/${action}`, {
+        method: 'POST',
+      })
+      const body = await res.json().catch(() => ({ detail: res.statusText }))
+      if (!res.ok) throw new Error(body.detail || `Artifact ${action} failed.`)
+      if (action === 'promote') {
+        setRevertResult({ action: 'promote', artifact_version_id: artifactVersionId, artifact_key: body.artifact_key })
+      }
+      await loadHistory()
+    } catch (err) {
+      setRevertResult({ error: err instanceof Error ? err.message : `Artifact ${action} failed.` })
+    } finally {
+      setArtifactActionBusy(null)
+    }
+  }
+
+  const handleRefinement = async (changeClass = null, options = {}) => {
     setLocalError(null)
+    setHarnessDecisionResponse(null)
     if (!draft.trim()) { setLocalError('Enter a request before launching a refinement run.'); return false }
     const mode = refinementModes.find((entry) => entry.changeClass === changeClass) || null
     if (mode && !mode.available) { setLocalError("This refinement path's workflow is not installed."); return false }
     const persisted = await persistCreateRequest({ nextRequestKind: 'refinement', changeClass })
     if (persisted) {
       try {
-        await startWorkflow(null, selectedValidationStrategy ? { app_validation_strategy: selectedValidationStrategy } : {}, {
+        const result = await startWorkflow(null, selectedValidationStrategy ? { app_validation_strategy: selectedValidationStrategy } : {}, {
           trigger_source: 'refinement',
           trigger_payload: buildRefinementTriggerPayload({
             changeClass,
@@ -518,8 +636,12 @@ export default function StudioCreatePage() {
             artifactKey: 'app_bundle',
             rawUserRequest: draft,
             sourceSurface: 'studio_create',
+            harnessAction: options.harnessAction || null,
           }),
         })
+        if (result?.execution_mode === 'harness_decision') {
+          setHarnessDecisionResponse(result)
+        }
         return true
       } catch (err) {
         setLocalError(err instanceof Error ? err.message : 'Refinement could not be started.')
@@ -531,6 +653,13 @@ export default function StudioCreatePage() {
   const handleRefinementFromOverlay = async (changeClass) => {
     const started = await handleRefinement(changeClass)
     if (started) setRefinementOverlayOpen(false)
+  }
+
+  const handleHarnessDecisionAction = async (action) => {
+    if (!action) return
+    await handleRefinement(selectedRefinementClass || null, {
+      harnessAction: { action_id: action.action_id },
+    })
   }
 
   if (loading) return <StudioLoadingState label="Loading Studio Create..." />
@@ -584,12 +713,22 @@ export default function StudioCreatePage() {
         </SurfaceCard>
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-          <RefinementSummaryCard
-            selectedMode={selectedRefinementMode}
-            readyCount={readyRefinementCount}
-            busy={busy}
-            onOpen={() => setRefinementOverlayOpen(true)}
-          />
+          <div className="space-y-6">
+            <RefinementSummaryCard
+              selectedMode={selectedRefinementMode}
+              readyCount={readyRefinementCount}
+              busy={busy}
+              onOpen={() => setRefinementOverlayOpen(true)}
+            />
+            {harnessDecisionResponse?.harness_decision && (
+              <HarnessDecisionCard
+                decision={harnessDecisionResponse.harness_decision}
+                busy={busy}
+                error={combinedError}
+                onAction={handleHarnessDecisionAction}
+              />
+            )}
+          </div>
 
           <CreateHistory
             currentPlan={currentPlan}
@@ -598,6 +737,12 @@ export default function StudioCreatePage() {
             onRevert={handleRevert}
             reverting={reverting}
             revertResult={revertResult}
+            onOpenWorkbench={handleOpenWorkbench}
+            openingWorkbench={artifactWorkbenchLoading}
+            onAcceptArtifact={(artifactVersionId) => handleArtifactLifecycleAction(artifactVersionId, 'accept')}
+            onRejectArtifact={(artifactVersionId) => handleArtifactLifecycleAction(artifactVersionId, 'reject')}
+            onPromoteArtifact={(artifactVersionId) => handleArtifactLifecycleAction(artifactVersionId, 'promote')}
+            artifactActionBusy={artifactActionBusy}
           />
         </div>
 
@@ -623,6 +768,27 @@ export default function StudioCreatePage() {
             helperText="The Apply refinement action uses the current Request Brief from the Create panel above. Leave the route hint unset if you want the backend classifier to decide the scope on its own."
             submitLabel="Apply refinement"
           />
+        </StudioSlideOver>
+
+        <StudioSlideOver
+          open={artifactWorkbenchOpen}
+          title={artifactWorkbenchData?.workbench?.title || 'Artifact Workbench'}
+          description={artifactWorkbenchData?.workbench?.description || 'Inspect a persisted artifact bundle and apply scoped refinement.'}
+          onClose={() => setArtifactWorkbenchOpen(false)}
+          maxWidthClass="max-w-6xl"
+        >
+          {artifactWorkbenchError ? (
+            <div className="rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {artifactWorkbenchError}
+            </div>
+          ) : artifactWorkbenchData ? (
+            <AppWorkbench
+              payload={artifactWorkbenchData.workbench || artifactWorkbenchData}
+              showExportActions={false}
+            />
+          ) : (
+            <div className="text-sm text-muted-foreground">No artifact workbench data loaded.</div>
+          )}
         </StudioSlideOver>
       </div>
     </AdminWorkspaceLayout>

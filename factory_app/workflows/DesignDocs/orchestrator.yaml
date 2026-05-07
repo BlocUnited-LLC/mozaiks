@@ -10,3 +10,6 @@ initial_message: 'DesignDocsAgent: concept_overview is provided via context vari
   and the canonical typed surface_map contract. The runtime auto-persists the bundle
   after validation.'
 initial_agent: DesignDocsAgent
+runtime_extensions:
+  - kind: lifecycle_hooks
+    entrypoint: workflows.AppGenerator.tools.platform.build_lifecycle:get_hooks

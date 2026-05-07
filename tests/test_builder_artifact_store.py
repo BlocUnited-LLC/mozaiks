@@ -214,3 +214,53 @@ def test_builder_artifact_store_persists_database_migration_history() -> None:
     assert record["bundle_relative_path"] == "config/database_migrations/m_20260503_120000.json"
     assert collection.docs[0]["artifact_version_id"] == "artifact_1"
     assert any(kwargs.get("name") == "dbm_app_migration" for _keys, kwargs in collection.indexes)
+
+
+def test_builder_artifact_store_reads_design_docs_database_intents_and_theme_capture() -> None:
+    pm = _FakePersistenceManager()
+    store = BuilderArtifactStore(pm=pm)
+
+    asyncio.run(
+        store.upsert_design_doc(
+            app_id="app_1",
+            user_id="user_1",
+            kind="backend",
+            stage="draft",
+            content="Backend design",
+            source_workflow="DesignDocs",
+            source_chat_id="chat_1",
+            extra_fields={"surface_map": {"surfaces": [{"surface_id": "workflow"}]}},
+        )
+    )
+    asyncio.run(
+        store.save_database_intent(
+            app_id="app_1",
+            build_id="build_1",
+            artifact_version_id="artifact_1",
+            change_class="feature",
+            database_intent_bundle={"surfaces": [{"surface_id": "workflow"}], "shared_collections": [], "policies": {}},
+            user_id="user_1",
+            source_workflow="DesignDocs",
+            source_chat_id="chat_1",
+        )
+    )
+    asyncio.run(
+        store.save_theme_capture(
+            app_id="app_1",
+            chat_id="chat_1",
+            app_url="https://example.com",
+            identity={"brand_name": "Investor Hub"},
+            theme_config={"palette": "warm"},
+        )
+    )
+
+    design_doc = asyncio.run(store.get_design_doc(app_id="app_1", kind="backend"))
+    design_docs = asyncio.run(store.list_design_docs(app_id="app_1"))
+    database_intent = asyncio.run(store.get_latest_database_intent(app_id="app_1"))
+    theme_capture = asyncio.run(store.get_theme_capture(app_id="app_1"))
+
+    assert design_doc["content"] == "Backend design"
+    assert design_doc["surface_map"]["surfaces"][0]["surface_id"] == "workflow"
+    assert len(design_docs) == 1
+    assert database_intent["artifact_version_id"] == "artifact_1"
+    assert theme_capture["identity"]["brand_name"] == "Investor Hub"

@@ -53,6 +53,7 @@ class SessionRouter:
         app_id = str(trigger.app_id or "").strip()
         user_id = str(trigger.user_id or "").strip()
         trigger_source = str(trigger.trigger_source or "").strip().lower() or "chat"
+        explicit_journey_id = str(trigger.journey_id or "").strip() or None
         if not app_id or not user_id:
             raise ValueError("app_id and user_id are required")
 
@@ -76,6 +77,8 @@ class SessionRouter:
         pack = load_global_pack_graph()
         if pack is not None and requested_workflow_id not in set(list_workflow_ids(pack)):
             raise ValueError(f"Unknown workflow_id '{requested_workflow_id}'")
+        if pack is not None and explicit_journey_id and get_workflow_sequence(pack, explicit_journey_id) is None:
+            raise ValueError(f"Unknown journey_id '{explicit_journey_id}'")
 
         resolved_workflow_id = requested_workflow_id
         unmet_dependency: Optional[UnmetDependency] = None
@@ -107,6 +110,7 @@ class SessionRouter:
         decision = RoutingDecision(
             workflow_id=resolved_workflow_id,
             requested_workflow_id=requested_workflow_id,
+            journey_id=explicit_journey_id,
             context_seed=context_seed,
             explanation=explanation,
             is_full_restart=is_full_restart,
@@ -124,6 +128,7 @@ class SessionRouter:
         user_id: str,
         transition_id: str,
         option_id: Optional[str] = None,
+        journey_id: Optional[str] = None,
         context_seed: Optional[dict[str, Any]] = None,
     ) -> TransitionResolution:
         app = str(app_id or "").strip()
@@ -145,9 +150,10 @@ class SessionRouter:
         if transition is None:
             raise ValueError(f"Unknown transition_id '{current_transition_id}'")
 
-        target, resolved_context = self._resolve_transition_target(
+        target, resolved_context, resolved_journey_id = self._resolve_transition_target(
             transition=transition,
             option_id=selected_option_id,
+            journey_id=journey_id,
             context_seed=resolved_context,
         )
 
@@ -158,12 +164,14 @@ class SessionRouter:
                 app_id=app,
                 user_id=user,
                 pending_transition_id=target,
+                journey_id=resolved_journey_id,
             )
             return TransitionResolution(
                 resolution_type="transition",
                 transition_id=current_transition_id,
                 target_id=target,
                 route_type=route_type,
+                journey_id=resolved_journey_id,
                 context_seed=resolved_context,
                 option_id=selected_option_id or None,
             )
@@ -174,6 +182,7 @@ class SessionRouter:
                 user_id=user,
                 trigger_source="transition",
                 workflow_id=target,
+                journey_id=resolved_journey_id,
                 context_variables=resolved_context,
             )
         )
@@ -182,6 +191,7 @@ class SessionRouter:
             transition_id=current_transition_id,
             target_id=routing_decision.workflow_id,
             route_type=route_type,
+            journey_id=routing_decision.journey_id,
             context_seed=resolved_context,
             option_id=selected_option_id or None,
             routing_decision=routing_decision,
@@ -560,6 +570,12 @@ class SessionRouter:
         now = datetime.now(UTC)
 
         state = await self._load_or_create_state(app_id=app_id, user_id=user_id)
+        self._ensure_journey_state_for_workflow(
+            state,
+            workflow_id=decision.workflow_id,
+            journey_id=decision.journey_id,
+            journey_position=None,
+        )
 
         state.lifecycle_state = decision.lifecycle_state
         state.current_workflow_id = decision.workflow_id
@@ -576,8 +592,14 @@ class SessionRouter:
         app_id: str,
         user_id: str,
         pending_transition_id: str,
+        journey_id: Optional[str] = None,
     ) -> None:
         state = await self._load_or_create_state(app_id=app_id, user_id=user_id)
+        self._ensure_journey_state_for_transition(
+            state,
+            transition_id=str(pending_transition_id),
+            journey_id=journey_id,
+        )
         state.lifecycle_state = SessionLifecycle.AWAITING_TRANSITION
         state.pending_transition_id = str(pending_transition_id)
         state.current_workflow_id = None
@@ -637,6 +659,20 @@ class SessionRouter:
         explicit_journey_id = str(journey_id or "").strip()
         if explicit_journey_id:
             resolved_journey = get_workflow_sequence(pack, explicit_journey_id)
+            if resolved_journey is None:
+                raise ValueError(f"Unknown journey_id '{explicit_journey_id}'")
+            groups = normalize_step_groups(resolved_journey.steps)
+            resolved_index = self._resolve_group_index_for_workflow(
+                groups=groups,
+                workflow_id=workflow_id,
+                preferred_index=journey_position,
+            )
+            if resolved_index is None:
+                raise ValueError(
+                    f"Workflow '{workflow_id}' is not part of journey '{explicit_journey_id}'"
+                )
+            if journey_position is None:
+                journey_position = resolved_index
         elif state.journey_key:
             active_journey = get_workflow_sequence(pack, state.journey_key)
             if active_journey is not None:
@@ -670,6 +706,48 @@ class SessionRouter:
             reset_instance=reset_instance,
         )
 
+    def _ensure_journey_state_for_transition(
+        self,
+        state: SessionState,
+        *,
+        transition_id: str,
+        journey_id: Optional[str],
+    ) -> None:
+        pack = load_global_pack_graph()
+        if pack is None:
+            return
+
+        resolved_journey = None
+        explicit_journey_id = str(journey_id or "").strip()
+        if explicit_journey_id:
+            resolved_journey = get_workflow_sequence(pack, explicit_journey_id)
+            if resolved_journey is None:
+                raise ValueError(f"Unknown journey_id '{explicit_journey_id}'")
+        elif state.journey_key:
+            resolved_journey = get_workflow_sequence(pack, state.journey_key)
+
+        if resolved_journey is None:
+            return
+
+        resolved_index = self._resolve_step_index_for_transition(
+            steps=resolved_journey.steps,
+            transition_id=transition_id,
+        )
+        if resolved_index is None:
+            if explicit_journey_id:
+                raise ValueError(
+                    f"Transition '{transition_id}' is not part of journey '{explicit_journey_id}'"
+                )
+            return
+
+        reset_instance = resolved_journey.id != state.journey_key and resolved_index == 0
+        self._apply_journey_metadata_to_state(
+            state,
+            resolved_journey.id,
+            journey_position=resolved_index,
+            reset_instance=reset_instance,
+        )
+
     @staticmethod
     def _resolve_group_index_for_workflow(
         *,
@@ -687,6 +765,29 @@ class SessionRouter:
                     return index
         for index, group in enumerate(groups):
             if workflow_id in group:
+                return index
+        return None
+
+    @staticmethod
+    def _resolve_step_index_for_transition(
+        *,
+        steps: list[Any],
+        transition_id: str,
+        preferred_index: Optional[int] = None,
+    ) -> Optional[int]:
+        if preferred_index is not None:
+            try:
+                index = int(preferred_index)
+            except Exception:
+                index = None
+            else:
+                if 0 <= index < len(steps):
+                    step_transition = str(getattr(steps[index], "transition", "") or "").strip()
+                    if step_transition == transition_id:
+                        return index
+        for index, step in enumerate(steps):
+            step_transition = str(getattr(step, "transition", "") or "").strip()
+            if step_transition == transition_id:
                 return index
         return None
 
@@ -870,13 +971,15 @@ class SessionRouter:
         *,
         transition,
         option_id: str,
+        journey_id: Optional[str],
         context_seed: dict[str, Any],
-    ) -> tuple[str, dict[str, Any]]:
+    ) -> tuple[str, dict[str, Any], Optional[str]]:
         selected_option_id = str(option_id or "").strip()
         if selected_option_id:
             return self._resolve_selected_option(
                 transition=transition,
                 option_id=selected_option_id,
+                journey_id=journey_id,
                 context_seed=context_seed,
             )
 
@@ -885,10 +988,15 @@ class SessionRouter:
             target = str(getattr(transition, "route_to", "") or "").strip()
             if not target:
                 raise ValueError(f"Transition '{transition.id}' has no route_to")
-            return target, dict(context_seed)
+            transition_journey_id = str(getattr(transition, "sequence", "") or "").strip() or None
+            return target, dict(context_seed), transition_journey_id or (str(journey_id or "").strip() or None)
 
         if transition_type == "condition":
-            return self._resolve_condition_transition(transition=transition, context_seed=context_seed)
+            return self._resolve_condition_transition(
+                transition=transition,
+                journey_id=journey_id,
+                context_seed=context_seed,
+            )
 
         raise ValueError(f"option_id is required for transition '{transition.id}'")
 
@@ -897,8 +1005,9 @@ class SessionRouter:
         *,
         transition,
         option_id: str,
+        journey_id: Optional[str],
         context_seed: dict[str, Any],
-    ) -> tuple[str, dict[str, Any]]:
+    ) -> tuple[str, dict[str, Any], Optional[str]]:
         selected = str(option_id or "").strip()
         for option in getattr(transition, "options", []) or []:
             if str(getattr(option, "id", "") or "").strip() != selected:
@@ -912,23 +1021,31 @@ class SessionRouter:
                 raise ValueError(
                     f"option_id '{selected}' for transition '{transition.id}' has no route_to"
                 )
-            return target, resolved_context
+            option_journey_id = str(getattr(option, "sequence", "") or "").strip() or None
+            transition_journey_id = str(getattr(transition, "sequence", "") or "").strip() or None
+            return target, resolved_context, option_journey_id or transition_journey_id or (str(journey_id or "").strip() or None)
 
         if selected == "confirm":
             target = str(getattr(transition, "confirm_route", "") or "").strip()
             if target:
-                return target, dict(context_seed)
+                transition_journey_id = str(getattr(transition, "sequence", "") or "").strip() or None
+                return target, dict(context_seed), transition_journey_id or (str(journey_id or "").strip() or None)
         if selected == "cancel":
             target = str(getattr(transition, "cancel_route", "") or "").strip()
             if target:
-                return target, dict(context_seed)
+                transition_journey_id = str(getattr(transition, "sequence", "") or "").strip() or None
+                return target, dict(context_seed), transition_journey_id or (str(journey_id or "").strip() or None)
 
         raise ValueError(
             f"option_id '{selected}' is not valid for transition '{transition.id}'"
         )
 
     @staticmethod
-    def _resolve_condition_transition(transition, context_seed: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    def _resolve_condition_transition(
+        transition,
+        journey_id: Optional[str],
+        context_seed: dict[str, Any],
+    ) -> tuple[str, dict[str, Any], Optional[str]]:
         context_key = str(getattr(transition, "context_key", "") or "").strip()
         if not context_key:
             raise ValueError(f"Condition transition '{transition.id}' is missing context_key")
@@ -940,11 +1057,14 @@ class SessionRouter:
             target = str(getattr(route, "route_to", "") or "").strip()
             if not target:
                 continue
-            return target, dict(context_seed)
+            route_journey_id = str(getattr(route, "sequence", "") or "").strip() or None
+            transition_journey_id = str(getattr(transition, "sequence", "") or "").strip() or None
+            return target, dict(context_seed), route_journey_id or transition_journey_id or (str(journey_id or "").strip() or None)
 
         default_route = str(getattr(transition, "default_route", "") or "").strip()
         if default_route:
-            return default_route, dict(context_seed)
+            transition_journey_id = str(getattr(transition, "sequence", "") or "").strip() or None
+            return default_route, dict(context_seed), transition_journey_id or (str(journey_id or "").strip() or None)
 
         raise ValueError(
             f"Condition transition '{transition.id}' had no matching route for context '{context_key}'"

@@ -1841,6 +1841,12 @@ models:
         - str
         - 'null'
         description: Workflow id or transition id to route to when selected. Required for all user_choice* transitions.
+      sequence:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional workflow sequence override to bind when this option is selected.
       context_variables:
         type: optional_dict
         description: Deterministic context variables seeded when this option is selected. Keys must be declared by the target workflow context_variables.yaml.
@@ -1888,6 +1894,12 @@ models:
         - str
         - 'null'
         description: Direct route target for single-route transitions only.
+      sequence:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional workflow sequence to keep active for single-route transitions.
       options:
         type: list
         items: PackGraphTransitionOption

@@ -71,6 +71,18 @@ class SimpleLLMCapabilityService:
 
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
+        if self._should_use_responses_api(model=model, llm_config=llm_config):
+            return await self._generate_responses_completion(
+                api_base=api_base,
+                headers=headers,
+                model=model,
+                messages=messages,
+                llm_config=llm_config,
+                app_id=app_id,
+                user_id=user_id,
+                ui_context=ui_context,
+            )
+
         payload: Dict[str, Any] = {
             "model": model,
             "temperature": float(temperature),
@@ -101,6 +113,45 @@ class SimpleLLMCapabilityService:
         )
         usage = data.get("usage", {}) if isinstance(data, dict) else {}
 
+        return {"content": content, "usage": usage}
+
+    async def _generate_responses_completion(
+        self,
+        *,
+        api_base: str,
+        headers: Dict[str, str],
+        model: str,
+        messages: List[Dict[str, str]],
+        llm_config: Optional[Dict[str, Any]],
+        app_id: Optional[str],
+        user_id: Optional[str],
+        ui_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        instructions, input_payload = self._messages_to_responses_payload(messages)
+        payload: Dict[str, Any] = {
+            "model": model,
+            "input": input_payload,
+        }
+        if instructions:
+            payload["instructions"] = instructions
+
+        logger.info(
+            "[CAPABILITY_LLM] Request",
+            extra={
+                "model": model,
+                "app_id": app_id,
+                "user_id": user_id,
+                "workflow_count": 0,
+                "message_count": len(messages),
+                "api_mode": "responses",
+            },
+        )
+
+        response = await self._client.post(f"{api_base}/responses", headers=headers, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        content = self._extract_responses_text(data)
+        usage = data.get("usage", {}) if isinstance(data, dict) else {}
         return {"content": content, "usage": usage}
 
     async def generate_json_completion(
@@ -137,6 +188,61 @@ class SimpleLLMCapabilityService:
             "parsed": parsed,
             "usage": response.get("usage") or {},
         }
+
+    @staticmethod
+    def _should_use_responses_api(*, model: str, llm_config: Optional[Dict[str, Any]]) -> bool:
+        normalized_model = str(model or "").strip().lower()
+        if normalized_model.endswith("-codex") or "-codex-" in normalized_model:
+            return True
+        config_mode = str((llm_config or {}).get("api_mode") or "").strip().lower()
+        return config_mode == "responses"
+
+    @staticmethod
+    def _messages_to_responses_payload(messages: List[Dict[str, str]]) -> tuple[Optional[str], Any]:
+        instructions: Optional[str] = None
+        items: List[Dict[str, Any]] = []
+        for message in messages:
+            role = str(message.get("role") or "user").strip().lower() or "user"
+            content = str(message.get("content") or "")
+            if role == "system" and instructions is None:
+                instructions = content
+                continue
+            items.append(
+                {
+                    "role": role,
+                    "content": [{"type": "input_text", "text": content}],
+                }
+            )
+        if len(items) == 1 and items[0].get("role") == "user":
+            content_items = items[0].get("content") or []
+            if (
+                isinstance(content_items, list)
+                and len(content_items) == 1
+                and isinstance(content_items[0], dict)
+                and content_items[0].get("type") == "input_text"
+            ):
+                return instructions, str(content_items[0].get("text") or "")
+        return instructions, items
+
+    @staticmethod
+    def _extract_responses_text(data: Any) -> str:
+        if not isinstance(data, dict):
+            return ""
+        output_text = data.get("output_text")
+        if isinstance(output_text, str) and output_text.strip():
+            return output_text.strip()
+
+        chunks: List[str] = []
+        for item in data.get("output", []) or []:
+            if not isinstance(item, dict):
+                continue
+            for content in item.get("content", []) or []:
+                if not isinstance(content, dict):
+                    continue
+                text = content.get("text")
+                if isinstance(text, str) and text:
+                    chunks.append(text)
+        return "\n".join(chunk.strip() for chunk in chunks if chunk.strip()).strip()
 
     @staticmethod
     def _parse_json_object(content: str) -> Dict[str, Any]:

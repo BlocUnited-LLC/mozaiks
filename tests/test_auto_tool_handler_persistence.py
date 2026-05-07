@@ -104,6 +104,54 @@ async def test_handle_tool_dispatch_persists_updated_context(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_handle_tool_dispatch_rejects_invalid_structured_data(monkeypatch):
+    handler = AutoToolEventHandler()
+    binding = AutoToolBinding(
+        model_name="SmokePresentation",
+        agent_name="PresenterAgent",
+        tool_name="consume_resume_state",
+        function=_consume_resume_state,
+        param_names=("summary", "worker_name", "context_variables"),
+        accepts_context=True,
+        ui_config={},
+        model_cls=SmokePresentation,
+    )
+
+    resolve_binding = AsyncMock(return_value=binding)
+    emit_tool_call = AsyncMock()
+    emit_tool_result = AsyncMock()
+    register_turn = AsyncMock()
+
+    monkeypatch.setattr(handler, "_resolve_binding", resolve_binding)
+    monkeypatch.setattr(handler, "_emit_tool_call", emit_tool_call)
+    monkeypatch.setattr(handler, "_emit_tool_result", emit_tool_result)
+    monkeypatch.setattr(handler, "_register_turn", register_turn)
+
+    event = {
+        "auto_tool_call": True,
+        "agent_name": "PresenterAgent",
+        "model_name": "SmokePresentation",
+        "structured_data": {
+            "summary": "Missing worker name should fail validation.",
+        },
+        "context": {
+            "workflow_name": "SmokeParent",
+            "chat_id": "chat-1",
+            "app_id": "app-1",
+        },
+        "turn_idempotency_key": "turn-2",
+        "_pattern_context_ref": _ContextVariables(),
+    }
+
+    await handler.handle_tool_dispatch(event)
+
+    resolve_binding.assert_awaited_once()
+    emit_tool_call.assert_not_awaited()
+    emit_tool_result.assert_not_awaited()
+    register_turn.assert_awaited_once_with("chat-1:turn-2")
+
+
+@pytest.mark.asyncio
 async def test_persist_context_variables_filters_canonical_fields():
     manager = AG2PersistenceManager.__new__(AG2PersistenceManager)
     fake_coll = MagicMock()

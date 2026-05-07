@@ -81,7 +81,7 @@ Informational registry of workflow types for UI/docs:
 Defines runtime auto-advance sequences:
 - `id` (string, required): sequence key (stored in persisted session metadata).
 - `description` (string, optional): human-readable.
-- `steps` (list, required): ordered groups shaped as `{ "workflows": ["WorkflowId"] }`.
+- `steps` (list, required): ordered groups shaped as `{ "workflows": ["WorkflowId"] }` or surfaced checkpoints shaped as `{ "transition": "TransitionId" }`.
 
 Workflow sequence declarations should be authored as sequence metadata only.
 Entry UI belongs to `entrypoints[]` routes that reference `transition: <id>` directly.
@@ -108,7 +108,9 @@ Defines router decision points:
 - `transition_type` (string, required): `user_choice`, `user_choice_context`, `user_choice_route`, `condition`, `confirm`, `silent`, `progress_view`, or `prerequisite_redirect`.
 - `ui` (object, required for `user_choice` and `confirm`): registered shell component binding, never a file path.
 - `options` (list, optional): selectable targets for `user_choice`; each option declares its own `route_to`, the UI emits option id, and the router resolves the target.
+- `options[].sequence` (string, optional): explicit sequence override for the selected branch.
 - `route_to` (string, optional): direct target for single-route transitions.
+- `sequence` (string, optional): explicit sequence binding for a single-route transition.
 - `options[].context_variables` (object, optional): deterministic context seeds merged when the option is selected. The target workflow receives only keys declared in its `context_variables.yaml`.
 
 ---
@@ -145,6 +147,10 @@ whole step group is complete. If so, it starts the next step group.
   `chat.transition_requested`; the shell mounts the registered transition React
   component and resumes routing through `/api/transitions/resolve`.
 
+When a shell route enters a transition or workflow directly, it forwards the
+route's `sequence` as `journey_id`. Transition options can override that active
+journey by declaring their own `options[].sequence` value.
+
 ### 3.3 Persisted sequence fields
 
 The runtime stores sequence metadata on chat sessions using the current
@@ -160,12 +166,14 @@ The runtime stores sequence metadata on chat sessions using the current
 ## 4) Mozaiks Example
 
 Configuration intent:
-- Build sequence: `ValueEngine -> DesignDocs -> AgentGenerator -> AppGenerator`
+- Build sequence: `app_type_selector -> ValueEngine -> ThemeCapture -> coding_journey_selector -> database_setup_selector -> DesignDocs -> AgentGenerator -> AppGenerator`
+- Brownfield adoption sequence: `app_type_selector -> ExistingAppDiscovery`
 - Dependencies: `DesignDocs` requires `ValueEngine`; generators require `DesignDocs`
-- Entry transition: `/create` points directly at `coding_journey_selector`
+- Entry transition: `/create` points directly at `app_type_selector`
 
 UX outcome:
 - The user picks a route before any workflow starts.
+- The greenfield and brownfield choices can bind different authored sequences from the same entry transition.
 - The runtime enforces prerequisites before each workflow start.
 - Completion of one build phase can auto-advance to the next phase.
 - Multiple apps (different `app_id`) remain isolated; no cross-app state bleed.

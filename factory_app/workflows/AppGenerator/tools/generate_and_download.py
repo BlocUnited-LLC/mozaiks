@@ -227,6 +227,91 @@ async def _persist_pending_schema_migration(
     return record
 
 
+async def _register_app_bundle_artifact_version(
+    *,
+    app_id: str,
+    user_id: Optional[str],
+    workflow_name: str,
+    chat_id: Optional[str],
+    bundle_name: str,
+    zip_path: Path,
+    context_variables: Optional[Any],
+):
+    try:
+        import hashlib
+        from mozaiksai.core.artifacts import (
+            ArtifactLifecycleStatus,
+            ArtifactValidationStatus,
+            get_artifact_store,
+        )
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError(f"Artifact store dependencies unavailable: {exc}") from exc
+
+    parent_version_id = None
+    validation_status_raw = None
+    lifecycle_status = None
+    if context_variables is not None and hasattr(context_variables, "get"):
+        try:
+            parent_version_id = context_variables.get("artifact_version_id")
+            validation_status_raw = context_variables.get("app_validation_status")
+        except Exception:
+            parent_version_id = None
+            validation_status_raw = None
+
+    lifecycle_status = (
+        ArtifactLifecycleStatus.DRAFT
+        if parent_version_id
+        else ArtifactLifecycleStatus.CURRENT
+    )
+
+    normalized_status = str(validation_status_raw or "").strip().lower()
+    validation_status = ArtifactValidationStatus.PENDING
+    if normalized_status == "passed":
+        validation_status = ArtifactValidationStatus.PASSED
+    elif normalized_status == "failed":
+        validation_status = ArtifactValidationStatus.FAILED
+    elif normalized_status == "skipped":
+        validation_status = ArtifactValidationStatus.SKIPPED
+
+    raw = zip_path.read_bytes()
+    sha = hashlib.sha256(raw).hexdigest()
+    artifact_store = get_artifact_store()
+    artifact_version = await artifact_store.create_artifact_version(
+        app_id=str(app_id),
+        artifact_kind="app_bundle",
+        artifact_key="app_bundle",
+        parent_version_id=str(parent_version_id) if parent_version_id else None,
+        files_manifest=[
+            {
+                "path": f"{bundle_name}/{zip_path.name}",
+                "sha256": sha,
+                "size_bytes": zip_path.stat().st_size,
+                "content_type": "application/zip",
+            }
+        ],
+        source_workflow=workflow_name,
+        source_chat_id=chat_id,
+        lifecycle_status=lifecycle_status,
+        validation_status=validation_status,
+        commit_metadata={
+            "message": f"{workflow_name}: {bundle_name}",
+            "author_user_id": user_id,
+            "source_workflow": workflow_name,
+            "source_chat_id": chat_id,
+            "metadata": {
+                "artifact_path": str(zip_path.resolve()),
+                "bundle_name": bundle_name,
+            },
+        },
+    )
+    if context_variables is not None and hasattr(context_variables, "set"):
+        try:
+            context_variables.set("artifact_version_id", artifact_version.id)
+        except Exception:
+            pass
+    return artifact_version
+
+
 async def generate_and_download(
     DownloadRequest: Annotated[
         Dict[str, Any],
@@ -358,6 +443,20 @@ async def generate_and_download(
                 zipf.write(file_path, arcname=f"{bundle_name}/{rel_path}")
 
     zip_size = zip_path.stat().st_size
+    artifact_version = None
+    try:
+        artifact_version = await _register_app_bundle_artifact_version(
+            app_id=str(app_id),
+            user_id=user_id,
+            workflow_name=workflow_name,
+            chat_id=chat_id,
+            bundle_name=bundle_name,
+            zip_path=zip_path,
+            context_variables=context_variables,
+        )
+    except Exception as artifact_err:
+        wf_logger.warning("Failed to register app bundle artifact version: %s", artifact_err)
+
     ui_files = [
         {
             "name": f"{bundle_name}.zip",
@@ -378,6 +477,9 @@ async def generate_and_download(
         "workflow_name": workflow_name,
         "agent_message_id": agent_message_id,
         "stage": "confirm" if confirmation_only else "files_ready",
+        "artifact_kind": "app_bundle",
+        "artifact_key": "app_bundle",
+        "artifact_version_id": artifact_version.id if artifact_version else None,
         # Workbench context (best-effort): allow ChatUI to render file tree + editor + preview.
         "generated_files": files_map,
     }

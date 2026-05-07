@@ -395,6 +395,140 @@ def test_app_build_plan_tool_rejects_split_admin_api_with_wrong_task_type() -> N
         )
 
 
+def test_app_build_plan_tool_rejects_unknown_task_type() -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_tool_unknown_task_type_guard",
+    )
+
+    with pytest.raises(ValueError, match="unsupported task_type 'custom_task'"):
+        module.app_build_plan(
+            AppBuildPlan={
+                "agent_message": "Planned the product.",
+                "app_kind": "marketplace",
+                "pages": [{"name": "Home", "route": "/", "purpose": "Land on the product"}],
+                "entities": [],
+                "roles": ["admin"],
+                "auth_strategy": "role-based",
+                "backend_scope": ["backend glue"],
+                "frontend_scope": ["home ui"],
+                "theme_preferences": None,
+                "brand_intent": None,
+                "capability_packs": [],
+                "external_integrations": [],
+                "agent_backend_required": False,
+                "build_tasks": [
+                    {
+                        "task_id": "task_custom_lane",
+                        "task_type": "custom_task",
+                        "capability_pack_id": None,
+                        "execution_target": "AppGenerator",
+                        "initial_agent": "ConfigMiddlewareAgent",
+                        "description": "Generate a non-canonical task.",
+                        "initial_message": "Generate a non-canonical task.",
+                        "owned_paths": ["backend/config.py"],
+                        "depends_on": [],
+                        "acceptance_criteria": ["Config exists"],
+                    }
+                ],
+                "generation_order": ["backend-foundation"],
+            },
+            context_variables=_Context(),
+        )
+
+
+def test_app_build_plan_tool_rejects_module_contract_with_wrong_initial_agent() -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_tool_module_contract_owner_guard",
+    )
+
+    with pytest.raises(ValueError, match="`module_contract` must start at ConfigMiddlewareAgent"):
+        module.app_build_plan(
+            AppBuildPlan={
+                "agent_message": "Planned the product.",
+                "app_kind": "marketplace",
+                "pages": [{"name": "Home", "route": "/", "purpose": "Land on the product"}],
+                "entities": [],
+                "roles": ["admin"],
+                "auth_strategy": "role-based",
+                "backend_scope": ["module contracts"],
+                "frontend_scope": ["home ui"],
+                "theme_preferences": None,
+                "brand_intent": None,
+                "capability_packs": [
+                    {
+                        "capability_pack_id": "orders",
+                        "pack_type": "custom_domain",
+                        "label": "Orders",
+                        "summary": "Order handling",
+                        "implementation_mode": "declarative_module",
+                    }
+                ],
+                "external_integrations": [],
+                "agent_backend_required": False,
+                "build_tasks": [
+                    {
+                        "task_id": "task_orders_contract",
+                        "task_type": "module_contract",
+                        "capability_pack_id": "orders",
+                        "execution_target": "AppGenerator",
+                        "initial_agent": "ServiceAgent",
+                        "description": "Generate the orders module contract.",
+                        "initial_message": "Generate the orders module contract.",
+                        "owned_paths": ["modules/orders/module.yaml"],
+                        "depends_on": [],
+                        "acceptance_criteria": ["Contract exists"],
+                    }
+                ],
+                "generation_order": ["backend-foundation"],
+            },
+            context_variables=_Context(),
+        )
+
+
+def test_app_build_plan_tool_rejects_backend_foundation_with_wrong_initial_agent() -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_tool_backend_foundation_owner_guard",
+    )
+
+    with pytest.raises(ValueError, match="`backend_foundation` must start at ConfigMiddlewareAgent"):
+        module.app_build_plan(
+            AppBuildPlan={
+                "agent_message": "Planned the product.",
+                "app_kind": "marketplace",
+                "pages": [{"name": "Home", "route": "/", "purpose": "Land on the product"}],
+                "entities": [],
+                "roles": ["admin"],
+                "auth_strategy": "role-based",
+                "backend_scope": ["backend glue"],
+                "frontend_scope": ["home ui"],
+                "theme_preferences": None,
+                "brand_intent": None,
+                "capability_packs": [],
+                "external_integrations": [],
+                "agent_backend_required": False,
+                "build_tasks": [
+                    {
+                        "task_id": "task_backend_foundation",
+                        "task_type": "backend_foundation",
+                        "capability_pack_id": None,
+                        "execution_target": "AppGenerator",
+                        "initial_agent": "ControllerAgent",
+                        "description": "Generate backend glue.",
+                        "initial_message": "Generate backend glue.",
+                        "owned_paths": ["backend/config.py"],
+                        "depends_on": [],
+                        "acceptance_criteria": ["Config exists"],
+                    }
+                ],
+                "generation_order": ["backend-foundation"],
+            },
+            context_variables=_Context(),
+        )
+
+
 def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators() -> None:
     module = _load_module(
         "factory_app/workflows/ValueEngine/tools/manifest.py",

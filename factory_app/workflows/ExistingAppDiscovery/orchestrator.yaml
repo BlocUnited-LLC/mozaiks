@@ -17,3 +17,6 @@ initial_message:
   You are part of the Mozaiks existing-app discovery process. DiscoveryHostAgent,
   welcome the user and begin gathering information about their existing application.
 initial_agent: DiscoveryHostAgent
+runtime_extensions:
+  - kind: lifecycle_hooks
+    entrypoint: workflows.AppGenerator.tools.platform.build_lifecycle:get_hooks

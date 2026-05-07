@@ -132,6 +132,7 @@ def test_new_app_entry_routes_into_valueengine_first() -> None:
     assert app_type_selector["transition_type"] == "user_choice_context"
     new_app_option = next(item for item in app_type_selector["options"] if item["id"] == "greenfield_app")
     assert new_app_option["route_to"] == "ValueEngine"
+    assert new_app_option["sequence"] == "build"
     assert new_app_option["context_variables"] == {"app_type": "greenfield_app"}
     assert "app_type" in value_context["definitions"]
     assert "database_provider" in design_docs_context["definitions"]
@@ -150,6 +151,7 @@ def test_existing_app_entry_routes_into_discovery_with_context() -> None:
     app_type_selector = transition_map["app_type_selector"]
     existing_app_option = next(item for item in app_type_selector["options"] if item["id"] == "brownfield_app")
     assert existing_app_option["route_to"] == "ExistingAppDiscovery"
+    assert existing_app_option["sequence"] == "brownfield_app_adoption"
     assert existing_app_option["context_variables"] == {"app_type": "brownfield_app"}
 
     assert "existing_app_entry_selector" not in transition_map

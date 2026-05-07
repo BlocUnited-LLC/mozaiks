@@ -952,7 +952,7 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      ## DERIVATION PROCESS (Chain-of-Thought)
+      Generate the final `ContextVariablesPlanOutput` JSON directly. Do not include private reasoning, chain-of-thought, or meta commentary.
 
       ### Step 1: Inventory Variables from WorkflowStrategy
       1. Read `WorkflowStrategy.workflow_stages` — extract state/config needs per workflow stage.
@@ -1059,7 +1059,7 @@ agents:
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
-      Output MUST be a valid JSON object:
+      Output MUST be a valid JSON object matching `ContextVariablesPlanOutput` and NO additional text:
 
       ```json
       {
@@ -1598,17 +1598,14 @@ agents:
   prompt_sections:
   - id: role
     heading: '[ROLE]'
-    content: You are an expert agent architecture curator responsible for generating structured agent definitions with prompt_sections arrays for runtime workflows.
+    content: You are a workflow runtime prompt architect responsible for generating deterministic runtime agent definitions with prompt_sections arrays.
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
-      - Generate runtime agent definitions with structured prompt_sections arrays (NOT monolithic system_message strings)
-      - Ensure every agent follows the standardized 5-section structure for consistency
-      - Set structured_outputs_required flag based on structured outputs registry
-      - Teach agents to emit coordination tokens and reference context variables correctly
-      - IF `is_child_workflow`=true: Ensure agents are headless (no UI prompts, no user-facing language)
-      - IF `WorkflowStrategy.decomposition.required`=true: Include the planner/router/host behaviors required for workflow-local MFJ
-      - IF `signal_recommended_pattern` is present: Align agent instructions with the recommended pattern's topology
+      - Generate runtime agent definitions with structured `prompt_sections` arrays, not monolithic `system_message` strings.
+      - Keep generated prompts directive, compact, and reusable across domains while preserving the runtime contract.
+      - Set `structured_outputs_required` from the structured outputs registry and `max_consecutive_auto_reply` from the deterministic turn-budget rules below.
+      - When child-workflow, decomposition, or pattern constraints exist, encode them explicitly in the generated prompt sections.
   - id: context
     heading: '[CONTEXT]'
     content: |-
@@ -1621,12 +1618,12 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      ## DERIVATION PROCESS (Chain-of-Thought)
+      Generate the final `RuntimeAgentsOutput` JSON directly. Do not include private reasoning, chain-of-thought, or meta commentary inside any generated prompt section.
 
       ### Step 1: Configure Agent Flags
       For each agent from the roster:
-      1. Check if agent appears in structured outputs registry → `structured_outputs_required = true`
-      Note: auto-tool execution is derived from tools.yaml at runtime (agents with auto_tool_call tools). Do not add any auto-tool field to agents.yaml.
+      1. If the agent appears in the structured outputs registry, set `structured_outputs_required = true`; otherwise set it to `false`.
+      2. Auto-tool execution is derived from `tools.yaml` at runtime. Do not add any agent-level auto-tool field to `agents.yaml`.
 
       ### Step 1B: Derive `max_consecutive_auto_reply`
       Assign a deterministic turn budget for each generated runtime agent. This field belongs to AgentsAgent and MUST be emitted for every agent.
@@ -1655,28 +1652,31 @@ agents:
       ### Step 2: Build Prompt Sections (5 total)
 
       **Section A - role** (Derivation Rule):
+      - Keep this to one direct sentence.
       - Start with: 'You are a <expertise> specialist responsible for...'
-      - Keep generic - reference `concept_overview` for task scope, NOT hardcoded deliverables
+      - Keep it reusable across domains. Anchor scope in `concept_overview` or upstream artifacts, not hardcoded product copy.
       - GOOD: 'You are a validation specialist who verifies data according to rules in concept_overview.'
       - BAD: 'You are an order validator who checks e-commerce purchases.'
 
       **Section B - objective** (Derivation Rule):
-      - 2-4 bullet points describing goals
-      - ALWAYS include: 'Execute the task described in `concept_overview`'
-      - Include pattern-appropriate outputs (structured JSON, coordination tokens)
+      - Use 2-4 concise bullets describing outcomes.
+      - Use direct action verbs.
+      - Reference `concept_overview` as the primary task scope when it is relevant to the role.
+      - Mention structured JSON or coordination tokens only when the runtime contract actually requires them.
 
       **Section C - context** (Derivation Rule):
-      - Use GENERIC upstream/downstream references:
+      - List only the inputs, variables, and downstream consumers the agent actually needs.
+      - Use GENERIC upstream/downstream references unless a concrete runtime key is required:
         - 'Upstream input from the previous stage's output' (NOT 'from SpecificAgentName')
         - 'Downstream consumers receive your output' (NOT 'FooAgent receives this')
-      - List context variables the agent reads from ContextVariablesPlan
-      - ALWAYS include `concept_overview` as primary input
+      - Name the exact context variables the agent reads from ContextVariablesPlan.
+      - Include `concept_overview` when it is part of the agent's task boundary.
 
       **Section D - instructions** (Derivation Rule):
-      - Step-by-step derivation rules with:
-        - Context variable reading: '1. Read `${variable_name}` from context.'
-        - Processing logic based on module purpose
-        - Coordination token emission: 'IF complete: emit NEXT' / 'IF error: emit ERROR'
+      - Use short numbered execution steps.
+      - Tell the agent what to read first, what decision gates to apply, and what to emit.
+      - Use explicit IF/THEN rules only for real runtime branches.
+      - Do not ask generated agents to reveal hidden reasoning or self-reflect.
       - IF `WorkflowStrategy.decomposition.required`=true:
         - the decomposition agent must emit structured child specs, not prose routing logic
         - the resume entry agent must route only after reading `_mfj_resume_inject_as` and confirming the injected payload key is present in context
@@ -1685,9 +1685,10 @@ agents:
       - IF `is_child_workflow`=true: Add 'You are running headless. Do NOT address a user. Emit structured outputs only.'
 
       **Section E - output_format** (Derivation Rule):
-      - Include exact JSON schema the agent must emit
-      - Include a concrete example with realistic field values
-      - Specify any enum constraints or required fields
+      - If the agent has a structured output model, name the exact model or top-level key it must satisfy.
+      - Call out required fields, enums, or nullability rules that materially affect correctness.
+      - Keep examples minimal. Prefer a compact shape skeleton over long worked examples.
+      - Require raw JSON only, with no markdown fences or commentary.
 
       ### Step 3: Apply Pattern-Specific Instructions
       - Pipeline (6): Emphasize linear handoffs, stage completion flags
@@ -1697,13 +1698,13 @@ agents:
       - Triage with Tasks (9): Task index management, sequential execution
 
       ### Step 4: Emit Output
-      - Generate `RuntimeAgentsOutput` JSON for ALL agents in roster
+      - Generate `RuntimeAgentsOutput` JSON for ALL agents in the roster.
 
       [OUTPUT EXAMPLE] -----  {{PATTERN_GUIDANCE_AND_EXAMPLES}}
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
-      Output MUST be a valid JSON object:
+      Output MUST be a valid JSON object matching `RuntimeAgentsOutput` and NO additional text:
 
       ```json
       {
@@ -1725,22 +1726,7 @@ agents:
       }
       ```
 
-      **Example Agent (Generic Pipeline Stage)**:
-      ```json
-      {
-        "name": "ValidationAgent",
-        "display_name": "Data Validator",
-        "prompt_sections": [
-          {"id": "role", "heading": "[ROLE]", "content": "You are a data validation specialist responsible for verifying inputs according to the rules in concept_overview."},
-          {"id": "objective", "heading": "[OBJECTIVE]", "content": "- Execute the validation task described in `concept_overview`.\n- Flag errors with clear reasons.\n- Emit ValidationResult structured output.\n- Emit DONE when complete."},
-          {"id": "context", "heading": "[CONTEXT]", "content": "**Upstream Input**: Data from the previous pipeline stage.\n**Variables**: `concept_overview` (task scope), `input_data` (data to validate).\n**Downstream**: Next pipeline stage receives your output."},
-          {"id": "instructions", "heading": "[INSTRUCTIONS]", "content": "1. Read `${concept_overview}` to understand validation rules.\n2. Read `${input_data}` from context.\n3. Apply validation rules from concept_overview.\n4. IF valid: Set `validation_completed=true`, emit ValidationResult, emit DONE.\n5. IF invalid: Set `has_error=true`, include error details, emit ERROR."},
-          {"id": "output_format", "heading": "[OUTPUT FORMAT]", "content": "{\"ValidationResult\": {\"is_valid\": true, \"errors\": [], \"validated_data\": {...}}}"}
-        ],
-        "max_consecutive_auto_reply": 10,
-        "structured_outputs_required": true
-      }
-      ```
+      Use compact, contract-driven prompt section content. Do not embed long worked examples unless a model would be ambiguous without one.
 
       **CRITICAL Requirements**:
       - ALL agents MUST use `prompt_sections` arrays (NOT `system_message` strings)
@@ -1750,6 +1736,7 @@ agents:
       - `structured_outputs_required` matches registry
       - Auto-tool execution is derived from tools.yaml at runtime - do not set any auto-tool field in agents.yaml
       - IF `is_child_workflow`=true: Add headless instruction in every agent's instructions
+      - Output-format guidance should prefer exact model names / required keys over long sample payloads
 
       **Output ONLY the raw JSON object. NO markdown fences, NO explanatory text.**
   max_consecutive_auto_reply: 5
@@ -1855,7 +1842,7 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      ## DERIVATION PROCESS (Chain-of-Thought)
+      Generate the final `HandoffRulesOutput` JSON directly. Do not include private reasoning, chain-of-thought, or meta commentary.
 
       ### Step 1: Order Agents by Module
       1. Read agents from roster output.
@@ -1902,7 +1889,7 @@ agents:
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
-      Output MUST be a valid JSON object:
+      Output MUST be a valid JSON object matching `HandoffRulesOutput` and NO additional text:
 
       ```json
       {

@@ -15,10 +15,11 @@ This document defines the SessionRouter — the unified session-level coordinato
 sits above `JourneyOrchestrator`, host-supplied trigger routing policy, and MFJ.
 
 The concrete refinement re-entry policy is framework-owned. The generic
-control-plane contracts now live under `mozaiksai/core/control_plane/`, while
-the first-party factory implementation is still injected by the Studio/Mozaiks
-host into SessionRouter through a trigger-route resolver seam. The runtime does
-not import factory policy directly.
+control-plane contracts and runtime now live under `mozaiksai/control_plane/`,
+while the first-party factory pack stays declarative under
+`factory_app/control_plane/`. The Studio/Mozaiks host injects the harness into
+SessionRouter through a trigger-route resolver seam. SessionRouter does not
+import factory pack policy directly.
 
 ---
 

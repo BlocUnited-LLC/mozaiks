@@ -651,6 +651,37 @@ def _extract_workflow_strategy_payload(raw: Any) -> Dict[str, Any]:
     return {}
 
 
+def _normalize_mapping_output(raw: Any, *, output_name: str, wf_logger) -> Dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+
+    if isinstance(raw, str):
+        cleaned = raw.strip()
+        if not cleaned:
+            return {}
+        try:
+            parsed = json.loads(cleaned)
+        except Exception:
+            wf_logger.warning(
+                f"⚠️ [CREATE_WORKFLOW_FILES] Ignoring malformed {output_name}; expected object-like JSON"
+            )
+            return {}
+        if isinstance(parsed, dict):
+            return parsed
+        wf_logger.warning(
+            f"⚠️ [CREATE_WORKFLOW_FILES] Ignoring malformed {output_name}; JSON payload was not an object"
+        )
+        return {}
+
+    if raw is None:
+        return {}
+
+    wf_logger.warning(
+        f"⚠️ [CREATE_WORKFLOW_FILES] Ignoring malformed {output_name}; expected dict, got {type(raw).__name__}"
+    )
+    return {}
+
+
 def _normalize_nullable_text(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -1332,7 +1363,11 @@ async def create_workflow_files(data: Dict[str, Any], context_variables: Optiona
         config: Dict[str, Any] = {}
 
         # Extract orchestrator settings from OrchestratorAgent output
-        orchestrator_output = data.get('orchestrator_output', {})
+        orchestrator_output = _normalize_mapping_output(
+            data.get('orchestrator_output', {}),
+            output_name='orchestrator_output',
+            wf_logger=wf_logger,
+        )
         if orchestrator_output:
             normalized_orchestrator = dict(orchestrator_output)
             normalized_orchestrator["initial_message_to_user"] = _normalize_nullable_text(
@@ -1357,7 +1392,11 @@ async def create_workflow_files(data: Dict[str, Any], context_variables: Optiona
         # Extract agents from AgentsAgent output.
         # Auto-tool execution is derived later by the runtime from tools.yaml.
         # Transform agents list into dict keyed by agent name for agents.yaml format.
-        agents_output = data.get('agents_output', {})
+        agents_output = _normalize_mapping_output(
+            data.get('agents_output', {}),
+            output_name='agents_output',
+            wf_logger=wf_logger,
+        )
         agent_names = _extract_agent_names(agents_output)
         if agents_output and 'agents' in agents_output:
             agents_list = agents_output['agents']
@@ -1383,14 +1422,22 @@ async def create_workflow_files(data: Dict[str, Any], context_variables: Optiona
             wf_logger.warning("⚠️ [CREATE_WORKFLOW_FILES] No agents in agents_output")
 
         # Extract handoffs from HandoffsAgent output
-        handoffs_output = data.get('handoffs_output', {})
+        handoffs_output = _normalize_mapping_output(
+            data.get('handoffs_output', {}),
+            output_name='handoffs_output',
+            wf_logger=wf_logger,
+        )
         if handoffs_output and 'handoff_rules' in handoffs_output:
             normalized_rules = _normalize_handoff_rules(handoffs_output.get('handoff_rules'))
             config['handoffs'] = {'handoff_rules': normalized_rules}
             wf_logger.info(f"📋 [CREATE_WORKFLOW_FILES] Added {len(normalized_rules)} handoff rules")
 
         # Extract hooks from HookAgent output (metadata only + optional filecontent -> extra_files)
-        hooks_output = data.get('hooks_output', {})
+        hooks_output = _normalize_mapping_output(
+            data.get('hooks_output', {}),
+            output_name='hooks_output',
+            wf_logger=wf_logger,
+        )
         if hooks_output and 'hooks' in hooks_output:
             raw_hooks = hooks_output.get('hooks', [])
             metadata_hooks: List[Dict[str, Any]] = []
@@ -1432,18 +1479,30 @@ async def create_workflow_files(data: Dict[str, Any], context_variables: Optiona
                 wf_logger.info(f"🧩 [CREATE_WORKFLOW_FILES] Collected {len(hook_extra_files)} hook implementation files")
 
         # Extract context variables from ContextVariablesAgent output
-        context_variables_output = data.get('context_variables_output', {})
+        context_variables_output = _normalize_mapping_output(
+            data.get('context_variables_output', {}),
+            output_name='context_variables_output',
+            wf_logger=wf_logger,
+        )
         if context_variables_output and 'context_variables' in context_variables_output:
             config['context_variables'] = context_variables_output
             wf_logger.info(f"📋 [CREATE_WORKFLOW_FILES] Added {len(context_variables_output['context_variables'])} context variables")
 
         # Extract tools configuration from ToolsManagerAgent
-        tools_manager_output = data.get('tools_manager_output', {})
+        tools_manager_output = _normalize_mapping_output(
+            data.get('tools_manager_output', {}),
+            output_name='tools_manager_output',
+            wf_logger=wf_logger,
+        )
 
         # -----------------------------
         # Structured outputs (MERGE)
         # -----------------------------
-        static_structured = data.get('structured_outputs', {}) or {}
+        static_structured = _normalize_mapping_output(
+            data.get('structured_outputs', {}) or {},
+            output_name='structured_outputs',
+            wf_logger=wf_logger,
+        )
         dynamic_structured = data.get('structured_outputs_agent_output', {}) or {}
 
         # Normalize dynamic structured outputs: agent may return JSON as string or
@@ -1506,7 +1565,11 @@ async def create_workflow_files(data: Dict[str, Any], context_variables: Optiona
                 if tools_config:
                     config["tools"] = tools_config
         # Add UI configuration
-        ui_config = data.get('ui_config', {})
+        ui_config = _normalize_mapping_output(
+            data.get('ui_config', {}),
+            output_name='ui_config',
+            wf_logger=wf_logger,
+        )
         if ui_config:
             normalized_ui_config = dict(ui_config)
             normalized_ui_config['visual_agents'] = _normalize_visual_agents(
@@ -1547,7 +1610,11 @@ async def create_workflow_files(data: Dict[str, Any], context_variables: Optiona
                     return True
             return False
 
-        workflow_strategy_output = data.get("workflow_strategy_output", {})
+        workflow_strategy_output = _normalize_mapping_output(
+            data.get("workflow_strategy_output", {}),
+            output_name="workflow_strategy_output",
+            wf_logger=wf_logger,
+        )
         workflow_local_graph = _build_workflow_local_pack_graph(
             workflow_name=workflow_name,
             workflow_strategy_output=workflow_strategy_output,

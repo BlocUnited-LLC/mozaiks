@@ -11,7 +11,7 @@ from mozaiksai.core.session.model import SessionLifecycle, TriggerInput
 from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
 from .change_classifier import get_change_classifier
 
-_logger = logging.getLogger("factory_app.control_plane.refinement_router")
+_logger = logging.getLogger("mozaiksai.control_plane.implementations.refinement_router")
 
 
 class ChangeClass(str, Enum):
@@ -125,8 +125,8 @@ _ARTIFACT_FAMILY_MAP: dict[ArtifactKind, list[str]] = {
 _DOWNSTREAM_BUILD_SEQUENCE = ["ValueEngine", "DesignDocs", "AgentGenerator", "AppGenerator"]
 
 class RefinementTriggerRouteResolver:
-    def __init__(self) -> None:
-        self._classifier = get_change_classifier()
+    def __init__(self, *, classifier=None) -> None:
+        self._classifier = classifier or get_change_classifier()
 
     @staticmethod
     def _artifact_label(artifact_kind: ArtifactKind) -> str:
@@ -155,6 +155,7 @@ class RefinementTriggerRouteResolver:
     async def _derive_change_intent(self, request: RefinementRequest) -> ChangeIntent:
         classification = await self._classifier.classify(
             artifact_kind=request.artifact_kind.value,
+            artifact_key=request.artifact_key,
             raw_user_request=request.raw_user_request,
             declared_change_class=request.declared_change_class.value if request.declared_change_class else None,
             artifact_version_id=request.artifact_version_id,
@@ -371,6 +372,12 @@ class RefinementTriggerRouteResolver:
         if not isinstance(nested_request, dict):
             return None
         request_payload = dict(nested_request)
+        request_payload.setdefault("extra", {})
+        if not isinstance(request_payload["extra"], dict):
+            request_payload["extra"] = {}
+        harness_action = payload.get("harness_action")
+        if isinstance(harness_action, dict):
+            request_payload["extra"]["harness_action"] = dict(harness_action)
 
         request_payload.setdefault("artifact_kind", ArtifactKind.APP_BUNDLE.value)
         request_payload["artifact_key"] = (

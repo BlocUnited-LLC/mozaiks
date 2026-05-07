@@ -28,6 +28,30 @@ hooks:
   filename: hook_domain_catalog_context.py
   function: inject_domain_catalog_context
 - hook_type: update_agent_state
+  hook_agent: AppPlanAgent
+  filename: hook_file_contract_context.py
+  function: inject_cookie_cutter_contracts_context
+- hook_type: update_agent_state
+  hook_agent: AppSchemaAgent
+  filename: hook_file_contract_context.py
+  function: inject_cookie_cutter_contracts_context
+- hook_type: update_agent_state
   hook_agent: ConfigMiddlewareAgent
   filename: hook_domain_catalog_context.py
   function: inject_module_file_manifest_guard
+- hook_type: update_agent_state
+  hook_agent: ConfigMiddlewareAgent
+  filename: hook_file_contract_context.py
+  function: inject_cookie_cutter_contracts_context
+- hook_type: update_agent_state
+  hook_agent: ServiceAgent
+  filename: hook_file_contract_context.py
+  function: inject_cookie_cutter_contracts_context
+- hook_type: update_agent_state
+  hook_agent: FrontendStubAgent
+  filename: hook_file_contract_context.py
+  function: inject_cookie_cutter_contracts_context
+- hook_type: update_agent_state
+  hook_agent: ControllerAgent
+  filename: hook_file_contract_context.py
+  function: inject_cookie_cutter_contracts_context

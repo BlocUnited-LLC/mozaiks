@@ -55,7 +55,7 @@ demo framework.
 ### Keep as core runtime contracts
 
 - `mozaiksai/core/ports/orchestration.py`
-- `mozaiksai/core/control_plane/contracts.py`
+- `mozaiksai/control_plane/contracts.py`
 - `mozaiksai/core/orchestration/universal_orchestrator.py`
 - `mozaiksai/core/workflow/pack/schema.py`
 - `mozaiksai/core/workflow/pack/gating.py`

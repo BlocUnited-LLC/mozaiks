@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from mozaiksai.core.capabilities import get_general_capability_service
-from mozaiksai.core.control_plane import ControlPlaneConfig, load_control_plane_config
+from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
+from mozaiksai.control_plane.contracts import ControlPlaneToolCall, ControlPlaneToolContext
+from mozaiksai.control_plane.executor import ControlPlaneToolExecutor
+from mozaiksai.control_plane.loader import load_selected_control_plane_pack
+from mozaiksai.control_plane.schema import LoadedControlPlanePack
 
 
 ChangeClassLiteral = Literal["patch", "design", "feature", "core"]
+_CHECKPOINT_EVENT = "request_submitted"
 
 
 class ChangeClassifierResult(BaseModel):
@@ -23,36 +29,24 @@ class ChangeClassifierResult(BaseModel):
 class LLMChangeClassifier:
     """Authoritative LLM-backed refinement change classifier."""
 
-    _SYSTEM_PROMPT = """You are the authoritative Mozaiks refinement change classifier.
-
-Classify a natural-language build refinement request into exactly one of:
-- patch: targeted fix or localized correction within the current artifact boundary
-- design: visual, UX, information architecture, schema, or design-system revision without changing the product concept
-- feature: additive capability within the current product direction
-- core: change in value proposition, target user, product identity, business model, architecture direction, or anything that should reopen ValueEngine
-
-Rules:
-- Use the request text as the primary signal.
-- Treat a user-declared hint as advisory only, never authoritative.
-- Be conservative about `core`, but choose it when the request changes what the product fundamentally is.
-- Return JSON only.
-- Do not include markdown fences.
-- Keep `signals` short and semantic, such as "new_capability", "concept_shift", "workflow_expansion", "visual_redesign", "bug_fix", "target_user_change".
-"""
-
     def __init__(
         self,
         *,
         capability_service: Any = None,
         config_loader: Any = load_control_plane_config,
+        pack_loader: Any = load_selected_control_plane_pack,
+        tool_executor: Any = None,
     ) -> None:
         self._service = capability_service or get_general_capability_service()
         self._config_loader = config_loader
+        self._pack_loader = pack_loader
+        self._tool_executor = tool_executor or ControlPlaneToolExecutor(pack_loader=pack_loader)
 
     async def classify(
         self,
         *,
         artifact_kind: str,
+        artifact_key: Optional[str] = None,
         raw_user_request: str,
         declared_change_class: Optional[str] = None,
         artifact_version_id: Optional[str] = None,
@@ -83,10 +77,20 @@ Rules:
             source_surface=source_surface,
             app_id=app_id,
             requested_workflow_id=requested_workflow_id,
+            control_plane_context=await self._load_control_plane_context(
+                artifact_kind=artifact_kind,
+                artifact_key=artifact_key,
+                raw_user_request=raw_user_request,
+                artifact_version_id=artifact_version_id,
+                source_surface=source_surface,
+                app_id=app_id,
+                requested_workflow_id=requested_workflow_id,
+                extra=extra or {},
+            ),
             extra=extra or {},
         )
         response = await self._service.generate_json_completion(
-            system_prompt=self._SYSTEM_PROMPT,
+            system_prompt=self._load_system_prompt(),
             user_prompt=user_prompt,
             app_id=app_id,
             user_id=None,
@@ -100,6 +104,65 @@ Rules:
         config = self._config_loader()
         return config if isinstance(config, ControlPlaneConfig) else ControlPlaneConfig.model_validate(config)
 
+    def _load_pack(self) -> LoadedControlPlanePack:
+        pack = self._pack_loader()
+        return pack if isinstance(pack, LoadedControlPlanePack) else LoadedControlPlanePack.model_validate(pack)
+
+    def _load_system_prompt(self) -> str:
+        pack = self._load_pack()
+        checkpoint = pack.checkpoint_by_event(_CHECKPOINT_EVENT)
+        if checkpoint is None or not checkpoint.prompt_id:
+            raise RuntimeError(
+                f"Selected control-plane profile does not declare a '{_CHECKPOINT_EVENT}' checkpoint with prompt_id"
+            )
+        prompt = pack.prompt_by_id(checkpoint.prompt_id)
+        if prompt is None:
+            raise RuntimeError(f"Classifier prompt '{checkpoint.prompt_id}' was not found in prompts.yaml")
+        return prompt.content
+
+    async def _load_control_plane_context(
+        self,
+        *,
+        artifact_kind: str,
+        artifact_key: Optional[str],
+        raw_user_request: str,
+        artifact_version_id: Optional[str],
+        source_surface: Optional[str],
+        app_id: Optional[str],
+        requested_workflow_id: Optional[str],
+        extra: dict[str, Any],
+    ) -> dict[str, Any]:
+        pack = self._load_pack()
+        checkpoint = pack.checkpoint_by_event(_CHECKPOINT_EVENT)
+        if checkpoint is None or not checkpoint.tool_ids:
+            return {}
+
+        context = ControlPlaneToolContext(
+            checkpoint=_CHECKPOINT_EVENT,
+            app_id=app_id,
+            artifact_kind=artifact_kind or None,
+            artifact_key=artifact_key,
+            artifact_version_id=artifact_version_id,
+            requested_workflow_id=requested_workflow_id,
+            source_surface=source_surface,
+            raw_user_request=raw_user_request or "",
+            extra=dict(extra or {}),
+        )
+        results: dict[str, Any] = {}
+        for tool_id in checkpoint.tool_ids:
+            result = await self._tool_executor.execute_tool(
+                ControlPlaneToolCall(tool_id=tool_id, target=_CHECKPOINT_EVENT),
+                context=context,
+            )
+            if result.success:
+                results[tool_id] = result.output
+            else:
+                results[tool_id] = {
+                    "error": result.error or "tool_execution_failed",
+                    "metadata": dict(result.metadata or {}),
+                }
+        return results
+
     @staticmethod
     def _build_user_prompt(
         *,
@@ -110,6 +173,7 @@ Rules:
         source_surface: Optional[str],
         app_id: Optional[str],
         requested_workflow_id: Optional[str],
+        control_plane_context: dict[str, Any],
         extra: dict[str, Any],
     ) -> str:
         lines = [
@@ -122,6 +186,9 @@ Rules:
             f"user_declared_hint: {declared_change_class or 'none'}",
             f"request: {raw_user_request or ''}",
         ]
+        if control_plane_context:
+            lines.append("control_plane_context_json:")
+            lines.append(json.dumps(control_plane_context, indent=2, sort_keys=True, default=str))
         if extra:
             lines.append(f"extra_context: {extra}")
         lines.append("")

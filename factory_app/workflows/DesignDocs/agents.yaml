@@ -14,7 +14,7 @@ agents:
       - Do NOT implement AI/LLM backend logic. No LLM endpoints, embeddings, vector DBs, model training, or prompt-serving APIs.
       - Focus on core application functionality only.
       - Generate documents as strings inside one structured output bundle.
-      - concept_overview, monetization_enabled, coding_participation, design_docs_hitl, database_provider, and database_setup_mode are provided via context variables; do not call tools to load them.
+      - concept_overview, monetization_enabled, coding_participation, design_docs_hitl, database_provider, database_setup_mode, and any refinement control-plane fields are provided via context variables; do not call tools to load them.
       - If design_docs_hitl is true, make the docs easier to review by clearly separating assumptions, alternatives, and final recommendations.
       - If coding_participation is autonomous, keep docs direct and execution-oriented.
       - If database_setup_mode is atlas or existing_uri, treat database connectivity as secret-managed configuration and do not hardcode connection strings.
@@ -26,6 +26,8 @@ agents:
     heading: '[PROCESS]'
     content: |-
       1) Read concept_overview, database_provider, and database_setup_mode from context variables.
+
+      1a) If refinement_request, change_class, change_intent, or impact_set are present, treat them as authoritative control-plane reroute context. Revise the design around that requested delta instead of regenerating from a blank slate.
 
       2) Generate the Frontend doc as Markdown and place it in `frontend_markdown`.
 

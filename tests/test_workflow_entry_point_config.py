@@ -26,6 +26,7 @@ def test_factory_app_control_plane_defaults_are_declared() -> None:
     data = json.loads(ai_path.read_text(encoding="utf-8"))
 
     assert data["control_plane"]["enabled"] is True
+    assert data["control_plane"]["profile"] == "default"
     assert data["control_plane"]["classifier"]["enabled"] is True
     assert data["control_plane"]["classifier"]["llm_config"]["model"] == "gpt-4o-mini"
 

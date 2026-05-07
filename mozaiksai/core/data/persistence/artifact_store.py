@@ -85,6 +85,14 @@ class BuilderArtifactStore:
         doc.pop("_id", None)
         return doc
 
+    async def get_theme_capture(self, *, app_id: str) -> Optional[Dict[str, Any]]:
+        coll = await self._collection(BuilderCollections.THEME_CAPTURES)
+        doc = await coll.find_one({"app_id": str(app_id)})
+        if not isinstance(doc, dict):
+            return None
+        doc.pop("_id", None)
+        return doc
+
     async def ensure_design_doc_indexes(self) -> None:
         await self._ensure_indexes(
             BuilderCollections.DESIGN_DOCUMENTS,
@@ -171,6 +179,27 @@ class BuilderArtifactStore:
             upsert=True,
         )
 
+    async def get_design_doc(self, *, app_id: str, kind: str) -> Optional[Dict[str, Any]]:
+        coll = await self._collection(BuilderCollections.DESIGN_DOCUMENTS)
+        doc = await coll.find_one({"app_id": str(app_id), "kind": str(kind)})
+        if not isinstance(doc, dict):
+            return None
+        doc.pop("_id", None)
+        return doc
+
+    async def list_design_docs(self, *, app_id: str) -> List[Dict[str, Any]]:
+        coll = await self._collection(BuilderCollections.DESIGN_DOCUMENTS)
+        cursor = coll.find({"app_id": str(app_id)})
+        rows = await cursor.to_list(length=None)
+        docs: List[Dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            doc = dict(row)
+            doc.pop("_id", None)
+            docs.append(doc)
+        return docs
+
     async def mark_design_doc_status(
         self,
         *,
@@ -233,6 +262,16 @@ class BuilderArtifactStore:
             },
             upsert=True,
         )
+
+    async def get_latest_database_intent(self, *, app_id: str) -> Optional[Dict[str, Any]]:
+        coll = await self._collection(BuilderCollections.DATABASE_INTENTS)
+        cursor = coll.find({"app_id": str(app_id)}).sort("updated_at", -1).limit(1)
+        docs = await cursor.to_list(length=1)
+        if not docs or not isinstance(docs[0], dict):
+            return None
+        doc = dict(docs[0])
+        doc.pop("_id", None)
+        return doc
 
     async def save_theme_capture(
         self,

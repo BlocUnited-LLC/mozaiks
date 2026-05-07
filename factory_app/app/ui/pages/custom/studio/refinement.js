@@ -44,6 +44,8 @@ export function buildRefinementTriggerPayload({
   artifactVersionId = null,
   rawUserRequest = null,
   sourceSurface = null,
+  extra = null,
+  harnessAction = null,
 }) {
   const trimmedRequest = typeof rawUserRequest === 'string' ? rawUserRequest.trim() : ''
   const refinementRequest = {
@@ -62,8 +64,15 @@ export function buildRefinementTriggerPayload({
   if (sourceSurface) {
     refinementRequest.source_surface = sourceSurface
   }
+  if (extra && typeof extra === 'object') {
+    refinementRequest.extra = extra
+  }
 
-  return {
+  const payload = {
     refinement_request: refinementRequest,
   }
+  if (harnessAction && typeof harnessAction === 'object') {
+    payload.harness_action = harnessAction
+  }
+  return payload
 }

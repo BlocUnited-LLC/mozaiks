@@ -114,6 +114,12 @@ class TestDomainCatalogYaml:
             data = yaml.safe_load(fh)
         assert len(data["domains"]) >= 10
 
+    def test_catalog_is_domain_prior_not_file_inventory(self):
+        source = _CATALOG_PATH.read_text(encoding="utf-8")
+        assert "recommended_module_type:" in source
+        assert "yaml_files:" not in source
+        assert "python_files:" not in source
+
 
 # ---------------------------------------------------------------------------
 # inject_domain_catalog_context tests
@@ -162,6 +168,15 @@ class TestInjectDomainCatalogContext:
         self.mod.inject_domain_catalog_context(agent, [])
         msg = agent.system_message
         assert "module.yaml always" in msg or "Include module.yaml always" in msg
+
+    def test_includes_module_archetype_priors(self):
+        agent = _FakeAgent(
+            name="AppPlanAgent",
+            context_variables={"concept_overview": "team messaging app"},
+        )
+        self.mod.inject_domain_catalog_context(agent, [])
+        msg = agent.system_message
+        assert "[messaging]" in msg or "[standard]" in msg or "[workflow]" in msg or "[transactional]" in msg
 
     def test_instructs_against_six_file_default(self):
         agent = _FakeAgent(

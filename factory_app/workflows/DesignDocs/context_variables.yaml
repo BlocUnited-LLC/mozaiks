@@ -1,4 +1,82 @@
 definitions:
+  refinement_mode:
+    type: boolean
+    description: >
+      True when DesignDocs was reopened by the refinement control plane rather
+      than launched as a fresh downstream build step.
+    source:
+      type: state
+      default: false
+  change_class:
+    type: string
+    description: >
+      Refinement change class: patch | design | feature | core. When present,
+      it describes why the control plane re-entered DesignDocs.
+    source:
+      type: state
+      default: null
+  artifact_kind:
+    type: string
+    description: >
+      Artifact family that triggered the current reroute, such as app_bundle or
+      workflow_bundle.
+    source:
+      type: state
+      default: null
+  artifact_version_id:
+    type: string
+    description: >
+      Version id of the downstream artifact that triggered the reroute. Null
+      for the first-pass design path.
+    source:
+      type: state
+      default: null
+  refinement_request:
+    type: string
+    description: >
+      Raw user-supplied refinement request text passed through from the
+      canonical RefinementRequest. When present, this is the design revision
+      request DesignDocsAgent should anchor to first.
+    source:
+      type: state
+      default: null
+  refinement_request_meta:
+    type: object
+    description: >
+      Full typed RefinementRequest payload persisted by the control plane.
+      Useful when downstream agents need artifact ids, source surface, or other
+      request metadata beyond the raw refinement text.
+    source:
+      type: state
+      default: null
+  screen:
+    type: string
+    description: >
+      Builder surface or screen identifier that launched the current refinement
+      request, such as studio-create. Preserved for analytics and future
+      surface-aware prompt shaping.
+    source:
+      type: state
+      default: null
+  change_intent:
+    type: object
+    description: >
+      Typed refinement classification emitted by the control plane. Contains the
+      final `change_class`, rationale, and layer-touch information so
+      DesignDocs can understand whether the revision is local, design-scoped,
+      feature-extending, or concept-revising.
+    source:
+      type: state
+      default: null
+  impact_set:
+    type: object
+    description: >
+      Typed downstream impact summary emitted by the control plane. Contains
+      affected workflows, affected declarative families, restart_from, and
+      rebuild/replanning flags for the current refinement request.
+    source:
+      type: state
+      default: null
   concept_overview:
     type: string
     description: Project description and overview from the BuilderConcepts collection (produced
@@ -50,6 +128,15 @@ definitions:
 agents:
   DesignDocsAgent:
     variables:
+    - refinement_mode
+    - change_class
+    - artifact_kind
+    - artifact_version_id
+    - refinement_request
+    - refinement_request_meta
+    - screen
+    - change_intent
+    - impact_set
     - concept_overview
     - monetization_enabled
     - coding_participation

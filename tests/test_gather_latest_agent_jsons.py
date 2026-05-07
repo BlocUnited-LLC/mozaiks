@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+from importlib import import_module
 import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from tests.import_utils import import_module_directly
-
-_persist_mod = import_module_directly("mozaiksai.core.data.persistence.persistence_manager")
+_persist_mod = import_module("mozaiksai.core.data.persistence.persistence_manager")
 AG2PersistenceManager = _persist_mod.AG2PersistenceManager
 
 
@@ -29,6 +28,48 @@ async def test_gather_latest_agent_jsons_ignores_user_messages(caplog) -> None:
 
     assert result == {"PresenterAgent": {"summary": "done"}}
     assert "No JSON found in user message" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_gather_latest_agent_jsons_falls_back_when_latest_message_is_malformed(caplog) -> None:
+    manager = AG2PersistenceManager.__new__(AG2PersistenceManager)
+    manager.resume_chat = AsyncMock(
+        return_value=[
+            {
+                "role": "assistant",
+                "agent_name": "AgentsAgent",
+                "structured_output": {
+                    "agents": [
+                        {
+                            "name": "PlannerAgent",
+                            "prompt_sections": [],
+                        }
+                    ]
+                },
+            },
+            {
+                "role": "assistant",
+                "agent_name": "AgentsAgent",
+                "content": '{"agents": [',
+            },
+        ]
+    )
+    manager._coll = AsyncMock(return_value=MagicMock())
+
+    with caplog.at_level(logging.DEBUG):
+        result = await manager.gather_latest_agent_jsons(chat_id="chat-1", app_id="app-1")
+
+    assert result == {
+        "AgentsAgent": {
+            "agents": [
+                {
+                    "name": "PlannerAgent",
+                    "prompt_sections": [],
+                }
+            ]
+        }
+    }
+    assert "Extracted JSON from AgentsAgent (via structured_output field)" in caplog.text
 
 
 def test_extract_json_from_wrapped_text_event_content() -> None:

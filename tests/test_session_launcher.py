@@ -124,6 +124,101 @@ def test_validate_context_for_workflow_keeps_refinement_launch_keys_for_appgener
     }
 
 
+@pytest.mark.parametrize(
+    ("workflow_id", "context", "expected"),
+    [
+        (
+            "AgentGenerator",
+            {
+                "refinement_mode": True,
+                "change_class": "patch",
+                "artifact_kind": "workflow_bundle",
+                "artifact_version_id": "wv_123",
+                "refinement_request": "Rename the workflow title",
+                "refinement_request_meta": {"artifact_key": "workflow_bundle"},
+                "screen": "studio-create",
+                "change_intent": {"change_class": "patch"},
+                "impact_set": {"restart_from": "AgentGenerator"},
+            },
+            {
+                "refinement_mode": True,
+                "change_class": "patch",
+                "artifact_kind": "workflow_bundle",
+                "artifact_version_id": "wv_123",
+                "refinement_request": "Rename the workflow title",
+                "refinement_request_meta": {"artifact_key": "workflow_bundle"},
+                "screen": "studio-create",
+                "change_intent": {"change_class": "patch"},
+                "impact_set": {"restart_from": "AgentGenerator"},
+            },
+        ),
+        (
+            "DesignDocs",
+            {
+                "refinement_mode": True,
+                "change_class": "design",
+                "artifact_kind": "app_bundle",
+                "artifact_version_id": "av_456",
+                "refinement_request": "Refresh the dashboard information architecture",
+                "refinement_request_meta": {"artifact_key": "app_bundle"},
+                "screen": "studio-create",
+                "change_intent": {"change_class": "design"},
+                "impact_set": {"restart_from": "DesignDocs"},
+            },
+            {
+                "refinement_mode": True,
+                "change_class": "design",
+                "artifact_kind": "app_bundle",
+                "artifact_version_id": "av_456",
+                "refinement_request": "Refresh the dashboard information architecture",
+                "refinement_request_meta": {"artifact_key": "app_bundle"},
+                "screen": "studio-create",
+                "change_intent": {"change_class": "design"},
+                "impact_set": {"restart_from": "DesignDocs"},
+            },
+        ),
+        (
+            "ValueEngine",
+            {
+                "refinement_mode": False,
+                "change_class": "core",
+                "artifact_kind": "app_bundle",
+                "artifact_version_id": "av_789",
+                "refinement_request": "Turn this into a blockchain marketplace",
+                "refinement_request_meta": {"artifact_key": "app_bundle"},
+                "screen": "studio-create",
+                "change_intent": {"change_class": "core"},
+                "impact_set": {"restart_from": "ValueEngine"},
+            },
+            {
+                "refinement_mode": False,
+                "change_class": "core",
+                "artifact_kind": "app_bundle",
+                "artifact_version_id": "av_789",
+                "refinement_request": "Turn this into a blockchain marketplace",
+                "refinement_request_meta": {"artifact_key": "app_bundle"},
+                "screen": "studio-create",
+                "change_intent": {"change_class": "core"},
+                "impact_set": {"restart_from": "ValueEngine"},
+            },
+        ),
+    ],
+)
+def test_validate_context_for_workflow_keeps_refinement_launch_keys_for_builder_workflows(
+    workflow_id: str,
+    context: dict,
+    expected: dict,
+) -> None:
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+
+    _workflow_manager.UnifiedWorkflowManager._instance = None
+    _workflow_manager.initialize_workflows(base_path=str(workflows_root))
+
+    validated = _session_launcher.validate_context_for_workflow(workflow_id, context)
+
+    assert validated == expected
+
+
 @pytest.mark.asyncio
 async def test_launch_routed_workflow_creates_chat_and_binds_session(monkeypatch):
     persistence = _FakePersistence()
@@ -347,6 +442,7 @@ async def test_emit_workflow_launch_navigation_sends_chat_navigate_envelope(monk
         rerouted_by_dependency=False,
         validated_context={},
         trigger_meta={},
+        journey_id=None,
         routing_decision=SimpleNamespace(explanation="ok", rerouted_by_dependency=False),
     )
 

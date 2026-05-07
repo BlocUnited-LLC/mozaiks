@@ -116,14 +116,13 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
 def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations_contract() -> None:
     source = _read("factory_app/workflows/AppGenerator/agents.yaml")
     handoffs = _read_yaml("factory_app/workflows/AppGenerator/handoffs.yaml")
+    file_contracts = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
+    module_archetypes = _read_yaml("factory_app/workflows/AppGenerator/tools/module_archetypes.yaml")
 
     assert "task_type: module_contract" in source
     assert "backend_foundation_bundle" in source
     assert "Do NOT include an `admin_config` build task." in source
     assert "Fail the task rather than guessing a fallback mode." in source
-    assert "modules/{pack_name}/module.yaml" in source
-    assert "modules/{pack_name}/subscriptions.yaml" in source
-    assert "modules/{pack_name}/admin.yaml" in source
     assert "backend/handler.py" in source
     assert "Frontend Stub Agent" in source
     assert "module_contract.js_stubs" in source
@@ -136,8 +135,6 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
     assert "Persistent app pages still belong in `app.json` + `ui/pages/*.yaml`." in source
     assert "`ui/route_manifest.json` + `ui/pages/custom/*.jsx`" in source
     assert "custom_route_bundle" in source
-    assert "domain.task_manager.task_created" in source
-    assert "schema_version: mozaiks.admin.v2" in source
     assert "schema_version: mozaiks.admin.app_backend.v1" in source
     assert "ControllerOutput.app_backend_admin_config" in source
     assert "\"mode\": \"app_backend_admin_surface\"" in source
@@ -155,6 +152,8 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
     assert "validation_status" in source
     assert "validate_app_build" in source
     assert "passed` or explicit `skipped`" in source
+    assert "[FILE CONTRACTS CONTEXT]" in source
+    assert "[MODULE ARCHETYPES CONTEXT]" in source
     assert "python_stubs" in source
     assert "js_stubs" in source
     assert "\"database_files\"" in source
@@ -165,6 +164,12 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
     assert "mode\": \"admin_config_bundle\"" not in source
     assert "host_admin_config" not in source
     assert "`app/config/admin.json`" not in source
+    assert "Module contract file set (Mode A)" not in source
+    assert "Mode A (module_contract) example" not in source
+    assert "Mode B (backend_foundation) example" not in source
+    assert "Split app-backend admin surface example" not in source
+    assert "states.yaml" not in source
+    assert "transitions.yaml" not in source
     assert any(
         rule["source_agent"] == "ServiceAgent" and rule["target_agent"] == "FrontendStubAgent"
         for rule in handoffs["handoff_rules"]
@@ -187,6 +192,23 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
     assert "page_component" not in _read("factory_app/workflows/AppGenerator/structured_outputs.yaml")
     assert "shell_extension" not in _read("factory_app/workflows/AppGenerator/structured_outputs.yaml")
 
+    module_contract = file_contracts["task_contracts"]["module_contract"]
+    assert module_contract["required_outputs"] == ["modules/{pack_name}/module.yaml"]
+    assert "modules/{pack_name}/subscriptions.yaml" in module_contract["optional_outputs"]
+    assert "modules/{pack_name}/admin.yaml" in module_contract["optional_outputs"]
+    assert "backend/handler.py" in module_contract["downstream_python_defaults"]
+    assert "backend/notifications.py" in module_contract["optional_python_hooks"]
+    assert "ui/index.js" in module_contract["optional_js_stubs"]
+
+    workflow_archetype = module_archetypes["archetypes"]["workflow"]
+    messaging_archetype = module_archetypes["archetypes"]["messaging"]
+    assert "policy.py exposes a validate_transition helper." in workflow_archetype["hard_constraints"]
+    assert "Event payloads include delivery metadata needed for real-time routing." in messaging_archetype["hard_constraints"]
+    assert "Use one of these exact top-level shapes:" in source
+    assert "Use one of these exact bounded shapes:" in source
+    assert "Exact nested field shapes come from `ConfigMiddlewareOutput`, `ModuleContractBundle`, and `BackendFoundationBundle` in `structured_outputs.yaml`." in source
+    assert "Exact nested field shapes come from `ControllerOutput` and `AppBackendAdminConfig` in `structured_outputs.yaml`." in source
+
 
 def test_appgenerator_download_tool_does_not_inject_legacy_admin_surfaces() -> None:
     source = _read("factory_app/workflows/AppGenerator/tools/generate_and_download.py")
@@ -196,4 +218,21 @@ def test_appgenerator_download_tool_does_not_inject_legacy_admin_surfaces() -> N
     assert "_inject_admin_surfaces(files_map)" not in source
     assert "extract_code_file_map_from_payload" in source
     assert "extract_code_file_entries_from_payload" in assembly
+
+
+def test_appgenerator_prompt_time_contract_artifacts_align_with_structured_outputs() -> None:
+    structured_outputs = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
+    file_contracts = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
+    module_archetypes = _read_yaml("factory_app/workflows/AppGenerator/tools/module_archetypes.yaml")
+
+    task_type_values = structured_outputs["models"]["AppBuildTask"]["fields"]["task_type"]["values"]
+    module_type_values = structured_outputs["models"]["ModuleIdentity"]["fields"]["type"]["values"]
+
+    assert set(file_contracts["task_contracts"].keys()).issubset(set(task_type_values))
+    assert file_contracts["task_contracts"]["page_bundle"]["owner_agent"] == "AppSchemaAgent"
+    assert file_contracts["task_contracts"]["module_contract"]["owner_agent"] == "ConfigMiddlewareAgent"
+    assert file_contracts["task_contracts"]["backend_foundation"]["owner_agent"] == "ConfigMiddlewareAgent"
+    assert file_contracts["task_contracts"]["api_surface"]["owner_agent"] == "ControllerAgent"
+
+    assert set(module_archetypes["archetypes"].keys()) == set(module_type_values)
 

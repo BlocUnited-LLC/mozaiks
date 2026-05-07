@@ -172,6 +172,7 @@ agents:
         - `depends_on`
         - `acceptance_criteria`
         - `capability_pack_id` should be null only for truly cross-cutting setup work such as shell/bootstrap glue.
+        - The injected `[FILE CONTRACTS CONTEXT]` is the prompt-time source for active task vocabulary, ownership, and allowed output families. Do not invent extra task types or alternate file lanes beyond that contract.
       11a. Treat persistent application UI as schema-first:
         - The default owner of persistent pages is `AppSchemaAgent`.
         - Ordinary app pages must compile into `app.json` + `ui/pages/*.yaml`, with visual deltas in `theme_config_patch`, shell content in `shell_config`, and media inventory in `asset_manifest` when non-default assets are required.
@@ -213,18 +214,12 @@ agents:
         - Use the app connector inventory as the source of truth for which third-party integrations are already ready. If the plan references Stripe, Twilio, SendGrid, or similar services that are not ready in the connector inventory, keep the integration in the product plan but explicitly mark it as a missing configuration dependency.
         - `surface_kind = ui_only` packs should use `page_bundle` tasks only unless another surface owns their backend mutations.
       12c. **module_contract rule**: For every capability pack with `surface_kind = module`, include a `task_type: module_contract` build task:
-        - This task produces the canonical module contract files that wire the capability into platform_app.
-        - `owned_paths` must include:
-          - `modules/{pack_name}/module.yaml` — identity + permissions + actions + public capabilities + handler path
-          - `modules/{pack_name}/events.yaml` — namespaced domain event declarations
-          - `modules/{pack_name}/subscriptions.yaml` — event reactions to handlers, capabilities, or notifications
-          - `modules/{pack_name}/notifications.yaml` — notification intents per event
-          - `modules/{pack_name}/settings.yaml` — module-local settings and feature flags
-          - `modules/{pack_name}/admin.yaml` — admin panel contract for this module (default: empty panels; only populate if admin surfaces were explicitly requested for this module)
-        - `initial_message` must include: the capability pack's entities, actions, capability ids, events it may publish, event subscriptions/reactions, notification needs, settings/feature flags, required Python hook files, backend layering expectations (`handler/service/repo/policy/models`), and `app_backend_url` from context (null = schema-only, non-null = active backend).
+        - This task plans the canonical module contract bundle defined in `[FILE CONTRACTS CONTEXT]`.
+        - `owned_paths` must contain the minimal YAML family required for the pack: `module.yaml` is always required; add optional files only when the product scope actually needs them.
+        - `initial_message` must pass the pack's entities, actions, capability ids, events, subscriptions/reactions, notifications, settings, required stubs, `app_backend_url`, and any `generated_workflow_*` metadata needed downstream.
         - **admin panels are opt-in**: only include admin panel requirements in `initial_message` if the product brief or interview explicitly asked for admin/operator views for this module. Do not invent admin panels by default.
         - `initial_agent` for this task is `ConfigMiddlewareAgent`.
-        - Do NOT generate Python implementation code here. YAML declares the contract; ServiceAgent implements `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, `backend/models.py`, and any optional hook stubs such as `backend/settings.py`, `backend/subscriptions.py`, and `backend/notifications.py`.
+        - Do NOT generate implementation code here. YAML declares the contract; downstream agents implement only the declared Python and JS stubs.
         - `module_contract` tasks run in the `backend-foundation` phase, before `data-models`.
       12d. **event architecture rule**:
         - Populate `event_flows` for every durable state change that other modules, notifications, integrations, or workflows may react to.
@@ -830,6 +825,7 @@ agents:
       - `task_run_mode`: true when executing a specific build task via MFJ fan-out.
       - `current_build_task_type`: `module_contract` → Mode A, `backend_foundation` → Mode B.
       - `current_build_task`: full task spec including `capability_pack_id`, `initial_message`, `owned_paths`.
+      - `[FILE CONTRACTS CONTEXT]` and `[MODULE ARCHETYPES CONTEXT]` are injected into your system message. Use them as the prompt-time source for file-family boundaries and module.type conventions instead of inventing extra files.
 
       **Mode A inputs** (from `current_build_task.initial_message`):
       - Capability pack name (= `capability_pack_id`)
@@ -850,111 +846,11 @@ agents:
       - Tech Stack (backend framework).
       - Previous Validation Errors: if this is a retry, review chat history and fix them.
 
-      **Module contract file set (Mode A)**:
-
-      Include only the files this module actually needs. Do NOT emit all six by default.
-
-      ```
-      modules/{pack_name}/module.yaml          — ALWAYS include. Identity, permissions, actions, capabilities, handler path.
-      modules/{pack_name}/events.yaml          — ONLY if this module publishes domain events.
-      modules/{pack_name}/subscriptions.yaml   — ONLY if this module reacts to events from other modules.
-      modules/{pack_name}/notifications.yaml   — ONLY if module events should trigger user-facing notifications.
-      modules/{pack_name}/settings.yaml        — ONLY if the module has configurable behavior or feature flags.
-      modules/{pack_name}/admin.yaml           — ONLY if the module needs admin or backoffice panels.
-      modules/{pack_name}/channels.yaml        — ONLY for messaging-type modules requiring real-time WebSocket or push delivery.
-      ```
-
-      Omit any file whose content would be an empty array or null object. A module
-      that publishes no events should not have an events.yaml. A module with no
-      configurable behavior should not have a settings.yaml. Sparse is correct.
-
-      **Customization boundary (Mode A)**:
-      - YAML may reference bounded helper/customization stubs only through explicit contract fields such as `module.handler`, subscription `target.handler`, setting `validator`, setting `on_change`, notification `audience.resolver`, notification `renderer`, and `admin.yaml hooks`.
-      - Python stubs must be declared in `python_stubs` with path + purpose + contract_refs.
-      - JS/TS stubs are allowed only for explicitly declared frontend customization surfaces such as `admin.yaml` panels using `renderer: custom_component`. These must be declared in `js_stubs` with path + registry_key + contract_refs.
-      - If no contract field references a stub, do not declare or imply one.
-
-      **Events.yaml contract**:
-      ```yaml
-      schema_version: mozaiks.events.v1
-      events:
-        - type: domain.task_manager.task_created
-          version: 1
-          description: Emitted after a task is created
-          producer: task_manager
-          payload_schema:
-            type: object
-            required: [task_id, title]
-      ```
-
-      **Module.yaml contract**:
-      ```yaml
-      schema_version: mozaiks.module.v1
-      module:
-        id: task_manager
-        display_name: Task Manager
-        version: 1.0.0
-        handler: backend.handler:TaskManagerModule
-      actions:
-        - id: create_task
-          handler_method: create_task
-          input_schema: { type: object, required: [title] }
-          output_schema: { type: object, required: [task_id] }
-          permissions: [tasks.write]
-          emits: [domain.task_manager.task_created]
-      capabilities:
-        - capability_id: task_manager.create
-          kind: action
-          target: create_task
-      ```
-
-      **Notifications.yaml contract**:
-      ```yaml
-      schema_version: mozaiks.notifications.v1
-      notifications:
-        - id: task_created
-          event_type: domain.task_manager.task_created
-          title: "Task created"
-          body: "'{{title}}' has been created."
-          channels: [in_app]
-          preference_key: task_notifications
-          default_enabled: true
-      ```
-
-      **Admin.yaml contract**:
-
-      Default (no admin panels requested):
-      ```yaml
-      schema_version: mozaiks.admin.v2
-      panels: []
-      hooks: []
-      ```
-
-      When admin panels are explicitly requested for this module:
-      ```yaml
-      schema_version: mozaiks.admin.v2
-      panels:
-        - id: task_manager.overview
-          label: Tasks
-          description: Review and manage task activity.
-          section: usage
-          order: 20
-          renderer: schema
-          layout: full-width
-          sections:
-            - id: task-table
-              primitive: DataTable
-              config:
-                api_endpoint: /api/modules/task_manager/list_tasks
-                columns:
-                  - key: title
-                    label: Task
-                  - key: status
-                    label: Status
-                    type: badge
-          permissions: [tasks.write]
-      hooks: []
-      ```
+      **Mode A contract boundary**:
+      - Use the injected `[FILE CONTRACTS CONTEXT]` as the canonical file-family boundary for `module_contract` tasks.
+      - Emit only the YAML files required by `current_build_task.owned_paths` and the feature intent. `module.yaml` is always required; optional families stay omitted when empty.
+      - Use the structured output models as the source of truth for exact field shapes instead of recreating ad hoc YAML examples in the prompt.
+      - Keep customization bounded to explicit contract fields and declared `python_stubs` / `js_stubs` entries.
 
   - id: instructions
     heading: '[INSTRUCTIONS]'
@@ -985,10 +881,7 @@ agents:
            - `backend/models.py`
          - Add optional hook files only when the YAML contract references them, such as `backend/settings.py`, `backend/subscriptions.py`, `backend/notifications.py`, or `backend/admin.py`.
          - Every entry must include `path`, `kind`, `purpose`, and `contract_refs`.
-         - **Type-specific YAML additions** — include these extra files in `code_files` when the module type requires them:
-           - `type: messaging` → also generate `channels.yaml` (transport/delivery channel definitions per the mozaiks.channels.v1 schema).
-           - `type: workflow` → also generate `states.yaml` (named states + initial state) and `transitions.yaml` (valid transitions, required roles/conditions, emitted events).
-           - `type: transactional` and `type: standard` → no additional YAML files beyond the base contract.
+         - Type-specific file additions must stay inside `[FILE CONTRACTS CONTEXT]`. `type: messaging` may add `channels.yaml` when the task owns it; other module types do not invent extra YAML families beyond the canonical contract bundle.
       12. Set `js_stubs` only when a declared YAML contract requires frontend customization, such as an admin panel using `renderer: custom_component`. Every entry must include `path`, `surface`, `registry_key`, `purpose`, and `contract_refs`.
       13. Also serialize the typed contract to `code_files` entries with YAML content strings at the exact `modules/{capability_pack_id}/...` paths.
       14. Set `backend_foundation_bundle` to null in module_contract mode.
@@ -1013,200 +906,35 @@ agents:
     content: |-
       Output MUST be a valid JSON object matching ConfigMiddlewareOutput and NO additional text:
 
-      **Mode A (module_contract) example**:
+      Use one of these exact top-level shapes:
+
+      **Mode A (`module_contract_bundle`)**:
       ```json
       {
         "mode": "module_contract_bundle",
-        "module_contract": {
-          "module_id": "task_manager",
-          "module_yaml": {
-            "schema_version": "mozaiks.module.v1",
-            "module": {
-              "id": "task_manager",
-              "display_name": "Task Manager",
-              "version": "1.0.0",
-              "description": "Manage tasks.",
-              "owner": "app",
-              "visibility": "public",
-              "handler": "backend.handler:TaskManagerModule"
-            },
-            "permissions": [
-              { "id": "tasks.write", "description": "Create and update tasks" }
-            ],
-            "actions": [
-              {
-                "id": "create_task",
-                "description": "Create a task",
-                "handler_method": "create_task",
-                "input_schema": { "type": "object", "required": ["title"] },
-                "output_schema": { "type": "object", "required": ["task_id"] },
-                "permissions": ["tasks.write"],
-                "emits": ["domain.task_manager.task_created"]
-              }
-            ],
-            "capabilities": [
-              {
-                "capability_id": "task_manager.create",
-                "kind": "action",
-                "target": "create_task",
-                "title": "Create task",
-                "permissions": ["tasks.write"],
-                "input_schema": { "type": "object", "required": ["title"] }
-              }
-            ]
-          },
-          "events_yaml": {
-            "schema_version": "mozaiks.events.v1",
-            "events": [
-              {
-                "type": "domain.task_manager.task_created",
-                "version": 1,
-                "description": "Emitted after a task is created.",
-                "producer": "task_manager",
-                "payload_schema": { "type": "object", "required": ["task_id", "title"] }
-              }
-            ]
-          },
-          "subscriptions_yaml": {
-            "schema_version": "mozaiks.subscriptions.v1",
-            "subscriptions": []
-          },
-          "notifications_yaml": {
-            "schema_version": "mozaiks.notifications.v1",
-            "notifications": [
-              {
-                "id": "task_created",
-                "event_type": "domain.task_manager.task_created",
-                "title": "Task created",
-                "body": "'{{payload.title}}' has been created.",
-                "channels": ["in_app"],
-                "audience": { "roles": ["admin"], "permissions": null, "resolver": null },
-                "preference_key": "task_notifications",
-                "default_enabled": true,
-                "renderer": null
-              }
-            ]
-          },
-          "settings_yaml": {
-            "schema_version": "mozaiks.settings.v1",
-            "settings": [],
-            "features": []
-          },
-          "admin_yaml": {
-            "schema_version": "mozaiks.admin.v2",
-            "panels": [
-              {
-                "id": "task_manager.overview",
-                "label": "Tasks",
-                "description": "Review and manage task activity.",
-                "section": "overview",
-                "order": 20,
-                "renderer": "schema",
-                "layout": "full-width",
-                "sections": [
-                  {
-                    "id": "task-table",
-                    "primitive": "DataTable",
-                    "config": {
-                      "api_endpoint": "/api/modules/task_manager/list_tasks",
-                      "columns": [
-                        { "key": "title", "label": "Task" },
-                        { "key": "status", "label": "Status", "type": "badge" }
-                      ]
-                    }
-                  }
-                ],
-                "component": null,
-                "permissions": ["tasks.write"]
-              }
-            ],
-            "hooks": []
-          },
-          "python_stubs": [
-            {
-              "path": "backend/handler.py",
-              "kind": "handler",
-              "purpose": "Thin module action adapter that delegates to the service layer.",
-              "contract_refs": ["module_yaml.module.handler", "module_yaml.actions[*].handler_method"]
-            },
-            {
-              "path": "backend/service.py",
-              "kind": "service",
-              "purpose": "Owns business logic and event publication for the module.",
-              "contract_refs": ["module_yaml.actions[*]", "events_yaml.events[*]"]
-            },
-            {
-              "path": "backend/repo.py",
-              "kind": "repo",
-              "purpose": "Owns persistence queries and writes for module entities.",
-              "contract_refs": ["module_yaml.actions[*]", "settings_yaml.settings[*]"]
-            },
-            {
-              "path": "backend/policy.py",
-              "kind": "policy",
-              "purpose": "Owns authorization, ownership, and transition checks.",
-              "contract_refs": ["module_yaml.permissions[*]", "module_yaml.actions[*].permissions"]
-            },
-            {
-              "path": "backend/models.py",
-              "kind": "schemas",
-              "purpose": "Owns typed DTOs, enums, and validation helpers used by the module.",
-              "contract_refs": ["module_yaml.actions[*].input_schema", "module_yaml.actions[*].output_schema"]
-            }
-          ],
-          "js_stubs": []
-        },
+        "module_contract": { "...": "Must match ModuleContractBundle exactly" },
         "backend_foundation_bundle": null,
         "code_files": [
-          { "filename": "modules/task_manager/module.yaml", "content": "schema_version: mozaiks.module.v1\nmodule:\n  id: task_manager\n..." },
-          { "filename": "modules/task_manager/events.yaml", "content": "schema_version: mozaiks.events.v1\nevents:\n  - type: domain.task_manager.task_created\n    version: 1\n" },
-          { "filename": "modules/task_manager/subscriptions.yaml", "content": "schema_version: mozaiks.subscriptions.v1\nsubscriptions: []\n" },
-          { "filename": "modules/task_manager/notifications.yaml", "content": "schema_version: mozaiks.notifications.v1\nnotifications: []\n" },
-          { "filename": "modules/task_manager/settings.yaml", "content": "schema_version: mozaiks.settings.v1\nsettings: []\nfeatures: []\n" },
-          { "filename": "modules/task_manager/admin.yaml", "content": "schema_version: mozaiks.admin.v2\npanels: []\nhooks: []\n" }
+          { "filename": "modules/{module_id}/module.yaml", "content": "..." }
         ],
-        "agent_message": "Generated task_manager module contract."
+        "agent_message": "Generated module contract."
       }
       ```
 
-      **Mode B (backend_foundation) example**:
+      **Mode B (`backend_foundation`)**:
       ```json
       {
         "mode": "backend_foundation",
         "module_contract": null,
-        "backend_foundation_bundle": {
-          "files": [
-            {
-              "path": "backend/config.py",
-              "kind": "config",
-              "purpose": "Load application configuration from environment.",
-              "contract_refs": ["build_tasks[backend_foundation].owned_paths"],
-              "content": "..."
-            },
-            {
-              "path": "backend/database.py",
-              "kind": "database_connection",
-              "purpose": "Create and reuse the database connection.",
-              "contract_refs": ["build_tasks[backend_foundation].owned_paths"],
-              "content": "..."
-            },
-            {
-              "path": "backend/middleware.py",
-              "kind": "middleware",
-              "purpose": "Register CORS and logging middleware.",
-              "contract_refs": ["build_tasks[backend_foundation].owned_paths"],
-              "content": "..."
-            }
-          ]
-        },
+        "backend_foundation_bundle": { "files": [{ "path": "backend/...", "kind": "...", "purpose": "...", "contract_refs": ["..."], "content": "..." }] },
         "code_files": [
-          { "filename": "backend/config.py", "content": "..." },
-          { "filename": "backend/database.py", "content": "..." },
-          { "filename": "backend/middleware.py", "content": "..." }
+          { "filename": "backend/...", "content": "..." }
         ],
         "agent_message": "Generated backend foundation files."
       }
       ```
+
+      Exact nested field shapes come from `ConfigMiddlewareOutput`, `ModuleContractBundle`, and `BackendFoundationBundle` in `structured_outputs.yaml`.
 
       **CRITICAL**: Output ONLY the raw JSON object.
   max_consecutive_auto_reply: 10
@@ -1454,6 +1182,7 @@ agents:
       - Code Context: `config_config`, `database_config`, `model_context` (injected by hook).
       - `app_backend_url`: Base URL of the active Mozaiks app host. Non-null means a live backend exists and services must publish real events. Null means schema-only generation — stub event publishing with a comment.
       - `current_build_task`: contains `capability_pack_id` (the module name) and references to the `module_contract` task's module.yaml/events.yaml/subscriptions.yaml/settings.yaml/notifications.yaml/admin.yaml.
+      - `[MODULE ARCHETYPES CONTEXT]` is injected into your system message. Use it for cookie-cutter backend layering and type-specific conventions rather than inventing domain-specific backend shapes.
       - **Previous Validation Errors**: If this is a retry, review the chat history for `AppValidation` errors and fix them.
 
       **Module implementation structure**:
@@ -1464,11 +1193,7 @@ agents:
         - `backend/repo.py` — persistence
         - `backend/policy.py` — ownership/authz/transition checks
         - `backend/models.py` — typed DTOs, enums, normalization helpers
-        - **Type-specific backend conventions** (read `module_contract.module_yaml.module.type`):
-          - `messaging`: every message document carries `thread_id` and `sender_id`; thread documents carry a `participants` array with per-member read state (`last_read_message_id`, `last_read_at`); repo provides `upsert_read_state`; event payloads for `message.sent` include `body_preview`, `sent_at`, and `participant_ids` for real-time routing; soft-delete is per-participant.
-          - `workflow`: every managed document carries a `state` field; `policy.py` exposes a `validate_transition(current_state, action, actor_role)` helper; `service.py` always calls the transition validator before mutating state; transition events include `from_state`, `to_state`, and the actor.
-          - `transactional`: state is derived from an append-only ledger; `repo.py` provides `append_entry` only (never `update_balance`); all multi-document writes use atomic `$inc` operations; every ledger entry carries `actor_id`, `action`, `amount`, `reference_id`, and timestamps; `models.py` defines separate TypedDicts for the balance projection and the ledger entry.
-          - `standard`: no additional conventions beyond the base layer rules.
+        - `module_contract.module_yaml.module.type` selects the cookie-cutter backend conventions from the injected `[MODULE ARCHETYPES CONTEXT]`. Do not invent a parallel module taxonomy or restate a different set of type rules.
       - Optional hook files go in `modules/{capability_pack_id}/backend/settings.py`, `subscriptions.py`, `notifications.py`, or `admin.py` only when referenced by YAML.
       - `module_contract.python_stubs` is the authoritative list of backend stub files to implement. Do not invent undeclared Python files.
       - Prefer the injected runtime module context as the primary dependency boundary: `context.app_id`, `context.user_id`, roles/principal metadata, `context.db` when present, and `context.events.publish(...)` for event emission.
@@ -1704,48 +1429,37 @@ agents:
     content: |-
       Output MUST be a valid JSON object matching `ControllerOutput` and NO additional text:
 
+      Use one of these exact bounded shapes:
+
+      **Mode A (`module_api_adapter`)**:
       ```json
       {
         "mode": "module_api_adapter",
         "app_backend_admin_config": null,
         "code_files": [
-          { "filename": "modules/task_manager/backend/api.py", "content": "\"\"\"Optional API adapter. Default access uses /api/modules/task_manager/{action_name}.\"\"\"\n" }
+          { "filename": "modules/{module_id}/backend/api.py", "content": "..." }
         ],
         "agent_message": "Generated module API adapter guidance."
       }
       ```
 
-      **Split app-backend admin surface example**:
+      **Mode B (`app_backend_admin_surface`)**:
       ```json
       {
         "mode": "app_backend_admin_surface",
         "app_backend_admin_config": {
           "schema_version": "mozaiks.admin.app_backend.v1",
-          "panels": [
-            {
-              "id": "app.users",
-              "label": "Users",
-              "section": "users",
-              "order": 10,
-              "renderer": "builtin",
-              "builtin_panel": "users",
-              "permissions": ["admin.users.read"]
-            }
-          ]
+          "panels": [{ "id": "...", "label": "...", "section": "...", "order": 10, "renderer": "builtin", "builtin_panel": "...", "permissions": ["..."] }]
         },
         "code_files": [
-          {
-            "filename": "backend/admin_config.py",
-            "content": "_ADMIN_CONFIG = {\n    \"schema_version\": \"mozaiks.admin.app_backend.v1\",\n    \"panels\": [\n        {\n            \"id\": \"app.users\",\n            \"label\": \"Users\",\n            \"section\": \"users\",\n            \"order\": 10,\n            \"renderer\": \"builtin\",\n            \"builtin_panel\": \"users\"\n        }\n    ]\n}\n\n\ndef get_admin_config():\n    return _ADMIN_CONFIG\n"
-          },
-          {
-            "filename": "backend/routes/admin.py",
-            "content": "from fastapi import APIRouter, HTTPException\nfrom inspect import isawaitable\n\nfrom backend.admin_config import get_admin_config\n\nrouter = APIRouter(prefix=\"/api/admin\", tags=[\"app-backend-admin\"])\n\n\n@router.get(\"/config\")\nasync def _get_admin_config():\n    try:\n        result = get_admin_config()\n        if isawaitable(result):\n            result = await result\n        return result\n    except HTTPException:\n        raise\n    except Exception as exc:\n        raise HTTPException(status_code=500, detail=str(exc)) from exc\n"
-          }
+          { "filename": "backend/admin_config.py", "content": "..." },
+          { "filename": "backend/routes/admin.py", "content": "..." }
         ],
         "agent_message": "Generated app-backend admin surface."
       }
       ```
+
+      Exact nested field shapes come from `ControllerOutput` and `AppBackendAdminConfig` in `structured_outputs.yaml`.
 
       **CRITICAL**: Output ONLY the raw JSON object.
   max_consecutive_auto_reply: 10

@@ -16,6 +16,21 @@ _FRONTEND_JS_TS_SEGMENTS = (
 )
 _OBSOLETE_HOST_ADMIN_CONFIG_PATH = "app/config/admin.json"
 _APP_BACKEND_ADMIN_PATHS = {"backend/admin_config.py", "backend/routes/admin.py"}
+_ALLOWED_TASK_TYPES = {
+    "backend_foundation",
+    "module_contract",
+    "data_models",
+    "business_services",
+    "api_surface",
+    "page_bundle",
+    "agent_backend_integration",
+}
+_CANONICAL_INITIAL_AGENTS = {
+    "backend_foundation": "ConfigMiddlewareAgent",
+    "module_contract": "ConfigMiddlewareAgent",
+    "api_surface": "ControllerAgent",
+    "page_bundle": "AppSchemaAgent",
+}
 
 
 def _normalize_string_list(value: Any) -> List[str]:
@@ -131,6 +146,22 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]]) -> None:
                     "Build task "
                     f"'{task_id}' must own both backend/admin_config.py and backend/routes/admin.py together."
                 )
+
+        if task_type not in _ALLOWED_TASK_TYPES:
+            allowed = ", ".join(sorted(_ALLOWED_TASK_TYPES))
+            raise ValueError(
+                "Build task "
+                f"'{task_id}' uses unsupported task_type '{task_type}'. "
+                f"Use only the canonical AppGenerator task types: {allowed}."
+            )
+
+        expected_initial_agent = _CANONICAL_INITIAL_AGENTS.get(task_type)
+        if expected_initial_agent and initial_agent != expected_initial_agent:
+            raise ValueError(
+                "Build task "
+                f"'{task_id}' assigns task_type '{task_type}' to {initial_agent}. "
+                f"`{task_type}` must start at {expected_initial_agent}."
+            )
 
 
 def app_build_plan(

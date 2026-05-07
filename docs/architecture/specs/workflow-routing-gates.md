@@ -142,6 +142,8 @@ Rules:
 - Use one workflow per step for serial execution.
 - Use multiple workflows in one step only when they should run as a parallel phase.
 - Use `{ "transition": "<id>" }` when a completed workflow should pause on a surfaced checkpoint before the next workflow starts.
+- Use `entrypoints[].sequence` to declare the default journey entered by a route.
+- Use `transitions[].options[].sequence` when a user choice must switch from the route's default journey into a different authored sequence.
 - Do not place a workflow in the same or earlier step as one of its required dependencies.
 - If `B` depends on `A`, author the sequence as `A` in an earlier step and `B` in a later step.
 - Do not list the same workflow more than once in a sequence.
@@ -181,6 +183,11 @@ Optional header pills are declared separately in `shell.json`:
 `/api/transitions/resolve`. If the result is another transition, the shell mounts
 that transition. If the result is a workflow, the backend creates a chat session
 and the shell navigates to chat.
+
+The shell forwards `entrypoints[].sequence` as `journey_id` when it starts a
+transition or workflow route. If a transition option declares its own
+`sequence`, that option-level sequence overrides the inherited route journey for
+the selected branch.
 
 ## Context Hydration
 

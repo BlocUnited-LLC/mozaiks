@@ -19,6 +19,12 @@ The builder-session loop is app-configurable through `app/config/ai.json`:
 Those settings belong to the control plane. They are not workflow-local AG2
 handoff settings.
 
+The first-party declarative pack for those settings lives under:
+
+- `factory_app/control_plane/config/*`
+- `factory_app/control_plane/prompts/*`
+- `factory_app/control_plane/tools/*`
+
 For the target package split, declarative pack shape, and implementation
 checklist for this harness, see
 [Control-Plane Harness Architecture](control-plane-harness-architecture.md).
@@ -80,12 +86,15 @@ This loop owns:
 - promotion readiness
 - change classification for build-affecting requests
 - routing to the smallest valid re-entry point
+- typed continuation decisions for builder surfaces
 
 This loop consumes:
 
 - workflow outcomes such as `completed`, `paused`, `failed`, or `invalid`
 - typed planning artifacts such as `BuildGraph`, `ChangeIntent`, and `ImpactSet`
 - active artifact versions under `generated/...`
+- control-plane tool summaries gathered from canonical concept, design, build,
+  and artifact stores
 - user requests that may mutate generated artifacts
 
 This loop does not own:
@@ -101,10 +110,10 @@ one global AG2 prompt:
 
 - Studio `/api/workflows/trigger`
 - `OrchestrationControlHarness`
-- `LLMChangeClassifier` when a builder-context request is ambiguous
-- `RefinementTriggerRouteResolver`
-- `SessionRouter`
-- selected workflow run or downstream re-entry point
+- `request_submitted` checkpoint when a builder-context request is ambiguous
+- `route_requested` checkpoint
+- `decision_requested` checkpoint
+- `SessionRouter`, coding worker, or typed harness decision response
 
 Important:
 
@@ -113,6 +122,8 @@ Important:
 - there is one builder-session harness that intercepts only builder-context
   requests
 - ordinary workflow chat stays in the workflow execution loop
+- the harness can now return `execution_mode="harness_decision"` when the
+  correct next step is confirmation, clarification, or workflow fallback
 
 ### 3. Refinement worker loop
 
@@ -124,6 +135,24 @@ This loop may be implemented by:
 - a dedicated refinement workflow mode
 - a bounded `AgentGenerator` or `AppGenerator` re-entry
 - a coding-agent provider behind a Mozaiks-owned interface
+
+Current first-party support includes a conservative control-plane coding worker
+that can short-circuit eligible patch refinements when
+`control_plane.coding.enabled=true`.
+If explicit file scope is missing, the dedicated `scope_requested` checkpoint
+can propose a bounded file set from artifact workspace context before the
+coding worker runs.
+The selected control-plane pack can now bound that inferred scope
+declaratively through `policies.yaml`, and low-risk multi-file proposals can be
+confirmed through a typed `apply_proposed_scope` harness action instead of
+forcing a full workflow fallback.
+If the request should not auto-run, the builder session loop can return a typed
+`HarnessDecision` instead of launching either a workflow or coding worker.
+The worker now produces concrete `updated_files`, validates the merged
+workspace snapshot, and can persist a child artifact version for the refined
+bundle. First-party builder surfaces can now supply explicit file payloads from
+persisted artifact workbenches and in-flight workflow UI, or let the harness
+infer scope when artifact lineage is available.
 
 This loop owns:
 
@@ -289,9 +318,10 @@ The builder session loop should route build-affecting requests in this order:
 1. classify the request into typed `ChangeIntent`
 2. compute `ImpactSet`
 3. choose the smallest valid re-entry point
-4. start the selected workflow run or refinement worker
-5. validate the result
-6. preview or promote
+4. decide whether to auto-run, clarify, confirm, or fallback
+5. start the selected workflow run or refinement worker when appropriate
+6. validate the result
+7. preview or promote
 
 Typical routing bias after the first complete build:
 
@@ -310,9 +340,10 @@ Flow:
 
 1. builder session loop classifies it as local refinement
 2. `ImpactSet` stays narrow
-3. refinement worker loop receives owned paths
-4. worker edits files or reruns one scoped unit
-5. builder session loop reruns validation and preview
+3. harness may auto-propose file scope or ask for clarification
+4. refinement worker loop receives owned paths
+5. worker edits files or reruns one scoped unit
+6. builder session loop reruns validation and preview
 
 The workflow execution loop may still be used inside that refinement unit, but
 the builder session loop remains the owner of routing and promotion.
@@ -326,9 +357,10 @@ User request:
 Flow:
 
 1. builder session loop classifies it as `core`
-2. downstream artifacts are marked stale
-3. router re-enters `ValueEngine`
-4. a new concept revision is created before downstream rebuild
+2. harness returns a typed `core_restart` decision for the builder surface
+3. once confirmed, downstream artifacts are marked stale
+4. router re-enters `ValueEngine`
+5. a new concept revision is created before downstream rebuild
 
 This is not a scoped file-edit problem.
 

@@ -1,0 +1,43 @@
+schema_version: mozaiks.control_plane.v1
+profile:
+  id: factory_app
+  display_name: Factory App Harness
+  description: App-zero declarative control-plane pack for the first-party Mozaiks build experience.
+harness:
+  implementation: mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness
+  supported_trigger_sources:
+    - refinement
+checkpoints:
+  - id: request_intake
+    event: request_submitted
+    entrypoint: mozaiksai.control_plane.implementations.change_classifier:LLMChangeClassifier
+    prompt_id: change_classifier_system
+    tool_ids:
+      - get_concept_overview
+      - get_design_summary
+      - get_artifact_summary
+      - get_build_state
+  - id: refinement_route
+    event: route_requested
+    entrypoint: mozaiksai.control_plane.implementations.refinement_router:RefinementTriggerRouteResolver
+  - id: decision
+    event: decision_requested
+    entrypoint: mozaiksai.control_plane.implementations.harness_decision:FirstPartyHarnessDecisionPolicy
+  - id: scope_selection
+    event: scope_requested
+    entrypoint: mozaiksai.control_plane.implementations.scope_proposer:ArtifactScopeProposer
+    prompt_id: coding_scope_selection_system
+    tool_ids:
+      - get_artifact_summary
+      - get_build_state
+      - get_artifact_workspace_catalog
+  - id: coding_refinement
+    event: coding_requested
+    entrypoint: mozaiksai.control_plane.implementations.coding_worker:ScopedRefinementCodingWorker
+    prompt_id: coding_refinement_system
+    tool_ids:
+      - get_concept_overview
+      - get_design_summary
+      - get_artifact_summary
+      - get_build_state
+      - get_artifact_workspace_scope

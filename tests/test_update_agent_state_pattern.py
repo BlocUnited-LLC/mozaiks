@@ -187,6 +187,48 @@ def test_agents_agent_prompt_declares_turn_limit_derivation_rules() -> None:
     assert "AgentsAgent owns runtime turn limits later" in roster_section
 
 
+def test_agents_agent_prompt_uses_compact_prompt_engineering_guidance() -> None:
+    workspace = Path(__file__).resolve().parents[1]
+    agents_yaml = (
+        workspace
+        / "factory_app"
+        / "workflows"
+        / "AgentGenerator"
+        / "agents.yaml"
+    ).read_text(encoding="utf-8")
+
+    agents_section = agents_yaml.split("- name: AgentsAgent", 1)[1].split("- name:", 1)[0]
+
+    assert "Generate the final `RuntimeAgentsOutput` JSON directly." in agents_section
+    assert "Do not include private reasoning, chain-of-thought, or meta commentary" in agents_section
+    assert "Keep examples minimal. Prefer a compact shape skeleton over long worked examples." in agents_section
+    assert "Use compact, contract-driven prompt section content." in agents_section
+    assert "Example Agent (Generic Pipeline Stage)" not in agents_section
+    assert "DERIVATION PROCESS (Chain-of-Thought)" not in agents_section
+
+
+def test_context_variables_and_handoffs_prompts_omit_chain_of_thought_wording() -> None:
+    workspace = Path(__file__).resolve().parents[1]
+    agents_yaml = (
+        workspace
+        / "factory_app"
+        / "workflows"
+        / "AgentGenerator"
+        / "agents.yaml"
+    ).read_text(encoding="utf-8")
+
+    context_section = agents_yaml.split("- name: ContextVariablesAgent", 1)[1].split("- name:", 1)[0]
+    handoffs_section = agents_yaml.split("- name: HandoffsAgent", 1)[1].split("- name:", 1)[0]
+
+    assert "Generate the final `ContextVariablesPlanOutput` JSON directly." in context_section
+    assert "Output MUST be a valid JSON object matching `ContextVariablesPlanOutput` and NO additional text:" in context_section
+    assert "DERIVATION PROCESS (Chain-of-Thought)" not in context_section
+
+    assert "Generate the final `HandoffRulesOutput` JSON directly." in handoffs_section
+    assert "Output MUST be a valid JSON object matching `HandoffRulesOutput` and NO additional text:" in handoffs_section
+    assert "DERIVATION PROCESS (Chain-of-Thought)" not in handoffs_section
+
+
 def test_hooks_bind_agents_guidance_to_agents_agent() -> None:
     workspace = Path(__file__).resolve().parents[1]
     hooks_yaml = (

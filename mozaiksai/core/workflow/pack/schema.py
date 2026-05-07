@@ -57,6 +57,7 @@ class TransitionOption(BaseModel):
     id: str
     route_to: Optional[str] = None  # workflow id OR transition id
     route_type: Literal["transition", "workflow"] = "workflow"  # stamped at load time
+    sequence: Optional[str] = None
     context_variables: Dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("id")
@@ -70,6 +71,14 @@ class TransitionOption(BaseModel):
     @field_validator("route_to")
     @classmethod
     def _normalize_route_to(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        val = str(value or "").strip()
+        return val or None
+
+    @field_validator("sequence")
+    @classmethod
+    def _normalize_sequence(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
         val = str(value or "").strip()
@@ -94,6 +103,15 @@ class ConditionRoute(BaseModel):
     match: Any  # value to compare against context_key
     route_to: str  # workflow id OR transition id
     route_type: Literal["transition", "workflow"] = "workflow"  # stamped at load time
+    sequence: Optional[str] = None
+
+    @field_validator("route_to", "sequence")
+    @classmethod
+    def _normalize_optional_id(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        val = str(value or "").strip()
+        return val or None
 
 
 class WorkflowTransition(BaseModel):
@@ -138,6 +156,7 @@ class WorkflowTransition(BaseModel):
     # single-route transition data
     route_to: Optional[str] = None
     route_type: Optional[Literal["transition", "workflow"]] = None
+    sequence: Optional[str] = None
 
     # condition transition data
     context_key: Optional[str] = None  # context_variable key to evaluate
@@ -155,6 +174,14 @@ class WorkflowTransition(BaseModel):
         if not val:
             raise ValueError("transition id must be non-empty")
         return val
+
+    @field_validator("sequence")
+    @classmethod
+    def _normalize_sequence(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        val = str(value or "").strip()
+        return val or None
 
     @model_validator(mode="after")
     def _validate_type_fields(self) -> "WorkflowTransition":
@@ -434,6 +461,11 @@ class GlobalPackGraph(BaseModel):
                     "is not a known workflow_sequence id"
                 )
         for transition in self.transitions:
+            if transition.sequence and transition.sequence not in journey_id_set:
+                raise ValueError(
+                    f"transition '{transition.id}' sequence '{transition.sequence}' "
+                    "is not a known workflow_sequence id"
+                )
             if transition.route_to and transition.route_to not in valid_targets:
                 raise ValueError(
                     f"transition '{transition.id}' route_to '{transition.route_to}' "
@@ -446,6 +478,11 @@ class GlobalPackGraph(BaseModel):
                     "transition" if transition.route_to in transition_id_set else "workflow",
                 )
             for opt in getattr(transition, "options", []):
+                if opt.sequence and opt.sequence not in journey_id_set:
+                    raise ValueError(
+                        f"transition '{transition.id}' option '{opt.id}' sequence '{opt.sequence}' "
+                        "is not a known workflow_sequence id"
+                    )
                 if not opt.route_to:
                     continue
                 if opt.route_to not in valid_targets:
@@ -459,6 +496,11 @@ class GlobalPackGraph(BaseModel):
                     "transition" if opt.route_to in transition_id_set else "workflow",
                 )
             for route in getattr(transition, "routes", []):
+                if route.sequence and route.sequence not in journey_id_set:
+                    raise ValueError(
+                        f"transition '{transition.id}' condition route sequence '{route.sequence}' "
+                        "is not a known workflow_sequence id"
+                    )
                 if route.route_to not in valid_targets:
                     raise ValueError(
                         f"transition '{transition.id}' condition route '{route.route_to}' "
