@@ -85,6 +85,35 @@ Detailed refinement-routing plans are internal. The public authoring contract is
 that workflows should emit scoped ownership metadata so later refinement can
 choose the smallest valid re-entry point.
 
+### Revision-aware workflow context
+
+Builder workflows should not rely on one boolean like `refinement_mode` as the
+long-term revision contract.
+
+The target workflow input contract is:
+
+- `build_mode` — `initial` or `revision`
+- `revision_scope` — `patch`, `design`, `feature`, or `core`
+- `change_request_id` — stable revision lineage id
+- `artifact_kind`
+- `artifact_version_id`
+- `refinement_request`
+- `refinement_request_meta`
+- `change_intent`
+- `impact_set`
+- `sequence_status`
+- `revision_origin_workflow`
+
+Rules:
+
+- `build_mode=revision` means the workflow starts from persisted builder state,
+  not from a blank-slate assumption
+- a `core` reroute into `ValueEngine` is still `build_mode=revision`
+- workflows should anchor first on the revision request and persisted upstream
+  summaries, then decide what to preserve or regenerate
+- workflows should emit updated summaries, ownership metadata, and invalidation
+  hints so later revisions stay structured
+
 ## Canonical File Shapes
 
 ### `orchestrator.yaml`
@@ -109,6 +138,8 @@ Rules:
   - `AgentDriven`
   - `UserDriven`
   - `BackendOnly`
+- `initial_message` is a hidden AG2/runtime seed. It is not user-facing transcript content and should not be used as visible copy.
+- `initial_message_to_user` is the optional user-facing startup prompt. When it is null, the first visible chat message should come from the workflow's actual initial agent output.
 
 ### `agents.yaml`
 

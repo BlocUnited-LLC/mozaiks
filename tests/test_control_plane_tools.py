@@ -8,20 +8,27 @@ import pytest
 from factory_app.control_plane.tools.get_artifact_summary import get_artifact_summary
 from factory_app.control_plane.tools.get_artifact_workspace_catalog import get_artifact_workspace_catalog
 from factory_app.control_plane.tools.get_artifact_workspace_scope import get_artifact_workspace_scope
-from factory_app.control_plane.tools.get_build_state import get_build_state
-from factory_app.control_plane.tools.get_concept_overview import get_concept_overview
-from factory_app.control_plane.tools.get_design_summary import get_design_summary
+from mozaiksai.control_plane.tools.get_revision_context import get_revision_context
 from mozaiksai.core.artifacts.models import (
     ArtifactLifecycleStatus,
     ArtifactValidationStatus,
     ArtifactVersionDoc,
     ChangeClassification,
+    ChangeIntentDoc,
+    ChangeRequestDoc,
+    ImpactSetDoc,
+    RefinementRequestPayload,
 )
+from mozaiksai.core.session.model import RevisionEntry, SequenceStatus, SessionLifecycle, SessionState
 from mozaiksai.control_plane import (
+    ControlPlaneArtifactChangeRoutesManifest,
+    ControlPlaneArtifactRoutingManifest,
+    ControlPlaneChangeRouteManifest,
     ControlPlaneHarnessManifest,
     ControlPlaneManifest,
     ControlPlaneProfileInfo,
     ControlPlanePromptsManifest,
+    ControlPlaneRoutingManifest,
     ControlPlaneToolCall,
     ControlPlaneToolContext,
     ControlPlaneToolDefinition,
@@ -83,65 +90,6 @@ async def test_control_plane_tool_executor_resolves_pack_declared_tool(tmp_path:
     assert result.output == {"checkpoint": "request_submitted", "artifact_kind": "app_bundle"}
 
 
-class _FakeBuilderStore:
-    async def get_concept(self, *, app_id: str):
-        return {
-            "app_id": app_id,
-            "app_name": "Investor Hub",
-            "ConceptOverview": "A platform for investors to evaluate startup deals.",
-            "Blueprint": {
-                "value_proposition": "Speed up investor diligence.",
-                "target_user": "Analyst",
-                "core_features": ["deal rooms", "notes", "approvals"],
-            },
-            "capability_pack_hints": ["crm", "reporting"],
-            "surface_candidate_hints": ["dashboard", "deal_detail"],
-            "agentic_capabilities": ["workflow_review"],
-            "status": "draft",
-            "updated_at": "2026-01-01T00:00:00+00:00",
-        }
-
-    async def list_design_docs(self, *, app_id: str):
-        return [
-            {
-                "kind": "backend",
-                "status": "succeeded",
-                "stage": "draft",
-                "content": "Backend design for investor workflows.",
-                "updated_at": "2026-01-01T00:00:00+00:00",
-                "surface_map": {"surfaces": [{"surface_id": "deal_workflow"}, {"surface_id": "dashboard"}]},
-            },
-            {
-                "kind": "ui_schema",
-                "status": "succeeded",
-                "stage": "draft",
-                "content": "UI schema for the dashboard.",
-                "updated_at": "2026-01-01T00:05:00+00:00",
-            },
-        ]
-
-    async def get_latest_database_intent(self, *, app_id: str):
-        return {
-            "updated_at": "2026-01-01T00:10:00+00:00",
-            "database_intent_bundle": {
-                "artifact_version_id": "av_200",
-                "surfaces": [{"surface_id": "deal_workflow"}],
-                "shared_collections": [{"name": "users"}],
-                "policies": {"default_scope_field": "app_id"},
-            },
-        }
-
-    async def get_build_plan(self, *, app_id: str):
-        return {
-            "build_plan_id": "plan_123",
-            "tasks": [{"task_id": "t1"}, {"task_id": "t2"}],
-            "entities": [{"name": "Deal"}, {"name": "Investor"}],
-        }
-
-    async def get_theme_capture(self, *, app_id: str):
-        return {"app_url": "https://example.com", "identity": {"brand_name": "Investor Hub", "tone": "serious"}}
-
-
 class _FakeChangeRequest:
     def __init__(self, classification: ChangeClassification) -> None:
         self.classification = classification
@@ -175,32 +123,253 @@ class _FakeArtifactStore:
         ]
 
 
+class _FakeSessionStore:
+    async def load(self, *, app_id: str, user_id: str):
+        return SessionState(
+            session_id=f"session_router::{app_id}::{user_id}",
+            app_id=app_id,
+            user_id=user_id,
+            sequence_status=SequenceStatus.REVISING,
+            active_revision_id="rev_1",
+            active_change_request_id="cr_1",
+            current_revision_scope="core",
+            revision_origin_workflow="FinalMemoAssembly",
+            restart_from_workflow="MarketResearch",
+            lifecycle_state=SessionLifecycle.ACTIVE,
+            current_workflow_id="FinalMemoAssembly",
+            current_chat_id="chat_1",
+            journey_key="plan_build",
+            journey_position=7,
+            journey_total_steps=8,
+            artifact_version_refs={
+                "business_plan_bundle": "av_bp_2",
+                "executive_summary": "av_exec_1",
+            },
+            stale_layers={"financial_model": "cr_1"},
+            revision_history=[
+                RevisionEntry(
+                    revision_id="rev_1",
+                    change_request_id="cr_1",
+                    scope="core",
+                    origin_workflow="FinalMemoAssembly",
+                    target_workflow="MarketResearch",
+                    from_version_refs={"business_plan_bundle": "av_bp_1"},
+                )
+            ],
+        )
+
+
+def _revision_pack() -> LoadedControlPlanePack:
+    return LoadedControlPlanePack(
+        path=Path("control_plane"),
+        manifest=ControlPlaneManifest(
+            schema_version="mozaiks.control_plane.v1",
+            profile=ControlPlaneProfileInfo(id="business_plan", display_name="Business Plan", description="Business plan"),
+            harness=ControlPlaneHarnessManifest(implementation="example.harness:Harness"),
+            routing=ControlPlaneRoutingManifest(
+                default_artifact_kind="business_plan_bundle",
+                artifacts=[
+                    ControlPlaneArtifactRoutingManifest(
+                        artifact_kind="business_plan_bundle",
+                        label="business plan bundle",
+                        routes=ControlPlaneArtifactChangeRoutesManifest(
+                            patch=ControlPlaneChangeRouteManifest(route_to="FinalMemoAssembly"),
+                            design=ControlPlaneChangeRouteManifest(route_to="ExecutiveSummary"),
+                            feature=ControlPlaneChangeRouteManifest(route_to="BusinessModel"),
+                            core=ControlPlaneChangeRouteManifest(route_to="MarketResearch"),
+                        ),
+                    ),
+                    ControlPlaneArtifactRoutingManifest(
+                        artifact_kind="executive_summary",
+                        label="executive summary",
+                        routes=ControlPlaneArtifactChangeRoutesManifest(
+                            patch=ControlPlaneChangeRouteManifest(route_to="ExecutiveSummary"),
+                            design=ControlPlaneChangeRouteManifest(route_to="ExecutiveSummary"),
+                            feature=ControlPlaneChangeRouteManifest(route_to="ExecutiveSummary"),
+                            core=ControlPlaneChangeRouteManifest(route_to="MarketResearch"),
+                        ),
+                    ),
+                ],
+            ),
+        ),
+        prompts=ControlPlanePromptsManifest(schema_version="mozaiks.control_plane.prompts.v1", prompts=[]),
+        tools=ControlPlaneToolsManifest(schema_version="mozaiks.control_plane.tools.v1", tools=[]),
+    )
+
+
+class _RevisionArtifactStore(_FakeArtifactStore):
+    async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+        if artifact_version_id == "av_bp_2":
+            return ArtifactVersionDoc(
+                _id=artifact_version_id,
+                app_id=app_id,
+                artifact_kind="business_plan_bundle",
+                artifact_key="business_plan_bundle",
+                version_number=2,
+                lineage_root_id="av_bp_root",
+                parent_version_id="av_bp_1",
+                canonical_inputs_version={
+                    "market_research": "av_market_1",
+                    "customer_persona": "av_persona_1",
+                },
+                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+                validation_status=ArtifactValidationStatus.PASSED,
+                source_workflow="FinalMemoAssembly",
+                commit_metadata={
+                    "metadata": {
+                        "summary_payload": {
+                            "title": "Investor Memo",
+                            "target_customer": "Enterprise banks",
+                        }
+                    }
+                },
+            )
+        if artifact_version_id == "av_exec_1":
+            return ArtifactVersionDoc(
+                _id=artifact_version_id,
+                app_id=app_id,
+                artifact_kind="executive_summary",
+                artifact_key="executive_summary",
+                version_number=1,
+                lineage_root_id="av_exec_root",
+                parent_version_id=None,
+                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+                validation_status=ArtifactValidationStatus.PASSED,
+                source_workflow="ExecutiveSummary",
+                commit_metadata={"metadata": {}},
+            )
+        if artifact_version_id == "av_market_1":
+            return ArtifactVersionDoc(
+                _id=artifact_version_id,
+                app_id=app_id,
+                artifact_kind="market_research",
+                artifact_key="market_research",
+                version_number=1,
+                lineage_root_id="av_market_1",
+                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+                validation_status=ArtifactValidationStatus.SKIPPED,
+                source_workflow="MarketResearch",
+                commit_metadata={
+                    "metadata": {
+                        "summary_payload": {
+                            "segment": "Enterprise banking",
+                            "summary": "Large regulated institutions with lengthy sales cycles.",
+                        }
+                    }
+                },
+            )
+        if artifact_version_id == "av_persona_1":
+            return ArtifactVersionDoc(
+                _id=artifact_version_id,
+                app_id=app_id,
+                artifact_kind="customer_persona",
+                artifact_key="customer_persona",
+                version_number=1,
+                lineage_root_id="av_persona_1",
+                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+                validation_status=ArtifactValidationStatus.SKIPPED,
+                source_workflow="CustomerPersona",
+                commit_metadata={
+                    "metadata": {
+                        "summary_payload": {
+                            "buyer": "Innovation lead at a major bank",
+                        }
+                    }
+                },
+            )
+        return None
+
+    async def list_artifact_versions(self, **kwargs):  # noqa: ANN003
+        artifact_kind = kwargs.get("artifact_kind")
+        if artifact_kind == "business_plan_bundle":
+            artifact = await self.get_artifact_version(app_id=kwargs["app_id"], artifact_version_id="av_bp_2")
+            return [artifact] if artifact is not None else []
+        if artifact_kind == "executive_summary":
+            artifact = await self.get_artifact_version(app_id=kwargs["app_id"], artifact_version_id="av_exec_1")
+            return [artifact] if artifact is not None else []
+        if artifact_kind == "market_research":
+            artifact = await self.get_artifact_version(app_id=kwargs["app_id"], artifact_version_id="av_market_1")
+            return [artifact] if artifact is not None else []
+        if artifact_kind == "customer_persona":
+            artifact = await self.get_artifact_version(app_id=kwargs["app_id"], artifact_version_id="av_persona_1")
+            return [artifact] if artifact is not None else []
+        return []
+
+    async def get_change_request(self, *, app_id: str, change_request_id: str):
+        return ChangeRequestDoc(
+            _id=change_request_id,
+            app_id=app_id,
+            artifact_kind="business_plan_bundle",
+            artifact_key="business_plan_bundle",
+            artifact_version_id="av_bp_2",
+            raw_user_request="Target enterprise banks instead of small businesses.",
+            classification=ChangeClassification.CORE,
+            refinement_request=RefinementRequestPayload(
+                artifact_kind="business_plan_bundle",
+                artifact_key="business_plan_bundle",
+                artifact_version_id="av_bp_2",
+                raw_user_request="Target enterprise banks instead of small businesses.",
+                app_id=app_id,
+            ),
+            change_intent=ChangeIntentDoc(
+                change_class=ChangeClassification.CORE,
+                rationale="Target customer shifted upstream.",
+                source="llm",
+                signals=["target_customer_change"],
+                requires_concept_revision=True,
+            ),
+            impact_set=ImpactSetDoc(
+                affected_workflows=["MarketResearch", "CustomerPersona", "ExecutiveSummary"],
+                affected_declarative_families=["market_research", "customer_persona", "business_plan_bundle"],
+                requires_replanning=True,
+                requires_rebuild=True,
+                restart_from="MarketResearch",
+                scope_summary="Reopen upstream strategy workflows.",
+            ),
+        )
+
+    async def list_change_requests(self, *, app_id: str, artifact_version_id: str, limit: int):
+        return [
+            await self.get_change_request(app_id=app_id, change_request_id="cr_1"),
+        ]
+
+
 @pytest.mark.asyncio
-async def test_factory_control_plane_context_tools_summarize_canonical_state() -> None:
+async def test_revision_context_tool_assembles_runtime_session_and_artifact_state() -> None:
     context = ControlPlaneToolContext(
         checkpoint="request_submitted",
         app_id="app_1",
-        artifact_kind="app_bundle",
-        artifact_key="app_bundle",
-        artifact_version_id="av_123",
-        raw_user_request="Add exports for investors",
+        user_id="user_1",
+        artifact_kind="business_plan_bundle",
+        artifact_key="business_plan_bundle",
+        artifact_version_id="av_bp_2",
+        requested_workflow_id="FinalMemoAssembly",
+        raw_user_request="Target enterprise banks instead of small businesses.",
     )
 
-    concept = await get_concept_overview(context=context, store=_FakeBuilderStore())
-    design = await get_design_summary(context=context, store=_FakeBuilderStore())
-    build_state = await get_build_state(context=context, store=_FakeBuilderStore())
-    artifact = await get_artifact_summary(context=context, artifact_store=_FakeArtifactStore())
+    revision_context = await get_revision_context(
+        context=context,
+        session_store=_FakeSessionStore(),
+        artifact_store=_RevisionArtifactStore(),
+        pack_loader=_revision_pack,
+    )
 
-    assert concept["present"] is True
-    assert concept["app_name"] == "Investor Hub"
-    assert design["present"] is True
-    assert "backend" in design["document_kinds"]
-    assert design["surface_ids"] == ["dashboard", "deal_workflow"]
-    assert build_state["build_plan"]["task_count"] == 2
-    assert build_state["theme_capture"]["identity"]["brand_name"] == "Investor Hub"
-    assert artifact["present"] is True
-    assert artifact["artifact_version_id"] == "av_123"
-    assert artifact["recent_change_classes"] == ["feature", "patch"]
+    assert revision_context["present"] is True
+    assert revision_context["routing"]["current_artifact"]["routes"]["core"] == "MarketResearch"
+    assert revision_context["session"]["sequence_status"] == "revising"
+    assert revision_context["session"]["active_change_request_id"] == "cr_1"
+    assert revision_context["current_artifact"]["artifact_version_id"] == "av_bp_2"
+    assert revision_context["current_artifact"]["summary_payload"]["target_customer"] == "Enterprise banks"
+    assert revision_context["current_artifact"]["input_artifacts"]["market_research"]["artifact_version_id"] == "av_market_1"
+    assert revision_context["active_change_request"]["classification"] == "core"
+    assert revision_context["tracked_artifacts"][0]["artifact_kind"] == "business_plan_bundle"
+    assert any(
+        artifact["artifact_kind"] == "market_research"
+        and artifact["summary_payload"]["segment"] == "Enterprise banking"
+        for artifact in revision_context["tracked_artifacts"]
+        if artifact.get("present")
+    )
+    assert revision_context["recent_change_requests"][0]["change_request_id"] == "cr_1"
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,11 @@ from .models import (
     RefinementSessionStatus,
 )
 from .store import ArtifactStore, get_artifact_store
+from .summary_artifacts import (
+    extract_summary_payload,
+    persist_summary_artifact,
+    resolve_latest_artifact_version_refs,
+)
 
 __all__ = [
     "ArtifactCommitMetadata",
@@ -29,4 +34,7 @@ __all__ = [
     "RefinementSessionStatus",
     "ArtifactStore",
     "get_artifact_store",
+    "extract_summary_payload",
+    "persist_summary_artifact",
+    "resolve_latest_artifact_version_refs",
 ]

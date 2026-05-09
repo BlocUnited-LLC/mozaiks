@@ -1,6 +1,6 @@
 {
-  "appName": "Factory App",
-  "appId": "factory-app",
+  "appName": "MozaiksFactory",
+  "appId": "mozaiks-factory",
   "startup": {
     "landing_spot": "/create"
   },

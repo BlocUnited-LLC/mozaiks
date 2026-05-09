@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 import yaml
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 
@@ -334,7 +335,8 @@ async def save_design_docs_bundle(
     user_id = _cv_get(context_variables, "user_id")
     artifact_version_id = _cv_get(context_variables, "artifact_version_id")
     build_id = _cv_get(context_variables, "build_id") or chat_id
-    change_class = _cv_get(context_variables, "change_class")
+    revision_scope = _cv_get(context_variables, "revision_scope")
+    build_mode = _cv_get(context_variables, "build_mode")
 
     if not app_id or not isinstance(app_id, str):
         return {"ok": False, "reason": "missing_app_id"}
@@ -401,12 +403,34 @@ async def save_design_docs_bundle(
         app_id=app_id,
         build_id=str(build_id or chat_id or "design-docs"),
         artifact_version_id=str(artifact_version_id) if artifact_version_id else None,
-        change_class=str(change_class) if change_class else None,
+        change_class=str(revision_scope) if revision_scope else None,
         database_intent_bundle=database_intent_bundle,
         user_id=str(user_id) if user_id else None,
         source_workflow="DesignDocs",
         source_chat_id=str(chat_id) if chat_id else None,
     )
+
+    try:
+        await persist_summary_artifact(
+            app_id=app_id,
+            artifact_kind="design_docs",
+            artifact_key="design_docs",
+            summary_payload={
+                "frontend_markdown": frontend_markdown,
+                "backend_markdown": backend_markdown,
+                "database_markdown": database_markdown,
+                "ui_schema_yaml": ui_schema_yaml,
+                "surface_map": surface_map,
+                "database_intent_bundle": database_intent_bundle,
+            },
+            source_workflow="DesignDocs",
+            source_chat_id=str(chat_id) if chat_id else None,
+            author_user_id=str(user_id) if user_id else None,
+            revision_mode=str(build_mode or "").strip().lower() == "revision",
+            input_artifact_kinds=("concept", "build_plan"),
+        )
+    except Exception as exc:
+        logger.warning("[DesignDocs] Generic design-doc artifact persistence failed: %s", exc)
 
     try:
         await _mark_design_docs_status(

@@ -8,6 +8,3 @@ initial_message: 'InterviewAgent: Greet the user, clarify the non-AI app scope,
   and gather any missing CRUD/page/auth/integration requirements before code generation
   begins.'
 initial_agent: InterviewAgent
-runtime_extensions:
-  - kind: lifecycle_hooks
-    entrypoint: workflows.AppGenerator.tools.platform.build_lifecycle:get_hooks

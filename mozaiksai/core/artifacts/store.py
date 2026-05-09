@@ -315,6 +315,49 @@ class ArtifactStore:
         )
         return int(result.modified_count)
 
+    async def invalidate_artifact_version_refs(
+        self,
+        *,
+        app_id: str,
+        artifact_version_refs: Dict[str, str],
+        affected_artifact_kinds: Optional[Iterable[str]] = None,
+        reason: str,
+        invalidated_by_version_id: Optional[str] = None,
+    ) -> list[str]:
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+
+        normalized_refs: Dict[str, str] = {}
+        for raw_kind, raw_version_id in dict(artifact_version_refs or {}).items():
+            artifact_kind = str(raw_kind or "").strip()
+            artifact_version_id = str(raw_version_id or "").strip()
+            if artifact_kind and artifact_version_id:
+                normalized_refs[artifact_kind] = artifact_version_id
+
+        target_kinds: list[str] = []
+        raw_target_kinds = list(affected_artifact_kinds or normalized_refs.keys())
+        for raw_kind in raw_target_kinds:
+            artifact_kind = str(raw_kind or "").strip()
+            if artifact_kind and artifact_kind not in target_kinds:
+                target_kinds.append(artifact_kind)
+
+        invalidated_ids: list[str] = []
+        seen_version_ids: set[str] = set()
+        for artifact_kind in target_kinds:
+            artifact_version_id = normalized_refs.get(artifact_kind)
+            if not artifact_version_id or artifact_version_id in seen_version_ids:
+                continue
+            seen_version_ids.add(artifact_version_id)
+            if await self.mark_artifact_version_stale(
+                app_id=resolved_app_id,
+                artifact_version_id=artifact_version_id,
+                reason=reason,
+                invalidated_by_version_id=invalidated_by_version_id,
+            ):
+                invalidated_ids.append(artifact_version_id)
+        return invalidated_ids
+
     async def set_validation_status(
         self,
         *,

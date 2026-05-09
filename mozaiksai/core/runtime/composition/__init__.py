@@ -5,7 +5,6 @@ from .extensions import (
     start_declared_services,
     stop_services,
     get_workflow_lifecycle_hooks,
-    get_workflow_api_router,
 )
 from .platform_hooks import get_platform_hooks, PlatformHookRegistry
 from .executor_registry import Executor, ExecutorRegistry, ExecutorType
@@ -17,7 +16,6 @@ __all__ = [
     "start_declared_services",
     "stop_services",
     "get_workflow_lifecycle_hooks",
-    "get_workflow_api_router",
     "get_platform_hooks",
     "PlatformHookRegistry",
     "Executor",

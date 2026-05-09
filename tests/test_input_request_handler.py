@@ -162,6 +162,46 @@ async def test_input_handler_auto_resumes_empty_generic_feedback_without_new_ass
 
 
 @pytest.mark.asyncio
+async def test_input_handler_does_not_auto_resume_generic_feedback_after_new_assistant_prompt() -> None:
+    handler = InputRequestHandler()
+    transport = _FakeTransport(recent_input_submit=True)
+    persistence_manager = _FakePersistenceManager(
+        latest_message={"role": "assistant", "content": "Who specifically are your target users?"}
+    )
+    ctx = _build_ctx(transport, persistence_manager)
+    state = StreamState(
+        turn_agent="ValueInterviewAgent",
+        last_text_role="assistant",
+        last_text_content="Who specifically are your target users?",
+    )
+    responded: list[str] = []
+
+    def _respond(value):  # type: ignore[no-untyped-def]
+        responded.append(value)
+        return None
+
+    prompt = (
+        "Please give feedback to chat_manager. Press enter to skip and use auto-reply, "
+        "or type 'exit' to stop the conversation: "
+    )
+    event = SimpleNamespace(
+        content=SimpleNamespace(prompt=prompt, respond=_respond),
+        prompt=prompt,
+    )
+
+    payload = await handler.handle(event, ctx, state)
+
+    assert payload is not None
+    assert payload["kind"] == "tool_call"
+    assert responded == []
+    assert state.awaiting_user_input is True
+    assert payload["tool_call_id"] in state.pending_input_requests
+    assert transport.calls[0][0] == "chat-1"
+    assert transport.sent_ui_events[0][0]["kind"] == "awaiting_reply"
+    assert persistence_manager.cleared_requests == []
+
+
+@pytest.mark.asyncio
 async def test_input_handler_preserves_non_generic_prompt_text() -> None:
     handler = InputRequestHandler()
     transport = _FakeTransport()

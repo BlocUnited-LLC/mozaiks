@@ -114,7 +114,7 @@ def _pack() -> LoadedControlPlanePack:
                     event="coding_requested",
                     entrypoint="mozaiksai.control_plane.implementations.coding_worker:ScopedRefinementCodingWorker",
                     prompt_id="coding_refinement_system",
-                    tool_ids=["get_artifact_summary", "get_build_state"],
+                    tool_ids=["get_revision_context", "get_artifact_summary"],
                 )
             ],
         ),
@@ -138,10 +138,10 @@ def _pack() -> LoadedControlPlanePack:
                     available_to=["coding_requested"],
                 ),
                 ControlPlaneToolDefinition(
-                    id="get_build_state",
+                    id="get_revision_context",
                     kind="context_tool",
-                    description="build state",
-                    entrypoint="example.tools:get_build_state",
+                    description="revision context",
+                    entrypoint="example.tools:get_revision_context",
                     available_to=["coding_requested"],
                 ),
             ],

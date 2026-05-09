@@ -82,7 +82,7 @@ class ScopedRefinementCodingWorker:
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 app_id=request.app_id,
-                user_id=None,
+                user_id=request.user_id,
                 ui_context={"surface": request.source_surface or "coding_worker"},
                 llm_config=llm_config,
                 temperature=self._resolve_temperature(llm_config),
@@ -200,6 +200,7 @@ class ScopedRefinementCodingWorker:
         context = ControlPlaneToolContext(
             checkpoint=_CHECKPOINT_EVENT,
             app_id=request.app_id,
+            user_id=request.user_id,
             artifact_kind=request.artifact_kind,
             artifact_key=request.artifact_key,
             artifact_version_id=request.artifact_version_id,

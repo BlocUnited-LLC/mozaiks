@@ -5,10 +5,16 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mozaiksai.core.session.model import SessionLifecycle, TriggerInput
 from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
+from ..loader import load_selected_control_plane_pack
+from ..schema import (
+    ControlPlaneArtifactRoutingManifest,
+    ControlPlaneChangeRouteManifest,
+    LoadedControlPlanePack,
+)
 from .change_classifier import get_change_classifier
 
 _logger = logging.getLogger("mozaiksai.control_plane.implementations.refinement_router")
@@ -33,17 +39,28 @@ class RefinementRequest(BaseModel):
 
     request_kind: str = "refinement"
     declared_change_class: Optional[ChangeClass] = None
-    artifact_kind: ArtifactKind
+    artifact_kind: str
     artifact_key: Optional[str] = None
     artifact_version_id: Optional[str] = None
     raw_user_request: str = ""
     source_surface: Optional[str] = None
     app_id: Optional[str] = None
+    user_id: Optional[str] = None
     requested_workflow_id: Optional[str] = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("artifact_kind")
+    @classmethod
+    def _normalize_artifact_kind(cls, value: Any) -> str:
+        if isinstance(value, Enum):
+            value = value.value
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            raise ValueError("artifact_kind is required")
+        return normalized
+
     def normalized_artifact_key(self) -> str:
-        return str(self.artifact_key or self.artifact_kind.value).strip() or self.artifact_kind.value
+        return str(self.artifact_key or self.artifact_kind).strip() or self.artifact_kind
 
 
 class ChangeIntent(BaseModel):
@@ -87,88 +104,77 @@ class RefinementRoutingDecision(BaseModel):
 
 @dataclass(frozen=True)
 class ArtifactRoutePolicy:
-    owner_workflow_id: str
-    design_workflow_id: str
-    root_workflow_id: str
+    artifact_kind: str
+    label: str
+    patch: ControlPlaneChangeRouteManifest
+    design: ControlPlaneChangeRouteManifest
+    feature: ControlPlaneChangeRouteManifest
+    core: ControlPlaneChangeRouteManifest
 
-
-_ARTIFACT_ROUTE_POLICIES: dict[ArtifactKind, ArtifactRoutePolicy] = {
-    ArtifactKind.APP_BUNDLE: ArtifactRoutePolicy(
-        owner_workflow_id="AppGenerator",
-        design_workflow_id="DesignDocs",
-        root_workflow_id="ValueEngine",
-    ),
-    ArtifactKind.WORKFLOW_BUNDLE: ArtifactRoutePolicy(
-        owner_workflow_id="AgentGenerator",
-        design_workflow_id="AgentGenerator",
-        root_workflow_id="ValueEngine",
-    ),
-    ArtifactKind.DESIGN_DOCS: ArtifactRoutePolicy(
-        owner_workflow_id="DesignDocs",
-        design_workflow_id="DesignDocs",
-        root_workflow_id="ValueEngine",
-    ),
-    ArtifactKind.CONCEPT: ArtifactRoutePolicy(
-        owner_workflow_id="ValueEngine",
-        design_workflow_id="ValueEngine",
-        root_workflow_id="ValueEngine",
-    ),
-}
-
-_ARTIFACT_FAMILY_MAP: dict[ArtifactKind, list[str]] = {
-    ArtifactKind.APP_BUNDLE: ["app_bundle"],
-    ArtifactKind.WORKFLOW_BUNDLE: ["workflow_bundle"],
-    ArtifactKind.DESIGN_DOCS: ["design_docs"],
-    ArtifactKind.CONCEPT: ["concept"],
-}
-
-_DOWNSTREAM_BUILD_SEQUENCE = ["ValueEngine", "DesignDocs", "AgentGenerator", "AppGenerator"]
+    def route_for(self, change_class: ChangeClass) -> ControlPlaneChangeRouteManifest:
+        return getattr(self, change_class.value)
 
 class RefinementTriggerRouteResolver:
-    def __init__(self, *, classifier=None) -> None:
+    def __init__(self, *, classifier=None, pack_loader=load_selected_control_plane_pack) -> None:
         self._classifier = classifier or get_change_classifier()
+        self._pack_loader = pack_loader
 
     @staticmethod
-    def _artifact_label(artifact_kind: ArtifactKind) -> str:
-        return artifact_kind.value.replace("_", " ")
+    def _artifact_label(artifact_kind: str, policy: Optional[ArtifactRoutePolicy] = None) -> str:
+        return str(policy.label if policy is not None else artifact_kind).replace("_", " ")
 
-    def _policy_for(self, artifact_kind: ArtifactKind) -> ArtifactRoutePolicy:
-        policy = _ARTIFACT_ROUTE_POLICIES.get(artifact_kind)
-        if policy is not None:
-            return policy
-        _logger.warning(
-            "No artifact routing policy for kind=%s, falling back to %s",
-            artifact_kind,
-            ArtifactKind.APP_BUNDLE.value,
+    def _load_pack(self) -> LoadedControlPlanePack:
+        loaded = self._pack_loader()
+        return loaded if isinstance(loaded, LoadedControlPlanePack) else LoadedControlPlanePack.model_validate(loaded)
+
+    def _policy_for(self, artifact_kind: str) -> ArtifactRoutePolicy:
+        pack = self._load_pack()
+        policy = pack.routing_for_artifact(artifact_kind)
+        if policy is None:
+            configured = ", ".join(sorted(artifact.artifact_kind for artifact in pack.manifest.routing.artifacts))
+            raise RuntimeError(
+                "No control-plane routing is configured for "
+                f"artifact_kind '{artifact_kind}'. Add it to control_plane.yaml routing.artifacts. "
+                f"Configured kinds: {configured or 'none'}."
+            )
+        return self._to_policy(policy)
+
+    @staticmethod
+    def _to_policy(policy: ControlPlaneArtifactRoutingManifest) -> ArtifactRoutePolicy:
+        return ArtifactRoutePolicy(
+            artifact_kind=policy.artifact_kind,
+            label=str(policy.label or policy.artifact_kind).strip() or policy.artifact_kind,
+            patch=policy.routes.patch,
+            design=policy.routes.design,
+            feature=policy.routes.feature,
+            core=policy.routes.core,
         )
-        return _ARTIFACT_ROUTE_POLICIES[ArtifactKind.APP_BUNDLE]
 
-    def _base_workflows_for(self, artifact_kind: ArtifactKind) -> list[str]:
-        if artifact_kind == ArtifactKind.APP_BUNDLE:
-            return ["AppGenerator"]
-        if artifact_kind == ArtifactKind.WORKFLOW_BUNDLE:
-            return ["AgentGenerator"]
-        if artifact_kind == ArtifactKind.DESIGN_DOCS:
-            return ["DesignDocs", "AgentGenerator", "AppGenerator"]
-        return list(_DOWNSTREAM_BUILD_SEQUENCE)
+    @staticmethod
+    def _families_for_route(route: ControlPlaneChangeRouteManifest, artifact_kind: str) -> list[str]:
+        families = [str(item).strip() for item in route.affected_declarative_families if str(item).strip()]
+        return families or [artifact_kind]
 
     async def _derive_change_intent(self, request: RefinementRequest) -> ChangeIntent:
         classification = await self._classifier.classify(
-            artifact_kind=request.artifact_kind.value,
+            artifact_kind=request.artifact_kind,
             artifact_key=request.artifact_key,
             raw_user_request=request.raw_user_request,
             declared_change_class=request.declared_change_class.value if request.declared_change_class else None,
             artifact_version_id=request.artifact_version_id,
             source_surface=request.source_surface,
             app_id=request.app_id,
+            user_id=request.user_id,
             requested_workflow_id=request.requested_workflow_id,
             extra=request.extra,
         )
         change_class = ChangeClass(classification.change_class)
         source = "llm"
         signals = [str(signal).strip() for signal in classification.signals if str(signal).strip()]
-        artifact_kind = request.artifact_kind
-        label = self._artifact_label(artifact_kind)
+        policy = self._policy_for(request.artifact_kind)
+        route = policy.route_for(change_class)
+        families = set(self._families_for_route(route, request.artifact_kind))
+        label = self._artifact_label(request.artifact_kind, policy)
 
         if change_class == ChangeClass.CORE:
             return ChangeIntent(
@@ -176,26 +182,23 @@ class RefinementTriggerRouteResolver:
                 source=source,
                 signals=signals,
                 rationale=str(classification.rationale).strip()
-                or f"Core revision requested for the {label}; canonical concept and downstream artifacts must be reopened.",
+                or f"Core revision requested for the {label}; reopen the upstream workflow and downstream dependent outputs.",
                 confidence=classification.confidence,
                 requires_concept_revision=True,
-                touches_app_bundle=True,
-                touches_workflow_bundle=True,
-                touches_design_docs=True,
-                touches_concept=True,
+                touches_app_bundle="app_bundle" in families,
+                touches_workflow_bundle="workflow_bundle" in families,
+                touches_design_docs="design_docs" in families,
+                touches_concept="concept" in families,
             )
 
-        touches_app_bundle = artifact_kind == ArtifactKind.APP_BUNDLE
-        touches_workflow_bundle = artifact_kind == ArtifactKind.WORKFLOW_BUNDLE
-        touches_design_docs = artifact_kind == ArtifactKind.DESIGN_DOCS
-        touches_concept = artifact_kind == ArtifactKind.CONCEPT
+        touches_app_bundle = "app_bundle" in families
+        touches_workflow_bundle = "workflow_bundle" in families
+        touches_design_docs = "design_docs" in families
+        touches_concept = "concept" in families
 
         if change_class == ChangeClass.DESIGN:
-            touches_design_docs = True
-            if artifact_kind == ArtifactKind.CONCEPT:
-                touches_concept = True
             rationale = str(classification.rationale).strip() or (
-                f"Design-scoped revision requested for the {label}; keep the current concept and reopen only design-owned surfaces."
+                f"Design-scoped revision requested for the {label}; preserve the current concept while revisiting the structured owning workflow."
             )
         elif change_class == ChangeClass.FEATURE:
             rationale = str(classification.rationale).strip() or (
@@ -212,7 +215,7 @@ class RefinementTriggerRouteResolver:
             signals=signals,
             rationale=rationale,
             confidence=classification.confidence,
-            requires_concept_revision=touches_concept and change_class != ChangeClass.PATCH,
+            requires_concept_revision=(change_class == ChangeClass.CORE) or (touches_concept and change_class != ChangeClass.PATCH),
             touches_app_bundle=touches_app_bundle,
             touches_workflow_bundle=touches_workflow_bundle,
             touches_design_docs=touches_design_docs,
@@ -221,51 +224,33 @@ class RefinementTriggerRouteResolver:
 
     def _derive_impact_set(self, request: RefinementRequest, intent: ChangeIntent) -> ImpactSet:
         policy = self._policy_for(request.artifact_kind)
-        artifact_kind = request.artifact_kind
-        families = list(_ARTIFACT_FAMILY_MAP.get(artifact_kind, []))
-
+        route = policy.route_for(intent.change_class)
+        families = self._families_for_route(route, request.artifact_kind)
+        label = self._artifact_label(request.artifact_kind, policy)
+        affected_workflows = [str(item).strip() for item in route.affected_workflows if str(item).strip()] or [route.route_to]
         if intent.change_class == ChangeClass.CORE:
-            return ImpactSet(
-                affected_workflows=list(_DOWNSTREAM_BUILD_SEQUENCE),
-                affected_declarative_families=["concept", "design_docs", "workflow_bundle", "app_bundle"],
-                requires_replanning=True,
-                requires_rebuild=True,
-                restart_from=policy.root_workflow_id,
-                scope_summary=f"Restart from {policy.root_workflow_id} and invalidate downstream concept, design, workflow, and app artifacts.",
+            scope_summary = route.scope_summary or (
+                f"Restart from {route.route_to} and invalidate downstream outputs that depend on the {label}."
             )
-
-        if intent.change_class == ChangeClass.DESIGN:
-            if artifact_kind == ArtifactKind.APP_BUNDLE:
-                affected_workflows = [policy.design_workflow_id, policy.owner_workflow_id]
-                families = ["design_docs", "app_bundle"]
-            else:
-                affected_workflows = self._base_workflows_for(artifact_kind)
-            return ImpactSet(
-                affected_workflows=affected_workflows,
-                affected_declarative_families=families,
-                requires_replanning=True,
-                requires_rebuild=True,
-                restart_from=policy.design_workflow_id,
-                scope_summary=f"Reopen design-owned surfaces for the {self._artifact_label(artifact_kind)} and rebuild affected downstream outputs.",
+        elif intent.change_class == ChangeClass.DESIGN:
+            scope_summary = route.scope_summary or (
+                f"Reopen structured planning surfaces for the {label} and rebuild the affected downstream outputs."
             )
-
-        if intent.change_class == ChangeClass.FEATURE:
-            return ImpactSet(
-                affected_workflows=self._base_workflows_for(artifact_kind),
-                affected_declarative_families=families,
-                requires_replanning=True,
-                requires_rebuild=True,
-                restart_from=policy.owner_workflow_id,
-                scope_summary=f"Extend the existing {self._artifact_label(artifact_kind)} within the approved concept using the owning workflow.",
+        elif intent.change_class == ChangeClass.FEATURE:
+            scope_summary = route.scope_summary or (
+                f"Extend the existing {label} within the approved concept using {route.route_to}."
             )
-
+        else:
+            scope_summary = route.scope_summary or (
+                f"Apply a local patch to the current {label} without widening upstream scope."
+            )
         return ImpactSet(
-            affected_workflows=[policy.owner_workflow_id],
+            affected_workflows=affected_workflows,
             affected_declarative_families=families,
-            requires_replanning=False,
-            requires_rebuild=True,
-            restart_from=policy.owner_workflow_id,
-            scope_summary=f"Apply a local patch to the current {self._artifact_label(artifact_kind)} without widening upstream scope.",
+            requires_replanning=route.requires_replanning,
+            requires_rebuild=route.requires_rebuild,
+            restart_from=route.route_to,
+            scope_summary=scope_summary,
         )
 
     def _derive_route(
@@ -276,44 +261,45 @@ class RefinementTriggerRouteResolver:
         impact_set: ImpactSet,
     ) -> RefinementRoutingDecision:
         policy = self._policy_for(request.artifact_kind)
-        label = self._artifact_label(request.artifact_kind)
+        route = policy.route_for(change_intent.change_class)
+        label = self._artifact_label(request.artifact_kind, policy)
 
         if change_intent.change_class == ChangeClass.CORE:
             return RefinementRoutingDecision(
-                workflow_id=policy.root_workflow_id,
+                workflow_id=route.route_to,
                 refinement_request=request,
                 change_intent=change_intent,
                 impact_set=impact_set,
-                explanation=f"Core concept change detected for {label}; restarting from {policy.root_workflow_id}.",
+                explanation=f"Core concept change detected for {label}; restarting from {route.route_to}.",
                 is_full_restart=True,
             )
 
         if change_intent.change_class == ChangeClass.DESIGN:
             return RefinementRoutingDecision(
-                workflow_id=policy.design_workflow_id,
+                workflow_id=route.route_to,
                 refinement_request=request,
                 change_intent=change_intent,
                 impact_set=impact_set,
-                explanation=f"Re-entering {policy.design_workflow_id} to revise design-owned aspects of the {label}.",
+                explanation=f"Re-entering {route.route_to} to revise design-owned aspects of the {label}.",
                 is_full_restart=False,
             )
 
         if change_intent.change_class == ChangeClass.FEATURE:
             return RefinementRoutingDecision(
-                workflow_id=policy.owner_workflow_id,
+                workflow_id=route.route_to,
                 refinement_request=request,
                 change_intent=change_intent,
                 impact_set=impact_set,
-                explanation=f"Re-entering {policy.owner_workflow_id} to extend the {label} within the current concept.",
+                explanation=f"Re-entering {route.route_to} to extend the {label} within the current concept.",
                 is_full_restart=False,
             )
 
         return RefinementRoutingDecision(
-            workflow_id=policy.owner_workflow_id,
+            workflow_id=route.route_to,
             refinement_request=request,
             change_intent=change_intent,
             impact_set=impact_set,
-            explanation=f"Re-entering {policy.owner_workflow_id} to apply a scoped patch to the {label}.",
+            explanation=f"Re-entering {route.route_to} to apply a scoped patch to the {label}.",
             is_full_restart=False,
         )
 
@@ -325,16 +311,24 @@ class RefinementTriggerRouteResolver:
         impact_set: ImpactSet,
     ) -> dict[str, Any]:
         context_seed: dict[str, Any] = {
-            "refinement_mode": change_intent.change_class != ChangeClass.CORE,
-            "change_class": change_intent.change_class.value,
-            "artifact_kind": request.artifact_kind.value,
+            "build_mode": "revision",
+            "revision_scope": change_intent.change_class.value,
+            "artifact_kind": request.artifact_kind,
             "refinement_request": request.raw_user_request,
             "refinement_request_meta": request.model_dump(mode="python"),
+            "screen": request.source_surface,
             "change_intent": change_intent.model_dump(mode="python"),
             "impact_set": impact_set.model_dump(mode="python"),
+            "revision_origin_workflow": request.requested_workflow_id,
         }
         if request.artifact_version_id:
             context_seed["artifact_version_id"] = request.artifact_version_id
+        change_request_id = request.extra.get("change_request_id")
+        if isinstance(change_request_id, str) and change_request_id.strip():
+            context_seed["change_request_id"] = change_request_id.strip()
+        revision_id = request.extra.get("revision_id")
+        if isinstance(revision_id, str) and revision_id.strip():
+            context_seed["revision_id"] = revision_id.strip()
         return context_seed
 
     async def route(self, request: RefinementRequest) -> RefinementRoutingDecision:
@@ -365,6 +359,7 @@ class RefinementTriggerRouteResolver:
         *,
         payload: dict[str, Any],
         app_id: Optional[str] = None,
+        user_id: Optional[str] = None,
         requested_workflow_id: Optional[str] = None,
         default_source_surface: Optional[str] = None,
     ) -> Optional[RefinementRequest]:
@@ -378,14 +373,22 @@ class RefinementTriggerRouteResolver:
         harness_action = payload.get("harness_action")
         if isinstance(harness_action, dict):
             request_payload["extra"]["harness_action"] = dict(harness_action)
+        change_request_id = payload.get("change_request_id")
+        if isinstance(change_request_id, str) and change_request_id.strip():
+            request_payload["extra"]["change_request_id"] = change_request_id.strip()
+        revision_id = payload.get("revision_id")
+        if isinstance(revision_id, str) and revision_id.strip():
+            request_payload["extra"]["revision_id"] = revision_id.strip()
 
-        request_payload.setdefault("artifact_kind", ArtifactKind.APP_BUNDLE.value)
+        default_artifact_kind = self._load_pack().manifest.routing.default_artifact_kind
+        request_payload.setdefault("artifact_kind", default_artifact_kind)
         request_payload["artifact_key"] = (
-            str(request_payload.get("artifact_key") or request_payload.get("artifact_kind") or ArtifactKind.APP_BUNDLE.value)
+            str(request_payload.get("artifact_key") or request_payload.get("artifact_kind") or default_artifact_kind)
             .strip()
-            or ArtifactKind.APP_BUNDLE.value
+            or default_artifact_kind
         )
         request_payload["app_id"] = str(app_id or "").strip() or None
+        request_payload["user_id"] = str(user_id or "").strip() or None
         request_payload["requested_workflow_id"] = str(requested_workflow_id or "").strip() or None
         if default_source_surface and not request_payload.get("source_surface"):
             request_payload["source_surface"] = default_source_surface
@@ -402,6 +405,7 @@ class RefinementTriggerRouteResolver:
         return self.request_from_payload(
             payload=dict(trigger.trigger_payload or {}),
             app_id=trigger.app_id,
+            user_id=trigger.user_id,
             requested_workflow_id=trigger.workflow_id,
             default_source_surface=default_source_surface,
         )
@@ -421,7 +425,9 @@ class RefinementTriggerRouteResolver:
         )
 
     def supported_artifact_kinds(self) -> list[str]:
-        return sorted(policy_kind.value for policy_kind in _ARTIFACT_ROUTE_POLICIES)
+        pack = self._load_pack()
+        configured = [artifact.artifact_kind for artifact in pack.manifest.routing.artifacts]
+        return sorted(configured or [ArtifactKind.APP_BUNDLE.value])
 
     def supported_change_classes(self) -> list[str]:
         return sorted(change_class.value for change_class in ChangeClass)

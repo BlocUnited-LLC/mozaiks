@@ -178,11 +178,17 @@ Runtime note:
   runtime
 - this keeps the checkpoint taxonomy declarative while still allowing the
   harness to compose checkpoint handlers deterministically
+- refinement re-entry routing is no longer hardcoded to builder workflows in
+  Python; the selected control-plane pack declares app-owned artifact kinds and
+  `route_to` targets per change class inside `control_plane.yaml`
+- that keeps the harness runtime-owned while letting future apps declare their
+  own artifact/output topology without becoming `factory_app` clones
 
 Current simplified pack taxonomy:
 
 - `config/control_plane.yaml`
   - top-level `harness`
+  - top-level `routing`
   - inline `checkpoints[]`
 - `prompts/*.yaml`
 - `config/tools.yaml`
@@ -197,6 +203,25 @@ Each checkpoint declares:
 
 There is no extra user-facing control-plane `components` layer. The pack
 declares what should run at each checkpoint.
+
+The `routing` section is the canonical app-local declaration for harness
+ownership:
+
+- `default_artifact_kind`
+- `artifacts[]`
+  - `artifact_kind`
+  - optional `label`
+  - `routes.patch|design|feature|core.route_to`
+  - affected workflows / declarative families / replanning flags
+
+This keeps the runtime generic:
+
+- `factory_app` can declare app-build artifacts like `concept`,
+  `design_docs`, `workflow_bundle`, and `app_bundle`
+- a future memo/planning app can declare artifacts like `market_research`,
+  `financial_model`, or `executive_summary`
+- the harness logic stays in `mozaiksai/control_plane`, while artifact
+  ownership stays in the selected pack
 
 Current app-level config contract:
 
@@ -240,13 +265,24 @@ Current default classifier grounding:
 
 - the selected control-plane pack declares a `request_submitted` checkpoint
   with its own prompt and tool ids inline in `control_plane.yaml`
-- the first-party factory pack currently loads canonical context from:
-  - `get_concept_overview`
-  - `get_design_summary`
-  - `get_artifact_summary`
-  - `get_build_state`
+- the runtime now provides a generic `get_revision_context` tool that assembles:
+  - persisted `SessionState`
+  - app-declared routing metadata from the selected control-plane pack
+  - tracked artifact refs and latest artifact lineage
+  - active change-request lineage when present
+  - persisted summary payloads for runtime-owned summary artifacts such as
+    `concept`, `build_plan`, `design_docs`, and `theme_capture`
+  - one-level resolved `canonical_inputs_version` lineage so downstream bundle
+    artifacts can expose the upstream artifacts they were built from
+- when a `ChangeRequest` is persisted, the control plane now also marks the
+  affected persisted artifact versions `stale` using the change-request id as
+  the invalidation reason
+- the first-party factory pack pairs that runtime context with
+  `get_artifact_summary`
+- app-specific packs may add extra tools, but the harness backbone should start
+  from runtime-owned revision context rather than builder-only persistence
 - that context is gathered before the model call and passed into the
-  classifier prompt as canonical persisted builder state
+  classifier prompt as canonical persisted runtime state
 - this keeps refinement classification above workflow-local AG2 logic and off
   the individual workflow prompt surfaces
 
@@ -258,6 +294,8 @@ Current first-party coding worker path:
   prompt and tool access
 - the first-party factory pack also declares a `scope_requested` checkpoint with its
   own prompt and tool access
+- both now ground on the same runtime `get_revision_context` backbone rather
+  than requiring builder-only `concept/design/build_state` tools
 - Studio may short-circuit a refinement request into `execution_mode:
   coding_worker` when all of these are true:
   - the refinement is classified as a narrow `patch`
@@ -326,6 +364,18 @@ Current first-party harness decision layer:
   - `review_patch`
 - builder surfaces round-trip those actions back through
   `refinement_request.extra.harness_action`
+- when launch is deferred, the runtime persists revision intent in
+  `SessionRouterState` immediately and reuses the active
+  `change_request_id` / `revision_id` for the follow-up action request
+- that persisted pending decision now includes the replay contract the shell
+  needs after refresh:
+  - `trigger_source`
+  - `requested_workflow_id`
+  - `journey_id`
+  - `context_variables`
+  - `trigger_payload`
+  - `selected_paths`
+  - `clarification_question`
 - the default control-plane pack now declares this behavior as a dedicated
   `decision_requested` checkpoint in `control_plane.yaml`
 
@@ -341,14 +391,16 @@ Current first-party artifact workbench bridge:
 - when no file is selected in `AppWorkbench`, the control-plane harness can
   now fall back to scope proposal instead of forcing file selection first
 
-Current first-party workflow context contract:
+Target workflow revision context contract:
 
-- `ValueEngine`, `DesignDocs`, `AgentGenerator`, and `AppGenerator` now all
-  declare the shared refinement-control-plane subset they are allowed to
-  receive on reroute
-- the current common subset is:
-  - `refinement_mode`
-  - `change_class`
+- `ValueEngine`, `DesignDocs`, `AgentGenerator`, and `AppGenerator` should all
+  declare one shared revision-context subset they are allowed to receive on
+  reroute
+- the target common subset is:
+  - `build_mode`
+  - `revision_scope`
+  - `revision_id`
+  - `change_request_id`
   - `artifact_kind`
   - `artifact_version_id`
   - `refinement_request`
@@ -356,9 +408,15 @@ Current first-party workflow context contract:
   - `screen`
   - `change_intent`
   - `impact_set`
+  - `sequence_status`
+  - `revision_origin_workflow`
 - this is what lets a confirmed `core_restart` into `ValueEngine` preserve the
   request and typed control-plane rationale without tripping
   `SESSION_LAUNCH_CONTEXT_KEY_REJECTED`
+- important: a reroute into `ValueEngine` for `core` does **not** mean "treat
+  this like a blank greenfield intake again." It is still a revision entry with
+  prior concept, design, and bundle history available through the revision
+  context.
 
 This is intentionally different from the older `code_context` subsystem under
 `AppGenerator/tools/code_context/`:
@@ -415,6 +473,45 @@ comes from the backend control-plane model call.
 
 The typed contract should stay stable even if the model prompt or provider
 changes later.
+
+---
+
+## Revision UX Model
+
+Builder UX should stay simple even though routing remains typed internally.
+
+User-facing distinction:
+
+- revisit the build plan
+- make a targeted change
+
+Runtime distinction:
+
+- `patch`
+- `design`
+- `feature`
+- `core`
+
+Rules:
+
+- the harness classifies the request semantically first
+- build progress or sequence completion does **not** determine the change class
+- session/build state influences the follow-up action, not the semantic class
+- a `core` or high-impact `feature` request may require workflow re-entry
+  before the overall build sequence is complete
+- a `patch` request after bundle delivery should stay local unless validation
+  forces scope widening
+
+That means:
+
+- "add blockchain" during `AppGenerator` may still route back to
+  `ValueEngine` when the classifier determines the concept, value
+  proposition, or build plan changed
+- "change the hero title" after bundle delivery stays in local refinement or a
+  narrow app-bundle re-entry
+
+The user should never have to pick `patch | design | feature | core`
+manually as the main path. That taxonomy is runtime-owned.
 
 ---
 
@@ -619,6 +716,9 @@ Example:
 - `core` change -> start a fresh `ValueEngine` revision, then downstream phases become stale
 - `design` change -> resume at `DesignDocs` or a design refinement workflow, then rebuild affected app artifacts
 - `feature` change -> resume at a scoped planner step, then run partial MFJ
+- an in-progress build and a completed build both use the same routing matrix;
+  the difference is whether the session's `sequence_status` is already
+  `completed` or still `in_progress`
 
 So the answer to "does this belong in journey sequencing?" is:
 
@@ -690,7 +790,7 @@ decision = await resolver.route(RefinementRequest(
 ))
 
 # decision.workflow_id      → "AppGenerator"
-# decision.context_seed     → {"refinement_mode": True, "change_class": "patch", ...}
+# decision.context_seed     → {"build_mode": "revision", "revision_scope": "patch", ...}
 # decision.explanation      → "Applying a targeted patch to scoped app files."
 # decision.is_full_restart  → False
 ```
@@ -821,13 +921,31 @@ request with:
 
 ### Generator Prompt Contract
 
-Generators respect the routing decision via two context variables:
+Generators should respect the routing decision through a revision context,
+not a single boolean:
 
 ```yaml
-refinement_mode: true         # tells agents to skip re-interview, load artifact
-change_class: "patch"         # tells agents how much to change
-artifact_version_id: "v3"     # tells agents which version to load
-refinement_request: "..."     # the raw user request, passed through from ChangeRequest
+build_mode: revision                # initial | revision
+revision_scope: patch               # patch | design | feature | core
+change_request_id: "cr_123"         # stable lineage handle
+artifact_version_id: "v3"           # version to load or compare against
+refinement_request: "..."           # raw user request passed through from ChangeRequest
+change_intent: {...}                # typed classification, rationale, touched layers
+impact_set: {...}                   # restart point, rebuild flags, affected workflows
+sequence_status: completed          # in_progress | completed | stale | revising
 ```
 
-Both `AppGenerator` and `AgentGenerator` declare these in `context_variables.yaml` and their agents respond accordingly. Agents check `refinement_mode` as the highest-priority instruction before any other prompt logic runs.
+Rules:
+
+- `build_mode=revision` means "do not re-interview by default; start from
+  persisted builder context and artifact lineage"
+- `revision_scope=core` rerouting into `ValueEngine` is still a revision entry,
+  not a blank first-pass interview
+- workflow prompts should use `change_intent` and `impact_set` to decide how
+  much prior work to preserve and which downstream layers may become stale
+- `sequence_status` tells the workflow whether the full build sequence had
+  already completed before this revision was requested
+
+`ValueEngine`, `DesignDocs`, `AgentGenerator`, and `AppGenerator` should all
+consume this same revision contract so re-entry behavior stays consistent
+across the build flow.

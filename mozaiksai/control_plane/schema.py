@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .contracts import ControlPlaneToolDefinition
 
@@ -34,12 +34,79 @@ class ControlPlaneCheckpointManifest(BaseModel):
     ui_tool_ids: list[str] = Field(default_factory=list)
 
 
+class ControlPlaneChangeRouteManifest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    route_to: str = Field(min_length=1)
+    affected_workflows: list[str] = Field(default_factory=list)
+    affected_declarative_families: list[str] = Field(default_factory=list)
+    requires_replanning: bool = True
+    requires_rebuild: bool = True
+    scope_summary: Optional[str] = None
+
+    @field_validator("route_to")
+    @classmethod
+    def _normalize_route_to(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("route_to must be non-empty")
+        return normalized
+
+
+class ControlPlaneArtifactChangeRoutesManifest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    patch: ControlPlaneChangeRouteManifest
+    design: ControlPlaneChangeRouteManifest
+    feature: ControlPlaneChangeRouteManifest
+    core: ControlPlaneChangeRouteManifest
+
+
+class ControlPlaneArtifactRoutingManifest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    artifact_kind: str = Field(min_length=1)
+    label: Optional[str] = None
+    routes: ControlPlaneArtifactChangeRoutesManifest
+
+    @field_validator("artifact_kind")
+    @classmethod
+    def _normalize_artifact_kind(cls, value: str) -> str:
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            raise ValueError("artifact_kind must be non-empty")
+        return normalized
+
+
+class ControlPlaneRoutingManifest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    default_artifact_kind: str = Field(default="app_bundle", min_length=1)
+    artifacts: list[ControlPlaneArtifactRoutingManifest] = Field(default_factory=list)
+
+    @field_validator("default_artifact_kind")
+    @classmethod
+    def _normalize_default_artifact_kind(cls, value: str) -> str:
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            raise ValueError("default_artifact_kind must be non-empty")
+        return normalized
+
+    @model_validator(mode="after")
+    def _unique_artifact_kinds(self) -> "ControlPlaneRoutingManifest":
+        artifact_kinds = [artifact.artifact_kind for artifact in self.artifacts]
+        if len(artifact_kinds) != len(set(artifact_kinds)):
+            raise ValueError("control_plane.yaml routing.artifacts artifact_kind values must be unique")
+        return self
+
+
 class ControlPlaneManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["mozaiks.control_plane.v1"]
     profile: ControlPlaneProfileInfo
     harness: ControlPlaneHarnessManifest
+    routing: ControlPlaneRoutingManifest = Field(default_factory=ControlPlaneRoutingManifest)
     checkpoints: list[ControlPlaneCheckpointManifest] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -140,4 +207,15 @@ class LoadedControlPlanePack(BaseModel):
         for checkpoint in self.manifest.checkpoints:
             if checkpoint.event == event_name:
                 return checkpoint
+        return None
+
+    def routing_for_artifact(self, artifact_kind: str) -> Optional[ControlPlaneArtifactRoutingManifest]:
+        requested = str(artifact_kind or "").strip().lower()
+        artifacts = list(self.manifest.routing.artifacts)
+        for candidate in [requested, str(self.manifest.routing.default_artifact_kind or "").strip().lower()]:
+            if not candidate:
+                continue
+            for artifact in artifacts:
+                if artifact.artifact_kind == candidate:
+                    return artifact
         return None

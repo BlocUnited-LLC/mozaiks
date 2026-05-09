@@ -489,18 +489,11 @@ __all__ = [
 
 
 def get_hooks() -> Dict[str, Any]:
-    """Return lifecycle hooks for the runtime_extensions system.
-    
-    This is the entrypoint called by the runtime when this workflow declares:
-        runtime_extensions:
-          - kind: lifecycle_hooks
-            entrypoint: workflows.AppGenerator.tools.platform.build_lifecycle:get_hooks
-    
-    Returns a dict with callables for:
-        - is_build_workflow: Check if this workflow is a "build" type
-        - on_start: Called when workflow starts
-        - on_complete: Called when workflow completes successfully
-        - on_fail: Called when workflow fails
+    """Return lifecycle hook callables.
+
+    Kept for backward compatibility with any code that calls get_hooks() directly.
+    Prefer referencing emit_build_started/emit_build_completed/emit_build_failed
+    individually via lifecycle_tools in tools.yaml.
     """
     return {
         "is_build_workflow": is_build_workflow,

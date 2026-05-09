@@ -32,7 +32,7 @@ WORKFLOW_FILE_MAPPINGS = {
     'ui_config': 'ui_config.yaml'
 }
 
-RUNTIME_EXTENSION_KINDS = {"api_router", "startup_service", "lifecycle_hooks"}
+RUNTIME_EXTENSION_KINDS = {"api_router", "startup_service"}
 ORCHESTRATOR_TRIGGER_TYPES = {"chat", "event", "route", "action", "schedule"}
 
 
@@ -682,6 +682,81 @@ def _normalize_mapping_output(raw: Any, *, output_name: str, wf_logger) -> Dict[
     return {}
 
 
+def _normalize_context_variables_plan(raw: Any, wf_logger) -> Dict[str, Any]:
+    output = _normalize_mapping_output(
+        raw,
+        output_name="context_variables_output",
+        wf_logger=wf_logger,
+    )
+    plan = output.get("ContextVariablesPlan")
+    if not isinstance(plan, dict):
+        plan = output
+
+    normalized: Dict[str, Any] = {}
+
+    raw_definitions = plan.get("definitions")
+    if isinstance(raw_definitions, dict):
+        definitions: Dict[str, Any] = {}
+        for name, entry in raw_definitions.items():
+            normalized_name = _normalize_nullable_text(name)
+            if normalized_name is None or not isinstance(entry, dict):
+                continue
+            definitions[normalized_name] = dict(entry)
+        normalized["definitions"] = definitions
+    elif isinstance(raw_definitions, list):
+        definitions = {}
+        for entry in raw_definitions:
+            if not isinstance(entry, dict):
+                continue
+            name = _normalize_nullable_text(entry.get("name"))
+            if name is None:
+                continue
+            definitions[name] = {key: value for key, value in entry.items() if key != "name"}
+        normalized["definitions"] = definitions
+
+    raw_agents = plan.get("agents")
+    if isinstance(raw_agents, dict):
+        agents: Dict[str, Any] = {}
+        for agent_name, exposure in raw_agents.items():
+            normalized_agent_name = _normalize_nullable_text(agent_name)
+            if normalized_agent_name is None:
+                continue
+            variables: List[str] = []
+            if isinstance(exposure, dict) and isinstance(exposure.get("variables"), list):
+                variables = [
+                    item.strip()
+                    for item in exposure.get("variables", [])
+                    if isinstance(item, str) and item.strip()
+                ]
+            agents[normalized_agent_name] = {"variables": variables}
+        normalized["agents"] = agents
+    elif isinstance(raw_agents, list):
+        agents = {}
+        for entry in raw_agents:
+            if not isinstance(entry, dict):
+                continue
+            agent_name = _normalize_nullable_text(entry.get("agent"))
+            if agent_name is None:
+                continue
+            variables = entry.get("variables")
+            if not isinstance(variables, list):
+                variables = []
+            agents[agent_name] = {
+                "variables": [item.strip() for item in variables if isinstance(item, str) and item.strip()]
+            }
+        normalized["agents"] = agents
+
+    lifecycle_requirements = plan.get("lifecycle_requirements")
+    if isinstance(lifecycle_requirements, dict):
+        normalized["lifecycle_requirements"] = dict(lifecycle_requirements)
+
+    assets = plan.get("assets")
+    if isinstance(assets, list):
+        normalized["assets"] = [item for item in assets if isinstance(item, dict)]
+
+    return normalized
+
+
 def _normalize_nullable_text(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -1169,18 +1244,17 @@ def _save_modular_workflow(
                     wf_logger.info(f"📄 [SAVE] structured_outputs saved → {filename}")
                 continue
 
-            # context_variables (unwrap wrapper)
+            # context_variables
             if section_name == "context_variables":
                 if isinstance(section_data, dict):
-                    plan = section_data.get("ContextVariablesPlan") or section_data
-                    has_new = any(k in plan for k in ("database_variables", "environment_variables", "derived_variables"))
-                    if has_new:
+                    plan = _normalize_context_variables_plan(section_data, wf_logger)
+                    if plan:
                         file_path = workflow_dir / filename
                         _save_yaml_file(file_path, plan)
                         saved_files.append(filename)
                         wf_logger.info(
                             f"📄 [SAVE] context_variables saved → {filename} "
-                            f"(db={len(plan.get('database_variables', []))}, env={len(plan.get('environment_variables', []))}, derived={len(plan.get('derived_variables', []))})"
+                            f"(definitions={len(plan.get('definitions') or {})}, agents={len(plan.get('agents') or {})})"
                         )
                 continue
 
@@ -1479,14 +1553,17 @@ async def create_workflow_files(data: Dict[str, Any], context_variables: Optiona
                 wf_logger.info(f"🧩 [CREATE_WORKFLOW_FILES] Collected {len(hook_extra_files)} hook implementation files")
 
         # Extract context variables from ContextVariablesAgent output
-        context_variables_output = _normalize_mapping_output(
+        context_variables_output = _normalize_context_variables_plan(
             data.get('context_variables_output', {}),
-            output_name='context_variables_output',
             wf_logger=wf_logger,
         )
-        if context_variables_output and 'context_variables' in context_variables_output:
+        if context_variables_output:
             config['context_variables'] = context_variables_output
-            wf_logger.info(f"📋 [CREATE_WORKFLOW_FILES] Added {len(context_variables_output['context_variables'])} context variables")
+            wf_logger.info(
+                "📋 [CREATE_WORKFLOW_FILES] Added context variables (definitions=%d, agents=%d)",
+                len(context_variables_output.get('definitions') or {}),
+                len(context_variables_output.get('agents') or {}),
+            )
 
         # Extract tools configuration from ToolsManagerAgent
         tools_manager_output = _normalize_mapping_output(
@@ -1726,12 +1803,10 @@ async def create_workflow_files(data: Dict[str, Any], context_variables: Optiona
                 if 'initial_message' not in cfg or cfg.get('initial_message') is None:
                     cfg['initial_message'] = 'Initialize workflow sequence.'
                 cfg['initial_message_to_user'] = None
-            # Extensions default
-            cfg['runtime_extensions'] = _normalize_runtime_extensions(
-                cfg.get('runtime_extensions'),
-                workflow_name=workflow_name,
-                wf_logger=wf_logger,
-            )
+            # runtime_extensions is intentionally excluded — only api_router and
+            # startup_service are valid, and they belong in module runtime_extensions.yaml,
+            # not in workflow orchestrator.yaml.
+            cfg.pop('runtime_extensions', None)
             cfg['triggers'] = _normalize_orchestrator_triggers(
                 cfg.get('triggers'),
                 wf_logger=wf_logger,

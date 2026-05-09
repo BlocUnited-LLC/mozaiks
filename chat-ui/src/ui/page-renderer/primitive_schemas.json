@@ -1,0 +1,163 @@
+{
+  "_comment": "Auto-derived from PrimitiveSchemas.js. Do not edit manually. Consumed by mozaiksai/core/workflow/ui_primitives.py for agent guidance injection.",
+  "DataTable": {
+    "required": ["columns"],
+    "properties": {
+      "columns": "array of string|{key,label?,type?,sortable?,width?} — REQUIRED",
+      "api_endpoint": "string — backend endpoint for rows",
+      "data": "array — static row data (alternative to api_endpoint)",
+      "selection": "string: none|single|multi — default none",
+      "pagination": "boolean — default true",
+      "page_size": "integer — default 20",
+      "search": "boolean — default true",
+      "actions": "array of action objects",
+      "empty": "{title?,message?,action?} — empty-state config"
+    }
+  },
+  "Form": {
+    "required": ["fields"],
+    "properties": {
+      "fields": "array of {name,label,type(text|email|password|number|textarea|select|checkbox),required?,placeholder?,default_value?,options?} — REQUIRED",
+      "layout": "string: vertical|horizontal|grid — default vertical",
+      "columns": "integer — grid columns when layout=grid, default 2",
+      "submit_label": "string — default Submit",
+      "submit_action": "action object",
+      "cancel_action": "action object",
+      "cancel_label": "string — default Cancel",
+      "disabled": "boolean — default false"
+    }
+  },
+  "Stat": {
+    "required": ["label"],
+    "properties": {
+      "label": "string — KPI label — REQUIRED",
+      "value": "any — static metric value (use value OR value_key)",
+      "value_key": "string — key path into api_endpoint response",
+      "format": "string: number|currency|percentage|compact",
+      "trend": "any — static trend value",
+      "trend_key": "string — key path into api_endpoint response",
+      "trend_direction": "string: up_good|up_bad|neutral — default up_good",
+      "color": "string",
+      "icon": "string"
+    }
+  },
+  "Grid": {
+    "required": ["columns", "children"],
+    "properties": {
+      "columns": "integer 1-6 — REQUIRED",
+      "gap": "string: sm|md|lg|1|2|3|4|6|8 — default 4",
+      "api_endpoint": "string — shared data endpoint for child Stat/Card binding",
+      "children": "array of {id?,primitive,title?,config} — REQUIRED"
+    }
+  },
+  "Card": {
+    "required": [],
+    "properties": {
+      "title": "string",
+      "subtitle": "string",
+      "actions": "array of action objects",
+      "children": "array of child sections"
+    }
+  },
+  "Button": {
+    "required": ["label"],
+    "properties": {
+      "label": "string — REQUIRED",
+      "variant": "string: primary|secondary|ghost|destructive — default primary",
+      "size": "string: sm|default|lg — default default",
+      "icon": "string",
+      "disabled": "boolean — default false",
+      "action": "action object"
+    }
+  },
+  "Modal": {
+    "required": [],
+    "properties": {
+      "title": "string",
+      "description": "string",
+      "size": "string: small|medium|large|full — default medium",
+      "actions": "array of action objects",
+      "children": "array of child sections"
+    }
+  },
+  "Alert": {
+    "required": ["message"],
+    "properties": {
+      "title": "string",
+      "message": "string — REQUIRED",
+      "variant": "string: default|info|success|warning|destructive — default default",
+      "dismissible": "boolean — default false"
+    }
+  },
+  "Badge": {
+    "required": ["label"],
+    "properties": {
+      "label": "string — REQUIRED",
+      "variant": "string"
+    }
+  },
+  "Skeleton": {
+    "required": [],
+    "properties": {
+      "rows": "integer — number of skeleton rows",
+      "height": "string — CSS height"
+    }
+  },
+  "Empty": {
+    "required": [],
+    "properties": {
+      "title": "string",
+      "message": "string",
+      "action": "action object",
+      "icon": "string"
+    }
+  },
+  "Timeline": {
+    "required": ["items"],
+    "properties": {
+      "title": "string",
+      "items": "array of {label,status(done|active|pending|error),description?,timestamp?} — REQUIRED"
+    }
+  },
+  "CodeBlock": {
+    "required": ["code"],
+    "properties": {
+      "title": "string",
+      "code": "string — REQUIRED",
+      "language": "string — e.g. python, javascript",
+      "filename": "string"
+    }
+  },
+  "ProgressTracker": {
+    "required": ["stages"],
+    "properties": {
+      "title": "string",
+      "stages": "array of {label,status(done|active|pending|error),description?} — REQUIRED"
+    }
+  },
+  "AlertBanner": {
+    "required": ["message"],
+    "properties": {
+      "title": "string",
+      "message": "string — REQUIRED",
+      "variant": "string: info|success|warning|destructive",
+      "dismissible": "boolean",
+      "actions": "array of action objects"
+    }
+  },
+  "ActionButton": {
+    "required": ["actions"],
+    "properties": {
+      "title": "string",
+      "layout": "string: row|column — default row",
+      "actions": "array of {id?,label,variant?,action?} — REQUIRED"
+    }
+  },
+  "FileList": {
+    "required": ["files"],
+    "properties": {
+      "title": "string",
+      "files": "array of {name,type?,size?,url?,status?(ready|generating|error)} — REQUIRED"
+    }
+  }
+}

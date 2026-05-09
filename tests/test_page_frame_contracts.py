@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 def _workspace() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -44,6 +46,9 @@ def test_schema_page_no_longer_owns_page_padding() -> None:
 def test_platform_dashboard_uses_shared_page_frame() -> None:
     from tests.import_utils import active_app_root
     app_root = active_app_root()
-    source = (app_root / "ui" / "pages" / "custom" / "Dashboard.jsx").read_text(encoding="utf-8")
+    dashboard_path = app_root / "ui" / "pages" / "custom" / "Dashboard.jsx"
+    if not dashboard_path.exists():
+        pytest.skip("Product-specific Dashboard.jsx not present in active app workspace")
+    source = dashboard_path.read_text(encoding="utf-8")
     assert "import { PageFrame } from '@mozaiks/chat-ui'" in source
     assert "<PageFrame" in source

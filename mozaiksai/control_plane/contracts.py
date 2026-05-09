@@ -18,6 +18,7 @@ class ControlPlaneToolContext(BaseModel):
 
     checkpoint: Optional[str] = None
     app_id: Optional[str] = None
+    user_id: Optional[str] = None
     artifact_kind: Optional[str] = None
     artifact_key: Optional[str] = None
     artifact_version_id: Optional[str] = None
@@ -50,6 +51,7 @@ class CodingWorkerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     app_id: str
+    user_id: Optional[str] = None
     artifact_kind: str
     artifact_key: Optional[str] = None
     artifact_version_id: Optional[str] = None

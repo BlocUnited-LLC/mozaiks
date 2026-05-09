@@ -66,7 +66,7 @@ def test_persist_pending_schema_migration_records_staged_history(monkeypatch) ->
     fake_store = _FakeStore()
     monkeypatch.setattr(generate_and_download_module, "BuilderArtifactStore", lambda: fake_store)
 
-    context = _Context({"artifact_version_id": "artifact_123", "change_class": "feature"})
+    context = _Context({"artifact_version_id": "artifact_123", "revision_scope": "feature"})
     record = asyncio.run(
         generate_and_download_module._persist_pending_schema_migration(
             pending_migration={"migration_id": "m_1", "changes": {"new_collections": ["users"]}},
@@ -89,6 +89,16 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     fake_artifact_store = _FakeArtifactStore()
     artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
     monkeypatch.setattr(artifacts_mod, "get_artifact_store", lambda: fake_artifact_store)
+    monkeypatch.setattr(
+        artifacts_mod,
+        "resolve_latest_artifact_version_refs",
+        lambda **kwargs: asyncio.sleep(0, result={
+            "concept": "av_concept_1",
+            "build_plan": "av_build_plan_1",
+            "design_docs": "av_design_docs_1",
+            "theme_capture": "av_theme_capture_1",
+        }),
+    )
 
     zip_path = tmp_path / "GeneratedApp.zip"
     zip_path.write_bytes(b"fake bundle bytes")
@@ -110,6 +120,12 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     assert fake_artifact_store.calls[0]["artifact_kind"] == "app_bundle"
     assert fake_artifact_store.calls[0]["artifact_key"] == "app_bundle"
     assert fake_artifact_store.calls[0]["parent_version_id"] == "av_parent_1"
+    assert fake_artifact_store.calls[0]["canonical_inputs_version"] == {
+        "concept": "av_concept_1",
+        "build_plan": "av_build_plan_1",
+        "design_docs": "av_design_docs_1",
+        "theme_capture": "av_theme_capture_1",
+    }
     assert fake_artifact_store.calls[0]["lifecycle_status"].value == "draft"
     assert fake_artifact_store.calls[0]["validation_status"].value == "passed"
     assert context.data["artifact_version_id"] == "av_bundle_1"

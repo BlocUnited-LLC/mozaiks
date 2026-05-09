@@ -5,18 +5,209 @@ profile:
   description: App-zero declarative control-plane pack for the first-party Mozaiks build experience.
 harness:
   implementation: mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness
-  supported_trigger_sources:
-    - refinement
+routing:
+  default_artifact_kind: app_bundle
+  artifacts:
+    - artifact_kind: concept
+      label: concept
+      routes:
+        patch:
+          route_to: ValueEngine
+          affected_workflows:
+            - ValueEngine
+          affected_declarative_families:
+            - concept
+          requires_replanning: false
+          requires_rebuild: true
+          scope_summary: Apply a local concept patch within ValueEngine.
+        design:
+          route_to: ValueEngine
+          affected_workflows:
+            - ValueEngine
+            - DesignDocs
+            - AgentGenerator
+            - AppGenerator
+          affected_declarative_families:
+            - concept
+          requires_replanning: true
+          requires_rebuild: true
+          scope_summary: Reopen ValueEngine for concept-level revision and refresh downstream generated outputs.
+        feature:
+          route_to: ValueEngine
+          affected_workflows:
+            - ValueEngine
+            - DesignDocs
+            - AgentGenerator
+            - AppGenerator
+          affected_declarative_families:
+            - concept
+          requires_replanning: true
+          requires_rebuild: true
+          scope_summary: Extend the concept in ValueEngine and rebuild downstream outputs that depend on it.
+        core:
+          route_to: ValueEngine
+          affected_workflows:
+            - ValueEngine
+            - DesignDocs
+            - AgentGenerator
+            - AppGenerator
+          affected_declarative_families:
+            - concept
+            - design_docs
+            - workflow_bundle
+            - app_bundle
+          requires_replanning: true
+          requires_rebuild: true
+          scope_summary: Restart from ValueEngine and invalidate downstream concept, design, workflow, and app artifacts.
+    - artifact_kind: design_docs
+      label: design docs
+      routes:
+        patch:
+          route_to: DesignDocs
+          affected_workflows:
+            - DesignDocs
+          affected_declarative_families:
+            - design_docs
+          requires_replanning: false
+          requires_rebuild: true
+          scope_summary: Apply a local patch within DesignDocs.
+        design:
+          route_to: DesignDocs
+          affected_workflows:
+            - DesignDocs
+            - AgentGenerator
+            - AppGenerator
+          affected_declarative_families:
+            - design_docs
+          requires_replanning: true
+          requires_rebuild: true
+          scope_summary: Reopen DesignDocs and refresh downstream generators that depend on the revised design intent.
+        feature:
+          route_to: DesignDocs
+          affected_workflows:
+            - DesignDocs
+            - AgentGenerator
+            - AppGenerator
+          affected_declarative_families:
+            - design_docs
+          requires_replanning: true
+          requires_rebuild: true
+          scope_summary: Extend design-owned capability planning in DesignDocs and rebuild downstream generators.
+        core:
+          route_to: ValueEngine
+          affected_workflows:
+            - ValueEngine
+            - DesignDocs
+            - AgentGenerator
+            - AppGenerator
+          affected_declarative_families:
+            - concept
+            - design_docs
+            - workflow_bundle
+            - app_bundle
+          requires_replanning: true
+          requires_rebuild: true
+          scope_summary: Restart from ValueEngine and invalidate downstream concept, design, workflow, and app artifacts.
+    - artifact_kind: workflow_bundle
+      label: workflow bundle
+      routes:
+        patch:
+          route_to: AgentGenerator
+          affected_workflows:
+            - AgentGenerator
+          affected_declarative_families:
+            - workflow_bundle
+          requires_replanning: false
+          requires_rebuild: true
+          scope_summary: Apply a local patch within AgentGenerator.
+        design:
+          route_to: AgentGenerator
+          affected_workflows:
+            - AgentGenerator
+          affected_declarative_families:
+            - workflow_bundle
+          requires_replanning: true
+          requires_rebuild: true
+          scope_summary: Reopen AgentGenerator for workflow-bundle revision within the approved concept.
+        feature:
+          route_to: AgentGenerator
+          affected_workflows:
+            - AgentGenerator
+          affected_declarative_families:
+            - workflow_bundle
+          requires_replanning: true
+          requires_rebuild: true
+          scope_summary: Extend workflow-bundle behavior in AgentGenerator within the approved concept.
+        core:
+          route_to: ValueEngine
+          affected_workflows:
+            - ValueEngine
+            - DesignDocs
+            - AgentGenerator
+            - AppGenerator
+          affected_declarative_families:
+            - concept
+            - design_docs
+            - workflow_bundle
+            - app_bundle
+          requires_replanning: true
+          requires_rebuild: true
+          scope_summary: Restart from ValueEngine and invalidate downstream concept, design, workflow, and app artifacts.
+    - artifact_kind: app_bundle
+      label: app bundle
+      routes:
+        patch:
+          route_to: AppGenerator
+          affected_workflows:
+            - AppGenerator
+          affected_declarative_families:
+            - app_bundle
+          requires_replanning: false
+          requires_rebuild: true
+          scope_summary: Apply a local patch within AppGenerator.
+        design:
+          route_to: DesignDocs
+          affected_workflows:
+            - DesignDocs
+            - AppGenerator
+          affected_declarative_families:
+            - design_docs
+            - app_bundle
+          requires_replanning: true
+          requires_rebuild: true
+          scope_summary: Reopen DesignDocs for app-surface revision and rebuild the affected app bundle output.
+        feature:
+          route_to: AppGenerator
+          affected_workflows:
+            - AppGenerator
+          affected_declarative_families:
+            - app_bundle
+          requires_replanning: true
+          requires_rebuild: true
+          scope_summary: Extend the app bundle in AppGenerator within the approved concept.
+        core:
+          route_to: ValueEngine
+          affected_workflows:
+            - ValueEngine
+            - DesignDocs
+            - AgentGenerator
+            - AppGenerator
+          affected_declarative_families:
+            - concept
+            - design_docs
+            - workflow_bundle
+            - app_bundle
+          requires_replanning: true
+          requires_rebuild: true
+          scope_summary: Restart from ValueEngine and invalidate downstream concept, design, workflow, and app artifacts.
 checkpoints:
   - id: request_intake
     event: request_submitted
     entrypoint: mozaiksai.control_plane.implementations.change_classifier:LLMChangeClassifier
     prompt_id: change_classifier_system
     tool_ids:
-      - get_concept_overview
-      - get_design_summary
+      - get_revision_context
       - get_artifact_summary
-      - get_build_state
   - id: refinement_route
     event: route_requested
     entrypoint: mozaiksai.control_plane.implementations.refinement_router:RefinementTriggerRouteResolver
@@ -28,16 +219,14 @@ checkpoints:
     entrypoint: mozaiksai.control_plane.implementations.scope_proposer:ArtifactScopeProposer
     prompt_id: coding_scope_selection_system
     tool_ids:
+      - get_revision_context
       - get_artifact_summary
-      - get_build_state
       - get_artifact_workspace_catalog
   - id: coding_refinement
     event: coding_requested
     entrypoint: mozaiksai.control_plane.implementations.coding_worker:ScopedRefinementCodingWorker
     prompt_id: coding_refinement_system
     tool_ids:
-      - get_concept_overview
-      - get_design_summary
+      - get_revision_context
       - get_artifact_summary
-      - get_build_state
       - get_artifact_workspace_scope

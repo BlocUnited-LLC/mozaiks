@@ -30,11 +30,13 @@ def test_studio_host_without_workspace_defaults_platform_path_to_factory_app_bun
     platform_path = Path(os.environ["PLATFORM_PATH"]).resolve()
     assert platform_path.name == "app"
     assert platform_path.parent.name == "factory_app"
-    assert not (platform_path / "workflows").exists()
 
     workflow_root = Path(os.environ["MOZAIKS_WORKFLOWS_PATH"]).resolve()
     assert workflow_root.name == "workflows"
     assert workflow_root.parent.name == "factory_app"
+    # Studio should use the shared factory_app/workflows, not factory_app/app/workflows
+    assert workflow_root.parent.name == "factory_app"
+    assert workflow_root != (platform_path / "workflows").resolve()
 
 
 def test_studio_host_uses_external_workspace_root_when_provided(monkeypatch, tmp_path) -> None:

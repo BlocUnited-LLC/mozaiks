@@ -1,6 +1,10 @@
 from .model import (
     JourneyAdvanceDecision,
+    PendingDecisionAction,
+    PendingHarnessDecision,
+    RevisionEntry,
     RoutingDecision,
+    SequenceStatus,
     SessionLifecycle,
     SessionState,
     TransitionResolution,
@@ -46,8 +50,12 @@ def __getattr__(name: str):
 
 __all__ = [
     "JourneyAdvanceDecision",
+    "PendingDecisionAction",
+    "PendingHarnessDecision",
     "PreparedWorkflowLaunch",
+    "RevisionEntry",
     "RoutingDecision",
+    "SequenceStatus",
     "SessionLifecycle",
     "SessionRouter",
     "SessionState",

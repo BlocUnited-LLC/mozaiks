@@ -1,0 +1,38 @@
+{
+  "workflow_name": "ContextVariablesWorkflow",
+  "orchestrator_output": {
+    "workflow_name": "ContextVariablesWorkflow",
+    "startup_mode": "BackendOnly"
+  },
+  "agents_output": {
+    "agents": [
+      {
+        "name": "ContextAgent",
+        "prompt_sections": []
+      }
+    ]
+  },
+  "context_variables_output": {
+    "ContextVariablesPlan": {
+      "definitions": [
+        {
+          "name": "project_id",
+          "type": "string",
+          "description": "Current project identifier",
+          "source": {
+            "type": "state",
+            "default": null
+          }
+        }
+      ],
+      "agents": [
+        {
+          "agent": "ContextAgent",
+          "variables": [
+            "project_id"
+          ]
+        }
+      ]
+    }
+  }
+}

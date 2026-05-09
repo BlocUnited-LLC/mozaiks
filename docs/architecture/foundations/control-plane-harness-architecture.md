@@ -27,7 +27,7 @@ Examples:
 
 Those requests need:
 
-- persisted app/build/artifact context
+- persisted session/artifact context
 - intent interpretation
 - deterministic continuation policy
 - optional coding refinement
@@ -95,9 +95,7 @@ factory_app/control_plane/
     coding_scope_selection_system.yaml
     coding_refinement_system.yaml
   tools/
-    get_concept_overview.py
-    get_design_summary.py
-    get_build_state.py
+    get_revision_context.py
     get_artifact_summary.py
     get_artifact_workspace_catalog.py
     get_artifact_workspace_scope.py
@@ -112,8 +110,8 @@ owner of the framework runtime.
 This layer owns:
 
 - the first-party declarative control-plane pack
-- builder-specific prompt text
-- builder-specific context tools
+- first-party prompt text
+- first-party artifact/workspace context tools
 - future control-plane UI surfaces
 
 It should not own the runtime engines.
@@ -200,10 +198,8 @@ checkpoints:
     entrypoint: mozaiksai.control_plane.implementations.change_classifier:LLMChangeClassifier
     prompt_id: change_classifier_system
     tool_ids:
-      - get_concept_overview
-      - get_design_summary
+      - get_revision_context
       - get_artifact_summary
-      - get_build_state
 
   - id: route
     event: route_requested
@@ -327,9 +323,7 @@ They are not:
 
 Examples:
 
-- `get_concept_overview`
-- `get_design_summary`
-- `get_build_state`
+- `get_revision_context`
 - `get_artifact_summary`
 - `get_artifact_workspace_catalog`
 - `get_artifact_workspace_scope`

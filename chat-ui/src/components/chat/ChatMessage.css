@@ -30,7 +30,7 @@
   --chat-bubble-padding-x: 1.15rem;
   --chat-user-bubble-padding-y: 0.7rem;
   --chat-user-bubble-padding-x: 0.95rem;
-  --chat-bubble-stack-gap: 0.85rem;
+  --chat-bubble-stack-gap: 0.65rem;
   --chat-bubble-header-gap: 0.35rem;
   --chat-name-pill-padding-y: 1px;
   --chat-name-pill-padding-x: 0.55rem;
@@ -175,10 +175,13 @@
 .message-body p + p,
 .message-body ul + p,
 .message-body ol + p,
-.message-body pre + p { margin-top: 0.85rem; }
+.message-body pre + p { margin-top: 0.55rem; }
 .message-body ul,
-.message-body ol { margin: 0.5rem 0 0.5rem 1.25rem; line-height: inherit; }
+.message-body ol { margin: 0.35rem 0 0.35rem 1.1rem; line-height: inherit; }
 .message-body li + li { margin-top: 0.25rem; }
+/* Loose lists: marked wraps each li in a <p> when items are blank-line separated */
+.message-body li > p { margin: 0; }
+.message-body li > p + p { margin-top: 0.2rem; }
 .message-body strong { color: var(--color-primary-light); }
 
 /* Subtle entry animation for latest message */

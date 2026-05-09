@@ -52,6 +52,7 @@ class LLMChangeClassifier:
         artifact_version_id: Optional[str] = None,
         source_surface: Optional[str] = None,
         app_id: Optional[str] = None,
+        user_id: Optional[str] = None,
         requested_workflow_id: Optional[str] = None,
         extra: Optional[dict[str, Any]] = None,
     ) -> ChangeClassifierResult:
@@ -84,6 +85,7 @@ class LLMChangeClassifier:
                 artifact_version_id=artifact_version_id,
                 source_surface=source_surface,
                 app_id=app_id,
+                user_id=user_id,
                 requested_workflow_id=requested_workflow_id,
                 extra=extra or {},
             ),
@@ -93,7 +95,7 @@ class LLMChangeClassifier:
             system_prompt=self._load_system_prompt(),
             user_prompt=user_prompt,
             app_id=app_id,
-            user_id=None,
+            user_id=user_id,
             ui_context={"surface": source_surface or "refinement_classifier"},
             llm_config=llm_config,
             temperature=temperature,
@@ -129,6 +131,7 @@ class LLMChangeClassifier:
         artifact_version_id: Optional[str],
         source_surface: Optional[str],
         app_id: Optional[str],
+        user_id: Optional[str],
         requested_workflow_id: Optional[str],
         extra: dict[str, Any],
     ) -> dict[str, Any]:
@@ -140,6 +143,7 @@ class LLMChangeClassifier:
         context = ControlPlaneToolContext(
             checkpoint=_CHECKPOINT_EVENT,
             app_id=app_id,
+            user_id=user_id,
             artifact_kind=artifact_kind or None,
             artifact_key=artifact_key,
             artifact_version_id=artifact_version_id,

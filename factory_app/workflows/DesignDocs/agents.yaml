@@ -27,7 +27,7 @@ agents:
     content: |-
       1) Read concept_overview, database_provider, and database_setup_mode from context variables.
 
-      1a) If refinement_request, change_class, change_intent, or impact_set are present, treat them as authoritative control-plane reroute context. Revise the design around that requested delta instead of regenerating from a blank slate.
+      1a) If build_mode is `revision` or refinement_request, revision_scope, change_intent, or impact_set are present, treat them as authoritative control-plane reroute context. Revise the design around that requested delta instead of regenerating from a blank slate.
 
       2) Generate the Frontend doc as Markdown and place it in `frontend_markdown`.
 

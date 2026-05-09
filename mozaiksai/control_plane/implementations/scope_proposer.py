@@ -143,7 +143,8 @@ class ArtifactScopeProposer:
         context = ControlPlaneToolContext(
             checkpoint=_CHECKPOINT_EVENT,
             app_id=refinement_request.app_id,
-            artifact_kind=refinement_request.artifact_kind.value,
+            user_id=refinement_request.user_id,
+            artifact_kind=refinement_request.artifact_kind,
             artifact_key=refinement_request.normalized_artifact_key(),
             artifact_version_id=refinement_request.artifact_version_id,
             requested_workflow_id=routing_decision.workflow_id,
@@ -179,7 +180,7 @@ class ArtifactScopeProposer:
         payload: dict[str, Any],
     ) -> str:
         body = {
-            "artifact_kind": refinement_request.artifact_kind.value,
+            "artifact_kind": refinement_request.artifact_kind,
             "artifact_key": refinement_request.normalized_artifact_key(),
             "artifact_version_id": refinement_request.artifact_version_id,
             "requested_workflow_id": routing_decision.workflow_id,

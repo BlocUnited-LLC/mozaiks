@@ -74,7 +74,7 @@ const FluidChatLayout = ({
     'relative flex flex-col min-h-0 h-full self-stretch transition-all duration-500 ease-in-out pt-0';
 
   return (
-    <div className={`flex h-full min-h-0 relative overflow-hidden ${layoutMode === 'view' ? 'gap-0 p-0' : 'gap-2 p-2'} items-stretch`}>
+    <div className={`flex h-full min-h-0 relative overflow-hidden ${layoutMode === 'view' || layoutMode === 'full' ? 'gap-0 p-0' : 'gap-2 p-2'} items-stretch`}>
       {/* Chat Panel - hidden in view mode */}
       {layout.chatVisible && (
         <div

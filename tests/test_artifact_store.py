@@ -105,6 +105,28 @@ async def test_invalidate_artifact_family_marks_versions_stale() -> None:
 
 
 @pytest.mark.asyncio
+async def test_invalidate_artifact_version_refs_marks_only_targeted_known_versions() -> None:
+    store = ArtifactStore.__new__(ArtifactStore)
+    store.mark_artifact_version_stale = AsyncMock(side_effect=[True, False, True])
+
+    invalidated = await store.invalidate_artifact_version_refs(
+        app_id="app-1",
+        artifact_version_refs={
+            "concept": "av_concept_1",
+            "app_bundle": "av_bundle_1",
+            "workflow_bundle": "av_workflow_1",
+        },
+        affected_artifact_kinds=["concept", "missing", "app_bundle", "workflow_bundle"],
+        reason="change_request:cr_123",
+    )
+
+    assert invalidated == ["av_concept_1", "av_workflow_1"]
+    assert store.mark_artifact_version_stale.await_args_list[0].kwargs["artifact_version_id"] == "av_concept_1"
+    assert store.mark_artifact_version_stale.await_args_list[1].kwargs["artifact_version_id"] == "av_bundle_1"
+    assert store.mark_artifact_version_stale.await_args_list[2].kwargs["artifact_version_id"] == "av_workflow_1"
+
+
+@pytest.mark.asyncio
 async def test_create_change_request_and_refinement_session_persist_structured_records() -> None:
     store = ArtifactStore.__new__(ArtifactStore)
     change_coll = MagicMock()

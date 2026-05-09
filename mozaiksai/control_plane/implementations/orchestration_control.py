@@ -13,11 +13,16 @@ same harness without changing the SessionRouter contract.
 
 from typing import Any, Optional
 
+from mozaiksai.core.artifacts import ArtifactStore
 from mozaiksai.core.session.model import TriggerInput
 from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 from mozaiksai.control_plane.contracts import CodingWorkerRequest, CodingWorkerResult, HarnessDecision
 from mozaiksai.control_plane.runtime import ControlPlaneCheckpointRuntime
+from mozaiksai.control_plane.invalidation import (
+    ArtifactInvalidationService,
+    get_artifact_invalidation_service,
+)
 
 from .coding_worker import ScopedRefinementCodingWorker, get_coding_worker
 from .refinement_router import (
@@ -45,6 +50,7 @@ class OrchestrationControlHarness:
         coding_worker: Optional[ScopedRefinementCodingWorker] = None,
         decision_policy: Optional[FirstPartyHarnessDecisionPolicy] = None,
         scope_proposer: Optional[ArtifactScopeProposer] = None,
+        artifact_invalidation: Optional[ArtifactInvalidationService] = None,
         config_loader: Any = load_control_plane_config,
     ) -> None:
         self._checkpoint_runtime = checkpoint_runtime
@@ -58,6 +64,7 @@ class OrchestrationControlHarness:
             decision_policy or self._get_checkpoint_handler("decision_requested") or get_harness_decision_policy()
         )
         self._scope_proposer = scope_proposer or self._get_checkpoint_handler("scope_requested") or get_scope_proposer()
+        self._artifact_invalidation = artifact_invalidation or get_artifact_invalidation_service()
         self._config_loader = config_loader
 
     def _get_checkpoint_handler(self, event_name: str) -> Any:
@@ -99,6 +106,7 @@ class OrchestrationControlHarness:
         *,
         payload: dict,
         app_id: Optional[str] = None,
+        user_id: Optional[str] = None,
         requested_workflow_id: Optional[str] = None,
         default_source_surface: Optional[str] = None,
     ) -> Optional[RefinementRequest]:
@@ -107,6 +115,7 @@ class OrchestrationControlHarness:
         return self._refinement_resolver.request_from_payload(
             payload=payload,
             app_id=app_id,
+            user_id=user_id,
             requested_workflow_id=requested_workflow_id,
             default_source_surface=default_source_surface,
         )
@@ -140,7 +149,8 @@ class OrchestrationControlHarness:
         safe_files = files if isinstance(files, dict) else {}
         return CodingWorkerRequest(
             app_id=str(refinement_request.app_id or "").strip(),
-            artifact_kind=refinement_request.artifact_kind.value,
+            user_id=str(refinement_request.user_id or "").strip() or None,
+            artifact_kind=refinement_request.artifact_kind,
             artifact_key=refinement_request.normalized_artifact_key(),
             artifact_version_id=refinement_request.artifact_version_id,
             requested_workflow_id=routing_decision.workflow_id,
@@ -227,6 +237,21 @@ class OrchestrationControlHarness:
         if not self.coding_enabled():
             raise RuntimeError("Control-plane coding worker is disabled in app/config/ai.json")
         return await self._coding_worker.execute(request)
+
+    async def persist_revision_invalidation(
+        self,
+        *,
+        refinement_request: RefinementRequest,
+        routing_decision: RefinementRoutingDecision,
+        change_request_id: Optional[str],
+        artifact_store: Optional[ArtifactStore] = None,
+    ) -> dict[str, object]:
+        return await self._artifact_invalidation.invalidate_for_change_request(
+            refinement_request=refinement_request,
+            routing_decision=routing_decision,
+            change_request_id=change_request_id,
+            artifact_store=artifact_store,
+        )
 
     def build_coding_result_decision(
         self,

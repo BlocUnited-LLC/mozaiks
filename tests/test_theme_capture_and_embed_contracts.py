@@ -186,14 +186,20 @@ def test_theme_capture_saver_persists_context_and_emits_preview(monkeypatch) -> 
     )
 
     emitted = {}
+    summary_artifact = {}
 
     async def _fake_emit(component_name, payload, **kwargs):
         emitted["component_name"] = component_name
         emitted["payload"] = payload
         emitted["kwargs"] = kwargs
 
+    async def _fake_persist_summary_artifact(**kwargs):
+        summary_artifact.update(kwargs)
+        return type("ArtifactVersion", (), {"id": "av_theme_capture_1"})()
+
     monkeypatch.setattr(module, "emit_ui_surface", _fake_emit)
     monkeypatch.setattr(module, "_HAS_PERSISTENCE", False)
+    monkeypatch.setattr(module, "persist_summary_artifact", _fake_persist_summary_artifact)
 
     context = {
         "structured_output": {
@@ -225,6 +231,8 @@ def test_theme_capture_saver_persists_context_and_emits_preview(monkeypatch) -> 
     assert context["captured_theme_config"]["identity"]["app_name"] == "MOZ-UI"
     assert emitted["component_name"] == "ThemePreviewCard"
     assert emitted["kwargs"]["workflow_name"] == "ThemeCapture"
+    assert summary_artifact["artifact_kind"] == "theme_capture"
+    assert summary_artifact["summary_payload"]["theme_config"]["identity"]["app_name"] == "MOZ-UI"
 
 
 def test_theme_capture_contract_targets_visual_tokens_not_shell_content() -> None:

@@ -21,6 +21,3 @@ initial_message:
   You are part of the Mozaiks ThemeCapture process. ThemeInterviewAgent,
   greet the user and begin gathering their app's visual identity.
 initial_agent: ThemeInterviewAgent
-runtime_extensions:
-  - kind: lifecycle_hooks
-    entrypoint: workflows.AppGenerator.tools.platform.build_lifecycle:get_hooks

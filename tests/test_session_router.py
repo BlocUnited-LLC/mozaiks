@@ -215,12 +215,20 @@ async def test_route_trigger_refinement_uses_injected_trigger_route_resolver(mon
     assert decision.workflow_id == "ValueEngine"
     assert decision.rerouted_by_dependency is True
     assert decision.lifecycle_state == _session_model.SessionLifecycle.ACTIVE
-    assert decision.context_seed.get("change_class") == "patch"
+    assert decision.context_seed.get("build_mode") == "revision"
+    assert decision.context_seed.get("revision_scope") == "patch"
     assert decision.context_seed.get("artifact_kind") == "workflow_bundle"
     assert decision.context_seed.get("artifact_version_id") == "v1"
+    assert decision.context_seed.get("sequence_status") == "in_progress"
     assert decision.context_seed.get("change_intent", {}).get("change_class") == "patch"
     assert decision.context_seed.get("change_intent", {}).get("source") == "llm"
     assert decision.context_seed.get("impact_set", {}).get("restart_from") == "AgentGenerator"
+
+    state = await store.load(app_id="app_1", user_id="user_1")
+    assert state is not None
+    assert state.sequence_status == _session_model.SequenceStatus.REVISING
+    assert state.current_revision_scope == "patch"
+    assert state.revision_origin_workflow is None
 
 
 @pytest.mark.asyncio
@@ -267,9 +275,17 @@ async def test_route_trigger_refinement_classifier_uses_authoritative_llm_result
     assert decision.workflow_id == "ValueEngine"
     assert decision.is_full_restart is True
     assert decision.lifecycle_state == _session_model.SessionLifecycle.STALE
-    assert decision.context_seed.get("change_class") == "core"
+    assert decision.context_seed.get("build_mode") == "revision"
+    assert decision.context_seed.get("revision_scope") == "core"
+    assert decision.context_seed.get("sequence_status") == "in_progress"
     assert decision.context_seed.get("change_intent", {}).get("source") == "llm"
     assert "concept_shift" in decision.context_seed.get("change_intent", {}).get("signals", [])
+
+    state = await store.load(app_id="app_1", user_id="user_1")
+    assert state is not None
+    assert state.sequence_status == _session_model.SequenceStatus.STALE
+    assert state.current_revision_scope == "core"
+    assert state.restart_from_workflow == "ValueEngine"
 
 
 @pytest.mark.asyncio
@@ -312,7 +328,8 @@ async def test_orchestration_control_harness_delegates_refinement_into_session_r
     )
 
     assert decision.requested_workflow_id == "AppGenerator"
-    assert decision.context_seed.get("change_class") == "feature"
+    assert decision.context_seed.get("build_mode") == "revision"
+    assert decision.context_seed.get("revision_scope") == "feature"
     assert decision.context_seed.get("change_intent", {}).get("source") == "llm"
 
 
@@ -1009,32 +1026,188 @@ async def test_resolve_resume_prefers_session_state_chat(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_mark_and_resolve_approval_updates_session_state(monkeypatch):
+async def test_mark_and_resolve_pending_harness_decision_updates_session_state(monkeypatch):
     persistence = _FakePersistence()
     store = SessionStateStore(persistence)
     router = SessionRouter(persistence=persistence, store=store)
     monkeypatch.setattr(_session_router, "load_global_pack_graph", lambda: _make_pack())
 
-    awaiting = await router.mark_awaiting_approval(
+    awaiting = await router.mark_pending_harness_decision(
         app_id="app_1",
         user_id="user_1",
-        approval_id="approve_123",
+        pending_decision=_session_model.PendingHarnessDecision(
+            decision_id="decision_123",
+            decision_type="core_restart",
+            message="Run ValueEngine",
+            rationale="The concept changed.",
+            requires_confirmation=True,
+            clarification_question="Confirm the upstream restart.",
+            selected_paths=["app.json"],
+            requested_workflow_id="ValueEngine",
+            context_variables={"screen": "chat"},
+            trigger_payload={"change_request_id": "cr_123"},
+            actions=[
+                _session_model.PendingDecisionAction(
+                    action_id="confirm_recommended_workflow",
+                    label="Run ValueEngine",
+                    action_type="confirm_workflow",
+                    workflow_id="ValueEngine",
+                )
+            ],
+        ),
         workflow_id="DesignDocs",
         chat_id="chat_design_1",
     )
 
-    assert awaiting["lifecycle_state"] == "awaiting_approval"
-    assert awaiting["pending_approval_id"] == "approve_123"
+    assert awaiting["lifecycle_state"] == "awaiting_decision"
+    assert awaiting["pending_harness_decision"]["decision_id"] == "decision_123"
+    assert awaiting["pending_harness_decision"]["clarification_question"] == "Confirm the upstream restart."
+    assert awaiting["pending_harness_decision"]["selected_paths"] == ["app.json"]
+    assert awaiting["pending_harness_decision"]["requested_workflow_id"] == "ValueEngine"
+    assert awaiting["pending_harness_decision"]["context_variables"] == {"screen": "chat"}
+    assert awaiting["pending_harness_decision"]["trigger_payload"] == {"change_request_id": "cr_123"}
     assert awaiting["current_chat_id"] == "chat_design_1"
 
-    resolved = await router.resolve_approval(
+    resolved = await router.resolve_pending_harness_decision(
         app_id="app_1",
         user_id="user_1",
-        approval_id="approve_123",
-        approved=True,
+        decision_id="decision_123",
+        action_id="confirm_recommended_workflow",
+        accepted=True,
     )
 
-    assert resolved["approved"] is True
+    assert resolved["accepted"] is True
+    assert resolved["action_id"] == "confirm_recommended_workflow"
     assert resolved["lifecycle_state"] == "active"
-    assert resolved["pending_approval_id"] is None
-    assert "approved" in (resolved["last_route_explanation"] or "")
+    assert resolved["pending_harness_decision"] is None
+    assert "resolved" in (resolved["last_route_explanation"] or "")
+
+
+@pytest.mark.asyncio
+async def test_persist_revision_intent_reuses_active_revision_for_follow_up_launch(monkeypatch):
+    persistence = _FakePersistence()
+    store = SessionStateStore(persistence)
+    resolver = get_refinement_trigger_route_resolver()
+    monkeypatch.setattr(
+        resolver,
+        "_classifier",
+        _FakeChangeClassifier(
+            change_class="core",
+            rationale="The user changed a foundational product assumption.",
+            signals=["concept_shift"],
+        ),
+    )
+    router = SessionRouter(
+        persistence=persistence,
+        store=store,
+        trigger_route_resolver=resolver,
+    )
+    monkeypatch.setattr(_session_router, "load_global_pack_graph", lambda: _make_pack())
+
+    await store.upsert(
+        _session_model.SessionState(
+            session_id=SessionStateStore.session_id_for_scope("app_1", "user_1"),
+            app_id="app_1",
+            user_id="user_1",
+            lifecycle_state=_session_model.SessionLifecycle.ACTIVE,
+            current_workflow_id="AppGenerator",
+            current_chat_id="chat_app_1",
+        )
+    )
+
+    pending = await router.persist_revision_intent(
+        trigger=TriggerInput(
+            app_id="app_1",
+            user_id="user_1",
+            trigger_source="refinement",
+            workflow_id="AppGenerator",
+            trigger_payload={"change_request_id": "cr_core_1"},
+        ),
+        decision=_session_model.RoutingDecision(
+            workflow_id="ValueEngine",
+            requested_workflow_id="ValueEngine",
+            context_seed={
+                "build_mode": "revision",
+                "revision_scope": "core",
+                "artifact_kind": "app_bundle",
+                "artifact_version_id": "av_core_1",
+                "change_request_id": "cr_core_1",
+                "impact_set": {
+                    "restart_from": "ValueEngine",
+                    "affected_declarative_families": [
+                        "concept",
+                        "design_docs",
+                        "workflow_bundle",
+                        "app_bundle",
+                    ],
+                },
+            },
+            explanation="Core concept change detected for app bundle; restarting from ValueEngine.",
+            is_full_restart=True,
+            lifecycle_state=_session_model.SessionLifecycle.STALE,
+        ),
+        pending_harness_decision=_session_model.PendingHarnessDecision(
+            decision_id="cr_core_1",
+            decision_type="core_restart",
+            message="Run ValueEngine",
+            rationale="The concept changed.",
+            change_request_id="cr_core_1",
+            revision_id="rev_core_1",
+            requires_confirmation=True,
+            clarification_question="Restart upstream from ValueEngine?",
+            selected_paths=["factory_app/workflows/ValueEngine"],
+            trigger_source="refinement",
+            requested_workflow_id="ValueEngine",
+            context_variables={"screen": "chat"},
+            trigger_payload={"change_request_id": "cr_core_1", "revision_id": "rev_core_1"},
+            actions=[
+                _session_model.PendingDecisionAction(
+                    action_id="confirm_recommended_workflow",
+                    label="Run ValueEngine",
+                    action_type="confirm_workflow",
+                    workflow_id="ValueEngine",
+                )
+            ],
+        ),
+    )
+
+    revision_id = pending["active_revision_id"]
+    assert revision_id is not None
+    assert pending["pending_harness_decision"]["decision_id"] == "cr_core_1"
+    assert pending["pending_harness_decision"]["decision_type"] == "core_restart"
+    assert pending["pending_harness_decision"]["clarification_question"] == "Restart upstream from ValueEngine?"
+    assert pending["pending_harness_decision"]["selected_paths"] == ["factory_app/workflows/ValueEngine"]
+    assert pending["pending_harness_decision"]["context_variables"] == {"screen": "chat"}
+    assert pending["pending_harness_decision"]["trigger_payload"] == {
+        "change_request_id": "cr_core_1",
+        "revision_id": "rev_core_1",
+    }
+    assert pending["lifecycle_state"] == "awaiting_decision"
+    assert pending["current_workflow_id"] == "AppGenerator"
+    assert pending["sequence_status"] == "stale"
+
+    decision = await router.route_trigger(
+        TriggerInput(
+            app_id="app_1",
+            user_id="user_1",
+            trigger_source="refinement",
+            trigger_payload={
+                "change_request_id": "cr_core_1",
+                "revision_id": revision_id,
+                "refinement_request": {
+                    "artifact_kind": "app_bundle",
+                    "artifact_key": "app_bundle",
+                    "artifact_version_id": "av_core_1",
+                    "raw_user_request": "Actually pivot this into a blockchain marketplace.",
+                },
+            },
+        )
+    )
+
+    assert decision.workflow_id == "ValueEngine"
+    state = await store.load(app_id="app_1", user_id="user_1")
+    assert state is not None
+    assert state.active_revision_id == revision_id
+    assert state.active_change_request_id == "cr_core_1"
+    assert state.pending_harness_decision is None
+    assert len(state.revision_history) == 1

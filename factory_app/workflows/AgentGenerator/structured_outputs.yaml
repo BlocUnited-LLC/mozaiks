@@ -608,7 +608,13 @@ models:
         - after_chat
         - before_agent
         - after_agent
-        description: Lifecycle boundary where the hook executes.
+        - on_start
+        - on_complete
+        - on_fail
+        description: |
+          Lifecycle boundary where the hook executes.
+          Turn-level: before_chat, after_chat (chat scope); before_agent, after_agent (agent scope).
+          Run-level: on_start, on_complete, on_fail (fired once per workflow run, agent must be null).
       agent:
         type: union
         variants:
@@ -1367,11 +1373,6 @@ models:
         items: str
         description: Agents permitted to render UI/text to the user (mirrors ui_config.json
           visual_agents list). Use null for backend-only/headless workflows.
-      runtime_extensions:
-        type: list
-        items: RuntimeExtension
-        default: []
-        description: Optional workflow-declared runtime extensions (mounted routers and/or startup services). Use [] when none.
       triggers:
         type: list
         items: OrchestratorTrigger
@@ -1418,26 +1419,6 @@ models:
         - 'null'
         description: Human-readable trigger purpose.
 
-  RuntimeExtension:
-    type: model
-    fields:
-      kind:
-        type: literal
-        values:
-        - api_router
-        - startup_service
-        - lifecycle_hooks
-        description: |
-          Extension kind:
-          - api_router: FastAPI router mounted at runtime startup
-          - startup_service: Service class started/stopped with runtime lifecycle
-          - lifecycle_hooks: Workflow lifecycle notifications (on_start, on_complete, on_fail) for platform integration
-      entrypoint:
-        type: str
-        description: Python entrypoint in the form module.path:attribute. For generated
-          workflows this must be workflow-local, e.g.
-          workflows.<WorkflowName>.tools.<module>:<attribute>; do not point at
-          workflows._shared or app.workflows._shared.
   HookFilesOutput:
     type: model
     fields:

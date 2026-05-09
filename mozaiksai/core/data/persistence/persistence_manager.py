@@ -30,6 +30,7 @@ from .namespaces import SYSTEM_DATABASE, RuntimeCollections
 from autogen.events.agent_events import TextEvent
 from autogen.events.base_event import BaseEvent
 from ..models import WorkflowStatus
+from mozaiksai.core.workflow.startup_messages import matches_hidden_initial_message
 # Lazy import to avoid circular dependency - see _format_message_for_storage
 
 logger = get_workflow_logger("persistence")
@@ -331,6 +332,12 @@ class AG2PersistenceManager:
                 # persisted UI context for multi-user resume of active artifact/tool panel
                 # null until first artifact/tool emission is persisted via update_last_artifact()
                 "last_artifact": None,
+                "usage_prompt_tokens_final": 0,
+                "usage_completion_tokens_final": 0,
+                "usage_total_tokens_final": 0,
+                "usage_total_cost_final": 0.0,
+                "tool_calls_final": 0,
+                "errors_final": 0,
                 "messages": [],
             }
 
@@ -676,6 +683,7 @@ class AG2PersistenceManager:
         Behavior:
             - Each provided message gets an auto-assigned sequence (incrementing last_sequence).
             - event_id is generated with 'init_' prefix for traceability.
+            - Hidden AG2 seed messages (`initial_message`, `userdriven_trigger`) are ignored.
             - Skips if list empty or chat session missing.
             - Safe to call multiple times: we perform a basic duplicate guard by checking
               if an identical (role, content) pair already exists as the latest message to
@@ -696,6 +704,9 @@ class AG2PersistenceManager:
                 role = m.get("role") or "user"
                 content = m.get("content")
                 if content is None:
+                    continue
+                seed_kind = str(m.get("_mozaiks_seed_kind") or "").strip().lower()
+                if seed_kind in {"initial_message", "userdriven_trigger"}:
                     continue
                 # Duplicate guard: if last message matches role+content, skip
                 if recent and isinstance(recent[-1], dict):
@@ -718,6 +729,17 @@ class AG2PersistenceManager:
                     "sequence": seq,
                     "agent_name": m.get("name") or ("user" if role == "user" else "assistant"),
                 }
+                seed_kind = m.get("_mozaiks_seed_kind")
+                raw_metadata = m.get("metadata")
+                metadata = deepcopy(raw_metadata) if isinstance(raw_metadata, dict) else None
+                if isinstance(seed_kind, str) and seed_kind.strip():
+                    normalized_seed_kind = seed_kind.strip()
+                    msg_doc["_mozaiks_seed_kind"] = normalized_seed_kind
+                    if metadata is None:
+                        metadata = {}
+                    metadata.setdefault("_mozaiks_seed_kind", normalized_seed_kind)
+                if metadata:
+                    msg_doc["metadata"] = metadata
                 await coll.update_one(
                     {"_id": chat_id, **build_app_scope_filter(resolved_app_id)},
                     {"$push": {"messages": msg_doc}, "$set": {"last_updated_at": datetime.now(UTC)}},
@@ -1080,6 +1102,23 @@ class AG2PersistenceManager:
                     content_str = str(raw_content)
             else:
                 content_str = str(raw_content)
+
+            if (
+                wf_name
+                and seq == 1
+                and matches_hidden_initial_message(
+                    workflow_name=str(wf_name),
+                    role=role,
+                    content=content_str,
+                    agent_name=raw_name,
+                )
+            ):
+                logger.debug(
+                    "[SAVE_EVENT] Skipping hidden AgentDriven initial_message for chat_id=%s workflow=%s",
+                    chat_id,
+                    wf_name,
+                )
+                return
 
             # UserDriven workflows use a synthetic "." user message only to kick off
             # AG2 group chat execution. It is internal coordination, not transcript.

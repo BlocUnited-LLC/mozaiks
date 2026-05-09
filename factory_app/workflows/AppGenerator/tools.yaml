@@ -132,4 +132,22 @@ tools:
   description: Seed the database with initial data via the backend.
   tool_type: Agent_Tool
   auto_tool_call: false
-lifecycle_tools: []
+lifecycle_tools:
+- trigger: on_start
+  agent: null
+  file: tools/platform/build_lifecycle.py
+  function: emit_build_started
+  description: Notify platform build tracking when workflow run starts.
+  tool_type: Agent_Tool
+- trigger: on_complete
+  agent: null
+  file: tools/platform/build_lifecycle.py
+  function: emit_build_completed
+  description: Notify platform build tracking when workflow run completes.
+  tool_type: Agent_Tool
+- trigger: on_fail
+  agent: null
+  file: tools/platform/build_lifecycle.py
+  function: emit_build_failed
+  description: Notify platform build tracking when workflow run fails.
+  tool_type: Agent_Tool

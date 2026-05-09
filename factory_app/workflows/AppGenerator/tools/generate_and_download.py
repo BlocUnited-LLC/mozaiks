@@ -202,7 +202,7 @@ async def _persist_pending_schema_migration(
     if context_variables is not None and hasattr(context_variables, "get"):
         try:
             artifact_version_id = context_variables.get("artifact_version_id")
-            change_class = context_variables.get("change_class")
+            change_class = context_variables.get("revision_scope")
         except Exception:
             artifact_version_id = None
             change_class = None
@@ -243,6 +243,7 @@ async def _register_app_bundle_artifact_version(
             ArtifactLifecycleStatus,
             ArtifactValidationStatus,
             get_artifact_store,
+            resolve_latest_artifact_version_refs,
         )
     except Exception as exc:  # pragma: no cover
         raise RuntimeError(f"Artifact store dependencies unavailable: {exc}") from exc
@@ -276,11 +277,17 @@ async def _register_app_bundle_artifact_version(
     raw = zip_path.read_bytes()
     sha = hashlib.sha256(raw).hexdigest()
     artifact_store = get_artifact_store()
+    canonical_inputs_version = await resolve_latest_artifact_version_refs(
+        app_id=str(app_id),
+        artifact_kinds=("concept", "build_plan", "design_docs", "theme_capture"),
+        artifact_store=artifact_store,
+    )
     artifact_version = await artifact_store.create_artifact_version(
         app_id=str(app_id),
         artifact_kind="app_bundle",
         artifact_key="app_bundle",
         parent_version_id=str(parent_version_id) if parent_version_id else None,
+        canonical_inputs_version=canonical_inputs_version,
         files_manifest=[
             {
                 "path": f"{bundle_name}/{zip_path.name}",

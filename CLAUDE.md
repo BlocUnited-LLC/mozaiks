@@ -26,10 +26,11 @@ factory workflows.
 
 This repo is the canonical runtime/platform/factory repo.
 
-- `factory_app/app/` is the current first-party Studio app bundle.
-- `factory_app/workflows/` is the shared builder workflow root.
-- `factory_app/app/ui/pages/custom/studio/` contains the first-party Studio UI.
-- `factory_app/app/modules/factory_control_plane/` contains the first-party Studio control plane.
+- `factory_app/workflows/` and `factory_app/control_plane/` are the Factory layer — the shared builder/generator workflows, agent configs, and control plane pack.
+- `factory_app/app/` is the Studio first-party app bundle — pages, modules, brand, config loaded by the Studio host.
+- `factory_app/app/ui/pages/custom/studio/` contains the Studio management UI.
+- `factory_app/app/modules/factory_control_plane/` is a Studio identity stub only — no backend, no logic.
+- `factory_app/` as a directory co-locates both concerns; it is not a synonym for either.
 - `platform/` contains repo-local infrastructure assets only. It is not an app workspace.
 - `generated/` is generator output awaiting validation and promotion; it is not runtime-loaded by default.
 
@@ -44,8 +45,9 @@ Canonical target:
 Working modes:
 
 1. **Framework/platform mode** — work on runtime, platform host, app shell contracts, package/install flows, and repo-local infrastructure
-2. **Studio mode** — work on `mozaiksai/hosts/studio.py`, `factory_app/app/ui/pages/custom/studio/`, `factory_app/app/modules/factory_control_plane/`, `chat-ui/src/admin/`, and the shared factory workflows in `factory_app/workflows/`
-3. **Hosted product mode** — work on `mozaiksai/hosts/mozaiks.py` and contracts that external hosted product workspaces consume
+2. **Factory mode** — work on `factory_app/workflows/`, `factory_app/control_plane/` — builder/generator workflows, agent configs, structured outputs, control plane pack
+3. **Studio mode** — work on `mozaiksai/hosts/studio.py`, `factory_app/app/ui/pages/custom/studio/`, `factory_app/app/modules/factory_control_plane/`, `chat-ui/src/admin/` — the management interface that surfaces Factory capabilities
+4. **Hosted product mode** — work on `mozaiksai/hosts/mozaiks.py` and contracts that external hosted product workspaces consume
 
 ## Pre-Production Cleanup Policy
 
@@ -385,3 +387,17 @@ Scoped rules live in `.claude/rules/`. Apply them when working in their target d
 Use lowercase kebab-case: `conversation-modes.md`
 
 Exception: `README.md`, `CLAUDE.md`, `ARCHITECTURE.md`
+
+## Decision Rules
+
+When adding code, decide placement in this order:
+
+1. Is this required for every runtime instance and independent of app semantics? → **Runtime**.
+2. Is this generic harness/control-plane behavior over execution contexts, state, events, and routing? → **`mozaiksai/control_plane`**.
+3. Is this app hosting, routing, sessions, pages, modules, shell config, or app workspace composition? → **Platform**.
+4. Is this workspace management, build lifecycle, artifact review, run history, or configuration UI? → **Studio**.
+5. Is this first-party builder behavior, app generation logic, or builder-specific harness configuration? → **`factory_app`**.
+6. Is this hosted-only capability such as collaboration, billing, marketplace, deployment, or org management? → **Mozaiks App**.
+7. Is this filesystem scaffolding, process management, or terminal diagnostics? → **CLI**.
+
+Key: a feature is not CLI just because it runs locally. If it is management UI, it belongs in Studio. If it is generic intent routing across execution contexts, it belongs in the harness implementation. If it is builder-specific policy, it belongs in the factory harness pack.

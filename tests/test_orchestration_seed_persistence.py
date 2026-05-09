@@ -35,7 +35,7 @@ class _StubTerminationHandler:
 
 
 @pytest.mark.asyncio
-async def test_resume_initialize_persists_direct_initial_message_for_new_chat() -> None:
+async def test_resume_initialize_keeps_direct_initial_message_out_of_persisted_transcript() -> None:
     pm = _StubPersistenceManager()
     termination = _StubTerminationHandler()
 
@@ -62,12 +62,11 @@ async def test_resume_initialize_persists_direct_initial_message_for_new_chat() 
         }
     ]
     assert termination.started_for == ["user-1"]
-    assert len(pm.persisted_batches) == 1
-    assert pm.persisted_batches[0]["messages"] == initial_messages
+    assert pm.persisted_batches == []
 
 
 @pytest.mark.asyncio
-async def test_resume_initialize_persists_config_seed_message_for_new_chat() -> None:
+async def test_resume_initialize_keeps_config_seed_out_of_persisted_transcript() -> None:
     pm = _StubPersistenceManager()
     termination = _StubTerminationHandler()
 
@@ -93,8 +92,56 @@ async def test_resume_initialize_persists_config_seed_message_for_new_chat() -> 
             "_mozaiks_seed_kind": "initial_message",
         }
     ]
-    assert len(pm.persisted_batches) == 1
-    assert pm.persisted_batches[0]["messages"] == initial_messages
+    assert pm.persisted_batches == []
+
+
+@pytest.mark.asyncio
+async def test_resume_initialize_reinjects_hidden_config_seed_on_resume_without_persisting() -> None:
+    pm = _StubPersistenceManager(
+        resumed_messages=[
+            {
+                "role": "assistant",
+                "name": "ValueInterviewAgent",
+                "content": "Which niche do you want to explore first?",
+            }
+        ]
+    )
+    termination = _StubTerminationHandler()
+
+    resumed_messages, initial_messages = await _patterns_mod._resume_or_initialize_chat(
+        persistence_manager=pm,
+        termination_handler=termination,
+        config={"initial_message": "Seed from config"},
+        chat_id="chat-resume-seed",
+        app_id="app-1",
+        workflow_name="RuntimeSmoke",
+        user_id="user-1",
+        initial_message=None,
+        initial_agent_name=None,
+        wf_logger=logging.getLogger("test.orchestration.seed"),
+    )
+
+    assert resumed_messages == [
+        {
+            "role": "assistant",
+            "name": "ValueInterviewAgent",
+            "content": "Which niche do you want to explore first?",
+        }
+    ]
+    assert initial_messages == [
+        {
+            "role": "user",
+            "name": "user",
+            "content": "Seed from config",
+            "_mozaiks_seed_kind": "initial_message",
+        },
+        {
+            "role": "assistant",
+            "name": "ValueInterviewAgent",
+            "content": "Which niche do you want to explore first?",
+        },
+    ]
+    assert pm.persisted_batches == []
 
 
 @pytest.mark.asyncio

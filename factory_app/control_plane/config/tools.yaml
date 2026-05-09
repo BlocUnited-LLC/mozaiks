@@ -1,19 +1,12 @@
 schema_version: mozaiks.control_plane.tools.v1
 tools:
-  - id: get_concept_overview
+  - id: get_revision_context
     kind: context_tool
-    description: Load the current concept overview and high-level concept metadata for the active app.
-    entrypoint: factory_app.control_plane.tools.get_concept_overview:get_concept_overview
+    description: Load runtime-owned revision context including session state, tracked artifact lineage, persisted summary payloads, resolved canonical inputs, and active change-request lineage.
+    entrypoint: mozaiksai.control_plane.tools.get_revision_context:get_revision_context
     available_to:
       - request_submitted
       - scope_requested
-      - coding_requested
-  - id: get_design_summary
-    kind: context_tool
-    description: Load the latest persisted design docs and surface-map summary for the active app.
-    entrypoint: factory_app.control_plane.tools.get_design_summary:get_design_summary
-    available_to:
-      - request_submitted
       - coding_requested
   - id: get_artifact_summary
     kind: context_tool
@@ -23,14 +16,6 @@ tools:
       - request_submitted
       - scope_requested
       - route_requested
-      - coding_requested
-  - id: get_build_state
-    kind: context_tool
-    description: Load current build-plan and theme-capture state for the active app.
-    entrypoint: factory_app.control_plane.tools.get_build_state:get_build_state
-    available_to:
-      - request_submitted
-      - scope_requested
       - coding_requested
   - id: get_artifact_workspace_scope
     kind: context_tool

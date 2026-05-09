@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from difflib import unified_diff
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
+from uuid import uuid4
 
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field, ValidationError
@@ -41,7 +42,14 @@ from mozaiksai.core.workflow.generator_support.connector_service import (
     update_connector_metadata,
 )
 from mozaiksai.core.session.launcher import launch_prepared_workflow, prepare_routed_workflow_launch
-from mozaiksai.core.session.router import configure_session_router
+from mozaiksai.core.session.model import (
+    PendingDecisionAction,
+    PendingHarnessDecision,
+    RoutingDecision,
+    SessionLifecycle,
+    TriggerInput,
+)
+from mozaiksai.core.session.router import configure_session_router, get_session_router
 from mozaiksai.hosts.platform import (
     build_shell_config,
     resolve_app_root,
@@ -933,12 +941,41 @@ async def trigger_workflow(
     coding_request = None
     coding_result = None
     coding_session = None
+    persisted_change_request_id = str(trigger_payload.get("change_request_id") or "").strip() or None
+    persisted_revision_id = str(trigger_payload.get("revision_id") or "").strip() or None
 
     if body.trigger_source == "refinement":
+        maybe_action = trigger_payload.get("harness_action")
+        if isinstance(maybe_action, dict) and (
+            not str(trigger_payload.get("change_request_id") or "").strip()
+            or not str(trigger_payload.get("revision_id") or "").strip()
+        ):
+            try:
+                session_snapshot = await get_session_router().get_session_snapshot(
+                    app_id=app_id,
+                    user_id=user_id,
+                )
+            except Exception as session_err:
+                logger.warning("Failed to load prelaunch revision session state: %s", session_err)
+                session_snapshot = None
+            if isinstance(session_snapshot, dict):
+                if not str(trigger_payload.get("change_request_id") or "").strip():
+                    active_change_request_id = str(
+                        session_snapshot.get("active_change_request_id") or ""
+                    ).strip()
+                    if active_change_request_id:
+                        trigger_payload["change_request_id"] = active_change_request_id
+                if not str(trigger_payload.get("revision_id") or "").strip():
+                    active_revision_id = str(
+                        session_snapshot.get("active_revision_id") or ""
+                    ).strip()
+                    if active_revision_id:
+                        trigger_payload["revision_id"] = active_revision_id
         try:
             refinement_request = orchestration_control.request_from_payload(
                 payload=trigger_payload,
                 app_id=app_id,
+                user_id=user_id,
                 requested_workflow_id=body.workflow_id,
                 default_source_surface=(
                     str((body.context_variables or {}).get("screen") or "").strip() or None
@@ -952,6 +989,13 @@ async def trigger_workflow(
                 status_code=400,
                 detail="refinement triggers require trigger_payload.refinement_request.",
             )
+        persisted_revision_id = (
+            str(refinement_request.extra.get("revision_id") or "").strip() or persisted_revision_id
+        )
+        persisted_change_request_id = (
+            str(refinement_request.extra.get("change_request_id") or "").strip()
+            or persisted_change_request_id
+        )
 
         try:
             refinement_decision = await orchestration_control.route_refinement_request(refinement_request)
@@ -959,7 +1003,7 @@ async def trigger_workflow(
             raise HTTPException(status_code=503, detail=f"Refinement classification unavailable: {exc}") from exc
         harness_decision = orchestration_control.build_harness_decision(refinement_decision)
         resolved_change_class = refinement_decision.change_intent.change_class.value
-        resolved_artifact_kind = refinement_request.artifact_kind.value
+        resolved_artifact_kind = refinement_request.artifact_kind
         resolved_artifact_version_id = refinement_request.artifact_version_id
         if orchestration_control.coding_enabled() and isinstance(trigger_payload.get("coding_request"), dict):
             coding_request = orchestration_control.build_coding_request(
@@ -979,15 +1023,23 @@ async def trigger_workflow(
         trigger_payload = {
             "refinement_request": refinement_request.model_dump(mode="python"),
         }
+        if persisted_change_request_id is not None:
+            trigger_payload["change_request_id"] = persisted_change_request_id
+        if persisted_revision_id is not None:
+            trigger_payload["revision_id"] = persisted_revision_id
 
     artifact_store = get_artifact_store() if refinement_request is not None and refinement_decision is not None else None
-    persisted_change_request = None
 
-    if refinement_request is not None and refinement_decision is not None and artifact_store is not None:
+    if (
+        persisted_change_request_id is None
+        and refinement_request is not None
+        and refinement_decision is not None
+        and artifact_store is not None
+    ):
         try:
             persisted_change_request = await artifact_store.create_change_request(
                 app_id=app_id,
-                artifact_kind=refinement_request.artifact_kind.value,
+                artifact_kind=refinement_request.artifact_kind,
                 artifact_key=body.artifact_key or refinement_request.normalized_artifact_key(),
                 artifact_version_id=refinement_request.artifact_version_id,
                 raw_user_request=refinement_request.raw_user_request,
@@ -1018,8 +1070,25 @@ async def trigger_workflow(
                 },
                 created_by_user_id=user_id,
             )
+            persisted_change_request_id = persisted_change_request.id
         except Exception as persist_err:
             logger.warning("Failed to persist ChangeRequest: %s", persist_err)
+    if (
+        persisted_change_request_id is not None
+        and refinement_request is not None
+        and refinement_decision is not None
+    ):
+        try:
+            await orchestration_control.persist_revision_invalidation(
+                refinement_request=refinement_request,
+                routing_decision=refinement_decision,
+                change_request_id=persisted_change_request_id,
+                artifact_store=artifact_store,
+            )
+        except Exception as invalidation_err:
+            logger.warning("Failed to persist artifact invalidation: %s", invalidation_err)
+    if persisted_change_request_id is not None:
+        trigger_payload["change_request_id"] = persisted_change_request_id
 
     confirmed_action = None
     if refinement_request is not None:
@@ -1047,6 +1116,82 @@ async def trigger_workflow(
     )
 
     if should_return_harness_decision:
+        try:
+            pending_workflow_id = harness_decision.recommended_workflow_id or refinement_decision.workflow_id
+            pending_revision_id = (
+                persisted_revision_id
+                or str((refinement_decision.context_seed or {}).get("revision_id") or "").strip()
+                or uuid4().hex
+            )
+            trigger_payload["revision_id"] = pending_revision_id
+            pending_decision = RoutingDecision(
+                workflow_id=pending_workflow_id,
+                requested_workflow_id=body.workflow_id or pending_workflow_id,
+                context_seed=dict(refinement_decision.context_seed or {}),
+                explanation=refinement_decision.explanation if refinement_decision is not None else "",
+                is_full_restart=bool(refinement_decision.is_full_restart),
+                rerouted_by_dependency=False,
+                lifecycle_state=(
+                    SessionLifecycle.STALE
+                    if refinement_decision is not None and refinement_decision.is_full_restart
+                    else SessionLifecycle.ACTIVE
+                ),
+            )
+            if persisted_change_request_id:
+                pending_decision.context_seed["change_request_id"] = persisted_change_request_id
+            pending_decision.context_seed["revision_id"] = pending_revision_id
+            pending_harness_decision = PendingHarnessDecision(
+                decision_id=(
+                    persisted_change_request_id
+                    or pending_revision_id
+                    or uuid4().hex
+                ),
+                decision_type=harness_decision.decision_type,
+                message=harness_decision.message,
+                rationale=harness_decision.rationale,
+                confidence=float(harness_decision.confidence),
+                recommended_workflow_id=harness_decision.recommended_workflow_id,
+                selected_paths=list(harness_decision.selected_paths or []),
+                clarification_question=harness_decision.clarification_question,
+                change_request_id=persisted_change_request_id,
+                revision_id=pending_revision_id,
+                requires_confirmation=bool(harness_decision.requires_confirmation),
+                trigger_source=body.trigger_source,
+                requested_workflow_id=body.workflow_id,
+                journey_id=body.journey_id,
+                context_variables=dict(body.context_variables or {}),
+                trigger_payload=dict(trigger_payload or {}),
+                actions=[
+                    PendingDecisionAction(
+                        action_id=action.action_id,
+                        label=action.label,
+                        action_type=action.action_type,
+                        workflow_id=action.workflow_id,
+                        metadata=dict(action.metadata or {}),
+                    )
+                    for action in harness_decision.actions
+                ],
+                metadata=dict(harness_decision.metadata or {}),
+            )
+            pending_snapshot = await get_session_router().persist_revision_intent(
+                trigger=TriggerInput(
+                    app_id=app_id,
+                    user_id=user_id,
+                    trigger_source=body.trigger_source,
+                    workflow_id=body.workflow_id,
+                    journey_id=body.journey_id,
+                    context_variables=body.context_variables or {},
+                    trigger_payload=trigger_payload,
+                ),
+                decision=pending_decision,
+                pending_harness_decision=pending_harness_decision,
+            )
+            pending_revision_id = str(pending_snapshot.get("active_revision_id") or "").strip()
+            if pending_revision_id:
+                persisted_revision_id = pending_revision_id
+                trigger_payload["revision_id"] = pending_revision_id
+        except Exception as session_err:
+            logger.warning("Failed to persist prelaunch revision intent: %s", session_err)
         return {
             "execution_mode": "harness_decision",
             "chat_id": None,
@@ -1060,7 +1205,7 @@ async def trigger_workflow(
         }
 
     if coding_result is not None and coding_result.eligible:
-        if artifact_store is not None and persisted_change_request is not None and refinement_request.artifact_version_id:
+        if artifact_store is not None and persisted_change_request_id is not None and refinement_request.artifact_version_id:
             try:
                 session_status = {
                     "validated": RefinementSessionStatus.VALIDATED,
@@ -1069,7 +1214,7 @@ async def trigger_workflow(
                 coding_session = await artifact_store.create_refinement_session(
                     app_id=app_id,
                     artifact_version_id=refinement_request.artifact_version_id,
-                    change_request_id=persisted_change_request.id,
+                    change_request_id=persisted_change_request_id,
                     result_artifact_version_id=((coding_result.metadata or {}).get("artifact_version_id")),
                     provider="control_plane_coding",
                     status=session_status,
@@ -1121,11 +1266,11 @@ async def trigger_workflow(
     resolved_workflow_id = launch.workflow_id
     routing_decision = launch.routing_decision
 
-    if persisted_change_request is not None and artifact_store is not None:
+    if persisted_change_request_id is not None and artifact_store is not None:
         try:
             await artifact_store.update_change_request_router_decision(
                 app_id=app_id,
-                change_request_id=persisted_change_request.id,
+                change_request_id=persisted_change_request_id,
                 router_decision={
                     "workflow_id": resolved_workflow_id,
                     "requested_workflow_id": routing_decision.requested_workflow_id,

@@ -30,20 +30,32 @@ definitions:
 # ============================================================================
 # STATE - Workflow orchestration triggers
 # ============================================================================
-  refinement_mode:
-    type: boolean
-    description: >
-      True when ValueEngine was reopened by the refinement control plane rather
-      than launched as a fresh greenfield interview. Use this to treat the
-      current request as a concept revision instead of a blank-slate ideation run.
-    source:
-      type: state
-      default: false
-  change_class:
+  build_mode:
     type: string
     description: >
-      Refinement change class: patch | design | feature | core. When present,
+      Build mode for ValueEngine. `initial` means fresh ideation; `revision`
+      means the workflow was reopened by the control plane and should revise
+      persisted concept state instead of acting like a blank-slate interview.
+    source:
+      type: state
+      default: initial
+  revision_scope:
+    type: string
+    description: >
+      Revision scope: patch | design | feature | core. When present,
       it describes why the control plane re-entered ValueEngine.
+    source:
+      type: state
+      default: null
+  change_request_id:
+    type: string
+    description: Stable lineage id for the active revision request.
+    source:
+      type: state
+      default: null
+  revision_id:
+    type: string
+    description: Runtime-generated revision run id for the current builder revision.
     source:
       type: state
       default: null
@@ -61,6 +73,20 @@ definitions:
     description: >
       Version id of the downstream artifact that triggered the reroute. Null
       for fresh greenfield starts.
+    source:
+      type: state
+      default: null
+  sequence_status:
+    type: string
+    description: >
+      Builder sequence state before the revision launch: in_progress |
+      completed | stale | revising.
+    source:
+      type: state
+      default: in_progress
+  revision_origin_workflow:
+    type: string
+    description: Workflow where the revision request originated before reroute.
     source:
       type: state
       default: null
@@ -95,7 +121,7 @@ definitions:
     type: object
     description: >
       Typed refinement classification emitted by the control plane. Contains the
-      final `change_class`, rationale, and layer-touch information so
+      final `revision_scope`, rationale, and layer-touch information so
       ValueEngine can treat reroutes as deliberate concept revisions.
     source:
       type: state
@@ -189,10 +215,14 @@ agents:
     - app_type
     - context_aware
     - monetization_enabled
-    - refinement_mode
-    - change_class
+    - build_mode
+    - revision_scope
+    - change_request_id
+    - revision_id
     - artifact_kind
     - artifact_version_id
+    - sequence_status
+    - revision_origin_workflow
     - refinement_request
     - refinement_request_meta
     - screen
@@ -201,10 +231,14 @@ agents:
     - interview_complete
   ResearchAgent:
     variables:
-    - refinement_mode
-    - change_class
+    - build_mode
+    - revision_scope
+    - change_request_id
+    - revision_id
     - artifact_kind
     - artifact_version_id
+    - sequence_status
+    - revision_origin_workflow
     - refinement_request
     - refinement_request_meta
     - change_intent
@@ -214,10 +248,14 @@ agents:
     - app_type
   GapAnalysisAgent:
     variables:
-    - refinement_mode
-    - change_class
+    - build_mode
+    - revision_scope
+    - change_request_id
+    - revision_id
     - artifact_kind
     - artifact_version_id
+    - sequence_status
+    - revision_origin_workflow
     - refinement_request
     - refinement_request_meta
     - change_intent

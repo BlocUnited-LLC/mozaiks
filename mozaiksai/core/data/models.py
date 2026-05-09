@@ -28,7 +28,7 @@ ChatSessions Stored Fields (superset; some optional):
     _id, app_id, workflow_name, user_id, status, created_at, last_updated_at,
     completed_at?, trace_id?, duration_sec (float),
     usage_prompt_tokens_final?, usage_completion_tokens_final?, usage_total_tokens_final?,
-    usage_total_cost_final?, usage_summary_raw?, messages[]
+    usage_total_cost_final?, tool_calls_final?, errors_final?, usage_summary_raw?, messages[]
 
 WorkflowSummaryDoc Stored Fields:
     _id, app_id, workflow_name, overall_avg, chat_sessions, agents
@@ -229,6 +229,8 @@ class ChatSessionDoc(BaseModel):
     usage_completion_tokens_final: int = 0
     usage_total_tokens_final: int = 0
     usage_total_cost_final: float = 0.0
+    tool_calls_final: int = 0
+    errors_final: int = 0
     # messages and timestamps only; token/cost fields are stored in WorkflowStats
     messages: List[ChatMessage] = Field(default_factory=list)
 

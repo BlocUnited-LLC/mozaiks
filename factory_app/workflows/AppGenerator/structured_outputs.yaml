@@ -1,4 +1,57 @@
 models:
+  PrimitiveSectionHint:
+    type: model
+    fields:
+      primitive:
+        type: literal
+        values:
+        - DataTable
+        - Form
+        - Stat
+        - Grid
+        - Card
+        - Button
+        - Modal
+        - Alert
+        - Badge
+        - Skeleton
+        - Empty
+        - Timeline
+        - CodeBlock
+        - ProgressTracker
+        - AlertBanner
+        - ActionButton
+        - FileList
+        description: >
+          Primitive type name from the shipped chat-ui primitive registry.
+          Must match exactly — AppSchemaAgent validates against this list.
+      config_hint:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: >
+          Partial primitive config scaffold. Keys must match the primitive's
+          contract (see [SHIPPED PAGE PRIMITIVES] for per-primitive field
+          definitions). Required fields for the primitive must be present.
+          AppSchemaAgent merges this with additional context — do not omit
+          required fields here. Null only when config is entirely
+          context-dependent and cannot be scaffolded at planning time.
+      section_id_hint:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: >
+          Suggested kebab-case section id. AppSchemaAgent may use or refine
+          this; it should reflect what the section represents.
+      title_hint:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional section heading hint for AppSchemaAgent.
+
   AppBuildPage:
     type: model
     fields:
@@ -20,15 +73,23 @@ models:
         items: str
         description: CRUD or workflow actions supported by the page.
       ui_layout:
-        type: union
-        variants:
-        - str
+        type: literal
+        values:
+        - grid
+        - sidebar
+        - full-width
+        - split
         - 'null'
-        description: "Preferred layout hint for AppSchemaAgent: grid | sidebar | full-width | split."
+        description: "Preferred layout hint for AppSchemaAgent: grid | sidebar | full-width | split. Null to let AppSchemaAgent decide."
       sections_hint:
         type: optional_list
-        items: str
-        description: "Primitive section types needed on this page (e.g. DataTable, Form, Stat). Used by AppSchemaAgent to scaffold page sections."
+        items: PrimitiveSectionHint
+        description: >
+          Typed primitive section hints for AppSchemaAgent. Each hint names
+          the primitive and provides a partial config scaffold with required
+          fields populated. AppSchemaAgent uses these as the base config and
+          extends them with page context. Emit one hint per expected UI
+          section on the page.
   AppBuildEntity:
     type: model
     fields:
@@ -1163,6 +1224,44 @@ models:
         items: str
         description: Contract fields that reference this component, e.g. admin_yaml.panels[campaigns.overview].component.
 
+  ModuleRuntimeExtension:
+    type: model
+    fields:
+      kind:
+        type: literal
+        values:
+        - api_router
+        - startup_service
+        description: |
+          Extension kind:
+          - api_router: FastAPI router mounted at host startup (webhook receivers, raw-body routes).
+          - startup_service: Background service started/stopped with host lifecycle (persistent connections).
+      entrypoint:
+        type: str
+        description: |
+          Module-local Python entrypoint in the form module.path:attribute.
+          api_router must point to backend.router:get_router.
+          startup_service must point to backend.worker:{ServiceClass}.
+      prefix:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: URL prefix for api_router extensions (e.g. /webhooks/stripe). Null for startup_service.
+
+  ModuleRuntimeExtensionsManifest:
+    type: model
+    fields:
+      schema_version:
+        type: literal
+        values:
+        - mozaiks.runtime_extensions.v1
+        description: Schema version for runtime_extensions.yaml.
+      extensions:
+        type: list
+        items: ModuleRuntimeExtension
+        description: List of host-level extensions declared by this module.
+
   ModuleContractBundle:
     type: model
     fields:
@@ -1195,6 +1294,12 @@ models:
         type: optional_list
         items: ModuleJsStub
         description: Optional JS/TS frontend customization stubs required by declared admin custom components.
+      runtime_extensions_yaml:
+        type: union
+        variants:
+        - ModuleRuntimeExtensionsManifest
+        - 'null'
+        description: Optional runtime_extensions.yaml contract. Emit only when the module needs an api_router (webhook receiver) or startup_service (persistent background connection). Null for most modules.
 
   ConfigMiddlewareOutput:
     type: model

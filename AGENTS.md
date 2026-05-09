@@ -112,9 +112,11 @@ Canonical ownership:
 | `mozaiksai.hosts.mozaiks` | Hosted Mozaiks product host — extends Studio with hosted-only capabilities |
 | `mozaiksai.hosts.bootstrap` | Repo-local path defaults (CWD-relative; no-ops when not in repo checkout) |
 | `mozaiks_cli/` | CLI / developer interface — parallel to Studio, not a subset of it |
-| `factory_app/app/` | First-party Studio app bundle — shared control-plane routes, default brand, and factory app contract |
-| `factory_app/app/ui/pages/custom/studio/` | Studio UI components — management interface layer |
-| `factory_app/app/modules/factory_control_plane/` | First-party Studio control-plane module |
+| `factory_app/workflows/` | Factory layer — shared builder/generator workflows (AppGenerator, AgentGenerator, DesignDocs, ValueEngine) |
+| `factory_app/control_plane/` | Factory layer — declarative builder harness pack: checkpoints, classifier prompts, routing policies, context tools |
+| `factory_app/app/` | Studio first-party app bundle — pages, modules, brand, config loaded by the Studio host; not a synonym for the Factory layer |
+| `factory_app/app/ui/pages/custom/studio/` | Studio management UI components |
+| `factory_app/app/modules/factory_control_plane/` | Studio identity stub only — no backend, no actions |
 | `chat-ui/src/admin/` | Platform-management surfaces — registered by Studio, inherited by Mozaiks App |
 | `platform/` | Repo-local infrastructure assets only — not an app workspace |
 | `generated/` | Generator output awaiting validation/promotion |
@@ -233,3 +235,17 @@ For runtime, generator, orchestration, or contract changes:
 - run targeted tests
 - update docs
 - prefer at least one real runtime smoke when practical
+
+## Decision Rules
+
+When adding code, decide placement in this order:
+
+1. Is this required for every runtime instance and independent of app semantics? → **Runtime**.
+2. Is this generic harness/control-plane behavior over execution contexts, state, events, and routing? → **`mozaiksai/control_plane`**.
+3. Is this app hosting, routing, sessions, pages, modules, shell config, or app workspace composition? → **Platform**.
+4. Is this workspace management, build lifecycle, artifact review, run history, or configuration UI? → **Studio**.
+5. Is this first-party builder behavior, app generation logic, or builder-specific harness configuration? → **`factory_app`**.
+6. Is this hosted-only capability such as collaboration, billing, marketplace, deployment, or org management? → **Mozaiks App**.
+7. Is this filesystem scaffolding, process management, or terminal diagnostics? → **CLI**.
+
+Key: a feature is not CLI just because it runs locally. If it is management UI, it belongs in Studio. If it is generic intent routing across execution contexts, it belongs in the harness implementation. If it is builder-specific policy, it belongs in the factory harness pack.

@@ -12,7 +12,7 @@
  */
 
 import { useCallback } from 'react';
-import { getPrimitive } from './PrimitiveRegistry.js';
+import { getPrimitive, getPrimitiveSchema } from './PrimitiveRegistry.js';
 import { getChildSections } from './schemaUtils.js';
 import { emitAppEvent } from '../hooks/useAppEventBus.js';
 import { cn } from '../lib/cn.js';
@@ -246,6 +246,41 @@ export function SectionRenderer({
   }
 
   const config = section.config ?? {};
+
+  // Dev-mode schema validation — warns on missing required fields or bad enum values.
+  // Never throws; advisory only. Remove the env check to enable in production.
+  if (process.env.NODE_ENV === 'development') {
+    const schema = getPrimitiveSchema(section.primitive);
+    if (schema) {
+      const violations = [];
+      const required = schema.required ?? [];
+      for (const field of required) {
+        if (config[field] === undefined || config[field] === null) {
+          violations.push(`missing required field "${field}"`);
+        }
+      }
+      const props = schema.properties ?? {};
+      for (const [field, def] of Object.entries(props)) {
+        const val = config[field];
+        if (val === undefined || val === null) continue;
+        if (def.enum && !def.enum.includes(val)) {
+          violations.push(`field "${field}" value "${val}" not in allowed values: ${def.enum.join(', ')}`);
+        }
+        if (def.type === 'array' && !Array.isArray(val)) {
+          violations.push(`field "${field}" must be an array`);
+        }
+        if (def.type === 'integer' && typeof val !== 'number') {
+          violations.push(`field "${field}" must be a number`);
+        }
+      }
+      if (violations.length) {
+        console.warn(
+          `[SectionRenderer] Config violations for section "${section.id}" (${section.primitive}):`,
+          violations
+        );
+      }
+    }
+  }
   const liveState = pageData?.[section.id];
   const hasOwnBinding = liveState !== undefined;
   const effectiveData = hasOwnBinding ? liveState.data : inheritedData;

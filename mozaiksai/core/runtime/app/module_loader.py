@@ -385,12 +385,24 @@ class ModuleAdminManifest(ModuleContractModel):
         return self
 
 
+class ModuleRuntimeExtension(ModuleContractModel):
+    kind: Literal["api_router", "startup_service"]
+    entrypoint: str
+    prefix: Optional[str] = None
+
+
+class ModuleRuntimeExtensionsManifest(ModuleContractModel):
+    schema_version: Literal["mozaiks.runtime_extensions.v1"]
+    extensions: List[ModuleRuntimeExtension] = Field(default_factory=list)
+
+
 class ModuleCompanionManifests(ModuleContractModel):
     events: ModuleEventsManifest
     subscriptions: ModuleSubscriptionsManifest
     notifications: ModuleNotificationsManifest
     settings: ModuleSettingsManifest
     admin: ModuleAdminManifest
+    runtime_extensions: Optional[ModuleRuntimeExtensionsManifest] = None
 
 
 class LoadedModule:
@@ -515,6 +527,17 @@ class ModuleLoader:
                 parsed[key] = model.model_validate(_load_yaml_file(path))
             except Exception as exc:
                 raise ModuleLoadError(f"Invalid {filename} for {definition.name!r}: {exc}") from exc
+
+        ext_yaml = module_dir / "runtime_extensions.yaml"
+        if ext_yaml.exists():
+            try:
+                parsed["runtime_extensions"] = ModuleRuntimeExtensionsManifest.model_validate(
+                    _load_yaml_file(ext_yaml)
+                )
+            except Exception as exc:
+                raise ModuleLoadError(
+                    f"Invalid runtime_extensions.yaml for {definition.name!r}: {exc}"
+                ) from exc
 
         manifests = ModuleCompanionManifests.model_validate(parsed)
         declared_events = manifests.events.event_types

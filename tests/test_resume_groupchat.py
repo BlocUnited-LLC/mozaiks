@@ -158,3 +158,103 @@ async def test_handle_resume_request_re_emits_awaiting_reply_for_generic_feedbac
     assert awaiting_event["replay"] is True
     assert awaiting_event["metadata"] == {"source": "resume_pending_input"}
     assert awaiting_event["timestamp"]
+
+
+@pytest.mark.asyncio
+async def test_handle_resume_request_skips_marked_agentdriven_seed_message(monkeypatch):
+    resumer = GroupChatResumer()
+    emitted = []
+
+    async def _fake_send(event, chat_id):  # noqa: ANN001
+        emitted.append((chat_id, event))
+
+    async def _fake_fetch(chat_id, app_id, projection=None):  # noqa: ANN001
+        return {
+            "status": 0,
+            "workflow_name": "ValueEngine",
+            "user_id": "user_1",
+            "messages": [
+                {
+                    "role": "user",
+                    "agent_name": "user",
+                    "content": "Hidden workflow primer",
+                    "_mozaiks_seed_kind": "initial_message",
+                },
+                {"role": "assistant", "agent_name": "InterviewAgent", "content": "Visible question"},
+            ],
+        }
+
+    async def _fake_resume_state(app_id, user_id):  # noqa: ANN001
+        return None
+
+    class _FakePM:
+        async def get_pending_input_request(self, **kwargs):  # noqa: ANN003
+            return None
+
+    monkeypatch.setattr(resumer, "_fetch_chat_doc", _fake_fetch)
+    monkeypatch.setattr(resumer, "_load_resume_state", _fake_resume_state)
+    monkeypatch.setattr(resumer, "_get_persistence_manager", lambda: _FakePM())
+
+    await resumer.handle_resume_request(
+        chat_id="chat_1",
+        app_id="app_1",
+        last_client_index=-1,
+        send_event=_fake_send,
+        workflow_startup_mode="AgentDriven",
+    )
+
+    text_events = [event for _chat_id, event in emitted if event.get("kind") == "text"]
+    assert len(text_events) == 1
+    assert text_events[0]["content"] == "Visible question"
+
+
+@pytest.mark.asyncio
+async def test_handle_resume_request_skips_legacy_agentdriven_primer_match(monkeypatch):
+    resumer = GroupChatResumer()
+    emitted = []
+
+    async def _fake_send(event, chat_id):  # noqa: ANN001
+        emitted.append((chat_id, event))
+
+    async def _fake_fetch(chat_id, app_id, projection=None):  # noqa: ANN001
+        return {
+            "status": 0,
+            "workflow_name": "ValueEngine",
+            "user_id": "user_1",
+            "messages": [
+                {
+                    "role": "user",
+                    "agent_name": "user",
+                    "content": "Legacy hidden primer",
+                },
+                {"role": "assistant", "agent_name": "InterviewAgent", "content": "Visible follow-up"},
+            ],
+        }
+
+    async def _fake_resume_state(app_id, user_id):  # noqa: ANN001
+        return None
+
+    class _FakePM:
+        async def get_pending_input_request(self, **kwargs):  # noqa: ANN003
+            return None
+
+    monkeypatch.setattr(resumer, "_fetch_chat_doc", _fake_fetch)
+    monkeypatch.setattr(resumer, "_load_resume_state", _fake_resume_state)
+    monkeypatch.setattr(resumer, "_get_persistence_manager", lambda: _FakePM())
+    monkeypatch.setattr(
+        resumer,
+        "_resolve_hidden_initial_message",
+        lambda **_kwargs: "Legacy hidden primer",
+    )
+
+    await resumer.handle_resume_request(
+        chat_id="chat_1",
+        app_id="app_1",
+        last_client_index=-1,
+        send_event=_fake_send,
+        workflow_startup_mode="AgentDriven",
+    )
+
+    text_events = [event for _chat_id, event in emitted if event.get("kind") == "text"]
+    assert len(text_events) == 1
+    assert text_events[0]["content"] == "Visible follow-up"

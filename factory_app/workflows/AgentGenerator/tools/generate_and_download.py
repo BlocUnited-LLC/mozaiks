@@ -68,6 +68,87 @@ def _promote_workflow_to_app_workspace(workflow_dir: Path, wf_name: str) -> None
         )
 
 
+async def _register_workflow_bundle_artifact_version(
+    *,
+    app_id: str,
+    user_id: Optional[str],
+    workflow_name: str,
+    chat_id: Optional[str],
+    bundle_name: str,
+    zip_path: Optional[Path],
+    context_variables: Optional[Any],
+):
+    try:
+        import hashlib
+        from mozaiksai.core.artifacts import (
+            ArtifactLifecycleStatus,
+            ArtifactValidationStatus,
+            get_artifact_store,
+            resolve_latest_artifact_version_refs,
+        )
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError(f"Artifact store dependencies unavailable: {exc}") from exc
+
+    files_manifest = []
+    if zip_path is not None and zip_path.exists():
+        raw = zip_path.read_bytes()
+        sha = hashlib.sha256(raw).hexdigest()
+        files_manifest.append(
+            {
+                "path": f"{bundle_name}/{zip_path.name}",
+                "sha256": sha,
+                "size_bytes": zip_path.stat().st_size,
+                "content_type": "application/zip",
+            }
+        )
+
+    parent_version_id = None
+    if context_variables and hasattr(context_variables, "get"):
+        try:
+            parent_version_id = context_variables.get("artifact_version_id")
+        except Exception:
+            parent_version_id = None
+
+    artifact_store = get_artifact_store()
+    canonical_inputs_version = await resolve_latest_artifact_version_refs(
+        app_id=str(app_id),
+        artifact_kinds=("concept", "build_plan", "design_docs"),
+        artifact_store=artifact_store,
+    )
+    artifact_version = await artifact_store.create_artifact_version(
+        app_id=str(app_id),
+        artifact_kind="workflow_bundle",
+        artifact_key=bundle_name,
+        parent_version_id=str(parent_version_id) if parent_version_id else None,
+        canonical_inputs_version=canonical_inputs_version,
+        files_manifest=files_manifest,
+        source_workflow=workflow_name,
+        source_chat_id=chat_id,
+        lifecycle_status=(
+            ArtifactLifecycleStatus.DRAFT
+            if parent_version_id
+            else ArtifactLifecycleStatus.CURRENT
+        ),
+        validation_status=ArtifactValidationStatus.PENDING,
+        commit_metadata={
+            "message": f"{workflow_name}: {bundle_name}",
+            "author_user_id": user_id,
+            "source_workflow": workflow_name,
+            "source_chat_id": chat_id,
+            "metadata": {
+                "artifact_path": str(zip_path) if zip_path else None,
+                "workflow_name": bundle_name,
+            },
+        },
+    )
+    if context_variables and hasattr(context_variables, "set"):
+        try:
+            context_variables.set("artifact_version_id", artifact_version.id)
+        except Exception:
+            pass
+    return artifact_version
+
+
 async def generate_and_download(
     DownloadRequest: Annotated[Dict[str, Any], "Download configuration with confirmation_only and storage_backend"],
     agent_message: Annotated[str, "Concise message (≤140 chars) shown to user in download UI"],
@@ -662,59 +743,15 @@ async def generate_and_download(
             # Register canonical artifact version so Studio history and refinement paths
             # can reference this build — fires for both CLI and Studio trigger paths.
             try:
-                import hashlib
-                from mozaiksai.core.artifacts import (
-                    ArtifactLifecycleStatus,
-                    ArtifactValidationStatus,
-                    get_artifact_store,
-                )
-                files_manifest = []
-                if zip_path is not None and zip_path.exists():
-                    raw = zip_path.read_bytes()
-                    sha = hashlib.sha256(raw).hexdigest()
-                    files_manifest.append({
-                        "path": f"{wf_name}/{zip_path.name}",
-                        "sha256": sha,
-                        "size_bytes": zip_path.stat().st_size,
-                        "content_type": "application/zip",
-                    })
-                artifact_store = get_artifact_store()
-                parent_version_id = None
-                if context_variables and hasattr(context_variables, "get"):
-                    try:
-                        parent_version_id = context_variables.get("artifact_version_id")
-                    except Exception:
-                        parent_version_id = None
-                artifact_version = await artifact_store.create_artifact_version(
+                artifact_version = await _register_workflow_bundle_artifact_version(
                     app_id=str(app_id),
-                    artifact_kind="workflow_bundle",
-                    artifact_key=wf_name,
-                    parent_version_id=str(parent_version_id) if parent_version_id else None,
-                    files_manifest=files_manifest,
-                    source_workflow="AgentGenerator",
-                    source_chat_id=chat_id,
-                    lifecycle_status=(
-                        ArtifactLifecycleStatus.DRAFT
-                        if parent_version_id
-                        else ArtifactLifecycleStatus.CURRENT
-                    ),
-                    validation_status=ArtifactValidationStatus.PENDING,
-                    commit_metadata={
-                        "message": f"AgentGenerator: {wf_name}",
-                        "author_user_id": user_id,
-                        "source_workflow": "AgentGenerator",
-                        "source_chat_id": chat_id,
-                        "metadata": {
-                            "artifact_path": str(zip_path) if zip_path else None,
-                            "workflow_name": wf_name,
-                        },
-                    },
+                    user_id=user_id,
+                    workflow_name="AgentGenerator",
+                    chat_id=chat_id,
+                    bundle_name=wf_name,
+                    zip_path=zip_path,
+                    context_variables=context_variables,
                 )
-                if context_variables and hasattr(context_variables, "set"):
-                    try:
-                        context_variables.set("artifact_version_id", artifact_version.id)
-                    except Exception:
-                        pass
                 wf_logger.info(f"[ArtifactStore] Registered artifact version {artifact_version.id} for {wf_name}")
             except Exception as av_err:
                 wf_logger.warning(f"[ArtifactStore] Failed to register artifact version: {av_err}")

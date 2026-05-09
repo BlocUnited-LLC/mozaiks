@@ -1,17 +1,29 @@
 definitions:
-  refinement_mode:
-    type: boolean
-    description: >
-      True when DesignDocs was reopened by the refinement control plane rather
-      than launched as a fresh downstream build step.
-    source:
-      type: state
-      default: false
-  change_class:
+  build_mode:
     type: string
     description: >
-      Refinement change class: patch | design | feature | core. When present,
+      Build mode for DesignDocs. `initial` is the normal downstream design pass;
+      `revision` means the workflow was reopened to revise persisted design state.
+    source:
+      type: state
+      default: initial
+  revision_scope:
+    type: string
+    description: >
+      Revision scope: patch | design | feature | core. When present,
       it describes why the control plane re-entered DesignDocs.
+    source:
+      type: state
+      default: null
+  change_request_id:
+    type: string
+    description: Stable lineage id for the active revision request.
+    source:
+      type: state
+      default: null
+  revision_id:
+    type: string
+    description: Runtime-generated revision run id for the current builder revision.
     source:
       type: state
       default: null
@@ -28,6 +40,20 @@ definitions:
     description: >
       Version id of the downstream artifact that triggered the reroute. Null
       for the first-pass design path.
+    source:
+      type: state
+      default: null
+  sequence_status:
+    type: string
+    description: >
+      Builder sequence state before the revision launch: in_progress |
+      completed | stale | revising.
+    source:
+      type: state
+      default: in_progress
+  revision_origin_workflow:
+    type: string
+    description: Workflow where the revision request originated before reroute.
     source:
       type: state
       default: null
@@ -62,7 +88,7 @@ definitions:
     type: object
     description: >
       Typed refinement classification emitted by the control plane. Contains the
-      final `change_class`, rationale, and layer-touch information so
+      final `revision_scope`, rationale, and layer-touch information so
       DesignDocs can understand whether the revision is local, design-scoped,
       feature-extending, or concept-revising.
     source:
@@ -128,10 +154,14 @@ definitions:
 agents:
   DesignDocsAgent:
     variables:
-    - refinement_mode
-    - change_class
+    - build_mode
+    - revision_scope
+    - change_request_id
+    - revision_id
     - artifact_kind
     - artifact_version_id
+    - sequence_status
+    - revision_origin_workflow
     - refinement_request
     - refinement_request_meta
     - screen

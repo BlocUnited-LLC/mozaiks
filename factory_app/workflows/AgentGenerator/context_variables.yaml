@@ -1,20 +1,30 @@
 definitions:
-  refinement_mode:
-    type: boolean
-    description: >
-      True when this AgentGenerator session is refining an existing workflow bundle
-      rather than generating from scratch. Seeded by the refinement control plane
-      via the trigger endpoint. Agents must check this flag — when true, read the
-      existing artifact_version_id and scope changes to owned_paths only.
-    source:
-      type: state
-      default: false
-  change_class:
+  build_mode:
     type: string
     description: >
-      Refinement change class: patch | design | feature | core.
-      Seeded by the refinement control plane. Agents use this to calibrate scope
-      — patch stays inside owned files, feature may widen scope, core is a restart.
+      Build mode for AgentGenerator. `initial` means generate the workflow bundle
+      from scratch; `revision` means revise an existing bundle from persisted state.
+    source:
+      type: state
+      default: initial
+  revision_scope:
+    type: string
+    description: >
+      Revision scope: patch | design | feature | core. Agents use this to
+      calibrate scope — patch stays inside owned files, feature may widen scope,
+      core reroutes earlier in the build plan.
+    source:
+      type: state
+      default: null
+  change_request_id:
+    type: string
+    description: Stable lineage id for the active revision request.
+    source:
+      type: state
+      default: null
+  revision_id:
+    type: string
+    description: Runtime-generated revision run id for the current builder revision.
     source:
       type: state
       default: null
@@ -33,7 +43,21 @@ definitions:
     description: >
       Version id of the workflow bundle artifact being refined. Null for initial
       generation runs. Agents use this to load the correct artifact version from
-      persistence when refinement_mode is true.
+      persistence when build_mode is revision.
+    source:
+      type: state
+      default: null
+  sequence_status:
+    type: string
+    description: >
+      Builder sequence state before the revision launch: in_progress |
+      completed | stale | revising.
+    source:
+      type: state
+      default: in_progress
+  revision_origin_workflow:
+    type: string
+    description: Workflow where the revision request originated before reroute.
     source:
       type: state
       default: null
@@ -42,7 +66,7 @@ definitions:
     description: >
       Raw user-supplied refinement request text, passed through from the
       canonical RefinementRequest. Agents read this instead of re-interviewing when
-      refinement_mode is true.
+      build_mode is revision.
     source:
       type: state
       default: null
@@ -68,7 +92,7 @@ definitions:
     type: object
     description: >
       Typed refinement classification emitted by the control plane. Contains the
-      final `change_class`, rationale, and layer-touch information so agents can
+      final `revision_scope`, rationale, and layer-touch information so agents can
       understand whether the request is local, design-scoped, feature-extending,
       or concept-revising.
     source:
@@ -382,10 +406,14 @@ definitions:
 agents:
   InterviewAgent:
     variables:
-    - refinement_mode
-    - change_class
+    - build_mode
+    - revision_scope
+    - change_request_id
+    - revision_id
     - artifact_kind
     - artifact_version_id
+    - sequence_status
+    - revision_origin_workflow
     - refinement_request
     - refinement_request_meta
     - screen
@@ -436,10 +464,14 @@ agents:
     - current_workflow_index
   PackMetadataAgent:
     variables:
-    - refinement_mode
-    - change_class
+    - build_mode
+    - revision_scope
+    - change_request_id
+    - revision_id
     - artifact_kind
     - artifact_version_id
+    - sequence_status
+    - revision_origin_workflow
     - refinement_request
     - refinement_request_meta
     - screen

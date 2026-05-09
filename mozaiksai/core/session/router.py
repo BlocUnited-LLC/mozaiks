@@ -22,7 +22,10 @@ from mozaiksai.core.workflow.pack.config import (
 
 from .model import (
     JourneyAdvanceDecision,
+    PendingHarnessDecision,
+    RevisionEntry,
     RoutingDecision,
+    SequenceStatus,
     SessionLifecycle,
     SessionState,
     TransitionResolution,
@@ -223,8 +226,13 @@ class SessionRouter:
             journey_position=journey_position,
         )
         state.lifecycle_state = SessionLifecycle.ACTIVE
+        if state.active_revision_id:
+            state.sequence_status = SequenceStatus.REVISING
+        elif state.sequence_status == SequenceStatus.STALE:
+            state.sequence_status = SequenceStatus.IN_PROGRESS
         state.current_workflow_id = workflow
         state.current_chat_id = chat
+        state.pending_harness_decision = None
         state.pending_transition_id = None
         state.updated_at = datetime.now(UTC)
         await self._store.upsert(state)
@@ -333,11 +341,15 @@ class SessionRouter:
             return None
 
         if current_group_index >= len(groups) - 1:
+            now = datetime.now(UTC)
             state.lifecycle_state = SessionLifecycle.COMPLETED
+            state.sequence_status = SequenceStatus.COMPLETED
+            state.sequence_completed_at = now
+            self._complete_active_revision(state)
             state.current_workflow_id = workflow
             state.current_chat_id = chat
             state.pending_transition_id = None
-            state.updated_at = datetime.now(UTC)
+            state.updated_at = now
             await self._store.upsert(state)
             return JourneyAdvanceDecision(
                 journey_instance_id=state.journey_instance_id,
@@ -351,8 +363,12 @@ class SessionRouter:
         next_step = journey.steps[next_group_index]
         next_transition_id = str(getattr(next_step, "transition", "") or "").strip() or None
         next_group = list(groups[next_group_index])
+        next_sequence_status = (
+            SequenceStatus.REVISING if state.active_revision_id else SequenceStatus.IN_PROGRESS
+        )
         if next_transition_id:
             state.lifecycle_state = SessionLifecycle.AWAITING_TRANSITION
+            state.sequence_status = next_sequence_status
             state.current_workflow_id = None
             state.current_chat_id = None
             state.pending_transition_id = next_transition_id
@@ -374,6 +390,7 @@ class SessionRouter:
             )
 
         state.lifecycle_state = SessionLifecycle.ACTIVE
+        state.sequence_status = next_sequence_status
         state.current_workflow_id = None
         state.current_chat_id = None
         state.pending_transition_id = None
@@ -504,26 +521,28 @@ class SessionRouter:
         state = await self._load_or_create_state(app_id=app, user_id=user)
         return self._serialize_state(state)
 
-    async def mark_awaiting_approval(
+    async def mark_pending_harness_decision(
         self,
         *,
         app_id: str,
         user_id: str,
-        approval_id: str,
+        pending_decision: PendingHarnessDecision,
         workflow_id: Optional[str] = None,
         chat_id: Optional[str] = None,
     ) -> dict[str, Any]:
         app = str(app_id or "").strip()
         user = str(user_id or "").strip()
-        approval = str(approval_id or "").strip()
         workflow = str(workflow_id or "").strip() or None
         chat = str(chat_id or "").strip() or None
-        if not app or not user or not approval:
-            raise ValueError("app_id, user_id, and approval_id are required")
+        if not app or not user:
+            raise ValueError("app_id and user_id are required")
+        decision_id = str(pending_decision.decision_id or "").strip()
+        if not decision_id:
+            raise ValueError("pending_decision.decision_id is required")
 
         state = await self._load_or_create_state(app_id=app, user_id=user)
-        state.lifecycle_state = SessionLifecycle.AWAITING_APPROVAL
-        state.pending_approval_id = approval
+        state.lifecycle_state = SessionLifecycle.AWAITING_DECISION
+        state.pending_harness_decision = pending_decision
         if workflow:
             state.current_workflow_id = workflow
         if chat:
@@ -532,37 +551,85 @@ class SessionRouter:
         await self._store.upsert(state)
         return self._serialize_state(state)
 
-    async def resolve_approval(
+    async def resolve_pending_harness_decision(
         self,
         *,
         app_id: str,
         user_id: str,
-        approval_id: str,
-        approved: bool = True,
+        decision_id: str,
+        action_id: Optional[str] = None,
+        accepted: bool = True,
     ) -> dict[str, Any]:
         app = str(app_id or "").strip()
         user = str(user_id or "").strip()
-        approval = str(approval_id or "").strip()
-        if not app or not user or not approval:
-            raise ValueError("app_id, user_id, and approval_id are required")
+        decision = str(decision_id or "").strip()
+        resolved_action_id = str(action_id or "").strip() or None
+        if not app or not user or not decision:
+            raise ValueError("app_id, user_id, and decision_id are required")
 
         state = await self._load_or_create_state(app_id=app, user_id=user)
-        pending = str(state.pending_approval_id or "").strip()
-        if pending != approval:
-            raise ValueError(f"approval_id '{approval}' does not match pending approval")
+        pending = state.pending_harness_decision
+        if pending is None:
+            raise ValueError("No pending harness decision is recorded for this session")
+        if str(pending.decision_id or "").strip() != decision:
+            raise ValueError(f"decision_id '{decision}' does not match pending harness decision")
 
-        state.pending_approval_id = None
+        state.pending_harness_decision = None
         state.lifecycle_state = SessionLifecycle.ACTIVE
         state.last_route_explanation = (
-            f"Approval '{approval}' approved."
-            if approved
-            else f"Approval '{approval}' rejected."
+            f"Pending decision '{decision}' resolved with action '{resolved_action_id or 'none'}'."
+            if accepted
+            else f"Pending decision '{decision}' dismissed."
         )
         state.updated_at = datetime.now(UTC)
         await self._store.upsert(state)
         payload = self._serialize_state(state)
-        payload["approved"] = bool(approved)
+        payload["accepted"] = bool(accepted)
+        payload["action_id"] = resolved_action_id
         return payload
+
+    async def persist_revision_intent(
+        self,
+        *,
+        trigger: TriggerInput,
+        decision: RoutingDecision,
+        pending_harness_decision: Optional[PendingHarnessDecision] = None,
+    ) -> dict[str, Any]:
+        """Persist revision lineage for a harness decision before launch."""
+
+        app_id = str(trigger.app_id or "").strip()
+        user_id = str(trigger.user_id or "").strip()
+        if not app_id or not user_id:
+            raise ValueError("app_id and user_id are required")
+
+        now = datetime.now(UTC)
+        state = await self._load_or_create_state(app_id=app_id, user_id=user_id)
+        prior_sequence_status = state.sequence_status
+        prior_artifact_refs = dict(state.artifact_version_refs)
+        self._apply_revision_state(
+            state=state,
+            trigger=trigger,
+            decision=decision,
+            prior_sequence_status=prior_sequence_status,
+            prior_artifact_refs=prior_artifact_refs,
+            now=now,
+        )
+
+        if not state.current_workflow_id:
+            state.current_workflow_id = decision.workflow_id
+        state.lifecycle_state = (
+            SessionLifecycle.AWAITING_DECISION
+            if pending_harness_decision is not None
+            else decision.lifecycle_state
+        )
+        state.pending_harness_decision = pending_harness_decision
+        state.pending_transition_id = None
+        state.last_trigger_source = str(trigger.trigger_source or "chat")
+        state.last_requested_workflow_id = decision.requested_workflow_id
+        state.last_route_explanation = decision.explanation
+        state.updated_at = now
+        await self._store.upsert(state)
+        return self._serialize_state(state)
 
     async def _persist_state(self, *, trigger: TriggerInput, decision: RoutingDecision) -> None:
         app_id = str(trigger.app_id)
@@ -570,15 +637,26 @@ class SessionRouter:
         now = datetime.now(UTC)
 
         state = await self._load_or_create_state(app_id=app_id, user_id=user_id)
+        prior_sequence_status = state.sequence_status
+        prior_artifact_refs = dict(state.artifact_version_refs)
         self._ensure_journey_state_for_workflow(
             state,
             workflow_id=decision.workflow_id,
             journey_id=decision.journey_id,
             journey_position=None,
         )
+        self._apply_revision_state(
+            state=state,
+            trigger=trigger,
+            decision=decision,
+            prior_sequence_status=prior_sequence_status,
+            prior_artifact_refs=prior_artifact_refs,
+            now=now,
+        )
 
         state.lifecycle_state = decision.lifecycle_state
         state.current_workflow_id = decision.workflow_id
+        state.pending_harness_decision = None
         state.last_trigger_source = str(trigger.trigger_source or "chat")
         state.last_requested_workflow_id = decision.requested_workflow_id
         state.last_route_explanation = decision.explanation
@@ -602,6 +680,7 @@ class SessionRouter:
         )
         state.lifecycle_state = SessionLifecycle.AWAITING_TRANSITION
         state.pending_transition_id = str(pending_transition_id)
+        state.pending_harness_decision = None
         state.current_workflow_id = None
         state.current_chat_id = None
         state.updated_at = datetime.now(UTC)
@@ -829,6 +908,17 @@ class SessionRouter:
             "session_id": state.session_id,
             "app_id": state.app_id,
             "user_id": state.user_id,
+            "sequence_status": state.sequence_status.value,
+            "sequence_completed_at": (
+                state.sequence_completed_at.isoformat()
+                if state.sequence_completed_at is not None
+                else None
+            ),
+            "active_revision_id": state.active_revision_id,
+            "active_change_request_id": state.active_change_request_id,
+            "current_revision_scope": state.current_revision_scope,
+            "revision_origin_workflow": state.revision_origin_workflow,
+            "restart_from_workflow": state.restart_from_workflow,
             "lifecycle_state": state.lifecycle_state.value,
             "current_workflow_id": state.current_workflow_id,
             "current_chat_id": state.current_chat_id,
@@ -837,10 +927,58 @@ class SessionRouter:
             "journey_position": int(state.journey_position),
             "journey_total_steps": int(state.journey_total_steps),
             "pending_transition_id": state.pending_transition_id,
-            "pending_approval_id": state.pending_approval_id,
+            "pending_harness_decision": (
+                {
+                    "decision_id": state.pending_harness_decision.decision_id,
+                    "decision_type": state.pending_harness_decision.decision_type,
+                    "message": state.pending_harness_decision.message,
+                    "rationale": state.pending_harness_decision.rationale,
+                    "confidence": float(state.pending_harness_decision.confidence),
+                    "recommended_workflow_id": state.pending_harness_decision.recommended_workflow_id,
+                    "selected_paths": list(state.pending_harness_decision.selected_paths),
+                    "clarification_question": state.pending_harness_decision.clarification_question,
+                    "change_request_id": state.pending_harness_decision.change_request_id,
+                    "revision_id": state.pending_harness_decision.revision_id,
+                    "requires_confirmation": bool(state.pending_harness_decision.requires_confirmation),
+                    "trigger_source": state.pending_harness_decision.trigger_source,
+                    "requested_workflow_id": state.pending_harness_decision.requested_workflow_id,
+                    "journey_id": state.pending_harness_decision.journey_id,
+                    "context_variables": dict(state.pending_harness_decision.context_variables),
+                    "trigger_payload": dict(state.pending_harness_decision.trigger_payload),
+                    "actions": [
+                        {
+                            "action_id": action.action_id,
+                            "label": action.label,
+                            "action_type": action.action_type,
+                            "workflow_id": action.workflow_id,
+                            "metadata": dict(action.metadata),
+                        }
+                        for action in state.pending_harness_decision.actions
+                    ],
+                    "metadata": dict(state.pending_harness_decision.metadata),
+                    "created_at": state.pending_harness_decision.created_at.isoformat(),
+                }
+                if state.pending_harness_decision is not None
+                else None
+            ),
             "last_trigger_source": state.last_trigger_source,
             "last_requested_workflow_id": state.last_requested_workflow_id,
             "last_route_explanation": state.last_route_explanation,
+            "artifact_version_refs": dict(state.artifact_version_refs),
+            "stale_layers": dict(state.stale_layers),
+            "revision_history": [
+                {
+                    "revision_id": entry.revision_id,
+                    "change_request_id": entry.change_request_id,
+                    "scope": entry.scope,
+                    "origin_workflow": entry.origin_workflow,
+                    "target_workflow": entry.target_workflow,
+                    "from_version_refs": dict(entry.from_version_refs),
+                    "to_version_refs": dict(entry.to_version_refs),
+                    "timestamp": entry.timestamp.isoformat(),
+                }
+                for entry in state.revision_history
+            ],
             "created_at": state.created_at.isoformat(),
             "updated_at": state.updated_at.isoformat(),
         }
@@ -919,8 +1057,8 @@ class SessionRouter:
             except Exception:
                 pass
 
-        if state.pending_approval_id:
-            state.lifecycle_state = SessionLifecycle.AWAITING_APPROVAL
+        if state.pending_harness_decision is not None:
+            state.lifecycle_state = SessionLifecycle.AWAITING_DECISION
         elif state.pending_transition_id:
             state.lifecycle_state = SessionLifecycle.AWAITING_TRANSITION
         elif self._is_doc_in_progress(chat_doc):
@@ -1145,6 +1283,108 @@ class SessionRouter:
             sort=[("completed_at", -1), ("created_at", -1)],
         )
         return bool(doc)
+
+    def _apply_revision_state(
+        self,
+        *,
+        state: SessionState,
+        trigger: TriggerInput,
+        decision: RoutingDecision,
+        prior_sequence_status: SequenceStatus,
+        prior_artifact_refs: dict[str, str],
+        now: datetime,
+    ) -> None:
+        context_seed = decision.context_seed
+        build_mode = str(context_seed.get("build_mode") or "").strip().lower()
+        if build_mode != "revision":
+            if prior_sequence_status == SequenceStatus.STALE:
+                state.sequence_status = SequenceStatus.IN_PROGRESS
+            elif prior_sequence_status == SequenceStatus.REVISING and not state.active_revision_id:
+                state.sequence_status = SequenceStatus.IN_PROGRESS
+            return
+
+        trigger_payload = dict(trigger.trigger_payload or {})
+        change_request_id = str(
+            context_seed.get("change_request_id")
+            or trigger_payload.get("change_request_id")
+            or ""
+        ).strip() or None
+        revision_scope = str(context_seed.get("revision_scope") or "").strip() or None
+        revision_origin_workflow = str(
+            context_seed.get("revision_origin_workflow")
+            or trigger.workflow_id
+            or state.current_workflow_id
+            or ""
+        ).strip() or None
+        revision_id = str(context_seed.get("revision_id") or "").strip() or str(uuid.uuid4())
+        restart_from_workflow = str(
+            context_seed.get("impact_set", {}).get("restart_from")
+            if isinstance(context_seed.get("impact_set"), dict)
+            else ""
+        ).strip() or decision.workflow_id
+        artifact_kind = str(context_seed.get("artifact_kind") or "").strip() or None
+        artifact_version_id = str(context_seed.get("artifact_version_id") or "").strip() or None
+        impact_set = context_seed.get("impact_set")
+        affected_layers = []
+        if isinstance(impact_set, dict):
+            affected_layers = [
+                str(layer).strip()
+                for layer in (impact_set.get("affected_declarative_families") or [])
+                if str(layer).strip()
+            ]
+
+        context_seed["revision_id"] = revision_id
+        context_seed["build_mode"] = "revision"
+        context_seed["sequence_status"] = prior_sequence_status.value
+        if change_request_id:
+            context_seed["change_request_id"] = change_request_id
+        if revision_origin_workflow:
+            context_seed["revision_origin_workflow"] = revision_origin_workflow
+
+        state.active_revision_id = revision_id
+        state.active_change_request_id = change_request_id
+        state.current_revision_scope = revision_scope
+        state.revision_origin_workflow = revision_origin_workflow
+        state.restart_from_workflow = restart_from_workflow
+
+        if artifact_kind and artifact_version_id:
+            state.artifact_version_refs[artifact_kind] = artifact_version_id
+
+        stale_reason = change_request_id or revision_id
+        if decision.is_full_restart:
+            layers = affected_layers or ([artifact_kind] if artifact_kind else [])
+            for layer in layers:
+                state.stale_layers[layer] = stale_reason
+            state.sequence_status = SequenceStatus.STALE
+        else:
+            state.sequence_status = SequenceStatus.REVISING
+
+        last_entry = state.revision_history[-1] if state.revision_history else None
+        if last_entry is None or last_entry.revision_id != revision_id:
+            state.revision_history.append(
+                RevisionEntry(
+                    revision_id=revision_id,
+                    change_request_id=change_request_id,
+                    scope=revision_scope,
+                    origin_workflow=revision_origin_workflow,
+                    target_workflow=decision.workflow_id,
+                    from_version_refs=prior_artifact_refs,
+                    timestamp=now,
+                )
+            )
+
+    @staticmethod
+    def _complete_active_revision(state: SessionState) -> None:
+        if state.active_revision_id and state.revision_history:
+            latest_entry = state.revision_history[-1]
+            if latest_entry.revision_id == state.active_revision_id:
+                latest_entry.to_version_refs = dict(state.artifact_version_refs)
+        state.active_revision_id = None
+        state.active_change_request_id = None
+        state.current_revision_scope = None
+        state.revision_origin_workflow = None
+        state.restart_from_workflow = None
+        state.stale_layers = {}
 
 
 _router: Optional[SessionRouter] = None

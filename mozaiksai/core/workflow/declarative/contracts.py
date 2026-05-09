@@ -78,8 +78,6 @@ class OrchestratorConfig(DeclarativeModel):
     initial_message: Optional[str] = None
     initial_agent: Optional[str] = None
     triggers: List[OrchestratorTriggerSpec] = Field(default_factory=list)
-    runtime_extensions: Optional[List[Dict[str, Any]]] = Field(default=None)
-
     @field_validator("workflow_name", "orchestration_pattern")
     @classmethod
     def _required_text_fields(cls, value: Any, info):  # type: ignore[no-untyped-def]
@@ -503,7 +501,10 @@ class ToolSpec(DeclarativeModel):
 
 
 class LifecycleToolSpec(DeclarativeModel):
-    trigger: Literal["before_chat", "after_chat", "before_agent", "after_agent"]
+    trigger: Literal[
+        "before_chat", "after_chat", "before_agent", "after_agent",
+        "on_start", "on_complete", "on_fail",
+    ]
     agent: Optional[str] = None
     file: str
     function: str
@@ -536,6 +537,15 @@ class LifecycleToolSpec(DeclarativeModel):
         if normalized == "ui_surface":
             return "UI_Surface"
         raise ValueError("tool_type must be 'Agent_Tool', 'UI_Tool', or 'UI_Surface'")
+
+    @model_validator(mode="after")
+    def _validate_run_level_triggers(self) -> "LifecycleToolSpec":
+        if self.trigger in {"on_start", "on_complete", "on_fail"} and self.agent is not None:
+            raise ValueError(
+                f"Run-level lifecycle trigger '{self.trigger}' must have agent=null "
+                "(it fires once per run, not per agent turn)"
+            )
+        return self
 
     @model_validator(mode="after")
     def _validate_lifecycle_ui_requirements(self) -> "LifecycleToolSpec":

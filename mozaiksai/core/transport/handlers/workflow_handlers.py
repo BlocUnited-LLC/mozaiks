@@ -153,19 +153,13 @@ async def handle_switch_workflow(
 
                 kind = event_dict.get("kind")
                 if kind == "text":
-                    text_payload = {
-                        "index": event_dict.get("index", 0),
-                        "content": event_dict.get("content", ""),
-                        "role": event_dict.get("role", "user"),
-                        "agent": event_dict.get("agent", "user"),
-                        "sender": event_dict.get("agent", "user"),
-                        "replay": event_dict.get("replay", True),
-                        "timestamp": event_dict.get("timestamp"),
-                        "metadata": event_dict.get("metadata"),
-                        "toolCall": event_dict.get("toolCall"),
-                        "tool_call_completed": event_dict.get("tool_call_completed"),
-                        "tool_call_status": event_dict.get("tool_call_status"),
-                    }
+                    text_payload = {k: v for k, v in event_dict.items() if k != "kind"}
+                    text_payload.setdefault("index", 0)
+                    text_payload.setdefault("content", "")
+                    text_payload.setdefault("role", "user")
+                    text_payload.setdefault("agent", event_dict.get("sender", "user"))
+                    text_payload.setdefault("sender", text_payload.get("agent", "user"))
+                    text_payload.setdefault("replay", True)
                     envelope = {
                         "type": "chat.text",
                         "data": text_payload,

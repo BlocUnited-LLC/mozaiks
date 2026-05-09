@@ -1,0 +1,26 @@
+{
+  "workflow_name": "InvalidDecompositionWorkflow",
+  "orchestrator_output": {
+    "workflow_name": "InvalidDecompositionWorkflow",
+    "startup_mode": "BackendOnly"
+  },
+  "agents_output": {
+    "agents": [
+      {
+        "name": "ReviewAgent",
+        "prompt_sections": []
+      }
+    ]
+  },
+  "workflow_strategy_output": {
+    "WorkflowStrategy": {
+      "workflow_name": "Invalid Decomposition Workflow",
+      "decomposition": {
+        "required": true,
+        "mode": "single_stage_mfj",
+        "work_unit": "document",
+        "decomposition_agent": "DecompositionAgent"
+      }
+    }
+  }
+}

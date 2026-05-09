@@ -12,6 +12,7 @@
   },
   "control_plane": {
     "enabled": true,
+    "profile": "default",
     "classifier": {
       "enabled": true,
       "llm_config": {

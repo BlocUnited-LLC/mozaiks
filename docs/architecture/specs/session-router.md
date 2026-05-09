@@ -178,7 +178,7 @@ SessionRouter does **not** execute workflows. It decides, persists, and delegate
 | `transition` | User resolved a transition surface | Transition lookup → next transition or spawn workflow |
 | `run_complete` | A workflow run finished | JourneyOrchestrator → next journey step group |
 | `refinement` | User requested a change against a prior artifact | re-entry policy helper → new session phase |
-| `approval` | Human approval callback received | Unblock `awaiting_approval` → resume queued workflow |
+| `decision` | User resolved a pending harness decision | Clear `awaiting_decision` → continue selected path |
 | `resume` | Client reconnect / session reload | Reload Session → re-wire transport → continue active run |
 
 ---
@@ -251,9 +251,19 @@ class Session:
     journey_position: int            # index into journey.steps (normalized step groups)
     journey_total_steps: int
 
+    # Builder-sequence status
+    sequence_status: SequenceStatus
+    # in_progress | completed | stale | revising
+    sequence_completed_at: datetime | None
+    active_revision_id: str | None
+    active_change_request_id: str | None
+    current_revision_scope: str | None      # patch | design | feature | core
+    revision_origin_workflow: str | None
+    restart_from_workflow: str | None
+
     # Lifecycle
     lifecycle_state: SessionLifecycle
-    # initial | active | awaiting_transition | awaiting_approval | completed | stale
+    # initial | active | awaiting_transition | awaiting_decision | completed | stale
 
     # Active execution
     current_run_id: str | None       # chat_id of the currently executing workflow run
@@ -262,19 +272,38 @@ class Session:
 
     # Blocked state
     pending_transition_id: str | None
-    pending_approval_id: str | None  # set when lifecycle_state == awaiting_approval
+    pending_harness_decision: PendingHarnessDecision | None
+    # persisted deferred decision envelope:
+    # {
+    #   decision_id, decision_type, message, rationale, confidence,
+    #   recommended_workflow_id, selected_paths, clarification_question,
+    #   change_request_id, revision_id,
+    #   trigger_source, requested_workflow_id, journey_id,
+    #   context_variables, trigger_payload,
+    #   actions[], metadata, created_at
+    # }
 
     # Artifact layer refs
     artifact_version_refs: dict[str, str]
     # keys: "concept" | "design_docs" | "workflow_bundle" | "app_bundle"
     # values: artifact_version_id of the latest committed version per layer
+    stale_layers: dict[str, str]
+    # keys: artifact layer names; values: invalidation reasons or revision ids
 
-    # Refinement history
-    refinement_history: list[RefinementEntry]
-    # [{change_request_id, artifact_kind, from_version_id, to_version_id, timestamp}]
+    # Revision history
+    revision_history: list[RevisionEntry]
+    # [{revision_id, change_request_id, scope, origin_workflow, from_version_refs, to_version_refs, timestamp}]
 
     created_at: datetime
     updated_at: datetime
+```
+
+```python
+class SequenceStatus(str, Enum):
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    STALE = "stale"
+    REVISING = "revising"
 ```
 
 ```python
@@ -282,7 +311,7 @@ class SessionLifecycle(str, Enum):
     INITIAL = "initial"
     ACTIVE = "active"
     AWAITING_TRANSITION = "awaiting_transition"
-    AWAITING_APPROVAL = "awaiting_approval"
+    AWAITING_DECISION = "awaiting_decision"
     COMPLETED = "completed"
     STALE = "stale"             # upstream artifact invalidated by a core change
 ```
@@ -301,12 +330,12 @@ awaiting_transition
 active
   → active                 (journey auto-advance spawned next step)
   → awaiting_transition    (router surfaces a transition)
-  → awaiting_approval      (workflow emitted approval_required event)
+  → awaiting_decision      (runtime persisted a deferred harness decision)
   → active                 (refinement trigger resolved to a workflow start)
   → completed              (last journey step completed)
 
-awaiting_approval
-  → active                 (approval received → resume)
+awaiting_decision
+  → active                 (user resolved the pending harness decision)
 
 completed
   → active                 (post-completion refinement request resolves to a workflow start)
@@ -315,6 +344,23 @@ completed
 stale
   → active                 (new concept revision started ValueEngine)
 ```
+
+Important:
+
+- `lifecycle_state` answers "what is the router/execution doing right now?"
+- `sequence_status` answers "what is the build journey's revision state?"
+- refinement does **not** need a separate `REFINING` lifecycle enum if
+  `sequence_status=revising` is persisted alongside `lifecycle_state=active`
+
+Examples:
+
+- user is mid-build in `AppGenerator`, asks for a core change:
+  `lifecycle_state=active`, `sequence_status=revising`
+- full build finished, user asks for a patch:
+  `lifecycle_state=active`, `sequence_status=revising`, prior
+  `sequence_completed_at` stays populated
+- core revision invalidates downstream layers before rerun:
+  `sequence_status=stale`, then `revising` once the new `ValueEngine` run starts
 
 ---
 
@@ -397,23 +443,92 @@ the outer workflow's run_complete event.
 
 ```
 1. trigger_source == "refinement" arrives at /api/workflows/trigger
-2. SessionRouter loads Session for (app_id, user_id)
-3. derives the re-entry workflow from change class + artifact ownership
+2. SessionRouter loads Session for (app_id, user_id) plus accepted artifact refs
+3. derives the re-entry workflow from change class + app-declared control-plane routing
 4. receives RoutingDecision(workflow_id, context_seed, is_full_restart)
-5. if is_full_restart:
-     - mark Session.lifecycle_state = STALE
-     - mark downstream artifact_version_refs as stale
-     - transition to new ValueEngine run → lifecycle_state = ACTIVE
-6. else:
-     - transition Session.lifecycle_state = REFINING
+5. control plane persists artifact-level stale status for affected
+   artifact_version_refs using the new `change_request_id`
+6. if the harness defers launch and returns a decision UI first:
+     - persist active_revision_id and active_change_request_id immediately
+     - keep the current chat/workflow binding until a new run is launched
+     - persist the full pending harness decision in SessionRouterState
+     - set Session.lifecycle_state = AWAITING_DECISION
+     - when the follow-up action is submitted, reuse the persisted
+       `change_request_id` and `revision_id`
+7. if is_full_restart:
+     - allocate active_revision_id and active_change_request_id
+     - mark Session.sequence_status = STALE
+     - mark downstream artifact_version_refs as stale in stale_layers
+     - transition to new ValueEngine revision run
+     - set Session.sequence_status = REVISING
+8. else:
+     - allocate active_revision_id and active_change_request_id
+     - set Session.sequence_status = REVISING
      - spawn re-entry workflow with context_seed merged into context_variables
-     - append RefinementEntry to Session.refinement_history
-7. emit session.refinement_entered event
+     - append RevisionEntry to Session.revision_history
+9. emit session.revision_requested
+10. emit session.reentry_selected
+11. emit session.revision_started when the workflow run is bound
 ```
 
 Refinement re-entry creates a **new workflow run** against the same Session.
 The Session retains its journey_position — refinement is not a journey step.
 On completion, Session transitions back to ACTIVE or COMPLETED depending on prior state.
+
+Rules:
+
+- build completion affects decision shaping, not semantic classification
+- a `core` reroute to `ValueEngine` is still revision mode, not blank-slate
+  intake
+- the workflow receives a revision context containing prior concept, design,
+  artifact lineage, change request, and impact metadata
+
+## Revision Context Contract
+
+Every workflow re-entry should receive the same revision envelope, regardless
+of whether the session was still mid-build or already completed:
+
+```python
+{
+    "build_mode": "revision",
+    "revision_scope": "patch" | "design" | "feature" | "core",
+    "revision_id": "...",
+    "change_request_id": "...",
+    "artifact_kind": "...",
+    "artifact_version_id": "...",
+    "revision_origin_workflow": "...",
+    "sequence_status": "in_progress" | "completed" | "stale" | "revising",
+    "refinement_request": "...",
+    "refinement_request_meta": {...},
+    "change_intent": {...},
+    "impact_set": {...},
+}
+```
+
+This contract exists so:
+
+- `ValueEngine` can reopen the concept with awareness of prior decisions
+- `DesignDocs` can revise design artifacts without pretending the build is new
+- `AgentGenerator` and `AppGenerator` can decide between targeted edits and
+  wider regeneration
+- downstream workflows can detect stale layers without scraping transcript
+  history
+
+## Session Events
+
+SessionRouter should emit explicit revision-aware session events:
+
+- `session.started`
+- `session.phase_advanced`
+- `session.awaiting_transition`
+- `session.sequence_completed`
+- `session.revision_requested`
+- `session.reentry_selected`
+- `session.layers_invalidated`
+- `session.revision_started`
+- `session.revision_completed`
+- `session.completed`
+- `session.stale`
 
 ---
 
@@ -439,9 +554,9 @@ Migration is **additive**, not a rewrite:
 
 ```
 mozaiksai/core/session/
-├── __init__.py          # exports SessionRouter, Session, SessionLifecycle
+├── __init__.py          # exports SessionRouter, Session, SessionLifecycle, SequenceStatus
 ├── router.py            # SessionRouter class — decision logic
-├── model.py             # Session, SessionLifecycle, RefinementEntry dataclasses
+├── model.py             # Session, SessionLifecycle, SequenceStatus, RevisionEntry dataclasses
 └── persistence.py       # Session CRUD against MongoDB (sessions collection)
 ```
 
@@ -460,9 +575,11 @@ platform workflow directory.
    parallel? Recommend: one active journey per `app_id` scope; standalone workflows get
    a synthetic journey with one step.
 
-3. **Approval protocol**: `awaiting_approval` is declared in the model but the approval
-   event contract is not yet specified. That belongs in a separate approval-flow spec
-   before SessionRouter.persistence.py is implemented.
+3. **Pending decision protocol**: the runtime now persists a replayable
+   `pending_harness_decision` and the shell restores it from
+   `chat_meta.session_state`. The remaining open question is whether future
+   `clarify_scope` flows should support freeform text replies in addition to
+   action buttons.
 
 4. **Transition declarations**: `GlobalPackGraph` now uses `entrypoints[]` for
    shell entry routes and `transitions[]` for router decisions. Sequence metadata

@@ -1,18 +1,19 @@
-import React from 'react';
+import brownfieldImage from '../../../../app/brand/assets/brownfield_comingsoon.png';
+import greenfieldImage from '../../../../app/brand/assets/greenfield.png';
 
 const OPTION_VIEW = {
   greenfield_app: {
-    label: 'Greenfield App',
+    label: 'Build Something New',
     description:
       'Shape a fresh product idea into a build-ready app plan.',
-    image: null,
+    image: greenfieldImage,
     cta: 'Start',
   },
   brownfield_app: {
-    label: 'Brownfield App',
+    label: 'Coming Soon: Existing App',
     description:
       'Augment a current product with Mozaiks workflows and generated surfaces.',
-    image: null,
+    image: brownfieldImage,
     cta: 'Connect',
   },
 };
@@ -34,7 +35,7 @@ function ChoiceCard({ option, meta, onResolve }) {
           src={meta.image}
           alt=""
           aria-hidden="true"
-          className="mb-4 h-24 w-full rounded-md border border-border/70 object-cover"
+          className="mb-4 block w-full rounded-md border border-border/70 bg-muted/20"
         />
       ) : (
         <div className="mb-4 h-2 w-16 rounded-full bg-primary/40 transition group-hover:bg-primary/70" />

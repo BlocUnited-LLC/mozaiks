@@ -285,11 +285,20 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
 
     shell_surface = _normalize_shell_surface(surface)
     result: dict = {"chat_startup_mode": "ask", "landing_spot": "/"}
+    app_manifest = _load_app_manifest()
 
     try:
-        app_manifest_path = _resolve_app_manifest_path()
-        if app_manifest_path.exists():
-            app_manifest = json.loads(app_manifest_path.read_text(encoding="utf-8"))
+        if app_manifest:
+            for key in ("appName", "app_name"):
+                value = app_manifest.get(key)
+                if isinstance(value, str) and value.strip():
+                    result["appName"] = value.strip()
+                    break
+            for key in ("appId", "app_id"):
+                value = app_manifest.get(key)
+                if isinstance(value, str) and value.strip():
+                    result["appId"] = value.strip()
+                    break
             startup = app_manifest.get("startup") if isinstance(app_manifest.get("startup"), dict) else {}
             landing_spot = startup.get("landing_spot")
             if isinstance(landing_spot, str) and landing_spot.startswith("/"):
@@ -591,13 +600,20 @@ def _resolve_app_manifest_path() -> Path:
     return (app_root / "app.json").resolve()
 
 
-def _resolve_default_app_id() -> str:
+def _load_app_manifest() -> dict[str, Any]:
     app_manifest_path = _resolve_app_manifest_path()
     if not app_manifest_path.exists():
-        return "default"
+        return {}
     try:
-        manifest = json.loads(app_manifest_path.read_text(encoding="utf-8"))
+        raw = json.loads(app_manifest_path.read_text(encoding="utf-8"))
     except Exception:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _resolve_default_app_id() -> str:
+    manifest = _load_app_manifest()
+    if not manifest:
         return "default"
 
     for key in ("appId", "app_id"):
@@ -1283,46 +1299,101 @@ async def get_session_state(
     return {"session_state": snapshot}
 
 
-class SessionApprovalAwaitRequest(BaseModel):
-    approval_id: str
+class PendingDecisionActionPayload(BaseModel):
+    action_id: str
+    label: str
+    action_type: str = "run_workflow"
+    workflow_id: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SessionPendingDecisionRequest(BaseModel):
+    decision_id: str
+    decision_type: str
+    message: str
+    rationale: str
+    confidence: float = 0.0
+    recommended_workflow_id: Optional[str] = None
+    selected_paths: list[str] = Field(default_factory=list)
+    clarification_question: Optional[str] = None
+    change_request_id: Optional[str] = None
+    revision_id: Optional[str] = None
+    requires_confirmation: bool = False
+    trigger_source: str = "refinement"
+    requested_workflow_id: Optional[str] = None
+    journey_id: Optional[str] = None
+    context_variables: Dict[str, Any] = Field(default_factory=dict)
+    trigger_payload: Dict[str, Any] = Field(default_factory=dict)
+    actions: list[PendingDecisionActionPayload] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     workflow_id: Optional[str] = None
     chat_id: Optional[str] = None
 
 
-@app.post("/api/session/approvals/await")
-async def mark_session_awaiting_approval(
-    body: SessionApprovalAwaitRequest,
+@app.post("/api/session/decisions/pending")
+async def mark_session_pending_decision(
+    body: SessionPendingDecisionRequest,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    from mozaiksai.core.session import get_session_router
+    from mozaiksai.core.session import PendingDecisionAction, PendingHarnessDecision, get_session_router
 
-    snapshot = await get_session_router().mark_awaiting_approval(
+    snapshot = await get_session_router().mark_pending_harness_decision(
         app_id=principal.app_id,
         user_id=principal.user_id,
-        approval_id=body.approval_id,
+        pending_decision=PendingHarnessDecision(
+            decision_id=body.decision_id,
+            decision_type=body.decision_type,
+            message=body.message,
+            rationale=body.rationale,
+            confidence=body.confidence,
+            recommended_workflow_id=body.recommended_workflow_id,
+            selected_paths=list(body.selected_paths or []),
+            clarification_question=body.clarification_question,
+            change_request_id=body.change_request_id,
+            revision_id=body.revision_id,
+            requires_confirmation=body.requires_confirmation,
+            trigger_source=body.trigger_source,
+            requested_workflow_id=body.requested_workflow_id,
+            journey_id=body.journey_id,
+            context_variables=dict(body.context_variables or {}),
+            trigger_payload=dict(body.trigger_payload or {}),
+            actions=[
+                PendingDecisionAction(
+                    action_id=action.action_id,
+                    label=action.label,
+                    action_type=action.action_type,
+                    workflow_id=action.workflow_id,
+                    metadata=dict(action.metadata or {}),
+                )
+                for action in body.actions
+            ],
+            metadata=dict(body.metadata or {}),
+        ),
         workflow_id=body.workflow_id,
         chat_id=body.chat_id,
     )
     return {"session_state": snapshot}
 
 
-class SessionApprovalResolveRequest(BaseModel):
-    approval_id: str
-    approved: bool = True
+class SessionPendingDecisionResolveRequest(BaseModel):
+    decision_id: str
+    action_id: Optional[str] = None
+    accepted: bool = True
 
 
-@app.post("/api/session/approvals/resolve")
-async def resolve_session_approval(
-    body: SessionApprovalResolveRequest,
+@app.post("/api/session/decisions/resolve")
+async def resolve_session_pending_decision(
+    body: SessionPendingDecisionResolveRequest,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     from mozaiksai.core.session import get_session_router
 
-    snapshot = await get_session_router().resolve_approval(
+    snapshot = await get_session_router().resolve_pending_harness_decision(
         app_id=principal.app_id,
         user_id=principal.user_id,
-        approval_id=body.approval_id,
-        approved=body.approved,
+        decision_id=body.decision_id,
+        action_id=body.action_id,
+        accepted=body.accepted,
     )
     return {"session_state": snapshot}
 

@@ -34,6 +34,33 @@ import logging
 logger = logging.getLogger("core.observability.realtime_token_logger")
 
 
+async def _mirror_usage_delta_to_performance_manager(
+    *,
+    chat_id: str,
+    agent_name: str,
+    model_name: Optional[str],
+    prompt_tokens: int,
+    completion_tokens: int,
+    cost: float,
+    duration_sec: float,
+) -> None:
+    try:
+        from mozaiksai.core.observability.performance_manager import get_performance_manager
+
+        perf_mgr = await get_performance_manager()
+        await perf_mgr.record_usage_delta(
+            chat_id=chat_id,
+            agent_name=agent_name,
+            model=model_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost=cost,
+            duration_sec=duration_sec,
+        )
+    except Exception:
+        logger.debug("Failed to mirror realtime usage delta to performance manager", exc_info=True)
+
+
 class RealtimeTokenLogger(BaseLogger):
     """Composite logger used as the single runtime_logging delegate."""
 
@@ -375,6 +402,17 @@ class RealtimeTokenLogger(BaseLogger):
         except Exception as err:  # pragma: no cover
             logger.warning(f"Failed to persist realtime usage delta: {err}")
             return
+
+        if self._chat_id and (prompt_tokens or completion_tokens or cost):
+            await _mirror_usage_delta_to_performance_manager(
+                chat_id=self._chat_id,
+                agent_name=agent_name or "unknown",
+                model_name=model_name,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cost=cost,
+                duration_sec=duration_sec,
+            )
 
         # Emit factual usage delta event (no pricing/gating/enforcement).
         try:

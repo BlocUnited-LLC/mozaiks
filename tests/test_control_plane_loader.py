@@ -18,14 +18,17 @@ def test_load_default_factory_control_plane_pack() -> None:
 
     assert pack.manifest.profile.id == "factory_app"
     assert pack.path == (Path(__file__).resolve().parents[1] / "factory_app" / "control_plane").resolve()
+    assert pack.manifest.routing.default_artifact_kind == "app_bundle"
+    app_bundle = pack.routing_for_artifact("app_bundle")
+    assert app_bundle is not None
+    assert app_bundle.routes.core.route_to == "ValueEngine"
+    assert app_bundle.routes.patch.route_to == "AppGenerator"
     request_intake = pack.checkpoint_by_event("request_submitted")
     assert request_intake is not None
     assert request_intake.prompt_id == "change_classifier_system"
     assert request_intake.tool_ids == [
-        "get_concept_overview",
-        "get_design_summary",
+        "get_revision_context",
         "get_artifact_summary",
-        "get_build_state",
     ]
     decision = pack.checkpoint_by_event("decision_requested")
     assert decision is not None
@@ -34,8 +37,8 @@ def test_load_default_factory_control_plane_pack() -> None:
     assert scope is not None
     assert scope.prompt_id == "coding_scope_selection_system"
     assert scope.tool_ids == [
+        "get_revision_context",
         "get_artifact_summary",
-        "get_build_state",
         "get_artifact_workspace_catalog",
     ]
     assert pack.policies.scope.max_selected_paths == 3
@@ -45,19 +48,15 @@ def test_load_default_factory_control_plane_pack() -> None:
     assert coding is not None
     assert coding.prompt_id == "coding_refinement_system"
     assert coding.tool_ids == [
-        "get_concept_overview",
-        "get_design_summary",
+        "get_revision_context",
         "get_artifact_summary",
-        "get_build_state",
         "get_artifact_workspace_scope",
     ]
     assert pack.prompt_by_id("change_classifier_system") is not None
     assert pack.prompt_by_id("coding_refinement_system") is not None
     assert [tool.id for tool in pack.tools.tools] == [
-        "get_concept_overview",
-        "get_design_summary",
+        "get_revision_context",
         "get_artifact_summary",
-        "get_build_state",
         "get_artifact_workspace_scope",
         "get_artifact_workspace_catalog",
     ]

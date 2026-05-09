@@ -34,6 +34,7 @@ from mozaiksai.core.events.runtime_events import (
 )
 from mozaiksai.core.events.usage_ingest import get_usage_ingest_client
 from mozaiksai.core.workflow.runtime_signals import SYSTEM_RESUME_SIGNAL
+from mozaiksai.core.workflow.startup_messages import matches_hidden_initial_message
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
 from logs.logging_config import get_core_logger, get_workflow_logger
 from mozaiksai.core.events.event_serialization import serialize_event_content
@@ -165,6 +166,7 @@ class UnifiedEventDispatcher:
         # The next text message from that agent is a transcript echo and
         # should be converted to a silent 'greeting_echo' event.
         self._greeting_echo_keys: set = set()
+        self._hidden_initial_message_keys: set = set()
         self.metrics: Dict[str, Any] = {
             "events_processed": 0,
             "events_failed": 0,
@@ -388,6 +390,8 @@ class UnifiedEventDispatcher:
         if base_kind in ('text', 'print') and workflow_name:
             agent_name = event_dict.get('agent') or event_dict.get('sender')
             content = event_dict.get('content', '')
+            metadata = event_dict.get('metadata') if isinstance(event_dict.get('metadata'), dict) else {}
+            seed_kind = event_dict.get('_mozaiks_seed_kind') or metadata.get('_mozaiks_seed_kind')
             
             # Check 0: System resume signals (always suppress)
             if isinstance(content, str) and SYSTEM_RESUME_SIGNAL in content:
@@ -398,6 +402,46 @@ class UnifiedEventDispatcher:
                     "data": event_dict,
                     "chat_id": chat_id,
                     "timestamp": timestamp
+                }
+
+            # Check 0.25: Hidden AG2 seed messages should never surface to users.
+            # These are internal orchestration primers retained for AG2 context only.
+            if isinstance(seed_kind, str) and seed_kind.strip() in {"initial_message", "userdriven_trigger"}:
+                event_dict['_mozaiks_hide'] = True
+                logger.info(
+                    "🚫 [SEED_MESSAGE] Suppressing hidden seed '%s' from %s",
+                    seed_kind.strip(),
+                    agent_name,
+                )
+                return {
+                    "type": f"chat.{base_kind}",
+                    "data": event_dict,
+                    "chat_id": chat_id,
+                    "timestamp": timestamp,
+                }
+
+            suppression_key = (str(chat_id), str(workflow_name))
+            if (
+                suppression_key not in self._hidden_initial_message_keys
+                and matches_hidden_initial_message(
+                    workflow_name=workflow_name,
+                    role="user",
+                    content=content,
+                    agent_name=agent_name,
+                )
+            ):
+                self._hidden_initial_message_keys.add(suppression_key)
+                event_dict['_mozaiks_hide'] = True
+                logger.info(
+                    "🚫 [HIDDEN_INITIAL_MESSAGE] Suppressing AgentDriven startup primer for chat=%s workflow=%s",
+                    chat_id,
+                    workflow_name,
+                )
+                return {
+                    "type": f"chat.{base_kind}",
+                    "data": event_dict,
+                    "chat_id": chat_id,
+                    "timestamp": timestamp,
                 }
 
             # Check 0.5: UserDriven synthetic trigger (the "." message used to start groupchat)

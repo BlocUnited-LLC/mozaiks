@@ -118,7 +118,7 @@ def _pack() -> LoadedControlPlanePack:
                     event="scope_requested",
                     entrypoint="mozaiksai.control_plane.implementations.scope_proposer:ArtifactScopeProposer",
                     prompt_id="coding_scope_selection_system",
-                    tool_ids=["get_artifact_summary", "get_build_state", "get_artifact_workspace_catalog"],
+                    tool_ids=["get_revision_context", "get_artifact_summary", "get_artifact_workspace_catalog"],
                 )
             ],
         ),
@@ -142,10 +142,10 @@ def _pack() -> LoadedControlPlanePack:
                     available_to=["scope_requested"],
                 ),
                 ControlPlaneToolDefinition(
-                    id="get_build_state",
+                    id="get_revision_context",
                     kind="context_tool",
-                    description="build state",
-                    entrypoint="example.tools:get_build_state",
+                    description="revision context",
+                    entrypoint="example.tools:get_revision_context",
                     available_to=["scope_requested"],
                 ),
                 ControlPlaneToolDefinition(

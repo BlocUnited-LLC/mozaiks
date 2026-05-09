@@ -26,12 +26,12 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. **Refinement Mode (Highest Priority)**:
-         - IF `ContextVariables.refinement_mode` is true:
+      1. **Revision Mode (Highest Priority)**:
+         - IF `ContextVariables.build_mode` equals `revision`:
            - Do NOT greet the user or re-interview from scratch.
            - Do NOT ask questions about scope that was already established.
            - Read `refinement_request` — this is the scoped change the user wants.
-           - Read `change_class` to calibrate depth:
+           - Read `revision_scope` to calibrate depth:
              - `patch`: confirm the targeted change only; emit NEXT immediately.
              - `design`: confirm visual/schema intent only; do not re-derive pages/entities.
              - `feature`: confirm the new capability's boundary only; preserve existing scope.
@@ -113,12 +113,12 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. **Refinement Mode (Highest Priority)**:
-         - IF `ContextVariables.refinement_mode` is true:
+      1. **Revision Mode (Highest Priority)**:
+         - IF `ContextVariables.build_mode` equals `revision`:
            - Do NOT rebuild the entire app build plan from scratch.
            - Load the existing plan from `artifact_version_id` as your baseline.
            - Read `refinement_request` — this describes only the scoped change.
-           - Read `change_class` to scope the rebuild:
+           - Read `revision_scope` to scope the rebuild:
              - `patch`: update only the specific `build_tasks` whose `owned_paths` are directly affected. All other tasks remain unchanged.
              - `feature`: extend the plan by adding or expanding the affected `capability_packs`, then add new pages/entities/tasks as needed without re-deriving unrelated ones.
              - `design`: update `theme_preferences`, `brand_intent`, and visual hints only; do not touch `capability_packs`, `build_tasks`, pages, or entities unless the design change structurally requires it.
@@ -182,6 +182,23 @@ agents:
         - `page_bundle` tasks must start at `AppSchemaAgent` and produce the declarative page bundle, not raw React files.
         - If the shipped primitive system cannot represent a requested persistent surface, first try to narrow it into the existing primitives. Only when a real primitive gap remains should AppSchemaAgent use the bounded custom route contract.
         - Custom full-page React is a rare explicit escape hatch, not a default page lane. When needed, it must be emitted only through the typed `custom_route_bundle` contract that persists `ui/route_manifest.json` + `ui/pages/custom/*.jsx` and never through ad hoc raw frontend files.
+      11b. For every page in `pages[]`, populate typed `sections_hint` as `PrimitiveSectionHint[]`:
+        - Include one hint per expected UI section. AppSchemaAgent will refine and extend these — do not leave them empty.
+        - Each hint must include `primitive` (exact registered name), `config_hint` (partial config with required fields), `section_id_hint` (kebab-case), and `title_hint`.
+        - Required fields per primitive (consult [SHIPPED PAGE PRIMITIVES] if injected):
+          - DataTable: `columns` (list of string column names or column objects)
+          - Form: `fields` (list of {name, label, type} objects)
+          - Stat: `label` + either `value` (static) or `value_key` (dynamic)
+          - Grid: `columns` (integer 1-6) + `children` (list of child section hints)
+          - ActionButton: `actions` (list of {label, action_type, ...})
+          - Alert / AlertBanner: `message`
+          - Button: `label`
+          - Timeline: `items` (list of {label, status})
+          - CodeBlock: `code`
+          - ProgressTracker: `stages` (list of {label, status})
+          - FileList: `files`
+          - Card / Modal / Skeleton / Empty / Badge: no required fields, but include identifying config
+        - Omit `config_hint` (null) only when the primitive config is entirely determined by page context that AppSchemaAgent will have but you do not.
       12. Treat generated app code as modules or integration surfaces into the existing Mozaiks runtime where possible, not as a fully bespoke platform rewrite. That means:
         - keep runtime-owned bootstrapping thin
         - prefer route registration, feature modules, reusable components, config adapters, and integration files
@@ -296,7 +313,30 @@ agents:
               "route": "<string>",
               "purpose": "<string>",
               "primary_entities": ["<string>"],
-              "primary_actions": ["<string>"]
+              "primary_actions": ["<string>"],
+              "ui_layout": "grid | sidebar | full-width | split | null",
+              "sections_hint": [
+                {
+                  "primitive": "DataTable",
+                  "config_hint": {
+                    "columns": ["id", "name", "status"],
+                    "selection": "single",
+                    "search": true,
+                    "api_endpoint": "/api/<resource>"
+                  },
+                  "section_id_hint": "<resource>-table",
+                  "title_hint": "All <Resources>"
+                },
+                {
+                  "primitive": "ActionButton",
+                  "config_hint": {
+                    "layout": "row",
+                    "actions": [{ "label": "Create <Resource>", "action_type": "event", "event_type": "ui.modal.open" }]
+                  },
+                  "section_id_hint": "create-action",
+                  "title_hint": null
+                }
+              ]
             }
           ],
           "entities": [
@@ -388,7 +428,7 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Primary inputs**:
-      - `app_build_plan`: canonical capability packs, page list, theme preferences, structured `brand_intent`, and `ui_layout` / `sections_hint` fields.
+      - `app_build_plan`: canonical capability packs, page list, theme preferences, structured `brand_intent`, and `ui_layout` / `sections_hint` fields. `sections_hint` is now typed `PrimitiveSectionHint[]` — each entry carries `primitive` (validated name), `config_hint` (partial config with required fields already populated by AppPlanAgent), `section_id_hint`, and `title_hint`. Use `config_hint` as the base config for that section and extend it; do not discard it.
       - `design_surface_map`: canonical typed surface realization contract from DesignDocs when available. Use it to confirm which surface owns each persistent page.
       - `captured_theme_config`: canonical ThemeCapture output when available. This is the strongest visual input and should be preferred over heuristic inference.
       - `experience_spec_document`: canonical persistent UI intent document from DesignDocs. In the current pipeline this is serialized under `ui_schema`.
@@ -490,7 +530,7 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. Read `app_build_plan.capability_packs`, `app_build_plan.pages`, and `app_build_plan.workflow_touchpoints`. For each page, map `purpose`, `primary_entities`, `primary_actions`, `ui_layout`, `sections_hint`, any workflow touchpoints, and any pack-specific behaviors to concrete primitive sections.
+      1. Read `app_build_plan.capability_packs`, `app_build_plan.pages`, and `app_build_plan.workflow_touchpoints`. For each page, map `purpose`, `primary_entities`, `primary_actions`, `ui_layout`, `sections_hint`, any workflow touchpoints, and any pack-specific behaviors to concrete primitive sections. When `sections_hint[i].config_hint` is present, use it as the base config for that section — merge it with any additional fields required by the primitive contract and page context. Do not discard or ignore provided `config_hint` values.
       2. Prefer `design_surface_map` for page ownership decisions, then `experience_spec_document`, then `ui_design_document`, before falling back to inference.
       3. For each page:
           a. Choose a `layout` that fits the page purpose.
@@ -652,15 +692,15 @@ agents:
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
-      **Greenfield (refinement_mode = false or null)**:
+      **Greenfield (build_mode != revision)**:
       - Provision the database using `provision_database`.
       - Generate MongoDB schema and seed data from `app_build_plan` + database design document.
       - Apply schema using `apply_database_schema`.
       - Seed using `seed_database`.
       - Output schema and seed as typed database artifacts + serialized files.
 
-      **Refinement (refinement_mode = true)**:
-      - Read `change_class` to determine your action (see Instructions).
+      **Revision (build_mode = revision)**:
+      - Read `revision_scope` to determine your action (see Instructions).
       - Fetch the prior schema using `fetch_current_schema`.
       - Generate the new schema from the updated `app_build_plan` + database design document.
       - Diff old vs new schema; produce a migration document.
@@ -670,8 +710,8 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Inputs**:
-      - `refinement_mode`: true when refining an existing app; false/null for greenfield.
-      - `change_class`: patch | design | feature | core — controls how deep the schema work goes.
+      - `build_mode`: `revision` when refining an existing app; otherwise treat the run as greenfield.
+      - `revision_scope`: patch | design | feature | core — controls how deep the schema work goes.
       - `artifact_version_id`: ID of the existing bundle being refined. Pass to `fetch_current_schema`.
       - `app_build_plan`: canonical entity list, required operations, roles, and integration constraints.
       - `database_design_document`: design-time Markdown schema doc from DesignDocs.
@@ -683,7 +723,7 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      **Greenfield path (refinement_mode = false or null)**:
+      **Greenfield path (build_mode != revision)**:
       1. Call `provision_database` to ensure DB exists.
       2. Read `app_build_plan.entities`, reconcile with `database_design_document`.
       3. Generate `schema.json` and `seed.json`.
@@ -692,9 +732,9 @@ agents:
       6. Produce `database_files` (schema_json + seed_json) and mirror into `code_files`.
       7. Set `pending_schema_migration` to null in your output.
 
-      **Refinement path (refinement_mode = true)**:
+      **Revision path (build_mode = revision)**:
 
-      Read `change_class` first:
+      Read `revision_scope` first:
 
       - `design`: Schema is unchanged. Skip all database work. Output empty `database_files`.
         Set `pending_schema_migration` to null. Emit `agent_message` confirming skip.
@@ -783,7 +823,7 @@ agents:
         "database_files": [],
         "code_files": [],
         "pending_schema_migration": null,
-        "agent_message": "change_class=design — schema unchanged, database work skipped."
+        "agent_message": "revision_scope=design — schema unchanged, database work skipped."
       }
       ```
 
@@ -880,11 +920,18 @@ agents:
            - `backend/policy.py`
            - `backend/models.py`
          - Add optional hook files only when the YAML contract references them, such as `backend/settings.py`, `backend/subscriptions.py`, `backend/notifications.py`, or `backend/admin.py`.
+         - If the module requires an `api_router` runtime extension (e.g. Stripe webhooks, inbound SMS hooks), also add `backend/router.py`.
+         - If the module requires a `startup_service` runtime extension (e.g. persistent WebSocket or market-feed connection), also add `backend/worker.py`.
          - Every entry must include `path`, `kind`, `purpose`, and `contract_refs`.
          - Type-specific file additions must stay inside `[FILE CONTRACTS CONTEXT]`. `type: messaging` may add `channels.yaml` when the task owns it; other module types do not invent extra YAML families beyond the canonical contract bundle.
       12. Set `js_stubs` only when a declared YAML contract requires frontend customization, such as an admin panel using `renderer: custom_component`. Every entry must include `path`, `surface`, `registry_key`, `purpose`, and `contract_refs`.
-      13. Also serialize the typed contract to `code_files` entries with YAML content strings at the exact `modules/{capability_pack_id}/...` paths.
-      14. Set `backend_foundation_bundle` to null in module_contract mode.
+      13. Set `runtime_extensions_yaml` only when the module genuinely requires a host-level extension:
+         - `api_router`: module needs unauthenticated raw-body routes at the host level (e.g. Stripe webhook receiver, inbound SMS handler). Entrypoint must be `backend.router:get_router` within this module.
+         - `startup_service`: module needs a process-lifetime background connection started before requests are served (e.g. WebSocket market feed, persistent broker connection). Entrypoint must be `backend.worker:{ServiceClass}` within this module.
+         - Most modules do NOT need runtime_extensions_yaml. Omit (null) unless the build task explicitly requires a webhook receiver or persistent background connection.
+         - When emitted, set `schema_version: mozaiks.runtime_extensions.v1` and populate `extensions[]`.
+      14. Also serialize the typed contract to `code_files` entries with YAML content strings at the exact `modules/{capability_pack_id}/...` paths. Include `modules/{capability_pack_id}/runtime_extensions.yaml` in code_files only when `runtime_extensions_yaml` is non-null.
+      15. Set `backend_foundation_bundle` to null in module_contract mode.
 
       **If `current_build_task_type == "backend_foundation"` (Mode B)**:
 

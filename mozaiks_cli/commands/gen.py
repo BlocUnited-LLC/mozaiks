@@ -95,7 +95,7 @@ def _find_generator_source() -> Optional[Path]:
 _ORCHESTRATOR_FIELD_RENAMES = {
     "startup_mode": "workflow_startup_mode",
 }
-_ORCHESTRATOR_DROP_FIELDS = {"runtime_extensions"}
+_ORCHESTRATOR_DROP_FIELDS: set[str] = set()
 
 # Fields that need to be stripped from nested list items in specific files
 _LIST_ITEM_DROP_FIELDS = {

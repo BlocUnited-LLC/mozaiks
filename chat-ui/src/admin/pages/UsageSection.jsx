@@ -56,7 +56,7 @@ function RunsPanel() {
         </button>
       </div>
       {runs.length === 0 ? (
-        <p className="text-sm text-muted-foreground italic">No runs tracked in memory.</p>
+        <p className="text-sm text-muted-foreground italic">No recent runs found.</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full text-sm">

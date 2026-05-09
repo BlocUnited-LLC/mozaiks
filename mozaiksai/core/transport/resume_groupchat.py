@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from logs.logging_config import get_core_logger
+from mozaiksai.core.workflow.startup_messages import resolve_hidden_initial_message
 
 SendEventFunc = Callable[[Dict[str, Any], Optional[str]], Awaitable[None]]
 
@@ -44,7 +45,12 @@ class GroupChatResumer:
             self.logger.debug("[AUTO_RESUME] No persisted chat found for %s", chat_id)
             return None
 
-        workflow_startup_mode = self._resolve_startup_mode(workflow_startup_mode, doc.get("workflow_name"))
+        workflow_name = doc.get("workflow_name")
+        workflow_startup_mode = self._resolve_startup_mode(workflow_startup_mode, workflow_name)
+        hidden_initial_message = self._resolve_hidden_initial_message(
+            workflow_name=workflow_name,
+            workflow_startup_mode=workflow_startup_mode,
+        )
         resume_state = await self._load_resume_state(app_id=app_id, user_id=doc.get("user_id"))
 
         try:
@@ -75,6 +81,7 @@ class GroupChatResumer:
             start_index=0,
             context={"reason": "on_connect"},
             workflow_startup_mode=workflow_startup_mode,
+            hidden_initial_message=hidden_initial_message,
             resume_state=resume_state,
         )
         return replay_result.get("last_index")
@@ -99,7 +106,12 @@ class GroupChatResumer:
         )
         messages: List[Dict[str, Any]] = doc.get("messages", []) or []
         status = doc.get("status", "unknown")
-        workflow_startup_mode = self._resolve_startup_mode(workflow_startup_mode, doc.get("workflow_name"))
+        workflow_name = doc.get("workflow_name")
+        workflow_startup_mode = self._resolve_startup_mode(workflow_startup_mode, workflow_name)
+        hidden_initial_message = self._resolve_hidden_initial_message(
+            workflow_name=workflow_name,
+            workflow_startup_mode=workflow_startup_mode,
+        )
         resume_state = await self._load_resume_state(app_id=app_id, user_id=doc.get("user_id"))
 
         if last_client_index < -1:
@@ -139,6 +151,7 @@ class GroupChatResumer:
             start_index=start_index,
             context={"reason": "client_resume", "last_client_index": last_client_index},
             workflow_startup_mode=workflow_startup_mode,
+            hidden_initial_message=hidden_initial_message,
             resume_state=resume_state,
         )
         return {
@@ -162,6 +175,7 @@ class GroupChatResumer:
         start_index: int,
         context: Optional[Dict[str, Any]],
         workflow_startup_mode: Optional[str] = None,
+        hidden_initial_message: Optional[str] = None,
         resume_state: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, int]:
         slice_messages = messages[start_index:]
@@ -195,9 +209,20 @@ class GroupChatResumer:
             metadata_seed_kind = metadata.get("_mozaiks_seed_kind") if isinstance(metadata, dict) else None
             role = str(message.get("role") or "").strip().lower()
             content = str(message.get("content") or "")
+            agent_name = str(message.get("agent_name") or message.get("name") or "").strip().lower()
 
             if normalized_startup_mode == "agentdriven":
-                if seed_kind == "initial_message" or metadata_seed_kind == "initial_message":
+                is_marked_initial_message = (
+                    seed_kind == "initial_message" or metadata_seed_kind == "initial_message"
+                )
+                is_legacy_initial_message = (
+                    absolute_index == 0
+                    and role == "user"
+                    and bool(hidden_initial_message)
+                    and content.strip() == str(hidden_initial_message).strip()
+                    and agent_name in {"", "user", "userproxy", "userproxyagent", "chat_manager", "manager", "agentmanager", "_user"}
+                )
+                if is_marked_initial_message or is_legacy_initial_message:
                     self.logger.debug(
                         "[AUTO_RESUME] Skipping initial_message for AgentDriven workflow (index=%d, chat_id=%s)",
                         absolute_index, chat_id
@@ -286,6 +311,25 @@ class GroupChatResumer:
 
         return {"last_index": last_index, "replayed_messages": len(replayed_messages)}
 
+    def _resolve_hidden_initial_message(
+        self,
+        *,
+        workflow_name: Optional[str],
+        workflow_startup_mode: Optional[str],
+    ) -> Optional[str]:
+        try:
+            return resolve_hidden_initial_message(
+                workflow_name,
+                workflow_startup_mode=workflow_startup_mode,
+            )
+        except Exception as exc:
+            self.logger.debug(
+                "[AUTO_RESUME] Failed to resolve hidden initial_message for workflow %s: %s",
+                workflow_name,
+                exc,
+            )
+            return None
+
     def _resolve_startup_mode(self, workflow_startup_mode: Optional[str], workflow_name: Optional[str]) -> Optional[str]:
         normalized = str(workflow_startup_mode or "").strip().lower()
         if normalized:
@@ -345,6 +389,14 @@ class GroupChatResumer:
                     tool_call_meta.get("tool_call_completed", False),
                     tool_call_meta.get("display", "inline")
                 )
+        seed_kind = message.get("_mozaiks_seed_kind")
+        if isinstance(seed_kind, str) and seed_kind.strip():
+            normalized["_mozaiks_seed_kind"] = seed_kind.strip()
+            metadata_payload = normalized.get("metadata")
+            if not isinstance(metadata_payload, dict):
+                metadata_payload = {}
+            metadata_payload.setdefault("_mozaiks_seed_kind", seed_kind.strip())
+            normalized["metadata"] = metadata_payload
         return normalized
 
     def _build_boundary_event(

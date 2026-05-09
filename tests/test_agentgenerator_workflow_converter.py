@@ -160,7 +160,6 @@ def test_runtime_extensions_stay_workflow_local() -> None:
     extensions = [
         {"kind": "api_router", "entrypoint": "workflows.ReviewWorkflow.tools.api:get_router"},
         {"kind": "startup_service", "entrypoint": "workflows._shared.tools.service:Service"},
-        {"kind": "lifecycle_hooks", "entrypoint": "workflows.OtherWorkflow.tools.lifecycle:get_hooks"},
         {"kind": "unsupported", "entrypoint": "workflows.ReviewWorkflow.tools.bad:get_hooks"},
     ]
 
@@ -723,3 +722,75 @@ def test_create_workflow_files_ignores_malformed_mapping_sections(monkeypatch, t
     assert "context_variables" not in config
     assert "tools" not in config
     assert config["structured_outputs"] == {"models": {}, "registry": {}}
+
+
+def test_create_workflow_files_preserves_canonical_context_variables_plan(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    generated_root = tmp_path / "generated"
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
+    context = _Context({"app_id": "demo-app", "chat_id": "build-ctx"})
+
+    result = asyncio.run(
+        workflow_converter.create_workflow_files(
+            {
+                "workflow_name": "ContextVariablesWorkflow",
+                "orchestrator_output": {
+                    "workflow_name": "ContextVariablesWorkflow",
+                    "startup_mode": "BackendOnly",
+                },
+                "agents_output": {
+                    "agents": [
+                        {
+                            "name": "ContextAgent",
+                            "prompt_sections": [],
+                        }
+                    ]
+                },
+                "context_variables_output": {
+                    "ContextVariablesPlan": {
+                        "definitions": [
+                            {
+                                "name": "project_id",
+                                "type": "string",
+                                "description": "Current project identifier",
+                                "source": {
+                                    "type": "state",
+                                    "default": None,
+                                },
+                            }
+                        ],
+                        "agents": [
+                            {"agent": "ContextAgent", "variables": ["project_id"]}
+                        ],
+                    }
+                },
+            },
+            context_variables=context,
+        )
+    )
+
+    assert result["status"] == "success"
+    assert result["workflow_config"]["context_variables"] == {
+        "definitions": {
+            "project_id": {
+                "type": "string",
+                "description": "Current project identifier",
+                "source": {
+                    "type": "state",
+                    "default": None,
+                },
+            }
+        },
+        "agents": {
+            "ContextAgent": {
+                "variables": ["project_id"],
+            }
+        },
+    }
+    workflow_dir = Path(result["workflow_dir"])
+    context_variables_text = (workflow_dir / "context_variables.yaml").read_text(encoding="utf-8")
+    assert "project_id:" in context_variables_text
+    assert "ContextAgent:" in context_variables_text
+    assert (workflow_dir / "context_variables.yaml").exists()

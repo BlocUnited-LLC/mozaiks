@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Dict, Optional
 import logging
 
+from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.workflow.ui_tools import emit_ui_surface
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,8 @@ async def save_captured_theme(
     chat_id = context_variables.get("chat_id")
     app_id = context_variables.get("app_id")
     app_url = context_variables.get("app_url")
+    user_id = context_variables.get("user_id")
+    build_mode = context_variables.get("build_mode")
 
     agent_message = data.get("agent_message", "Theme captured successfully.")
     theme_config = {key: value for key, value in data.items() if key != "agent_message"}
@@ -74,6 +77,28 @@ async def save_captured_theme(
             )
         except Exception as exc:
             logger.warning("[ThemeCapture] Persistence failed: %s", exc)
+
+    try:
+        await persist_summary_artifact(
+            app_id=persistence_id,
+            artifact_kind="theme_capture",
+            artifact_key="theme_capture",
+            summary_payload={
+                "app_id": persistence_id,
+                "chat_id": str(chat_id) if chat_id else None,
+                "app_url": app_url,
+                "identity": identity,
+                "theme_config": theme_config,
+                "updated_at": now.isoformat(),
+            },
+            source_workflow="ThemeCapture",
+            source_chat_id=str(chat_id) if chat_id else None,
+            author_user_id=str(user_id) if user_id else None,
+            revision_mode=str(build_mode or "").strip().lower() == "revision",
+            input_artifact_kinds=("concept",),
+        )
+    except Exception as exc:
+        logger.warning("[ThemeCapture] Generic theme artifact persistence failed: %s", exc)
 
     ui_payload = {
         "title": f"Theme: {identity.get('app_name', 'Captured Theme')}",

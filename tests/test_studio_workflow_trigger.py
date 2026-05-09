@@ -142,6 +142,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
 
     captured_prepare: dict = {}
     persisted_changes: list[dict] = []
+    persisted_invalidations: list[dict] = []
     updated_router_decisions: list[dict] = []
 
     async def fake_prepare_routed_workflow_launch(**kwargs):
@@ -172,6 +173,10 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
         async def create_change_request(self, **kwargs):
             persisted_changes.append(kwargs)
             return SimpleNamespace(id="cr_123")
+
+        async def invalidate_artifact_version_refs(self, **kwargs):
+            persisted_invalidations.append(kwargs)
+            return ["av_123"]
 
         async def update_change_request_router_decision(self, **kwargs):
             updated_router_decisions.append(kwargs)
@@ -242,7 +247,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
             ],
             "metadata": {
                 "change_class": "feature",
-                "scope_summary": "Extend the existing app bundle within the approved concept using the owning workflow.",
+                    "scope_summary": "Extend the app bundle in AppGenerator within the approved concept.",
             },
         },
     }
@@ -250,6 +255,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
     assert captured_prepare["trigger_source"] == "refinement"
     assert captured_prepare["context_variables"] == {"screen": "studio-create"}
     assert captured_prepare["trigger_payload"] == {
+        "change_request_id": "cr_123",
         "refinement_request": {
             "request_kind": "refinement",
             "declared_change_class": None,
@@ -259,6 +265,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
             "raw_user_request": "Add an export action",
             "source_surface": "studio_create",
             "app_id": captured_prepare["app_id"],
+            "user_id": captured_prepare["user_id"],
             "requested_workflow_id": None,
             "extra": {},
         },
@@ -290,6 +297,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
                 "raw_user_request": "Add an export action",
                 "source_surface": "studio_create",
                 "app_id": captured_prepare["app_id"],
+                "user_id": "demo-user",
                 "requested_workflow_id": None,
                 "extra": {},
             },
@@ -312,7 +320,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
                 "requires_replanning": True,
                 "requires_rebuild": True,
                 "restart_from": "AppGenerator",
-                "scope_summary": "Extend the existing app bundle within the approved concept using the owning workflow.",
+                "scope_summary": "Extend the app bundle in AppGenerator within the approved concept.",
             },
             "router_decision": {
                 "workflow_id": "AppGenerator",
@@ -341,11 +349,19 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
                     ],
                     "metadata": {
                         "change_class": "feature",
-                        "scope_summary": "Extend the existing app bundle within the approved concept using the owning workflow.",
+                        "scope_summary": "Extend the app bundle in AppGenerator within the approved concept.",
                     },
                 },
             },
             "created_by_user_id": "demo-user",
+        }
+    ]
+    assert persisted_invalidations == [
+        {
+            "app_id": captured_prepare["app_id"],
+            "artifact_version_refs": {"app_bundle": "av_123"},
+            "affected_artifact_kinds": ["app_bundle"],
+            "reason": "change_request:cr_123",
         }
     ]
     assert updated_router_decisions == [
@@ -379,7 +395,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
                     ],
                     "metadata": {
                         "change_class": "feature",
-                        "scope_summary": "Extend the existing app bundle within the approved concept using the owning workflow.",
+                        "scope_summary": "Extend the app bundle in AppGenerator within the approved concept.",
                     },
                 },
             },
@@ -473,6 +489,9 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
         async def create_change_request(self, **kwargs):
             persisted_changes.append(kwargs)
             return SimpleNamespace(id="cr_code_1")
+
+        async def invalidate_artifact_version_refs(self, **kwargs):
+            return [kwargs["artifact_version_refs"]["app_bundle"]]
 
         async def create_refinement_session(self, **kwargs):
             persisted_sessions.append(kwargs)
@@ -647,6 +666,9 @@ def test_studio_trigger_endpoint_can_auto_scope_before_coding_worker(monkeypatch
             persisted_changes.append(kwargs)
             return SimpleNamespace(id="cr_code_auto_1")
 
+        async def invalidate_artifact_version_refs(self, **kwargs):
+            return [kwargs["artifact_version_refs"]["app_bundle"]]
+
         async def create_refinement_session(self, **kwargs):
             return SimpleNamespace(id="rs_code_auto_1")
 
@@ -779,6 +801,9 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
         async def create_change_request(self, **kwargs):
             persisted_changes.append(kwargs)
             return SimpleNamespace(id=f"cr_scope_{len(persisted_changes)}")
+
+        async def invalidate_artifact_version_refs(self, **kwargs):
+            return [kwargs["artifact_version_refs"]["app_bundle"]]
 
         async def create_refinement_session(self, **kwargs):
             return SimpleNamespace(id="rs_scope_1")
@@ -952,6 +977,9 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
         async def create_change_request(self, **kwargs):
             return SimpleNamespace(id="cr_core_1")
 
+        async def invalidate_artifact_version_refs(self, **kwargs):
+            return [kwargs["artifact_version_refs"]["app_bundle"]]
+
     monkeypatch.setattr(studio_app, "prepare_routed_workflow_launch", fail_prepare)
     monkeypatch.setattr(studio_app, "launch_prepared_workflow", fail_launch)
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: _ArtifactStore())
@@ -1019,6 +1047,183 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
             },
         },
     }
+
+
+def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(monkeypatch):
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    sys.modules.pop("factory_app", None)
+
+    from mozaiksai.hosts import studio as studio_app
+
+    persisted_state = {
+        "active_change_request_id": None,
+        "active_revision_id": None,
+    }
+    create_calls: list[dict] = []
+    captured_prepare: dict = {}
+    captured_pending_harness_decision: dict = {}
+
+    async def fake_get_session_snapshot(*, app_id, user_id):  # noqa: ANN001
+        return {
+            "session_id": f"session_router::{app_id}::{user_id}",
+            "app_id": app_id,
+            "user_id": user_id,
+            "active_change_request_id": persisted_state["active_change_request_id"],
+            "active_revision_id": persisted_state["active_revision_id"],
+        }
+
+    async def fake_persist_revision_intent(*, trigger, decision, pending_harness_decision=None):  # noqa: ANN001
+        if pending_harness_decision is not None:
+            captured_pending_harness_decision.update(
+                {
+                    "trigger_source": pending_harness_decision.trigger_source,
+                    "requested_workflow_id": pending_harness_decision.requested_workflow_id,
+                    "journey_id": pending_harness_decision.journey_id,
+                    "context_variables": dict(pending_harness_decision.context_variables or {}),
+                    "trigger_payload": dict(pending_harness_decision.trigger_payload or {}),
+                }
+            )
+        persisted_state["active_change_request_id"] = (
+            str(
+                decision.context_seed.get("change_request_id")
+                or getattr(pending_harness_decision, "change_request_id", None)
+                or ""
+            ).strip()
+            or None
+        )
+        persisted_state["active_revision_id"] = (
+            str(
+                decision.context_seed.get("revision_id")
+                or getattr(pending_harness_decision, "revision_id", None)
+                or ""
+            ).strip()
+            or "rev_core_1"
+        )
+        return {
+            "session_id": f"session_router::{trigger.app_id}::{trigger.user_id}",
+            "app_id": trigger.app_id,
+            "user_id": trigger.user_id,
+            "active_change_request_id": persisted_state["active_change_request_id"],
+            "active_revision_id": persisted_state["active_revision_id"],
+        }
+
+    async def fake_prepare_routed_workflow_launch(**kwargs):
+        captured_prepare.update(kwargs)
+        return SimpleNamespace(
+            workflow_id="ValueEngine",
+            routing_decision=SimpleNamespace(
+                requested_workflow_id="ValueEngine",
+                explanation="Core concept change detected for app bundle; restarting from ValueEngine.",
+                is_full_restart=True,
+                rerouted_by_dependency=False,
+            ),
+            journey_id=None,
+        )
+
+    async def fake_launch_prepared_workflow(launch):  # noqa: ANN001
+        return SimpleNamespace(
+            chat_id="chat_value_1",
+            workflow_id=launch.workflow_id,
+            requested_workflow_id="ValueEngine",
+            journey_id=None,
+            websocket_url="/ws/ValueEngine/app_1/chat_value_1/demo-user",
+            trigger_source="refinement",
+            routing_explanation=launch.routing_decision.explanation,
+            rerouted_by_dependency=False,
+        )
+
+    class _ArtifactStore:
+        async def create_change_request(self, **kwargs):
+            create_calls.append(kwargs)
+            return SimpleNamespace(id="cr_core_1")
+
+        async def invalidate_artifact_version_refs(self, **kwargs):
+            return [kwargs["artifact_version_refs"]["app_bundle"]]
+
+        async def update_change_request_router_decision(self, **kwargs):
+            return True
+
+    router_double = SimpleNamespace(
+        get_session_snapshot=fake_get_session_snapshot,
+        persist_revision_intent=fake_persist_revision_intent,
+    )
+
+    monkeypatch.setattr(studio_app, "get_session_router", lambda: router_double)
+    monkeypatch.setattr(studio_app, "prepare_routed_workflow_launch", fake_prepare_routed_workflow_launch)
+    monkeypatch.setattr(studio_app, "launch_prepared_workflow", fake_launch_prepared_workflow)
+    monkeypatch.setattr(studio_app, "get_artifact_store", lambda: _ArtifactStore())
+    monkeypatch.setattr(
+        studio_app.get_orchestration_control_harness()._refinement_resolver,
+        "_classifier",
+        SimpleNamespace(
+            classify=_async_classifier(
+                change_class="core",
+                rationale="Adding blockchain changes the product direction.",
+                confidence=0.94,
+                signals=["concept_shift", "new_capability"],
+            )
+        ),
+    )
+
+    client = TestClient(studio_app.app)
+    first = client.post(
+        "/api/workflows/trigger",
+        json={
+            "trigger_source": "refinement",
+            "trigger_payload": {
+                "refinement_request": {
+                    "artifact_kind": "app_bundle",
+                    "artifact_key": "app_bundle",
+                    "artifact_version_id": "av_core_1",
+                    "raw_user_request": "Add blockchain support to the product.",
+                    "source_surface": "studio_create",
+                },
+            },
+        },
+    )
+
+    assert first.status_code == 200
+    assert first.json()["execution_mode"] == "harness_decision"
+    assert create_calls and len(create_calls) == 1
+    assert persisted_state["active_change_request_id"] == "cr_core_1"
+    assert persisted_state["active_revision_id"]
+    assert captured_pending_harness_decision["trigger_source"] == "refinement"
+    assert captured_pending_harness_decision["requested_workflow_id"] is None
+    assert captured_pending_harness_decision["journey_id"] is None
+    assert captured_pending_harness_decision["context_variables"] == {}
+    assert captured_pending_harness_decision["trigger_payload"]["change_request_id"] == "cr_core_1"
+    assert captured_pending_harness_decision["trigger_payload"]["revision_id"] == persisted_state["active_revision_id"]
+    assert captured_pending_harness_decision["trigger_payload"]["refinement_request"]["artifact_kind"] == "app_bundle"
+    assert captured_pending_harness_decision["trigger_payload"]["refinement_request"]["artifact_version_id"] == "av_core_1"
+
+    second = client.post(
+        "/api/workflows/trigger",
+        json={
+            "trigger_source": "refinement",
+            "trigger_payload": {
+                "refinement_request": {
+                    "artifact_kind": "app_bundle",
+                    "artifact_key": "app_bundle",
+                    "artifact_version_id": "av_core_1",
+                    "raw_user_request": "Add blockchain support to the product.",
+                    "source_surface": "studio_create",
+                },
+                "harness_action": {
+                    "action_id": "confirm_recommended_workflow",
+                },
+            },
+        },
+    )
+
+    assert second.status_code == 200
+    assert second.json()["execution_mode"] == "workflow"
+    assert len(create_calls) == 1
+    assert captured_prepare["trigger_payload"]["change_request_id"] == "cr_core_1"
+    assert captured_prepare["trigger_payload"]["revision_id"] == persisted_state["active_revision_id"]
 
 
 class _ReviewArtifactStore:

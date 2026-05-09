@@ -529,24 +529,31 @@ def test_app_build_plan_tool_rejects_backend_foundation_with_wrong_initial_agent
         )
 
 
-def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators() -> None:
+def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators(monkeypatch) -> None:
     module = _load_module(
         "factory_app/workflows/ValueEngine/tools/manifest.py",
         "tests.valueengine_manifest_direct",
     )
     module._HAS_PERSISTENCE = False
     emitted = {}
+    summary_artifact = {}
 
     async def _fake_emit(component, payload, **kwargs):
         emitted["component"] = component
         emitted["payload"] = payload
         emitted["kwargs"] = kwargs
 
+    async def _fake_persist_summary_artifact(**kwargs):
+        summary_artifact.update(kwargs)
+        return type("ArtifactVersion", (), {"id": "av_concept_1"})()
+
     module.emit_ui_surface = _fake_emit
+    monkeypatch.setattr(module, "persist_summary_artifact", _fake_persist_summary_artifact)
 
     context = _Context(
         chat_id="chat_value_123",
         app_id="app_123",
+        user_id="user_123",
         workflow_name="ValueEngine",
         structured_output={
             "app_name": "Mozaiks Social",
@@ -582,16 +589,28 @@ def test_valueengine_manifest_preserves_brand_intent_for_downstream_generators()
     assert emitted["component"] == "ConceptBlueprint"
     assert emitted["payload"]["blueprint"]["brand_intent"]["appearance_hint"] == "dark"
     assert emitted["payload"]["blueprint"]["agentic_capabilities"] == ["thread_summary"]
+    assert summary_artifact["artifact_kind"] == "concept"
+    assert summary_artifact["summary_payload"]["app_name"] == "Mozaiks Social"
+    assert summary_artifact["author_user_id"] == "user_123"
 
 
-def test_valueengine_save_build_plan_preserves_capability_packs_and_concept_blueprint() -> None:
+def test_valueengine_save_build_plan_preserves_capability_packs_and_concept_blueprint(monkeypatch) -> None:
     module = _load_module(
         "factory_app/workflows/ValueEngine/tools/decompose.py",
         "tests.valueengine_decompose_direct",
     )
     module._HAS_PERSISTENCE = False
+    summary_artifact = {}
+
+    async def _fake_persist_summary_artifact(**kwargs):
+        summary_artifact.update(kwargs)
+        return type("ArtifactVersion", (), {"id": "av_build_plan_1"})()
+
+    monkeypatch.setattr(module, "persist_summary_artifact", _fake_persist_summary_artifact)
     context = _Context(
         app_id="app_123",
+        chat_id="chat_123",
+        user_id="user_123",
         value_manifest={
             "app_name": "AdMarket",
             "value_proposition": "Invest in campaigns",
@@ -628,6 +647,9 @@ def test_valueengine_save_build_plan_preserves_capability_packs_and_concept_blue
     assert context.data["build_plan"]["concept_blueprint"]["app_name"] == "AdMarket"
     assert context.data["build_plan"]["capability_packs"][0]["pack_type"] == "marketplace_pack"
     assert context.data["capability_packs"][0]["capability_pack_id"] == "marketplace_core"
+    assert summary_artifact["artifact_kind"] == "build_plan"
+    assert summary_artifact["input_artifact_kinds"] == ("concept",)
+    assert summary_artifact["summary_payload"]["capability_packs"][0]["capability_pack_id"] == "marketplace_core"
 
 
 def test_app_generation_strategy_docs_are_indexed_and_examples_are_grounded() -> None:

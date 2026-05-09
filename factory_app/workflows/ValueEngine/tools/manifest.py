@@ -23,6 +23,7 @@ except ImportError:
     _HAS_PERSISTENCE = False
     BuilderArtifactStore = None
 
+from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.workflow.ui_tools import emit_ui_surface
 
 
@@ -122,13 +123,17 @@ async def save_value_manifest(
     # Extract context
     chat_id = None
     app_id = None
+    user_id = None
     workflow_name = "ValueEngine"
+    build_mode = None
     structured_output = None
 
     if context_variables is not None and hasattr(context_variables, "get"):
         chat_id = context_variables.get("chat_id")
         app_id = context_variables.get("app_id")
+        user_id = context_variables.get("user_id")
         workflow_name = context_variables.get("workflow_name", "ValueEngine")
+        build_mode = context_variables.get("build_mode")
         # Structured output from GapAnalysisAgent
         structured_output = context_variables.get("structured_output")
         # Also check for direct ConceptBlueprint output
@@ -210,6 +215,20 @@ async def save_value_manifest(
             logger.info(f"[ValueEngine] Concept saved for app_id={app_id}")
         except Exception as e:
             logger.warning(f"[ValueEngine] Persistence failed: {e}")
+
+    try:
+        await persist_summary_artifact(
+            app_id=str(app_id),
+            artifact_kind="concept",
+            artifact_key="concept",
+            summary_payload=manifest,
+            source_workflow=str(workflow_name or "ValueEngine"),
+            source_chat_id=str(chat_id) if chat_id else None,
+            author_user_id=str(user_id) if user_id else None,
+            revision_mode=str(build_mode or "").strip().lower() == "revision",
+        )
+    except Exception as exc:
+        logger.warning("[ValueEngine] Generic concept artifact persistence failed: %s", exc)
 
     # Build UI payload matching ConceptBlueprint.js expectations
     ui_payload = {

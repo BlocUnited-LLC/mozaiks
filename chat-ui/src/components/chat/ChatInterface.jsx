@@ -7,6 +7,14 @@ import {
   getBrandLogoSrc,
 } from "../../styles/brandAssets";
 
+const PENDING_HARNESS_DECISION_TITLES = {
+  workflow_reentry: 'Workflow Re-Entry',
+  core_restart: 'Core Change Detected',
+  auto_patch: 'Scoped Patch',
+  clarify_scope: 'Clarify Scope',
+  fallback_workflow: 'Workflow Fallback',
+};
+
 // Tool-call renderer for workflow-agnostic UI surfaces
 // NOTE: Hooks must run unconditionally; define state first, then early-return.
 const ToolCallRenderer = React.memo(({ toolCall, onResponse, isCompleted, onArtifactAction, actionStatusMap }) => {
@@ -103,7 +111,7 @@ const ToolCallRenderer = React.memo(({ toolCall, onResponse, isCompleted, onArti
 
   return (
     <div ref={rootRef} className="flex justify-center px-0 message-container">
-      <div className="mt-1 w-full max-w-2xl">
+      <div className="w-full max-w-2xl">
         <div className="flex flex-col gap-3 w-full items-center">
           {completed && displayMode === 'inline' && (
             <span
@@ -169,6 +177,7 @@ const ModernChatInterface = ({
   hideHeader = false, // Hide the header (used when widget has its own header)
   plainContainer = false, // Skip decorative cosmic-ui-module styling (used in widget)
   chatTheme = null,
+  appDisplayName = null,
   artifactContext = null,
   overlayMode = false,
   onOverlayClose = null,
@@ -177,6 +186,10 @@ const ModernChatInterface = ({
   pendingComposerInputToolCall = null,
   pendingComposerReply = null,
   onPendingComposerInputSkip = null,
+  pendingHarnessDecision = null,
+  pendingHarnessDecisionBusy = false,
+  pendingHarnessDecisionError = null,
+  onPendingHarnessDecisionAction = null,
 }) => {
   const [message, setMessage] = useState('');
   const [hasUserInteracted, setHasUserInteracted] = useState(false);
@@ -198,7 +211,8 @@ const ModernChatInterface = ({
     : (typeof onAskHistoryToggle === 'function' ? onAskHistoryToggle : null);
   const showAskHistoryToggle = (showHistoryMenu || showAskHistoryMenu) && typeof historyToggleHandler === 'function';
   const avatarIcon = conversationMode === 'ask' ? '🧠' : '🤖';
-  const shellTitle = chatTheme?.branding?.name || 'MozaiksAI';
+  const baseShellTitle = String(appDisplayName || chatTheme?.branding?.name || 'MozaiksAI').trim() || 'MozaiksAI';
+  const shellTitle = conversationMode === 'ask' ? `Ask ${baseShellTitle}` : baseShellTitle;
   const brandLogoSrc = getBrandLogoSrc(chatTheme);
   // const renderCountRef = useRef(0); // For debugging renders if needed
 
@@ -226,9 +240,12 @@ const ModernChatInterface = ({
   };
 
   const { appId } = useParams();
+  const pendingComposerPayload = pendingComposerInputToolCall?.payload || null;
   const pendingComposerPrompt = String(
-    pendingComposerInputToolCall?.payload?.prompt
+    pendingComposerPayload?.prompt
       || pendingComposerReply?.prompt
+      || pendingComposerPayload?.agent_message
+      || pendingComposerPayload?.description
       || ''
   ).trim();
   const pendingComposerAgent = (
@@ -238,6 +255,18 @@ const ModernChatInterface = ({
     || pendingComposerReply?.agent
     || 'Agent'
   );
+  const hasPendingHarnessDecision = Boolean(
+    pendingHarnessDecision
+    && typeof pendingHarnessDecision === 'object'
+    && pendingHarnessDecision.decision_id
+  );
+  const pendingHarnessTitle = PENDING_HARNESS_DECISION_TITLES[pendingHarnessDecision?.decision_type] || 'Harness Decision';
+  const pendingHarnessActions = Array.isArray(pendingHarnessDecision?.actions)
+    ? pendingHarnessDecision.actions
+    : [];
+  const pendingHarnessSelectedPaths = Array.isArray(pendingHarnessDecision?.selected_paths)
+    ? pendingHarnessDecision.selected_paths
+    : [];
   // Only show the "Awaiting Workflow Reply" banner when the agent explicitly
   // requested a custom interaction — either a non-empty prompt or a named
   // component (not the generic UserInputRequest fallback).  Bare AG2
@@ -251,9 +280,11 @@ const ModernChatInterface = ({
        pendingComposerInputToolCall.tool_name !== 'UserInputRequest')
     )
   );
-  const composerPlaceholder = (pendingComposerInputToolCall || pendingComposerReply)
-    ? 'Reply to continue the workflow...'
-    : 'Transmit your message...';
+  const composerPlaceholder = hasPendingHarnessDecision
+    ? 'Choose an action to continue...'
+    : (pendingComposerInputToolCall || pendingComposerReply)
+      ? 'Reply to continue the workflow...'
+      : 'Transmit your message...';
 
   // Agent action handler - used by UI tool event responses
   const handleAgentAction = (action) => {
@@ -275,6 +306,7 @@ const ModernChatInterface = ({
       return;
     }
 
+    if (hasPendingHarnessDecision) return;
     if (message.trim() === '') return;
 
     const newMessage = { "sender": "user", "content": message, "artifactContext": artifactContext || null };
@@ -285,6 +317,7 @@ const ModernChatInterface = ({
   const onUploadClick = () => {
     if (!onUploadFile) return;
     if (buttonText === 'NEXT') return;
+    if (hasPendingHarnessDecision) return;
     if (pendingComposerInputToolCall || pendingComposerReply) return;
     try {
       fileInputRef.current?.click?.();
@@ -387,7 +420,7 @@ const ModernChatInterface = ({
     }
 
     return messages?.map((chat, index) => {
-      if (!chat) {
+      if (!chat || chat.metadata?.hideInTranscript) {
         return null;
       }
 
@@ -458,8 +491,8 @@ const ModernChatInterface = ({
   })();
 
   const messageStackClass = isOnChatPage
-    ? 'chat-feed-stream flex flex-col gap-3 md:gap-4'
-    : 'relative space-y-3 md:space-y-4';
+    ? 'chat-feed-stream flex flex-col gap-2 md:gap-3'
+    : 'relative space-y-2 md:space-y-3';
 
   const disableMobileShellChrome = conversationMode === 'ask';
 
@@ -673,7 +706,7 @@ const ModernChatInterface = ({
 
   {/* Fixed Transmission Input Area - Never moves */}
             <div className={`flex-shrink-0 p-2 sm:p-2.5 md:p-3 border-t border-[rgba(var(--color-primary-light-rgb),0.2)] bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.05)] to-[rgba(var(--color-secondary-rgb),0.05)] backdrop-blur-xl shadow-lg transition-all duration-500 transmission-input-tight rounded-b-[inherit]`}>
-        {showComposerBanner && (
+        {false && showComposerBanner && (
           <div className="mb-2 rounded-xl border border-[rgba(var(--color-primary-light-rgb),0.3)] bg-[rgba(var(--color-primary-rgb),0.08)] px-3 py-2 backdrop-blur-sm">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -699,6 +732,73 @@ const ModernChatInterface = ({
             </div>
           </div>
         )}
+        {hasPendingHarnessDecision && (
+          <div className="mb-3 rounded-xl border border-[rgba(var(--color-primary-light-rgb),0.28)] bg-[rgba(8,15,32,0.8)] px-3 py-3 backdrop-blur-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-primary-light)]">
+                  Control Plane
+                </div>
+                <div className="mt-1 text-sm font-semibold text-white">
+                  {pendingHarnessTitle}
+                </div>
+              </div>
+              {typeof pendingHarnessDecision?.confidence === 'number' && (
+                <div className="shrink-0 rounded-lg border border-[rgba(var(--color-primary-light-rgb),0.22)] bg-white/5 px-2.5 py-1 text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-secondary)]">
+                  {`Confidence ${Math.round((pendingHarnessDecision.confidence || 0) * 100)}%`}
+                </div>
+              )}
+            </div>
+
+            <p className="mt-3 text-sm font-medium text-white">
+              {pendingHarnessDecision?.message}
+            </p>
+            <p className="mt-2 text-xs leading-6 text-[var(--color-text-secondary)]">
+              {pendingHarnessDecision?.rationale}
+            </p>
+
+            {pendingHarnessDecision?.clarification_question && (
+              <div className="mt-3 rounded-lg border border-[rgba(var(--color-secondary-rgb),0.28)] bg-[rgba(var(--color-secondary-rgb),0.08)] px-3 py-2 text-xs text-white/90">
+                {pendingHarnessDecision.clarification_question}
+              </div>
+            )}
+
+            {pendingHarnessSelectedPaths.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {pendingHarnessSelectedPaths.map((path) => (
+                  <span
+                    key={path}
+                    className="rounded-lg border border-[rgba(var(--color-primary-light-rgb),0.2)] bg-white/5 px-2 py-1 font-mono text-[11px] text-[var(--color-text-secondary)]"
+                  >
+                    {path}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {pendingHarnessActions.length > 0 && (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {pendingHarnessActions.map((action) => (
+                  <button
+                    key={action.action_id}
+                    type="button"
+                    disabled={pendingHarnessDecisionBusy}
+                    onClick={() => typeof onPendingHarnessDecisionAction === 'function' && onPendingHarnessDecisionAction(action)}
+                    className="rounded-lg border border-[rgba(var(--color-primary-light-rgb),0.28)] bg-[rgba(var(--color-primary-rgb),0.14)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white transition hover:bg-[rgba(var(--color-primary-rgb),0.2)] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {pendingHarnessDecisionBusy ? 'Working...' : action.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {pendingHarnessDecisionError && (
+              <div className="mt-3 rounded-lg border border-[rgba(248,113,113,0.35)] bg-[rgba(127,29,29,0.22)] px-3 py-2 text-xs text-[rgba(254,202,202,0.95)]">
+                {pendingHarnessDecisionError}
+              </div>
+            )}
+          </div>
+        )}
         <form onSubmit={onSubmitClick} className="flex gap-2 sm:gap-3 flex-row items-center">
           {/* Hidden file input (Upload) */}
           <input
@@ -721,7 +821,7 @@ const ModernChatInterface = ({
               onKeyPress={handleKeyPress}
               onFocus={() => setHasUserInteracted(true)}
               placeholder={composerPlaceholder}
-              disabled={buttonText === 'NEXT'}
+              disabled={buttonText === 'NEXT' || hasPendingHarnessDecision}
               rows={1}
               className={`w-full bg-white/10 border-2 rounded-lg sm:rounded-xl px-2.5 sm:px-3 py-1.5 sm:py-2 mt-0.5 text-[var(--color-text-primary)] text-slate-100 text-sm sm:text-base placeholder:text-[var(--color-text-secondary)] placeholder:text-slate-400 placeholder:text-xs sm:placeholder:text-sm focus:outline-none resize-none transition-all duration-300 transmission-typing-font min-h-[36px] sm:min-h-[40px] max-h-[120px] my-scroll1 backdrop-blur-sm ${
                 hasUserInteracted
@@ -743,7 +843,7 @@ const ModernChatInterface = ({
             <button
               type="button"
               onClick={onUploadClick}
-              disabled={buttonText === 'NEXT' || isUploadingFile || !!pendingComposerInputToolCall || !!pendingComposerReply}
+              disabled={buttonText === 'NEXT' || isUploadingFile || hasPendingHarnessDecision || !!pendingComposerInputToolCall || !!pendingComposerReply}
               className={
                 `px-2 py-1.5 rounded-md transition-all duration-300 min-w-[36px] sm:min-w-[40px] w-auto h-8 sm:h-9 oxanium font-bold text-[13px] flex items-center justify-center letter-spacing-wide border-2 flex-shrink-0 ` +
                 `${(buttonText === 'NEXT' || isUploadingFile)
@@ -760,7 +860,7 @@ const ModernChatInterface = ({
 
           <button
             type="submit"
-            disabled={!message.trim()}
+            disabled={!message.trim() || hasPendingHarnessDecision}
             className={`
               px-2 py-1.5 rounded-md transition-all duration-300 min-w-[36px] sm:min-w-[40px] w-auto h-8 sm:h-9 oxanium font-bold text-[13px] flex items-center justify-center letter-spacing-wide border-2 flex-shrink-0
               ${(!message.trim())

@@ -80,6 +80,57 @@ def test_build_outbound_event_envelope_supports_domain_event() -> None:
     assert envelope["data"]["source"] == "unit_test"
 
 
+def test_build_outbound_event_envelope_suppresses_first_hidden_initial_message(monkeypatch) -> None:
+    dispatcher = UnifiedEventDispatcher()
+
+    monkeypatch.setattr(
+        _dispatcher_mod,
+        "matches_hidden_initial_message",
+        lambda **kwargs: kwargs.get("workflow_name") == "ValueEngine"
+        and kwargs.get("content") == "Hidden workflow primer"
+        and kwargs.get("agent_name") == "user",
+    )
+
+    first = dispatcher.build_outbound_event_envelope(
+        raw_event={"kind": "text", "content": "Hidden workflow primer", "agent": "user"},
+        chat_id="chat-1",
+        workflow_name="ValueEngine",
+    )
+    second = dispatcher.build_outbound_event_envelope(
+        raw_event={"kind": "text", "content": "Hidden workflow primer", "agent": "user"},
+        chat_id="chat-1",
+        workflow_name="ValueEngine",
+    )
+
+    assert first is not None
+    assert first["type"] == "chat.text"
+    assert first["data"]["_mozaiks_hide"] is True
+    assert second is not None
+    assert second["type"] == "chat.text"
+    assert second["data"].get("_mozaiks_hide") is not True
+
+
+def test_build_outbound_event_envelope_marks_hidden_initial_seed_messages() -> None:
+    dispatcher = UnifiedEventDispatcher()
+
+    envelope = dispatcher.build_outbound_event_envelope(
+        raw_event={
+            "kind": "text",
+            "content": "ValueInterviewAgent: start a focused interview.",
+            "agent": "user",
+            "role": "user",
+            "_mozaiks_seed_kind": "initial_message",
+        },
+        chat_id="chat-seed",
+        workflow_name="ValueEngine",
+    )
+
+    assert envelope is not None
+    assert envelope["type"] == "chat.text"
+    assert envelope["data"]["_mozaiks_hide"] is True
+    assert envelope["data"]["_mozaiks_seed_kind"] == "initial_message"
+
+
 def test_serialize_event_content_normalizes_enum_to_value() -> None:
     class WorkflowName(Enum):
         SMOKE_CHILD = "SmokeChild"

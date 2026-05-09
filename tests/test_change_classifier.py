@@ -83,7 +83,7 @@ def _pack() -> LoadedControlPlanePack:
                     event="request_submitted",
                     entrypoint="mozaiksai.control_plane.implementations.change_classifier:LLMChangeClassifier",
                     prompt_id="change_classifier_system",
-                    tool_ids=["get_concept_overview", "get_artifact_summary"],
+                    tool_ids=["get_revision_context", "get_artifact_summary"],
                 ),
                 ControlPlaneCheckpointManifest(
                     id="route",
@@ -105,10 +105,10 @@ def _pack() -> LoadedControlPlanePack:
             schema_version="mozaiks.control_plane.tools.v1",
             tools=[
                 ControlPlaneToolDefinition(
-                    id="get_concept_overview",
+                    id="get_revision_context",
                     kind="context_tool",
-                    description="Load concept state",
-                    entrypoint="example.tools:get_concept_overview",
+                    description="Load revision context",
+                    entrypoint="example.tools:get_revision_context",
                     available_to=["request_submitted"],
                 ),
                 ControlPlaneToolDefinition(
@@ -154,7 +154,7 @@ async def test_change_classifier_uses_control_plane_llm_config() -> None:
     assert service.calls[0]["temperature"] == 0.0
     assert service.calls[0]["system_prompt"] == "system prompt from pack"
     assert "control_plane_context_json:" in service.calls[0]["user_prompt"]
-    assert '"get_concept_overview"' in service.calls[0]["user_prompt"]
+    assert '"get_revision_context"' in service.calls[0]["user_prompt"]
     assert len(tool_executor.calls) == 2
     assert tool_executor.calls[0]["context"].artifact_kind == "app_bundle"
     assert tool_executor.calls[0]["context"].artifact_key == "app_bundle"

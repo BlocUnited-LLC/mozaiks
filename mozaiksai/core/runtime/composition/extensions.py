@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import importlib
 import inspect
+from pathlib import Path
 from typing import Any, Iterable, Optional
 
+import yaml
 from fastapi import FastAPI
 from fastapi.routing import APIRouter
 
@@ -11,6 +13,8 @@ from logs.logging_config import get_workflow_logger
 
 
 logger = get_workflow_logger("runtime_extensions")
+
+_RUN_LEVEL_TRIGGERS = {"on_start", "on_complete", "on_fail"}
 
 
 def _load_entrypoint(entrypoint: str) -> Any:
@@ -33,33 +37,44 @@ def _load_entrypoint(entrypoint: str) -> Any:
 
 
 def _iter_declared_extensions() -> Iterable[dict[str, Any]]:
-    """Yield extension dicts across all loaded workflows.
+    """Yield extension dicts from modules/{name}/runtime_extensions.yaml in the active app root.
 
-    Schema (preferred):
-      runtime_extensions:
-        - kind: api_router
-          entrypoint: pkg.mod:get_router
-          prefix: ""  # optional
-        - kind: startup_service
-          entrypoint: pkg.mod:ServiceClass
-
-    Backward/alt schema supported:
-        - id: api_router
-          entrypoints: { router: pkg.mod:get_router }
-          prefix: ""
+    Schema for runtime_extensions.yaml:
+        schema_version: mozaiks.runtime_extensions.v1
+        extensions:
+          - kind: api_router
+            entrypoint: backend.router:get_router
+            prefix: /webhooks        # optional
+          - kind: startup_service
+            entrypoint: backend.worker:MyService
     """
-
     try:
-        from mozaiksai.core.workflow.workflow_manager import get_workflow_manager
-
-        mgr = get_workflow_manager()
-    except Exception as exc:  # pragma: no cover
-        logger.debug(f"RUNTIME_EXTENSIONS_WORKFLOW_MANAGER_UNAVAILABLE: {exc}")
+        from mozaiksai.core.workflow.paths import resolve_active_app_root
+        app_root = resolve_active_app_root()
+    except Exception as exc:
+        logger.debug(f"RUNTIME_EXTENSIONS_APP_ROOT_UNAVAILABLE: {exc}")
         return
 
-    for wf_name in sorted(mgr.list_loaded_workflows()):
-        cfg = mgr.get_config(wf_name) or {}
-        ext_list = cfg.get("runtime_extensions")
+    modules_dir = app_root / "modules"
+    if not modules_dir.is_dir():
+        return
+
+    for module_dir in sorted(modules_dir.iterdir(), key=lambda d: d.name.lower()):
+        if not module_dir.is_dir():
+            continue
+
+        ext_yaml = module_dir / "runtime_extensions.yaml"
+        if not ext_yaml.exists():
+            continue
+
+        try:
+            with open(ext_yaml, "r", encoding="utf-8") as fh:
+                raw = yaml.safe_load(fh) or {}
+        except Exception as exc:
+            logger.warning(f"RUNTIME_EXTENSIONS_PARSE_FAILED: {ext_yaml} error={exc}")
+            continue
+
+        ext_list = raw.get("extensions")
         if not isinstance(ext_list, list):
             continue
 
@@ -67,7 +82,7 @@ def _iter_declared_extensions() -> Iterable[dict[str, Any]]:
             if not isinstance(ext, dict):
                 continue
             ext2 = dict(ext)
-            ext2.setdefault("workflow", wf_name)
+            ext2.setdefault("module", module_dir.name)
             yield ext2
 
 
@@ -80,18 +95,13 @@ def mount_declared_routers(app: FastAPI) -> int:
     mounted = 0
 
     for ext in _iter_declared_extensions():
-        kind = (ext.get("kind") or ext.get("id") or "").strip().lower()
+        kind = (ext.get("kind") or "").strip().lower()
         if kind != "api_router":
             continue
 
         entrypoint = ext.get("entrypoint")
         if not isinstance(entrypoint, str) or not entrypoint.strip():
-            eps = ext.get("entrypoints")
-            if isinstance(eps, dict) and isinstance(eps.get("router"), str):
-                entrypoint = eps.get("router")
-
-        if not isinstance(entrypoint, str) or not entrypoint.strip():
-            logger.warning(f"RUNTIME_EXTENSIONS_SKIP_ROUTER: missing entrypoint (workflow={ext.get('workflow')})")
+            logger.warning(f"RUNTIME_EXTENSIONS_SKIP_ROUTER: missing entrypoint (module={ext.get('module')})")
             continue
 
         prefix = ext.get("prefix")
@@ -129,18 +139,13 @@ async def start_declared_services() -> list[Any]:
     started: list[Any] = []
 
     for ext in _iter_declared_extensions():
-        kind = (ext.get("kind") or ext.get("id") or "").strip().lower()
+        kind = (ext.get("kind") or "").strip().lower()
         if kind != "startup_service":
             continue
 
         entrypoint = ext.get("entrypoint")
         if not isinstance(entrypoint, str) or not entrypoint.strip():
-            eps = ext.get("entrypoints")
-            if isinstance(eps, dict) and isinstance(eps.get("service"), str):
-                entrypoint = eps.get("service")
-
-        if not isinstance(entrypoint, str) or not entrypoint.strip():
-            logger.warning(f"RUNTIME_EXTENSIONS_SKIP_SERVICE: missing entrypoint (workflow={ext.get('workflow')})")
+            logger.warning(f"RUNTIME_EXTENSIONS_SKIP_SERVICE: missing entrypoint (module={ext.get('module')})")
             continue
 
         try:
@@ -172,32 +177,38 @@ async def stop_services(services: list[Any]) -> None:
 
 
 # =============================================================================
-# LIFECYCLE HOOKS - Workflow-declared execution lifecycle notifications
+# LIFECYCLE HOOKS — Workflow-declared run-level lifecycle notifications
 # =============================================================================
 
 def get_workflow_lifecycle_hooks(workflow_name: str) -> dict[str, Any]:
-    """Load lifecycle hooks declared by a specific workflow.
+    """Load run-level lifecycle hooks declared by a workflow in tools.yaml.
 
-    Workflows can declare lifecycle hooks in their orchestrator.yaml via
-    runtime_extensions with kind: lifecycle_hooks. This allows workflows
-    to notify external systems (e.g., a platform control plane) when the
-    workflow execution starts, completes, or fails.
+    Workflows declare on_start, on_complete, and on_fail notifications via
+    lifecycle_tools entries in tools.yaml using run-level trigger values:
 
-    Example orchestrator.yaml:
-        runtime_extensions:
-          - kind: lifecycle_hooks
-            entrypoint: workflows.MyWorkflow.tools.lifecycle:get_hooks
+        lifecycle_tools:
+          - trigger: on_start
+            agent: null
+            file: tools/platform/build_lifecycle.py
+            function: emit_build_started
+          - trigger: on_complete
+            agent: null
+            file: tools/platform/build_lifecycle.py
+            function: emit_build_completed
+          - trigger: on_fail
+            agent: null
+            file: tools/platform/build_lifecycle.py
+            function: emit_build_failed
 
-    The entrypoint should return a dict with optional callables:
-        {
-            "on_start": async callable(app_id, execution_id, chat_id, user_id, workflow_name),
-            "on_complete": async callable(app_id, execution_id, chat_id, user_id, workflow_name),
-            "on_fail": async callable(app_id, execution_id, chat_id, user_id, workflow_name, message, details=None),
-        }
+    Each hook callable signature:
+        on_start/on_complete:
+            async fn(app_id, execution_id, chat_id, user_id, workflow_name)
+        on_fail:
+            async fn(app_id, execution_id, chat_id, user_id, workflow_name, message, details=None)
 
-    Returns dict with None values if no hooks are declared (safe to call without checking).
+    Returns dict with None values when no hooks are declared (safe to call unconditionally).
     """
-    empty_hooks = {
+    empty_hooks: dict[str, Any] = {
         "on_start": None,
         "on_complete": None,
         "on_fail": None,
@@ -214,97 +225,52 @@ def get_workflow_lifecycle_hooks(workflow_name: str) -> dict[str, Any]:
         logger.debug(f"LIFECYCLE_HOOKS_WORKFLOW_MANAGER_UNAVAILABLE: {exc}")
         return empty_hooks
 
-    ext_list = cfg.get("runtime_extensions")
-    if not isinstance(ext_list, list):
+    lifecycle_tools = cfg.get("lifecycle_tools")
+    if not isinstance(lifecycle_tools, list):
         return empty_hooks
 
-    for ext in ext_list:
-        if not isinstance(ext, dict):
+    result = dict(empty_hooks)
+
+    for entry in lifecycle_tools:
+        if not isinstance(entry, dict):
             continue
 
-        kind = (ext.get("kind") or "").strip().lower()
-        if kind != "lifecycle_hooks":
+        trigger = (entry.get("trigger") or "").strip().lower()
+        if trigger not in _RUN_LEVEL_TRIGGERS:
             continue
 
-        entrypoint = ext.get("entrypoint")
-        if not isinstance(entrypoint, str) or not entrypoint.strip():
-            logger.warning(f"LIFECYCLE_HOOKS_SKIP: missing entrypoint (workflow={workflow_name})")
+        # Build entrypoint from workflow-relative file + function fields
+        wf_file = (entry.get("file") or "").strip()
+        function = (entry.get("function") or "").strip()
+        if not wf_file or not function:
+            logger.warning(
+                f"LIFECYCLE_HOOKS_SKIP: missing file or function for trigger={trigger} "
+                f"(workflow={workflow_name})"
+            )
             continue
+
+        # Convert tools/platform/build_lifecycle.py → workflows.WorkflowName.tools.platform.build_lifecycle
+        # The file path in tools.yaml is workflow-local (relative to the workflow directory).
+        module_path = _workflow_local_file_to_module(wf_file, workflow_name)
+        entrypoint = f"{module_path}:{function}"
 
         try:
-            factory = _load_entrypoint(entrypoint.strip())
-            hooks = factory() if callable(factory) else factory
-
-            if not isinstance(hooks, dict):
-                logger.warning(f"LIFECYCLE_HOOKS_SKIP: entrypoint did not return dict: {entrypoint}")
-                continue
-
-            result = dict(empty_hooks)
-            for key in empty_hooks:
-                if key in hooks and hooks[key] is not None:
-                    result[key] = hooks[key]
-
-            logger.info(f"LIFECYCLE_HOOKS_LOADED: {entrypoint} (workflow={workflow_name})")
-            return result
-
+            callable_fn = _load_entrypoint(entrypoint)
+            result[trigger] = callable_fn
+            logger.info(f"LIFECYCLE_HOOKS_LOADED: {entrypoint} trigger={trigger} (workflow={workflow_name})")
         except Exception as exc:
-            logger.warning(f"LIFECYCLE_HOOKS_FAILED: {entrypoint} error={exc}")
-            continue
+            logger.warning(f"LIFECYCLE_HOOKS_FAILED: {entrypoint} trigger={trigger} error={exc}")
 
-    return empty_hooks
+    return result
 
 
-# =============================================================================
-# API ROUTER - Workflow-declared additional FastAPI routes
-# =============================================================================
+def _workflow_local_file_to_module(file_path: str, workflow_name: str) -> str:
+    """Convert a workflow-local file path to a Python import path.
 
-def get_workflow_api_router(workflow_name: str) -> Any:
-    """Load an optional FastAPI APIRouter declared by a specific workflow.
-
-    Workflows can declare an API router in their orchestrator.yaml via
-    runtime_extensions with kind: api_router. The entrypoint callable should
-    return a FastAPI APIRouter instance.
-
-    Example orchestrator.yaml::
-
-        runtime_extensions:
-          - kind: api_router
-            entrypoint: workflows.MyWorkflow.tools.api:get_router
-
-    Returns None if no router is declared (safe to call without checking).
+    tools/platform/build_lifecycle.py → workflows.WorkflowName.tools.platform.build_lifecycle
     """
-    if not workflow_name:
-        return None
-
-    try:
-        from mozaiksai.core.workflow.workflow_manager import get_workflow_manager
-        mgr = get_workflow_manager()
-        cfg = mgr.get_config(workflow_name) or {}
-    except Exception as exc:
-        logger.debug(f"API_ROUTER_WORKFLOW_MANAGER_UNAVAILABLE: {exc}")
-        return None
-
-    ext_list = cfg.get("runtime_extensions")
-    if not isinstance(ext_list, list):
-        return None
-
-    for ext in ext_list:
-        if not isinstance(ext, dict):
-            continue
-        kind = (ext.get("kind") or "").strip().lower()
-        if kind != "api_router":
-            continue
-        entrypoint = ext.get("entrypoint")
-        if not isinstance(entrypoint, str) or not entrypoint.strip():
-            logger.warning(f"API_ROUTER_SKIP: missing entrypoint (workflow={workflow_name})")
-            continue
-        try:
-            factory = _load_entrypoint(entrypoint.strip())
-            router = factory() if callable(factory) else factory
-            logger.info(f"API_ROUTER_LOADED: {entrypoint} (workflow={workflow_name})")
-            return router
-        except Exception as exc:
-            logger.warning(f"API_ROUTER_FAILED: {entrypoint} error={exc}")
-            continue
-
-    return None
+    # Strip leading ./ and trailing .py
+    clean = file_path.lstrip("./").removesuffix(".py")
+    # Replace path separators with dots
+    dotted = clean.replace("/", ".").replace("\\", ".")
+    return f"workflows.{workflow_name}.{dotted}"

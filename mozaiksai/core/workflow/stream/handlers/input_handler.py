@@ -217,22 +217,6 @@ class InputRequestHandler(BaseEventHandler):
                 )
 
         if suppressed_generic_prompt and callable(respond_cb):
-            if ctx.transport and hasattr(ctx.transport, "consume_recent_input_submit"):
-                try:
-                    if bool(ctx.transport.consume_recent_input_submit(ctx.chat_id)):
-                        await _invoke_respond_callback(respond_cb, SYSTEM_RESUME_SIGNAL)
-                        await _clear_auto_resumed_pending_input()
-                        ctx.wf_logger.info(
-                            f" [{ctx.workflow_name_upper}] Auto-resumed suppressed AG2 feedback prompt "
-                            f"after recent user input for request {request_id}"
-                        )
-                        state.awaiting_user_input = False
-                        return None
-                except Exception as e:
-                    ctx.wf_logger.debug(
-                        f"Failed checking recent input submit marker for {request_id}: {e}"
-                    )
-
             latest_role = str(getattr(state, "last_text_role", None) or "").strip().lower()
             latest_content = str(getattr(state, "last_text_content", None) or "").strip()
             if not latest_role and not latest_content:
@@ -249,6 +233,30 @@ class InputRequestHandler(BaseEventHandler):
                     )
                 latest_role = str(latest_message.get("role") or "").strip().lower()
                 latest_content = str(latest_message.get("content") or "").strip()
+
+            recent_submit = False
+            if ctx.transport and hasattr(ctx.transport, "consume_recent_input_submit"):
+                try:
+                    recent_submit = bool(ctx.transport.consume_recent_input_submit(ctx.chat_id))
+                except Exception as e:
+                    ctx.wf_logger.debug(
+                        f"Failed checking recent input submit marker for {request_id}: {e}"
+                    )
+            if recent_submit and (latest_role != "assistant" or not latest_content):
+                try:
+                    await _invoke_respond_callback(respond_cb, SYSTEM_RESUME_SIGNAL)
+                    await _clear_auto_resumed_pending_input()
+                    ctx.wf_logger.info(
+                        f" [{ctx.workflow_name_upper}] Auto-resumed suppressed AG2 feedback prompt "
+                        f"after recent user input for request {request_id}"
+                    )
+                    state.awaiting_user_input = False
+                    return None
+                except Exception as e:
+                    ctx.wf_logger.debug(
+                        f"Failed auto-resuming suppressed AG2 feedback prompt for {request_id}: {e}"
+                    )
+
             if latest_role != "assistant" or not latest_content:
                 try:
                     await _invoke_respond_callback(respond_cb, SYSTEM_RESUME_SIGNAL)

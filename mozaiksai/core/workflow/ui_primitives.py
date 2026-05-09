@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from mozaiksai.resources import resolve_chat_ui_src_root
 
@@ -166,12 +167,41 @@ def format_component_ui_primitive_guidance() -> str:
     )
 
 
+@lru_cache(maxsize=1)
+def _load_primitive_schemas() -> Optional[Dict[str, Dict]]:
+    """Load primitive_schemas.json from the page-renderer directory."""
+    try:
+        schema_path = (
+            _chat_ui_src_root() / "ui" / "page-renderer" / "primitive_schemas.json"
+        )
+        if not schema_path.exists():
+            return None
+        raw = json.loads(schema_path.read_text(encoding="utf-8"))
+        # Strip the _comment key if present
+        return {k: v for k, v in raw.items() if not k.startswith("_")}
+    except Exception:
+        return None
+
+
 def format_page_ui_primitive_guidance() -> str:
     names = ", ".join(get_page_ui_primitive_names())
+    schemas = _load_primitive_schemas()
+    schema_block = ""
+    if schemas:
+        lines: List[str] = []
+        for name, defn in schemas.items():
+            required = defn.get("required", [])
+            props = defn.get("properties", {})
+            req_str = f"required=[{', '.join(required)}]" if required else "no required fields"
+            prop_lines = [f"      {k}: {v}" for k, v in props.items()]
+            lines.append(f"  {name} — {req_str}")
+            lines.extend(prop_lines)
+        schema_block = "\n\nPer-primitive config contract (required fields + all props):\n" + "\n".join(lines)
     return (
         "Live shipped page primitives from `@mozaiks/chat-ui/ui/page-renderer/PrimitiveRegistry.js`:\n"
         f"- {names}\n\n"
         "Emit ONLY these names in `sections[*].primitive` and nested Grid child primitives."
+        f"{schema_block}"
     )
 
 
@@ -185,4 +215,5 @@ __all__ = [
     "get_page_ui_primitive_names",
     "validate_component_ui_primitives",
     "validate_page_ui_primitives",
+    "load_primitive_schemas",
 ]

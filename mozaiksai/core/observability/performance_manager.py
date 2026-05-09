@@ -178,6 +178,12 @@ class PerformanceManager:
                     "created_at": now,
                     "last_updated_at": now,
                     "duration_sec": 0.0,
+                    "usage_prompt_tokens_final": 0,
+                    "usage_completion_tokens_final": 0,
+                    "usage_total_tokens_final": 0,
+                    "usage_total_cost_final": 0.0,
+                    "tool_calls_final": 0,
+                    "errors_final": 0,
                     "messages": []
                 }},
                 upsert=True,
@@ -272,6 +278,20 @@ class PerformanceManager:
             st.tool_calls += 1
             if not success:
                 st.errors += 1
+        try:
+            coll = await self._get_coll()
+            inc_ops: Dict[str, Any] = {"tool_calls_final": 1}
+            if not success:
+                inc_ops["errors_final"] = 1
+            await coll.update_one(
+                {"_id": chat_id},
+                {
+                    "$inc": inc_ops,
+                    "$set": {"last_updated_at": datetime.now(timezone.utc)},
+                },
+            )
+        except Exception:
+            logger.debug("Failed to persist tool/error counters", exc_info=True)
         perf_logger.debug("tool_call", chat_id=chat_id, tool=tool_name, success=success)
 
     async def record_workflow_end(self, chat_id: str, status: Union[int, str, WorkflowStatus]):

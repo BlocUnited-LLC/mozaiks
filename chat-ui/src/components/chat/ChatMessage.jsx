@@ -163,7 +163,7 @@ const debugFlag = (k) => { try { return ['1','true','on','yes'].includes((localS
   if (isThinking) {
     return (
       <div className="flex justify-start px-0 message-container">
-        <div className="mt-1 agent-message message thinking-indicator">
+        <div className="agent-message message thinking-indicator">
           <div className="flex flex-col">
             <div className="message-header">
               <span className="name-pill agent">
@@ -200,7 +200,7 @@ const debugFlag = (k) => { try { return ['1','true','on','yes'].includes((localS
       : null;
     return (
       <div className="flex justify-center px-0 message-container">
-        <div className="md:rounded-[10px] rounded-[10px] w-4/5 mt-1 leading-4 techfont px-[12px] py-[8px] border border-[rgba(var(--color-primary-light-rgb),0.25)] bg-[rgba(0,0,0,0.35)]">
+        <div className="md:rounded-[10px] rounded-[10px] w-4/5 leading-4 techfont px-[12px] py-[8px] border border-[rgba(var(--color-primary-light-rgb),0.25)] bg-[rgba(0,0,0,0.35)]">
           <div className="flex flex-col">
             <div className="text-xs mb-1 opacity-75 flex items-center gap-2 text-[var(--color-text-secondary)]">
               <span aria-hidden>📎</span>
@@ -223,7 +223,7 @@ const debugFlag = (k) => { try { return ['1','true','on','yes'].includes((localS
     if (!message) return null; // nothing to show
     return (
       <div className="flex justify-start px-0 message-container">
-        <div className={`mt-1 user-message message ${isLatest ? 'latest' : ''}`}>
+        <div className={`user-message message ${isLatest ? 'latest' : ''}`}>
           <div className="flex flex-col">
             <div className="message-header justify-end">
               <span className="name-pill user"><span className="pill-avatar" aria-hidden>🧑</span> You</span>
@@ -241,7 +241,7 @@ const debugFlag = (k) => { try { return ['1','true','on','yes'].includes((localS
   if (systemStyles) {
     return (
       <div className="flex justify-center mr-3 message-container">
-        <div className={`md:rounded-[10px] rounded-[10px] w-4/5 mt-1 leading-4 techfont px-[12px] py-[6px] ${systemStyles.container}`}>
+        <div className={`md:rounded-[10px] rounded-[10px] w-4/5 leading-4 techfont px-[12px] py-[6px] ${systemStyles.container}`}>
           <div className="flex flex-col">
             <div className={`text-xs mb-1 opacity-75 flex items-center gap-2 ${systemStyles.text}`}>
               <span>{systemStyles.icon}</span>
@@ -262,7 +262,7 @@ const debugFlag = (k) => { try { return ['1','true','on','yes'].includes((localS
   if (!message) return null; // ensure no empty container
   return (
     <div className="flex justify-start px-0 message-container">
-      <div className={`mt-1 agent-message message ${isLatest ? 'latest' : ''}`}>
+      <div className={`agent-message message ${isLatest ? 'latest' : ''}`}>
         <div className="flex flex-col">
           <div className="message-header justify-between">
             <span className="name-pill agent"><span className="pill-avatar" aria-hidden>🤖</span> {agentName || 'Agent'}</span>

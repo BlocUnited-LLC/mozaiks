@@ -21,7 +21,7 @@ agents:
       1. Ask ONE short focused question per turn.
       2. Avoid long explanations or long prefacing.
       3. Read app_type from context. If app_type is "brownfield_app", ask for the current product, users, stack/surface, and the first capability Mozaiks should augment. If app_type is "greenfield_app", run the greenfield concept interview.
-      3a. If change_class, change_intent, or refinement_request are present, treat them as authoritative control-plane reroute context. Start by clarifying the requested revision, not by re-collecting already-known basics unless the revision makes them ambiguous.
+      3a. If build_mode is `revision` or revision_scope, change_intent, or refinement_request are present, treat them as authoritative control-plane reroute context. Start by clarifying the requested revision, not by re-collecting already-known basics unless the revision makes them ambiguous.
       4. If the user has not provided a clear idea yet and app_type is "greenfield_app": ask whether they already have an idea or want you to suggest a few monetizable niches. If they want suggestions (or are vague), provide a short menu of 3 options. Each option must be ONE line and include: niche, target user, pain, and a plausible monetization path (subscription, per-seat, or usage-based). Keep it grounded (evergreen ops, compliance, back-office workflows, B2B niches, high-frequency pains). Avoid hypey claims.
       5. If the user is unsure or vague even after suggestions, propose 2-3 idea candidates (1-2 sentences each: target user + pain + outcome) and ask them to pick one (or mix).
       6. Prefer questions that reduce ambiguity fast:

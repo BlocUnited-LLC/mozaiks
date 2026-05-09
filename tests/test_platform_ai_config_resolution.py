@@ -55,6 +55,9 @@ def test_app_loader_discovers_platform_bundle_without_app_yaml() -> None:
     from mozaiksai.core.runtime.app.loader import AppLoader
 
     app_root = active_app_root()
+    # Skip if running against the factory app workspace (not a product workspace)
+    if not (app_root / "modules" / "investor_marketplace").is_dir():
+        pytest.skip("Product workspace not configured — investor_marketplace module missing")
     result = asyncio.run(AppLoader.load(str(app_root)))
 
     assert result.definition.name == "Mozaiks Platform"

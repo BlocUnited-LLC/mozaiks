@@ -24,6 +24,7 @@ from .executor import (
     ControlPlaneToolExecutor,
     resolve_control_plane_tool_entrypoint,
 )
+from .invalidation import ArtifactInvalidationService, get_artifact_invalidation_service
 from .implementations import (
     ArtifactKind,
     ArtifactScopeProposer,
@@ -68,7 +69,11 @@ from .runtime import (
     instantiate_control_plane_handler,
     resolve_control_plane_handler_entrypoint,
 )
+from .revision_context import assemble_revision_context
 from .schema import (
+    ControlPlaneArtifactChangeRoutesManifest,
+    ControlPlaneArtifactRoutingManifest,
+    ControlPlaneChangeRouteManifest,
     ControlPlaneCheckpointManifest,
     ControlPlaneHarnessManifest,
     ControlPlaneManifest,
@@ -76,13 +81,16 @@ from .schema import (
     ControlPlaneProfileInfo,
     ControlPlanePromptDefinition,
     ControlPlanePromptsManifest,
+    ControlPlaneRoutingManifest,
     ControlPlaneScopePolicyManifest,
     ControlPlaneToolsManifest,
     LoadedControlPlanePack,
 )
+from .tools import get_revision_context
 
 __all__ = [
     "ArtifactKind",
+    "ArtifactInvalidationService",
     "ArtifactScopeProposer",
     "ChangeClass",
     "ChangeClassifierPort",
@@ -92,6 +100,9 @@ __all__ = [
     "CodingWorkerPort",
     "CodingWorkerRequest",
     "CodingWorkerResult",
+    "ControlPlaneArtifactChangeRoutesManifest",
+    "ControlPlaneArtifactRoutingManifest",
+    "ControlPlaneChangeRouteManifest",
     "ControlPlaneCapabilityConfig",
     "ControlPlaneCheckpointManifest",
     "ControlPlaneCheckpointRuntime",
@@ -104,6 +115,7 @@ __all__ = [
     "ControlPlaneProfileInfo",
     "ControlPlanePromptDefinition",
     "ControlPlanePromptsManifest",
+    "ControlPlaneRoutingManifest",
     "ControlPlaneScopePolicyManifest",
     "ControlPlaneToolCall",
     "ControlPlaneToolContext",
@@ -129,10 +141,13 @@ __all__ = [
     "ScopeProposalPort",
     "ScopedRefinementCodingWorker",
     "build_selected_control_plane_harness",
+    "assemble_revision_context",
+    "get_artifact_invalidation_service",
     "get_change_classifier",
     "get_coding_worker",
     "get_harness_decision_policy",
     "get_orchestration_control_harness",
+    "get_revision_context",
     "get_refinement_trigger_route_resolver",
     "get_scope_proposer",
     "instantiate_control_plane_handler",

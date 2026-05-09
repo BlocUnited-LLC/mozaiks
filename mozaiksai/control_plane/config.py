@@ -21,6 +21,7 @@ class ControlPlaneConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     enabled: bool = False
+    profile: str = "default"
     classifier: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
     coding: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
 

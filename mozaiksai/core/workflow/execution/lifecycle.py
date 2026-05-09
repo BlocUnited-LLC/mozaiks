@@ -43,7 +43,7 @@ import yaml
 from logs.logging_config import get_workflow_logger
 from logs.tools_logs import get_tool_logger, log_tool_event
 from ..declarative import parse_tools_config
-from ..workflow_manager import workflow_manager
+from ..paths import primary_workflows_root as _primary_workflows_root
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,9 @@ class LifecycleTrigger(Enum):
     AFTER_CHAT = "after_chat"
     BEFORE_AGENT = "before_agent"
     AFTER_AGENT = "after_agent"
+    ON_START = "on_start"
+    ON_COMPLETE = "on_complete"
+    ON_FAIL = "on_fail"
 
 
 @dataclass
@@ -85,8 +88,8 @@ class LifecycleToolManager:
         if self._loaded:
             return
 
-        base_dir = workflow_manager.resolve_workflow_path(self.workflow_name)
-        if base_dir is None:
+        base_dir = _primary_workflows_root() / self.workflow_name
+        if not base_dir.is_dir():
             logger.debug(f"[LIFECYCLE] Workflow path not found for '{self.workflow_name}'")
             self._loaded = True
             return

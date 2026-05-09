@@ -161,11 +161,19 @@ def _bundle():
 
 def test_save_design_docs_bundle_persists_surface_map_and_database_intent(monkeypatch) -> None:
     monkeypatch.setattr(design_docs_module, "AG2PersistenceManager", _FakePersistenceManager)
+    summary_artifact = {}
+
+    async def _fake_persist_summary_artifact(**kwargs):
+        summary_artifact.update(kwargs)
+        return type("ArtifactVersion", (), {"id": "av_design_docs_1"})()
+
+    monkeypatch.setattr(design_docs_module, "persist_summary_artifact", _fake_persist_summary_artifact)
 
     context = _Context(
         {
             "app_id": "app_123",
             "chat_id": "chat_123",
+            "user_id": "user_123",
             "build_id": "build_123",
             "artifact_version_id": "artifact_123",
             "structured_output": _bundle(),
@@ -186,3 +194,6 @@ def test_save_design_docs_bundle_persists_surface_map_and_database_intent(monkey
         for update in design_docs_collection.updates
     )
     assert database_intents_collection.updates[0][1]["$set"]["database_intent_bundle"]["artifact_version_id"] == "artifact_123"
+    assert summary_artifact["artifact_kind"] == "design_docs"
+    assert summary_artifact["input_artifact_kinds"] == ("concept", "build_plan")
+    assert summary_artifact["summary_payload"]["surface_map"]["surfaces"][0]["surface_id"] == "users"

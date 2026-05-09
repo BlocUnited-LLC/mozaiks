@@ -11,6 +11,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+from mozaiksai.core.artifacts import persist_summary_artifact
+
 # Use mozaiks runtime persistence
 try:
     from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
@@ -70,10 +72,18 @@ async def save_build_plan(
     # Extract context
     app_id = None
     manifest = None
+    chat_id = None
+    user_id = None
+    build_mode = None
+    workflow_name = "ValueEngine"
 
     if context_variables and hasattr(context_variables, "get"):
         app_id = context_variables.get("app_id")
         manifest = context_variables.get("value_manifest")
+        chat_id = context_variables.get("chat_id")
+        user_id = context_variables.get("user_id")
+        build_mode = context_variables.get("build_mode")
+        workflow_name = context_variables.get("workflow_name", "ValueEngine")
 
     if not app_id:
         return {"success": False, "error": "app_id required in context"}
@@ -106,6 +116,21 @@ async def save_build_plan(
             logger.info(f"[ValueEngine] BuildPlan saved for app_id={app_id}")
         except Exception as e:
             logger.warning(f"[ValueEngine] Persistence failed: {e}")
+
+    try:
+        await persist_summary_artifact(
+            app_id=str(app_id),
+            artifact_kind="build_plan",
+            artifact_key="build_plan",
+            summary_payload=build_plan,
+            source_workflow=str(workflow_name or "ValueEngine"),
+            source_chat_id=str(chat_id) if chat_id else None,
+            author_user_id=str(user_id) if user_id else None,
+            revision_mode=str(build_mode or "").strip().lower() == "revision",
+            input_artifact_kinds=("concept",),
+        )
+    except Exception as exc:
+        logger.warning("[ValueEngine] Generic build-plan artifact persistence failed: %s", exc)
 
     # Store in context for MFJ to pick up
     _set_context_value(context_variables, "build_plan", build_plan)

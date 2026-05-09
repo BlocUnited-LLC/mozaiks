@@ -20,22 +20,32 @@ definitions:
     source:
       type: state
       default: null
-  refinement_mode:
-    type: boolean
-    description: >
-      True when this AppGenerator session is refining an existing app bundle rather
-      than generating from scratch. Seeded by the refinement control plane via the
-      trigger endpoint. InterviewAgent skips the intake interview when true and reads
-      the existing artifact instead.
-    source:
-      type: state
-      default: false
-  change_class:
+  build_mode:
     type: string
     description: >
-      Refinement change class: patch | design | feature | core. Seeded by the
+      Build mode for AppGenerator. `initial` means generate the app bundle from
+      scratch; `revision` means revise an existing bundle from persisted state.
+    source:
+      type: state
+      default: initial
+  revision_scope:
+    type: string
+    description: >
+      Revision scope: patch | design | feature | core. Seeded by the
       refinement control plane. AppPlanAgent uses this to scope the rebuild —
       patch edits targeted files, feature extends the plan, core restarts.
+    source:
+      type: state
+      default: null
+  change_request_id:
+    type: string
+    description: Stable lineage id for the active revision request.
+    source:
+      type: state
+      default: null
+  revision_id:
+    type: string
+    description: Runtime-generated revision run id for the current builder revision.
     source:
       type: state
       default: null
@@ -53,7 +63,21 @@ definitions:
     description: >
       Version id of the app bundle artifact being refined. Null for initial
       generation runs. AppPlanAgent loads the existing build_tasks from this
-      version when refinement_mode is true.
+      version when build_mode is revision.
+    source:
+      type: state
+      default: null
+  sequence_status:
+    type: string
+    description: >
+      Builder sequence state before the revision launch: in_progress |
+      completed | stale | revising.
+    source:
+      type: state
+      default: in_progress
+  revision_origin_workflow:
+    type: string
+    description: Workflow where the revision request originated before reroute.
     source:
       type: state
       default: null
@@ -62,7 +86,7 @@ definitions:
     description: >
       Raw user-supplied refinement request text, passed through from the
       canonical RefinementRequest. InterviewAgent reads this instead of re-interviewing when
-      refinement_mode is true.
+      build_mode is revision.
     source:
       type: state
       default: null
@@ -88,7 +112,7 @@ definitions:
     type: object
     description: >
       Typed refinement classification emitted by the control plane. Contains the
-      final `change_class`, rationale, and layer-touch information so
+      final `revision_scope`, rationale, and layer-touch information so
       AppGenerator can distinguish a local patch from a wider feature or
       concept-driven restart.
     source:
@@ -607,10 +631,14 @@ agents:
   InterviewAgent:
     variables:
     - platform_user_email
-    - refinement_mode
-    - change_class
+    - build_mode
+    - revision_scope
+    - change_request_id
+    - revision_id
     - artifact_kind
     - artifact_version_id
+    - sequence_status
+    - revision_origin_workflow
     - refinement_request
     - refinement_request_meta
     - screen
@@ -634,10 +662,14 @@ agents:
     variables:
     - platform_user_email
     - app_backend_url
-    - refinement_mode
-    - change_class
+    - build_mode
+    - revision_scope
+    - change_request_id
+    - revision_id
     - artifact_kind
     - artifact_version_id
+    - sequence_status
+    - revision_origin_workflow
     - refinement_request
     - refinement_request_meta
     - screen
@@ -694,10 +726,14 @@ agents:
     - mfj_app_task_results
   DatabaseAgent:
     variables:
-    - refinement_mode
-    - change_class
+    - build_mode
+    - revision_scope
+    - change_request_id
+    - revision_id
     - artifact_kind
     - artifact_version_id
+    - sequence_status
+    - revision_origin_workflow
     - refinement_request
     - refinement_request_meta
     - screen

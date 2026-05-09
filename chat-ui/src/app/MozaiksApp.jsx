@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import { useCallback } from 'react';
 import { BrowserRouter as Router } from 'react-router-dom';
 import { ChatUIProvider, useChatUI } from '../context/ChatUIContext';
 import GlobalChatWidgetWrapper from '../widget/GlobalChatWidgetWrapper';
@@ -6,6 +6,7 @@ import ShellUIToolRenderer from '../core/ui/ShellUIToolRenderer';
 import NavigationProvider from '../providers/NavigationProvider';
 import RouteRenderer from '../components/RouteRenderer';
 import { initializeWorkflows } from '../@chat-workflows/index.js';
+import { registerComponent } from '../registry/componentRegistry.js';
 import ConfigValidationOverlay from '../config/ConfigValidationOverlay';
 
 /**
@@ -63,7 +64,7 @@ export default function MozaiksApp({
   // Config validation overlay (dev-mode in-browser error/warning banner)
   // Replaces console-only logging — founders see issues without opening DevTools
 
-  const moduleInitializer = (registerComponent) => {
+  const moduleInitializer = () => {
     initializeWorkflows(registerComponent);
   };
 

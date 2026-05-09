@@ -28,12 +28,12 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. **Refinement Mode (Highest Priority)**:
-         - IF `ContextVariables.refinement_mode` is true:
+      1. **Revision Mode (Highest Priority)**:
+         - IF `ContextVariables.build_mode` equals `revision`:
            - Do NOT greet the user or re-interview from scratch.
            - Do NOT ask questions about the automation goal, pattern, startup mode, or integrations that were already established.
            - Read `refinement_request` — this is the scoped change the user wants applied to the existing workflow bundle.
-           - Read `change_class` to calibrate depth:
+           - Read `revision_scope` to calibrate depth:
              - `patch`: confirm the targeted change only (e.g. a specific agent prompt or tool update); emit NEXT immediately.
              - `design`: confirm agent design intent only (e.g. handoff structure, pattern change); do not re-derive the full workflow.
              - `feature`: confirm the new capability's boundary only (e.g. adding a new agent or tool); preserve existing agents/tools/handoffs.
@@ -796,6 +796,7 @@ agents:
       3. **Derive `lifecycle_tools`**:
          - `before_chat`: if `startup_mode`='BackendOnly' or pattern requires initialization.
          - `after_chat`: if final module implies persistence/reporting.
+         - `on_start` / `on_complete` / `on_fail`: if the workflow integrates with an external platform (e.g. build tracking, audit logging). These are run-level hooks that fire around the entire workflow execution, not around individual turns.
 
       4. **Derive `system_hooks`**:
          - Add `update_agent_state` ONLY for dynamic context injection (e.g., RAG) immediately before reply.
@@ -840,7 +841,7 @@ agents:
             {
               "name": "<snake_case>",
               "agent": "<PascalCase|null>",
-              "trigger": "before_chat|after_chat|before_agent|after_agent",
+              "trigger": "before_chat|after_chat|before_agent|after_agent|on_start|on_complete|on_fail",
               "purpose": "<string>"
             }
           ],
@@ -1187,7 +1188,9 @@ agents:
 
       2. **Derive `lifecycle_tools`**:
          - Extract lifecycle tools from `ToolPlanning.lifecycle_tools`.
-         - Preserve `trigger` (before_chat|after_chat|before_agent|after_agent) and `agent` when scoped; `agent`=null for chat-level hooks.
+         - Preserve `trigger` (before_chat|after_chat|before_agent|after_agent|on_start|on_complete|on_fail) and `agent` when scoped; `agent`=null for chat-level and run-level hooks.
+         - Turn-level triggers (before_chat|after_chat|before_agent|after_agent) fire around individual conversation turns.
+         - Run-level triggers (on_start|on_complete|on_fail) fire around the entire workflow run — use for platform integration (build tracking, audit logging).
          - Map `description` from purpose; use `UI_Tool` for interactive lifecycle UI, `UI_Surface` for one-way lifecycle UI, else `Agent_Tool`.
          - For UI lifecycle hooks, include `ui` {"component", "mode", "workflow_primitive", "realization"}; for `Agent_Tool`, omit `ui`.
          - Set `file`="tools/<name>.py" and `function`="<name>".
@@ -1207,7 +1210,7 @@ agents:
           {"agent": "<PascalCase>", "file": "tools/<name>.py", "function": "<name>", "description": "<string>", "tool_type": "UI_Tool|UI_Surface|Agent_Tool", "auto_tool_call": true|false|null, "ui": {"component": "<string>", "mode": "inline|artifact", "workflow_primitive": "<catalog id>", "realization": "shipped_component|workflow_wrapper|generated_component"}, "ui_contract": {"surface_kind": "agent_tool", "payload_schema": {"type": "object", "properties": {}, "additionalProperties": true}, "actions_schema": [{"id": "approve", "label": "Approve", "variant": "primary", "approved": true, "description": "Optional", "payload_schema": {"type": "object", "properties": {}, "additionalProperties": true}}]}}
         ],
         "lifecycle_tools": [
-          {"agent": "<PascalCase|null>", "file": "tools/<name>.py", "function": "<name>", "description": "<string>", "tool_type": "UI_Tool|UI_Surface|Agent_Tool", "trigger": "before_chat|after_chat|before_agent|after_agent", "ui": {"component": "<string>", "mode": "inline|artifact", "workflow_primitive": "<catalog id>", "realization": "shipped_component|workflow_wrapper|generated_component"}}
+          {"agent": "<PascalCase|null>", "file": "tools/<name>.py", "function": "<name>", "description": "<string>", "tool_type": "UI_Tool|UI_Surface|Agent_Tool", "trigger": "before_chat|after_chat|before_agent|after_agent|on_start|on_complete|on_fail", "ui": {"component": "<string>", "mode": "inline|artifact", "workflow_primitive": "<catalog id>", "realization": "shipped_component|workflow_wrapper|generated_component"}}
         ]
       }
       ```
@@ -1955,12 +1958,13 @@ agents:
          - If `startup_mode` is `BackendOnly` and no user-facing chat/artifact output is intended, set `visual_agents` to `null`.
 
       5. **Derive `runtime_extensions`**:
-         - If workflow needs custom API endpoints → add `kind: api_router`
-         - If workflow needs background services → add `kind: startup_service`
-         - If workflow needs lifecycle hooks → add `kind: lifecycle_hooks`
-         - Every extension entrypoint must point at this workflow's own tools package:
+         - Only declare when the workflow genuinely needs host-level capabilities:
+           - `kind: api_router` — workflow needs custom HTTP routes at startup (e.g. webhook receivers)
+           - `kind: startup_service` — workflow needs a persistent background service (e.g. external feed listener)
+         - Every entrypoint must point at this workflow's own tools package:
            `workflows.<WorkflowName>.tools.<module>:<attribute>`.
-         - Do not reference shared workflow folders in extension entrypoints. If an extension needs reusable framework behavior, put the entrypoint in the workflow-local tool and import the framework API there.
+         - Do not use `lifecycle_hooks` here — on_start/on_complete/on_fail are declared in `lifecycle_tools` in tools.yaml, not in runtime_extensions.
+         - Do not reference shared workflow folders. If reusable framework behavior is needed, import it from the workflow-local tool.
 
       6. **Derive `triggers`**:
          - Copy canonical event triggers from `WorkflowStrategy.event_boundary.input_events`.
@@ -1993,10 +1997,7 @@ agents:
         "initial_message": "<string|null>",
         "initial_agent": "<PascalCaseAgent>",
         "visual_agents": ["<PascalCaseAgent>"] | null,
-        "runtime_extensions": [
-          {"kind": "api_router", "entrypoint": "workflows.<Name>.tools.api:get_router"},
-          {"kind": "startup_service", "entrypoint": "workflows.<Name>.tools.services:MyService"}
-        ],
+        "runtime_extensions": [],
         "triggers": [
           {
             "type": "event",
@@ -2016,12 +2017,12 @@ agents:
       - visual_agents cover UI/tool owners
       - for headless BackendOnly workflows, set visual_agents to null
       - optional absent values must be null, not empty strings
-      - Add extensions as needed (api_router, startup_service, lifecycle_hooks)
+      - Add runtime_extensions only for api_router or startup_service (host-level). Never lifecycle_hooks
+      - on_start/on_complete/on_fail belong in lifecycle_tools in tools.yaml, not in runtime_extensions
       - event triggers must come from `WorkflowStrategy.event_boundary.input_events`
       - preserve `capability_id` on event triggers when present
       - workflows must never publish `domain.*` directly; they call module actions/capabilities instead
       - runtime extension entrypoints must stay under `workflows.<WorkflowName>.tools.*`
-      - lifecycle_hooks enables workflow lifecycle notifications (on_start, on_complete, on_fail) for platform integration
       Output only the JSON object.
   max_consecutive_auto_reply: 5
   structured_outputs_required: true

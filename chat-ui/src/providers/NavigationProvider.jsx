@@ -18,6 +18,8 @@ export { NavigationContext };
 
 const DEFAULT_NAVIGATION = {
   version: '1.0.0',
+  appName: null,
+  appId: null,
   landing_spot: '/',
   pages: [],
   header: { logo: { src: null, wordmark: null, alt: 'App', href: '/' }, pages: [], actions: [] },
@@ -92,6 +94,8 @@ export const NavigationProvider = ({
           const shellConfig = await response.json();
           staticNav = {
             ...staticNav,
+            ...(shellConfig.appName ? { appName: shellConfig.appName } : {}),
+            ...(shellConfig.appId ? { appId: shellConfig.appId } : {}),
             entry_point: shellConfig.entry_point,
             chat_startup_mode: shellConfig.chat_startup_mode || 'ask',
             resume_policy: shellConfig.resume_policy,
@@ -143,6 +147,8 @@ export const NavigationProvider = ({
     loading,
     error,
     version: navigation.version,
+    appName: navigation.appName || null,
+    appId: navigation.appId || null,
     landing_spot: navigation.landing_spot || '/',
     chat_startup_mode: navigation.chat_startup_mode || 'ask',  // "ask" or "workflow"
     entry_point: navigation.entry_point || null,

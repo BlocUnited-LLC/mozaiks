@@ -38,14 +38,14 @@ from autogen.events.agent_events import (
     RunCompletionEvent,
 )
 from mozaiksai.core.workflow.outputs.structured import get_structured_outputs_for_workflow
-from mozaiksai.core.data.persistence import AG2PersistenceManager as _PM
+from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager as _PM
 from mozaiksai.core.events.event_serialization import (
     build_ui_event_payload as unified_build_ui_event_payload,
     EventBuildContext as UnifiedEventBuildContext,
     serialize_event_content,
 )
 
-from ..data.persistence import AG2PersistenceManager
+from ..data.persistence.persistence_manager import AG2PersistenceManager
 from .execution import create_termination_handler
 from .context import DerivedContextManager
 from logs.logging_config import get_workflow_logger
@@ -130,21 +130,21 @@ async def _resume_or_initialize_chat(
     initial_agent_name: Optional[str],
     wf_logger,
 ):
-    async def _persist_seed_messages(seed_messages: List[Dict[str, Any]], *, reason: str) -> None:
-        if not seed_messages:
-            return
-        try:
-            await persistence_manager.persist_initial_messages(
-                chat_id=chat_id,
-                app_id=app_id,
-                messages=seed_messages,
-            )
-        except Exception as persist_err:  # pragma: no cover
-            wf_logger.debug(f" Failed to persist {reason} for {chat_id}: {persist_err}")
+    def _build_hidden_config_seed() -> Optional[Dict[str, Any]]:
+        seed = config.get("initial_message")
+        if not isinstance(seed, str) or not seed.strip():
+            return None
+        return {
+            "role": "user",
+            "name": "user",
+            "content": seed.strip(),
+            "_mozaiks_seed_kind": "initial_message",
+        }
 
     resumed_messages = await persistence_manager.resume_chat(chat_id, app_id) or []
     resume_raw_count = len(resumed_messages)
     initial_messages: List[Dict[str, Any]] = []
+    hidden_config_seed = _build_hidden_config_seed()
 
     # Strip general-mode (non-AG2) chatter before handing the transcript back to AG2 orchestration.
     filtered_resumed_messages: List[Dict[str, Any]] = []
@@ -183,6 +183,8 @@ async def _resume_or_initialize_chat(
             f" [RESUME_DETECT] Resuming chat {chat_id}: total_messages={effective_resume_count} meaningful={len(meaningful_messages)}"
         )
         initial_messages = list(resumed_messages)
+        if hidden_config_seed is not None:
+            initial_messages = [dict(hidden_config_seed)] + initial_messages
         if initial_message:
             seed_message = {
                 "role": "user",
@@ -191,7 +193,6 @@ async def _resume_or_initialize_chat(
                 "_mozaiks_seed_kind": "initial_message",
             }
             initial_messages.append(seed_message)
-            await _persist_seed_messages([seed_message], reason="resume seed message")
     else:
         if resume_raw_count > 0:
             wf_logger.info(
@@ -201,15 +202,16 @@ async def _resume_or_initialize_chat(
             wf_logger.info(f" [RESUME_DETECT] No prior messages for chat {chat_id}. Starting NEW chat.")
 
         resumed_messages = []  # normalize to empty for downstream checks
+        if hidden_config_seed is not None:
+            initial_messages.append(dict(hidden_config_seed))
         if initial_message:
-            initial_messages.append(
-                {
-                    "role": "user",
-                    "name": "user",
-                    "content": initial_message,
-                    "_mozaiks_seed_kind": "initial_message",
-                }
-            )
+            runtime_seed_message = {
+                "role": "user",
+                "name": "user",
+                "content": initial_message,
+                "_mozaiks_seed_kind": "initial_message",
+            }
+            initial_messages.append(runtime_seed_message)
 
         current_user_id = user_id or "system_user"
         if not user_id:
@@ -231,20 +233,12 @@ async def _resume_or_initialize_chat(
         except Exception as start_err:
             logger.error(f" Termination handler start failed: {start_err}")
 
-        await _persist_seed_messages(initial_messages, reason="initial seed messages")
-
     if not initial_messages:
         # UserDriven greeting is handled by register_reply on the initial
         # agent (AG2-native). Do NOT seed it here — let AG2 emit it as a
         # normal TextEvent so resume/replay track it natively.
 
-        seed = config.get("initial_message")
-        if seed:
-            initial_messages = [
-                {"role": "user", "name": "user", "content": seed, "_mozaiks_seed_kind": "initial_message"}
-            ]
-            await _persist_seed_messages(initial_messages, reason="config seed message")
-        elif config.get("workflow_startup_mode", "").strip().lower() == "userdriven":
+        if config.get("workflow_startup_mode", "").strip().lower() == "userdriven":
             # UserDriven needs a synthetic trigger so AG2 can start the group
             # chat loop.  The register_reply on the initial agent intercepts
             # before the LLM is ever called and returns the static greeting.
