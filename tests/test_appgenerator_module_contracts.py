@@ -104,7 +104,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "users",
         "billing",
         "usage",
-        "activity",
+        "operations",
         "settings",
         "integrations",
         "support",

@@ -5,17 +5,26 @@
 This document defines the canonical lifecycle across:
 
 - Mozaiks CLI
-- Studio
+- the Studio host and its visible workspace/build surfaces
 - `factory_app`
 - the active app workspace
 - generated artifacts
 - hosted product promotion/export
 
+Terminology note:
+
+- `Studio` remains the current internal host and command name
+- customer-facing UX should prefer `Apps`, `Build`, `Integrations`, and
+  `Operations`
+- when this document says `Studio` in ownership terms, it means the host and
+  management composition layer, not a required visible product label
+
 The current system has the right primitives, but the lifecycle is not explicit
 enough. That leads to confusion about:
 
 - whether `init` creates a real app or just a scaffold
-- whether Studio is operating on the active workspace or on staged artifacts
+- whether the workspace/build surfaces are operating on the active workspace or
+  on staged artifacts
 - when `factory_app` should mutate the live app root
 - how generated output becomes the app that later runs
 
@@ -95,7 +104,7 @@ Recommended commands:
 - `mozaiks init <preset>` for explicit/dev scaffolding
 - `mozaiks onboard` may create this implicitly when missing
 
-## Phase 2: Studio Launch
+## Phase 2: Workspace Console Launch
 
 This phase starts the host and opens the management UI.
 
@@ -109,13 +118,14 @@ Responsibilities:
 - select the active workspace
 - boot backend host
 - boot frontend shell
-- open `/studio`
+- open the current management surface
 
 Recommended command:
 
 - `mozaiks studio --open`
 
-This should become the standard user path.
+This remains the current command path. Customer-facing UX should normalize to
+`Apps` as the landing surface and `Build` as the creation/refinement surface.
 
 Low-level equivalents:
 
@@ -139,7 +149,7 @@ Responsibilities:
 
 - allocate `build_registry_id`
 - associate `app_id`, `user_id`, app name, and initial status
-- expose build status to Studio/hosted product UI
+- expose build status to the `Apps` directory and app `Build` surfaces
 
 Important rule:
 
@@ -220,7 +230,7 @@ This phase determines whether staged artifacts are acceptable.
 
 Owned by:
 
-- Studio
+- the Studio host and Build review surfaces
 - validation tools
 - optionally CLI for terminal-oriented users
 
@@ -237,7 +247,7 @@ Responsibilities:
 Review state transitions:
 
 - newly generated refinement children are persisted as `draft`
-- `draft` children are reviewed in Studio with:
+- `draft` children are reviewed in Build with:
   - changed-file diffs
   - selected refinement scope
   - validation outcome
@@ -251,7 +261,8 @@ Review state transitions:
 Important rule:
 
 - `mozaiks gen` may remain a convenience path
-- but canonical review/history/diff/promotion must live in Studio
+- but canonical review/history/diff/promotion must live in the workspace
+  console and Build surfaces
 
 Canonical frontend/workflow UI validation targets:
 
@@ -289,7 +300,7 @@ This phase copies approved artifacts into a runnable app root.
 
 Owned by:
 
-- Studio/control plane
+- Studio host / control plane
 - optionally CLI for advanced users
 
 Promotion source:
@@ -341,7 +352,7 @@ Use these terms consistently.
 
 | Object | Meaning |
 | --- | --- |
-| `workspace root` | Local folder selected by CLI or Studio. |
+| `workspace root` | Local folder selected by CLI or the current workspace console host. |
 | `app root` | The runnable app bundle directory, usually `<workspace>/app`. |
 | `build_registry_id` | Hosted control-plane/build-tracking record id. |
 | `app_id` | Logical app identity used across workflows and artifacts. |
@@ -373,7 +384,7 @@ For most users:
 
 1. `mozaiks onboard`
 2. `mozaiks studio --open`
-3. build in Studio
+3. build in `Build`
 4. review staged artifacts
 5. promote/export/deploy
 
@@ -423,7 +434,7 @@ Should:
 - become the primary entrypoint for actual building
 - start backend + frontend together
 - open the browser
-- route the user into `/studio/create`
+- route the user into the current build surface at `/apps/:appId/build`
 
 ### `mozaiks gen`
 
@@ -443,8 +454,8 @@ These are the remaining lifecycle gaps.
 1. There is no explicit user-facing contract saying that the scaffold is only a
    shell and that generated output stages separately.
 2. The preferred public path still feels too dev-script-centric.
-3. Promotion exists conceptually, but Studio/CLI responsibilities around it are
-   not yet the dominant UX.
+3. Promotion exists conceptually, but workspace-console/CLI responsibilities
+   around it are not yet the dominant UX.
 4. `mozaiks-app` and hosted product behavior should consume the same staged
    build/promotion lifecycle instead of inventing a second builder path.
 5. `mozaiks gen`, `mozaiks onboard`, and `mozaiks studio` still need one
@@ -454,11 +465,11 @@ These are the remaining lifecycle gaps.
 
 1. Make `mozaiks onboard` the primary first-run command.
 2. Add `mozaiks studio --open` as the standard builder launch command.
-3. Teach onboarding/studio status screens to explain:
+3. Teach onboarding and Apps/Build status surfaces to explain:
    - scaffold
    - staged build
    - promotion
-4. Add first-class review/promotion UX in Studio around `generated_app_dir`.
+4. Add first-class review/promotion UX in Build around `generated_app_dir`.
 5. Keep repo dev scripts as framework tooling only.
 6. Align hosted product modules (`app_registry`, `hosting`, etc.) to the same
    build registry and staged artifact lifecycle.

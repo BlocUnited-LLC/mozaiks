@@ -435,10 +435,10 @@ async def generate_and_download(
     except Exception as exc:
         wf_logger.warning("Failed to persist pending schema migration: %s", exc)
 
-    # Update the hosted build-registry record to 'generated' now that files are on disk.
+    # Update the app lifecycle record to 'review' now that files are on disk.
     await update_build_status(
         build_registry_id=build_registry_id or "",
-        status="generated",
+        status="review",
         bundle_path=str(app_dir.resolve()),
     )
 

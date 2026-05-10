@@ -55,24 +55,25 @@ app/
 │           └── *.{js,jsx}
 ├── modules/
 │   └── {module_name}/
-│       ├── module.yaml         # identity, actions, capabilities
-│       ├── events.yaml         # domain events this module may publish
-│       ├── subscriptions.yaml  # reactions/gates owned by the module
-│       ├── notifications.yaml  # notification rules
-│       ├── settings.yaml       # user/app settings schema
-│       ├── admin.yaml          # admin panels mounted under /admin/*
+│       ├── module.yaml              # required — identity, actions, capabilities
+│       ├── contracts/               # optional companion manifests
+│       │   ├── events.yaml          # domain events this module may publish
+│       │   ├── reactions.yaml       # event reactions owned by this module
+│       │   ├── notifications.yaml   # notification rules per event
+│       │   ├── settings.yaml        # user/app settings schema
+│       │   ├── admin.yaml           # admin panels mounted under /admin/*
+│       │   └── entitlements.yaml    # optional capability entitlements
+│       ├── runtime_extensions.yaml  # optional — api_router / startup_service
 │       ├── backend/
 │       │   ├── __init__.py
-│       │   ├── handler.py      # required — thin dispatch, one method per declared action
-│       │   ├── service.py      # recommended — all business logic and event emission
-│       │   ├── repo.py         # recommended — MongoDB access layer, no logic
-│       │   ├── policy.py       # recommended — query scoping for multi-tenancy
-│       │   ├── models.py       # recommended — TypedDict shapes + helper functions
-│       │   ├── settings.py     # optional — settings hook implementations
-│       │   ├── subscriptions.py# optional — subscription handler implementations
-│       │   ├── notifications.py# optional — notification hook implementations
-│       │   └── admin.py        # optional — admin panel implementations
-│       └── ui/                 # optional module-specific UI surfaces
+│       │   ├── handler.py           # required — thin dispatch, one method per declared action
+│       │   ├── service.py           # recommended — all business logic and event emission
+│       │   ├── repo.py              # recommended — MongoDB access layer, no logic
+│       │   ├── policy.py            # recommended — query scoping for multi-tenancy
+│       │   ├── schemas.py           # recommended — TypedDict shapes + helper functions
+│       │   ├── settings.py          # optional — settings hooks
+│       │   └── admin.py             # optional — admin panel hooks
+│       └── ui/                      # optional module-specific UI surfaces
 │           └── index.js
 └── brand/                      # colocated brand/theme assets
     ├── assets/
@@ -85,8 +86,7 @@ Canonical rule:
 - `config/`, `ui/pages/`, `workflows/`, `modules/`, `ui/`, and `brand/` belong
   together under the active app root
 - generated/customer app workspaces should be self-contained
-- sibling `ui/` and `brand/` folders outside the app root are transitional,
-  not canonical
+- sibling `ui/` and `brand/` folders outside the app root are not canonical
 
 ## Factory App Workspace
 
@@ -300,7 +300,7 @@ modules may publish `hosted.*` events, but those hosted semantics stay above
 the runtime kernel.
 
 At runtime, `mozaiksai/hosts/platform.py` registers `ModuleEventRouter` for loaded module
-manifests. That router consumes `subscriptions.yaml` and `notifications.yaml`
+manifests. That router consumes `contracts/reactions.yaml` and `contracts/notifications.yaml`
 and derives platform reactions such as `notification.created`.
 
 ### `config/*`
@@ -318,8 +318,8 @@ For most new apps:
 3. Create app pages in `app/ui/pages/`
 4. Create workflow definitions in `app/workflows/` (with triggers in `orchestrator.yaml`)
 5. Create modules in `app/modules/` (with actions in `module.yaml` and events in `events.yaml`)
-6. Add `admin.yaml`, `settings.yaml`, `notifications.yaml`, and
-   `subscriptions.yaml` as needed
+6. Add companion manifests under `contracts/` (`reactions.yaml`, `notifications.yaml`,
+   `settings.yaml`, `admin.yaml`) as needed
 
 ## CRUD Minimalism
 
@@ -336,7 +336,7 @@ That is enough to prove the product shape without drowning the user in schema.
 
 ## Current Repo Reality
 
-This repo now treats `factory_app/app/` as the first-party Studio app bundle.
+This repo now treats `factory_app/app/` as the first-party Console app bundle served by the Studio host.
 Hosted product workspaces are expected to live outside this repo and consume
 the same contract.
 
@@ -348,13 +348,13 @@ The canonical target is:
 
 ## Module Types
 
-The base module structure above applies to all modules. The `type` field in
-`module.yaml` declares which of four canonical patterns the module follows:
-`standard`, `messaging`, `workflow`, or `transactional`. Each type may add
-additional YAML files (e.g., `channels.yaml` for `messaging`, `states.yaml`
-and `transitions.yaml` for `workflow`) and carries its own backend conventions.
+The base module structure above applies to all modules. The optional `type` field in
+`module.yaml` declares which of three canonical patterns the module follows:
+`standard` (default), `messaging`, or `transactional`. All types share the same
+`contracts/` layout — the type is a backend-convention signal, not a YAML-structure
+difference.
 
-See [module-type-taxonomy.md](module-type-taxonomy.md) for the full reference.
+See [module-type-taxonomy.md](module-type-taxonomy.md) for backend conventions per type.
 
 ## Cross References
 

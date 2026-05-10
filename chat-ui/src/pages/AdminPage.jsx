@@ -13,7 +13,7 @@
  *
  * App-business admin panels may come from a connected app backend's
  * /api/admin/config and are embedded by section-level components such as
- * UsersSection and BillingSection.
+ * UsersSection and OperationsSection.
  */
 
 import { useLocation } from 'react-router-dom'
@@ -22,30 +22,22 @@ import { AdminExtensionPanels, useAdminFetch } from '../admin/components/AdminPr
 import { AdminWorkspaceLayout } from '../admin/components/AdminWorkspaceLayout.jsx'
 import { OverviewSection as AdminOverviewPanel } from '../admin/pages/OverviewSection.jsx'
 import { UsersSection }        from '../admin/pages/UsersSection.jsx'
-import { BillingSection }      from '../admin/pages/BillingSection.jsx'
 import { UsageSection }        from '../admin/pages/UsageSection.jsx'
-import { ActivitySection }     from '../admin/pages/ActivitySection.jsx'
+import { OperationsSection }   from '../admin/pages/ActivitySection.jsx'
 import { SettingsSection }     from '../admin/pages/SettingsSection.jsx'
-import { IntegrationsSection } from '../admin/pages/IntegrationsSection.jsx'
-import { SupportSection }      from '../admin/pages/SupportSection.jsx'
 
 // ---------------------------------------------------------------------------
 // Section routing
 // ---------------------------------------------------------------------------
 
-const ADMIN_SECTION_ROUTES = {
-  '/admin': 'overview',
-  '/admin/users': 'users',
-  '/admin/billing': 'billing',
-  '/admin/usage': 'usage',
-  '/admin/activity': 'activity',
-  '/admin/settings': 'settings',
-  '/admin/integrations': 'integrations',
-  '/admin/support': 'support',
-}
-
 function AdminSectionRoute(pathname) {
-  return ADMIN_SECTION_ROUTES[pathname] || 'overview'
+  const match = /^\/apps\/[^/]+\/(?:admin|users|usage|operations|settings)\/?$/.exec(pathname)
+  if (!match) return 'overview'
+  const adminMatch = /^\/apps\/[^/]+\/admin\/?$/.test(pathname)
+  if (adminMatch) return 'overview'
+  const suffixMatch = /^\/apps\/[^/]+\/([^/]+)\/?$/.exec(pathname)
+  const raw = suffixMatch?.[1] || 'overview'
+  return normalizeSection(raw, 'overview')
 }
 
 // ---------------------------------------------------------------------------
@@ -53,18 +45,12 @@ function AdminSectionRoute(pathname) {
 // ---------------------------------------------------------------------------
 
 const KNOWN_SECTIONS = new Set([
-  'overview', 'users', 'billing', 'usage', 'activity', 'settings', 'integrations', 'support',
+  'overview', 'users', 'usage', 'operations', 'settings',
 ])
 
 function normalizeSection(value, fallback) {
   const raw = String(value || '').trim().toLowerCase().replace(/_/g, '-')
   if (!raw) return fallback
-  if (raw === 'user' || raw === 'access' || raw === 'users-access') return 'users'
-  if (raw === 'subscription' || raw === 'subscriptions' || raw === 'payments' || raw === 'revenue') return 'billing'
-  if (raw === 'runtime' || raw === 'health' || raw === 'usage-health' || raw === 'workflows') return 'usage'
-  if (raw === 'audit' || raw === 'logs' || raw === 'events') return 'activity'
-  if (raw === 'config' || raw === 'configuration') return 'settings'
-  if (raw === 'module' || raw === 'modules' || raw === 'feature' || raw === 'features') return 'integrations'
   if (KNOWN_SECTIONS.has(raw)) return raw
   return fallback
 }
@@ -73,12 +59,12 @@ function inferSection(panel) {
   const text = [panel?.section, panel?.category, panel?.group, panel?.id, panel?.label, panel?.description]
     .filter(Boolean).join(' ').toLowerCase()
   if (/(user|role|permission|auth|account|member)/.test(text)) return 'users'
-  if (/(billing|subscription|invoice|payment|stripe|revenue|plan)/.test(text)) return 'billing'
-  if (/(run|session|workflow|usage|health|cost|token|error|performance)/.test(text)) return 'usage'
-  if (/(activity|audit|log|event|history)/.test(text)) return 'activity'
+  if (/(billing|subscription|invoice|payment|stripe|revenue|plan)/.test(text)) return 'overview'
+  if (/(run|session|workflow|cost|token|usage)/.test(text)) return 'usage'
+  if (/(operations|activity|audit|log|event|history|incident|alert|health|error|performance)/.test(text)) return 'operations'
   if (/(setting|config|domain|brand|theme|environment)/.test(text)) return 'settings'
-  if (/(support|ticket|notification|alert)/.test(text)) return 'support'
-  return 'integrations'
+  if (/(support|ticket|notification|alert)/.test(text)) return 'operations'
+  return 'overview'
 }
 
 function getPanelId(panelConfig) {
@@ -89,7 +75,7 @@ function normalizeRuntimePanels(runtimePanels) {
   const normalize = (p) => {
     const id = getPanelId(p)
     if (!id) return null
-    const fallback = id === 'sessions' ? 'activity' : 'usage'
+    const fallback = id === 'sessions' ? 'operations' : 'usage'
     if (typeof p === 'string') return { id: p, section: fallback }
     return { ...p, section: normalizeSection(p?.section || p?.category || p?.group, fallback) }
   }
@@ -142,28 +128,14 @@ export default function AdminPage() {
     case 'users':
       content = <UsersSection section="users" extensionPanels={extensionPanels} />
       break
-    case 'billing':
-      content = <BillingSection section="billing" extensionPanels={extensionPanels} />
-      break
     case 'usage':
       content = <UsageSection title="Usage" runtimePanels={runtimePanels} extensionPanels={extensionPanels} />
       break
-    case 'activity':
-      content = <ActivitySection runtimePanels={runtimePanels} extensionPanels={extensionPanels} />
+    case 'operations':
+      content = <OperationsSection runtimePanels={runtimePanels} extensionPanels={extensionPanels} />
       break
     case 'settings':
       content = <SettingsSection extensionPanels={extensionPanels} />
-      break
-    case 'integrations':
-      content = (
-        <IntegrationsSection
-          allExtensionPanels={allExtensionPanels}
-          extensionPanels={extensionPanels}
-        />
-      )
-      break
-    case 'support':
-      content = <SupportSection extensionPanels={extensionPanels} />
       break
     default:
       content = (

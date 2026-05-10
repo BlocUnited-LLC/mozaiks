@@ -59,7 +59,7 @@ Owns:
 - page renderer
 - chat UI
 - theme runtime
-- admin and Studio shell surfaces
+- admin and workspace/build shell surfaces
 
 Current source in this repo:
 
@@ -89,9 +89,10 @@ Canonical target:
 
 Current implementation state:
 
-- `factory_app/app/` is the current first-party Studio app bundle
+- `factory_app/app/` is the current first-party Console app bundle served by the Studio host
 - shared builder workflows live under `factory_app/workflows/`
-- Studio binds to the shared builder workflow root at `factory_app/workflows/`
+- the Studio host binds to the shared builder workflow root at
+  `factory_app/workflows/`
 - app/product hosts bind to the active app root's `workflows/` directory; any
    product-owned overlay registry lives in the product workspace, not in this repo
 
@@ -149,14 +150,14 @@ hosted-product/
 
 Current implemented state in this repo:
 
-- `factory_app/app/` is the first-party Studio app bundle
+- `factory_app/app/` is the first-party Console app bundle served by the Studio host
 - hosted product workspaces are expected to live outside this repo
 
 ## How Apps Should Be Created
 
 The canonical creation flow is:
 
-1. Studio or CLI creates a build request
+1. the workspace console or CLI creates a build request
 2. shared generation core runs the builder workflows
 3. artifacts are written to a generated/staging area
 4. validation and review happen
@@ -171,7 +172,7 @@ This is the important boundary:
 Current composition rule in this repo:
 
 - the active app workspace is resolved first
-- Studio uses `factory_app/workflows/` as its builder workflow root
+- the Studio host uses `factory_app/workflows/` as its builder workflow root
 - app/product hosts use the active app root's `workflows/` directory
 - product-owned workflows stay under the active app root's `workflows/`
    directory
@@ -197,7 +198,7 @@ They then run the workspace locally through the Mozaiks host/CLI.
 The hosted product runs the same app-workspace contract, but Mozaiks owns:
 
 - hosted infra
-- hosted Studio
+- hosted Mozaiks product surfaces built on the Studio host
 - product capabilities
 - billing/collaboration/deployment surfaces
 
@@ -206,19 +207,16 @@ bundle contract.
 
 ## What This Means For The Current Repo
 
-The current repo contains both canonical pieces and transitional layout.
+The current repo contains the canonical runtime, shell, CLI, and first-party
+builder sources in one repository.
 
-### Canonical long-term ownership
+### Canonical ownership
 
 - `mozaiksai/` - runtime package source
 - `chat-ui/` - shared shell/UI source
 - `mozaiks_cli/` - developer interface
 - factory layer / shared builder workflows - should remain first-class and stay
    outside customer app workspaces
-
-### Transitional layout that should not be deepened
-
-- hosted product concerns leaking into shared framework ownership
 
 ## Canonical Decisions
 

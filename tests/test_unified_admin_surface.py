@@ -25,23 +25,26 @@ def test_admin_portal_is_the_only_registered_admin_page() -> None:
 
 def test_admin_portal_embeds_app_admin_panels() -> None:
     source = _read("chat-ui/src/pages/AdminPage.jsx")
-    billing_source = _read("chat-ui/src/admin/pages/BillingSection.jsx")
     users_source = _read("chat-ui/src/admin/pages/UsersSection.jsx")
 
     assert "AdminWorkspaceLayout" in source
     assert "AdminOverviewPanel" in source
-    assert "ADMIN_SECTION_ROUTES" in source
-    assert "'/admin/users': 'users'" in source
-    assert "'/admin/usage': 'usage'" in source
+    assert "AdminSectionRoute" in source
+    assert "^\\/apps\\/[^/]+\\/(?:admin|users|usage|operations|settings)\\/?$" in source
+    assert "'operations'" in source
+    assert "raw === 'activity'" not in source
+    assert "raw === 'audit'" not in source
+    assert "raw === 'logs'" not in source
     assert "AdminSectionRoute" in source
     assert "useLocation" in source
     assert 'title="Usage"' in source
     assert 'section="users"' in source
-    assert 'section="billing"' in source
+    assert "BillingSection" not in source
+    assert "IntegrationsSection" not in source
+    assert "SupportSection" not in source
     assert "AdminExtensionPanels" in source
     assert "normalizeRuntimePanels" in source
     assert "BuilderWorkspacePanel" not in source
-    assert "AppAdminPanels" in billing_source
     assert "AppAdminPanels" in users_source
 
 
@@ -50,19 +53,22 @@ def test_platform_shell_registers_admin_section_routes() -> None:
     contract_source = _read("mozaiksai/core/admin/contract.py")
 
     for path in [
-        "/admin",
-        "/admin/users",
-        "/admin/billing",
-        "/admin/usage",
-        "/admin/activity",
-        "/admin/settings",
-        "/admin/integrations",
-        "/admin/support",
+        "/apps/:appId/admin",
+        "/apps/:appId/users",
+        "/apps/:appId/usage",
+        "/apps/:appId/operations",
+        "/apps/:appId/settings",
     ]:
         assert path in contract_source
 
     assert '"component": "AdminPortal"' in platform_source
     assert "build_admin_shell_routes" in platform_source
+    assert "/apps/:appId/users" in _read("factory_app/app/ui/route_manifest.json")
+    assert "/apps/:appId/usage" in _read("factory_app/app/ui/route_manifest.json")
+    assert "/apps/:appId/operations" in _read("factory_app/app/ui/route_manifest.json")
+    assert "/apps/:appId/settings" in _read("factory_app/app/ui/route_manifest.json")
+    assert '"payments": "billing"' not in contract_source
+    assert '"usage-health": "operations"' not in contract_source
 
 
 def test_platform_host_mounts_admin_api_routes() -> None:
@@ -80,7 +86,7 @@ def test_profile_menu_uses_framework_defaults() -> None:
 
     assert "getDefaultProfileMenu" in source
     assert '"profile"' in source
-    assert '"admin-portal"' in source
+    assert '"admin-portal"' not in source
     assert '"signin"' in source
     assert '"signout"' in source
     assert "mergeProfileMenu" in source
@@ -121,7 +127,7 @@ def test_runtime_admin_config_discovers_module_admin_yaml(tmp_path) -> None:
                     {
                         "id": "crm.contacts",
                         "label": "Contacts",
-                        "section": "integrations",
+                        "section": "settings",
                         "renderer": "schema",
                         "layout": "full-width",
                         "sections": [
@@ -153,7 +159,7 @@ def test_runtime_admin_config_discovers_module_admin_yaml(tmp_path) -> None:
             "id": "crm.contacts",
             "label": "Contacts",
             "description": None,
-            "section": "integrations",
+            "section": "settings",
             "order": 0,
             "renderer": "schema",
             "layout": "full-width",

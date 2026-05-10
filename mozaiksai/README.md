@@ -33,7 +33,7 @@ It must not own:
 
 - shell config or page serving
 - app admin shell composition
-- Studio management/create routes
+- Studio management routes
 - hosted product behavior
 - repo-specific CLI conveniences
 

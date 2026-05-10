@@ -54,7 +54,7 @@ async def test_control_plane_tool_executor_resolves_pack_declared_tool(tmp_path:
     pack = LoadedControlPlanePack(
         path=tmp_path,
         manifest=ControlPlaneManifest(
-            schema_version="mozaiks.control_plane.v1",
+            schema_version="mozaiks.control_plane",
             profile=ControlPlaneProfileInfo(
                 id="test",
                 display_name="Test",
@@ -63,11 +63,11 @@ async def test_control_plane_tool_executor_resolves_pack_declared_tool(tmp_path:
             harness=ControlPlaneHarnessManifest(implementation="example.harness:Harness"),
         ),
         prompts=ControlPlanePromptsManifest(
-            schema_version="mozaiks.control_plane.prompts.v1",
+            schema_version="mozaiks.control_plane.prompts",
             prompts=[],
         ),
         tools=ControlPlaneToolsManifest(
-            schema_version="mozaiks.control_plane.tools.v1",
+            schema_version="mozaiks.control_plane.tools",
             tools=[
                 ControlPlaneToolDefinition(
                     id="echo_tool",
@@ -163,7 +163,7 @@ def _revision_pack() -> LoadedControlPlanePack:
     return LoadedControlPlanePack(
         path=Path("control_plane"),
         manifest=ControlPlaneManifest(
-            schema_version="mozaiks.control_plane.v1",
+            schema_version="mozaiks.control_plane",
             profile=ControlPlaneProfileInfo(id="business_plan", display_name="Business Plan", description="Business plan"),
             harness=ControlPlaneHarnessManifest(implementation="example.harness:Harness"),
             routing=ControlPlaneRoutingManifest(
@@ -192,8 +192,8 @@ def _revision_pack() -> LoadedControlPlanePack:
                 ],
             ),
         ),
-        prompts=ControlPlanePromptsManifest(schema_version="mozaiks.control_plane.prompts.v1", prompts=[]),
-        tools=ControlPlaneToolsManifest(schema_version="mozaiks.control_plane.tools.v1", tools=[]),
+        prompts=ControlPlanePromptsManifest(schema_version="mozaiks.control_plane.prompts", prompts=[]),
+        tools=ControlPlaneToolsManifest(schema_version="mozaiks.control_plane.tools", tools=[]),
     )
 
 

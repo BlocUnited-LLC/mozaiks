@@ -5,7 +5,7 @@ export const APP_ADMIN_SECTION_IDS = Object.freeze([
   'users',
   'billing',
   'usage',
-  'activity',
+  'operations',
   'settings',
   'integrations',
   'support',

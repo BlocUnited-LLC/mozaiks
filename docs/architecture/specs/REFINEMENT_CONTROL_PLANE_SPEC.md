@@ -383,9 +383,9 @@ Current first-party artifact workbench bridge:
 
 - `AppGenerator` now registers `app_bundle` artifact versions for generated
   bundles
-- Studio exposes `GET /api/studio/artifacts/{artifact_version_id}/bundle` to
+- Studio exposes `GET /api/studio/build/artifacts/{artifact_version_id}/bundle` to
   reopen a persisted bundle as a text-file workbench payload
-- the Studio Create history surface can open that bundle in `AppWorkbench`
+- the Build history surface can open that bundle in `AppWorkbench`
 - `AppWorkbench` can launch a scoped refinement request with
   `coding_request.files` sourced from the selected file editor state
 - when no file is selected in `AppWorkbench`, the control-plane harness can

@@ -22,75 +22,120 @@
  *   }
  */
 
-import { useCallback } from 'react'
-import { LauncherCard } from './LauncherCard.jsx'
+import { useCallback, useEffect, useState } from 'react';
+import { LauncherCard } from './LauncherCard.jsx';
 
 const formatOptionLabel = (id) =>
   String(id || 'continue')
     .replace(/[_-]+/g, ' ')
-    .trim()
-    .toUpperCase()
+    .replace(/\b\w/g, (match) => match.toUpperCase())
+    .trim();
 
 const asObject = (value) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return value
-}
+  return value;
+};
 
 const asString = (value) => {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+};
+
+function usePrefersReducedMotion() {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return undefined;
+    }
+
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setPrefersReducedMotion(mediaQuery.matches);
+    update();
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', update);
+      return () => mediaQuery.removeEventListener('change', update);
+    }
+
+    mediaQuery.addListener(update);
+    return () => mediaQuery.removeListener(update);
+  }, []);
+
+  return prefersReducedMotion;
 }
 
-export function LauncherScreen({ transition, onResolve }) {
-  const options = transition?.options ?? []
-  const screenProps = asObject(transition?.ui?.props)
-  const optionPropsById = asObject(screenProps.options)
+function getEnterStyle(entered, prefersReducedMotion, delayMs = 0, distance = 14) {
+  if (prefersReducedMotion) return undefined;
 
-  const title = asString(screenProps.title) ?? 'Choose Your Path'
-  const subtitle = asString(screenProps.subtitle)
-  const background = asString(screenProps.background)
-  const defaultButton = asString(screenProps.button) ?? 'Continue'
+  return {
+    opacity: entered ? 1 : 0,
+    transform: entered ? 'translateY(0px) scale(1)' : `translateY(${distance}px) scale(0.985)`,
+    transitionProperty: 'opacity, transform',
+    transitionDuration: '420ms',
+    transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    transitionDelay: `${delayMs}ms`,
+  };
+}
+
+export function LauncherScreen({ transition, onResolve, overlayTitleId, overlayDescriptionId }) {
+  const options = transition?.options ?? [];
+  const screenProps = asObject(transition?.ui?.props);
+  const optionPropsById = asObject(screenProps.options);
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const [entered, setEntered] = useState(false);
+
+  const title = asString(screenProps.title) ?? 'Choose Your Path';
+  const subtitle = asString(screenProps.subtitle);
+  const background = asString(screenProps.background);
+  const defaultButton = asString(screenProps.button) ?? 'Continue';
+
+  useEffect(() => {
+    if (prefersReducedMotion) {
+      setEntered(true);
+      return undefined;
+    }
+
+    const frame = window.requestAnimationFrame(() => setEntered(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [prefersReducedMotion]);
 
   const handleSelect = useCallback(
     (option) => {
-      onResolve?.(option.id)
+      onResolve?.(option.id);
     },
     [onResolve],
-  )
+  );
 
   return (
-    <div className="relative flex min-h-full flex-1 flex-col bg-background overflow-hidden">
+    <div className="relative overflow-hidden">
 
       {background && (
         <img
           src={background}
           alt=""
           aria-hidden="true"
-          className="absolute inset-0 z-0 h-full w-full object-cover opacity-30 pointer-events-none select-none"
+          className="absolute inset-0 z-0 h-full w-full object-cover opacity-15 pointer-events-none select-none"
           draggable={false}
         />
       )}
 
-      <div className="relative z-10 flex min-h-full flex-1 flex-col items-center justify-center px-6 py-12">
+      <div className="relative z-10 p-6 sm:p-8 lg:p-10">
 
-        <div className="text-center mb-10 max-w-xl">
-          <h1 className="text-3xl md:text-4xl font-bold text-foreground tracking-tight mb-3">
+        <div className="mx-auto max-w-3xl text-center" style={getEnterStyle(entered, prefersReducedMotion, 0, 10)}>
+          <p className="text-xs font-semibold uppercase tracking-widest text-primary/80">Transition</p>
+          <h1 id={overlayTitleId} className="mt-3 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
             {title}
           </h1>
           {subtitle && (
-            <p className="text-base text-muted-foreground">{subtitle}</p>
+            <p id={overlayDescriptionId} className="mt-3 text-sm leading-6 text-muted-foreground sm:text-base">{subtitle}</p>
           )}
         </div>
 
         <div
-          className={[
-            'flex gap-5 w-full max-w-3xl',
-            options.length <= 2
-              ? 'flex-col md:flex-row'
-              : 'flex-col md:flex-row md:flex-wrap justify-center',
-          ].join(' ')}
+          className="mt-8 flex flex-wrap items-stretch justify-center gap-4"
         >
           {options.map((option, i) => {
-            const optionProps = asObject(optionPropsById?.[option.id])
+            const optionProps = asObject(optionPropsById?.[option.id]);
             return (
               <LauncherCard
                 key={option.id ?? i}
@@ -98,15 +143,19 @@ export function LauncherScreen({ transition, onResolve }) {
                 description={asString(optionProps.description) ?? ''}
                 image={asString(optionProps.image)}
                 button={asString(optionProps.button) ?? defaultButton}
+                helperText={asString(optionProps.helper) ?? ''}
+                badge={asString(optionProps.badge) ?? ''}
+                disabled={optionProps.disabled === true}
                 onClick={() => handleSelect(option)}
+                style={getEnterStyle(entered, prefersReducedMotion, 110 + i * 70)}
               />
-            )
+            );
           })}
         </div>
 
       </div>
     </div>
-  )
+  );
 }
 
-export default LauncherScreen
+export default LauncherScreen;

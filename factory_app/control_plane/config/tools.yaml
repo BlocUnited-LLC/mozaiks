@@ -1,4 +1,4 @@
-schema_version: mozaiks.control_plane.tools.v1
+schema_version: mozaiks.control_plane.tools
 tools:
   - id: get_revision_context
     kind: context_tool

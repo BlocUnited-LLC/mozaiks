@@ -4,16 +4,17 @@ from __future__ import annotations
 
 import json
 
-from mozaiksai.core.runtime.app import build_studio_home_summary, get_missing_studio_surfaces
 from mozaiks_cli.studio_launcher import launch_studio
 from mozaiks_cli.workspace import resolve_active_app_root, resolve_workspace_root
 
 
 def run(args) -> None:
     """Execute the studio command."""
+    from mozaiksai.core.runtime.app import build_app_overview_summary, get_missing_console_surfaces
+
     workspace_root = resolve_workspace_root(getattr(args, "directory", None))
     app_root = resolve_active_app_root(workspace_root)
-    missing_surfaces = get_missing_studio_surfaces(app_root)
+    missing_surfaces = get_missing_console_surfaces(app_root)
     if missing_surfaces:
         print(f"Error: no valid Mozaiks scaffold found in {workspace_root}")
         print("Missing required files:")
@@ -39,15 +40,15 @@ def run(args) -> None:
             print("Frontend shell unavailable; backend is running but browser Studio is not available in this environment.")
         return
 
-    summary = build_studio_home_summary(app_root, surface="cli-home", local_only=True)
+    summary = build_app_overview_summary(app_root, surface="cli-home", local_only=True)
     if getattr(args, "json_output", False):
         print(json.dumps(summary, indent=2, ensure_ascii=False))
         return
 
-    _print_studio_home(summary)
+    _print_app_overview(summary)
 
 
-def _print_studio_home(summary: dict) -> None:
+def _print_app_overview(summary: dict) -> None:
     app = summary["app"]
     ai = summary["ai"]
     theme = summary["theme"]
@@ -55,10 +56,10 @@ def _print_studio_home(summary: dict) -> None:
     workspace = summary["workspace"]
     home = summary["home"]
 
-    print("Studio Home\n")
-    print(f"Workspace:         {summary['studio']['workspace_root']}")
-    print(f"Route:             {summary['studio']['route']}")
-    print(f"Local Only:        {summary['studio']['local_only']}")
+    print("App Overview\n")
+    print(f"Workspace:         {summary['console']['workspace_root']}")
+    print(f"Route:             {summary['console']['route']}")
+    print(f"Local Only:        {summary['console']['local_only']}")
     print(f"App:               {app['name']}")
     print(f"Journey:           {app['journey'] or 'not configured'}")
     print(f"First Goal:        {app['first_goal'] or 'not configured'}")

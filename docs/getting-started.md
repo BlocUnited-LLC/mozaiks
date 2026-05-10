@@ -6,11 +6,11 @@ The recommended first experience is:
 
 1. set your environment
 2. create a local workspace
-3. open Studio
+3. open the Mozaiks Console
 4. build your app through the `factory_app` workflows
 
 You do **not** need to hand-author workflows, modules, or branding before you
-open Studio.
+open the Mozaiks Console.
 
 ## What Mozaiks Is Doing
 
@@ -18,8 +18,8 @@ There are three layers involved in the first-run experience:
 
 - `mozaiks` CLI
   - bootstraps a local workspace and launches the app
-- Studio
-  - browser UI where you create and manage builds
+- Mozaiks Console
+  - browser UI where you create and manage apps and builds
 - `factory_app`
   - the shared build workflows that decompose intent and generate the app
 
@@ -27,15 +27,15 @@ Important:
 
 - the local workspace scaffold is **not** the finished app
 - the generated app is staged separately first
-- Studio and the generator workflows are the primary build path
+- the Console and the generator workflows are the primary build path
 
 ## Recommended Path For First-Time Users
 
-Use the full Mozaiks repo checkout and launch Studio locally.
+Use the full Mozaiks repo checkout and launch the Console locally.
 
 Why this is the recommended path:
 
-- Studio lives in the shared frontend shell
+- the Console lives in the shared frontend shell
 - the builder workflows live in `factory_app`
 - those pieces are available in the repo checkout
 
@@ -72,8 +72,8 @@ cd mozaiks
 
 ## Fastest Path
 
-If you already cloned the repo and want the shortest supported path into
-Studio, run the bootstrap script from the repo root.
+If you already cloned the repo and want the shortest supported path into the
+Console, run the bootstrap script from the repo root.
 
 ### PowerShell
 
@@ -92,7 +92,7 @@ What this does:
 - creates `.venv` when missing
 - runs `pip install -e .`
 - launches `mozaiks quickstart`
-- opens Studio
+- opens the Mozaiks Console
 
 If you want the manual steps instead, keep reading.
 
@@ -127,7 +127,7 @@ Important:
 If you are new to Mozaiks, use the builder path.
 
 - Builder path
-  - You want to build an app through Studio and the shared `factory_app` workflows.
+  - You want to build an app through the Console and the shared `factory_app` workflows.
   - Use `mozaiks quickstart`.
 - Framework path
   - You are working on the runtime, CLI, platform hosts, workflow generator, or repo internals.
@@ -135,7 +135,7 @@ If you are new to Mozaiks, use the builder path.
 
 ## Step 3: Set Your Environment Variables
 
-Before launching Studio, set:
+Before launching the Console, set:
 
 - your LLM key
 - your Mongo connection string
@@ -169,7 +169,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 
 If you prefer MongoDB Atlas, set `MONGO_URI` to your Atlas connection string.
 
-## Step 4: Quickstart Into Studio
+## Step 4: Quickstart Into The Console
 
 Run:
 
@@ -183,7 +183,7 @@ What this does:
 - writes minimal core app config files
 - launches the local backend
 - launches the frontend shell
-- opens Studio in your browser
+- opens the Mozaiks Console in your browser
 
 If you want detailed branding/admin setup later, use:
 
@@ -191,24 +191,25 @@ If you want detailed branding/admin setup later, use:
 mozaiks onboard --dir ./my-first-mozaiks-app --full
 ```
 
-## Step 5: Open Studio Create
+## Step 5: Open Apps
 
 If the browser did not open automatically, go to:
 
 ```text
-http://localhost:3000/studio/create
+http://localhost:3000/apps
 ```
 
-This is the main first-run entrypoint.
+This is the main first-run entrypoint for creating and managing apps.
 
 ## Step 6: Start Your First Build
 
-In Studio Create:
+In `Apps`:
 
-1. choose `Greenfield App`
-2. choose your validation strategy
-3. paste your build request
-4. start the build
+1. create a new app
+2. choose `Greenfield App`
+3. choose your validation strategy
+4. paste your build request
+5. start the build
 
 Example prompt:
 
@@ -260,7 +261,7 @@ lifecycle.
 If you are brand new, think about Mozaiks like this:
 
 - `quickstart`
-  - prepares the local workspace and opens Studio
+  - prepares the local workspace and opens the Console
 - `studio --open`
   - advanced way to open the builder directly
 - `factory_app`
@@ -284,7 +285,7 @@ Create or configure a workspace with the lower-level setup command:
 mozaiks onboard --dir ./my-first-mozaiks-app
 ```
 
-Open Studio directly:
+Open the Studio host directly:
 
 ```bash
 mozaiks studio --dir ./my-first-mozaiks-app --open
@@ -308,7 +309,7 @@ mozaiks onboard --dir ./my-first-mozaiks-app --full
 
 That is expected until the first public PyPI release is live.
 
-Mozaiks' Studio-first builder flow depends on the full repo checkout, including:
+Mozaiks' Console-first builder flow depends on the full repo checkout, including:
 
 - `factory_app/`
 - `web_shell/`
@@ -351,7 +352,7 @@ If you already had an older local install cached, remove it before retrying:
 python -m pip uninstall mozaiks
 ```
 
-### Studio does not open
+### Console does not open
 
 Check:
 
@@ -390,7 +391,7 @@ mozaiks studio --dir ./my-first-mozaiks-app --open --backend-port 8001 --fronten
 
 ## Advanced: Runtime-Only Path
 
-If you are **not** trying to use Studio and only want the runtime/CLI surfaces,
+If you are **not** trying to use the Console and only want the runtime/CLI surfaces,
 you can still use the lower-level path:
 
 ```bash

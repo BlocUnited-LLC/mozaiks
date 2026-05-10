@@ -80,7 +80,7 @@ def _change_request_doc(*, artifact_version_id: str) -> ChangeRequestDoc:
                 artifact_key="app_bundle",
                 artifact_version_id=artifact_version_id,
                 raw_user_request="Update the dashboard title and export controls.",
-                source_surface="studio_create",
+                source_surface="app_build",
             ).model_dump(mode="python"),
             "change_intent": ChangeIntentDoc(
                 change_class=ChangeClassification.PATCH,
@@ -209,7 +209,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
                     "artifact_key": "app_bundle",
                     "artifact_version_id": "av_123",
                     "raw_user_request": "Add an export action",
-                    "source_surface": "studio_create",
+                    "source_surface": "app_build",
                 },
             },
             "context_variables": {"screen": "studio-create"},
@@ -263,7 +263,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
             "artifact_key": "app_bundle",
             "artifact_version_id": "av_123",
             "raw_user_request": "Add an export action",
-            "source_surface": "studio_create",
+            "source_surface": "app_build",
             "app_id": captured_prepare["app_id"],
             "user_id": captured_prepare["user_id"],
             "requested_workflow_id": None,
@@ -295,7 +295,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
                 "artifact_key": "app_bundle",
                 "artifact_version_id": "av_123",
                 "raw_user_request": "Add an export action",
-                "source_surface": "studio_create",
+                "source_surface": "app_build",
                 "app_id": captured_prepare["app_id"],
                 "user_id": "demo-user",
                 "requested_workflow_id": None,
@@ -456,7 +456,7 @@ def test_studio_trigger_endpoint_rejects_refinement_when_control_plane_disabled(
                     "artifact_key": "app_bundle",
                     "artifact_version_id": "av_123",
                     "raw_user_request": "Add an export action",
-                    "source_surface": "studio_create",
+                    "source_surface": "app_build",
                 },
             },
         },
@@ -558,7 +558,7 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
                     "artifact_key": "app_bundle",
                     "artifact_version_id": "av_456",
                     "raw_user_request": "Fix the dashboard spacing",
-                    "source_surface": "studio_create",
+                    "source_surface": "app_build",
                 },
                 "coding_request": {
                     "files": {"app/ui/pages/Dashboard.jsx": "export default function Dashboard() {}"},
@@ -765,7 +765,7 @@ def test_studio_trigger_endpoint_can_auto_scope_before_coding_worker(monkeypatch
                     "artifact_key": "app_bundle",
                     "artifact_version_id": "av_789",
                     "raw_user_request": "Fix the dashboard spacing",
-                    "source_surface": "studio_create",
+                    "source_surface": "app_build",
                 },
                 "coding_request": {
                     "validation_strategy": "skip",
@@ -914,7 +914,7 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
                     "artifact_key": "app_bundle",
                     "artifact_version_id": "av_scope_1",
                     "raw_user_request": "Update the dashboard and export panel copy",
-                    "source_surface": "studio_create",
+                    "source_surface": "app_build",
                 },
                 "coding_request": {
                     "validation_strategy": "skip",
@@ -939,7 +939,7 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
                     "artifact_key": "app_bundle",
                     "artifact_version_id": "av_scope_1",
                     "raw_user_request": "Update the dashboard and export panel copy",
-                    "source_surface": "studio_create",
+                    "source_surface": "app_build",
                 },
                 "coding_request": {
                     "validation_strategy": "skip",
@@ -1007,7 +1007,7 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
                     "artifact_key": "app_bundle",
                     "artifact_version_id": "av_core_1",
                     "raw_user_request": "Add blockchain support to the product.",
-                    "source_surface": "studio_create",
+                    "source_surface": "app_build",
                 },
             },
         },
@@ -1180,7 +1180,7 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
                     "artifact_key": "app_bundle",
                     "artifact_version_id": "av_core_1",
                     "raw_user_request": "Add blockchain support to the product.",
-                    "source_surface": "studio_create",
+                    "source_surface": "app_build",
                 },
             },
         },
@@ -1210,7 +1210,7 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
                     "artifact_key": "app_bundle",
                     "artifact_version_id": "av_core_1",
                     "raw_user_request": "Add blockchain support to the product.",
-                    "source_surface": "studio_create",
+                    "source_surface": "app_build",
                 },
                 "harness_action": {
                     "action_id": "confirm_recommended_workflow",
@@ -1356,7 +1356,7 @@ def test_studio_artifact_bundle_endpoint_returns_workbench_payload(monkeypatch, 
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
 
     client = TestClient(studio_app.app)
-    response = client.get("/api/studio/artifacts/av_child_1/bundle")
+    response = client.get("/api/studio/build/artifacts/av_child_1/bundle")
 
     assert response.status_code == 200
     body = response.json()
@@ -1385,7 +1385,7 @@ def test_studio_artifact_review_endpoint_returns_diff_and_session_context(monkey
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
 
     client = TestClient(studio_app.app)
-    response = client.get("/api/studio/artifacts/av_child_1/review")
+    response = client.get("/api/studio/build/artifacts/av_child_1/review")
 
     assert response.status_code == 200
     body = response.json()
@@ -1411,7 +1411,7 @@ def test_studio_artifact_accept_endpoint_marks_current_and_updates_session(monke
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
 
     client = TestClient(studio_app.app)
-    response = client.post("/api/studio/artifacts/av_child_1/accept")
+    response = client.post("/api/studio/build/artifacts/av_child_1/accept")
 
     assert response.status_code == 200
     body = response.json()
@@ -1435,7 +1435,7 @@ def test_studio_artifact_reject_endpoint_archives_and_updates_session(monkeypatc
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: store)
 
     client = TestClient(studio_app.app)
-    response = client.post("/api/studio/artifacts/av_child_1/reject")
+    response = client.post("/api/studio/build/artifacts/av_child_1/reject")
 
     assert response.status_code == 200
     body = response.json()
@@ -1461,7 +1461,7 @@ def test_studio_artifact_promote_endpoint_restores_bundle_and_updates_session(mo
     monkeypatch.setattr(studio_app, "resolve_app_root", lambda: runtime_root)
 
     client = TestClient(studio_app.app)
-    response = client.post("/api/studio/artifacts/av_child_1/promote")
+    response = client.post("/api/studio/build/artifacts/av_child_1/promote")
 
     assert response.status_code == 200
     body = response.json()

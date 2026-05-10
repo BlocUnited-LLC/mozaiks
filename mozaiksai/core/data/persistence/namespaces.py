@@ -31,7 +31,7 @@ class BuilderCollections:
 
 class PlatformCollections:
     BUILD_EVENTS_OUTBOX = "PlatformBuildEventsOutbox"
-    STUDIO_CREATE_STATE = "StudioCreateState"
+    BUILD_STATE = "BuildState"
     APP_CONNECTORS = "AppConnectors"
 
 

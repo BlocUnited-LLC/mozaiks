@@ -2,7 +2,7 @@
 title: UI Systems
 status: Authoritative
 created: 2026-04-11
-updated: 2026-04-23
+updated: 2026-05-09
 ---
 
 # UI Systems
@@ -21,6 +21,11 @@ they do not share one generic authoring contract.
 
 Transition UI is shell-owned routing UI. It is not workflow-local React and it
 is not AppGenerator page output.
+
+Customer-facing route labels should follow the normalized IA from
+`platform-information-architecture.md` and `ux-route-normalization-spec.md`.
+Docs, examples, and generated surfaces should use the visible product
+vocabulary directly: `Apps`, `Build`, `Operations`, and `Integrations`.
 
 Entry example:
 
@@ -49,9 +54,11 @@ Transition declaration example:
 Rules:
 
 - Keep transition routing semantic in `extension_registry.json`.
+- Shared reusable transition primitives are shell-owned. Put them in `chat-ui/src/platform/transitionPrimitives.js` and consume them from workflow transition components via `@mozaiks/chat-ui/platform`.
 - For branded transition visuals, add file-backed transition components under
   `factory_app/workflows/extended_orchestration/ui/` and export through
   `ui/index.js`.
+- Do not create reusable transition primitive layers under individual workflow folders. Keep workflow transition files focused on product-specific copy, imagery, and option mapping.
 - Do not use workflow sequence declarations (`workflow_sequences[]`) for entry UI.
 - Use `transitions[]` for choice/confirm/silent routing and deterministic context seeds.
 - Use `ui.component` to bind to a known shell transition screen.
@@ -60,6 +67,24 @@ Rules:
 - Keep route options semantic (`id`, `route_to`, optional `context_variables`).
 - Transition components emit `option_id`; the router maps that id to route/context effects.
 - Use `workflow_sequences[]` only as runtime workflow sequence metadata for auto-advance and between-workflow transition checkpoints.
+
+### Transition Primitive Catalog
+
+Use these shell-owned pieces when authoring or generating transition UI:
+
+| Primitive | Ownership | Use When |
+| --- | --- | --- |
+| `LauncherScreen` | shell renderer | a lightweight choice screen can be expressed with `ui.props` only |
+| `ConfirmScreen` | shell renderer | the transition is a simple confirm/cancel gate |
+| `TransitionChoicePanel` | `@mozaiks/chat-ui/platform` | a branded transition needs custom title/subtitle/copy and a cohesive modal choice layout |
+| `TransitionChoiceCard` | `@mozaiks/chat-ui/platform` | a custom transition needs reusable full-card options with image, badge, helper text, CTA, disabled state, and equal-height treatment |
+| `useTransitionChoiceMotion` | `@mozaiks/chat-ui/platform` | a custom transition wrapper needs shared entry animation while respecting `prefers-reduced-motion` |
+
+Rules for generated transition wrappers:
+
+- Workflow-local transition components may compose `TransitionChoicePanel` and `TransitionChoiceCard`, but they must not define their own reusable transition primitive layer.
+- Workflow-local transition components should not import `TransitionOverlayFrame`; the shell owns overlay, focus management, backdrop, and Escape behavior.
+- Use workflow-local files only for product-specific copy, imagery, semantic option mapping, and lightweight wrapper composition.
 
 ## App UI
 
@@ -200,7 +225,7 @@ Rules:
 - Named React imports only. No `import React from 'react'`.
 - `typography.js` font-stack constants (`--font-heading`, `--font-body`) are acceptable
   for font-family only; they are not color tokens and are not affected by the v2 token rules.
-- Custom Route UI must not import from `factory_app/app/ui/pages/custom/studio/` or `chat-ui/src/admin/`.
+- Custom Route UI must not import from `factory_app/app/ui/pages/custom/console/` or `chat-ui/src/admin/`.
   The dependency flows one way: app custom routes build on the substrate.
 
 ## Decision Guide

@@ -7,57 +7,31 @@ from typing import Any
 ADMIN_SECTION_ORDER = (
     "overview",
     "users",
-    "billing",
     "usage",
-    "activity",
+    "operations",
     "settings",
-    "integrations",
-    "support",
 )
 
 
 ADMIN_SECTION_META: dict[str, dict[str, Any]] = {
-    "overview": {"label": "Overview", "order": 999, "path": "/admin", "title": "Overview"},
-    "users": {"label": "Users", "order": 1000, "path": "/admin/users", "title": "Users"},
-    "billing": {"label": "Billing", "order": 1001, "path": "/admin/billing", "title": "Billing"},
-    "usage": {"label": "Usage", "order": 1002, "path": "/admin/usage", "title": "Usage"},
-    "activity": {"label": "Activity", "order": 1003, "path": "/admin/activity", "title": "Activity"},
-    "settings": {"label": "Settings", "order": 1004, "path": "/admin/settings", "title": "Settings"},
-    "integrations": {"label": "Integrations", "order": 1005, "path": "/admin/integrations", "title": "Integrations"},
-    "support": {"label": "Support", "order": 1006, "path": "/admin/support", "title": "Support"},
+    "overview": {"label": "Admin", "order": 999, "path": "/apps/:appId/admin", "title": "Admin"},
+    "users": {"label": "Users", "order": 1000, "path": "/apps/:appId/users", "title": "Users"},
+    "usage": {"label": "Usage", "order": 1001, "path": "/apps/:appId/usage", "title": "Usage"},
+    "operations": {"label": "Operations", "order": 1002, "path": "/apps/:appId/operations", "title": "Operations"},
+    "settings": {"label": "Settings", "order": 1003, "path": "/apps/:appId/settings", "title": "Settings"},
 }
 
 
 DEFAULT_RUNTIME_PANELS: list[dict[str, Any]] = [
     {"id": "stats", "label": "Usage Stats", "section": "usage"},
     {"id": "runs", "label": "Active Runs", "section": "usage"},
-    {"id": "sessions", "label": "Recent Sessions", "section": "activity"},
+    {"id": "sessions", "label": "Recent Sessions", "section": "operations"},
 ]
 
 
 def normalize_admin_section_name(value: str) -> str:
     section = value.strip().lower().replace("_", "-")
-    aliases = {
-        "access": "users",
-        "user": "users",
-        "users-access": "users",
-        "payments": "billing",
-        "revenue": "billing",
-        "subscriptions": "billing",
-        "runtime": "usage",
-        "health": "usage",
-        "usage-health": "usage",
-        "logs": "activity",
-        "audit": "activity",
-        "config": "settings",
-        "configuration": "settings",
-        "module": "integrations",
-        "modules": "integrations",
-        "feature": "integrations",
-        "features": "integrations",
-    }
-    normalized = aliases.get(section, section)
-    return normalized if normalized in ADMIN_SECTION_META else "integrations"
+    return section if section in ADMIN_SECTION_META else "overview"
 
 
 def build_default_admin_sections() -> dict[str, dict[str, Any]]:

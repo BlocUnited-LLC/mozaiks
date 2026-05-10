@@ -75,7 +75,7 @@ function SessionsPanel() {
 // Built-in panel registry for this section
 // ---------------------------------------------------------------------------
 
-const ACTIVITY_PANELS = {
+const OPERATIONS_PANELS = {
   sessions: { label: 'Recent Sessions', component: SessionsPanel },
 }
 
@@ -83,18 +83,18 @@ const ACTIVITY_PANELS = {
 // Section
 // ---------------------------------------------------------------------------
 
-export function ActivitySection({ runtimePanels, extensionPanels }) {
+export function OperationsSection({ runtimePanels, extensionPanels }) {
   const hasRuntimeContent = runtimePanels.length > 0
   const hasExtensionContent = extensionPanels.length > 0
 
   return (
     <SectionFrame
-      title="Activity"
-      description="Audit events, notifications, recent changes, and operational history."
+      title="Operations"
+      description="Operational history, validation signals, incidents, and recent runtime activity."
     >
       {runtimePanels.map((panelConfig) => {
         const id = typeof panelConfig === 'string' ? panelConfig : panelConfig?.id
-        const built = ACTIVITY_PANELS[id]
+        const built = OPERATIONS_PANELS[id]
         if (!built) return null
         const label = typeof panelConfig === 'object' && panelConfig?.label ? panelConfig.label : built.label
         const Panel = built.component
@@ -107,7 +107,7 @@ export function ActivitySection({ runtimePanels, extensionPanels }) {
       })}
       <AdminExtensionPanels panels={extensionPanels} />
       {!hasRuntimeContent && !hasExtensionContent && (
-        <EmptyState>No activity or audit panels are configured yet.</EmptyState>
+        <EmptyState>No operations panels are configured yet.</EmptyState>
       )}
     </SectionFrame>
   )

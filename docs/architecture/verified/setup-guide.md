@@ -139,7 +139,7 @@ builder workflows are not stored inside that app root.
 
 ```text
 factory_app/
-├── app/                        # first-party Studio app bundle
+├── app/                        # first-party Console app bundle served by the Studio host
 └── workflows/
     ├── extended_orchestration/
     │   └── extension_registry.json

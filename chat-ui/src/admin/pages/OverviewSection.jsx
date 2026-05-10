@@ -23,7 +23,7 @@ export function OverviewSection({ runtimePanels, extensionPanels }) {
         <StatCard
           label="Tracked Runs"
           value={loading ? '…' : data?.tracked_chats ?? 0}
-          sub="Persisted runtime activity"
+          sub="Persisted runtime operations"
         />
         <StatCard
           label="Admin Extensions"

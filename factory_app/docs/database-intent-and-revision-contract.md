@@ -50,7 +50,7 @@ This contract does not assume:
 - SQL databases
 - ORM-managed schema
 - destructive auto-migrations
-- backward compatibility for pre-production drift
+- preservation of pre-production drift
 
 ## Canonical Ownership
 

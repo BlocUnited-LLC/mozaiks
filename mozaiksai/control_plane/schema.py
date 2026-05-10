@@ -103,7 +103,7 @@ class ControlPlaneRoutingManifest(BaseModel):
 class ControlPlaneManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["mozaiks.control_plane.v1"]
+    schema_version: Literal["mozaiks.control_plane"]
     profile: ControlPlaneProfileInfo
     harness: ControlPlaneHarnessManifest
     routing: ControlPlaneRoutingManifest = Field(default_factory=ControlPlaneRoutingManifest)
@@ -130,7 +130,7 @@ class ControlPlanePromptDefinition(BaseModel):
 class ControlPlanePromptsManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["mozaiks.control_plane.prompts.v1"]
+    schema_version: Literal["mozaiks.control_plane.prompts"]
     prompts: list[ControlPlanePromptDefinition] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -144,7 +144,7 @@ class ControlPlanePromptsManifest(BaseModel):
 class ControlPlaneToolsManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["mozaiks.control_plane.tools.v1"]
+    schema_version: Literal["mozaiks.control_plane.tools"]
     tools: list[ControlPlaneToolDefinition] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -172,7 +172,7 @@ class ControlPlaneScopePolicyManifest(BaseModel):
 class ControlPlanePoliciesManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["mozaiks.control_plane.policies.v1"] = "mozaiks.control_plane.policies.v1"
+    schema_version: Literal["mozaiks.control_plane.policies"] = "mozaiks.control_plane.policies"
     scope: ControlPlaneScopePolicyManifest = Field(default_factory=ControlPlaneScopePolicyManifest)
 
 

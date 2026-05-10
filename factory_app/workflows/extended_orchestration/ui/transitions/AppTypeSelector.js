@@ -1,20 +1,29 @@
-import brownfieldImage from '../../../../app/brand/assets/brownfield_comingsoon.png';
+import brownfieldImage from '../../../../app/brand/assets/brownfield.png';
 import greenfieldImage from '../../../../app/brand/assets/greenfield.png';
+import {
+  TransitionChoiceCard,
+  TransitionChoicePanel,
+  useTransitionChoiceMotion,
+} from '@mozaiks/chat-ui/platform';
 
 const OPTION_VIEW = {
   greenfield_app: {
     label: 'Build Something New',
     description:
-      'Shape a fresh product idea into a build-ready app plan.',
+      'Start with a fresh concept and let Mozaiks guide it into a build-ready app plan.',
     image: greenfieldImage,
-    cta: 'Start',
+    cta: 'Start Build',
   },
   brownfield_app: {
-    label: 'Coming Soon: Existing App',
+    label: 'Existing App',
     description:
-      'Augment a current product with Mozaiks workflows and generated surfaces.',
+      'Bring an existing product into Mozaiks for augmentation, workflows, and generated surfaces.',
     image: brownfieldImage,
-    cta: 'Connect',
+    cta: 'Coming Soon',
+    badge: 'Coming Soon',
+    disabled: true,
+    helperText:
+      'Existing-app onboarding is part of our roadmap but will be available soon.',
   },
 };
 
@@ -23,45 +32,21 @@ const toLabel = (value) =>
     .replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, (m) => m.toUpperCase());
 
-function ChoiceCard({ option, meta, onResolve }) {
-  return (
-    <button
-      type="button"
-      onClick={() => onResolve?.(option.id)}
-      className="group w-full rounded-lg border border-border/70 bg-card/85 p-5 text-left transition hover:border-primary/60 hover:bg-card"
-    >
-      {meta.image ? (
-        <img
-          src={meta.image}
-          alt=""
-          aria-hidden="true"
-          className="mb-4 block w-full rounded-md border border-border/70 bg-muted/20"
-        />
-      ) : (
-        <div className="mb-4 h-2 w-16 rounded-full bg-primary/40 transition group-hover:bg-primary/70" />
-      )}
-      <h2 className="text-base font-semibold text-foreground">{meta.label}</h2>
-      {meta.description ? (
-        <p className="mt-2 text-sm text-muted-foreground">{meta.description}</p>
-      ) : null}
-      <div className="mt-4 inline-flex rounded-md bg-primary/20 px-3 py-1 text-xs font-semibold uppercase text-primary">
-        {meta.cta || 'Continue'}
-      </div>
-    </button>
-  );
-}
-
-export default function AppTypeSelector({ transition, onResolve }) {
+export default function AppTypeSelector({ transition, onResolve, overlayTitleId, overlayDescriptionId }) {
   const options = Array.isArray(transition?.options) ? transition.options : [];
+  const motion = useTransitionChoiceMotion();
 
   return (
-    <section className="flex min-h-full flex-1 items-center justify-center bg-background px-6 py-12">
-      <div className="mx-auto w-full max-w-5xl">
-        <header className="mb-8 text-center">
-          <h1 className="text-3xl font-bold text-foreground">Choose Your App Journey</h1>
-        </header>
-        <div className="grid gap-4 md:grid-cols-2">
-          {options.map((option) => {
+    <TransitionChoicePanel
+      eyebrow="Start Here"
+      title="Choose Your App Journey"
+      subtitle="Start a fresh build now, or preview where existing-product onboarding is heading next."
+      overlayTitleId={overlayTitleId}
+      overlayDescriptionId={overlayDescriptionId}
+      entered={motion.entered}
+      prefersReducedMotion={motion.prefersReducedMotion}
+    >
+      {options.map((option, index) => {
             const meta = OPTION_VIEW[option.id] || {
               label: toLabel(option.id),
               description: '',
@@ -69,16 +54,23 @@ export default function AppTypeSelector({ transition, onResolve }) {
               cta: 'Continue',
             };
             return (
-              <ChoiceCard
+              <TransitionChoiceCard
                 key={option.id}
-                option={option}
-                meta={meta}
+                optionId={option.id}
+                label={meta.label}
+                description={meta.description}
+                image={meta.image}
+                cta={meta.cta || 'Continue'}
+                badge={meta.badge || ''}
+                helperText={meta.helperText || ''}
+                disabled={meta.disabled === true}
                 onResolve={onResolve}
+                entered={motion.entered}
+                prefersReducedMotion={motion.prefersReducedMotion}
+                delayMs={120 + index * 80}
               />
             );
           })}
-        </div>
-      </div>
-    </section>
+    </TransitionChoicePanel>
   );
 }

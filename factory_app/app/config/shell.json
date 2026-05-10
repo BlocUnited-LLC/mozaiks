@@ -4,18 +4,18 @@
       "src": "mozaik_logo.svg",
       "wordmark": "mozaik.png",
       "alt": "Mozaiks logo",
-      "href": "/create"
+      "href": "/apps"
     },
     "pages": [],
     "actions": [
       {
         "id": "create-app",
-        "label": "Create",
-        "path": "/create",
+        "label": "Create App",
+        "path": "/apps/new",
         "path_by_role": {
-          "admin": "/create",
-          "investor": "/create",
-          "default": "/create"
+          "admin": "/apps/new",
+          "investor": "/apps/new",
+          "default": "/apps/new"
         },
         "variant": "primary",
         "visible": true

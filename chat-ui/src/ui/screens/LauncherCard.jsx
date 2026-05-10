@@ -5,8 +5,6 @@
  * Receives all content as props — no hardcoded text or images.
  */
 
-import { useState } from 'react'
-
 /**
  * @param {{
  *   plan: string,
@@ -15,61 +13,88 @@ import { useState } from 'react'
  *   button: string,
  *   onClick: () => void,
  *   disabled?: boolean,
+ *   helperText?: string,
+ *   badge?: string,
+ *   style?: object,
  * }} props
  */
-export function LauncherCard({ plan, description, image, button, onClick, disabled = false }) {
-  const [hovered, setHovered] = useState(false)
+export function LauncherCard({
+  plan,
+  description,
+  image,
+  button,
+  onClick,
+  disabled = false,
+  helperText = '',
+  badge = '',
+  style,
+}) {
+  const interactive = !disabled && typeof onClick === 'function';
 
   return (
     <button
-      onClick={disabled ? undefined : onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      disabled={disabled}
+      type="button"
+      onClick={interactive ? onClick : undefined}
+      aria-disabled={disabled}
+      title={disabled && helperText ? helperText : undefined}
       className={[
-        'flex flex-col items-center text-center rounded-2xl border transition-all duration-200',
-        'bg-card/80 backdrop-blur-sm p-6 gap-4 w-full flex-1',
-        hovered && !disabled
-          ? 'border-primary/60 shadow-lg shadow-primary/10 scale-[1.02]'
-          : 'border-border/50',
-        disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+        'group relative flex flex-col overflow-hidden rounded-[1.5rem] border bg-card/78 p-5 text-left focus:outline-none focus:ring-2 focus:ring-primary/60 focus:ring-offset-2 focus:ring-offset-background',
+        interactive
+          ? 'cursor-pointer border-border/70 transition hover:-translate-y-1 hover:border-primary/60 hover:bg-card hover:shadow-2xl'
+          : 'cursor-not-allowed border-border/60 bg-card/60 opacity-80',
       ].join(' ')}
+      style={{
+        width: '100%',
+        maxWidth: '24rem',
+        flex: '1 1 20rem',
+        boxShadow: interactive
+          ? '0 24px 60px -40px rgba(15, 23, 42, 0.85)'
+          : '0 18px 44px -40px rgba(15, 23, 42, 0.65)',
+        ...style,
+      }}
     >
-      {/* Image */}
+      {badge ? (
+        <span className="absolute right-4 top-4 z-10 rounded-full border border-border/70 bg-background/85 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {badge}
+        </span>
+      ) : null}
+
       {image && (
-        <div className="w-full flex justify-center">
+        <div className="mb-5 flex h-44 w-full items-center justify-center overflow-hidden rounded-2xl border border-border/60 bg-muted/20 p-4">
           <img
             src={image}
-            alt={plan}
-            className="h-40 w-auto object-contain rounded-xl"
+            alt=""
+            aria-hidden="true"
+            className="max-h-full max-w-full object-contain"
             draggable={false}
           />
         </div>
       )}
 
-      {/* Plan label */}
-      <p className="text-xs font-bold tracking-widest uppercase text-primary">
-        {plan}
-      </p>
-
-      {/* Description */}
-      <p className="text-sm text-muted-foreground leading-relaxed flex-1">
-        {description}
-      </p>
-
-      {/* CTA button */}
+      <h2 className="text-lg font-semibold text-foreground">{plan}</h2>
+      {description ? (
+        <p className="mt-3 flex-1 text-sm leading-6 text-muted-foreground">{description}</p>
+      ) : null}
+      {helperText ? (
+        <p className={[
+          'mt-4 text-xs leading-5',
+          disabled ? 'text-warning' : 'text-muted-foreground',
+        ].join(' ')}>
+          {helperText}
+        </p>
+      ) : null}
       <span
         className={[
-          'mt-2 px-6 py-2 rounded-full text-xs font-bold tracking-widest uppercase transition-colors',
+          'mt-5 inline-flex min-h-11 items-center justify-center rounded-xl border px-4 py-3 text-sm font-semibold transition-colors',
           disabled
-            ? 'bg-muted text-muted-foreground'
-            : 'bg-primary text-primary-foreground hover:bg-primary/90',
+            ? 'border-border/70 bg-muted text-muted-foreground'
+            : 'border-primary/40 bg-primary text-primary-foreground group-hover:bg-primary/90',
         ].join(' ')}
       >
         {button}
       </span>
     </button>
-  )
+  );
 }
 
 export default LauncherCard

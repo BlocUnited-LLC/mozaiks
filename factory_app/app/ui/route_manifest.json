@@ -1,50 +1,170 @@
 {
   "pages": [
     {
-      "path": "/hub",
-      "component": "HubPage",
-      "label": "Hub",
+      "path": "/apps/new",
+      "component": "ConsolePage",
+      "label": "Create App",
+      "order": 3,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "Create App",
+        "appShell": true
+      }
+    },
+    {
+      "path": "/apps",
+      "component": "AppsPage",
+      "label": "Apps",
       "order": 4,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
-        "title": "App Hub",
+        "title": "Apps",
         "appShell": true
       }
     },
     {
-      "path": "/studio",
-      "component": "StudioHomePage",
-      "label": "Studio",
+      "path": "/usage",
+      "component": "ConsolePage",
+      "label": "Usage",
       "order": 5,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
-        "title": "Studio Home",
+        "title": "Usage",
         "appShell": true
       }
     },
     {
-      "path": "/studio/create",
-      "component": "StudioCreatePage",
-      "label": "Create",
+      "path": "/operations",
+      "component": "ConsolePage",
+      "label": "Operations",
       "order": 6,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
-        "title": "Studio Create",
+        "title": "Operations",
         "appShell": true
       }
     },
     {
-      "path": "/studio/adapters",
-      "component": "StudioAdaptersPage",
-      "label": "Adapters",
+      "path": "/billing",
+      "component": "ConsolePage",
+      "label": "Billing & Hosting",
       "order": 7,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
-        "title": "Studio Adapters",
+        "title": "Billing & Hosting",
+        "appShell": true
+      }
+    },
+    {
+      "path": "/settings",
+      "component": "ConsolePage",
+      "label": "Workspace Settings",
+      "order": 8,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "Workspace Settings",
+        "appShell": true
+      }
+    },
+    {
+      "path": "/apps/:appId/overview",
+      "component": "AppOverviewPage",
+      "label": "Overview",
+      "order": 20,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "App Overview",
+        "appShell": true
+      }
+    },
+    {
+      "path": "/apps/:appId/build",
+      "component": "AppBuildPage",
+      "label": "Build",
+      "order": 21,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "Build",
+        "appShell": true
+      }
+    },
+    {
+      "path": "/apps/:appId/deploy",
+      "component": "ConsolePage",
+      "label": "Deploy",
+      "order": 22,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "Deploy",
+        "appShell": true
+      }
+    },
+    {
+      "path": "/apps/:appId/users",
+      "component": "AdminPortal",
+      "label": "Users",
+      "order": 23,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "Users",
+        "appShell": true
+      }
+    },
+    {
+      "path": "/apps/:appId/integrations",
+      "component": "AppIntegrationsPage",
+      "label": "Integrations",
+      "order": 24,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "Integrations",
+        "appShell": true
+      }
+    },
+    {
+      "path": "/apps/:appId/usage",
+      "component": "AdminPortal",
+      "label": "Usage",
+      "order": 25,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "Usage",
+        "appShell": true
+      }
+    },
+    {
+      "path": "/apps/:appId/operations",
+      "component": "AdminPortal",
+      "label": "Operations",
+      "order": 26,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "Operations",
+        "appShell": true
+      }
+    },
+    {
+      "path": "/apps/:appId/settings",
+      "component": "AdminPortal",
+      "label": "Settings",
+      "order": 27,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "Settings",
         "appShell": true
       }
     }

@@ -67,7 +67,7 @@ def _pack() -> LoadedControlPlanePack:
     return LoadedControlPlanePack(
         path=Path("factory_app/control_plane"),
         manifest=ControlPlaneManifest(
-            schema_version="mozaiks.control_plane.v1",
+            schema_version="mozaiks.control_plane",
             profile=ControlPlaneProfileInfo(
                 id="factory_app",
                 display_name="Factory App Harness",
@@ -93,7 +93,7 @@ def _pack() -> LoadedControlPlanePack:
             ],
         ),
         prompts=ControlPlanePromptsManifest(
-            schema_version="mozaiks.control_plane.prompts.v1",
+            schema_version="mozaiks.control_plane.prompts",
             prompts=[
                 ControlPlanePromptDefinition(
                     id="change_classifier_system",
@@ -102,7 +102,7 @@ def _pack() -> LoadedControlPlanePack:
             ],
         ),
         tools=ControlPlaneToolsManifest(
-            schema_version="mozaiks.control_plane.tools.v1",
+            schema_version="mozaiks.control_plane.tools",
             tools=[
                 ControlPlaneToolDefinition(
                     id="get_revision_context",

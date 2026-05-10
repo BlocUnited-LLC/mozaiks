@@ -205,5 +205,10 @@ export {
   spacing,
   typography,
 } from './workflowSurfaceStyles.js';
+export {
+  TransitionChoiceCard,
+  TransitionChoicePanel,
+  useTransitionChoiceMotion,
+} from './transitionPrimitives.js';
 
 export default platform;

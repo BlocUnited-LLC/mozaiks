@@ -14,35 +14,27 @@ Modules support workflows — they provide the action surface that AI agents cal
 
 ## What a Module Is
 
-```
+```text
 app/modules/{name}/
-├── module.yaml           ← actions, permissions, capabilities, emits, type
-├── events.yaml           ← domain events this module may publish
-├── subscriptions.yaml    ← event reactions owned by this module
-├── notifications.yaml    ← notification rules derived from events
-├── settings.yaml         ← user/app settings schema (empty list if none)
-├── admin.yaml            ← admin panels (omit file if none)
-│
-│   # type: messaging only
-├── channels.yaml         ← transport/delivery channel definitions (WebSocket, push)
-│
-│   # type: workflow only
-├── states.yaml           ← named states + initial state
-├── transitions.yaml      ← valid transitions, required roles, emitted events
-│
+├── module.yaml              ← required: identity, actions, capabilities
+├── contracts/               ← optional companion manifests
+│   ├── events.yaml          ← domain events this module may publish
+│   ├── reactions.yaml       ← event reactions owned by this module
+│   ├── notifications.yaml   ← notification rules derived from events
+│   ├── settings.yaml        ← user/app settings schema
+│   └── admin.yaml           ← admin panels (omit if none)
+├── runtime_extensions.yaml  ← optional: api_router / startup_service hooks
 └── backend/
     ├── __init__.py
     ├── handler.py        ← required — thin dispatch, one method per action
     ├── service.py        ← recommended — all business logic and event emission
     ├── repo.py           ← recommended — MongoDB access, no logic
     ├── policy.py         ← recommended — multi-tenancy query scoping
-    └── models.py         ← recommended — typed shapes + pure helpers
+    └── schemas.py        ← recommended — typed shapes + pure helpers
 ```
 
-The `type` field in `module.yaml` selects the scaffold pattern:
-`standard` (default), `messaging`, `workflow`, or `transactional`.
-Type-specific YAML files and backend conventions are documented in
-`docs/architecture/foundations/module-type-taxonomy.md`.
+Only `module.yaml` and `backend/handler.py` are required. Add companion manifests
+under `contracts/` only when the module needs them.
 
 The runtime auto-discovers and registers all modules at startup.
 Module routes are auto-mounted at `/api/modules/{name}/{action_id}`.
@@ -59,10 +51,9 @@ module:
   id: {name}
   display_name: {Display Name}
   version: 1.0.0
-  type: standard   # standard | messaging | workflow | transactional
   description: What this module does.
   owner: mozaiks
-  visibility: hosted
+  visibility: internal
   handler: backend.handler:{Name}Handler
 
 permissions:
@@ -96,15 +87,17 @@ actions:
       type: object
       required: [success]
     permissions: [{name}.manage]
-    emits: [hosted.{name}.record.created]
+    emits: [domain.{name}.record_created]
 ```
 
-### 2. Write `events.yaml`
+### 2. Write `contracts/events.yaml`
+
+Only needed when this module publishes domain events.
 
 ```yaml
 schema_version: mozaiks.events.v1
 events:
-  - type: hosted.{name}.record.created
+  - type: domain.{name}.record_created
     version: 1
     description: Emitted when a {name} record is created.
     producer: {name}
@@ -113,29 +106,30 @@ events:
       required: [record_id, owner_id]
 ```
 
-### 3. Write `subscriptions.yaml`
+### 3. Write `contracts/reactions.yaml`
+
+Only needed when this module reacts to events from other modules.
 
 ```yaml
-subscriptions: []
+reactions: []
 # Add entries when this module reacts to events from other modules.
-# Three target kinds:
-#   notification  → create a notification intent from notifications.yaml
-#   capability    → trigger a workflow via orchestrator.yaml capability_id
-#   handler       → route event payload to a handler method (module-to-module)
+# Each reaction routes an event to a handler method on this module's handler class.
 #
-# Example handler target:
-#   - id: {name}.on_something
-#     event: hosted.other_module.something_happened
-#     handler: hosted.{name}.handle_something
+# Example:
+#   - id: {name}.on_other_event
+#     event: domain.other_module.something_happened
+#     handler_method: handle_something
 ```
 
-### 4. Write `notifications.yaml`
+### 4. Write `contracts/notifications.yaml`
+
+Only needed when this module sends notifications on its events.
 
 ```yaml
 schema_version: mozaiks.notifications.v1
 notifications:
   - id: {name}.record_created.admin
-    event: hosted.{name}.record.created
+    event: domain.{name}.record_created
     channels: [in_app, email]
     recipients: [admin]
     template:
@@ -144,14 +138,16 @@ notifications:
         A new {name} record has been created by {{owner_id}}.
 ```
 
-### 5. Write `settings.yaml`
+### 5. Write `contracts/settings.yaml`
+
+Only needed when this module exposes user/app configurable settings.
 
 ```yaml
 schema_version: mozaiks.settings.v1
 settings: []
 ```
 
-### 6. Write `backend/models.py`
+### 6. Write `backend/schemas.py`
 
 TypedDicts for MongoDB document shapes. Pure helpers. No I/O.
 
@@ -215,7 +211,7 @@ MongoDB access only. No business logic, no event emission, no validation.
 from __future__ import annotations
 from typing import Any
 
-COLLECTION = "hosted_{name}_records"
+COLLECTION = "domain_{name}_records"
 
 
 class {Name}Repo:
@@ -259,7 +255,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from .models import {Name}Record, coerce_limit, timestamp_now
+from .schemas import {Name}Record, coerce_limit, timestamp_now
 from .policy import owner_id_from_context, scoped_owner_query, scoped_record_query
 from .repo import {Name}Repo
 
@@ -287,7 +283,7 @@ class {Name}Service:
         }
         await self.repo.insert(ctx, record=record)
         await ctx.emit(
-            "hosted.{name}.record.created",
+            "domain.{name}.record_created",
             {"record_id": record["record_id"], "owner_id": owner_id, "name": name},
         )
         return {"success": True, "record": dict(record)}
@@ -338,23 +334,24 @@ Modules are loaded at startup. No registration step needed.
 | `service.py` | Validate, call repo, call ctx.emit after commit | ctx.db direct access, HTTP calls |
 | `repo.py` | MongoDB queries, cursor iteration | Business logic, event emission, validation |
 | `policy.py` | Build query dicts from ctx | DB access, side effects |
-| `models.py` | TypedDicts, timestamp_now, coerce_limit | I/O, imports from service/repo |
+| `schemas.py` | TypedDicts, timestamp_now, coerce_limit | I/O, imports from service/repo |
 
 ---
 
-## Subscription Handler Target (module-to-module)
+## Event Reactions (module-to-module)
 
 When this module needs to react to an event from another module without starting
-a workflow, use the `handler` target in `subscriptions.yaml`:
+a workflow, declare it in `contracts/reactions.yaml` and add the handler method:
 
 ```yaml
-subscriptions:
+# contracts/reactions.yaml
+reactions:
   - id: {name}.on_other_event
-    event: hosted.other_module.something_happened
-    handler: hosted.{name}.handle_something
+    event: domain.other_module.something_happened
+    handler_method: handle_something
 ```
 
-Add `handle_something` as a method on `{Name}Handler` (and delegate to service):
+Add `handle_something` as a method on `{Name}Handler` (delegate to service):
 
 ```python
 async def handle_something(self, ctx, *, field_from_event: str) -> dict[str, Any]:

@@ -27,7 +27,7 @@ If a phase is not complete, do not pretend later phases are solved by adding one
 - [ ] Strategy doc is canonical and referenced from the docs index
 - [ ] Existing-app augmentation doc is canonical and referenced from the docs index
 - [ ] Existing architecture docs do not teach a conflicting workflow-first story
-- [ ] Temporary placeholders are explicitly documented as transitional
+- [ ] Temporary placeholders are explicitly marked non-canonical and scheduled for replacement
 - [ ] Coding-agent guidance points to the strategy + this checklist for builder work
 
 **Acceptance**

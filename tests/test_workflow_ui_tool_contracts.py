@@ -142,11 +142,11 @@ def test_generator_prompts_treat_connector_state_as_platform_owned() -> None:
 
     assert "platform connector flow" in agent_generator
     assert "Do not create workflow collections for API keys" in agent_generator
-    assert "Studio adapters/admin surface" in agent_generator
-    assert "some integrations may already be ready from the Studio adapters surface" in agent_generator
+    assert "workspace integrations/admin surface" in agent_generator
+    assert "some integrations may already be ready from the workspace integrations surface" in agent_generator
     assert "missing dependency" in agent_generator
     assert "must not be modeled as app/business collections inside `database_intent_bundle`" in design_docs
-    assert "Connector credentials, API-key metadata, and Studio adapter records are platform-owned integration state." in app_generator
+    assert "Connector credentials, API-key metadata, and workspace integration records are platform-owned integration state." in app_generator
     assert "app connector inventory as the source of truth" in app_generator
 
 

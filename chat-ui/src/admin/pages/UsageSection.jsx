@@ -28,7 +28,7 @@ function StatsPanel() {
       <StatCard label="Total Runs"        value={data.tracked_chats} />
       <StatCard label="Agent Turns"       value={data.total_agent_turns} />
       <StatCard label="Errors"            value={data.total_errors}
-        sub={data.total_errors > 0 ? 'check activity panel' : 'clean'} />
+        sub={data.total_errors > 0 ? 'check operations panel' : 'clean'} />
       <StatCard label="Prompt Tokens"     value={data.total_prompt_tokens?.toLocaleString()} />
       <StatCard label="Completion Tokens" value={data.total_completion_tokens?.toLocaleString()} />
       <StatCard label="Total Tokens"      value={totalTokens.toLocaleString()} />

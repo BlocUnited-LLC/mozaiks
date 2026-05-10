@@ -284,7 +284,7 @@ const ModernChatInterface = ({
     ? 'Choose an action to continue...'
     : (pendingComposerInputToolCall || pendingComposerReply)
       ? 'Reply to continue the workflow...'
-      : 'Transmit your message...';
+      : 'Message the agent\u2026';
 
   // Agent action handler - used by UI tool event responses
   const handleAgentAction = (action) => {
@@ -491,13 +491,13 @@ const ModernChatInterface = ({
   })();
 
   const messageStackClass = isOnChatPage
-    ? 'chat-feed-stream flex flex-col gap-2 md:gap-3'
-    : 'relative space-y-2 md:space-y-3';
+    ? 'chat-feed-stream flex flex-col'
+    : 'relative';
 
   const disableMobileShellChrome = conversationMode === 'ask';
 
   const messageStack = (
-    <div className={messageStackClass}>
+    <div className={messageStackClass} style={{ rowGap: 'var(--chat-bubble-stack-gap, 1rem)' }}>
       {/* Messages render below */}
       {renderedMessages}
       {/* Typing indicator slot (rendered when loading without messages updating) */}
@@ -691,6 +691,10 @@ const ModernChatInterface = ({
           )}
         </div>
 
+        {/* Scroll gradient fades */}
+        <div className="chat-scroll-fade-top" aria-hidden="true" />
+        <div className="chat-scroll-fade-bottom" aria-hidden="true" />
+
         {/* Jump to Present Button - Positioned over the messages area */}
         {isScrolledUp && (
       <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-10">
@@ -705,7 +709,7 @@ const ModernChatInterface = ({
       </div>
 
   {/* Fixed Transmission Input Area - Never moves */}
-            <div className={`flex-shrink-0 p-2 sm:p-2.5 md:p-3 border-t border-[rgba(var(--color-primary-light-rgb),0.2)] bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.05)] to-[rgba(var(--color-secondary-rgb),0.05)] backdrop-blur-xl shadow-lg transition-all duration-500 transmission-input-tight rounded-b-[inherit]`}>
+            <div className={`flex-shrink-0 p-3 sm:p-4 border-t border-[rgba(var(--color-primary-light-rgb),0.2)] bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.05)] to-[rgba(var(--color-secondary-rgb),0.05)] backdrop-blur-xl shadow-lg transition-all duration-500 transmission-input-tight rounded-b-[inherit]`}>
         {false && showComposerBanner && (
           <div className="mb-2 rounded-xl border border-[rgba(var(--color-primary-light-rgb),0.3)] bg-[rgba(var(--color-primary-rgb),0.08)] px-3 py-2 backdrop-blur-sm">
             <div className="flex items-start justify-between gap-3">
@@ -737,7 +741,7 @@ const ModernChatInterface = ({
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-primary-light)]">
-                  Control Plane
+                  Build Routing
                 </div>
                 <div className="mt-1 text-sm font-semibold text-white">
                   {pendingHarnessTitle}
@@ -854,7 +858,9 @@ const ModernChatInterface = ({
               title={isUploadingFile ? 'Uploading…' : 'Upload a file'}
               aria-label={isUploadingFile ? 'Uploading file' : 'Upload file'}
             >
-              <span className="text-base sm:text-lg" aria-hidden="true">📎</span>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 sm:w-5 sm:h-5" aria-hidden="true">
+                <path fillRule="evenodd" d="M15.621 4.379a3 3 0 0 0-4.242 0l-7 7a3 3 0 0 0 4.241 4.243h.001l.497-.5a.75.75 0 0 1 1.064 1.057l-.498.501-.002.002a4.5 4.5 0 0 1-6.364-6.364l7-7a4.5 4.5 0 0 1 6.368 6.36l-3.455 3.553A2.625 2.625 0 1 1 9.52 9.52l3.45-3.451a.75.75 0 1 1 1.061 1.06l-3.45 3.451a1.125 1.125 0 0 0 1.587 1.595l3.454-3.553a3 3 0 0 0 0-4.243Z" clipRule="evenodd" />
+              </svg>
             </button>
           )}
 
@@ -870,9 +876,11 @@ const ModernChatInterface = ({
             `}
           >
             {buttonText === 'NEXT' ? (
-              <span className="text-base sm:text-lg" aria-label="Launch" role="img">🚀</span>
+              <span className="text-[11px] font-bold tracking-widest" aria-label="Continue">NEXT</span>
             ) : (
-              <span className="text-base sm:text-lg" aria-label="Transmit" role="img">📡</span>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 sm:w-5 sm:h-5" aria-hidden="true">
+                <path d="M3.105 2.288a.75.75 0 0 0-.826.95l1.414 4.926A1.5 1.5 0 0 0 5.135 9.25h6.115a.75.75 0 0 1 0 1.5H5.135a1.5 1.5 0 0 0-1.442 1.086l-1.414 4.926a.75.75 0 0 0 .826.95 28.897 28.897 0 0 0 15.293-7.154.75.75 0 0 0 0-1.115A28.897 28.897 0 0 0 3.105 2.288Z" />
+              </svg>
             )}
           </button>
         </form>

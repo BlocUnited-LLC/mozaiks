@@ -19,7 +19,7 @@ def _routing_decision(change_class: ChangeClass) -> RefinementRoutingDecision:
         artifact_key="app_bundle",
         artifact_version_id="av_123",
         raw_user_request="Change the dashboard",
-        source_surface="studio_create",
+        source_surface="app_build",
         app_id="app_1",
         requested_workflow_id="AppGenerator",
     )

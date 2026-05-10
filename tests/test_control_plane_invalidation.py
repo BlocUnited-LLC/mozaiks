@@ -43,7 +43,7 @@ def _request() -> RefinementRequest:
         artifact_key="app_bundle",
         artifact_version_id="av_app_1",
         raw_user_request="Refresh the app information architecture.",
-        source_surface="studio_create",
+        source_surface="app_build",
         app_id="app_1",
         user_id="user_1",
         requested_workflow_id="AppGenerator",

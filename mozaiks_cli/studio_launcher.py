@@ -122,7 +122,7 @@ def launch_studio(
 
     backend_url = f"http://localhost:{backend_port}/api/health"
     frontend_url = f"http://localhost:{frontend_port}/"
-    studio_url = f"http://localhost:{frontend_port}/studio/create"
+    studio_url = f"http://localhost:{frontend_port}/apps"
 
     backend_process = None
     if not _http_ready(backend_url):

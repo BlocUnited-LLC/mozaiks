@@ -1,48 +1,48 @@
 /**
- * factory_app/app/ui — Studio UI registration.
+ * factory_app/app/ui — first-party workspace UI registration.
  *
- * Studio is the shared management interface. It remains an optional
- * framework-owned capability loaded by the host shell, but its React
- * implementation lives inside the factory app UI tree under pages/custom/studio/.
+ * The first-party workspace console remains a framework-owned capability loaded
+ * by the host shell, but its React implementation lives inside the factory app
+ * UI tree under pages/custom/console/.
  */
 
 import { lazy } from 'react';
 
 const AdminPage = lazy(() => import('@mozaiks/chat-ui/pages/AdminPage.jsx'));
-const StudioPage = lazy(() => import('./pages/custom/studio/StudioPage.jsx'));
-const HubPage = lazy(() => import('./pages/custom/studio/HubPage.jsx'));
-const StudioHomePage = lazy(() => import('./pages/custom/studio/StudioHomePage.jsx'));
-const StudioCreatePage = lazy(() => import('./pages/custom/StudioCreatePage.jsx'));
-const StudioAdaptersPage = lazy(() => import('./pages/custom/studio/StudioAdaptersPage.jsx'));
+const ConsolePage = lazy(() => import('./pages/custom/console/ConsolePage.jsx'));
+const AppsPage = lazy(() => import('./pages/custom/console/AppsPage.jsx'));
+const AppOverviewPage = lazy(() => import('./pages/custom/console/AppOverviewPage.jsx'));
+const AppBuildPage = lazy(() => import('./pages/custom/console/AppBuildPage.jsx'));
+const AppIntegrationsPage = lazy(() => import('./pages/custom/console/AppIntegrationsPage.jsx'));
 
-export function registerStudioComponents(registerComponent) {
+export function registerConsoleComponents(registerComponent) {
   if (typeof registerComponent !== 'function') return;
 
   registerComponent('AdminPortal', AdminPage, {
-    description: 'Unified admin shell — app, module, and runtime/operator panels. Platform-management surface registered by Studio.',
+    description: 'Unified admin shell — app, module, and runtime/operator panels. Platform-management surface registered by the workspace console.',
   });
 
-  registerComponent('StudioPage', StudioPage, {
-    description: 'Studio shell — internal router for all /studio/* and /hub paths.',
+  registerComponent('ConsolePage', ConsolePage, {
+    description: 'Workspace console shell — internal router for the first-party app directory and app-console surfaces.',
   });
 
-  registerComponent('HubPage', HubPage, {
-    description: 'Hub — My Apps list. Shows all app records for the current user and routes into Studio per app.',
+  registerComponent('AppsPage', AppsPage, {
+    description: 'Apps directory — shows app records for the current user and routes into the app console per app.',
   });
 
-  registerComponent('StudioHomePage', StudioHomePage, {
-    description: 'Studio Home surface — shows app intent, workspace readiness, and the next recommended build step.',
+  registerComponent('AppOverviewPage', AppOverviewPage, {
+    description: 'App overview surface — shows app intent, readiness, and the next recommended build step.',
   });
 
-  registerComponent('StudioCreatePage', StudioCreatePage, {
-    description: 'Studio Create surface — factory-owned create and refinement control plane routed through the Studio shell.',
+  registerComponent('AppBuildPage', AppBuildPage, {
+    description: 'Build surface — factory-owned create and refinement surface routed through the workspace console.',
   });
 
-  registerComponent('StudioAdaptersPage', StudioAdaptersPage, {
-    description: 'Studio Adapters surface — focused third-party adapter inventory and CRUD controls for app-scoped integrations.',
+  registerComponent('AppIntegrationsPage', AppIntegrationsPage, {
+    description: 'Integrations surface — focused third-party connector inventory and CRUD controls for app-scoped integrations.',
   });
 }
 
 export function register(registerComponent) {
-  registerStudioComponents(registerComponent);
+  registerConsoleComponents(registerComponent);
 }

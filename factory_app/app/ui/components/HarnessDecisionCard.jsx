@@ -19,13 +19,13 @@ export default function HarnessDecisionCard({
 
   const actions = Array.isArray(decision.actions) ? decision.actions : []
   const selectedPaths = Array.isArray(decision.selected_paths) ? decision.selected_paths : []
-  const title = TITLES[decision.decision_type] || 'Harness Decision'
+  const title = TITLES[decision.decision_type] || 'Routing Decision'
 
   return (
     <div className={['rounded-2xl border border-border bg-background/70 p-4', className].join(' ').trim()}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Control Plane</div>
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Build Routing</div>
           <div className="mt-1 text-base font-semibold text-foreground">{title}</div>
         </div>
         {typeof decision.confidence === 'number' && (

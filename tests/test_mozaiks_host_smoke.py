@@ -9,7 +9,7 @@ import pytest
 async def test_studio_shell_config_injects_studio_routes():
     from mozaiksai.hosts import studio as studio_app
 
-    shell_config = await studio_app.get_studio_shell_config()
+    shell_config = await studio_app.get_console_shell_config()
     page_paths = {page.get("path") for page in shell_config.get("pages", [])}
     header_paths = {
         page.get("path")
@@ -17,23 +17,23 @@ async def test_studio_shell_config_injects_studio_routes():
         if isinstance(page, dict)
     }
 
-    # Factory app uses /hub as its main landing page (product workspaces may use /dashboard)
-    assert "/hub" in page_paths or "/dashboard" in page_paths
-    assert "/create" in page_paths or "/hub" in page_paths
-    assert "/admin" in page_paths
-    assert "/admin/users" in page_paths
-    assert "/admin/billing" in page_paths
-    assert "/admin/usage" in page_paths
+    assert "/apps" in page_paths
+    assert "/apps/:appId/overview" in page_paths
+    assert "/apps/:appId/build" in page_paths
+    assert "/apps/:appId/integrations" in page_paths
+    assert "/apps/:appId/admin" in page_paths
+    assert "/apps/:appId/users" in page_paths
+    assert "/apps/:appId/usage" in page_paths
+    assert "/apps/:appId/operations" in page_paths
+    assert "/apps/:appId/settings" in page_paths
     assert "/profile" in page_paths
-    assert "/studio" in page_paths
-    assert "/studio/create" in page_paths
-    assert "/studio" not in header_paths
-    assert "/studio/create" not in header_paths
+    assert "/apps" not in header_paths
+    assert "/apps/:appId/build" not in header_paths
     assert "/profile" not in header_paths
 
     studio_pages = {page.get("path"): page for page in shell_config.get("pages", [])}
-    assert studio_pages["/studio"]["meta"]["requiresRole"] == "admin"
-    assert studio_pages["/studio/create"]["meta"]["requiresRole"] == "admin"
+    assert studio_pages["/apps"]["meta"]["requiresRole"] == "admin"
+    assert studio_pages["/apps/:appId/build"]["meta"]["requiresRole"] == "admin"
 
 
 def test_mozaiks_app_composes_studio_host():
@@ -55,13 +55,43 @@ def test_studio_endpoints_work_without_auth_user_id(monkeypatch):
         async def list_change_requests(self, **_kwargs):
             return []
 
+    class _AppRegistryService:
+        def __init__(self) -> None:
+            self._app = None
+
+        async def create_app_record(self, **kwargs):  # noqa: ANN003
+            self._app = {
+                "app_id": kwargs.get("app_id") or "smoke-app",
+                "bundle_path": None,
+                "created_at": "2025-01-01T00:00:00+00:00",
+                "description": kwargs.get("description"),
+                "last_status_changed_at": "2025-01-01T00:00:00+00:00",
+                "lifecycle_state": kwargs.get("status", "draft"),
+                "name": kwargs.get("name", "Smoke App"),
+                "owner_user_id": kwargs.get("owner_user_id", "demo-user"),
+                "updated_at": "2025-01-01T00:00:00+00:00",
+                "build_registry_id": "appreg_smoke",
+            }
+            return {"success": True, "app": self._app}
+
+        async def get_app_record(self, **_kwargs):
+            return {"app": self._app}
+
+    service = _AppRegistryService()
+
     monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     monkeypatch.setattr(studio_app, "get_artifact_store", lambda: _ArtifactStore())
+    monkeypatch.setattr(studio_app, "_get_app_registry_service", lambda: service)
     reset_auth_adapter()
 
     client = TestClient(studio_app.app)
-    build_response = client.get("/api/studio/create")
-    history_response = client.get("/api/studio/history?limit=10")
+    create_response = client.post("/api/studio/apps", json={"name": "Smoke App"})
+    assert create_response.status_code == 200
+    app_id = create_response.json()["app"]["app_id"]
+
+    build_response = client.get(f"/api/studio/build?app_id={app_id}")
+    history_response = client.get("/api/studio/build/history?limit=10")
 
     assert build_response.status_code == 200
     assert history_response.status_code == 200

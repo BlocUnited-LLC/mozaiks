@@ -1,8 +1,8 @@
 """
 update_app_record — called at the end of the AppGenerator pipeline.
 
-Updates the hosted product build-registry record to 'generated' once the bundle
-is written, so the Hub reflects the completed build.
+Updates the app lifecycle record to 'review' once the bundle is written, so the
+Console reflects a completed build that is ready for inspection.
 
 Best-effort: never raises.
 """

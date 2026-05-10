@@ -12,6 +12,10 @@ hooks:
   filename: hook_primitive_catalog.py
   function: inject_primitive_catalog
 - hook_type: update_agent_state
+  hook_agent: PackMetadataAgent
+  filename: hook_primitive_catalog.py
+  function: inject_primitive_catalog
+- hook_type: update_agent_state
   hook_agent: ToolsManagerAgent
   filename: hook_primitive_catalog.py
   function: inject_primitive_catalog

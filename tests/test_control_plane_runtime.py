@@ -36,7 +36,7 @@ def test_checkpoint_runtime_binds_and_caches_handlers(tmp_path: Path, monkeypatc
     pack = LoadedControlPlanePack(
         path=tmp_path,
         manifest=ControlPlaneManifest(
-            schema_version="mozaiks.control_plane.v1",
+            schema_version="mozaiks.control_plane",
             profile=ControlPlaneProfileInfo(id="test", display_name="Test", description="Test pack"),
             harness=ControlPlaneHarnessManifest(implementation="example_control_plane:ExampleHandler"),
             checkpoints=[
@@ -48,11 +48,11 @@ def test_checkpoint_runtime_binds_and_caches_handlers(tmp_path: Path, monkeypatc
             ],
         ),
         prompts=ControlPlanePromptsManifest(
-            schema_version="mozaiks.control_plane.prompts.v1",
+            schema_version="mozaiks.control_plane.prompts",
             prompts=[],
         ),
         tools=ControlPlaneToolsManifest(
-            schema_version="mozaiks.control_plane.tools.v1",
+            schema_version="mozaiks.control_plane.tools",
             tools=[],
         ),
     )

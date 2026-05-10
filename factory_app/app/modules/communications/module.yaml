@@ -1,0 +1,180 @@
+schema_version: mozaiks.module.v1
+module:
+  id: communications
+  display_name: Communications
+  version: 1.0.0
+  type: messaging
+  description: Standalone direct messages, group threads, and announcement delivery.
+  owner: app
+  visibility: private
+  handler: backend.handler:CommunicationsModule
+permissions:
+  - id: communications.read
+    description: View threads, messages, and announcements.
+  - id: communications.write
+    description: Create threads and send messages.
+  - id: communications.announce
+    description: Post announcements to a wider audience.
+  - id: communications.moderate
+    description: Moderate threads and view communications operations panels.
+actions:
+  - id: create_thread
+    description: Create a new direct or group thread.
+    handler_method: create_thread
+    input_schema:
+      type: object
+      required:
+        - title
+        - participant_ids
+      properties:
+        title:
+          type: string
+        participant_ids:
+          type: array
+          items:
+            type: string
+        thread_type:
+          type: string
+          enum:
+            - direct
+            - group
+    output_schema:
+      type: object
+      properties:
+        thread_id:
+          type: string
+        title:
+          type: string
+    permissions:
+      - communications.write
+    emits:
+      - domain.communications.thread_created
+  - id: send_message
+    description: Send a message into an existing thread.
+    handler_method: send_message
+    input_schema:
+      type: object
+      required:
+        - thread_id
+        - body
+      properties:
+        thread_id:
+          type: string
+        body:
+          type: string
+        attachments:
+          type: array
+          items:
+            type: string
+    output_schema:
+      type: object
+      properties:
+        message_id:
+          type: string
+        thread_id:
+          type: string
+        sent_at:
+          type: string
+    permissions:
+      - communications.write
+    emits:
+      - domain.communications.message_sent
+  - id: mark_thread_read
+    description: Update the caller's read state for a thread.
+    handler_method: mark_thread_read
+    input_schema:
+      type: object
+      required:
+        - thread_id
+        - message_id
+      properties:
+        thread_id:
+          type: string
+        message_id:
+          type: string
+    output_schema:
+      type: object
+      properties:
+        thread_id:
+          type: string
+        last_read_message_id:
+          type: string
+        read_at:
+          type: string
+    permissions:
+      - communications.read
+    emits:
+      - domain.communications.thread_read
+  - id: post_announcement
+    description: Broadcast an announcement to a configured audience.
+    handler_method: post_announcement
+    input_schema:
+      type: object
+      required:
+        - title
+        - body
+        - audience_scope
+      properties:
+        title:
+          type: string
+        body:
+          type: string
+        audience_scope:
+          type: string
+          enum:
+            - organization
+            - role
+            - thread
+    output_schema:
+      type: object
+      properties:
+        announcement_id:
+          type: string
+        sent_at:
+          type: string
+    permissions:
+      - communications.announce
+    emits:
+      - domain.communications.announcement_posted
+capabilities:
+  - capability_id: communications.create_thread
+    kind: action
+    target: create_thread
+    title: Create Thread
+    permissions:
+      - communications.write
+    input_schema:
+      type: object
+      required:
+        - title
+        - participant_ids
+      properties:
+        title:
+          type: string
+        participant_ids:
+          type: array
+          items:
+            type: string
+  - capability_id: communications.send_message
+    kind: action
+    target: send_message
+    title: Send Message
+    permissions:
+      - communications.write
+    input_schema:
+      type: object
+      required:
+        - thread_id
+        - body
+      properties:
+        thread_id:
+          type: string
+        body:
+          type: string
+  - capability_id: communications.messages_page
+    kind: page
+    target: /messages
+    title: Messages
+    permissions:
+      - communications.read
+    input_schema: null

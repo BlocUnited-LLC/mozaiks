@@ -43,9 +43,9 @@ CANONICAL_MOZAIKS_ROUTES = {
     ("POST", "/chat/{app_id}/{chat_id}/{user_id}/input"),
     ("POST", "/chat/{app_id}/{chat_id}/component_action"),
     ("POST", "/api/tool-call/respond"),
-    ("GET", "/api/studio/home"),
-    ("GET", "/api/studio/create"),
-    ("PUT", "/api/studio/create"),
+    ("GET", "/api/studio/overview"),
+    ("GET", "/api/studio/build"),
+    ("PUT", "/api/studio/build"),
     ("WS", "/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}"),
 }
 

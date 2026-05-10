@@ -133,22 +133,36 @@ Canonical target:
 
 When working in or generating modules:
 
-- Every capability pack that needs deterministic app behavior must emit the
-  canonical module contract files: `module.yaml`, `events.yaml`,
-  `subscriptions.yaml`, `notifications.yaml`, `settings.yaml`, `admin.yaml`,
-  and `backend/handler.py`.
-- YAML declares contracts, capabilities, events, settings, notification rules,
-  subscriptions, and admin panels.
-- Python stubs implement behavior and hooks: `backend/handler.py` is required
-  (thin dispatch — one method per declared action, no business logic, no ctx.db,
-  no ctx.emit); `backend/service.py`, `backend/repo.py`, `backend/policy.py`,
-  and `backend/schemas.py` are the canonical support files for any module with
-  database access;
-  `backend/settings.py`, `backend/subscriptions.py`, `backend/notifications.py`,
-  and `backend/admin.py` are optional hooks.
-- Generic modules may publish `domain.*` events. Workflow starts/resumes are
-  resolved by runtime/platform trigger contracts, not by hardcoded workflow
-  names in module code.
+- Only `module.yaml` and `backend/handler.py` are required. All companion manifests
+  live under `contracts/` and are optional — include only what the module needs.
+- Canonical module shape:
+  ```
+  modules/{module_id}/
+  ├── module.yaml                     ← required: identity, actions, capabilities
+  ├── contracts/                      ← optional companion manifests
+  │   ├── events.yaml                 ← domain events this module may publish
+  │   ├── reactions.yaml              ← event reactions owned by this module
+  │   ├── notifications.yaml          ← notification rules per event
+  │   ├── settings.yaml               ← user/app settings schema
+  │   ├── admin.yaml                  ← admin panels mounted into /admin/*
+  │   └── entitlements.yaml           ← optional capability entitlements
+  ├── runtime_extensions.yaml         ← optional: api_router / startup_service
+  └── backend/
+      ├── handler.py                  ← required: thin dispatch, one method per action
+      ├── service.py                  ← recommended: business logic and event emission
+      ├── repo.py                     ← recommended: MongoDB access layer, no logic
+      ├── policy.py                   ← recommended: query scoping for multi-tenancy
+      ├── schemas.py                  ← recommended: typed request/response + document shapes
+      ├── settings.py                 ← optional: settings hooks
+      └── admin.py                    ← optional: admin panel hooks
+  ```
+- `backend/handler.py` is thin dispatch only — one method per declared action, no
+  business logic, no `ctx.db`, no `ctx.emit`.
+- `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and
+  `backend/schemas.py` are the canonical support files for any module with database access.
+- App modules publish `domain.*` events. Hosted product modules use `hosted.*`.
+  Workflow starts/resumes are resolved by runtime/platform trigger contracts, not by
+  hardcoded workflow names in module code.
 - AppGenerator produces these files through structured output models. Keep the
   generated shapes aligned with runtime loaders, docs, and tests.
 
@@ -168,9 +182,9 @@ When introducing or changing YAML contracts:
   validators/loaders, docs, and tests together so generators do not drift from
   execution.
 
-This applies to `module.yaml`, `events.yaml`, `subscriptions.yaml`,
-`notifications.yaml`, `settings.yaml`, `admin.yaml`, workflow YAMLs, and page
-schemas.
+This applies to `module.yaml`, `contracts/events.yaml`, `contracts/reactions.yaml`,
+`contracts/notifications.yaml`, `contracts/settings.yaml`, `contracts/admin.yaml`,
+workflow YAMLs, and page schemas.
 
 ## Contract-Declared Customization Rule
 

@@ -5843,8 +5843,8 @@ useEffect(() => {
   const shouldReserveArtifactSpace = conversationMode === 'workflow';
   const mobileChatPaddingBottomClass = shouldReserveArtifactSpace
     ? (mobileDrawerState === 'expanded'
-        ? 'pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)]'
-        : 'pb-[calc(env(safe-area-inset-bottom,0px)+5.75rem)]')
+        ? 'pb-[calc(env(safe-area-inset-bottom,0px)+0.5rem)]'
+        : 'pb-[calc(env(safe-area-inset-bottom,0px)+5rem)]')
     : 'pb-[calc(env(safe-area-inset-bottom,0px)+0.5rem)]';
   const mobileChatTopMarginClass = 'mt-0';
 
@@ -6228,8 +6228,8 @@ useEffect(() => {
           </div>
         )}
       </div>
-      <Footer />
-      
+      {!isMobileView && <Footer />}
+
     </div>
   );
 };

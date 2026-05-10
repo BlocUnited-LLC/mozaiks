@@ -9,7 +9,7 @@ const SECTION_VARIANT = {
   users:        'primary',
   billing:      'warning',
   usage:        'success',
-  activity:     'default',
+  operations:   'default',
   settings:     'default',
   support:      'default',
   integrations: 'default',

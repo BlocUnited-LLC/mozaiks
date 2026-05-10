@@ -69,7 +69,7 @@ def load_control_plane_pack(
     tools = ControlPlaneToolsManifest.model_validate(_load_yaml_file(pack_path / "config" / "tools.yaml"))
     policies = ControlPlanePoliciesManifest.model_validate(
         _load_yaml_file(pack_path / "config" / "policies.yaml", required=False)
-        or {"schema_version": "mozaiks.control_plane.policies.v1"}
+        or {"schema_version": "mozaiks.control_plane.policies"}
     )
     _validate_pack(manifest=manifest, prompts=prompts, tools=tools, pack_path=pack_path)
     return LoadedControlPlanePack(path=pack_path, manifest=manifest, prompts=prompts, tools=tools, policies=policies)
@@ -101,7 +101,7 @@ def _load_prompt_manifest(prompts_root: Path) -> ControlPlanePromptsManifest:
         prompts.append(ControlPlanePromptDefinition(id=prompt_id, content=content))
 
     return ControlPlanePromptsManifest(
-        schema_version="mozaiks.control_plane.prompts.v1",
+        schema_version="mozaiks.control_plane.prompts",
         prompts=prompts,
     )
 

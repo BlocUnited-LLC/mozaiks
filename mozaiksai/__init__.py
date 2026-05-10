@@ -5,7 +5,7 @@ The canonical host entrypoints live in ``mozaiksai.hosts``:
 
 - ``mozaiksai.hosts.runtime``   — runtime substrate host
 - ``mozaiksai.hosts.platform``  — headless app host
-- ``mozaiksai.hosts.studio``    — local/private Studio management/create host
+- ``mozaiksai.hosts.studio``    — local/private Studio management host
 - ``mozaiksai.hosts.mozaiks``   — hosted product host
 
 Start via the CLI::

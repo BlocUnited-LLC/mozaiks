@@ -1,0 +1,32 @@
+schema_version: mozaiks.settings.v1
+settings:
+  - id: communications.default_delivery_channel
+    label: Default delivery channel
+    type: select
+    required: true
+    scope: user
+    default: in_app
+    allowed_values:
+      - in_app
+      - email
+    validator: null
+    on_change: null
+  - id: communications.read_receipts
+    label: Read receipts
+    type: boolean
+    required: false
+    scope: user
+    default: true
+    validator: null
+    on_change: null
+features:
+  - id: communications.announcements_enabled
+    label: Announcements enabled
+    type: boolean
+    default: true
+    scope: app
+  - id: communications.email_notifications_enabled
+    label: Email notifications enabled
+    type: boolean
+    default: false
+    scope: app

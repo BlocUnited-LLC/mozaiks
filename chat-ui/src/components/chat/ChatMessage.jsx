@@ -165,18 +165,16 @@ const debugFlag = (k) => { try { return ['1','true','on','yes'].includes((localS
       <div className="flex justify-start px-0 message-container">
         <div className="agent-message message thinking-indicator">
           <div className="flex flex-col">
-            <div className="message-header">
-              <span className="name-pill agent">
-                <span className="pill-avatar" aria-hidden>🤖</span> {agentName || 'Agent'}
-              </span>
+            <div className="message-header justify-between">
+              <span className="msg-sender-chip agent">{agentName || 'Agent'}</span>
+              <span className="msg-thinking-badge">processing</span>
             </div>
-            <div className="message-body w-full flex items-center gap-2">
+            <div className="message-body w-full flex items-center gap-2.5 pt-0.5">
               <div className="flex items-center gap-1.5">
-                <div className="w-2 h-2 bg-[var(--color-primary-light)] rounded-full animate-bounce [animation-delay:0ms]"></div>
-                <div className="w-2 h-2 bg-[var(--color-primary-light)] rounded-full animate-bounce [animation-delay:150ms]"></div>
-                <div className="w-2 h-2 bg-[var(--color-primary-light)] rounded-full animate-bounce [animation-delay:300ms]"></div>
+                <div className="w-1.5 h-1.5 bg-[var(--color-primary-light)] rounded-full animate-bounce [animation-delay:0ms] opacity-80"></div>
+                <div className="w-1.5 h-1.5 bg-[var(--color-primary-light)] rounded-full animate-bounce [animation-delay:160ms] opacity-80"></div>
+                <div className="w-1.5 h-1.5 bg-[var(--color-primary-light)] rounded-full animate-bounce [animation-delay:320ms] opacity-80"></div>
               </div>
-              <span className="text-sm text-[var(--color-text-secondary)] italic ml-1">thinking...</span>
             </div>
           </div>
         </div>
@@ -226,7 +224,7 @@ const debugFlag = (k) => { try { return ['1','true','on','yes'].includes((localS
         <div className={`user-message message ${isLatest ? 'latest' : ''}`}>
           <div className="flex flex-col">
             <div className="message-header justify-end">
-              <span className="name-pill user"><span className="pill-avatar" aria-hidden>🧑</span> You</span>
+              <span className="msg-sender-chip user">You</span>
             </div>
             <div className="message-body w-full flex justify-start text-left font-semibold">
               {renderMessageContent(message)}
@@ -265,7 +263,7 @@ const debugFlag = (k) => { try { return ['1','true','on','yes'].includes((localS
       <div className={`agent-message message ${isLatest ? 'latest' : ''}`}>
         <div className="flex flex-col">
           <div className="message-header justify-between">
-            <span className="name-pill agent"><span className="pill-avatar" aria-hidden>🤖</span> {agentName || 'Agent'}</span>
+            <span className="msg-sender-chip agent">{agentName || 'Agent'}</span>
             {traceItems.length > 0 && (
               <button
                 type="button"

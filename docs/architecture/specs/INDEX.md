@@ -15,8 +15,9 @@ The current canonical architecture is the layered host model documented in
 - `mozaiksai/hosts/platform.py` — headless app host
 - `mozaiksai/hosts/studio.py` — local/private builder host
 - `mozaiksai/hosts/mozaiks.py` — hosted Mozaiks product host
-- current repo layout includes `factory_app/app/` as the first-party Studio
-  app bundle; hosted product workspaces are external to this repo
+- current repo layout includes `factory_app/app/` as the first-party Console
+  app bundle served by the Studio host; hosted product workspaces are external
+  to this repo
 
 The package-splitting documents are retained as future packaging proposals, not
 as the current source of truth.
@@ -85,7 +86,7 @@ use different naming conventions for the same packages:
 | **Understand the canonical app-generation model** | [agentic-app-generation-strategy.md](./agentic-app-generation-strategy.md) ⭐⭐⭐ |
 | **Understand the canonical distribution/workspace model** | [../foundations/distribution-and-workspace-model.md](../foundations/distribution-and-workspace-model.md) ⭐⭐⭐ |
 | **Track the app-generation implementation plan** | [agentic-app-generation-checklist.md](./agentic-app-generation-checklist.md) ⭐⭐⭐ |
-| **Define the onboarding wizard and Studio product flow** | [onboarding-and-studio-product-spec.md](./onboarding-and-studio-product-spec.md) ⭐⭐⭐ |
+| **Define the onboarding wizard and Build product flow** | [onboarding-and-build-product-spec.md](./onboarding-and-build-product-spec.md) ⭐⭐⭐ |
 | **Understand how AppGenerator assembles app bundles** | [appgenerator-output-assembly-contract.md](./appgenerator-output-assembly-contract.md) ⭐⭐ |
 | **Understand the existing-app adoption path** | [existing-app-augmentation-strategy.md](./existing-app-augmentation-strategy.md) ⭐⭐⭐ |
 | **Understand the design system & theming** | [DESIGN_SYSTEM_SPEC.md](./DESIGN_SYSTEM_SPEC.md) ⭐ |
@@ -312,18 +313,18 @@ Platform and frontend strategy for OSS vs hosted:
   - Platform = better intelligence + managed experience
   - Fonts/themes are tokens resolved at runtime
 
-### ⭐⭐⭐ [onboarding-and-studio-product-spec.md](./onboarding-and-studio-product-spec.md)
+### ⭐⭐⭐ [onboarding-and-build-product-spec.md](./onboarding-and-build-product-spec.md)
 
 Product blueprint for the missing layer between blank scaffolding and productive app-building:
 
-- **Three-layer journey:** `mozaiks init` for blank scaffold, `mozaiks onboard` for guided setup, `mozaiks studio` for the local/private control plane
+- **Three-layer journey:** `mozaiks init` for blank scaffold, `mozaiks onboard` for guided setup, `mozaiks studio` for the local/private builder host
 - **OpenClaw lessons translated to Mozaiks:** copy the wizard and dashboard pattern, reject vague skill magic and unclear trust/cost boundaries
-- **Studio information architecture:** Home, Build, Capability Library, Pages and Shell, Workflows, Runtime, Admin
+- **Console information architecture:** Apps, Overview, Build, Pages and Shell, Workflows, Runtime, Admin
 - **Command boundaries:** keep `init` structure-first, move product questions into onboarding, keep generation and installation explicit
 - **Capability model:** operations, pages, workflows, and capability packs instead of one generic plugin bucket
 - **Guardrails:** cost visibility, trust metadata, no dead-end post-setup state, no public admin by default
 
-**Use this document when shaping the next CLI and Studio product surface.**
+**Use this document when shaping the next CLI and Console product surface.**
 
 ### ⭐⭐ [PLATFORM_DOGFOODING_SPEC.md](./PLATFORM_DOGFOODING_SPEC.md) (CRITICAL)
 
@@ -511,7 +512,7 @@ CURRENT STATE:
 ├── mozaiksai/hosts/platform.py             # headless app host
 ├── mozaiksai/hosts/studio.py               # local/private builder host
 ├── mozaiksai/hosts/mozaiks.py              # hosted product host
-├── factory_app/app/            # first-party Studio app bundle
+├── factory_app/app/            # first-party Console app bundle served by the Studio host
 └── external hosted product workspace
     └── app/                    # hosted product app root
 

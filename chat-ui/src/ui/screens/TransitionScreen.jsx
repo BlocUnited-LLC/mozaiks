@@ -18,10 +18,11 @@
  *   onNavigate   {Function} (option_id?: string|null, runtime_context?: object) => void
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useId } from 'react';
 import { getComponent, hasComponent } from '../../registry/componentRegistry';
 import { LauncherScreen } from './LauncherScreen';
 import { ConfirmScreen } from './ConfirmScreen';
+import { TransitionOverlayFrame } from './TransitionOverlayFrame.jsx';
 import { useAppEventBus } from '../hooks/useAppEventBus';
 
 // ---------------------------------------------------------------------------
@@ -29,8 +30,8 @@ import { useAppEventBus } from '../hooks/useAppEventBus';
 // ---------------------------------------------------------------------------
 
 const TransitionLoading = () => (
-  <div className="flex min-h-full flex-1 items-center justify-center bg-background px-6 py-12">
-    <div className="flex flex-col items-center gap-3">
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/78 px-4 backdrop-blur-md">
+    <div className="flex w-full max-w-sm flex-col items-center gap-3 rounded-[1.75rem] border border-border/80 bg-background/90 px-8 py-10 text-center shadow-2xl shadow-black/35 backdrop-blur-xl">
       <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
       <p className="text-sm text-muted-foreground">Loading…</p>
     </div>
@@ -38,8 +39,8 @@ const TransitionLoading = () => (
 );
 
 const TransitionError = ({ message, onRetry }) => (
-  <div className="flex min-h-full flex-1 items-center justify-center bg-background px-6 py-12">
-    <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-8 text-center max-w-md">
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/78 px-4 backdrop-blur-md">
+    <div className="w-full max-w-md rounded-[1.75rem] border border-destructive/40 bg-background/90 p-8 text-center shadow-2xl shadow-black/35 backdrop-blur-xl">
       <h1 className="text-lg font-black text-destructive mb-3">Transition Error</h1>
       <p className="text-sm text-muted-foreground mb-5">{message}</p>
       {onRetry && (
@@ -63,6 +64,8 @@ export function TransitionScreen({ transitionId, onNavigate }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [retryCount, setRetryCount] = useState(0);
+  const titleId = useId();
+  const descriptionId = useId();
 
   // Fetch transition from API — re-runs on transitionId change or explicit retry
   useEffect(() => {
@@ -129,6 +132,11 @@ export function TransitionScreen({ transitionId, onNavigate }) {
   });
 
   const handleRetry = useCallback(() => setRetryCount((n) => n + 1), []);
+  const handleDismiss = useCallback(() => {
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      window.history.back();
+    }
+  }, []);
 
   if (loading) return <TransitionLoading />;
   if (error) return <TransitionError message={error} onRetry={handleRetry} />;
@@ -140,17 +148,49 @@ export function TransitionScreen({ transitionId, onNavigate }) {
     return null;
   }
 
+  let body = null;
+
   const componentName = transition.ui?.component;
   if (componentName && hasComponent(componentName)) {
     const TransitionComponent = getComponent(componentName);
-    return <TransitionComponent transition={transition} onResolve={onResolve} />;
+    body = (
+      <TransitionComponent
+        transition={transition}
+        onResolve={onResolve}
+        overlayTitleId={titleId}
+        overlayDescriptionId={descriptionId}
+      />
+    );
+  } else if (transition.transition_type === 'confirm') {
+    body = (
+      <ConfirmScreen
+        transition={transition}
+        onResolve={onResolve}
+        overlayTitleId={titleId}
+        overlayDescriptionId={descriptionId}
+      />
+    );
+  } else {
+    body = (
+      <LauncherScreen
+        transition={transition}
+        onResolve={onResolve}
+        overlayTitleId={titleId}
+        overlayDescriptionId={descriptionId}
+      />
+    );
   }
 
-  if (transition.transition_type === 'confirm') {
-    return <ConfirmScreen transition={transition} onResolve={onResolve} />;
-  }
-
-  return <LauncherScreen transition={transition} onResolve={onResolve} />;
+  return (
+    <TransitionOverlayFrame
+      transition={transition}
+      titleId={titleId}
+      descriptionId={descriptionId}
+      onDismiss={handleDismiss}
+    >
+      {body}
+    </TransitionOverlayFrame>
+  );
 }
 
 export default TransitionScreen;

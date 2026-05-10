@@ -89,14 +89,6 @@ const getDefaultProfileMenu = (user) => {
       action: "navigate",
       href: "/profile",
     },
-    {
-      id: "admin-portal",
-      label: "Admin Portal",
-      icon: "settings.svg",
-      action: "navigate",
-      path: "/admin",
-      requiresRole: "admin",
-    },
   ];
 
   items.push(

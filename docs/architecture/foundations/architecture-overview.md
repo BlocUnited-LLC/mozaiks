@@ -118,7 +118,7 @@ contracts are now aligned.
 
 Today it contains:
 
-- `factory_app/app/*` — first-party Studio app bundle
+- `factory_app/app/*` — first-party Console app bundle served by the Studio host
 - `generated/*` — staged generated output
 - `chat-ui/` and `web_shell/` — shared shell source plus local shell host
 
@@ -205,4 +205,3 @@ repo-specific product directory layout.
 For the factory dogfood workspace, `factory_app/app/workflows/` is only an
 app-local overlay path. It should not be checked in until the factory app
 actually owns a workflow that is not part of the shared generation core.
-

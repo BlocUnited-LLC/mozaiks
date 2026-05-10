@@ -573,7 +573,7 @@ agents:
          - Use appropriate BSON types: ObjectId, String, Integer, Boolean, Float, Double, Timestamp, Array, Object.
          - Add `constraints.unique` for fields that require unique indexes (e.g., email).
          - Add `indices` for frequently queried fields (e.g., userId, createdAt, status).
-         - Never model API keys, OAuth secrets, refresh tokens, or Studio adapter records as workflow-owned collections. If an integration needs credentials, capture that dependency in access patterns and rely on the platform connector flow instead.
+         - Never model API keys, OAuth secrets, refresh tokens, or workspace integration records as workflow-owned collections. If an integration needs credentials, capture that dependency in access patterns and rely on the platform connector flow instead.
 
       3. **Describe access patterns**:
          - Provide 3-8 short strings describing expected read/write patterns.
@@ -782,8 +782,8 @@ agents:
       2. **Derive `agent_tools`** (Backend/Logic Tools Only):
          - Create tools for backend logic implied by module purpose (analysis, computation, API calls).
          - Do NOT create tools for UI interactions; those are encoded in `ui_requirements`.
-         - If a workflow needs third-party credentials, reuse the platform connector flow (`get_or_request_api_key`, `request_api_keys_bundle`, and the Studio adapters/admin surface) instead of inventing a custom API-key table, raw Mongo write, or bespoke credential form.
-         - Treat connector availability as app-scoped runtime context: some integrations may already be ready from the Studio adapters surface, some may be metadata-only, and others may be missing entirely.
+         - If a workflow needs third-party credentials, reuse the platform connector flow (`get_or_request_api_key`, `request_api_keys_bundle`, and the workspace integrations/admin surface) instead of inventing a custom API-key table, raw Mongo write, or bespoke credential form.
+         - Treat connector availability as app-scoped runtime context: some integrations may already be ready from the workspace integrations surface, some may be metadata-only, and others may be missing entirely.
          - When an integration is required but not ready, explicitly call it out as a missing dependency and recommend collecting/configuring it instead of assuming the agent can already use it.
          - **Decomposition Logic**:
            - If `WorkflowStrategy.decomposition.required`=false, do NOT add recursive planning tools.
@@ -1243,7 +1243,7 @@ agents:
       - Some workflow primitives resolve to shipped shared components. For those, `component` may be the canonical shipped component name instead of a workflow-local file.
       - Treat these files as contract-declared customization stubs. Generate only the files required by the Tools manifest and `ui_contract`; do not invent extra UI surfaces.
       - Enforce `--mz-*` CSS semantic tokens in all generated React. No legacy color classes.
-      - Credential capture is a platform-owned exception: when a workflow needs API keys or connector input, prefer the shipped connector helpers/components and the Studio adapters surface instead of generating a bespoke credential-management UI.
+      - Credential capture is a platform-owned exception: when a workflow needs API keys or connector input, prefer the shipped connector helpers/components and the workspace integrations surface instead of generating a bespoke credential-management UI.
   - id: primitives
     heading: '[PLATFORM PRIMITIVES — BUILDING BLOCKS]'
     content: |
@@ -1282,6 +1282,35 @@ agents:
       - `Empty`      — `title`, `message`, `action`, `icon`
 
       Use `primitives_hint` from the manifest to decide which to import and compose.
+  - id: transition_wrappers
+    heading: '[TRANSITION WRAPPERS]'
+    content: |
+      Transition wrappers are a separate shell-routed surface from agent-driven UI tools.
+      If you are asked to emit a file-backed transition component for
+      `extended_orchestration/ui/transitions/*.js`:
+
+      - Generate a React-only wrapper. Do NOT generate a Python tool half for transition wrappers.
+      - Export the wrapper through `extended_orchestration/ui/index.js`; `extension_registry.json`
+        references the component registry key only.
+      - Import shell-owned transition primitives from `@mozaiks/chat-ui/platform`:
+        ```js
+        import {
+          TransitionChoicePanel,
+          TransitionChoiceCard,
+          useTransitionChoiceMotion,
+        } from '@mozaiks/chat-ui/platform'
+        ```
+      - `TransitionChoicePanel` owns the branded modal body layout inside the shell overlay.
+      - `TransitionChoiceCard` owns the reusable full-card option treatment: image,
+        badge, helper text, CTA, disabled state, and equal-height layout.
+      - `useTransitionChoiceMotion` owns shared entry motion and reduced-motion handling.
+      - Do NOT import `TransitionOverlayFrame` inside workflow transition files. The shell
+        owns backdrop, dialog semantics, focus trap, Escape handling, and scroll lock.
+      - Do NOT create reusable transition primitive helpers under the workflow folder.
+        Keep workflow-local files focused on product-specific copy, image selection,
+        option mapping, helper text, and `onResolve(optionId)` wiring.
+      - Use built-in `LauncherScreen` or `ConfirmScreen` when `ui.props` is sufficient and no
+        branded wrapper file is needed.
   - id: bidirectional_pattern
     heading: '[AGENT-DRIVEN UI PATTERN]'
     content: |
@@ -2130,6 +2159,15 @@ agents:
          - Emit surfaced transitions when the user intent requires choosing app mode, participation level, approval policy, import path, integration path, or another deterministic journey variable.
          - Transition UI is declared as `ui: {"component": "<RegisteredTransitionComponent>", "mode": "screen"}`.
          - Transition UI components are file-backed React stubs exported from `extended_orchestration/ui/index.js`. The JSON references the component registry key only.
+         - Prefer shell-owned transition primitives over workflow-local scaffolding.
+         - Canonical shell transition options:
+           - `LauncherScreen` — generic shell-owned choice screen, tuned with `ui.props` for lightweight routes.
+           - `ConfirmScreen` — shell-owned confirm/cancel gate for simple approvals.
+           - `TransitionChoicePanel` from `@mozaiks/chat-ui/platform` — reusable modal body wrapper for branded transition copy, heading, subtitle, and choice layout.
+           - `TransitionChoiceCard` from `@mozaiks/chat-ui/platform` — reusable full-card selectable option with image, badge, helper text, CTA, disabled state, and equal-height layout.
+           - `useTransitionChoiceMotion` from `@mozaiks/chat-ui/platform` — shared entry-motion helper for transition wrappers; respect reduced-motion.
+         - Do not create reusable transition primitive helpers under `extended_orchestration/ui/transitions/` or any workflow-local folder.
+         - Do not import `TransitionOverlayFrame` inside workflow transition components. The shell owns overlay, focus trap, Escape handling, backdrop, and dialog semantics.
          - Use `transition_type: "user_choice_context"` when the main purpose of the choice is seeding deterministic context for the next step.
          - Use `transition_type: "user_choice_route"` when the main purpose of the choice is explicit branch routing.
          - Use `transition_type: "confirm"` for simple continue/cancel approval gates.
@@ -2138,6 +2176,7 @@ agents:
          - Every context key seeded by a transition must be declared in the target workflow's `context_variables.yaml`.
          - The ContextVariablesAgent must expose transition-seeded variables to the agents that need them.
          - For product-specific card visuals, copy, or images, prefer a file-backed transition component exported from `extended_orchestration/ui/index.js` and reference that `ui.component`.
+         - For bespoke transition wrappers, compose the wrapper from `TransitionChoicePanel` and `TransitionChoiceCard` imported from `@mozaiks/chat-ui/platform` instead of recreating card grids, badges, CTA bars, or motion hooks.
          - Use `ui.props` only for lightweight built-in fallback tuning; do not rely on it for branded transition design.
 
       6. **Emit Output**:

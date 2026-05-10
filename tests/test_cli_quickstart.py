@@ -45,7 +45,7 @@ def test_quickstart_bootstraps_workspace_and_launches_studio(monkeypatch, tmp_pa
         return {
             "backend_url": f"http://localhost:{backend_port}",
             "frontend_url": f"http://localhost:{frontend_port}",
-            "studio_url": f"http://localhost:{frontend_port}/studio/create",
+            "studio_url": f"http://localhost:{frontend_port}/apps",
             "frontend_available": True,
         }
 

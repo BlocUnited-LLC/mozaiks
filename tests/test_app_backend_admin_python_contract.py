@@ -97,7 +97,7 @@ def test_appgenerator_structured_output_contract_matches_runtime_schema_version_
         "users",
         "billing",
         "usage",
-        "activity",
+        "operations",
         "settings",
         "integrations",
         "support",

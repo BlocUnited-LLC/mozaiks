@@ -24,7 +24,7 @@ Modules exist as support bundles, but they should not dominate the authoring mod
 The runtime reads an active app root. Canonically, that root is:
 
 - `app/` in a generated/customer app workspace
-- `factory_app/app/` for the first-party Studio app bundle in this repo
+- `factory_app/app/` for the first-party Console app bundle served by the Studio host in this repo
 
 Current repo note:
 

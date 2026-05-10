@@ -26,7 +26,7 @@ CURRENT STATE:
 ├── mozaiksai/hosts/platform.py          # headless app host
 ├── mozaiksai/hosts/studio.py            # local/private builder host
 ├── mozaiksai/hosts/mozaiks.py           # hosted product host
-├── factory_app/app/         # first-party Studio app bundle
+├── factory_app/app/         # first-party Console app bundle served by the Studio host
 └── external hosted product workspace
     └── app/                 # hosted product app root
 

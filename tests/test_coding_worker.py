@@ -98,7 +98,7 @@ def _pack() -> LoadedControlPlanePack:
     return LoadedControlPlanePack(
         path=Path("factory_app/control_plane"),
         manifest=ControlPlaneManifest(
-            schema_version="mozaiks.control_plane.v1",
+            schema_version="mozaiks.control_plane",
             profile=ControlPlaneProfileInfo(
                 id="factory_app",
                 display_name="Factory App Harness",
@@ -119,7 +119,7 @@ def _pack() -> LoadedControlPlanePack:
             ],
         ),
         prompts=ControlPlanePromptsManifest(
-            schema_version="mozaiks.control_plane.prompts.v1",
+            schema_version="mozaiks.control_plane.prompts",
             prompts=[
                 ControlPlanePromptDefinition(
                     id="coding_refinement_system",
@@ -128,7 +128,7 @@ def _pack() -> LoadedControlPlanePack:
             ],
         ),
         tools=ControlPlaneToolsManifest(
-            schema_version="mozaiks.control_plane.tools.v1",
+            schema_version="mozaiks.control_plane.tools",
             tools=[
                 ControlPlaneToolDefinition(
                     id="get_artifact_summary",
@@ -172,7 +172,7 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
             artifact_version_id="av_123",
             requested_workflow_id="AppGenerator",
             raw_user_request="Fix the dashboard spacing",
-            source_surface="studio_create",
+            source_surface="app_build",
             change_class="patch",
             files={"app/ui/pages/Dashboard.jsx": "export default function Dashboard() {}"},
             validation_strategy="local",
@@ -220,7 +220,7 @@ async def test_coding_worker_rejects_non_patch_requests() -> None:
             artifact_version_id="av_123",
             requested_workflow_id="AppGenerator",
             raw_user_request="Add a brand new approvals capability",
-            source_surface="studio_create",
+            source_surface="app_build",
             change_class="feature",
             files={"app/ui/pages/Dashboard.jsx": "export default function Dashboard() {}"},
         )
@@ -268,7 +268,7 @@ async def test_coding_worker_fails_when_model_edits_outside_scoped_files(tmp_pat
             artifact_version_id="av_123",
             requested_workflow_id="AppGenerator",
             raw_user_request="Fix the dashboard spacing",
-            source_surface="studio_create",
+            source_surface="app_build",
             change_class="patch",
             files={"app/ui/pages/Dashboard.jsx": "export default function Dashboard() {}"},
             validation_strategy="skip",

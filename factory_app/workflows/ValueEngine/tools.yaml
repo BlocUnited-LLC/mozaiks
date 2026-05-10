@@ -53,7 +53,7 @@ lifecycle_tools:
     agent: null
     file: create_app_record.py
     function: create_app_record
-    description: Create a hosted build-registry record at pipeline start so the Hub shows the app as in-progress immediately.
+    description: Create a hosted build-registry record at pipeline start so the Apps directory shows the app as in-progress immediately.
   - trigger: on_start
     agent: null
     file: tools/platform/build_lifecycle.py

@@ -18,7 +18,10 @@ const MobileArtifactDrawer = ({
   const isExpanded = viewMode || state === 'expanded';
   const isHidden = state === 'hidden';
   const isPeek = !isExpanded && !isHidden;
-  const heightClass = viewMode ? 'h-full' : (isExpanded ? 'h-[calc(100vh-5rem)]' : isHidden ? 'h-0' : 'h-20');
+  const heightClass = viewMode ? 'h-full' : (isHidden ? 'h-0' : isExpanded ? '' : 'h-20');
+  const expandedStyle = !viewMode && isExpanded
+    ? { height: 'calc(100dvh - env(safe-area-inset-top, 0px) - var(--shell-header-height, 4rem))' }
+    : undefined;
   const brandLogoSrc = getBrandLogoSrc(chatTheme);
 
   const baseContainerClasses = 'relative w-full bg-[rgba(3,6,15,0.96)] backdrop-blur-2xl border border-[rgba(var(--color-primary-light-rgb),0.45)] shadow-[0_-12px_40px_rgba(2,6,23,0.65)] overflow-hidden transition-all duration-300 pointer-events-auto flex flex-col';
@@ -57,7 +60,7 @@ const MobileArtifactDrawer = ({
       className="absolute inset-x-0 bottom-0 z-40 pointer-events-none"
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
-      <div className={`${containerClasses}`}>
+      <div className={`${containerClasses}`} style={expandedStyle}>
         {!isHidden && (
           <button
             type="button"

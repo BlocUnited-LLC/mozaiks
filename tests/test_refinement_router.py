@@ -37,7 +37,7 @@ def _pack() -> LoadedControlPlanePack:
     return LoadedControlPlanePack(
         path=Path("custom/control_plane"),
         manifest=ControlPlaneManifest(
-            schema_version="mozaiks.control_plane.v1",
+            schema_version="mozaiks.control_plane",
             profile=ControlPlaneProfileInfo(
                 id="business_plan",
                 display_name="Business Plan Harness",
@@ -152,11 +152,11 @@ def _pack() -> LoadedControlPlanePack:
             checkpoints=[],
         ),
         prompts=ControlPlanePromptsManifest(
-            schema_version="mozaiks.control_plane.prompts.v1",
+            schema_version="mozaiks.control_plane.prompts",
             prompts=[],
         ),
         tools=ControlPlaneToolsManifest(
-            schema_version="mozaiks.control_plane.tools.v1",
+            schema_version="mozaiks.control_plane.tools",
             tools=[],
         ),
     )

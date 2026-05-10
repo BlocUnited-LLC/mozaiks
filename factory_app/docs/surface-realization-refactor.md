@@ -367,8 +367,8 @@ Update `WorkflowStrategy`:
         description: Complete stage roadmap for this workflow.
 ```
 
-Replace the old field names directly. This codebase is pre-production and does
-not need a long-lived compatibility layer.
+Replace the old field names directly. This codebase is pre-production and
+should keep one canonical contract.
 
 ### 3.2 Rename `module_index` to `stage_index`
 

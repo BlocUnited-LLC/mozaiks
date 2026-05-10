@@ -2,7 +2,7 @@
   "appName": "MozaiksFactory",
   "appId": "mozaiks-factory",
   "startup": {
-    "landing_spot": "/create"
+    "landing_spot": "/apps"
   },
   "targets": {
     "web": true,

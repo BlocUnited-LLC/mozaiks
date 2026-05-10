@@ -273,7 +273,7 @@ def create_parser():
         "--full",
         dest="full_setup",
         action="store_true",
-        help="Collect detailed product, branding, and admin configuration instead of the minimal Studio-first setup",
+        help="Collect detailed product, branding, and admin configuration instead of the minimal Console-first setup",
     )
     onboard_parser.add_argument(
         "--open-studio",
@@ -302,7 +302,7 @@ def create_parser():
     studio_parser = subparsers.add_parser(
         "studio",
         help="Inspect or launch Studio",
-        description="Read the active workspace and print a status summary, or launch the full Studio create/build UI when used with --open.",
+        description="Read the active workspace and print an app overview summary, or launch the full Studio build UI when used with --open.",
     )
     studio_parser.add_argument(
         "--dir",
@@ -314,7 +314,7 @@ def create_parser():
         "--json",
         dest="json_output",
         action="store_true",
-        help="Emit the Studio Home summary as JSON",
+        help="Emit the app overview summary as JSON",
     )
     studio_parser.add_argument(
         "--open",

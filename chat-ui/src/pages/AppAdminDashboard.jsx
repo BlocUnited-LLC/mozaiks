@@ -1,9 +1,9 @@
 /**
  * AppAdminDashboard — app-owner admin panel group.
  *
- * The canonical visible admin routes are /admin and /admin/* via AdminPortal.
- * This module provides the app-owner panels embedded inside that unified admin
- * shell.
+ * The canonical visible admin routes are /apps/:appId/admin and the app-scoped
+ * admin console routes powered by AdminPortal.
+ * This module provides the app-owner panels embedded inside that unified admin shell.
  *
  * ## How panels work
  *

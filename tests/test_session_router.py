@@ -203,7 +203,7 @@ async def test_route_trigger_refinement_uses_injected_trigger_route_resolver(mon
                     "artifact_key": "workflow_bundle",
                     "artifact_version_id": "v1",
                     "raw_user_request": "Update workflow naming",
-                    "source_surface": "studio_create",
+                    "source_surface": "app_build",
                 }
             },
             context_variables={"screen": "studio-create"},

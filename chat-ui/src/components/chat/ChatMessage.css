@@ -15,27 +15,27 @@
 
 :root {
   /* --chat-bubble-radius is overridden by themeProvider if brand.json sets chat.bubbleRadius */
-  --chat-bubble-radius: 18px;
-  --chat-feed-max-width: 1040px;
-  --chat-feed-padding-top-base: 1rem;
-  --chat-feed-padding-top-sm: 1.25rem;
-  --chat-feed-padding-top-md: 1.75rem;
-  --chat-feed-padding-bottom-base: 3.25rem;
-  --chat-feed-padding-bottom-sm: 3.75rem;
-  --chat-feed-padding-bottom-md: 4rem;
+  --chat-bubble-radius: 14px;
+  --chat-feed-max-width: 1080px;
+  --chat-feed-padding-top-base: 1.25rem;
+  --chat-feed-padding-top-sm: 1.5rem;
+  --chat-feed-padding-top-md: 2rem;
+  --chat-feed-padding-bottom-base: 3.5rem;
+  --chat-feed-padding-bottom-sm: 4rem;
+  --chat-feed-padding-bottom-md: 4.5rem;
   --chat-feed-padding-x-base: 1rem;
   --chat-feed-padding-x-sm: 1.5rem;
-  --chat-feed-padding-x-md: 1.75rem;
-  --chat-bubble-padding-y: 0.95rem;
-  --chat-bubble-padding-x: 1.15rem;
-  --chat-user-bubble-padding-y: 0.7rem;
-  --chat-user-bubble-padding-x: 0.95rem;
-  --chat-bubble-stack-gap: 0.65rem;
-  --chat-bubble-header-gap: 0.35rem;
+  --chat-feed-padding-x-md: 2rem;
+  --chat-bubble-padding-y: 1.1rem;
+  --chat-bubble-padding-x: 1.35rem;
+  --chat-user-bubble-padding-y: 0.85rem;
+  --chat-user-bubble-padding-x: 1.1rem;
+  --chat-bubble-stack-gap: 1.1rem;
+  --chat-bubble-header-gap: 0.45rem;
   --chat-name-pill-padding-y: 1px;
   --chat-name-pill-padding-x: 0.55rem;
   --chat-name-pill-font-size: 10px;
-  --chat-bubble-line-height: 1.45;
+  --chat-bubble-line-height: 1.62;
 
   /* Derived from brand theme vars — fallbacks match the mozaiksai default palette */
   --chat-bubble-shadow:
@@ -61,11 +61,11 @@
 /* User chat bubble */
 .user-message {
   background: var(--chat-user-bg);
-  border: 1.5px solid var(--chat-user-border);
+  border: 1px solid var(--chat-user-border);
   box-shadow:
-    0 6px 24px rgba(5, 15, 28, 0.5),
-    0 0 35px rgba(45, 212, 191, 0.18),
-    inset 0 0 0 1px rgba(var(--color-primary-light-rgb, 103, 232, 249), 0.25);
+    0 4px 16px rgba(5, 15, 28, 0.4),
+    0 0 20px rgba(45, 212, 191, 0.1),
+    inset 0 0 0 1px rgba(var(--color-primary-light-rgb, 103, 232, 249), 0.15);
   color: var(--color-text-primary);
   font-family: var(--font-body, 'Rajdhani', ui-sans-serif, system-ui, sans-serif);
   font-weight: 500;
@@ -74,8 +74,7 @@
   font-size: 1rem;
   border-radius: var(--chat-bubble-radius);
   display: inline-block;
-  max-width: min(680px, 90%);
-  white-space: pre-wrap;
+  max-width: min(500px, 78%);
   overflow-wrap: anywhere;
   word-break: break-word;
   hyphens: auto;
@@ -89,10 +88,8 @@
   position: absolute;
   inset: -1px;
   border-radius: inherit;
-  border: 1px solid rgba(var(--color-primary-light-rgb, 103, 232, 249), 0.6);
-  box-shadow:
-    0 0 10px rgba(var(--color-primary-light-rgb, 103, 232, 249), 0.35),
-    0 0 30px rgba(var(--color-primary-rgb, 34, 211, 238), 0.18);
+  border: 1px solid rgba(var(--color-primary-light-rgb, 103, 232, 249), 0.4);
+  box-shadow: 0 0 12px rgba(var(--color-primary-rgb, 34, 211, 238), 0.12);
   pointer-events: none;
   z-index: -1;
 }
@@ -101,7 +98,9 @@
 .agent-message {
   background: var(--chat-agent-bg);
   border: 1px solid var(--chat-agent-border);
-  box-shadow: var(--chat-bubble-shadow), 0 0 0 1px rgba(99, 102, 241, 0.25) inset;
+  box-shadow:
+    0 8px 32px rgba(var(--color-surface-rgb, 2, 6, 23), 0.45),
+    0 0 0 1px rgba(99, 102, 241, 0.18) inset;
   color: var(--color-text-primary);
   font-family: var(--font-body, 'Rajdhani', ui-sans-serif, system-ui, sans-serif);
   padding: var(--chat-bubble-padding-y) var(--chat-bubble-padding-x);
@@ -109,8 +108,7 @@
   font-size: 1rem;
   border-radius: var(--chat-bubble-radius);
   display: inline-block;
-  max-width: min(680px, 90%);
-  white-space: pre-wrap;
+  max-width: min(820px, 88%);
   overflow-wrap: anywhere;
   word-break: break-word;
   hyphens: auto;
@@ -167,7 +165,7 @@
 .message-body {
   color: #e6f6ff;
   line-height: var(--chat-bubble-line-height);
-  font-size: 0.97rem;
+  font-size: 1rem;
   font-family: var(--font-body, 'Rajdhani', ui-sans-serif, system-ui, sans-serif);
 }
 
@@ -175,14 +173,33 @@
 .message-body p + p,
 .message-body ul + p,
 .message-body ol + p,
-.message-body pre + p { margin-top: 0.55rem; }
+.message-body pre + p { margin-top: 0.7rem; }
 .message-body ul,
-.message-body ol { margin: 0.35rem 0 0.35rem 1.1rem; line-height: inherit; }
-.message-body li + li { margin-top: 0.25rem; }
+.message-body ol { margin: 0.5rem 0 0.5rem 1.25rem; line-height: inherit; }
+.message-body li + li { margin-top: 0.3rem; }
 /* Loose lists: marked wraps each li in a <p> when items are blank-line separated */
 .message-body li > p { margin: 0; }
-.message-body li > p + p { margin-top: 0.2rem; }
+.message-body li > p + p { margin-top: 0.25rem; }
 .message-body strong { color: var(--color-primary-light); }
+.message-body code {
+  font-family: var(--font-mono, ui-monospace, 'Cascadia Code', monospace);
+  font-size: 0.875em;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  padding: 0.05em 0.35em;
+}
+.message-body pre {
+  background: rgba(2, 6, 23, 0.55);
+  border: 1px solid rgba(var(--color-secondary-rgb, 99, 102, 241), 0.25);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin: 0.6rem 0;
+  overflow-x: auto;
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+.message-body pre code { background: none; border: none; padding: 0; }
 
 /* Subtle entry animation for latest message */
 .message.latest { animation: rise-in 260ms ease-out; }
@@ -193,6 +210,81 @@
 
 /* Hide standalone name labels (replaced by in-bubble pills) */
 .user-name, .agent-name { display: none !important; }
+
+/* ==========================================================================
+   Sender chips — minimal uppercase label replacing emoji name pills
+   ========================================================================== */
+
+.msg-sender-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-family: var(--font-heading, 'Orbitron', 'Rajdhani', ui-sans-serif, system-ui, sans-serif);
+  line-height: 1;
+  user-select: none;
+}
+
+.msg-sender-chip.agent {
+  color: rgba(var(--color-primary-light-rgb, 103, 232, 249), 0.72);
+}
+
+.msg-sender-chip.user {
+  color: rgba(var(--color-primary-rgb, 6, 182, 212), 0.78);
+}
+
+/* Thinking badge inside agent header */
+.msg-thinking-badge {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-family: var(--font-heading, 'Orbitron', 'Rajdhani', ui-sans-serif, system-ui, sans-serif);
+  color: rgba(var(--color-secondary-rgb, 139, 92, 246), 0.75);
+  animation: thinking-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes thinking-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+/* ==========================================================================
+   Scroll area gradient fades
+   ========================================================================== */
+
+.chat-scroll-fade-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3rem;
+  pointer-events: none;
+  z-index: 20;
+  background: linear-gradient(
+    to bottom,
+    rgba(var(--color-surface-rgb, 8, 15, 32), 0.65) 0%,
+    transparent 100%
+  );
+}
+
+.chat-scroll-fade-bottom {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 4rem;
+  pointer-events: none;
+  z-index: 20;
+  background: linear-gradient(
+    to top,
+    rgba(var(--color-surface-rgb, 8, 15, 32), 0.75) 0%,
+    transparent 100%
+  );
+}
 
 /* Tighter message spacing */
 .message { margin-top: 0.0625rem; margin-bottom: 0.0625rem; }
@@ -207,47 +299,59 @@
 .user-message { text-align: left; }
 .agent-message { text-align: left; }
 
-/* Latest-only shadow */
-.message.latest { box-shadow: var(--chat-bubble-shadow) !important; }
-.message:not(.latest) { box-shadow: none !important; }
+/* Latest message gets a stronger glow; older messages keep a subtle shadow */
+.message.latest.agent-message {
+  box-shadow:
+    0 8px 32px rgba(var(--color-surface-rgb, 2, 6, 23), 0.55),
+    0 0 0 1px rgba(99, 102, 241, 0.25) inset,
+    0 0 24px rgba(var(--color-secondary-rgb, 99, 102, 241), 0.1) !important;
+}
+.message.latest.user-message {
+  box-shadow:
+    0 6px 24px rgba(5, 15, 28, 0.5),
+    0 0 20px rgba(45, 212, 191, 0.15),
+    inset 0 0 0 1px rgba(var(--color-primary-light-rgb, 103, 232, 249), 0.2) !important;
+}
+.message:not(.latest) { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25) !important; }
 
-/* Desktop max width */
+/* Desktop max width — agent wider, user narrower */
 @media (min-width: 1024px) {
-  .user-message,
   .agent-message {
     width: auto !important;
-    max-width: min(720px, 70%) !important;
+    max-width: min(820px, 76%) !important;
+  }
+  .user-message {
+    width: auto !important;
+    max-width: min(500px, 52%) !important;
   }
 }
 
 /* Mobile */
 @media (max-width: 640px) {
-  .user-message,
   .agent-message {
-    padding: 10px 12px;
-    font-size: 0.98rem;
-    width: 90% !important;
-    max-width: none !important;
+    padding: 0.85rem 1rem;
+    font-size: 0.97rem;
+    max-width: 92% !important;
   }
   .user-message {
-    padding: 0.65rem 0.85rem;
+    padding: 0.7rem 0.9rem;
+    font-size: 0.97rem;
+    max-width: 82% !important;
   }
   .user-message {
     margin-left: auto;
-    margin-right: .01px;
+    margin-right: 0;
     border-radius: var(--chat-bubble-radius);
-    box-shadow: 0 0 12px rgba(0,230,255,0.16);
   }
   .agent-message {
     margin-right: auto;
-    margin-left: .01px;
+    margin-left: 0;
     border-radius: var(--chat-bubble-radius);
-    box-shadow: 0 0 8px rgba(77,166,255,0.10);
   }
 
   .chat-feed-shell {
-    padding-top: var(--chat-feed-padding-top-base, 1rem);
-    padding-bottom: var(--chat-feed-padding-bottom-base, 3.25rem);
+    padding-top: var(--chat-feed-padding-top-base, 1.25rem);
+    padding-bottom: var(--chat-feed-padding-bottom-base, 3.5rem);
   }
 }
 

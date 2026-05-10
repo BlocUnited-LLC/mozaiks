@@ -83,7 +83,7 @@ def test_load_selected_control_plane_pack_uses_app_override(tmp_path: Path) -> N
     (workspace_root / "control_plane" / "config" / "control_plane.yaml").write_text(
         "\n".join(
             [
-                "schema_version: mozaiks.control_plane.v1",
+                "schema_version: mozaiks.control_plane",
                 "profile:",
                 "  id: custom",
                 "  display_name: Custom",
@@ -112,13 +112,13 @@ def test_load_selected_control_plane_pack_uses_app_override(tmp_path: Path) -> N
         encoding="utf-8",
     )
     (workspace_root / "control_plane" / "config" / "tools.yaml").write_text(
-        "schema_version: mozaiks.control_plane.tools.v1\ntools: []\n",
+        "schema_version: mozaiks.control_plane.tools\ntools: []\n",
         encoding="utf-8",
     )
     (workspace_root / "control_plane" / "config" / "policies.yaml").write_text(
         "\n".join(
             [
-                "schema_version: mozaiks.control_plane.policies.v1",
+                "schema_version: mozaiks.control_plane.policies",
                 "scope:",
                 "  max_selected_paths: 2",
                 "  auto_apply_max_paths: 1",
@@ -145,7 +145,7 @@ def test_load_control_plane_pack_validates_prompt_references(tmp_path: Path) -> 
     (pack_root / "config" / "control_plane.yaml").write_text(
         "\n".join(
             [
-                "schema_version: mozaiks.control_plane.v1",
+                "schema_version: mozaiks.control_plane",
                 "profile:",
                 "  id: broken",
                 "  display_name: Broken",
@@ -162,7 +162,7 @@ def test_load_control_plane_pack_validates_prompt_references(tmp_path: Path) -> 
         encoding="utf-8",
     )
     (pack_root / "config" / "tools.yaml").write_text(
-        "schema_version: mozaiks.control_plane.tools.v1\ntools: []\n",
+        "schema_version: mozaiks.control_plane.tools\ntools: []\n",
         encoding="utf-8",
     )
 
@@ -180,7 +180,7 @@ def test_load_control_plane_pack_validates_component_tool_availability(tmp_path:
     (pack_root / "config" / "control_plane.yaml").write_text(
         "\n".join(
             [
-                "schema_version: mozaiks.control_plane.v1",
+                "schema_version: mozaiks.control_plane",
                 "profile:",
                 "  id: broken",
                 "  display_name: Broken",
@@ -213,7 +213,7 @@ def test_load_control_plane_pack_validates_component_tool_availability(tmp_path:
     (pack_root / "config" / "tools.yaml").write_text(
         "\n".join(
             [
-                "schema_version: mozaiks.control_plane.tools.v1",
+                "schema_version: mozaiks.control_plane.tools",
                 "tools:",
                 "  - id: router_only_tool",
                 "    kind: context_tool",

@@ -6,7 +6,7 @@ Mozaiks currently has two supported ways to use the repo.
 
 Use this if your goal is:
 
-- open Studio
+- open the Mozaiks Console
 - describe the app you want
 - build through the shared `factory_app` workflows
 
@@ -26,8 +26,8 @@ What happens:
 - `.venv` is created when missing
 - the repo is installed in editable mode
 - minimal config is written
-- backend and frontend Studio services start
-- the browser opens at `/studio/create`
+- backend and frontend Console services start
+- the browser opens at `/apps`
 
 This is the Mozaiks path that is closest to an OpenClaw-style product flow.
 

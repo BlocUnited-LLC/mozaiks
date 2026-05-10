@@ -1,0 +1,34 @@
+schema_version: mozaiks.capability_pack.v1
+capability_pack_id: messaging
+label: Messaging
+summary: Direct messages, threads, channels, read state, and notification hooks.
+visibility: public
+pack_type: messaging_pack
+implementation_mode: declarative_module
+delivery_mode: app_embedded
+requires:
+  licensed_services: []
+  connectors: []
+contributes:
+  modules:
+    - communications
+  pages:
+    - messages
+  admin_sections:
+    - operations
+  workflows: []
+  events:
+    - domain.communications.thread_created
+    - domain.communications.message_sent
+    - domain.communications.thread_read
+    - domain.communications.announcement_posted
+  functions:
+    - messaging.resolve_thread_recipients
+    - messaging.validate_announcement_scope
+function_entrypoints:
+  - functions.notifications_hooks:resolve_thread_recipients
+  - functions.policy_hooks:validate_announcement_scope
+hard_constraints:
+  - Keep handler.py thin.
+  - Publish only declared domain events.
+  - Use thread/member read-state records for delivery semantics.

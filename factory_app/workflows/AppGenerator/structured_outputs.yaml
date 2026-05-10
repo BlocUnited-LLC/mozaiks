@@ -847,7 +847,7 @@ models:
         - users
         - billing
         - usage
-        - activity
+        - operations
         - settings
         - integrations
         - support
@@ -1526,7 +1526,7 @@ models:
         - users
         - billing
         - usage
-        - activity
+        - operations
         - settings
         - integrations
         - support

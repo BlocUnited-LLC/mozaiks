@@ -110,6 +110,9 @@ nav:
       - Foundations:
           - Overview: architecture/foundations/overview.md
           - Framework Capability Classification: architecture/foundations/framework-capability-classification.md
+          - Module System: architecture/foundations/module-system.md
+          - Module Type Taxonomy: architecture/foundations/module-type-taxonomy.md
+          - Capability Pack Model: architecture/foundations/capability-pack-model.md
           - Distribution and Workspace Model: architecture/foundations/distribution-and-workspace-model.md
           - App Manifest And Platform Targets: architecture/foundations/app-manifest-and-platform-targets.md
           - Canonical App Structure: architecture/foundations/canonical-app-structure.md
@@ -138,6 +141,7 @@ nav:
           - Layout Modes: architecture/frontend/layout-modes.md
           - Generated Frontend Surface Contract: architecture/frontend/generated-frontend-surface-contract.md
           - Workflow UI Primitive Catalog: architecture/frontend/workflow-ui-primitive-catalog.md
+          - Transition UI Primitives: architecture/frontend/transition-ui-primitives.md
           - Tool Event Lifecycle: architecture/frontend/tool-event-lifecycle.md
           - Admin Observability Contract: architecture/frontend/admin-observability-contract.md
           - AG-UI Comparison: architecture/frontend/ag-ui-copilotkit-comparison.md

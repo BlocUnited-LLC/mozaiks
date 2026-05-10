@@ -9,7 +9,7 @@ This repo is the **canonical Mozaiks repo** — the AI runtime, app host, fronte
 Deterministic app behavior is owned by app bundles hosted by `mozaiksai.hosts.platform`, generated module contracts, or optional external/generated app backends connected through the generic `AppBackendPort` contract in `mozaiksai/core/ports/app_backend.py`.
 
 ```text
-mozaiks/                           # This repo (current transitional layout)
+mozaiks/                           # Canonical Mozaiks repo
 ├── mozaiksai/                     # AI workflow runtime (first-class)
 │   └── control_plane/             # Builder session harness runtime (Studio-only)
 ├── chat-ui/                       # Chat interface primitives (first-class)
@@ -90,6 +90,14 @@ See [docs/architecture/foundations/distribution-and-workspace-model.md](docs/arc
 - `mozaiksai.hosts.mozaiks` — hosted Mozaiks product host; extends Studio with hosted-only capabilities
 - `factory_app/app` — first-party Studio app bundle; hosted product workspaces consume the same `app/` contract from outside this repo
 
+Customer-facing terminology follows a different layer:
+
+- `Studio` is an internal host/composition term
+- visible UX should prefer `Apps`, `Build`, `Operations`, `Integrations`, and
+  `Admin`
+- `Hub`, `Studio` as a top-level product area, and `Adapters` should not be
+  treated as long-term customer-facing IA
+
 **Working modes:**
 
 1. **Framework/platform mode** — `mozaiksai.hosts.runtime`, `mozaiksai.hosts.platform`, `mozaiksai/`, `chat-ui/`, `web_shell/`, repo-local infrastructure/packaging
@@ -101,7 +109,7 @@ See [docs/architecture/foundations/distribution-and-workspace-model.md](docs/arc
 
 ## Runtime Layering & Separation of Concerns (CRITICAL)
 
-This repo uses layered FastAPI hosts as the canonical runtime architecture. These rules take precedence over legacy patterns.
+This repo uses layered FastAPI hosts as the canonical runtime architecture.
 
 ### Layer Model
 
@@ -116,6 +124,13 @@ Runtime (AI substrate)
 **CLI and Studio are parallel interfaces**, not a chain. CLI owns developer tooling (filesystem, scaffolding, process management). Studio owns the management surface (workspace status, build lifecycle, artifacts, run history, config). CLI must not become a dependency of Studio, Platform, or Runtime.
 
 **Mozaiks App extends Studio** — it does not fork it. Hosted-only capabilities layer on top through the `@platform/extensions` mechanism.
+
+The visible product model on top of those hosts is:
+
+- `Apps` for the workspace-level directory
+- `Build` for app creation and refinement
+- `Operations` for health, incidents, and runtime status
+- `Integrations` for connected systems
 
 ### Universal Substrate vs Framework Capabilities
 
@@ -140,7 +155,7 @@ See [docs/architecture/foundations/framework-capability-classification.md](docs/
 
 **Must not own:**
 - Shell config, pages, themes, or transitions
-- Studio or create routes
+- workspace-console or Build routes
 - Admin app-shell routes or product-shell UI composition
 - Generator or refinement behavior
 - App manifest loading for app-host composition
@@ -201,7 +216,7 @@ Note: `factory_app/` as a directory co-locates the Factory layer (`workflows/`, 
 - Artifact lifecycle: generated → staged → promoted
 - Run history, logs, and validation status
 - Diff viewer and promotion controls
-- Adapter and API key configuration
+- integration and API key configuration
 - Workflow and module inspection
 - Platform-management surfaces including the admin portal
 - Local preview controls
@@ -283,7 +298,7 @@ Key: a feature is not CLI just because it runs locally — if it's management UI
 ### Hard Anti-Leak Rules
 
 **Never put in Runtime:**
-- `PLATFORM_PATH` resolution, legacy repo-local workspace references
+- `PLATFORM_PATH` resolution, repo-local workspace references
 - Shell config logic, Studio routes, transition routing
 - App manifest loading for app-host composition
 - Generator-specific behavior, page or theme serving
@@ -423,7 +438,7 @@ The admin portal and Studio pages are **not** core `chat-ui` primitives. They ar
 | Component | Route | Purpose |
 |-----------|-------|---------|
 | `AdminPortal` | `/admin` | Unified admin shell — app-business panels, module panels, runtime/operator panels |
-| `StudioPage` | `/studio/*` | Studio management interface — workspace status, build, adapters |
+| `StudioPage` | `/apps/*` | First-party workspace console and Build surfaces — app directory, overview, build, and integrations |
 
 `AdminPortal` separates authority internally:
 - **App-business admin panels** — from `app_backend_url/api/admin/*` using `mozaiks.admin.app_backend.v1`
@@ -508,10 +523,10 @@ Events are **distributed**, not centralized. No separate `automations/` director
 
 | Who | Declares | In File |
 |-----|----------|---------|
-| Module | Events it **publishes** | `modules/{name}/events.yaml` |
-| Module | Event reactions/subscriptions | `modules/{name}/subscriptions.yaml` |
-| Module | Notification rules | `modules/{name}/notifications.yaml` |
-| Module | Admin panels | `modules/{name}/admin.yaml` |
+| Module | Events it **publishes** | `modules/{name}/contracts/events.yaml` |
+| Module | Event reactions/subscriptions | `modules/{name}/contracts/reactions.yaml` |
+| Module | Notification rules | `modules/{name}/contracts/notifications.yaml` |
+| Module | Admin panels | `modules/{name}/contracts/admin.yaml` |
 | Workflow | Events it **emits** | `orchestrator.yaml` → `events.emits` |
 | Workflow | Events that **trigger** it | `orchestrator.yaml` → `triggers` |
 
@@ -550,23 +565,24 @@ app/
 │           └── mfj_extension.json   # Optional MFJ fan-out/fan-in config (intra-workflow only)
 ├── modules/
 │   └── {module_name}/
-│       ├── module.yaml         # Identity + actions + capabilities
-│       ├── events.yaml         # Domain events this module may publish
-│       ├── subscriptions.yaml  # Event reactions owned by this module
-│       ├── notifications.yaml  # Notification rules
-│       ├── settings.yaml       # User/app settings schema
-│       ├── admin.yaml          # Admin panels mounted into /admin/*
+│       ├── module.yaml              # Required: identity, actions, capabilities
+│       ├── contracts/               # Optional companion manifests
+│       │   ├── events.yaml          # Domain events this module may publish
+│       │   ├── reactions.yaml       # Event reactions owned by this module
+│       │   ├── notifications.yaml   # Notification rules per event
+│       │   ├── settings.yaml        # User/app settings schema
+│       │   ├── admin.yaml           # Admin panels mounted into /admin/*
+│       │   └── entitlements.yaml    # Optional capability entitlements
+│       ├── runtime_extensions.yaml  # Optional: api_router / startup_service
 │       ├── backend/
-│       │   ├── handler.py      # Required: thin dispatch, one method per action
-│       │   ├── service.py      # Recommended: all business logic and event emission
-│       │   ├── repo.py         # Recommended: MongoDB access layer, no logic
-│       │   ├── policy.py       # Recommended: query scoping for multi-tenancy
-│       │   ├── schemas.py      # Recommended: typed request/response + document shapes
-│       │   ├── settings.py     # Optional: settings hooks
-│       │   ├── subscriptions.py# Optional: subscription hooks
-│       │   ├── notifications.py# Optional: notification hooks
-│       │   └── admin.py        # Optional: admin panel hooks
-│       └── ui/                 # Optional: module-specific UI surfaces
+│       │   ├── handler.py           # Required: thin dispatch, one method per action
+│       │   ├── service.py           # Recommended: business logic and event emission
+│       │   ├── repo.py              # Recommended: MongoDB access layer, no logic
+│       │   ├── policy.py            # Recommended: query scoping for multi-tenancy
+│       │   ├── schemas.py           # Recommended: typed request/response + document shapes
+│       │   ├── settings.py          # Optional: settings hooks
+│       │   └── admin.py             # Optional: admin panel hooks
+│       └── ui/                      # Optional: module-specific UI surfaces
 ├── ui/
 │   ├── route_manifest.json     # Custom full-page route ownership metadata
 │   ├── pages/
@@ -707,7 +723,7 @@ These invariants guide every implementation decision in this repo.
 | AppBackendPort | generic contract in `mozaiksai` for AI runtime ↔ app backend communication |
 | app_backend_url | optional base URL for an external/generated app backend when a split topology is used |
 | module | self-contained deterministic capability unit under an app workspace `modules/` root or a generated app bundle |
-| module manifest system | YAML manifest family for modules (`module.yaml`, `events.yaml`, `settings.yaml`, `notifications.yaml`, `subscriptions.yaml`, `admin.yaml`) |
+| module manifest system | `module.yaml` (required) + optional `contracts/` companion manifests: `events.yaml`, `reactions.yaml`, `notifications.yaml`, `settings.yaml`, `admin.yaml`, `entitlements.yaml` |
 | module.yaml | handler/action manifest — identity, capabilities, and action definitions; event declarations live in `events.yaml` |
 | admin.yaml (platform) | module admin panels rendered inside unified `/admin` |
 | runtime ingress | boundary that accepts validated app/domain events and routes them to workflow triggers |

@@ -6,7 +6,7 @@ tests. In the canonical architecture, the preferred host entrypoints are in
 
 - ``mozaiksai.hosts.runtime``   — runtime substrate host
 - ``mozaiksai.hosts.platform``  — headless app host
-- ``mozaiksai.hosts.studio``    — local/private Studio management/create host
+- ``mozaiksai.hosts.studio``    — local/private Studio management host
 - ``mozaiksai.hosts.mozaiks``   — hosted product host
 
 Use ``create_mozaiks_app()`` when you explicitly want only the runtime substrate

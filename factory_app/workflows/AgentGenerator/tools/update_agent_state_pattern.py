@@ -2204,7 +2204,14 @@ def inject_ui_file_generator_guidance(agent, messages: List[Dict[str, Any]]) -> 
             "- If `ui.realization`=`generated_component`, generate the full workflow-local React surface.\\n"
             "- The `use_ui_tool(...)` identifier must match the declared `ui.component` value so runtime lookup resolves correctly.\\n"
             "- Do not generate an inline text box just to collect ordinary chat feedback. Plain free-text user reply should use the shell composer/input-request lane unless the interaction is structured enough to require a dedicated component.\\n"
-            "- Compose only the shipped `chat-ui` primitives declared in `[SHIPPED UI PRIMITIVES]`.\\n\\n"
+            "- Compose only the shipped `chat-ui` primitives declared in `[SHIPPED UI PRIMITIVES]`.\n"
+            "\n"
+            "[TRANSITION WRAPPER CONTRACT]\n"
+            "- If the requested file lives under `extended_orchestration/ui/transitions/`, generate a React-only transition wrapper, not a Python + React `UI_Tool` pair.\n"
+            "- For branded transition wrappers, compose the shell-owned pieces declared in `[TRANSITION UI PRIMITIVE CATALOG]`, especially `TransitionChoicePanel`, `TransitionChoiceCard`, and `useTransitionChoiceMotion`.\n"
+            "- Do not import `TransitionOverlayFrame` into workflow-local transition files; the shell owns overlay behavior.\n"
+            "- Export file-backed transition wrappers through `extended_orchestration/ui/index.js`; keep `extension_registry.json` declarative and semantic.\n"
+            "- Do not invent workflow-local reusable transition primitive helpers; keep wrapper files focused on copy, imagery, option mapping, and `onResolve(optionId)` wiring.\n\n"
         )
 
         guidance = (

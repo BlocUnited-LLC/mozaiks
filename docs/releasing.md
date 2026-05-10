@@ -3,7 +3,7 @@
 Mozaiks now has a tag-driven release workflow.
 
 For the first public package release, keep the version pre-`1.0.0`. The repo
-contracts, CLI UX, and Studio-first builder flow are still settling, so a
+contracts, CLI UX, and Console-first builder flow are still settling, so a
 `0.x` release is the honest signal to users that breaking changes can still
 happen.
 

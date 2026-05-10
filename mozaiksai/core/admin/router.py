@@ -410,16 +410,16 @@ def _infer_admin_panel_section(panel: dict) -> str:
     if any(token in text for token in ("user", "role", "permission", "auth", "account", "member")):
         return "users"
     if any(token in text for token in ("billing", "bill", "subscription", "invoice", "payment", "stripe", "revenue", "plan")):
-        return "billing"
-    if any(token in text for token in ("run", "session", "workflow", "usage", "health", "cost", "token", "error", "performance", "telemetry")):
+        return "overview"
+    if any(token in text for token in ("run", "session", "workflow", "usage", "cost", "token", "telemetry")):
         return "usage"
-    if any(token in text for token in ("activity", "audit", "log", "event", "history")):
-        return "activity"
+    if any(token in text for token in ("operations", "activity", "audit", "log", "event", "history", "incident", "alert", "health", "error", "performance")):
+        return "operations"
     if any(token in text for token in ("setting", "config", "domain", "brand", "theme", "environment")):
         return "settings"
     if any(token in text for token in ("support", "ticket", "notification", "alert", "message")):
-        return "support"
-    return "integrations"
+        return "operations"
+    return "overview"
 
 
 def _normalize_module_admin_panel(panel: dict, *, module_id: str) -> dict:

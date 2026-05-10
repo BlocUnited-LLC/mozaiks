@@ -1,7 +1,7 @@
 """Platform-owned persistence helpers for app connector metadata.
 
 Connector records are app-scoped admin/runtime metadata. They intentionally
-store only sanitized state needed for the Studio/Admin adapters surface and
+store only sanitized state needed for the app admin integrations surface and
 workflow coordination. Secrets belong in a vault-backed connector service, not
 in MongoDB.
 """

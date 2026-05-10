@@ -5,8 +5,8 @@ wrapper. Persistent storage is therefore a first-class runtime contract.
 
 ## Core Rule
 
-- Durable persistence is required for Studio, `factory_app`, multi-stage build
-  workflows, refinement, and revision history.
+- Durable persistence is required for the workspace console/build surfaces,
+  `factory_app`, multi-stage build workflows, refinement, and revision history.
 - In-memory execution is only acceptable for smoke tests, demos, or simple
   non-builder workflows that do not need upstream artifacts.
 - MongoDB is the canonical persistence backend today.
@@ -45,8 +45,8 @@ These collections hold the durable handoff between workflow stages such as
 
 ### 2b. Platform Connector Metadata
 
-Platform-owned, app-scoped adapter/connector metadata used by Studio/Admin
-surfaces and workflow integration helpers:
+Platform-owned, app-scoped connector metadata used by the visible
+Integrations/Admin surfaces and workflow integration helpers:
 
 - `AppConnectors`
 
@@ -68,10 +68,11 @@ Rules:
 - MongoDB stores connector metadata, status, timestamps, and ownership only.
 - Raw API keys and refresh tokens are stored in the connector vault backend or
   remain ephemeral for the current session.
-- Studio/Admin may manage connector metadata even when no vault is configured.
-- When a vault backend is configured, the Studio adapters surface may create,
-  rotate, and delete durable connector secrets while keeping MongoDB limited to
-  sanitized metadata.
+- the workspace console, Build, Integrations, and Admin surfaces may manage
+  connector metadata even when no vault is configured.
+- when a vault backend is configured, the visible Integrations surface may
+  create, rotate, and delete durable connector secrets while keeping MongoDB
+  limited to sanitized metadata.
 - A connector can therefore be `metadata_only` in local/dev runtimes and
   `active` in vault-backed runtimes.
 
@@ -157,7 +158,7 @@ The target contract is:
   separate.
 - Do keep connector metadata separate from app business collections and builder
   artifact collections.
-- Do fail fast when Studio or the builder is launched without durable
+- Do fail fast when the Studio host or the builder is launched without durable
   persistence configured.
 - Do not teach workflows or docs that legacy database names are canonical.
 - Do not treat persistence as optional for the builder journey.

@@ -17,6 +17,7 @@ from uuid import uuid4
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
+from factory_app.app.modules.app_registry.backend.service import AppRegistryService
 from mozaiksai.hosts.bootstrap import configure_repo_host_defaults
 
 configure_repo_host_defaults("studio")
@@ -24,16 +25,16 @@ configure_repo_host_defaults("studio")
 from mozaiksai.hosts import platform as platform_app
 from mozaiksai.control_plane import get_orchestration_control_harness
 from logs.logging_config import get_workflow_logger
-from mozaiksai.core.auth import UserPrincipal, require_any_auth, require_user_scope
-from mozaiksai.core.runtime.app.studio_home import (
-    build_create_section,
-    build_studio_adapters_summary,
-    build_studio_apps_summary,
-    build_studio_home_summary,
-    build_studio_create_summary,
-    get_missing_studio_surfaces,
-    load_studio_create_state_from_db,
-    save_studio_create_state_to_db,
+from mozaiksai.core.auth import UserPrincipal, require_user_scope
+from mozaiksai.core.runtime.app.console_summary import (
+    build_app_overview_summary,
+    build_apps_summary,
+    build_build_section,
+    build_build_summary,
+    build_integrations_summary,
+    get_missing_console_surfaces,
+    load_build_state_from_db,
+    save_build_state_to_db,
 )
 from mozaiksai.core.workflow.generator_support.connector_service import (
     delete_connector,
@@ -72,6 +73,10 @@ _BUNDLE_MAX_TOTAL_BYTES = 2_000_000
 _BUNDLE_MAX_SINGLE_FILE_BYTES = 250_000
 _DIFF_PREVIEW_MAX_LINES = 120
 _DIFF_PREVIEW_MAX_CHARS = 12_000
+
+
+def _get_app_registry_service() -> AppRegistryService:
+    return AppRegistryService()
 
 
 def _normalize_bundle_entry_name(name: str) -> Optional[str]:
@@ -328,61 +333,108 @@ def _resolve_studio_scope(
 
 
 @app.get("/api/shell-config")
-async def get_studio_shell_config():
+async def get_console_shell_config():
     return await build_shell_config(surface="studio")
 
 
-@app.get("/api/studio/home")
-async def get_studio_home(
-    principal: UserPrincipal = Depends(require_any_auth),
+@app.get("/api/studio/overview")
+async def get_app_overview(
+    app_id: Optional[str] = None,
+    principal: UserPrincipal = Depends(require_user_scope),
 ):
-    _ = principal
+    resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     app_root = resolve_app_root()
-    missing_surfaces = get_missing_studio_surfaces(app_root)
+    missing_surfaces = get_missing_console_surfaces(app_root)
     if missing_surfaces:
         raise HTTPException(
             status_code=500,
-            detail=f"Studio Home is missing required surfaces: {', '.join(missing_surfaces)}",
+            detail=f"App overview is missing required surfaces: {', '.join(missing_surfaces)}",
         )
 
     try:
-        return build_studio_home_summary(app_root, surface="shell-home", local_only=True)
+        record = (await _get_app_registry_service().get_app_record(app_id=resolved_app_id)).get("app")
+        if not isinstance(record, dict):
+            raise HTTPException(status_code=404, detail=f"App record not found: {resolved_app_id}")
+        return build_app_overview_summary(
+            app_root,
+            surface="shell-overview",
+            local_only=True,
+            app_record=record,
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to build Studio Home summary: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"Failed to build app overview summary: {exc}") from exc
 
 
 @app.get("/api/studio/apps")
-async def get_studio_apps(
-    principal: UserPrincipal = Depends(require_any_auth),
+async def get_workspace_apps(
+    principal: UserPrincipal = Depends(require_user_scope),
 ):
-    _ = principal
+    _, user_id = _resolve_studio_scope(principal)
     app_root = resolve_app_root()
-    missing_surfaces = get_missing_studio_surfaces(app_root)
+    missing_surfaces = get_missing_console_surfaces(app_root)
     if missing_surfaces:
         raise HTTPException(
             status_code=500,
-            detail=f"Studio Hub is missing required surfaces: {', '.join(missing_surfaces)}",
+            detail=f"Apps surface is missing required surfaces: {', '.join(missing_surfaces)}",
         )
 
     try:
-        return build_studio_apps_summary(app_root, surface="shell-hub", local_only=True)
+        apps = (await _get_app_registry_service().list_apps(owner_user_id=user_id)).get("apps") or []
+        return build_apps_summary(
+            app_root,
+            surface="shell-apps",
+            local_only=True,
+            app_records=apps,
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to build Studio Hub summary: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"Failed to build apps summary: {exc}") from exc
 
 
-@app.get("/api/studio/adapters")
-async def get_studio_adapters(
+class CreateWorkspaceAppRequest(BaseModel):
+    name: str = Field(default="New App", min_length=1, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    app_id: Optional[str] = Field(default=None, max_length=160)
+
+
+@app.post("/api/studio/apps")
+async def create_workspace_app(
+    body: CreateWorkspaceAppRequest,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    app_id, _ = _resolve_studio_scope(principal)
-    return await build_studio_adapters_summary(app_id=app_id)
+    _, user_id = _resolve_studio_scope(principal)
+    try:
+        return await _get_app_registry_service().create_app_record(
+            owner_user_id=user_id,
+            name=body.name,
+            description=body.description,
+            status="draft",
+            app_id=body.app_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to create app record: {exc}") from exc
 
 
-@app.get("/api/studio/adapters/connectors")
-async def get_studio_connectors(
+@app.get("/api/studio/integrations")
+async def get_app_integrations(
+    app_id: Optional[str] = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    app_id, _ = _resolve_studio_scope(principal)
+    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    return await build_integrations_summary(app_id=app_id)
+
+
+@app.get("/api/studio/integrations/connectors")
+async def get_integration_connectors(
+    app_id: Optional[str] = None,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     connectors = await list_connectors(app_id)
     return {
         "app_id": app_id,
@@ -390,7 +442,7 @@ async def get_studio_connectors(
     }
 
 
-class StudioConnectorPatchRequest(BaseModel):
+class IntegrationConnectorPatchRequest(BaseModel):
     display_name: Optional[str] = None
     notes: Optional[str] = None
     status: Optional[Literal["metadata_only", "active", "expiring", "expired", "revoked"]] = None
@@ -399,16 +451,17 @@ class StudioConnectorPatchRequest(BaseModel):
     ttl_days: Optional[int] = Field(default=30, ge=1, le=3650)
 
 
-class StudioConnectorCreateRequest(StudioConnectorPatchRequest):
+class IntegrationConnectorCreateRequest(IntegrationConnectorPatchRequest):
     service: str = Field(..., description="Connector service identifier, such as openai or stripe")
 
 
-@app.post("/api/studio/adapters/connectors")
-async def create_or_update_studio_connector(
-    body: StudioConnectorCreateRequest,
+@app.post("/api/studio/integrations/connectors")
+async def create_or_update_integration_connector(
+    body: IntegrationConnectorCreateRequest,
+    app_id: Optional[str] = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    app_id, user_id = _resolve_studio_scope(principal)
+    app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
     record = None
     secret_result: Optional[Dict[str, Any]] = None
     if body.secret_value:
@@ -445,7 +498,7 @@ async def create_or_update_studio_connector(
             secret_available=False,
             notes=body.notes,
             expires_at=body.expires_at,
-            status_reason="Created manually from the Studio adapters surface.",
+            status_reason="Created manually from the integrations surface.",
         )
     return {
         "app_id": app_id,
@@ -454,15 +507,16 @@ async def create_or_update_studio_connector(
     }
 
 
-@app.patch("/api/studio/adapters/connectors/{service}")
-async def patch_studio_connector(
+@app.patch("/api/studio/integrations/connectors/{service}")
+async def patch_integration_connector(
     service: str,
-    body: StudioConnectorPatchRequest,
+    body: IntegrationConnectorPatchRequest,
+    app_id: Optional[str] = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     from mozaiksai.core.data.persistence import AppConnectorStore
 
-    app_id, user_id = _resolve_studio_scope(principal)
+    app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
     store = AppConnectorStore()
     existing = await store.get_connector(app_id=app_id, service=service)
     if not existing:
@@ -494,12 +548,13 @@ async def patch_studio_connector(
     }
 
 
-@app.delete("/api/studio/adapters/connectors/{service}")
-async def remove_studio_connector(
+@app.delete("/api/studio/integrations/connectors/{service}")
+async def remove_integration_connector(
     service: str,
+    app_id: Optional[str] = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    app_id, _ = _resolve_studio_scope(principal)
+    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     result = await delete_connector(app_id=app_id, service=service)
     if not result.get("deleted"):
         raise HTTPException(status_code=404, detail=f"Connector not found: {service}")
@@ -509,9 +564,10 @@ async def remove_studio_connector(
     }
 
 
-@app.get("/api/studio/history")
-async def get_studio_history(
+@app.get("/api/studio/build/history")
+async def get_build_history(
     principal: UserPrincipal = Depends(require_user_scope),
+    app_id: Optional[str] = None,
     artifact_kind: Optional[str] = None,
     artifact_key: Optional[str] = None,
     artifact_version_id: Optional[str] = None,
@@ -538,12 +594,13 @@ async def get_studio_history(
     }
 
 
-@app.get("/api/studio/artifacts/{artifact_version_id}/bundle")
-async def get_studio_artifact_bundle(
+@app.get("/api/studio/build/artifacts/{artifact_version_id}/bundle")
+async def get_build_artifact_bundle(
     artifact_version_id: str,
+    app_id: Optional[str] = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    app_id, _ = _resolve_studio_scope(principal)
+    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_artifact_version(
         app_id=app_id,
@@ -558,7 +615,7 @@ async def get_studio_artifact_bundle(
     if zip_path is None:
         raise HTTPException(
             status_code=400,
-            detail="This artifact version does not have a bundle path that Studio can inspect.",
+            detail="This artifact version does not have a bundle path that the build surface can inspect.",
         )
 
     try:
@@ -595,12 +652,13 @@ async def get_studio_artifact_bundle(
     }
 
 
-@app.get("/api/studio/artifacts/{artifact_version_id}/review")
-async def get_studio_artifact_review(
+@app.get("/api/studio/build/artifacts/{artifact_version_id}/review")
+async def get_build_artifact_review(
     artifact_version_id: str,
+    app_id: Optional[str] = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    app_id, _ = _resolve_studio_scope(principal)
+    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_artifact_version(
         app_id=app_id,
@@ -616,12 +674,13 @@ async def get_studio_artifact_review(
     return {"app_id": app_id, **payload}
 
 
-@app.post("/api/studio/artifacts/{artifact_version_id}/accept")
-async def accept_studio_artifact_version(
+@app.post("/api/studio/build/artifacts/{artifact_version_id}/accept")
+async def accept_build_artifact_version(
     artifact_version_id: str,
+    app_id: Optional[str] = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    app_id, _ = _resolve_studio_scope(principal)
+    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
     if not version:
@@ -657,12 +716,13 @@ async def accept_studio_artifact_version(
     return {"accepted": True, "app_id": app_id, **payload}
 
 
-@app.post("/api/studio/artifacts/{artifact_version_id}/reject")
-async def reject_studio_artifact_version(
+@app.post("/api/studio/build/artifacts/{artifact_version_id}/reject")
+async def reject_build_artifact_version(
     artifact_version_id: str,
+    app_id: Optional[str] = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    app_id, _ = _resolve_studio_scope(principal)
+    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
     if not version:
@@ -673,7 +733,7 @@ async def reject_studio_artifact_version(
     rejected = await artifact_store.reject_artifact_version(
         app_id=app_id,
         artifact_version_id=artifact_version_id,
-        reason="Rejected in Studio review.",
+        reason="Rejected in build review.",
     )
     if not rejected:
         raise HTTPException(status_code=500, detail="Artifact version could not be rejected.")
@@ -699,12 +759,13 @@ async def reject_studio_artifact_version(
     return {"rejected": True, "app_id": app_id, **payload}
 
 
-@app.post("/api/studio/artifacts/{artifact_version_id}/promote")
-async def promote_studio_artifact_version(
+@app.post("/api/studio/build/artifacts/{artifact_version_id}/promote")
+async def promote_build_artifact_version(
     artifact_version_id: str,
+    app_id: Optional[str] = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    app_id, _ = _resolve_studio_scope(principal)
+    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
     if not version:
@@ -763,13 +824,14 @@ async def promote_studio_artifact_version(
     }
 
 
-class StudioRevertRequest(BaseModel):
+class BuildRevertRequest(BaseModel):
     artifact_version_id: str = Field(..., description="Artifact version to restore as the active app state")
 
 
-@app.post("/api/studio/revert")
+@app.post("/api/studio/build/revert")
 async def revert_to_artifact_version(
-    body: StudioRevertRequest,
+    body: BuildRevertRequest,
+    app_id: Optional[str] = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     """Restore a previously generated artifact version as the active app state.
@@ -781,7 +843,7 @@ async def revert_to_artifact_version(
     import zipfile as _zipfile
     from pathlib import Path as _Path
 
-    app_id, _ = _resolve_studio_scope(principal)
+    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     artifact_store = get_artifact_store()
 
     version = await artifact_store.get_artifact_version(
@@ -839,36 +901,47 @@ async def revert_to_artifact_version(
     }
 
 
-@app.get("/api/studio/create")
-async def get_studio_create(
+@app.get("/api/studio/build")
+async def get_build_surface(
+    app_id: Optional[str] = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    app_id, _ = _resolve_studio_scope(principal)
+    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     app_root = resolve_app_root()
-    missing_surfaces = get_missing_studio_surfaces(app_root)
+    missing_surfaces = get_missing_console_surfaces(app_root)
     if missing_surfaces:
         raise HTTPException(
             status_code=500,
-            detail=f"Studio Create is missing required surfaces: {', '.join(missing_surfaces)}",
+            detail=f"Build surface is missing required surfaces: {', '.join(missing_surfaces)}",
         )
 
     try:
-        create_state = await load_studio_create_state_from_db(app_id)
-        home_summary = build_studio_home_summary(app_root, surface="shell-create", local_only=True)
-        home_summary["studio"] = {**home_summary["studio"], "surface": "shell-create", "route": "/studio/create"}
+        record = (await _get_app_registry_service().get_app_record(app_id=app_id)).get("app")
+        if not isinstance(record, dict):
+            raise HTTPException(status_code=404, detail=f"App record not found: {app_id}")
+        build_state = await load_build_state_from_db(app_id)
+        home_summary = build_app_overview_summary(
+            app_root,
+            surface="shell-build",
+            local_only=True,
+            app_record=record,
+        )
+        home_summary["console"] = {**home_summary["console"], "surface": "shell-build", "route": f"/apps/{app_id}/build"}
         return {
             **home_summary,
-            "create": build_create_section(home_summary, create_state),
+            "build": build_build_section(home_summary, build_state),
         }
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to build Studio Create summary: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"Failed to build build summary: {exc}") from exc
 
 
-class StudioCreateSaveRequest(BaseModel):
-    request_text: str = Field(..., description="Persisted Studio create request text")
+class BuildSaveRequest(BaseModel):
+    request_text: str = Field(..., description="Persisted build request text")
     request_kind: Optional[Literal["greenfield_app", "brownfield_app", "refinement"]] = Field(
         None,
-        description="High-level request kind for the current create draft",
+        description="High-level request kind for the current build draft",
     )
     change_class: Optional[Literal["patch", "design", "feature", "core"]] = Field(
         None,
@@ -876,40 +949,55 @@ class StudioCreateSaveRequest(BaseModel):
     )
 
 
-@app.put("/api/studio/create")
-async def save_studio_create(
-    request: StudioCreateSaveRequest,
+@app.put("/api/studio/build")
+async def save_build_surface(
+    request: BuildSaveRequest,
+    app_id: Optional[str] = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    app_id, _ = _resolve_studio_scope(principal)
+    app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
     if request.change_class and request.request_kind != "refinement":
         raise HTTPException(status_code=400, detail="change_class is only valid when request_kind is 'refinement'")
 
     app_root = resolve_app_root()
-    missing_surfaces = get_missing_studio_surfaces(app_root)
+    missing_surfaces = get_missing_console_surfaces(app_root)
     if missing_surfaces:
         raise HTTPException(
             status_code=500,
-            detail=f"Studio Create is missing required surfaces: {', '.join(missing_surfaces)}",
+            detail=f"Build surface is missing required surfaces: {', '.join(missing_surfaces)}",
         )
 
     try:
-        create_state = await save_studio_create_state_to_db(
+        record_result = await _get_app_registry_service().ensure_status_for_app(
+            app_id=app_id,
+            owner_user_id=user_id,
+            status="draft",
+            default_name=app_id,
+        )
+        record = record_result.get("app")
+        build_state = await save_build_state_to_db(
             app_id,
             request_text=request.request_text,
             request_kind=request.request_kind,
             change_class=request.change_class,
         )
-        home_summary = build_studio_home_summary(app_root, surface="shell-create", local_only=True)
-        home_summary["studio"] = {**home_summary["studio"], "surface": "shell-create", "route": "/studio/create"}
+        home_summary = build_app_overview_summary(
+            app_root,
+            surface="shell-build",
+            local_only=True,
+            app_record=record if isinstance(record, dict) else None,
+        )
+        home_summary["console"] = {**home_summary["console"], "surface": "shell-build", "route": f"/apps/{app_id}/build"}
         return {
             **home_summary,
-            "create": build_create_section(home_summary, create_state),
+            "build": build_build_section(home_summary, build_state),
         }
+    except HTTPException:
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to persist Studio Create state: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"Failed to persist build state: {exc}") from exc
 
 
 class WorkflowTriggerRequest(BaseModel):

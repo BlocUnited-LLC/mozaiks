@@ -1,49 +1,77 @@
 # Module Type Taxonomy
 
-Every module in Mozaiks follows the same base contract — `module.yaml`, `events.yaml`,
-`backend/`, and the handler → service → repo → models → policy stack. But not every
+Every module in Mozaiks follows the same base contract — `module.yaml`, `contracts/`,
+`backend/`, and the handler → service → repo → schemas → policy stack. But not every
 module has the same *shape* of problem.
 
-This document defines the four canonical module types. The type governs which YAML
-files are added beyond the base contract, what conventions the backend layers follow,
-and how the factory scaffolds the module.
+This document defines the three canonical module types. The type governs backend layer
+conventions and how the factory scaffolds the module. Type-specific YAML additions are
+not used — the distinction is entirely in naming conventions and implementation patterns.
 
 ---
 
 ## The `type` Field
 
-Every module declares its type in `module.yaml`:
+Every module may declare its type in `module.yaml`:
 
 ```yaml
 # app/modules/my_module/module.yaml
-name: my_module
-type: standard   # standard | messaging | workflow | transactional
+module:
+  id: my_module
+  # ...
+  type: standard   # standard | messaging | transactional
 ```
 
 The type is a scaffolding and convention signal, not a runtime enforcement. The
-platform does not gate behaviour on the type field today. The factory uses it to
-select the right template and YAML additions. Treat it as a required declaration
-from day one.
+platform does not gate behavior on the type field. The factory uses it to select
+the right backend template and apply type-aware prompts. Treat it as a required
+declaration from day one.
 
 ---
 
 ## Type Overview
 
 | Type | Core Nature | Signature Problem |
-|---|---|---|
+|------|-------------|-------------------|
 | `standard` | Request/response CRUD | Shared logic, listings, profiles, settings |
 | `messaging` | Stateful, real-time, event-driven | Threads, DMs, presence, unread tracking |
-| `workflow` | State machine, multi-party, time-bound | Proposals, approvals, voting, review flows |
 | `transactional` | Atomic, ledger-like, audit trail | Wallets, payments, asset issuance |
 
-All four types share the same Python layer structure. The differences are in YAML
-additions, naming conventions, and how events are shaped.
+All three types share the same module shape and Python layer structure. The differences
+are in backend conventions and how events are shaped.
+
+---
+
+## Base Contract (all types)
+
+```text
+{module_name}/
+├── module.yaml              # Required: identity, actions, capabilities
+├── contracts/               # Optional companion manifests
+│   ├── events.yaml          # Domain events this module may publish
+│   ├── reactions.yaml       # Event reactions owned by this module
+│   ├── notifications.yaml   # Notification rules per event
+│   ├── settings.yaml        # User/app settings schema
+│   ├── admin.yaml           # Admin panels mounted into /admin/*
+│   └── entitlements.yaml    # Optional capability entitlements
+├── runtime_extensions.yaml  # Optional: api_router / startup_service
+└── backend/
+    ├── __init__.py
+    ├── handler.py     # thin dispatch, one method per declared action
+    ├── service.py     # all business logic and event emission
+    ├── repo.py        # MongoDB access only, no logic
+    ├── schemas.py     # TypedDict shapes + helper functions
+    └── policy.py      # query scoping for multi-tenancy
+```
+
+No type-specific YAML files are added. All companion manifests live under `contracts/`
+and are optional for every type.
 
 ---
 
 ## `standard`
 
-The default type. Use it unless one of the other three is a clear fit.
+The default type. Use it unless one of the other two is a clear fit.
 
 ### When to use
 
@@ -52,32 +80,11 @@ The default type. Use it unless one of the other three is a clear fit.
 - Integration bridges that expose read/write actions
 - Any module whose actions are one-shot request/response
 
-### Base contract (all types inherit this)
-
-```text
-{module_name}/
-├── module.yaml
-├── events.yaml
-├── subscriptions.yaml
-├── notifications.yaml
-├── settings.yaml
-├── admin.yaml
-└── backend/
-    ├── __init__.py
-    ├── handler.py     # thin dispatch, one method per declared action
-    ├── service.py     # all business logic and event emission
-    ├── repo.py        # MongoDB access only, no logic
-    ├── models.py      # TypedDict shapes + helper functions
-    └── policy.py      # query scoping for multi-tenancy
-```
-
-No additional YAML files beyond the base contract.
-
 ### Backend conventions
 
 - `service.py` calls `ctx.emit()` after every state-changing action
 - `repo.py` methods accept only primitives; no domain objects cross the repo boundary
-- `models.py` uses TypedDict for all document shapes; no ORM
+- `schemas.py` uses TypedDict for all document shapes; no ORM
 
 ### Examples
 
@@ -88,40 +95,13 @@ No additional YAML files beyond the base contract.
 ## `messaging`
 
 Use for modules whose core concern is communication between participants — threads,
-direct messages, group channels, or any surface where read/unread state and
-real-time delivery matter.
+direct messages, group channels, or any surface where read/unread state matters.
 
 ### When to use
 
 - User-to-user or user-to-group communication
 - Thread-based discussion where read state is per-participant
 - Any feature where a sent message needs to *reach* a recipient, not just be stored
-
-### Additional YAML
-
-```text
-{module_name}/
-├── ...base contract...
-└── channels.yaml      # transport and delivery channel definitions
-```
-
-`channels.yaml` declares the named channels this module can push events into and
-the delivery contract for each (websocket, push notification, email digest). This
-is what lets the hosting layer route a `message.sent` event to a live WebSocket
-without the module owning the transport.
-
-```yaml
-# channels.yaml
-channels:
-  - name: thread_updates
-    event: message.sent
-    transport: websocket
-    payload_fields: [thread_id, sender_id, body_preview, sent_at]
-  - name: thread_notifications
-    event: message.sent
-    transport: push
-    when: recipient_is_offline
-```
 
 ### Backend conventions
 
@@ -132,8 +112,7 @@ channels:
   computed inline in the service
 - Events emitted by `service.py` include enough payload for real-time rendering
   without a follow-up fetch (sender name, avatar, body preview, timestamps)
-- Soft delete is per-participant, not global: a participant can leave a thread
-  without destroying it for others
+- Soft delete is per-participant, not global
 
 ### Module boundary rule
 
@@ -144,87 +123,6 @@ module. A `messaging` module owns standalone communication surfaces.
 ### Examples
 
 `communications` (DMs, threads, announcements)
-
----
-
-## `workflow`
-
-Use for modules whose core concern is a process that moves through defined states,
-involves multiple parties, and may be time-bound.
-
-### When to use
-
-- Approval or review flows with explicit accept/reject/revise states
-- Voting or proposal systems where participation windows matter
-- Any feature where the current *state* of a record drives what actions are available
-  and who can take them
-
-### Additional YAML
-
-```text
-{module_name}/
-├── ...base contract...
-├── states.yaml        # state machine definition
-└── transitions.yaml   # who can trigger which transition and under what conditions
-```
-
-`states.yaml` declares the named states and which are terminal:
-
-```yaml
-# states.yaml
-states:
-  - name: draft
-    terminal: false
-  - name: active
-    terminal: false
-  - name: passed
-    terminal: true
-  - name: rejected
-    terminal: true
-  - name: expired
-    terminal: true
-initial_state: draft
-```
-
-`transitions.yaml` declares valid transitions, the required role or condition, and
-the event emitted on success:
-
-```yaml
-# transitions.yaml
-transitions:
-  - from: draft
-    to: active
-    action: submit_proposal
-    requires_role: member
-    emits: proposal.submitted
-  - from: active
-    to: passed
-    action: close_vote
-    requires: vote_threshold_met
-    emits: proposal.passed
-  - from: active
-    to: rejected
-    action: close_vote
-    requires: vote_threshold_not_met
-    emits: proposal.rejected
-  - from: active
-    to: expired
-    trigger: deadline_passed
-    emits: proposal.expired
-```
-
-### Backend conventions
-
-- Every document managed by the module carries a `state` field
-- `policy.py` exposes a `validate_transition(current_state, action, actor_role)`
-  helper; the service calls this before any state change
-- `service.py` never mutates state directly — it always goes through the transition
-  validator
-- Events emitted on transition include `from_state`, `to_state`, and the actor
-
-### Examples
-
-`governance`, `app_review`, `hosting` (deployment approval flow)
 
 ---
 
@@ -255,7 +153,7 @@ None beyond the base contract. The distinction is entirely in backend convention
   operations
 - **Audit trail**: every entry carries `actor_id`, `action`, `amount`, `reference_id`,
   and timestamps. No entry is ever deleted
-- `models.py` defines separate TypedDicts for the balance projection (derived) and
+- `schemas.py` defines separate TypedDicts for the balance projection (derived) and
   the ledger entry (source of truth)
 
 ### Examples
@@ -273,10 +171,6 @@ Does the module manage communication between participants
 where read state and real-time delivery matter?
   → messaging
 
-Does the module manage a process that has named states
-and moves through them based on rules and roles?
-  → workflow
-
 Does the module move money, tokens, or assets where
 the history of movements is the source of truth?
   → transactional
@@ -285,29 +179,43 @@ Everything else
   → standard
 ```
 
-When in doubt, start with `standard`. Promoting a module to a more specific type
-later is straightforward — it means adding YAML files and tightening backend
-conventions, not restructuring the Python layers.
+When in doubt, start with `standard`. Promoting to a more specific type later is
+straightforward — it means tightening backend conventions, not restructuring the shape.
 
 ---
 
-## Factory Behaviour
+## Capability Ownership and Module Types
+
+Module type is an *implementation convention* — it does not change whether a
+capability is generated, selected from a pack, or hosted.
+
+See [module-system.md](module-system.md) for capability ownership classification:
+`host_universal`, `framework_pack`, `hosted_pack`, `generated_module`, `external_adapter`.
+
+Most `messaging` and `transactional` capabilities in practice are `framework_pack`
+or `hosted_pack` — not regenerated from scratch per app. AppGenerator generates
+`standard` modules most frequently; it uses `messaging` and `transactional` types
+when the app explicitly requires communication or ledger behavior that does not
+overlap with an existing framework pack.
+
+---
+
+## Factory Behavior
 
 The factory reads `type` from `module.yaml` and:
 
 - selects the matching scaffold template for `backend/`
-- adds the type-specific YAML files for `messaging` and `workflow`
 - uses type-aware prompts for action and event generation
 
 Structured output validation and CI enforcement per type are roadmap items.
-For now, the type declaration is the contract — honour it in your implementation
+For now, the type declaration is the contract — honor it in the implementation
 even when the tooling does not yet enforce it.
 
 ---
 
 ## Cross References
 
+- [module-system.md](module-system.md)
 - [canonical-app-structure.md](canonical-app-structure.md)
-- [event-contracts.md](event-contracts.md)
 - [app-bundle-declaratives.md](app-bundle-declaratives.md)
-- [framework-capability-classification.md](framework-capability-classification.md)
+- [capability-pack-model.md](capability-pack-model.md)

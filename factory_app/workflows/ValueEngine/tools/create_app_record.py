@@ -1,11 +1,11 @@
 """
 create_app_record — called at the start of the ValueEngine pipeline.
 
-Creates a hosted product build-registry record for the current user so the Hub
-immediately shows the app as in-progress while the factory pipeline runs.
+Creates or reopens an app lifecycle record for the current user so the Console
+immediately shows the app as building while the factory pipeline runs.
 
-Best-effort: never raises. If the hosted build-registry module is not installed
-(OSS user without mozaiks-app) this silently no-ops.
+Best-effort: never raises. If the app_registry module is not installed this
+silently no-ops.
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ async def _call_module(action: str, payload: dict) -> Optional[dict]:
 
 async def create_app_record(context_variables: Optional[Any] = None) -> dict:
     """
-    Create a hosted build-registry record with status 'building'.
+    Create or reopen an app lifecycle record with status 'building'.
     Called by the on_workflow_start hook in ValueEngine.
     """
     cv = context_variables or {}

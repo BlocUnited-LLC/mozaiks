@@ -1,0 +1,140 @@
+schema_version: mozaiks.module.v1
+module:
+  id: app_registry
+  display_name: App Registry
+  version: 1.0.0
+  type: standard
+  description: Durable app records and lifecycle state for the Mozaiks Console.
+  owner: app
+  visibility: private
+  handler: backend.handler:AppRegistryModule
+permissions:
+  - id: app_registry.read
+    description: View app records and lifecycle state.
+  - id: app_registry.write
+    description: Create app records and update lifecycle state.
+actions:
+  - id: create_app_record
+    description: Create or reopen an app lifecycle record.
+    handler_method: create_app_record
+    input_schema:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum:
+            - draft
+            - building
+            - review
+            - configuring
+            - deploying
+            - active
+            - needs_revision
+            - archived
+        app_id:
+          type: string
+    output_schema:
+      type: object
+      properties:
+        success:
+          type: boolean
+        app:
+          type: object
+    permissions:
+      - app_registry.write
+    emits:
+      - domain.app_registry.app_created
+  - id: update_build_status
+    description: Update the lifecycle state for an existing app record.
+    handler_method: update_build_status
+    input_schema:
+      type: object
+      required:
+        - build_registry_id
+        - status
+      properties:
+        build_registry_id:
+          type: string
+        status:
+          type: string
+          enum:
+            - draft
+            - building
+            - review
+            - configuring
+            - deploying
+            - active
+            - needs_revision
+            - archived
+        bundle_path:
+          type: string
+    output_schema:
+      type: object
+      properties:
+        success:
+          type: boolean
+        app:
+          type: object
+    permissions:
+      - app_registry.write
+    emits:
+      - domain.app_registry.status_changed
+  - id: list_apps
+    description: List app records for the current user scope.
+    handler_method: list_apps
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      properties:
+        apps:
+          type: array
+          items:
+            type: object
+    permissions:
+      - app_registry.read
+  - id: get_app_record
+    description: Fetch one app lifecycle record by app id or build registry id.
+    handler_method: get_app_record
+    input_schema:
+      type: object
+      properties:
+        app_id:
+          type: string
+        build_registry_id:
+          type: string
+    output_schema:
+      type: object
+      properties:
+        app:
+          type: object
+    permissions:
+      - app_registry.read
+capabilities:
+  - capability_id: app_registry.list
+    kind: action
+    target: list_apps
+    title: List Apps
+    permissions:
+      - app_registry.read
+    input_schema:
+      type: object
+  - capability_id: app_registry.create
+    kind: action
+    target: create_app_record
+    title: Create App Record
+    permissions:
+      - app_registry.write
+    input_schema:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string

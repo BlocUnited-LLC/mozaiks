@@ -183,7 +183,7 @@ Declares:
 Example:
 
 ```yaml
-schema_version: mozaiks.control_plane.v1
+schema_version: mozaiks.control_plane
 profile:
   id: factory_app
   display_name: Factory App Harness

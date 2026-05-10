@@ -26,30 +26,6 @@ from starlette.responses import JSONResponse, Response
 
 logger = logging.getLogger(__name__)
 
-_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() in {"true", "1", "yes"}
-_RPM = int(os.getenv("RATE_LIMIT_REQUESTS_PER_MINUTE", "60"))
-_CLIENT_HEADER = os.getenv("RATE_LIMIT_CLIENT_HEADER", "").strip()
-_EXCLUDED_PATHS = {
-    p.strip()
-    for p in os.getenv(
-        "RATE_LIMIT_EXCLUDED_PATHS",
-        "/api/health,/api/health/live,/api/health/ready",
-    ).split(",")
-    if p.strip()
-}
-
-# Parse per-path overrides from env: "path:rpm,path:rpm"
-_env_path_limits: dict[str, int] = {}
-_raw_path_limits = os.getenv("RATE_LIMIT_PATH_LIMITS", "").strip()
-if _raw_path_limits:
-    for _entry in _raw_path_limits.split(","):
-        if ":" in _entry:
-            _p, _r = _entry.rsplit(":", 1)
-            try:
-                _env_path_limits[_p.strip()] = int(_r.strip())
-            except ValueError:
-                logger.warning("Rate limiter: invalid RATE_LIMIT_PATH_LIMITS entry: %s", _entry)
-
 # Default tighter limits on expensive endpoints; env values override these.
 _DEFAULT_PATH_LIMITS: dict[str, int] = {
     "/api/chats": 10,
@@ -59,13 +35,47 @@ _DEFAULT_PATH_LIMITS: dict[str, int] = {
 
 
 def _path_limits() -> dict[str, int]:
-    return {**_DEFAULT_PATH_LIMITS, **_env_path_limits}
+    env_path_limits: dict[str, int] = {}
+    raw_path_limits = os.getenv("RATE_LIMIT_PATH_LIMITS", "").strip()
+    if raw_path_limits:
+        for entry in raw_path_limits.split(","):
+            if ":" not in entry:
+                continue
+            path, rpm = entry.rsplit(":", 1)
+            try:
+                env_path_limits[path.strip()] = int(rpm.strip())
+            except ValueError:
+                logger.warning("Rate limiter: invalid RATE_LIMIT_PATH_LIMITS entry: %s", entry)
+    return {**_DEFAULT_PATH_LIMITS, **env_path_limits}
 
 
-def _get_client_key(request: Request) -> str:
+def _rate_limit_enabled() -> bool:
+    return os.getenv("RATE_LIMIT_ENABLED", "true").lower() in {"true", "1", "yes"}
+
+
+def _requests_per_minute() -> int:
+    return int(os.getenv("RATE_LIMIT_REQUESTS_PER_MINUTE", "60"))
+
+
+def _client_header() -> str:
+    return os.getenv("RATE_LIMIT_CLIENT_HEADER", "").strip()
+
+
+def _excluded_paths() -> set[str]:
+    return {
+        path.strip()
+        for path in os.getenv(
+            "RATE_LIMIT_EXCLUDED_PATHS",
+            "/api/health,/api/health/live,/api/health/ready",
+        ).split(",")
+        if path.strip()
+    }
+
+
+def _get_client_key(request: Request, client_header: str) -> str:
     """Resolve the client identity used as the rate-limit bucket key."""
-    if _CLIENT_HEADER:
-        val = request.headers.get(_CLIENT_HEADER, "").strip()
+    if client_header:
+        val = request.headers.get(client_header, "").strip()
         if val:
             # X-Forwarded-For may be comma-separated; use the leftmost (original client) IP.
             return val.split(",")[0].strip()
@@ -113,7 +123,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, **kwargs):
         super().__init__(app, **kwargs)
 
-        if not _ENABLED:
+        if not _rate_limit_enabled():
             logger.info("Rate limiting disabled (RATE_LIMIT_ENABLED=false)")
             self._enabled = False
             return
@@ -122,18 +132,21 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         from limits.strategies import MovingWindowRateLimiter
 
         self._enabled = True
+        self._client_header = _client_header()
+        self._excluded_paths = _excluded_paths()
         self._storage = _build_storage()
         self._limiter = MovingWindowRateLimiter(self._storage)
 
         limits_map = _path_limits()
-        self._global_limit = parse(f"{_RPM}/minute")
+        requests_per_minute = _requests_per_minute()
+        self._global_limit = parse(f"{requests_per_minute}/minute")
         self._path_limits_parsed = {
             path: parse(f"{rpm}/minute") for path, rpm in limits_map.items()
         }
 
         logger.info(
             "Rate limiting enabled: global=%d/min, path overrides=%s",
-            _RPM,
+            requests_per_minute,
             {k: v for k, v in limits_map.items()},
         )
 
@@ -147,10 +160,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         path = request.url.path
 
-        if path in _EXCLUDED_PATHS:
+        if path in self._excluded_paths:
             return await call_next(request)
 
-        client_key = _get_client_key(request)
+        client_key = _get_client_key(request, self._client_header)
 
         # Pick the most specific matching path-prefix limit.
         active_limit = self._global_limit

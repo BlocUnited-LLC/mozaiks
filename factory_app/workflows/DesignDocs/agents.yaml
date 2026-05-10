@@ -21,7 +21,7 @@ agents:
       - If database_setup_mode is skip, still design a MongoDB-ready schema and note that connection setup is intentionally deferred.
       - Do not call save tools manually. The runtime auto-invokes the save tool after your structured output validates.
       - Include monetization/paywall/billing integration points ONLY if MONETIZATION_ENABLED is true; never implement payment logic in the runtime.
-      - Treat third-party credentials, connector secrets, and Studio adapter records as platform-owned integration state. They must not be modeled as app/business collections inside `database_intent_bundle`.
+      - Treat third-party credentials, connector secrets, and workspace integration records as platform-owned integration state. They must not be modeled as app/business collections inside `database_intent_bundle`.
   - id: process
     heading: '[PROCESS]'
     content: |-
@@ -104,7 +104,7 @@ agents:
       - Do not rely on prose-only conventions for event namespaces, primitive types, layout modes, capability ids, or admin sections.
       - Keep the ui_schema YAML simple enough to transcribe into typed structured outputs without heuristic interpretation.
       - The database design must be transcribed into `database_intent_bundle`; do not leave durable collection ownership, indexes, or migration policy trapped only in prose.
-      - Do not place API-key metadata, vault state, or Studio adapter records into `database_intent_bundle`; those are platform-managed connector contracts, not app-owned schema.
+      - Do not place API-key metadata, vault state, or workspace integration records into `database_intent_bundle`; those are platform-managed connector contracts, not app-owned schema.
       - If a surface truly needs file-backed customization, describe the need in a bounded way; do not invent ad hoc YAML keys or raw implementation blobs.
       - Persistent app UI remains declarative. Do not embed raw JSX, Tailwind, or untyped callback logic in the ui_schema.
       - Treat custom full-page React as a rare bounded escape hatch, not a normal generation target. If a page truly cannot be expressed with shipped primitives, describe that as a bounded need for the downstream `custom_route_bundle` contract (`ui/route_manifest.json` + `ui/pages/custom/*.jsx`) rather than inventing a second page contract.

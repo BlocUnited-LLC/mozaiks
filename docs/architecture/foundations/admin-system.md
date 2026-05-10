@@ -1,21 +1,24 @@
 # Admin System
 
-Mozaiks has one visible admin route family:
+Mozaiks has one visible app-admin route family:
 
 ```text
-/admin
-/admin/users
-/admin/billing
-/admin/usage
-/admin/activity
-/admin/settings
-/admin/integrations
-/admin/support
+/apps/:appId/admin
+/apps/:appId/users
+/apps/:appId/usage
+/apps/:appId/operations
+/apps/:appId/settings
 ```
 
-These routes are rendered by the framework-owned `AdminPortal` component. The
-shell is fixed and semantic. Studio, Build, and other builder surfaces are
-separate product routes, not admin sections.
+These routes are rendered by the framework-owned `AdminPortal` component inside
+the app console. The shell is fixed and semantic. Build, Deploy, and
+Integrations are separate product surfaces, not admin sections.
+
+Terminology note:
+
+- use `Operations` as the visible section name for health, incidents, runtime
+  state, and deployment issues
+- keep admin semantics framework-owned and explicit
 
 ## Ownership
 
@@ -27,7 +30,7 @@ separate product routes, not admin sections.
 
 The platform host owns the shell and access model. Modules own feature admin
 panels. An app backend may add app-business panels, but it does not replace the
-host-owned `/admin` shell.
+framework-owned admin shell.
 
 ## Canonical Model
 
@@ -36,7 +39,7 @@ The admin system has four distinct layers. Keep them separate:
 1. `app/app.json` `admins` is the admin bootstrap/access allowlist for the app.
 2. The built-in admin section registry is framework-owned and defines the
   semantic section ids, default labels, route paths, and default ordering for
-  the `/admin` route family.
+  the app admin route family.
 3. `modules/{module}/admin.yaml` contributes feature-owned panels into those
   semantic sections.
 4. An optional connected app backend may contribute app-business panels through
@@ -62,8 +65,7 @@ That means:
 - generated apps should set `app/app.json` `admins` for bootstrap access
 - generators should not emit `app/config/admin.json`
 - runtime/operator panels remain framework-owned
-- Studio, Build, and other builder/control-plane routes remain separate product
-  surfaces, not admin sections
+- Build and other product routes remain separate surfaces, not admin sections
 
 Example:
 
@@ -74,16 +76,16 @@ Example:
 }
 ```
 
-The platform injects the `/admin` route family with the `AdminPortal`
-component. Generators must not create a separate admin page, `/app-admin`
-route, page schema, or admin React shell.
+The platform injects the admin route family with the `AdminPortal` component.
+Generators must not create a separate admin page, route family, page schema, or
+admin React shell.
 
 ## Built-In Section Registry
 
 The built-in admin sections are framework-owned. They provide the semantic
 taxonomy for:
 
-- `/admin` shell route injection
+- admin shell route injection
 - sidebar and drawer navigation
 - section-level rendering inside `AdminPortal`
 - placement of runtime, module, and app-backend panels
@@ -91,7 +93,7 @@ taxonomy for:
 The canonical built-in ids are:
 
 ```text
-overview | users | billing | usage | activity | settings | integrations | support
+overview | users | usage | operations | settings
 ```
 
 The taxonomy is fixed by the framework today. If a future product genuinely

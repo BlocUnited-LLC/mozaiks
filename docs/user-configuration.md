@@ -152,7 +152,7 @@ Behavior:
 - no vault configured
 - connector records can still exist as metadata
 - vault configured
-  - Studio adapters can create, rotate, and delete durable connector secrets
+  - Workspace integrations can create, rotate, and delete durable connector secrets
 
 ## Two Ways Users Can Provide Connector Access
 
@@ -160,7 +160,7 @@ There are two valid paths:
 
 ### 1. Manual Platform Configuration
 
-The user or operator opens the Studio adapters/admin surface and adds the
+The user or operator opens the workspace integrations/admin surface and adds the
 connector there first.
 
 Use this when:

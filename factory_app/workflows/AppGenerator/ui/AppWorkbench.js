@@ -130,7 +130,7 @@ const AppWorkbench = ({
       setArtifactReviewBusy(true);
       setArtifactReviewError(null);
       try {
-        const response = await fetch(`/api/studio/artifacts/${encodeURIComponent(artifactVersionId)}/review`);
+        const response = await fetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/review`);
         const body = await response.json().catch(() => ({ detail: response.statusText }));
         if (!response.ok) {
           throw new Error(body.detail || 'Artifact review could not be loaded.');
@@ -238,7 +238,7 @@ const AppWorkbench = ({
     setArtifactReviewBusy(true);
     setArtifactReviewError(null);
     try {
-      const response = await fetch(`/api/studio/artifacts/${encodeURIComponent(artifactVersionId)}/${action}`, {
+      const response = await fetch(`/api/studio/build/artifacts/${encodeURIComponent(artifactVersionId)}/${action}`, {
         method: 'POST',
       });
       const body = await response.json().catch(() => ({ detail: response.statusText }));

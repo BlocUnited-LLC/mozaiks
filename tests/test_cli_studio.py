@@ -27,7 +27,7 @@ def test_studio_command_recommends_onboarding_for_blank_scaffold(tmp_path, capsy
     studio_command.run(Namespace(directory=str(target_dir), json_output=False))
     captured = capsys.readouterr()
 
-    assert "Studio Home" in captured.out
+    assert "App Overview" in captured.out
     assert "Run 'mozaiks onboard'" in captured.out
     assert "not configured" in captured.out
 
@@ -57,8 +57,8 @@ def test_studio_command_outputs_json_summary_for_onboarded_workspace(tmp_path, c
     captured = capsys.readouterr()
     summary = json.loads(captured.out)
 
-    assert summary["studio"]["surface"] == "cli-home"
-    assert summary["studio"]["local_only"] is True
+    assert summary["console"]["surface"] == "cli-home"
+    assert summary["console"]["local_only"] is True
     assert summary["app"]["name"] == "Atlas CRM"
     assert summary["app"]["journey"] == "brownfield_app"
     assert summary["ai"]["provider"] == "anthropic"

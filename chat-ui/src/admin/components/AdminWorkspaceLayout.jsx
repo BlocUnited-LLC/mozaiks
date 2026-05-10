@@ -8,81 +8,143 @@ import {
   RiMoneyDollarCircleFill,
   RiNotification2Fill,
   RiPlugLine,
-  RiRobot2Line,
   RiServerFill,
   RiSettings3Fill,
   RiUser3Fill,
 } from 'react-icons/ri'
 
-const ADMIN_NAV_DEFS = [
-  { id: 'overview', label: 'Overview', path: '/admin', icon: RiDashboardFill, exact: true, order: 999 },
-  { id: 'users', label: 'Users', path: '/admin/users', icon: RiUser3Fill, order: 1000 },
-  { id: 'billing', label: 'Billing', path: '/admin/billing', icon: RiMoneyDollarCircleFill, order: 1001 },
-  { id: 'usage', label: 'Usage', path: '/admin/usage', icon: RiServerFill, order: 1002 },
-  { id: 'activity', label: 'Activity', path: '/admin/activity', icon: RiFileList3Fill, order: 1003 },
-  { id: 'settings', label: 'Settings', path: '/admin/settings', icon: RiSettings3Fill, order: 1004 },
-  { id: 'integrations', label: 'Integrations', path: '/admin/integrations', icon: RiAppsFill, order: 1005 },
-  { id: 'support', label: 'Support', path: '/admin/support', icon: RiNotification2Fill, order: 1006 },
-]
-
-const STUDIO_NAV_ITEMS = [
+const WORKSPACE_NAV_ITEMS = [
   {
-    id: 'hub',
-    label: 'My Apps',
-    path: '/hub',
+    id: 'apps',
+    label: 'Apps',
+    path: '/apps',
     icon: RiAppsFill,
     exact: true,
   },
   {
-    id: 'studio',
-    label: 'Studio',
-    path: '/studio',
-    icon: RiRobot2Line,
+    id: 'usage',
+    label: 'Usage',
+    path: '/usage',
+    icon: RiServerFill,
     exact: true,
   },
   {
-    id: 'create',
-    label: 'Create',
-    path: '/studio/create',
-    icon: RiCodeSSlashLine,
+    id: 'operations',
+    label: 'Operations',
+    path: '/operations',
+    icon: RiFileList3Fill,
     exact: true,
   },
   {
-    id: 'adapters',
-    label: 'Adapters',
-    path: '/studio/adapters',
-    icon: RiPlugLine,
+    id: 'billing',
+    label: 'Billing & Hosting',
+    path: '/billing',
+    icon: RiMoneyDollarCircleFill,
+    exact: true,
+  },
+  {
+    id: 'settings',
+    label: 'Workspace Settings',
+    path: '/settings',
+    icon: RiSettings3Fill,
     exact: true,
   },
 ]
 
-function buildNavGroups(adminSections = null) {
-  const sectionConfig = adminSections && typeof adminSections === 'object' ? adminSections : {}
-  const adminItems = ADMIN_NAV_DEFS
-    .filter((item) => {
-      const config = sectionConfig[item.id]
-      return typeof config !== 'object' || config?.enabled !== false
-    })
-    .map((item) => {
-      const config = sectionConfig[item.id]
-      return {
-        ...item,
-        label: typeof config?.label === 'string' && config.label.trim() ? config.label.trim() : item.label,
-        order: Number.isInteger(config?.order) ? config.order : item.order,
-      }
-    })
-    .sort((left, right) => left.order - right.order)
+const APP_NAV_ITEMS = [
+  {
+    id: 'overview',
+    label: 'Overview',
+    suffix: '/overview',
+    icon: RiDashboardFill,
+    exact: true,
+  },
+  {
+    id: 'build',
+    label: 'Build',
+    suffix: '/build',
+    icon: RiCodeSSlashLine,
+    exact: true,
+  },
+  {
+    id: 'deploy',
+    label: 'Deploy',
+    suffix: '/deploy',
+    icon: RiServerFill,
+    exact: true,
+  },
+  {
+    id: 'users',
+    label: 'Users',
+    suffix: '/users',
+    icon: RiUser3Fill,
+    exact: true,
+  },
+  {
+    id: 'integrations',
+    label: 'Integrations',
+    suffix: '/integrations',
+    icon: RiPlugLine,
+    exact: true,
+  },
+  {
+    id: 'usage',
+    label: 'Usage',
+    suffix: '/usage',
+    icon: RiServerFill,
+    exact: true,
+  },
+  {
+    id: 'operations',
+    label: 'Operations',
+    suffix: '/operations',
+    icon: RiFileList3Fill,
+    exact: true,
+  },
+  {
+    id: 'settings',
+    label: 'Settings',
+    suffix: '/settings',
+    icon: RiSettings3Fill,
+    exact: true,
+  },
+  {
+    id: 'admin',
+    label: 'Admin',
+    suffix: '/admin',
+    icon: RiNotification2Fill,
+    exact: true,
+  },
+]
 
-  return [
+function resolveAppId(pathname) {
+  const match = /^\/apps\/([^/]+)/.exec(pathname)
+  return match?.[1] ? decodeURIComponent(match[1]) : null
+}
+
+function buildAppPath(appId, suffix) {
+  return `/apps/${encodeURIComponent(appId)}${suffix}`
+}
+
+function buildNavGroups(_adminSections = null, appId = null) {
+  const groups = [
     {
-      label: 'Administration',
-      items: adminItems,
-    },
-    {
-      label: 'Studio',
-      items: STUDIO_NAV_ITEMS,
+      label: 'Console',
+      items: WORKSPACE_NAV_ITEMS,
     },
   ]
+
+  if (appId) {
+    groups.push({
+      label: 'App Console',
+      items: APP_NAV_ITEMS.map((item) => ({
+        ...item,
+        path: buildAppPath(appId, item.suffix),
+      })),
+    })
+  }
+
+  return groups
 }
 
 
@@ -127,7 +189,8 @@ function isItemActive(item, location) {
 
 function AdminSidebar({ adminSections = null, onNavigate = null }) {
   const location = useLocation()
-  const navGroups = useMemo(() => buildNavGroups(adminSections), [adminSections])
+  const appId = resolveAppId(location.pathname)
+  const navGroups = useMemo(() => buildNavGroups(adminSections, appId), [adminSections, appId])
 
   return (
     <aside className="rounded-lg border border-border bg-card p-3 shadow-sm">
@@ -136,8 +199,8 @@ function AdminSidebar({ adminSections = null, onNavigate = null }) {
           M
         </div>
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-foreground">Mozaiks Admin</div>
-          <div className="truncate text-xs text-muted-foreground">Control workspace</div>
+          <div className="truncate text-sm font-semibold text-foreground">Mozaiks Console</div>
+          <div className="truncate text-xs text-muted-foreground">Workspace console</div>
         </div>
       </div>
 
