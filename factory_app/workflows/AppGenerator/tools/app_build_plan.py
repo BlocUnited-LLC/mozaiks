@@ -16,6 +16,8 @@ _FRONTEND_JS_TS_SEGMENTS = (
 )
 _OBSOLETE_HOST_ADMIN_CONFIG_PATH = "app/config/admin.json"
 _APP_BACKEND_ADMIN_PATHS = {"backend/admin_config.py", "backend/routes/admin.py"}
+_INTEGRATIONS_PREFIX = "backend/integrations/"
+_CLIENT_SUFFIX = "_client.py"
 _ALLOWED_TASK_TYPES = {
     "backend_foundation",
     "module_contract",
@@ -65,6 +67,22 @@ def _normalize_object_list(value: Any) -> List[Dict[str, Any]]:
 def _task_sort_key(task: Dict[str, Any]) -> tuple[int, str]:
     task_id = str(task.get("task_id") or "")
     return (0 if task_id else 1, task_id)
+
+
+def _infer_pack_id_from_integration_path(path: str) -> Optional[str]:
+    """
+    Extract the hosted pack id from a backend/integrations/{pack_id}_client.py path.
+
+    Returns the inferred pack_id string, or None if the path does not match
+    the hosted adapter pattern.
+    """
+    normalized = path.replace("\\", "/").strip()
+    if not normalized.startswith(_INTEGRATIONS_PREFIX):
+        return None
+    filename = PurePosixPath(normalized).name
+    if filename.endswith(_CLIENT_SUFFIX):
+        return filename[: -len(_CLIENT_SUFFIX)]
+    return None
 
 
 def _raw_frontend_source_path(task: Dict[str, Any]) -> Optional[str]:
@@ -147,6 +165,27 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: fr
                 f"({initial_agent}). `page_bundle` must start at AppSchemaAgent and emit "
                 "declarative page artifacts only."
             )
+
+        # Hosted-pack adapter tasks must declare capability_pack_id so that template
+        # expansion (resolve_hosted_pack_templates) can locate the correct pack template.
+        # This check fires only when the path pattern matches a known hosted pack
+        # (e.g. backend/integrations/mozaikspay_client.py → inferred pack id "mozaikspay").
+        if (
+            task_type == "api_surface"
+            and surface_kind_raw == "external_integration"
+            and not normalized_capability_pack_id
+        ):
+            for owned_path in owned_paths:
+                inferred_pack_id = _infer_pack_id_from_integration_path(owned_path)
+                if inferred_pack_id and inferred_pack_id in hosted_pack_ids:
+                    raise ValueError(
+                        f"Build task '{task_id}' generates '{owned_path}' for hosted_pack "
+                        f"'{inferred_pack_id}' but has capability_pack_id=null. "
+                        f"Set capability_pack_id: '{inferred_pack_id}' so that "
+                        "resolve_hosted_pack_templates can locate the hosted pack template. "
+                        "The capability_pack_id on api_surface adapter tasks identifies "
+                        "which hosted pack template to copy into the generated app."
+                    )
 
         raw_frontend_path = _raw_frontend_source_path(task)
         if raw_frontend_path:

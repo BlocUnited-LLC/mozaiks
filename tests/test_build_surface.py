@@ -37,6 +37,7 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     assert 'build_shell_config(surface="studio")' in studio_source
     assert '"path": "/apps/new"' in manifest_source
     assert '"path": "/usage"' in manifest_source
+    assert '"path": "/health"' in manifest_source
     assert '"path": "/billing"' in manifest_source
     assert '"path": "/hosting"' in manifest_source
     assert '"path": "/operations"' not in manifest_source
@@ -45,6 +46,7 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     assert '"component": "AppsPage"' in manifest_source
     assert '"path": "/apps/:appId/users"' in manifest_source
     assert '"path": "/apps/:appId/usage"' in manifest_source
+    assert '"path": "/apps/:appId/health"' in manifest_source
     assert '"path": "/apps/:appId/billing"' in manifest_source
     assert '"path": "/apps/:appId/hosting"' in manifest_source
     assert '"path": "/apps/:appId/build"' not in manifest_source
@@ -59,10 +61,15 @@ def test_factory_app_ui_barrel_registers_hosting_pages_and_omits_removed_pages()
     source = _read("factory_app/app/ui/index.js")
     assert "AppsPage" in source
     assert "registerComponent('AppsPage'" in source
+    assert "WorkspaceHealthPage" in source
+    assert "registerComponent('WorkspaceHealthPage'" in source
     assert "WorkspaceHostingPage" in source
     assert "registerComponent('WorkspaceHostingPage'" in source
+    assert "AppHealthPage" in source
+    assert "registerComponent('AppHealthPage'" in source
     assert "AppHostingPage" in source
     assert "registerComponent('AppHostingPage'" in source
+    assert "./pages/custom/console/AppHealthPage.jsx" in source
     assert "./pages/custom/console/AppHostingPage.jsx" in source
     assert "AppBuildPage" not in source
     assert "AppDeployPage" not in source
@@ -91,7 +98,9 @@ def test_removed_console_pages_are_deleted_from_factory_app() -> None:
         assert not (workspace / relative_path).exists()
 
     assert (workspace / "factory_app/app/ui/pages/custom/console/AppHostingPage.jsx").exists()
+    assert (workspace / "factory_app/app/ui/pages/custom/console/AppHealthPage.jsx").exists()
     assert (workspace / "factory_app/app/ui/pages/custom/console/WorkspaceHostingPage.jsx").exists()
+    assert (workspace / "factory_app/app/ui/pages/custom/console/WorkspaceHealthPage.jsx").exists()
 
 
 def test_refinement_ui_moves_into_factory_app() -> None:
@@ -146,17 +155,20 @@ def test_admin_workspace_layout_links_console_and_hosting_sections() -> None:
     assert "label: 'App Console'" in source
     assert "Users" in source
     assert "Billing" in source
+    assert "Health" in source
     assert "Hosting" in source
     assert "Usage" in source
     assert "Integrations" in source
     assert "buildAppPath(appId, item.suffix)" in source
     assert "path: '/apps'" in source
     assert "path: '/usage'" in source
+    assert "path: '/health'" in source
     assert "path: '/billing'" in source
     assert "path: '/hosting'" in source
     assert "path: '/operations'" not in source
     assert "path: '/settings'" not in source
     assert "suffix: '/users'" in source
+    assert "suffix: '/health'" in source
     assert "suffix: '/integrations'" in source
     assert "suffix: '/usage'" in source
     assert "suffix: '/billing'" in source

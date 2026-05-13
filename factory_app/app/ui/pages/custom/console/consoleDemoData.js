@@ -623,4 +623,30 @@ export function getConsoleDemoAdminStats(appId) {
   }
 }
 
+export function getConsoleDemoWorkspaceRuns() {
+  return Object.entries(DEMO_RUNS_BY_APP).flatMap(([appId, runs]) => {
+    const app = DEMO_APPS.find((entry) => entry.app_id === appId)
+    return runs.map((run) => ({
+      ...run,
+      app_id: appId,
+      app_name: app?.name || appId,
+    }))
+  })
+}
+
+export function getConsoleDemoWorkspaceStats() {
+  const runs = getConsoleDemoWorkspaceRuns()
+
+  return {
+    active_chats: runs.filter((run) => !run.ended_at).length,
+    tracked_chats: runs.length,
+    total_agent_turns: runs.reduce((total, run) => total + Number(run.agent_turns || 0), 0),
+    total_tool_calls: runs.reduce((total, run) => total + Number(run.tool_calls || 0), 0),
+    total_errors: runs.reduce((total, run) => total + Number(run.errors || 0), 0),
+    total_prompt_tokens: runs.reduce((total, run) => total + Number(run.prompt_tokens || 0), 0),
+    total_completion_tokens: runs.reduce((total, run) => total + Number(run.completion_tokens || 0), 0),
+    total_cost: runs.reduce((total, run) => total + Number(run.cost || 0), 0),
+  }
+}
+
 export default buildConsoleDemoApps

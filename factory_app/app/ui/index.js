@@ -12,9 +12,11 @@ const AdminPage = lazy(() => import('@mozaiks/chat-ui/pages/AdminPage.jsx'));
 const ConsolePage = lazy(() => import('./pages/custom/console/ConsolePage.jsx'));
 const AppsPage = lazy(() => import('./pages/custom/console/AppsPage.jsx'));
 const WorkspaceUsagePage = lazy(() => import('./pages/custom/console/WorkspaceUsagePage.jsx'));
+const WorkspaceHealthPage = lazy(() => import('./pages/custom/console/WorkspaceHealthPage.jsx'));
 const WorkspaceBillingPage = lazy(() => import('./pages/custom/console/WorkspaceBillingPage.jsx'));
 const WorkspaceHostingPage = lazy(() => import('./pages/custom/console/WorkspaceHostingPage.jsx'));
 const AppOverviewPage = lazy(() => import('./pages/custom/console/AppOverviewPage.jsx'));
+const AppHealthPage = lazy(() => import('./pages/custom/console/AppHealthPage.jsx'));
 const AppUsersPage = lazy(() => import('./pages/custom/console/AppUsersPage.jsx'));
 const AppUsagePage = lazy(() => import('./pages/custom/console/AppUsagePage.jsx'));
 const AppBillingPage = lazy(() => import('./pages/custom/console/AppBillingPage.jsx'));
@@ -40,6 +42,10 @@ export function registerConsoleComponents(registerComponent) {
     description: 'Workspace usage surface — portfolio-level usage, capacity, and value trends across all apps.',
   });
 
+  registerComponent('WorkspaceHealthPage', WorkspaceHealthPage, {
+    description: 'Workspace health surface — cross-app runtime, workflow, and hosting health in one portfolio view.',
+  });
+
   registerComponent('WorkspaceBillingPage', WorkspaceBillingPage, {
     description: 'Workspace billing surface — billing ownership, revenue posture, and commercial readiness for all apps.',
   });
@@ -50,6 +56,10 @@ export function registerConsoleComponents(registerComponent) {
 
   registerComponent('AppOverviewPage', AppOverviewPage, {
     description: 'App overview surface — shows app intent, readiness, and the next recommended build step.',
+  });
+
+  registerComponent('AppHealthPage', AppHealthPage, {
+    description: 'App health surface — overall app health across workflows, hosting, integrations, and runtime posture.',
   });
 
   registerComponent('AppUsersPage', AppUsersPage, {

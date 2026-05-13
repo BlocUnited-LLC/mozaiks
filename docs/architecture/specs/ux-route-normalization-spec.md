@@ -9,7 +9,7 @@
 The route model must follow the customer-facing IA directly.
 
 This spec exists so route and navigation work uses one canonical vocabulary:
-`Apps`, `Overview`, `Usage`, `Billing`, `Hosting`, `Integrations`, and `Users`.
+`Apps`, `Overview`, `Health`, `Usage`, `Billing`, `Hosting`, `Integrations`, and `Users`.
 
 ## Target Customer-Facing Route Families
 
@@ -18,6 +18,7 @@ This spec exists so route and navigation work uses one canonical vocabulary:
 ```text
 /apps
 /usage
+/health
 /billing
 /hosting
 ```
@@ -26,6 +27,7 @@ This spec exists so route and navigation work uses one canonical vocabulary:
 
 ```text
 /apps/:appId/overview
+/apps/:appId/health
 /apps/:appId/users
 /apps/:appId/usage
 /apps/:appId/billing
@@ -80,11 +82,26 @@ Do not merge Billing into Hosting.
 Use `Hosting` for:
 
 - domains
+- email and mailbox posture
+- DNS and certificate posture
+- backup and storage posture
 - environment posture
 - managed rollout readiness
 - production handoff state
 
 Do not merge Hosting back into Billing or present it as `Deploy`.
+
+## Health Route Rules
+
+Use `Health` for:
+
+- overall app health
+- runtime readiness
+- workflow reliability
+- hosting health posture
+- integration health blockers
+
+Do not rename this surface back to `Operations` in the production console.
 
 ## Integrations Route Rules
 
@@ -97,10 +114,14 @@ Rules:
   `/settings`
 - avoid visible `Adapters` terminology
 
+## Usage Route Rules
+
 Use `Usage` for:
 
-- tokens
-- spend
+- input tokens
+- output tokens
+- token totals and averages
+- token cost and spend
 - API volume
 - counts and consumption metrics
 

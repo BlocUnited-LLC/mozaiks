@@ -14,7 +14,7 @@ This document defines the canonical lifecycle across:
 Terminology note:
 
 - `Studio` remains the current internal host and command name
-- customer-facing UX should prefer `Apps`, `Usage`, `Billing`, `Hosting`, and
+- customer-facing UX should prefer `Apps`, `Usage`, `Health`, `Billing`, `Hosting`, and
   `Integrations`
 - `Build` refers to the workflow-owned agent sequence for create and
   refinement, not a required persistent console page

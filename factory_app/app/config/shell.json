@@ -17,6 +17,22 @@
           "investor": "/create",
           "default": "/create"
         },
+        "route_overrides": [
+          {
+            "when": { "pathPrefix": "/chat" },
+            "label": "Console",
+            "icon": "settings.svg",
+            "path": "/apps",
+            "variant": "secondary"
+          },
+          {
+            "when": { "path": "/", "queryParam": "workflow" },
+            "label": "Console",
+            "icon": "settings.svg",
+            "path": "/apps",
+            "variant": "secondary"
+          }
+        ],
         "variant": "primary",
         "visible": true
       }

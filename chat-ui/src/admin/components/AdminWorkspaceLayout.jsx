@@ -6,6 +6,7 @@ import {
   RiFileList3Fill,
   RiMoneyDollarCircleFill,
   RiPlugLine,
+  RiPulseLine,
   RiServerFill,
   RiUser3Fill,
 } from 'react-icons/ri'
@@ -23,6 +24,13 @@ const WORKSPACE_NAV_ITEMS = [
     label: 'Usage',
     path: '/usage',
     icon: RiFileList3Fill,
+    exact: true,
+  },
+  {
+    id: 'health',
+    label: 'Health',
+    path: '/health',
+    icon: RiPulseLine,
     exact: true,
   },
   {
@@ -47,6 +55,13 @@ const APP_NAV_ITEMS = [
     label: 'Overview',
     suffix: '/overview',
     icon: RiDashboardFill,
+    exact: true,
+  },
+  {
+    id: 'health',
+    label: 'Health',
+    suffix: '/health',
+    icon: RiPulseLine,
     exact: true,
   },
   {
@@ -97,24 +112,24 @@ function buildAppPath(appId, suffix) {
 }
 
 function buildNavGroups(_adminSections = null, appId = null) {
-  const groups = [
+  if (appId) {
+    return [
+      {
+        label: null,
+        items: APP_NAV_ITEMS.map((item) => ({
+          ...item,
+          path: buildAppPath(appId, item.suffix),
+        })),
+      },
+    ]
+  }
+
+  return [
     {
-      label: 'Console',
+      label: null,
       items: WORKSPACE_NAV_ITEMS,
     },
   ]
-
-  if (appId) {
-    groups.push({
-      label: 'App Console',
-      items: APP_NAV_ITEMS.map((item) => ({
-        ...item,
-        path: buildAppPath(appId, item.suffix),
-      })),
-    })
-  }
-
-  return groups
 }
 
 
@@ -177,27 +192,44 @@ function AdminSidebar({ adminSections = null, onNavigate = null, navGroups: prov
   const navigationLabel = appId ? 'App Console navigation' : 'Workspace navigation'
   const surfaceClass =
     surface === 'sheet'
-      ? 'rounded-2xl border border-border/70 bg-background/70 p-3'
-      : 'rounded-lg border border-border bg-card p-3 shadow-sm'
+      ? 'rounded-2xl border border-border/45 bg-background/76 p-3'
+      : 'rounded-[1.35rem] border border-border/42 bg-card/22 p-3 shadow-sm shadow-black/5'
 
   return (
     <aside className={surfaceClass}>
-      <div className="mb-5 flex items-center gap-3 px-2 pt-1">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 text-sm font-bold text-primary">
-          M
+      {appId ? (
+        <div className="mb-4 px-2 pt-1">
+          <Link
+            to="/apps"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground/80 transition hover:text-foreground"
+          >
+            <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 12H5M12 5l-7 7 7 7" />
+            </svg>
+            All Apps
+          </Link>
+          <div className="mt-3 truncate text-sm font-semibold text-foreground">App Console</div>
         </div>
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-foreground">Mozaiks Console</div>
-          <div className="truncate text-xs text-muted-foreground">Workspace console</div>
+      ) : (
+        <div className="mb-5 flex items-center gap-3 px-2 pt-1">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/26 bg-primary/8 text-sm font-bold text-primary">
+            M
+          </div>
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-foreground">Mozaiks Console</div>
+            <div className="truncate text-xs text-muted-foreground/84">Manage your apps</div>
+          </div>
         </div>
-      </div>
+      )}
 
       <nav aria-label={navigationLabel} className="space-y-5">
         {navGroups.map((group) => (
-          <div key={group.label}>
-            <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-              {group.label}
-            </div>
+          <div key={group.label || 'workspace'}>
+            {group.label ? (
+              <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground/72">
+                {group.label}
+              </div>
+            ) : null}
             <div className="space-y-1">
               {group.items.map((item) => {
                 const Icon = item.icon
@@ -208,10 +240,10 @@ function AdminSidebar({ adminSections = null, onNavigate = null, navGroups: prov
                     to={itemHref(item)}
                     aria-current={active ? 'page' : undefined}
                     onClick={onNavigate || undefined}
-                    className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition ${
+                    className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
                       active
-                        ? 'border-primary/40 bg-primary/15 text-primary'
-                        : 'border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground'
+                        ? 'border-primary/28 bg-primary/10 text-primary'
+                        : 'border-transparent text-muted-foreground/88 hover:border-border/45 hover:bg-muted/28 hover:text-foreground'
                     }`}
                   >
                     <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
@@ -234,7 +266,7 @@ function AdminMobileNavTrigger({ onOpenMenu, activeLabel = 'Console' }) {
       <button
         type="button"
         onClick={onOpenMenu}
-        className="inline-flex h-11 max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full border border-border bg-background/95 px-4 text-foreground shadow-lg shadow-black/15 backdrop-blur-md transition hover:bg-muted"
+      className="inline-flex h-11 max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full border border-border/45 bg-background/90 px-4 text-foreground shadow-lg shadow-black/15 backdrop-blur-md transition hover:bg-muted/35"
         aria-label="Open console navigation"
       >
         <MenuGlyph />
@@ -258,7 +290,7 @@ export function AdminWorkspaceLayout({ children, adminSections = null }) {
 
   return (
     <div className="min-h-full flex-1 bg-background">
-      <div className="mx-auto flex w-full max-w-[92rem] gap-6 px-4 py-6 md:px-6 lg:px-8">
+      <div className="mx-auto flex w-full max-w-[96rem] gap-6 px-4 py-7 md:px-6 lg:px-8">
         <div className="hidden w-72 shrink-0 lg:block">
           <div className="sticky top-24">
             <AdminSidebar adminSections={adminSections} navGroups={navGroups} />
@@ -276,10 +308,21 @@ export function AdminWorkspaceLayout({ children, adminSections = null }) {
             <div className="absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-y-auto rounded-t-3xl border border-border bg-card/95 p-3 pb-[calc(env(safe-area-inset-bottom,0px)+6.25rem)] shadow-2xl backdrop-blur-md">
               <div className="mb-3 flex items-center justify-between px-2">
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-foreground">Console navigation</div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {activeNav.group?.label ? `${activeNav.group.label} / ${activeLabel}` : activeLabel}
-                  </div>
+                  {appId ? (
+                    <Link
+                      to="/apps"
+                      onClick={() => setMobileOpen(false)}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground/80 transition hover:text-foreground"
+                    >
+                      <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M19 12H5M12 5l-7 7 7 7" />
+                      </svg>
+                      All Apps
+                    </Link>
+                  ) : (
+                    <div className="truncate text-sm font-semibold text-foreground">Console navigation</div>
+                  )}
+                  <div className="truncate text-xs text-muted-foreground">{activeLabel}</div>
                 </div>
                 <button
                   type="button"

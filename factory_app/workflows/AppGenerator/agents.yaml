@@ -228,7 +228,7 @@ agents:
         - Only capability packs with `surface_kind = module` may emit `task_type: module_contract`.
         Capability source rules:
         - `host_universal` capabilities: do NOT scaffold or plan any code — they are already in the platform runtime.
-        - `hosted_pack` capabilities: Do NOT plan a `module_contract` build task for it. The module already exists in the deployed host. Include it as a capability_pack entry with `implementation_mode: external_integration` and `capability_source: hosted_pack`. Plan an `api_surface` adapter task (owned by ControllerAgent) to generate the thin adapter client at `backend/integrations/{pack_id}_client.py`.
+        - `hosted_pack` capabilities: Do NOT plan a `module_contract` build task for it. The module already exists in the deployed host. Include it as a capability_pack entry with `implementation_mode: external_integration` and `capability_source: hosted_pack`. Plan an `api_surface` adapter task (owned by ControllerAgent) to generate the thin adapter client at `backend/integrations/{pack_id}_client.py`. Set `capability_pack_id: "{pack_id}"` on the adapter task — this is required for hosted pack template expansion during assembly.
         - `generated_module` capabilities: must generate full module contracts and backend files — plan `module_contract` build tasks for these packs.
         - `external_adapter` capabilities: generate adapter/client wiring only — no hosted business logic.
         - `surface_kind = workflow` packs describe agentic behavior and UI/workflow touchpoints, but do not generate runtime modules here.
@@ -265,7 +265,7 @@ agents:
          - integration-adapters
         - app-schema-bundle
         - validation-export
-        Adapter task decision rule: For each `hosted_pack` with `surface_kind: external_integration`, plan one `api_surface` task whose owned_paths live under `backend/integrations/` — no hosted business logic in these files, only thin client wiring. Do NOT place adapter files under `modules/{pack_id}/`.
+        Adapter task decision rule: For each `hosted_pack` with `surface_kind: external_integration`, plan one `api_surface` task with: `capability_pack_id: "{pack_id}"` (REQUIRED — identifies which hosted pack template to copy), `surface_kind: "external_integration"`, `initial_agent: "ControllerAgent"`, `owned_paths: ["backend/integrations/{pack_id}_client.py"]`. No hosted business logic in these files, only thin client wiring. Do NOT place adapter files under `modules/{pack_id}/`. Do NOT set capability_pack_id to null on hosted adapter tasks — null breaks template expansion.
       14. Emit `workflows` child specs derived directly from `build_tasks`:
          - `name` MUST be `AppGenerator`
          - `initial_agent` MUST match the task's designated starting agent
@@ -429,6 +429,7 @@ agents:
               "current_build_task": {
                 "task_id": "task_wallet_adapter",
                 "task_type": "api_surface",
+                "capability_pack_id": "wallet",
                 "surface_kind": "external_integration",
                 "owned_paths": ["backend/integrations/wallet_client.py"],
                 "initial_agent": "ControllerAgent"

@@ -59,6 +59,99 @@ const resolveRoleScopedRoute = (mapping, roles = []) => {
   return null;
 };
 
+const wildcardToRegExp = (pattern) => {
+  const escaped = pattern.replace(/[|\\{}()[\]^$+?.]/g, "\\$&").replace(/\*/g, ".*");
+  return new RegExp(`^${escaped}$`);
+};
+
+const normalizeRouteList = (value) => {
+  if (Array.isArray(value)) return value.filter((item) => typeof item === "string" && item.trim());
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  return [];
+};
+
+const queryParamMatches = (params, condition) => {
+  if (!condition) return true;
+  if (typeof condition === "string") return params.has(condition);
+  if (!condition || typeof condition !== "object" || Array.isArray(condition)) return false;
+
+  const name = condition.name || condition.key || condition.param;
+  if (typeof name !== "string" || !name.trim() || !params.has(name)) return false;
+
+  const current = params.get(name);
+  if (condition.value !== undefined) return current === String(condition.value);
+  if (Array.isArray(condition.values)) {
+    return condition.values.map((value) => String(value)).includes(current);
+  }
+  return true;
+};
+
+const routeConditionMatches = (condition, location) => {
+  if (!condition || typeof condition !== "object" || Array.isArray(condition)) return false;
+
+  const pathname = location?.pathname || "/";
+  const searchParams = new URLSearchParams(location?.search || "");
+  const exactPaths = normalizeRouteList(condition.path ?? condition.paths);
+  const prefixes = normalizeRouteList(
+    condition.pathPrefix ?? condition.path_prefix ?? condition.startsWith ?? condition.starts_with,
+  );
+  const patterns = normalizeRouteList(condition.pathPattern ?? condition.path_pattern ?? condition.pattern);
+
+  if (exactPaths.length > 0 && !exactPaths.includes(pathname)) return false;
+  if (prefixes.length > 0 && !prefixes.some((prefix) => pathname === prefix || pathname.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`))) {
+    return false;
+  }
+  if (patterns.length > 0 && !patterns.some((pattern) => wildcardToRegExp(pattern).test(pathname))) {
+    return false;
+  }
+
+  const queryParam = condition.queryParam ?? condition.query_param ?? condition.searchParam ?? condition.search_param;
+  if (queryParam !== undefined && !queryParamMatches(searchParams, queryParam)) return false;
+
+  const query = condition.query ?? condition.search;
+  if (query && typeof query === "object" && !Array.isArray(query)) {
+    for (const [key, expected] of Object.entries(query)) {
+      if (!searchParams.has(key)) return false;
+      if (expected !== true && expected !== undefined && expected !== null && searchParams.get(key) !== String(expected)) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+};
+
+const resolveActionForRoute = (action, location) => {
+  if (!action || typeof action !== "object") return action;
+  const overrides = action.route_overrides || action.routeOverrides || action.route_variants || action.routeVariants;
+  if (!Array.isArray(overrides)) return action;
+
+  for (const entry of overrides) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const condition = entry.when || entry.match || entry.route || {};
+    if (!routeConditionMatches(condition, location)) continue;
+
+    const rawOverride = entry.action || entry.override || entry.set || entry;
+    const override = { ...rawOverride };
+    delete override.when;
+    delete override.match;
+    delete override.route;
+    delete override.action;
+    delete override.override;
+    delete override.set;
+
+    const resolved = { ...action, ...override, id: override.id || action.id };
+    if (override.path || override.href || override.trigger) {
+      delete resolved.path_by_role;
+      delete resolved.paths_by_role;
+      delete resolved.href_by_role;
+    }
+    return resolved;
+  }
+
+  return action;
+};
+
 const resolveActionByRole = (action, roles = []) => {
   if (!action || typeof action !== "object") return action;
 
@@ -217,8 +310,12 @@ const Header = ({
   const currentUser = user || { id: "anonymous", firstName: "Guest", userPhoto: null };
   const userRoles = useMemo(() => getUserRoles(currentUser), [currentUser]);
   const headerActions = useMemo(
-    () => (Array.isArray(headerConfig.actions) ? headerConfig.actions.filter((item) => item?.visible !== false) : []),
-    [headerConfig.actions]
+    () => (Array.isArray(headerConfig.actions)
+      ? headerConfig.actions
+        .map((item) => resolveActionForRoute(item, location))
+        .filter((item) => item?.visible !== false)
+      : []),
+    [headerConfig.actions, location.pathname, location.search]
   );
   const primaryAction = useMemo(
     () => headerActions.find((item) => item?.variant === "gradient") || headerActions[0] || null,
@@ -305,7 +402,8 @@ const Header = ({
 
   const executeAction = async (action) => {
     if (!action) return;
-    const resolvedAction = resolveActionByRole(action, userRoles);
+    const contextualAction = resolveActionForRoute(action, location);
+    const resolvedAction = resolveActionByRole(contextualAction, userRoles);
 
     if (resolvedAction.action === "signout" || resolvedAction.id === "signout") {
       await logout?.();

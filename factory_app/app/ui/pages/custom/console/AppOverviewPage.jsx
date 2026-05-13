@@ -84,18 +84,18 @@ export default function AppOverviewPage() {
           summary={data.summary}
           dataMode={dataMode}
           title="Overview"
-          subtitle="Keep the current build state, workflow coverage, and approval posture in one readable app-level control surface."
+          subtitle="Review build state, workflow coverage, approvals, and runtime signals."
           currentSection="overview"
           summaryItems={summaryItems}
         />
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)]">
-          <Panel eyebrow="Movement" title="Latest app movement" subtitle="Most recent build and runtime activity flowing through this app.">
+          <Panel title="Latest app movement" subtitle="Most recent build and runtime activity.">
             <div className="space-y-3">
-              <div className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4">
+              <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Latest build artifact</div>
+                    <div className="text-[12px] font-medium text-muted-foreground/82">Latest build artifact</div>
                     <div className="mt-1 text-base font-semibold text-foreground">
                       {latestArtifact ? `Build version ${latestArtifact.version_number}` : 'No build version yet'}
                     </div>
@@ -111,8 +111,8 @@ export default function AppOverviewPage() {
                 </div>
               </div>
 
-              <div className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4">
-                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Latest runtime activity</div>
+              <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-4">
+                <div className="text-[12px] font-medium text-muted-foreground/82">Latest runtime activity</div>
                 <div className="mt-1 text-base font-semibold text-foreground">
                   {latestRun?.workflow_name || 'No runtime activity yet'}
                 </div>
@@ -123,15 +123,15 @@ export default function AppOverviewPage() {
             </div>
           </Panel>
 
-          <Panel eyebrow="Coverage" title="Workflow coverage" subtitle="Keep the currently connected workflows explicit so routing decisions are visible before a deeper drill-down.">
+          <Panel title="Workflow coverage" subtitle="Connected workflows for this app.">
             <div className="space-y-3">
               {workflowNames.length > 0 ? workflowNames.map((workflowName) => (
-                <div key={workflowName} className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4">
+                <div key={workflowName} className="rounded-2xl border border-border/42 bg-card/30 px-4 py-4">
                   <div className="font-semibold text-foreground">{workflowName}</div>
                   <div className="mt-1 text-sm text-muted-foreground">Available to the current app console workflow set.</div>
                 </div>
               )) : (
-                <div className="rounded-[1.5rem] border border-dashed border-border/70 bg-background/55 px-4 py-6 text-sm text-muted-foreground">
+                <div className="rounded-2xl border border-dashed border-border/42 bg-background/24 px-4 py-6 text-sm text-muted-foreground">
                   No workflow coverage has been recorded yet.
                 </div>
               )}
@@ -140,7 +140,7 @@ export default function AppOverviewPage() {
         </div>
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)]">
-          <Panel eyebrow="Approvals" title="Pending Approvals" subtitle="Show the current plan and approval state before this app moves deeper into deploy and runtime operations.">
+          <Panel title="Pending Approvals" subtitle="Current plan and approval state.">
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <StatusPill tone={build.approval_state === 'approved' ? 'success' : build.approval_state === 'rejected' ? 'warning' : 'primary'}>
@@ -149,8 +149,8 @@ export default function AppOverviewPage() {
                 <StatusPill tone="default">{getPlanStateLabel(build.plan_state)}</StatusPill>
               </div>
 
-              <div className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4 text-sm">
-                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Current request</div>
+              <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-4 text-sm">
+                <div className="text-[12px] font-medium text-muted-foreground/82">Current request</div>
                 <div className="mt-2 text-foreground">
                   {build.current_request?.text || 'The current request brief will appear here after Build saves the draft.'}
                 </div>
@@ -161,22 +161,22 @@ export default function AppOverviewPage() {
             </div>
           </Panel>
 
-          <Panel eyebrow="Signals" title="Operating summary" subtitle="Keep cost, errors, and tooling signals visible before leaving overview for deeper page-level work.">
+          <Panel title="Operating summary" subtitle="Cost, errors, and tool activity.">
             <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4 text-sm">
-                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Tool Calls</div>
+              <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-4 text-sm">
+                <div className="text-[12px] font-medium text-muted-foreground/82">Tool Calls</div>
                 <div className="mt-2 text-2xl font-semibold text-foreground">{formatCompactNumber(snapshot.stats.total_tool_calls, '0')}</div>
               </div>
-              <div className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4 text-sm">
-                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Errors</div>
+              <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-4 text-sm">
+                <div className="text-[12px] font-medium text-muted-foreground/82">Errors</div>
                 <div className="mt-2 text-2xl font-semibold text-foreground">{formatCompactNumber(snapshot.stats.total_errors, '0')}</div>
               </div>
-              <div className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4 text-sm">
-                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Total Cost</div>
+              <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-4 text-sm">
+                <div className="text-[12px] font-medium text-muted-foreground/82">Total Cost</div>
                 <div className="mt-2 text-2xl font-semibold text-foreground">{formatCurrencyValue(snapshot.stats.total_cost, 'Pending')}</div>
               </div>
-              <div className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4 text-sm">
-                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Latest Activity</div>
+              <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-4 text-sm">
+                <div className="text-[12px] font-medium text-muted-foreground/82">Latest Activity</div>
                 <div className="mt-2 text-sm font-semibold text-foreground">{latestRun?.workflow_name || 'No runs yet'}</div>
                 <div className="mt-1 text-muted-foreground">{latestRun ? formatDateTimeLabel(latestRun.started_at) : 'Waiting for the first saved run.'}</div>
               </div>

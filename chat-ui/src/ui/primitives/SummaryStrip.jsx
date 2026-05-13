@@ -12,23 +12,23 @@ export function SummaryStrip({ items = [], className }) {
   return (
     <div
       className={cn(
-        'overflow-hidden rounded-[calc(var(--core-primitive-radius,1rem)+0.35rem)] border border-border/35 bg-card/18 shadow-[0_1px_0_rgba(255,255,255,0.02)]',
+        'overflow-hidden rounded-[calc(var(--core-primitive-radius,1rem)+0.35rem)] border border-border/32 bg-card/[0.16] shadow-[0_1px_0_rgba(255,255,255,0.025)]',
         className,
       )}
     >
-      <div className="grid grid-cols-2 gap-px bg-border/40 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px bg-border/26 md:grid-cols-4">
         {normalizedItems.map((item, index) => (
           <div
             key={item.id || item.label}
             className={cn(
-              'min-w-0 bg-card/38 px-4 py-3 sm:px-5 sm:py-3.5',
+              'min-w-0 bg-card/30 px-4 py-3.5 sm:px-5 sm:py-4',
               index === 0 && 'md:rounded-l-[inherit]',
               index === normalizedItems.length - 1 && 'md:rounded-r-[inherit]',
             )}
           >
-            <div className="text-[12px] font-medium text-muted-foreground/88">{item.label}</div>
+            <div className="text-[12px] font-medium text-muted-foreground/84">{item.label}</div>
             <div className="mt-1 flex flex-wrap items-end gap-x-2 gap-y-1">
-              <div className="text-[1.45rem] font-semibold leading-none tracking-[-0.035em] text-foreground sm:text-[1.7rem]">
+              <div className="text-[1.45rem] font-semibold leading-none tracking-[-0.035em] text-foreground sm:text-[1.62rem]">
                 {item.value}
               </div>
               {item.detail ? (

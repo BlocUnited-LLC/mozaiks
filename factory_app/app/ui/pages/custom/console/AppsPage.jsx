@@ -98,7 +98,7 @@ function AppCell({ row }) {
 
 function AppMobileItem({ row, onOpen }) {
   return (
-    <article className="rounded-[1.35rem] border border-border/70 bg-card/55 p-4 shadow-sm">
+    <article className="rounded-[1.15rem] border border-border/45 bg-card/34 p-4 shadow-sm shadow-black/5">
       <div className="flex items-start justify-between gap-3">
         <AppCell row={row} />
         <StatusPill tone={row.snapshot.lifecycleTone}>{row.snapshot.lifecycleLabel}</StatusPill>

@@ -68,14 +68,14 @@ function MobileRowCard({
   return (
     <article
       className={cn(
-        'rounded-[1.5rem] border border-border/70 bg-card/72 shadow-sm space-y-3 p-4 md:hidden',
+        'rounded-[1.2rem] border border-border/45 bg-card/34 shadow-sm shadow-black/5 space-y-3 p-4 md:hidden',
         selection !== 'none' && 'cursor-pointer',
         isSelected && 'ring-2 ring-primary/25',
       )}
       onClick={selection !== 'none' ? () => onToggle(rowKey) : undefined}
     >
       {selection !== 'none' && (
-        <div className="flex items-center justify-between gap-3 border-b border-border/60 pb-3">
+        <div className="flex items-center justify-between gap-3 border-b border-border/32 pb-3">
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Selection</div>
             <div className="mt-1 text-sm font-medium text-foreground">{isSelected ? 'Included' : 'Tap to select'}</div>
@@ -92,7 +92,7 @@ function MobileRowCard({
 
       {columns.map((col) => (
         <div key={col.key} className="space-y-1.5">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
             {col.label}
           </div>
           <div className="text-sm text-foreground">
@@ -204,7 +204,7 @@ export function DataTable({
               placeholder="Search…"
               value={searchQuery}
               onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
-              className="h-9 w-full max-w-xs rounded-md border border-input bg-transparent px-3 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="h-11 w-full max-w-md rounded-[var(--shell-control-radius,1rem)] border border-border/48 bg-card/34 px-4 text-sm text-foreground shadow-sm shadow-black/5 outline-none transition placeholder:text-muted-foreground/68 hover:border-border/70 focus:border-primary/42 focus:ring-2 focus:ring-primary/16"
             />
           )}
           {actions.length > 0 && (

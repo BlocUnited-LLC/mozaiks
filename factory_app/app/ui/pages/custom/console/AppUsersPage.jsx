@@ -69,15 +69,14 @@ export default function AppUsersPage() {
           dataMode={dataMode}
           title="Users"
           currentSection="Users"
-          subtitle="See who is using the app, which segments are active, and where subscription or support signals need operator attention."
+          subtitle="Review users, segments, subscriptions, and support signals."
           summaryItems={summaryItems}
         />
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
           <Panel
-            eyebrow="User table"
             title="People using this app"
-            subtitle="Search by name, email, segment, or subscription. Keep the surface intentionally light: this is the app-level roster, not a full CRM."
+            subtitle="Search by name, email, segment, or subscription."
             action={(
               <div className="flex flex-wrap gap-2">
                 <ActionButton
@@ -107,14 +106,14 @@ export default function AppUsersPage() {
                 value={searchValue}
                 onChange={(event) => setSearchValue(event.target.value)}
                 placeholder="Search users"
-                className="w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm text-foreground outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                className="w-full rounded-[var(--shell-control-radius,1rem)] border border-border/48 bg-card/36 px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-muted-foreground/68 hover:border-border/70 focus:border-primary/42 focus:ring-2 focus:ring-primary/16"
               />
             </div>
 
             {filteredUsers.length > 0 ? (
-              <div className="overflow-hidden rounded-2xl border border-border">
-                <table className="min-w-full divide-y divide-border text-sm">
-                  <thead className="bg-background/80 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground">
+              <div className="overflow-hidden rounded-2xl border border-border/42">
+                <table className="min-w-full divide-y divide-border/32 text-sm">
+                  <thead className="bg-background/34 text-left text-xs text-muted-foreground/84">
                     <tr>
                       <th className="px-4 py-3 font-semibold">User</th>
                       <th className="px-4 py-3 font-semibold">Segment</th>
@@ -122,13 +121,13 @@ export default function AppUsersPage() {
                       <th className="px-4 py-3 font-semibold">Last Seen</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border bg-card/60">
+                  <tbody className="divide-y divide-border/28 bg-card/24">
                     {filteredUsers.map((user) => {
                       const active = selectedUser?.id === user.id
                       return (
                         <tr
                           key={user.id}
-                          className={`cursor-pointer transition ${active ? 'bg-primary/10' : 'hover:bg-background/70'}`}
+                          className={`cursor-pointer transition ${active ? 'bg-primary/10' : 'hover:bg-card/30'}`}
                           onClick={() => setSelectedUserId(user.id)}
                         >
                           <td className="px-4 py-3">
@@ -158,23 +157,22 @@ export default function AppUsersPage() {
 
           <div className="space-y-6">
             <Panel
-              eyebrow="Selected profile"
               title={selectedUser ? selectedUser.name || selectedUser.email : 'User profile'}
-              subtitle="Use this compact profile card to review the current user in focus without leaving App Console."
+              subtitle="Selected user context."
             >
               {selectedUser ? (
                 <div className="space-y-3 text-sm">
-                  <div className="rounded-2xl border border-border bg-card/70 px-4 py-3">
+                  <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-3">
                     <div className="font-semibold text-foreground">{selectedUser.email}</div>
                     <div className="mt-2 text-muted-foreground">{selectedUser.segment || 'No segment assigned yet'}</div>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-2xl border border-border bg-card/70 px-4 py-3">
-                      <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status</div>
+                    <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-3">
+                      <div className="text-[12px] font-medium text-muted-foreground/82">Status</div>
                       <div className="mt-2 font-semibold text-foreground">{selectedUser.status || 'Unknown'}</div>
                     </div>
-                    <div className="rounded-2xl border border-border bg-card/70 px-4 py-3">
-                      <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Subscription</div>
+                    <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-3">
+                      <div className="text-[12px] font-medium text-muted-foreground/82">Subscription</div>
                       <div className="mt-2 font-semibold text-foreground">{selectedUser.subscription || 'Unassigned'}</div>
                     </div>
                   </div>
@@ -187,11 +185,11 @@ export default function AppUsersPage() {
               )}
             </Panel>
 
-            <Panel eyebrow="Segments" title="User segments" subtitle="High-value groupings stay visible so operators can see where the app is landing first.">
+            <Panel title="User segments" subtitle="Current user distribution.">
               {toArray(usersRecord?.segments).length > 0 ? (
                 <div className="space-y-3">
                   {toArray(usersRecord?.segments).map((segment) => (
-                    <div key={segment.label} className="flex items-center justify-between rounded-2xl border border-border bg-card/70 px-4 py-3">
+                    <div key={segment.label} className="flex items-center justify-between rounded-2xl border border-border/42 bg-card/30 px-4 py-3">
                       <div className="font-semibold text-foreground">{segment.label}</div>
                       <StatusPill tone="primary">{formatCompactNumber(segment.count, '0')}</StatusPill>
                     </div>
@@ -205,11 +203,11 @@ export default function AppUsersPage() {
               )}
             </Panel>
 
-            <Panel eyebrow="Subscriptions" title="Subscription mix" subtitle="App-level plan mix helps explain churn, support load, and revenue posture.">
+            <Panel title="Subscription mix" subtitle="Plan distribution by user.">
               {subscriptionMix.length > 0 ? (
                 <div className="space-y-3">
                   {subscriptionMix.map((subscription) => (
-                    <div key={subscription.label} className="flex items-center justify-between rounded-2xl border border-border bg-card/70 px-4 py-3">
+                    <div key={subscription.label} className="flex items-center justify-between rounded-2xl border border-border/42 bg-card/30 px-4 py-3">
                       <div className="font-semibold text-foreground">{subscription.label}</div>
                       <div className="text-sm text-muted-foreground">{subscription.count} users</div>
                     </div>
@@ -226,11 +224,11 @@ export default function AppUsersPage() {
         </div>
 
         <div className="grid gap-6 xl:grid-cols-2">
-          <Panel eyebrow="Activity" title="Recent user-facing activity" subtitle="Keep app-level activity compact: just the latest signals that help explain changes in user posture.">
+          <Panel title="Recent user-facing activity" subtitle="Latest user and subscription signals.">
             {recentActivity.length > 0 ? (
               <div className="space-y-3">
                 {recentActivity.map((entry) => (
-                  <div key={entry.id} className="rounded-2xl border border-border bg-card/70 px-4 py-3">
+                  <div key={entry.id} className="rounded-2xl border border-border/42 bg-card/30 px-4 py-3">
                     <div className="flex items-center justify-between gap-3">
                       <div className="font-semibold text-foreground">{entry.title}</div>
                       <div className="text-xs text-muted-foreground">{entry.timestamp}</div>
@@ -247,11 +245,11 @@ export default function AppUsersPage() {
             )}
           </Panel>
 
-          <Panel eyebrow="Support history" title="Recent support and subscription notes" subtitle="Surface the small set of signals that usually drive user retention work.">
+          <Panel title="Recent support and subscription notes" subtitle="Signals that may affect retention.">
             {toArray(usersRecord?.support_history).length > 0 ? (
               <div className="space-y-3">
                 {toArray(usersRecord?.support_history).map((entry) => (
-                  <div key={entry.id} className="rounded-2xl border border-border bg-card/70 px-4 py-3">
+                  <div key={entry.id} className="rounded-2xl border border-border/42 bg-card/30 px-4 py-3">
                     <div className="font-semibold text-foreground">{entry.label}</div>
                     <div className="mt-2 text-sm text-muted-foreground">{entry.detail}</div>
                   </div>

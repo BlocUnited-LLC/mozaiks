@@ -18,11 +18,11 @@ function renderCell(column, item, index) {
 
 function DefaultMobileItem({ item, columns, index }) {
   return (
-    <article className="rounded-[1.35rem] border border-border/70 bg-card/55 p-4 shadow-sm">
+    <article className="rounded-[1.15rem] border border-border/45 bg-card/[0.34] p-4 shadow-sm shadow-black/5">
       <div className="space-y-3">
         {columns.map((column) => (
           <div key={column.id} className="space-y-1">
-            <div className="text-[12px] font-medium text-muted-foreground">{column.header}</div>
+            <div className="text-[12px] font-medium text-muted-foreground/80">{column.header}</div>
             <div className="text-sm text-foreground">{renderCell(column, item, index)}</div>
           </div>
         ))}
@@ -57,7 +57,7 @@ export function ResourceList({
   }
 
   return (
-    <div className={cn('overflow-hidden rounded-[1.5rem] border border-border/65 bg-background/34', className)}>
+    <div className={cn('overflow-hidden rounded-[1.35rem] border border-border/45 bg-background/20 shadow-[0_1px_0_rgba(255,255,255,0.025)]', className)}>
       <div className="grid gap-3 p-3 md:hidden">
         {normalizedItems.map((item, index) => (
           <div key={getItemId(item, index)}>
@@ -70,12 +70,12 @@ export function ResourceList({
 
       <div className="hidden overflow-x-auto md:block">
         <table className={cn('min-w-full table-fixed text-sm', tableClassName)}>
-          <thead className="border-b border-border/65 text-left text-[12px] font-medium text-muted-foreground">
+          <thead className="border-b border-border/35 text-left text-[12px] font-medium text-muted-foreground/82">
             <tr>
               {normalizedColumns.map((column) => (
                 <th
                   key={column.id}
-                  className={cn('px-4 py-3 font-medium', column.headerClassName)}
+                  className={cn('px-5 py-3.5 font-medium', column.headerClassName)}
                   style={column.width ? { width: column.width } : undefined}
                 >
                   {column.header}
@@ -83,7 +83,7 @@ export function ResourceList({
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-border/58">
+          <tbody className="divide-y divide-border/28">
             {normalizedItems.map((item, index) => {
               const rowId = getItemId(item, index);
               const clickable = typeof onRowClick === 'function';
@@ -99,12 +99,12 @@ export function ResourceList({
                     }
                   } : undefined}
                   className={cn(
-                    'align-middle transition',
-                    clickable && 'cursor-pointer hover:bg-card/42 focus-visible:bg-card/42 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/24',
+                    'align-middle transition-colors',
+                    clickable && 'cursor-pointer hover:bg-card/30 focus-visible:bg-card/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/24',
                   )}
                 >
                   {normalizedColumns.map((column) => (
-                    <td key={column.id} className={cn('px-4 py-4', column.cellClassName)}>
+                    <td key={column.id} className={cn('px-5 py-5', column.cellClassName)}>
                       {renderCell(column, item, index)}
                     </td>
                   ))}

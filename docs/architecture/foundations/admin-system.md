@@ -7,6 +7,7 @@ The production app console keeps these pages visible instead:
 
 ```text
 /apps/:appId/overview
+/apps/:appId/health
 /apps/:appId/users
 /apps/:appId/usage
 /apps/:appId/billing
@@ -15,14 +16,15 @@ The production app console keeps these pages visible instead:
 ```
 
 Framework-owned admin composition remains internal and host-owned. Build,
-Billing, Hosting, and Integrations are product surfaces; they are not admin
+Health, Billing, Hosting, and Integrations are product surfaces; they are not admin
 sections.
 
 Terminology note:
 
-- use `Operations` as the visible section name for health, incidents, runtime
-  state, and deployment issues
-- keep admin semantics framework-owned and explicit
+- use `Health` as the visible product section name for runtime posture,
+  workflow reliability, and app health in the production console
+- keep `operations` as an internal admin taxonomy when framework-owned admin
+  panels need a bounded section for incidents, logs, or runtime state
 
 ## Ownership
 

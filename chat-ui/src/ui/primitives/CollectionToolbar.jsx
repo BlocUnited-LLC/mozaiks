@@ -32,7 +32,7 @@ export function CollectionToolbar({
   const normalizedSortOptions = normalizeOptions(sortOptions);
 
   return (
-    <div className={cn('space-y-4 border-b border-border/55 pb-4', className)}>
+    <div className={cn('space-y-4 border-b border-border/32 pb-4', className)}>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <label className="relative block w-full max-w-2xl">
           <span className="sr-only">{searchPlaceholder}</span>
@@ -44,7 +44,7 @@ export function CollectionToolbar({
             value={searchValue}
             onChange={(event) => onSearchChange?.(event.target.value)}
             placeholder={searchPlaceholder}
-            className="h-12 w-full rounded-[var(--shell-control-radius,1rem)] border border-border/75 bg-card/72 pl-11 pr-4 text-sm text-foreground outline-none transition placeholder:text-muted-foreground/72 hover:border-border focus:border-primary/45 focus:ring-2 focus:ring-primary/18"
+            className="h-12 w-full rounded-[var(--shell-control-radius,1rem)] border border-border/48 bg-card/36 pl-11 pr-4 text-sm text-foreground outline-none transition placeholder:text-muted-foreground/68 hover:border-border/70 hover:bg-card/46 focus:border-primary/42 focus:bg-card/52 focus:ring-2 focus:ring-primary/16"
           />
         </label>
 
@@ -56,7 +56,7 @@ export function CollectionToolbar({
               <select
                 value={sortValue}
                 onChange={(event) => onSortChange?.(event.target.value)}
-                className="h-11 rounded-[var(--shell-control-radius,1rem)] border border-border/75 bg-background/72 px-3 text-sm font-medium text-foreground outline-none transition hover:border-border focus:border-primary/45 focus:ring-2 focus:ring-primary/18"
+                className="h-11 rounded-[var(--shell-control-radius,1rem)] border border-border/48 bg-card/24 px-3 text-sm font-medium text-foreground outline-none transition hover:border-border/70 hover:bg-card/40 focus:border-primary/42 focus:ring-2 focus:ring-primary/16"
               >
                 {normalizedSortOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -80,7 +80,7 @@ export function CollectionToolbar({
                 onClick={() => onFilterChange?.(filter.value)}
                 className={cn(
                   'relative -mb-[17px] border-b border-transparent pb-3 text-[13px] font-semibold transition',
-                  selected ? 'border-primary/55 text-foreground' : 'text-muted-foreground hover:text-foreground',
+                  selected ? 'border-primary/55 text-foreground' : 'text-muted-foreground/84 hover:text-foreground',
                 )}
               >
                 {filter.label}

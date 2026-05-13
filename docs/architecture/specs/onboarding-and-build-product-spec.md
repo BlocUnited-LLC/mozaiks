@@ -7,7 +7,7 @@
 Terminology note:
 
 - `Studio` remains the current internal host and command name.
-- customer-facing UX should prefer `Apps`, `Usage`, `Billing`, `Hosting`, and
+- customer-facing UX should prefer `Apps`, `Usage`, `Health`, `Billing`, `Hosting`, and
    `Integrations`
 - `Build` is the workflow-owned agent sequence for create/refinement, not a
    standalone persistent console page
@@ -166,8 +166,8 @@ Responsibility:
 production-ready model should be:
 
 - `Apps` as the workspace-level landing area
-- `Usage`, `Billing`, and `Hosting` as workspace portfolio summaries
-- `Overview`, `Users`, `Integrations`, `Usage`, `Billing`, and `Hosting` as
+- `Usage`, `Health`, `Billing`, and `Hosting` as workspace portfolio summaries
+- `Overview`, `Health`, `Users`, `Integrations`, `Usage`, `Billing`, and `Hosting` as
    app-console sections
 - the build/refinement experience launched into the workflow-owned agent
    sequence from create and app-context actions, not exposed as a persistent
@@ -190,11 +190,20 @@ Shows:
 
 Shows:
 
-- workspace usage signals
-- token and cost posture
+- workspace usage signals across multiple workflows
+- input and output token posture
+- totals and averages at the top of the surface
 - recent portfolio activity that is already production-ready to expose
 
-### 3. Billing
+### 3. Health
+
+Shows:
+
+- overall app and workspace health posture
+- runtime readiness and workflow reliability
+- hosting and integration blockers that need intervention
+
+### 4. Billing
 
 Shows:
 
@@ -203,24 +212,25 @@ Shows:
 - commercial readiness by app
 - finance follow-up signals that are already live
 
-### 4. Hosting
+### 5. Hosting
 
 Shows:
 
-- managed hosting posture
-- domains and environment readiness
+- managed hosting posture in a provider-style control center
+- domains, email, DNS, SSL, storage, and backup posture
 - release handoff state that is already production-ready to expose
 
-### 5. App Console
+### 6. App Console
 
 Shows:
 
 - overview and current app posture
+- health and app reliability posture
 - users and participation
 - integrations and credential posture
 - usage, billing, and hosting summaries for the current app
 
-### 6. Workflow-Owned Build Sequence
+### 7. Workflow-Owned Build Sequence
 
 Shows:
 

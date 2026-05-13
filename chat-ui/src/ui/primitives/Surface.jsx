@@ -6,11 +6,11 @@ import { cn } from '../lib/cn.js';
 
 export function StatusPill({ children, label, tone = 'default', className = '' }) {
   const tones = {
-    default: 'border-border/65 bg-muted/36 text-muted-foreground',
-    primary: 'border-primary/30 bg-primary/10 text-primary',
-    success: 'border-success/30 bg-success/10 text-success',
-    warning: 'border-warning/30 bg-warning/10 text-warning',
-    destructive: 'border-destructive/30 bg-destructive/10 text-destructive',
+    default: 'border-border/50 bg-muted/22 text-muted-foreground',
+    primary: 'border-primary/28 bg-primary/8 text-primary',
+    success: 'border-success/28 bg-success/8 text-success',
+    warning: 'border-warning/28 bg-warning/8 text-warning',
+    destructive: 'border-destructive/28 bg-destructive/8 text-destructive',
   };
 
   return (
@@ -38,19 +38,19 @@ export function SurfaceCard({
   return (
     <section
       className={cn(
-        'rounded-[calc(var(--core-primitive-radius,1rem)+0.5rem)] border p-6 shadow-sm',
-        accent ? 'border-primary/20 bg-card' : 'border-border/70 bg-card/58',
+        'rounded-[calc(var(--core-primitive-radius,1rem)+0.45rem)] border p-5 shadow-sm shadow-black/5 sm:p-6',
+        accent ? 'border-primary/18 bg-card/62' : 'border-border/45 bg-card/34',
         className,
       )}
     >
       {eyebrow ? (
-        <div className="mb-2 text-[11px] font-medium text-muted-foreground">{eyebrow}</div>
+        <div className="mb-2 text-[11px] font-medium text-muted-foreground/78">{eyebrow}</div>
       ) : null}
       {(title || subtitle || headerAction) ? (
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
             {title ? <h2 className="text-lg font-semibold tracking-[-0.015em] text-foreground">{title}</h2> : null}
-            {subtitle ? <p className="mt-2 max-w-3xl text-sm leading-7 text-muted-foreground">{subtitle}</p> : null}
+            {subtitle ? <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground/88">{subtitle}</p> : null}
           </div>
           {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
         </div>
@@ -62,25 +62,25 @@ export function SurfaceCard({
 
 export function Metric({ label, value, detail = null, className = '' }) {
   return (
-    <div className={cn('rounded-2xl border border-border/65 bg-background/52 p-4', className)}>
-      <div className="text-[12px] font-medium text-muted-foreground">{label}</div>
+    <div className={cn('rounded-2xl border border-border/42 bg-background/34 p-4', className)}>
+      <div className="text-[12px] font-medium text-muted-foreground/82">{label}</div>
       <div className="mt-2 text-2xl font-semibold tracking-[-0.025em] text-foreground">{value}</div>
-      {detail ? <div className="mt-2 text-sm leading-6 text-muted-foreground">{detail}</div> : null}
+      {detail ? <div className="mt-2 text-sm leading-6 text-muted-foreground/86">{detail}</div> : null}
     </div>
   );
 }
 
 export function Panel({ title, eyebrow = null, subtitle = null, action = null, children, className = '' }) {
   return (
-    <section className={cn('rounded-2xl border border-border/65 bg-background/52 p-4', className)}>
+    <section className={cn('rounded-[1.35rem] border border-border/42 bg-background/28 p-4 shadow-sm shadow-black/5', className)}>
       {(eyebrow || action) ? (
         <div className="mb-3 flex items-start justify-between gap-3">
-          {eyebrow ? <div className="text-[11px] font-medium text-muted-foreground">{eyebrow}</div> : <span />}
+          {eyebrow ? <div className="text-[11px] font-medium text-muted-foreground/78">{eyebrow}</div> : <span />}
           {action ? <div className="shrink-0">{action}</div> : null}
         </div>
       ) : null}
       {title ? <h3 className="text-sm font-semibold text-foreground">{title}</h3> : null}
-      {subtitle ? <p className="mt-2 text-sm leading-6 text-muted-foreground">{subtitle}</p> : null}
+      {subtitle ? <p className="mt-2 text-sm leading-6 text-muted-foreground/86">{subtitle}</p> : null}
       {children ? <div className="mt-4">{children}</div> : null}
     </section>
   );
@@ -151,10 +151,10 @@ export function SegmentedControl({ options = [], value, onChange, className = ''
 
 export function InlineEmptyState({ title, description, action = null, className = '' }) {
   return (
-    <div className={cn('rounded-2xl border border-border/70 bg-background/38 px-6 py-6', className)}>
+    <div className={cn('rounded-[1.35rem] border border-border/42 bg-background/24 px-6 py-6', className)}>
       <div className="max-w-2xl">
         <div className="text-base font-semibold text-foreground">{title}</div>
-        {description ? <p className="mt-2 text-sm leading-7 text-muted-foreground">{description}</p> : null}
+        {description ? <p className="mt-2 text-sm leading-6 text-muted-foreground/86">{description}</p> : null}
         {action ? <div className="mt-4">{action}</div> : null}
       </div>
     </div>

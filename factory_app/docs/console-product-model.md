@@ -12,6 +12,7 @@ Use these terms in visible product copy:
 - `Apps`
 - `App Console`
 - `Overview`
+- `Health`
 - `Users`
 - `Usage`
 - `Billing`
@@ -39,14 +40,16 @@ not appear as primary customer-facing product language:
 Workspace-level routes:
 
 - `/apps` -> workspace app portfolio home
-- `/usage` -> workspace cross-app usage
+- `/usage` -> workspace workflow token usage and cost totals
+- `/health` -> workspace cross-app health summary
 - `/billing` -> workspace billing summary
-- `/hosting` -> workspace hosting summary
+- `/hosting` -> workspace provider-style hosting summary
 
 App-level routes:
 
 - `/apps/:appId` -> redirects to `/apps/:appId/overview`
 - `/apps/:appId/overview` -> App Console overview
+- `/apps/:appId/health` -> app health
 - `/apps/:appId/users` -> app users
 - `/apps/:appId/usage` -> app usage
 - `/apps/:appId/billing` -> app billing
@@ -56,6 +59,7 @@ App-level routes:
 Primary app navigation is:
 
 - Overview
+- Health
 - Users
 - Integrations
 - Usage
@@ -71,16 +75,18 @@ retired customer-facing terms such as `Hub`, `Studio`, `Treasury`, `Adapters`,
 | Route | Surface | Notes |
 | --- | --- | --- |
 | `/apps` | Workspace Apps | Primary workspace home and app portfolio |
-| `/usage` | Workspace Usage | Cross-app usage aggregation |
+| `/usage` | Workspace Usage | Cross-app workflow input/output tokens, totals, and averages |
+| `/health` | Workspace Health | Cross-app health posture and app-level risk visibility |
 | `/billing` | Workspace Billing | Revenue, recurring value, and finance readiness |
-| `/hosting` | Workspace Hosting | Managed hosting posture, domains, and release readiness |
+| `/hosting` | Workspace Hosting | Provider-style hosting posture across domains, email, SSL, and backups |
 | `/create` | Workflow entrypoint | Workflow-owned create path; not part of the persistent console nav |
 | `/apps/:appId` | App Console | Redirects to app overview |
 | `/apps/:appId/overview` | App Overview | App-scoped summary and next actions |
+| `/apps/:appId/health` | App Health | Overall app health across runtime, workflows, hosting, and integrations |
 | `/apps/:appId/users` | App Users | App-scoped users and customer activity |
-| `/apps/:appId/usage` | App Usage | App-scoped usage and cost signals |
+| `/apps/:appId/usage` | App Usage | App-scoped input/output token usage, cost signals, totals, and averages |
 | `/apps/:appId/billing` | App Billing | App revenue, customer billing, and finance posture |
-| `/apps/:appId/hosting` | App Hosting | Hosting readiness, domains, environments, and production posture |
+| `/apps/:appId/hosting` | App Hosting | Provider-style hosting resources for domains, email, SSL, and backups |
 | `/apps/:appId/integrations` | App Integrations | App-scoped connectors, credentials, and permissions |
 
 ## Lifecycle States
@@ -109,12 +115,14 @@ Behavior expectations:
 
 - apps
 - usage
+- health
 - billing
 - hosting
 
 `App Console` is single-app scope:
 
 - overview
+- health
 - users
 - integrations
 - usage

@@ -1,36 +1,102 @@
 import { useMemo, useState } from 'react'
 
-import { PageHeader, SummaryStrip } from '@mozaiks/chat-ui/ui'
+import {
+  CollectionToolbar,
+  InlineEmptyState,
+  PageHeader,
+  ResourceList,
+  SummaryStrip,
+} from '@mozaiks/chat-ui/ui'
 import { AdminWorkspaceLayout } from '@mozaiks/chat-ui/admin/components/AdminWorkspaceLayout.jsx'
 import {
   ConsoleErrorState,
-  ConsoleInlineEmptyState,
   ConsoleLoadingState,
   Panel,
   StatusPill,
 } from '../../../components/ConsoleShared.jsx'
 import { formatCompactNumber, formatCurrencyValue } from './AppConsoleChrome.jsx'
-import buildWorkspacePortfolio from './workspaceConsoleModel.js'
+import { getConsoleDemoBillingRecord } from './consoleDemoData.js'
 import { useWorkspaceApps } from './useWorkspaceApps.js'
+import buildWorkspacePortfolio from './workspaceConsoleModel.js'
 
+function buildBillingRows(rows, dataMode) {
+  return rows.map((row) => {
+    const appId = row.app?.app_id || row.app?.id || row.id
+    const billing = dataMode === 'demo' ? getConsoleDemoBillingRecord(appId) : null
+    const revenue = Number(billing?.total_revenue_usd || 0)
+    const failedPayments = Number(billing?.failed_payments || 0)
+    const billingTone = revenue > 0 ? 'success' : failedPayments > 0 ? 'warning' : 'default'
+    const billingLabel = revenue > 0 ? 'Revenue active' : failedPayments > 0 ? 'Needs review' : 'Pre-revenue'
+
+    return {
+      ...row,
+      revenue,
+      customers: Number(billing?.active_customers || 0),
+      mrr: Number(billing?.mrr_usd || 0),
+      failedPayments,
+      billingTone,
+      billingLabel,
+    }
+  })
+}
 
 export default function WorkspaceBillingPage() {
-  const { apps, metrics, loading, error } = useWorkspaceApps('Billing could not be loaded.')
+  const { apps, loading, error, dataMode } = useWorkspaceApps('Billing could not be loaded.')
   const [searchValue, setSearchValue] = useState('')
 
   const portfolio = useMemo(() => buildWorkspacePortfolio(apps), [apps])
+  const billingRows = useMemo(() => buildBillingRows(portfolio.rows, dataMode), [dataMode, portfolio.rows])
   const visibleRows = useMemo(() => {
     const search = searchValue.trim().toLowerCase()
-    if (!search) return portfolio.rows
-    return portfolio.rows.filter((row) => row.searchText.includes(search))
-  }, [portfolio.rows, searchValue])
-  const totalRevenue = metrics.total_revenue_usd ?? metrics.revenue_usd ?? null
-  const preRevenueCount = Math.max(portfolio.totalApps - portfolio.activeCount, 0)
+    if (!search) return billingRows
+    return billingRows.filter((row) => row.searchText.includes(search))
+  }, [billingRows, searchValue])
+  const totalRevenue = billingRows.reduce((total, row) => total + row.revenue, 0)
   const summaryItems = [
     { id: 'revenue', label: 'Total Revenue', value: formatCurrencyValue(totalRevenue, 'Pending'), detail: 'Workspace billing' },
-    { id: 'active', label: 'Active Apps', value: formatCompactNumber(portfolio.activeCount, '0'), detail: 'Commercially active' },
-    { id: 'pre-revenue', label: 'Pre-Revenue', value: formatCompactNumber(preRevenueCount, '0'), detail: 'Billing still maturing' },
-    { id: 'review', label: 'Review Required', value: formatCompactNumber(portfolio.blockingAlerts, '0'), detail: 'Need finance follow-up' },
+    { id: 'active', label: 'Commercial Apps', value: formatCompactNumber(billingRows.filter((row) => row.revenue > 0).length, '0'), detail: 'Apps with active revenue' },
+    { id: 'preRevenue', label: 'Pre-Revenue', value: formatCompactNumber(billingRows.filter((row) => row.revenue <= 0).length, '0'), detail: 'Before payments' },
+    { id: 'review', label: 'Review Required', value: formatCompactNumber(billingRows.filter((row) => row.failedPayments > 0 || ['review', 'needs_revision'].includes(row.status)).length, '0'), detail: 'Needs follow-up' },
+  ]
+  const columns = [
+    {
+      id: 'app',
+      header: 'App',
+      width: '36%',
+      render: (row) => (
+        <div>
+          <div className="font-semibold text-foreground">{row.name}</div>
+          <div className="mt-1 max-w-xl text-sm leading-6 text-muted-foreground/88">{row.description}</div>
+        </div>
+      ),
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      width: '16%',
+      render: (row) => <StatusPill tone={row.billingTone}>{row.billingLabel}</StatusPill>,
+    },
+    {
+      id: 'revenue',
+      header: 'Revenue',
+      width: '16%',
+      cellClassName: 'text-muted-foreground tabular-nums',
+      render: (row) => formatCurrencyValue(row.revenue, '$0.00'),
+    },
+    {
+      id: 'mrr',
+      header: 'MRR',
+      width: '16%',
+      cellClassName: 'text-muted-foreground tabular-nums',
+      render: (row) => formatCurrencyValue(row.mrr, '$0.00'),
+    },
+    {
+      id: 'customers',
+      header: 'Customers',
+      width: '16%',
+      cellClassName: 'text-muted-foreground tabular-nums',
+      render: (row) => formatCompactNumber(row.customers, '0'),
+    },
   ]
 
   if (loading) return <ConsoleLoadingState label="Loading billing…" />
@@ -41,61 +107,33 @@ export default function WorkspaceBillingPage() {
       <div className="space-y-6">
         <PageHeader
           title="Billing"
-          subtitle="Track workspace billing posture, revenue readiness, and the apps that still need commercial follow-up."
+          subtitle="Track revenue, customers, and billing follow-up by app."
         />
 
         <SummaryStrip items={summaryItems} />
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-          <Panel eyebrow="Revenue" title="Revenue summary" subtitle="Search billing posture by app and keep the core finance signals visible without exposing unfinished finance tooling.">
-            <div className="mb-4">
-              <input
-                type="search"
-                value={searchValue}
-                onChange={(event) => setSearchValue(event.target.value)}
-                placeholder="Search billing..."
-                className="w-full rounded-[var(--shell-control-radius,1rem)] border border-border bg-card px-4 py-3 text-sm text-foreground outline-none transition focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
-              />
-            </div>
+        <Panel
+          title="Billing reporting pending"
+          subtitle="Live billing detail appears here as payment systems are connected."
+        >
+          <div className="space-y-4">
+            <CollectionToolbar
+              searchValue={searchValue}
+              onSearchChange={setSearchValue}
+              searchPlaceholder="Search billing..."
+              actions={dataMode === 'demo' ? <StatusPill tone="warning">Demo dataset</StatusPill> : null}
+            />
 
-            <div className="rounded-[1.5rem] border border-warning/25 bg-warning/10 px-4 py-3 text-sm text-foreground">
-              Billing reporting pending
-            </div>
-
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4 text-sm">
-                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Revenue Snapshot</div>
-                <div className="mt-2 text-2xl font-semibold text-foreground">{formatCurrencyValue(totalRevenue, 'Pending')}</div>
-              </div>
-              <div className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4 text-sm">
-                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Active Apps</div>
-                <div className="mt-2 text-2xl font-semibold text-foreground">{portfolio.activeCount}</div>
-              </div>
-            </div>
-          </Panel>
-
-          <Panel eyebrow="Portfolio" title="Commercial review queue" subtitle="Keep customer value, billing readiness, and the next finance follow-up visible for each app.">
             {visibleRows.length > 0 ? (
-              <div className="space-y-3">
-                {visibleRows.map((row) => (
-                  <div key={row.id} className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="font-semibold text-foreground">{row.name}</div>
-                      <StatusPill tone={row.snapshot.lifecycleTone}>{row.snapshot.lifecycleLabel}</StatusPill>
-                    </div>
-                    <div className="mt-2 text-sm text-muted-foreground">{row.description || row.snapshot.guidance}</div>
-                    <div className="mt-3 text-xs text-muted-foreground">Updated {row.updatedLabel}</div>
-                  </div>
-                ))}
-              </div>
+              <ResourceList items={visibleRows} columns={columns} getItemId={(row) => row.id} />
             ) : (
-              <ConsoleInlineEmptyState
+              <InlineEmptyState
                 title="No apps match this billing search"
-                description="Adjust the search term to bring billing posture back into view."
+                description="Adjust the billing search term to bring the commercial queue back into view."
               />
             )}
-          </Panel>
-        </div>
+          </div>
+        </Panel>
       </div>
     </AdminWorkspaceLayout>
   )

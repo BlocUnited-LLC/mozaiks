@@ -37,10 +37,22 @@
       }
     },
     {
+      "path": "/health",
+      "component": "WorkspaceHealthPage",
+      "label": "Health",
+      "order": 6,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "Health",
+        "appShell": true
+      }
+    },
+    {
       "path": "/billing",
       "component": "WorkspaceBillingPage",
       "label": "Billing",
-      "order": 6,
+      "order": 7,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -52,7 +64,7 @@
       "path": "/hosting",
       "component": "WorkspaceHostingPage",
       "label": "Hosting",
-      "order": 7,
+      "order": 8,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -85,10 +97,22 @@
       }
     },
     {
+      "path": "/apps/:appId/health",
+      "component": "AppHealthPage",
+      "label": "Health",
+      "order": 21,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "App Health",
+        "appShell": true
+      }
+    },
+    {
       "path": "/apps/:appId/users",
       "component": "AppUsersPage",
       "label": "Users",
-      "order": 21,
+      "order": 22,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -100,7 +124,7 @@
       "path": "/apps/:appId/integrations",
       "component": "AppIntegrationsPage",
       "label": "Integrations",
-      "order": 22,
+      "order": 23,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -112,7 +136,7 @@
       "path": "/apps/:appId/usage",
       "component": "AppUsagePage",
       "label": "Usage",
-      "order": 23,
+      "order": 24,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -124,7 +148,7 @@
       "path": "/apps/:appId/billing",
       "component": "AppBillingPage",
       "label": "Billing",
-      "order": 24,
+      "order": 25,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -136,7 +160,7 @@
       "path": "/apps/:appId/hosting",
       "component": "AppHostingPage",
       "label": "Hosting",
-      "order": 25,
+      "order": 26,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",

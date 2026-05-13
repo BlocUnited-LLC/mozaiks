@@ -15,6 +15,34 @@ const ICON_FILE_RE = /\.(svg|png|jpe?g|gif|webp|ico)$/i;
 const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const URL_RE = /^(https?:\/\/|\/)/;
 
+function validateRouteOverrides(overrides, issues, file, prefix) {
+  if (overrides === undefined) return;
+  if (!Array.isArray(overrides)) {
+    issues.push({ level: 'error', file, message: `${prefix}.route_overrides must be an array.` });
+    return;
+  }
+  overrides.forEach((entry, i) => {
+    const entryPrefix = `${prefix}.route_overrides[${i}]`;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      issues.push({ level: 'error', file, message: `${entryPrefix} must be an object.` });
+      return;
+    }
+    const when = entry.when || entry.match || entry.route;
+    if (!when || typeof when !== 'object' || Array.isArray(when)) {
+      issues.push({ level: 'error', file, message: `${entryPrefix}.when must describe a route match.` });
+    }
+    if (entry.path !== undefined && (typeof entry.path !== 'string' || !entry.path.startsWith('/'))) {
+      issues.push({ level: 'error', file, message: `${entryPrefix}.path must be a route path starting with "/".` });
+    }
+    if (entry.href !== undefined && (typeof entry.href !== 'string' || entry.href.length === 0)) {
+      issues.push({ level: 'error', file, message: `${entryPrefix}.href must be a non-empty string.` });
+    }
+    if (entry.icon && !ICON_FILE_RE.test(entry.icon) && !URL_RE.test(entry.icon)) {
+      issues.push({ level: 'error', file, message: `${entryPrefix}.icon="${entry.icon}" is not a valid asset filename.` });
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Individual section validators
 // ---------------------------------------------------------------------------
@@ -112,6 +140,7 @@ function validateShellConfig(config) {
         if (action.icon && !ICON_FILE_RE.test(action.icon) && !URL_RE.test(action.icon)) {
           issues.push({ level: 'error', file, message: `header.actions[${i}].icon="${action.icon}" is not a valid asset filename. Use "sparkle.svg" not "sparkle".` });
         }
+        validateRouteOverrides(action.route_overrides || action.routeOverrides, issues, file, `header.actions[${i}]`);
         if (action.path_by_role !== undefined) {
           if (!action.path_by_role || typeof action.path_by_role !== 'object' || Array.isArray(action.path_by_role)) {
             issues.push({ level: 'error', file, message: `header.actions[${i}].path_by_role must be an object mapping role names to route paths.` });
