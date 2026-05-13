@@ -51,7 +51,22 @@ jobs:
         id: meta
         shell: bash
         run: |
-          VERSION="$(python -c 'from mozaiksai.version import __version__; print(__version__)')"
+          VERSION="$(python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          source = Path("mozaiksai/version.py").read_text(encoding="utf-8")
+          tree = ast.parse(source)
+          for node in tree.body:
+              if not isinstance(node, ast.Assign):
+                  continue
+              for target in node.targets:
+                  if isinstance(target, ast.Name) and target.id == "__version__":
+                      print(ast.literal_eval(node.value))
+                      raise SystemExit(0)
+          raise SystemExit("__version__ not found in mozaiksai/version.py")
+          PY
+          )"
           TAG="${GITHUB_REF_NAME#v}"
           if [ "$VERSION" != "$TAG" ]; then
             echo "Tag version $TAG does not match package version $VERSION" >&2
