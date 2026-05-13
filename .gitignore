@@ -12,6 +12,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+!chat-ui/src/ui/lib/
+!chat-ui/src/ui/lib/**
 parts/
 sdist/
 var/
