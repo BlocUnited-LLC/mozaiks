@@ -91,7 +91,7 @@ function normalizeColumns(columns) {
         };
       }
 
-      const key = column.key ?? column.field ?? column.name ?? column.id;
+      const key = column.key;
       return {
         ...column,
         key,
@@ -107,8 +107,8 @@ function normalizeFormFields(fields) {
     .filter(isRecord)
     .map((field, index) => ({
       ...field,
-      name: field.name ?? field.id ?? `field-${index + 1}`,
-      type: field.type ?? field.field_type ?? 'text',
+      name: field.name ?? `field-${index + 1}`,
+      type: field.type ?? 'text',
     }));
 }
 
@@ -152,21 +152,8 @@ function materializeActions(actions, executeAction, defaultPrefix) {
 function buildEmptyAction(config, executeAction, defaultPrefix) {
   if (!isRecord(config)) return undefined;
 
-  const canonicalAction = isRecord(config.action) ? config.action : null;
-  const legacyAction = typeof config.action_label === 'string' && config.action_label.trim()
-    ? {
-        label: config.action_label,
-        action_type: config.action_type,
-        href: config.href ?? null,
-        event_type: config.action_event ?? config.event_type ?? null,
-        workflow_id: config.workflow_id ?? null,
-        context_variables: isRecord(config.context_variables) ? config.context_variables : null,
-        event_payload: config.action_payload ?? config.event_payload ?? null,
-      }
-    : null;
-
   const [action] = materializeActions(
-    canonicalAction ? [canonicalAction] : legacyAction ? [legacyAction] : [],
+    isRecord(config.action) ? [config.action] : [],
     executeAction,
     defaultPrefix,
   );
@@ -189,7 +176,7 @@ function buildButtonAction(config) {
     event_type: config.event_type ?? null,
     workflow_id: config.workflow_id ?? null,
     context_variables: isRecord(config.context_variables) ? config.context_variables : null,
-    event_payload: config.event_payload ?? null,
+    payload: isRecord(config.payload) ? config.payload : null,
   };
 }
 
@@ -204,21 +191,6 @@ function resolveTableData(config, liveData) {
     return liveData.items ?? liveData.results ?? liveData.rows ?? liveData.data ?? [];
   }
   return [];
-}
-
-function resolveStatValue(config, liveData, staticKey, dynamicKey, fallbackKey) {
-  if (config[staticKey] !== undefined) return config[staticKey];
-  if (typeof config[dynamicKey] === 'string') {
-    const resolved = resolvePath(liveData, config[dynamicKey]);
-    if (resolved !== undefined) return resolved;
-  }
-  if (isRecord(liveData) && liveData[fallbackKey] !== undefined) {
-    return liveData[fallbackKey];
-  }
-  if (!isRecord(liveData) && !Array.isArray(liveData) && liveData !== undefined) {
-    return liveData;
-  }
-  return undefined;
 }
 
 /**
@@ -286,9 +258,7 @@ export function SectionRenderer({
   const effectiveData = hasOwnBinding ? liveState.data : inheritedData;
   const effectiveLoading = hasOwnBinding ? (liveState.loading ?? false) : inheritedLoading;
   const refreshTargetId = hasOwnBinding ? section.id : inheritedRefreshTargetId;
-  const componentId = section.primitive === 'Modal' && typeof config.modal_id === 'string' && config.modal_id.trim()
-    ? config.modal_id
-    : section.id;
+  const componentId = section.id;
 
   const refetchCurrentSection = useCallback(() => {
     if (!onRefetch || !refreshTargetId) return Promise.resolve(null);
@@ -303,7 +273,7 @@ export function SectionRenderer({
 
     try {
       if (actionType === 'event' && action.event_type) {
-        const payload = interpolateValue(action.payload ?? action.event_payload ?? {}, context);
+        const payload = interpolateValue(action.payload ?? {}, context);
         emitAppEvent(action.event_type, payload);
         return payload;
       }
@@ -337,9 +307,8 @@ export function SectionRenderer({
         if (!target) return null;
 
         const method = actionType === 'delete' ? 'DELETE' : 'POST';
-        const bodySource = action.payload !== undefined ? action.payload : action.event_payload;
-        const body = bodySource !== undefined
-          ? interpolateValue(bodySource, context)
+        const body = action.payload !== undefined
+          ? interpolateValue(action.payload, context)
           : extraContext.values ?? extraContext.selectedRows ?? {};
 
         const request = {
@@ -462,7 +431,7 @@ export function SectionRenderer({
       break;
     case 'ResourceTable':
     case 'DataTable': {
-      const actions = materializeActions(config.toolbar_actions ?? config.actions, executeAction, section.id);
+      const actions = materializeActions(config.actions, executeAction, section.id);
       const emptyAction = buildEmptyAction(config.empty, executeAction, `${section.id}-empty`);
       const actionLookup = new Map(actions.map((action) => [action.id, action]));
       if (emptyAction) {
@@ -475,7 +444,7 @@ export function SectionRenderer({
         data: resolveTableData(config, effectiveData),
         selection: config.selection ?? 'none',
         pagination: config.pagination ?? true,
-        page_size: config.page_size ?? config.pageSize ?? 20,
+        page_size: config.page_size ?? 20,
         search: config.search ?? true,
         actions,
         onAction: (actionId, selectedRows) => {
@@ -496,16 +465,7 @@ export function SectionRenderer({
       break;
     }
     case 'Form': {
-      const submitAction = isRecord(config.submit_action)
-        ? config.submit_action
-        : typeof config.submit_endpoint === 'string' && config.submit_endpoint.trim()
-          ? {
-              label: config.submit_label ?? 'Submit',
-              action_type: 'submit',
-              href: config.submit_endpoint,
-              event_payload: config.submit_payload ?? null,
-            }
-          : null;
+      const submitAction = isRecord(config.submit_action) ? config.submit_action : null;
       const [cancelAction] = materializeActions(
         isRecord(config.cancel_action) ? [config.cancel_action] : [],
         executeAction,
@@ -527,30 +487,10 @@ export function SectionRenderer({
       };
       break;
     }
-    case 'Stat':
-      primitiveProps = {
-        id: componentId,
-        label: config.label,
-        value: resolveStatValue(config, effectiveData, 'value', 'value_key', 'value'),
-        trend: resolveStatValue(config, effectiveData, 'trend', 'trend_key', 'trend'),
-        trend_direction: config.trend_direction ?? 'up_good',
-        format: config.format,
-        icon: config.icon,
-        color: config.color,
-      };
-      break;
     case 'Grid':
       primitiveProps = {
-        columns: Number(config.columns ?? config.cols ?? 3),
+        columns: Number(config.columns ?? 3),
         gap: GAP_VALUES[String(config.gap)] ?? String(config.gap ?? '4'),
-        children: nestedChildren,
-      };
-      break;
-    case 'Card':
-      primitiveProps = {
-        title: config.title,
-        subtitle: config.subtitle,
-        actions: materializeActions(config.actions, executeAction, section.id),
         children: nestedChildren,
       };
       break;
@@ -588,12 +528,6 @@ export function SectionRenderer({
         message: config.message,
         variant: config.variant ?? 'default',
         dismissible: config.dismissible ?? false,
-      };
-      break;
-    case 'Badge':
-      primitiveProps = {
-        label: config.label,
-        variant: config.variant ?? 'default',
       };
       break;
     case 'Skeleton':

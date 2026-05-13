@@ -27,6 +27,20 @@ NotificationStore = Callable[[Dict[str, Any]], Awaitable[Any] | Any]
 CapabilityInvoker = Callable[[str, Dict[str, Any], Dict[str, Any]], Awaitable[Any] | Any]
 
 
+class _SubscriptionCtx:
+    """Minimal context passed to handler methods during subscription dispatch."""
+
+    def __init__(self, *, app_id: str, tenant_id: str, user_id: str, event_emitter: Optional[EventEmitter]) -> None:
+        self.app_id = app_id
+        self.tenant_id = tenant_id
+        self.user_id = user_id
+        self._event_emitter = event_emitter
+
+    async def emit(self, event_type: str, payload: Dict[str, Any]) -> None:
+        if self._event_emitter is not None:
+            await ModuleEventRouter._maybe_await(self._event_emitter(event_type, payload))
+
+
 class ModuleEventRouter:
     """Routes loaded module events to platform-level reactions."""
 
@@ -44,6 +58,7 @@ class ModuleEventRouter:
         self._subscriptions_by_event: Dict[str, List[dict]] = defaultdict(list)
         self._notifications_by_event: Dict[str, List[dict]] = defaultdict(list)
         self._notifications_by_key: Dict[tuple[str, str], dict] = {}
+        self._handlers_by_module: Dict[str, Any] = {}
         self._index_modules(modules)
 
     @property
@@ -78,6 +93,8 @@ class ModuleEventRouter:
                     key = (str(rule.get("module_id") or ""), str(rule.get("id") or ""))
                     await self._create_notification(rule, event_type, envelope)
                     emitted_notifications.add(key)
+            elif target_kind == "handler":
+                await self._dispatch_handler(subscription, event_type, envelope)
             elif target_kind:
                 await self._emit_platform_reaction(subscription, event_type, envelope)
 
@@ -89,27 +106,30 @@ class ModuleEventRouter:
     def _index_modules(self, modules: Iterable[LoadedModule]) -> None:
         for module in modules:
             module_id = module.name
-            for raw_subscription in module.manifests.subscriptions.subscriptions:
-                if not isinstance(raw_subscription, dict):
-                    continue
-                event_type = str(raw_subscription.get("event_type") or "").strip()
-                if not event_type:
-                    continue
-                subscription = dict(raw_subscription)
-                subscription["module_id"] = module_id
-                self._subscriptions_by_event[event_type].append(subscription)
+            self._handlers_by_module[module_id] = module.handler
+            if module.manifests.subscriptions is not None:
+                for raw_subscription in module.manifests.subscriptions.subscriptions:
+                    if not isinstance(raw_subscription, dict):
+                        continue
+                    event_type = str(raw_subscription.get("event_type") or "").strip()
+                    if not event_type:
+                        continue
+                    subscription = dict(raw_subscription)
+                    subscription["module_id"] = module_id
+                    self._subscriptions_by_event[event_type].append(subscription)
 
-            for raw_rule in module.manifests.notifications.notifications:
-                if not isinstance(raw_rule, dict):
-                    continue
-                event_type = str(raw_rule.get("event_type") or "").strip()
-                rule_id = str(raw_rule.get("id") or "").strip()
-                if not event_type or not rule_id:
-                    continue
-                rule = dict(raw_rule)
-                rule["module_id"] = module_id
-                self._notifications_by_event[event_type].append(rule)
-                self._notifications_by_key[(module_id, rule_id)] = rule
+            if module.manifests.notifications is not None:
+                for raw_rule in module.manifests.notifications.notifications:
+                    if not isinstance(raw_rule, dict):
+                        continue
+                    event_type = str(raw_rule.get("event_type") or "").strip()
+                    rule_id = str(raw_rule.get("id") or "").strip()
+                    if not event_type or not rule_id:
+                        continue
+                    rule = dict(raw_rule)
+                    rule["module_id"] = module_id
+                    self._notifications_by_event[event_type].append(rule)
+                    self._notifications_by_key[(module_id, rule_id)] = rule
 
     def _handler_for(self, event_type: str) -> Callable[[Dict[str, Any]], Awaitable[None]]:
         async def handle(envelope: Dict[str, Any]) -> None:
@@ -182,6 +202,57 @@ class ModuleEventRouter:
         if capability_result is not None:
             reaction_payload["payload"]["result"] = capability_result
         await self._maybe_await(self._event_emitter(reaction_event_type, reaction_payload))
+
+    async def _dispatch_handler(
+        self,
+        subscription: dict,
+        event_type: str,
+        envelope: Dict[str, Any],
+    ) -> None:
+        module_id = str(subscription.get("module_id") or "").strip()
+        target = subscription.get("target") if isinstance(subscription.get("target"), dict) else {}
+        handler_method = str(target.get("handler_method") or "").strip()
+
+        if not module_id or not handler_method:
+            logger.warning(
+                "HANDLER_TARGET_SKIPPED: subscription %r missing module_id or handler_method",
+                subscription.get("id"),
+            )
+            return
+
+        handler = self._handlers_by_module.get(module_id)
+        if handler is None:
+            logger.warning("HANDLER_TARGET_SKIPPED: no handler registered for module %r", module_id)
+            return
+
+        method = getattr(handler, handler_method, None)
+        if not callable(method):
+            logger.warning(
+                "HANDLER_TARGET_SKIPPED: %r.%r not found or not callable",
+                module_id,
+                handler_method,
+            )
+            return
+
+        tenant = envelope.get("tenant") if isinstance(envelope.get("tenant"), dict) else {}
+        actor = envelope.get("actor") if isinstance(envelope.get("actor"), dict) else {}
+        ctx = _SubscriptionCtx(
+            app_id=str(tenant.get("app_id") or ""),
+            tenant_id=str(tenant.get("tenant_id") or ""),
+            user_id=str(actor.get("id") or ""),
+            event_emitter=self._event_emitter,
+        )
+        payload = envelope.get("payload") if isinstance(envelope.get("payload"), dict) else {}
+        try:
+            await self._maybe_await(method(ctx, **payload))
+        except Exception as exc:
+            logger.error(
+                "HANDLER_DISPATCH_ERROR: %r.%r raised %s",
+                module_id,
+                handler_method,
+                exc,
+                exc_info=True,
+            )
 
     async def _create_notification(
         self,

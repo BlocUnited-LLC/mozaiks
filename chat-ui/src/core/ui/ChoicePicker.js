@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Alert, Badge, Button, Card } from '../../ui/primitives/index.js';
+import { Alert, Button, StatusPill, SurfaceCard } from '../../ui/primitives/index.js';
 import { normalizeOptions, normalizePrimitiveActions, sendPrimitiveResponse } from './workflowPrimitiveUtils.js';
 
 export default function ChoicePicker({ payload = {}, onResponse, onCancel }) {
@@ -41,17 +41,12 @@ export default function ChoicePicker({ payload = {}, onResponse, onCancel }) {
   const hasSelection = Array.isArray(selected) ? selected.length > 0 : Boolean(selected);
 
   return (
-    <Card
+    <SurfaceCard
       title={payload.title || 'Choose an option'}
       subtitle={payload.summary || 'Pick one or more options to continue the workflow.'}
-      className="border-border/80 bg-card/95 shadow-sm"
+      headerAction={<StatusPill label={selectionMode === 'multi' ? 'multi-select' : 'single-select'} tone="default" />}
     >
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge label="choice_picker" variant="secondary" />
-          <Badge label={selectionMode === 'multi' ? 'multi-select' : 'single-select'} variant="outline" />
-        </div>
-
         {payload.error ? <Alert message={payload.error} variant="warning" /> : null}
 
         <div className="space-y-2">
@@ -71,7 +66,7 @@ export default function ChoicePicker({ payload = {}, onResponse, onCancel }) {
               >
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-medium">{option.label}</span>
-                  {isSelected ? <Badge label="Selected" variant="success" /> : null}
+                  {isSelected ? <StatusPill label="Selected" tone="success" /> : null}
                 </div>
                 {option.description ? (
                   <p className="mt-1 text-sm text-muted-foreground">{option.description}</p>
@@ -96,6 +91,6 @@ export default function ChoicePicker({ payload = {}, onResponse, onCancel }) {
           ) : null}
         </div>
       </div>
-    </Card>
+    </SurfaceCard>
   );
 }

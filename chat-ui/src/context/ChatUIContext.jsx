@@ -3,9 +3,11 @@ import { createInitialSurfaceState, mapSurfaceEventToAction, uiSurfaceReducer } 
 import platform from '../platform/index.js';
 import {
   getStoredActiveChatId,
+  getStoredActiveGeneralChatId,
   getStoredActiveWorkflowName,
   getStoredConversationMode,
   setStoredActiveChatId,
+  setStoredActiveGeneralChatId,
   setStoredActiveWorkflowName,
   setStoredConversationMode,
 } from '../session/chatSessionStorage';
@@ -144,7 +146,7 @@ export const ChatUIProvider = ({
   }, [surfaceDispatch]);
 
   const [currentArtifactContext, setCurrentArtifactContext] = useState(null); // { type, payload, id }
-  const [activeGeneralChatId, setActiveGeneralChatId] = useState(null);
+  const [activeGeneralChatId, setActiveGeneralChatId] = useState(() => getStoredActiveGeneralChatId());
   const [generalChatSummary, setGeneralChatSummary] = useState(null);
   const [generalChatSessions, setGeneralChatSessions] = useState([]);
   
@@ -171,6 +173,14 @@ export const ChatUIProvider = ({
       /* ignore storage errors */
     }
   }, [activeWorkflowName]);
+
+  useEffect(() => {
+    try {
+      setStoredActiveGeneralChatId(activeGeneralChatId);
+    } catch (_) {
+      /* ignore storage errors */
+    }
+  }, [activeGeneralChatId]);
 
   useEffect(() => {
     try {

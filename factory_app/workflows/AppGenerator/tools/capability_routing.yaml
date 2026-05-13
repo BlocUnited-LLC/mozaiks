@@ -1,0 +1,113 @@
+version: 1
+
+description: >
+  Capability routing rules for AppGenerator. Apply these during app planning to
+  decide what to generate vs. what to reference vs. what to hand off. These rules
+  prevent generators from duplicating runtime infrastructure, rebuilding AI logic
+  as deterministic code, or over-constraining user-owned custom capabilities.
+
+layers:
+
+  runtime_provided:
+    description: >
+      Built into mozaiksai. Always present in every deployed app. Never generate
+      these as modules, capability packs, or build tasks — reference them as
+      available platform infrastructure only.
+    capabilities:
+      - auth, sessions, JWT validation, OAuth flows
+      - WebSocket transport and connection lifecycle
+      - Unified event bus and domain event dispatch
+      - Admin shell, panel registration, /admin routing
+      - Platform notification storage and delivery pipeline
+      - Module action routing via /api/modules/{module_id}/{action_id}
+      - AG2 workflow orchestration engine and session management
+      - User account and identity (/api/me contract)
+    rule: >
+      If the product spec mentions any of these, note them as available platform
+      capabilities in backend_scope. Do not add them to capability_packs or
+      build_tasks. Domain-specific profile records (investor profiles, creator
+      profiles, vendor profiles) are module-owned entities — they extend the
+      platform identity contract; they do not replace it.
+
+  ai_workflow:
+    description: >
+      AI reasoning, multi-step orchestration, content generation, autonomous
+      decisions, recommendations, and agentic behavior. These belong to the
+      workflow layer — produced by AgentGenerator, not by deterministic module code.
+    rule: >
+      When a feature requires reasoning, judgment, recommendations, content
+      generation, or multi-step autonomous processing:
+        1. Declare a workflow_touchpoint on the relevant page(s)
+        2. Generate the deterministic module(s) that own the data the workflow
+           reads and writes — actions, events, storage
+        3. Generate a module_interface.yaml alongside the workflow declaring
+           which module actions it will call
+        4. Do NOT generate a deterministic module that tries to implement AI logic
+      AgentGenerator produces the workflow. The module layer owns the data contract.
+    examples:
+      - '"smart recommendations"  → workflow touchpoint + recommendations storage module'
+      - '"AI content generation"  → workflow touchpoint + content storage module'
+      - '"intelligent routing"    → workflow touchpoint + queue/state module'
+      - '"copilot / assistant"    → workflow touchpoint + context data modules'
+      - '"agentic automation"     → workflow touchpoint + task/result storage module'
+
+  capability_pack:
+    description: >
+      Reusable framework packs covering well-known capability domains. Select
+      the pack; generate only the app-specific wiring, page composition, and
+      event flow bindings — not pack internals.
+    packs:
+      - id: messaging
+        covers: DM threads, group channels, real-time delivery, read/unread state
+        capability_kind: framework_pack
+      - id: files
+        covers: file upload, storage, retrieval, media management
+        capability_kind: framework_pack
+      - id: notifications
+        covers: multi-channel notification delivery (in-app, email, push, SMS)
+        capability_kind: framework_pack
+      - id: entitlements
+        covers: >
+          SaaS plan/tier catalog, user plan assignment, trial lifecycle, feature gates.
+          Reacts to payment events from payments_integration via subscriptions.yaml —
+          does not own payment processing. Use this whenever an app needs to gate
+          features by plan, manage free/paid tiers, or run trials.
+        capability_kind: framework_pack
+        manifest: factory_app/capability_packs/public/entitlements/manifest.yaml
+      - id: payments
+        covers: payment processing, provider integration, checkout flows
+        capability_kind: hosted_pack
+    rule: >
+      For these domains declare capability_kind as framework_pack or hosted_pack.
+      Generate the app-specific wiring (pages, façade module actions, event flows)
+      but never regenerate pack internals.
+
+    naming_note: >
+      IMPORTANT — do not confuse these two things:
+        subscriptions.yaml (module contract file) — declares which domain events from
+          other modules THIS module reacts to. Pub-sub routing. Every module may have one.
+        entitlements pack — SaaS subscription plans, feature gates, trial management.
+          A capability pack selected by apps that need plan-based access control.
+      They share no implementation. Use subscriptions.yaml for event wiring in any module.
+      Use the entitlements pack when the product needs SaaS plan/tier logic.
+
+  custom_owned:
+    description: >
+      Advanced, custom, or bring-your-own capabilities the user owns entirely.
+      Includes custom agentic frameworks, bespoke integration engines, custom
+      runtime extensions, or any system whose internals the user controls.
+    rule: >
+      For custom or advanced capabilities:
+        1. Generate module.yaml with declared action interfaces — the API boundary
+           the platform routes into the custom system
+        2. Generate runtime_extensions.yaml startup_service or api_router entry
+           points when the custom system needs host-level hooks
+        3. Generate empty backend stubs with clear interface contracts
+        4. DO NOT implement the custom logic — the user owns the implementation
+      This gives the platform a well-defined integration surface while leaving
+      the custom system's internals entirely user-controlled.
+    examples:
+      - Custom agentic framework → module.yaml action interfaces + startup_service stub
+      - Custom ML inference engine → module.yaml actions + api_router webhook stub
+      - Custom real-time data feed → startup_service stub + module action for reads
+      - Proprietary business engine → module.yaml action declarations only

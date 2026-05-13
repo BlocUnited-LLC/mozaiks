@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Alert, Badge, Button, Card } from '../../ui/primitives/index.js';
+import { Alert, Button, StatusPill, SurfaceCard } from '../../ui/primitives/index.js';
 import { normalizePrimitiveActions, sendPrimitiveResponse } from './workflowPrimitiveUtils.js';
 
 const fallbackActions = [
@@ -128,17 +128,12 @@ export default function DownloadCenter({ payload = {}, onResponse, onCancel }) {
   }
 
   return (
-    <Card
+    <SurfaceCard
       title={payload.title || 'Download center'}
       subtitle={payload.summary || 'Review the generated files and finish the workflow when ready.'}
-      className="border-border/80 bg-card/95 shadow-sm"
+      headerAction={<StatusPill label={`${files.length} file${files.length === 1 ? '' : 's'}`} tone="default" />}
     >
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge label="download_center" variant="secondary" />
-          <Badge label={`${files.length} file${files.length === 1 ? '' : 's'}`} variant="outline" />
-        </div>
-
         {downloadErrors.length > 0 ? (
           <Alert
             message={`Some files failed to download: ${downloadErrors.map((entry) => entry.name).join(', ')}`}
@@ -218,6 +213,6 @@ export default function DownloadCenter({ payload = {}, onResponse, onCancel }) {
           ) : null}
         </div>
       </div>
-    </Card>
+    </SurfaceCard>
   );
 }

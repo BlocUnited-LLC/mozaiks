@@ -71,7 +71,7 @@ _DRIFT_PATH_FRAGMENTS = [
 
 # Minimal module YAML (no emits) — safe to load without contracts/events.yaml
 _PROJECTS_MODULE_YAML = """\
-schema_version: mozaiks.module
+schema_version: mozaiks.module.v1
 module:
   id: projects
   display_name: Projects
@@ -120,7 +120,7 @@ capabilities:
 """
 
 _TASKS_MODULE_YAML = """\
-schema_version: mozaiks.module
+schema_version: mozaiks.module.v1
 module:
   id: tasks
   display_name: Tasks
@@ -210,7 +210,7 @@ class TasksModule:
 """
 
 _PROJECTS_EVENTS_YAML = """\
-schema_version: mozaiks.events
+schema_version: mozaiks.events.v1
 events:
   - type: domain.projects.project_created
     version: 1
@@ -222,7 +222,7 @@ events:
 """
 
 _TASKS_EVENTS_YAML = """\
-schema_version: mozaiks.events
+schema_version: mozaiks.events.v1
 events:
   - type: domain.tasks.task_created
     version: 1
@@ -737,7 +737,7 @@ class TestRuntimeLoadFixture:
         loaded = ModuleLoader(str(tmp_path)).load("projects")
 
         assert loaded.name == "projects"
-        assert loaded.definition.schema_version == "mozaiks.module"
+        assert loaded.definition.schema_version == "mozaiks.module.v1"
 
     def test_tasks_module_loads_from_canonical_layout(self, tmp_path: Path) -> None:
         from mozaiksai.core.runtime.app.module_loader import ModuleLoader
@@ -748,7 +748,7 @@ class TestRuntimeLoadFixture:
         loaded = ModuleLoader(str(tmp_path)).load("tasks")
 
         assert loaded.name == "tasks"
-        assert loaded.definition.schema_version == "mozaiks.module"
+        assert loaded.definition.schema_version == "mozaiks.module.v1"
 
     def test_projects_handler_exposes_declared_action_methods(self, tmp_path: Path) -> None:
         from mozaiksai.core.runtime.app.module_loader import ModuleLoader
@@ -784,7 +784,7 @@ class TestRuntimeLoadFixture:
         loaded = ModuleLoader(str(tmp_path)).load("projects")
 
         assert loaded.manifests.events is None
-        assert loaded.manifests.reactions is None
+        assert loaded.manifests.subscriptions is None
         assert loaded.manifests.notifications is None
         assert loaded.manifests.admin is None
         assert loaded.manifests.runtime_extensions is None
@@ -828,7 +828,8 @@ class TestRuntimeLoadFixture:
 
         loaded = ModuleLoader(str(tmp_path)).load("tasks")
 
-        assert loaded.manifests.reactions is None
+        # Flat-root subscriptions.yaml must be ignored — canonical location is contracts/
+        assert loaded.manifests.subscriptions is None
 
     def test_action_method_map_covers_all_declared_actions(self, tmp_path: Path) -> None:
         from mozaiksai.core.runtime.app.module_loader import ModuleLoader

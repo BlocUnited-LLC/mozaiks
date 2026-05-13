@@ -31,6 +31,7 @@ import {
   clearStoredArtifactState,
   clearStoredChatCacheSeed,
   getStoredActiveChatId,
+  getStoredActiveGeneralChatId,
   getStoredActiveWorkflowName,
   getStoredArtifactPanelOpen,
   getStoredChatCacheSeed,
@@ -3504,7 +3505,16 @@ useEffect(() => {
         ...(queryChangeClass ? { change_class: queryChangeClass } : {}),
         ...(queryArtifactVersionId ? { artifact_version_id: queryArtifactVersionId } : {}),
       };
-      const result = await api.startChat(currentAppId, startWorkflowName, currentUserId, {}, queryContext, triggerMeta);
+      const askCarrierMode = queryMode === 'ask' || conversationMode === 'ask';
+      const result = await api.startChat(
+        currentAppId,
+        startWorkflowName,
+        currentUserId,
+        {},
+        queryContext,
+        triggerMeta,
+        askCarrierMode ? { transportPurpose: 'ask_carrier' } : null,
+      );
       if (result && (result.chat_id || result.id)) {
         const newId = result.chat_id || result.id;
         const reused = !!result.reused;
@@ -4408,13 +4418,23 @@ useEffect(() => {
     }
   };
 
-  const ensureGeneralMode = useCallback(() => {
+  const ensureGeneralMode = useCallback((requestedGeneralChatId = null) => {
+    const preferredGeneralChatId = requestedGeneralChatId || activeGeneralChatId || getStoredActiveGeneralChatId();
     if (conversationMode === 'ask') {
+      if (requestedGeneralChatId) {
+        sendWsMessage({
+          type: 'chat.enter_general_mode',
+          general_chat_id: preferredGeneralChatId || undefined,
+        });
+      }
       return true;
     }
     workflowReplayPendingRef.current = false;
     console.log('🧠 [MODE_TOGGLE] Switching to ask mode (sending chat.enter_general_mode)');
-    const sent = sendWsMessage({ type: 'chat.enter_general_mode' });
+    const sent = sendWsMessage({
+      type: 'chat.enter_general_mode',
+      general_chat_id: preferredGeneralChatId || undefined,
+    });
     
     // ALWAYS switch to ask mode locally, even if backend is unavailable
     // This ensures the UI updates correctly for offline operation
@@ -4445,7 +4465,7 @@ useEffect(() => {
     
     refreshGeneralSessions();
     return sent;
-  }, [conversationMode, refreshGeneralSessions, sendWsMessage, setConversationMode, setMessagesWithLogging, currentArtifactMessages, isSidePanelOpen, layoutMode, askMessages]);
+  }, [activeGeneralChatId, conversationMode, refreshGeneralSessions, sendWsMessage, setConversationMode, setMessagesWithLogging, currentArtifactMessages, isSidePanelOpen, layoutMode, askMessages]);
 
   const startNewGeneralSession = useCallback(() => {
     const sent = sendWsMessage({ type: 'chat.start_general_chat' });
@@ -4461,7 +4481,7 @@ useEffect(() => {
     if (!chatId || generalHydrationPendingRef.current) {
       return;
     }
-    ensureGeneralMode();
+    ensureGeneralMode(chatId);
     generalHydrationPendingRef.current = true;
     setActiveGeneralChatId(chatId);
     const session = (generalChatSessions || []).find((item) => item?.chat_id === chatId);
@@ -4769,6 +4789,12 @@ useEffect(() => {
       || resolveKnownWorkflowName(configuredEntryWorkflow);
 
     if (normalized === 'last_active') {
+      const shouldRestoreStoredWorkflowChat = !(
+        conversationMode === 'ask'
+      );
+      if (!shouldRestoreStoredWorkflowChat) {
+        return null;
+      }
       const lastActiveChatId = activeChatId || currentChatId || getStoredActiveChatId();
       if (!lastActiveChatId) {
         return null;
@@ -4875,6 +4901,7 @@ useEffect(() => {
     currentAppId,
     currentUserId,
     workflowSessions,
+    conversationMode,
   ]);
 
   const handleConversationModeChange = useCallback(async (mode) => {
@@ -4978,7 +5005,16 @@ useEffect(() => {
           }
 
           try {
-            const result = await api.startChat(currentAppId, entryWorkflow, currentUserId);
+            const askCarrierMode = queryMode === 'ask' || conversationMode === 'ask';
+            const result = await api.startChat(
+              currentAppId,
+              entryWorkflow,
+              currentUserId,
+              {},
+              null,
+              null,
+              askCarrierMode ? { transportPurpose: 'ask_carrier' } : null,
+            );
             if (result && (result.chat_id || result.id)) {
               const newChatId = result.chat_id || result.id;
               console.log(`🚀 [MODE_CHANGE] Created new session for ${entryWorkflow}: ${newChatId}`);

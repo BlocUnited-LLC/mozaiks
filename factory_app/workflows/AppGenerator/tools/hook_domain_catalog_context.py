@@ -215,10 +215,14 @@ def _format_domain_excerpt(domain_key: str, domain_data: Dict[str, Any]) -> str:
     description = domain_data.get("description") or ""
     modules: Dict[str, Any] = domain_data.get("modules") or {}
     common_app_types = [str(item) for item in domain_data.get("common_app_types") or [] if str(item).strip()]
+    capability_packs = [str(p) for p in domain_data.get("capability_packs") or [] if str(p).strip()]
 
     lines = [f"Domain: {domain_key} — {description}"]
     if common_app_types:
         lines.append(f"  common_app_types: {', '.join(common_app_types[:4])}")
+    if capability_packs:
+        lines.append(f"  recommended_capability_packs: {', '.join(capability_packs)}")
+        lines.append("    (These are framework or hosted packs — select them; do not regenerate their internals.)")
     for i, (mod_key, mod_data) in enumerate(modules.items()):
         if i >= _MAX_MODULES_PER_DOMAIN:
             remaining = len(modules) - _MAX_MODULES_PER_DOMAIN

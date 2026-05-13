@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -36,13 +37,18 @@ import yaml
 _WORKSPACE = Path(__file__).resolve().parents[1]
 _TOOLS_DIR = _WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "tools"
 
-# Optional — only present when mozaiks-app workspace is co-located
-_MOZAIKS_APP_ROOT = _WORKSPACE.parent / "mozaiks-app"
-_REAL_PACKS_ROOT = _MOZAIKS_APP_ROOT / "app_generator" / "capability_packs"
-_REAL_WALLET_TEMPLATE = _REAL_PACKS_ROOT / "wallet" / "backend_templates" / "wallet_client.py"
-_REAL_WALLET_MANIFEST = _REAL_PACKS_ROOT / "wallet" / "manifest.yaml"
+# Optional hosted-pack integration checks are opt-in so the OSS suite never
+# changes behavior just because a proprietary consumer workspace is nearby.
+_PACKS_ROOT_ENV = os.getenv("MOZAIKS_HOSTED_PACKS_ROOT", "").strip()
+_REAL_PACKS_ROOT = Path(_PACKS_ROOT_ENV).expanduser().resolve() if _PACKS_ROOT_ENV else None
+_REAL_WALLET_TEMPLATE = (
+    _REAL_PACKS_ROOT / "wallet" / "backend_templates" / "wallet_client.py"
+    if _REAL_PACKS_ROOT
+    else None
+)
+_REAL_WALLET_MANIFEST = _REAL_PACKS_ROOT / "wallet" / "manifest.yaml" if _REAL_PACKS_ROOT else None
 
-_REAL_PACK_AVAILABLE = _REAL_WALLET_TEMPLATE.exists()
+_REAL_PACK_AVAILABLE = bool(_REAL_WALLET_TEMPLATE and _REAL_WALLET_TEMPLATE.exists())
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -675,13 +681,14 @@ class TestCreatorDashboardAssembly:
 
 @pytest.mark.skipif(
     not _REAL_PACK_AVAILABLE,
-    reason="mozaiks-app wallet pack not present in this environment",
+    reason="Set MOZAIKS_HOSTED_PACKS_ROOT to run hosted wallet pack drift checks",
 )
 class TestRealWalletTemplateDriftGuards:
     """Verify the real hosted wallet template contains no drift patterns."""
 
     @pytest.fixture(autouse=True)
     def _load_template(self) -> None:
+        assert _REAL_WALLET_TEMPLATE is not None
         self.content = _REAL_WALLET_TEMPLATE.read_text(encoding="utf-8")
         self.import_lines = [
             ln.strip() for ln in self.content.splitlines()
@@ -725,6 +732,7 @@ class TestRealWalletTemplateDriftGuards:
         assert "httpx" in self.content
 
     def test_real_template_expands_correctly_via_resolver(self) -> None:
+        assert _REAL_PACKS_ROOT is not None
         resolver = _load_resolver()
         pack_sources = [
             {
@@ -770,12 +778,12 @@ title: Wallet
 description: View wallet balance and request payouts.
 sections:
   - id: wallet-balance
-    primitive: Stat
+    primitive: SummaryStrip
     title: Available Balance
-    data_source:
-      type: api
-      endpoint: /api/modules/wallet_dashboard/get_wallet_summary
-      response_field: balance
+    config:
+      items:
+        - label: Available Balance
+          value: "$0"
   - id: payout-action
     primitive: Button
     label: Request Payout

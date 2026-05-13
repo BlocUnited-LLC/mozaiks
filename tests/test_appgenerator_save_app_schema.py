@@ -56,7 +56,7 @@ def _base_page():
         "route": "/dashboard",
         "title": "Dashboard",
         "layout": "grid",
-        "sections": [{"id": "hero", "primitive": "Card", "config": {}}],
+        "sections": [{"id": "hero", "primitive": "Panel", "config": {"title": "Overview"}}],
     }
 
 
@@ -75,25 +75,18 @@ def _canonical_page():
                     "gap": "md",
                     "children": [
                         {
-                            "primitive": "Stat",
+                            "primitive": "Metric",
                             "config": {
                                 "label": "Total Users",
-                                "value_key": "totals.users",
-                                "format": "number",
+                                "value": 12,
+                                "detail": "Active user count",
                             },
                         },
                         {
-                            "primitive": "Card",
+                            "primitive": "Panel",
                             "config": {
                                 "title": "Create User",
-                                "actions": [
-                                    {
-                                        "label": "Open Create Form",
-                                        "action_type": "event",
-                                        "event_type": "ui.modal.open",
-                                        "payload": {"modal_id": "create-user-modal"},
-                                    }
-                                ],
+                                "subtitle": "Open the create user modal from the page actions.",
                             },
                         },
                     ],
@@ -259,7 +252,7 @@ def test_save_app_schema_rejects_unknown_nested_grid_child(monkeypatch, tmp_path
             "config": {
                 "columns": 2,
                 "children": [
-                    {"primitive": "Stat", "config": {"label": "Users", "value": 12}},
+                    {"primitive": "Metric", "config": {"label": "Users", "value": 12}},
                     {"primitive": "Wizard", "config": {}},
                 ]
             },
@@ -411,7 +404,7 @@ def test_save_app_schema_rejects_duplicate_section_ids(monkeypatch, tmp_path: Pa
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     page = _base_page()
     page["sections"] = [
-        {"id": "hero", "primitive": "Card", "config": {}},
+        {"id": "hero", "primitive": "Panel", "config": {}},
         {"id": "hero", "primitive": "Empty", "config": {}},
     ]
 
@@ -470,7 +463,7 @@ def test_save_app_schema_strips_blank_optional_form_placeholder(monkeypatch, tmp
                 "submit_action": {
                     "label": "Save",
                     "action_type": "submit",
-                    "endpoint": "/api/modules/tickets/save_settings",
+                    "href": "/api/modules/tickets/save_settings",
                     "event_type": "",
                 },
             },
@@ -491,7 +484,7 @@ def test_save_app_schema_strips_blank_optional_form_placeholder(monkeypatch, tmp
     assert "href: /api/modules/tickets/save_settings" in dashboard_yaml
 
 
-def test_save_app_schema_promotes_form_api_endpoint_to_submit_href(monkeypatch, tmp_path: Path) -> None:
+def test_save_app_schema_rejects_submit_action_without_resolvable_href(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     page = _base_page()
     page["sections"] = [
@@ -499,7 +492,6 @@ def test_save_app_schema_promotes_form_api_endpoint_to_submit_href(monkeypatch, 
             "id": "settings",
             "primitive": "Form",
             "config": {
-                "api_endpoint": "/api/modules/tickets/save_settings",
                 "fields": [
                     {
                         "name": "default_queue",
@@ -517,16 +509,12 @@ def test_save_app_schema_promotes_form_api_endpoint_to_submit_href(monkeypatch, 
         }
     ]
 
-    save_app_schema_module.save_app_schema(
-        manifest=_base_manifest(),
-        pages=[page],
-        context_variables=_Context(),
-    )
-
-    dashboard_yaml = (tmp_path / "ui" / "pages" / "Dashboard.yaml").read_text(
-        encoding="utf-8"
-    )
-    assert "href: /api/modules/tickets/save_settings" in dashboard_yaml
+    with pytest.raises(ValueError, match=r"submit_action\.href is required for submit actions"):
+        save_app_schema_module.save_app_schema(
+            manifest=_base_manifest(),
+            pages=[page],
+            context_variables=_Context(),
+        )
 
 
 def test_save_app_schema_derives_missing_submit_href_from_build_plan(monkeypatch, tmp_path: Path) -> None:

@@ -27,11 +27,13 @@ _ALLOWED_TASK_TYPES = {
     "page_bundle",
     "agent_backend_integration",
     "control_plane_surface",
+    "pack_overlay",
 }
 _CANONICAL_INITIAL_AGENTS = {
     "backend_foundation": "ConfigMiddlewareAgent",
     "module_contract": "ConfigMiddlewareAgent",
     "control_plane_surface": "ConfigMiddlewareAgent",
+    "pack_overlay": "ConfigMiddlewareAgent",
     "api_surface": "ControllerAgent",
     "page_bundle": "AppSchemaAgent",
 }
@@ -39,6 +41,7 @@ _SURFACE_KIND_ALLOWED_TASK_TYPES: dict[str, frozenset[str]] = {
     "external_integration": frozenset({"api_surface"}),
     "control_plane": frozenset({"control_plane_surface"}),
     "ui_only": frozenset({"page_bundle"}),
+    "framework_pack": frozenset({"pack_overlay"}),
 }
 _WORKFLOW_SURFACE_KIND = "workflow"
 
@@ -235,6 +238,13 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: fr
                     "Build task "
                     f"'{task_id}' must own both backend/admin_config.py and backend/routes/admin.py together."
                 )
+
+        if task_type == "pack_overlay" and not normalized_capability_pack_id:
+            raise ValueError(
+                "Build task "
+                f"'{task_id}' uses task_type 'pack_overlay' but capability_pack_id is null. "
+                "pack_overlay tasks must identify the framework_pack via capability_pack_id."
+            )
 
         if task_type not in _ALLOWED_TASK_TYPES:
             allowed = ", ".join(sorted(_ALLOWED_TASK_TYPES))

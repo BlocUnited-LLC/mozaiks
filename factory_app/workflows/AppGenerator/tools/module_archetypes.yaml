@@ -27,10 +27,10 @@ archetypes:
       - backend/service.py
       - backend/repo.py
       - backend/policy.py
-      - backend/models.py
+      - backend/schemas.py
     hard_constraints:
       - Keep backend/handler.py thin.
-      - Put business logic in service.py, repo.py, policy.py, and models.py.
+      - Put business logic in service.py, repo.py, policy.py, and schemas.py.
       - Publish only declared domain events.
 
   messaging:
@@ -53,7 +53,7 @@ archetypes:
       - backend/service.py
       - backend/repo.py
       - backend/policy.py
-      - backend/models.py
+      - backend/schemas.py
     hard_constraints:
       - Message records carry thread_id and sender_id.
       - Thread records carry participants and per-member read state.
@@ -79,7 +79,7 @@ archetypes:
       - backend/service.py
       - backend/repo.py
       - backend/policy.py
-      - backend/models.py
+      - backend/schemas.py
     hard_constraints:
       - Managed documents carry a state field.
       - policy.py exposes a validate_transition helper.
@@ -105,9 +105,9 @@ archetypes:
       - backend/service.py
       - backend/repo.py
       - backend/policy.py
-      - backend/models.py
+      - backend/schemas.py
     hard_constraints:
       - State is derived from an append-only ledger.
       - repo.py provides append_entry style writes instead of update_balance shortcuts.
       - Multi-document writes use atomic operations.
-      - models.py separates balance projections from ledger entries.
+      - schemas.py separates balance projections from ledger entries.

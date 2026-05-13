@@ -25,11 +25,14 @@ Forward Compatibility (AG2 Beta):
 """
 
 import logging
-from typing import Any, Dict, Optional, Set, Type
+from typing import TYPE_CHECKING, Any, Dict, Optional, Set, Type
 
 from .base import BaseEventHandler
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from ..context import StreamContext, StreamState
 
 from mozaiksai.core.events.ag2_events import (
     AgentThinkingEvent,

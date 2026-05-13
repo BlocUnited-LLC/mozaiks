@@ -64,7 +64,7 @@ class TestFileContractsHelperSection:
         assert "service.py" in layer_str
         assert "repo.py" in layer_str
         assert "policy.py" in layer_str
-        assert "schemas.py" in layer_str or "models.py" in layer_str
+        assert "schemas.py" in layer_str
 
     def test_helper_examples_all_under_backend(self):
         data = _load_yaml(_FILE_CONTRACTS)
@@ -193,7 +193,7 @@ class TestServiceAgentHelperGuidance:
         assert "backend/service.py" in text
         assert "backend/repo.py" in text
         assert "backend/policy.py" in text
-        assert "backend/models.py" in text
+        assert "backend/schemas.py" in text
 
     def test_service_agent_handler_stays_thin(self):
         text = _agents_text()

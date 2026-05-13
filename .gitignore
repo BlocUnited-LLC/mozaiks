@@ -12,6 +12,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+!chat-ui/src/ui/lib/
+!chat-ui/src/ui/lib/**
 parts/
 sdist/
 var/
@@ -24,6 +26,7 @@ wheels/
 .venv/
 venv/
 ENV/
+.pkg-venv/
 
 # IDE
 .idea/
@@ -34,6 +37,7 @@ ENV/
 # Testing
 .pytest_cache/
 .coverage
+coverage.xml
 htmlcov/
 .tox/
 .nox/
@@ -68,6 +72,7 @@ dist/
 # Runtime outputs
 logs/logs/
 logs/agent_outputs/
+logs/workflow_converter/
 generated_apps/
 uploads/
 mozaiks-platform/

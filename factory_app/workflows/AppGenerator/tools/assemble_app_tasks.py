@@ -4,6 +4,7 @@ from autogen.tools.dependency_injection import Field
 
 from .assembly_phase import assemble_features
 from .code_file_utils import collect_generated_app_file_entries
+from .generate_module_interface_files import generate_module_interface_files
 
 
 def _is_truthy(value: Any) -> bool:
@@ -86,12 +87,31 @@ async def assemble_app_tasks(
         feature_outputs=feature_outputs,
     )
 
+    # Merge module_interface.yaml files generated from agent_backend_integration tasks.
+    # AppPlanAgent already reasoned about module action dependencies and stored them as
+    # structured context_variables on each task — this tool just serializes them to YAML.
+    app_build_plan = (
+        context_variables.get("app_build_plan")
+        if context_variables and hasattr(context_variables, "get")
+        else None
+    )
+    interface_files = generate_module_interface_files(app_build_plan)
+    code_files = result.get("code_files", [])
+    if interface_files:
+        # Merge by filename (interface files take precedence over any stub)
+        file_map = {f["filename"]: f["content"] for f in code_files}
+        for f in interface_files:
+            file_map[f["filename"]] = f["content"]
+        code_files = [{"filename": k, "content": v} for k, v in sorted(file_map.items())]
+
     status_note = result.get("message") or "Assembled app task outputs into one bundle."
+    if interface_files:
+        status_note = f"{status_note} (+{len(interface_files)} module_interface.yaml)"
     if isinstance(inject_key, str) and inject_key:
         status_note = f"{status_note} (source={inject_key})"
 
     return {
-        "code_files": result.get("code_files", []),
+        "code_files": code_files,
         "agent_message": status_note,
     }
 

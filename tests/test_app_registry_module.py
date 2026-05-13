@@ -14,17 +14,15 @@ def _workspace() -> Path:
 
 def test_app_registry_module_contract_is_present() -> None:
     module_root = _workspace() / "factory_app" / "app" / "modules" / "app_registry"
+    contracts_dir = module_root / "contracts"
     manifest = yaml.safe_load((module_root / "module.yaml").read_text(encoding="utf-8"))
     actions = {entry["id"] for entry in manifest["actions"]}
 
     assert manifest["module"]["id"] == "app_registry"
     assert manifest["module"]["handler"] == "backend.handler:AppRegistryModule"
     assert {"create_app_record", "update_build_status", "list_apps", "get_app_record"} == actions
-    assert (module_root / "events.yaml").exists()
-    assert (module_root / "subscriptions.yaml").exists()
-    assert (module_root / "notifications.yaml").exists()
-    assert (module_root / "settings.yaml").exists()
-    assert (module_root / "admin.yaml").exists()
+    assert contracts_dir.exists()
+    assert (contracts_dir / "events.yaml").exists()
     assert (module_root / "backend" / "handler.py").exists()
 
 

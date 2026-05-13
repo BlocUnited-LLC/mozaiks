@@ -49,6 +49,7 @@ export default function AppOverviewPage() {
   const latestArtifact = snapshot.buildHistory[0] || null
   const latestRun = snapshot.runs[0] || null
   const workflowNames = getWorkflowNames(snapshot)
+  const nextStep = snapshot.summary?.next_step || 'Continue from the highest-priority build or runtime signal.'
   const summaryItems = [
     {
       id: 'journey',
@@ -92,6 +93,11 @@ export default function AppOverviewPage() {
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)]">
           <Panel title="Latest app movement" subtitle="Most recent build and runtime activity.">
             <div className="space-y-3">
+              <div className="rounded-2xl border border-primary/24 bg-primary/8 px-4 py-4">
+                <div className="text-[12px] font-medium text-muted-foreground/82">Next step</div>
+                <div className="mt-2 text-sm leading-6 text-foreground">{nextStep}</div>
+              </div>
+
               <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>

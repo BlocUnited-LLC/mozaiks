@@ -305,7 +305,7 @@ export function AdminWorkspaceLayout({ children, adminSections = null }) {
               aria-label="Close console navigation"
               onClick={() => setMobileOpen(false)}
             />
-            <div className="absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-y-auto rounded-t-3xl border border-border bg-card/95 p-3 pb-[calc(env(safe-area-inset-bottom,0px)+6.25rem)] shadow-2xl backdrop-blur-md">
+            <div className="absolute inset-x-0 bottom-0 max-h-[82dvh] overflow-y-auto rounded-t-3xl border border-border bg-card/95 p-3 pb-[calc(env(safe-area-inset-bottom,0px)+6.25rem)] shadow-2xl backdrop-blur-md">
               <div className="mb-3 flex items-center justify-between px-2">
                 <div className="min-w-0">
                   {appId ? (

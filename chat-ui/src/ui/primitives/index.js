@@ -20,13 +20,10 @@
 
 export { DataTable }       from './DataTable.jsx';
 export { Form }            from './Form.jsx';
-export { Card }            from './Card.jsx';
-export { Stat }            from './Stat.jsx';
 export { Grid }            from './Grid.jsx';
 export { Button }          from './Button.jsx';
 export { Modal }           from './Modal.jsx';
 export { Alert }           from './Alert.jsx';
-export { Badge }           from './Badge.jsx';
 export { Skeleton, Empty } from './Skeleton.jsx';
 export { Timeline }        from './Timeline.jsx';
 export { CodeBlock }       from './CodeBlock.jsx';

@@ -37,8 +37,9 @@ Capability source taxonomy:
   host_universal  — Built-in platform feature already provided by the runtime host.
                     Do NOT scaffold or generate code for these. Reference them in
                     backend_scope or external_integrations, never as capability packs.
-  framework_pack  — Reusable OSS AppGenerator capability pack. AppGenerator generates
-                    module contracts and backend files from this pack.
+  framework_pack  — Reusable OSS capability pack selected by the app. Generate ONLY
+                    app-specific wiring (pack_overlay task): event-flow bindings,
+                    facade module actions, page composition. Never regenerate pack internals.
   hosted_pack     — Proprietary hosted capability available in this deployment.
                     Do NOT regenerate its internals. Include it as a capability pack
                     entry with implementation_mode: external_integration and

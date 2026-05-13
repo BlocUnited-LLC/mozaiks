@@ -288,6 +288,37 @@ class KeywordFilter(logging.Filter):
 # ----------------------------------------------------------------------
 # Handler factory
 # ----------------------------------------------------------------------
+class SafeRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    """RotatingFileHandler that keeps writing if rollover is temporarily locked.
+
+    Windows file watchers, editors, or sync clients can briefly lock a log file
+    during rollover. The standard handler drops the current record when that
+    happens. This handler backs off rollover attempts for a short interval and
+    writes the record to the active file instead.
+    """
+
+    def __init__(self, *args, rollover_retry_seconds: float = 30.0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.rollover_retry_seconds = max(float(rollover_retry_seconds), 0.0)
+        self._next_rollover_retry_at = 0.0
+
+    def shouldRollover(self, record: logging.LogRecord) -> int:
+        if self._next_rollover_retry_at and perf_counter() < self._next_rollover_retry_at:
+            return 0
+        return super().shouldRollover(record)
+
+    def doRollover(self) -> None:
+        try:
+            super().doRollover()
+            self._next_rollover_retry_at = 0.0
+        except OSError as exc:
+            if not isinstance(exc, PermissionError) and getattr(exc, "winerror", None) not in (32, 33):
+                raise
+            self._next_rollover_retry_at = perf_counter() + self.rollover_retry_seconds
+            if self.stream is None or self.stream.closed:
+                self.stream = self._open()
+
+
 def _make_handler(
     path: Path,
     level: int,
@@ -298,7 +329,7 @@ def _make_handler(
     backup_count: int,
 ) -> logging.Handler:
     """Return a RotatingFileHandler with common defaults pre-applied."""
-    h = logging.handlers.RotatingFileHandler(
+    h = SafeRotatingFileHandler(
         path,
         maxBytes=max_bytes,
         backupCount=backup_count,
@@ -308,6 +339,27 @@ def _make_handler(
     h.setFormatter(formatter)
     h.addFilter(log_filter) if log_filter else None
     return h
+
+
+def _close_logger_handlers(logger: logging.Logger) -> None:
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        try:
+            handler.flush()
+        except Exception:
+            pass
+        try:
+            handler.close()
+        except Exception:
+            pass
+
+
+def _reset_named_logger_state(name: str) -> logging.Logger:
+    logger = logging.getLogger(name)
+    _close_logger_handlers(logger)
+    logger.setLevel(logging.NOTSET)
+    logger.propagate = True
+    return logger
 
 # Global flag to prevent duplicate logging setup
 _logging_initialized = False
@@ -364,7 +416,9 @@ def setup_logging(
     if should_clear_runtime_artifacts_on_start():
         cleared_runtime_artifacts = clear_runtime_artifacts()
 
-    root = logging.getLogger(); root.handlers.clear(); root.setLevel(logging.DEBUG)
+    root = logging.getLogger()
+    _close_logger_handlers(root)
+    root.setLevel(logging.DEBUG)
     # Choose file formatter based on env; console remains pretty
     file_fmt = ProductionJSONFormatter() if LOGS_AS_JSON else PrettyConsoleFormatter(no_color=True)
     console_fmt = PrettyConsoleFormatter()
@@ -392,7 +446,7 @@ def setup_logging(
         backup_count=backup_count
     )
     # Only attach to the agent_messages logger (created in log_conversation_to_agent_chat_file)
-    agent_messages_logger = logging.getLogger("mozaiks.workflow.agent_messages")
+    agent_messages_logger = _reset_named_logger_state("mozaiks.workflow.agent_messages")
     agent_messages_logger.addHandler(agent_conv_handler)
     agent_messages_logger.setLevel(logging.INFO)
     # Don't propagate to root to avoid duplication in mozaiks.log
@@ -426,7 +480,10 @@ def setup_logging(
 
 def reset_logging_state():
     """Reset logging initialization state for testing purposes"""
-    global _logging_initialized; _logging_initialized = False
+    global _logging_initialized
+    _close_logger_handlers(logging.getLogger())
+    _reset_named_logger_state("mozaiks.workflow.agent_messages")
+    _logging_initialized = False
 
 # Public getters -----------------------------------------------------
 # Enhanced core module loggers

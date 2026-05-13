@@ -30,7 +30,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from '../base/components/table.jsx';
-import { Badge } from './Badge.jsx';
+import { StatusPill } from './Surface.jsx';
 import { Button } from './Button.jsx';
 import { Skeleton } from './Skeleton.jsx';
 import { Empty } from './Skeleton.jsx';
@@ -41,7 +41,7 @@ function CellContent({ column, value }) {
   if (value === null || value === undefined) return <span className="text-muted-foreground">—</span>;
   switch (column.type) {
     case 'badge':
-      return <Badge label={String(value)} variant="secondary" />;
+      return <StatusPill label={String(value)} tone="default" />;
     case 'date':
       return <span>{new Date(value).toLocaleDateString()}</span>;
     case 'number':

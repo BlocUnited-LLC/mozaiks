@@ -52,11 +52,11 @@ class GateStep:
 
 def _base_env() -> dict[str, str]:
     env = os.environ.copy()
-    env.setdefault("ENV", "test")
-    env.setdefault("AUTH_ENABLED", "false")
-    env.setdefault("RATE_LIMIT_ENABLED", "false")
-    env.setdefault("OPENAI_API_KEY", "sk-test-placeholder")
-    env.setdefault("MONGO_URI", "mongodb://localhost:27017/test_mozaiks")
+    env["ENV"] = "test"
+    env["AUTH_ENABLED"] = "false"
+    env["RATE_LIMIT_ENABLED"] = "false"
+    env["OPENAI_API_KEY"] = "sk-test-placeholder"
+    env["MONGO_URI"] = "mongodb://localhost:27017/test_mozaiks"
     return env
 
 

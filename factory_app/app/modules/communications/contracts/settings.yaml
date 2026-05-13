@@ -1,4 +1,4 @@
-schema_version: mozaiks.settings
+schema_version: mozaiks.settings.v1
 settings:
   - id: communications.default_delivery_channel
     label: Default delivery channel

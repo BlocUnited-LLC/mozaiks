@@ -40,6 +40,7 @@ class GeneralModeMixin:
         *,
         chat_id: str,
         force_new: bool = False,
+        requested_general_chat_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Return or create the general chat context for a websocket connection."""
 
@@ -58,6 +59,28 @@ class GeneralModeMixin:
             raise RuntimeError("Cannot create general chat without app context")
 
         pm = self._get_or_create_persistence_manager()
+        if requested_general_chat_id and not force_new:
+            transcript = await pm.fetch_general_chat_transcript(
+                general_chat_id=str(requested_general_chat_id),
+                app_id=str(app_id),
+                limit=1,
+            )
+            if transcript and str(transcript.get("user_id") or "") == str(user_id):
+                general_ctx = {
+                    "chat_id": transcript.get("chat_id"),
+                    "label": transcript.get("label"),
+                    "sequence": transcript.get("sequence"),
+                    "app_id": str(app_id),
+                    "user_id": str(user_id),
+                    "created_at": (
+                        transcript.get("created_at").isoformat()
+                        if hasattr(transcript.get("created_at"), "isoformat")
+                        else transcript.get("created_at")
+                    ),
+                }
+                conn["general_session"] = general_ctx
+                return general_ctx
+
         session_info = await pm.create_general_chat_session(
             app_id=str(app_id),
             user_id=str(user_id),
@@ -90,7 +113,13 @@ class GeneralModeMixin:
         if not app_id:
             raise RuntimeError("Cannot route general-mode message without app context")
 
-        general_ctx = await self._ensure_general_chat_context(chat_id=chat_id)
+        requested_general_chat_id = None
+        if isinstance(ui_context, dict):
+            requested_general_chat_id = ui_context.get("general_chat_id") or ui_context.get("requested_general_chat_id")
+        general_ctx = await self._ensure_general_chat_context(
+            chat_id=chat_id,
+            requested_general_chat_id=requested_general_chat_id,
+        )
         general_chat_id = general_ctx.get("chat_id")
         general_label = general_ctx.get("label")
         if not general_chat_id:

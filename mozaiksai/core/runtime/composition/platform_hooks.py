@@ -38,6 +38,10 @@ Bundle keys (all optional):
     workflow_ordering     (workflow_names: List[str]) -> List[str]
         Reorder the workflow list returned to the frontend (e.g. by journey
         step sequence).
+
+    workflow_name_resolver (requested_workflow_name: str, workflow_names: List[str])
+        -> Optional[str]
+        Resolve stale or case-insensitive workflow names to a loaded workflow.
 """
 
 import importlib
@@ -49,7 +53,13 @@ from logs.logging_config import get_workflow_logger
 
 logger = get_workflow_logger("platform_hooks")
 
-_BUNDLE_KEYS = ("on_startup", "chat_prereqs", "chat_session_fields", "workflow_ordering")
+_BUNDLE_KEYS = (
+    "on_startup",
+    "chat_prereqs",
+    "chat_session_fields",
+    "workflow_ordering",
+    "workflow_name_resolver",
+)
 
 
 def _resolve_entrypoint(entrypoint: str) -> Any:
@@ -78,6 +88,7 @@ class PlatformHookRegistry:
         self._chat_prereqs_hooks: List[Callable] = []
         self._chat_session_fields_hooks: List[Callable] = []
         self._workflow_ordering_hooks: List[Callable] = []
+        self._workflow_name_resolver_hooks: List[Callable] = []
         self._loaded = False
 
     # ------------------------------------------------------------------
@@ -136,6 +147,7 @@ class PlatformHookRegistry:
             "chat_prereqs": self._chat_prereqs_hooks,
             "chat_session_fields": self._chat_session_fields_hooks,
             "workflow_ordering": self._workflow_ordering_hooks,
+            "workflow_name_resolver": self._workflow_name_resolver_hooks,
         }
         for key, target in slot_map.items():
             val = _get(key)
@@ -223,6 +235,29 @@ class PlatformHookRegistry:
                 logger.warning(f"PLATFORM_HOOKS_ORDERING_ERROR: {exc}")
         return result
 
+    def call_workflow_name_resolver(
+        self,
+        requested_workflow_name: str,
+        workflow_names: List[str],
+    ) -> Optional[str]:
+        """Resolve a requested workflow name against loaded workflow names."""
+        names = list(workflow_names or [])
+        for hook in self._workflow_name_resolver_hooks:
+            try:
+                resolved = hook(requested_workflow_name, names)
+                if isinstance(resolved, str) and resolved.strip():
+                    return resolved.strip()
+            except Exception as exc:
+                logger.warning(f"PLATFORM_HOOKS_WORKFLOW_NAME_RESOLVER_ERROR: {exc}")
+
+        requested = str(requested_workflow_name or "").strip()
+        if not requested:
+            return None
+        for name in names:
+            if str(name).lower() == requested.lower():
+                return str(name)
+        return None
+
     # ------------------------------------------------------------------
     # Introspection
     # ------------------------------------------------------------------
@@ -245,6 +280,7 @@ class PlatformHookRegistry:
             "chat_prereqs_hooks": len(self._chat_prereqs_hooks),
             "chat_session_fields_hooks": len(self._chat_session_fields_hooks),
             "workflow_ordering_hooks": len(self._workflow_ordering_hooks),
+            "workflow_name_resolver_hooks": len(self._workflow_name_resolver_hooks),
         }
 
 

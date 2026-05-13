@@ -45,18 +45,17 @@ export function TransitionOverlayFrame({
   return (
     <Dialog open onOpenChange={handleOpenChange}>
       <DialogPortal>
-        <DialogOverlay className="!z-[70] bg-background/78 backdrop-blur-md supports-[backdrop-filter]:bg-background/62 motion-reduce:backdrop-blur-0" />
+        <DialogOverlay className="!z-40 bg-background/78 backdrop-blur-md supports-[backdrop-filter]:bg-background/62 motion-reduce:backdrop-blur-0" />
         <DialogPrimitive.Content
           onEscapeKeyDown={preventDismiss}
           onInteractOutside={preventDismiss}
           onPointerDownOutside={preventDismiss}
           className={[
-            'fixed inset-x-3 z-[70] flex flex-col overflow-hidden rounded-[2rem] border border-border/80 bg-background/88 shadow-2xl shadow-black/40 outline-none backdrop-blur-xl',
-            'top-[calc(env(safe-area-inset-top,0px)+4.25rem)] bottom-[max(0.75rem,env(safe-area-inset-bottom,0.75rem))]',
+            'fixed inset-x-0 bottom-0 z-50 w-full flex max-h-[calc(100dvh-env(safe-area-inset-top,0px)-1rem)] flex-col overflow-hidden rounded-t-[2rem] border border-border/80 border-b-0 bg-background/88 shadow-2xl shadow-black/40 outline-none backdrop-blur-xl',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
             'data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom',
-            'sm:inset-x-auto sm:left-1/2 sm:top-1/2 sm:right-auto sm:bottom-auto sm:w-[min(96vw,72rem)] sm:max-h-[88vh] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:flex-none',
+            'sm:inset-x-auto sm:left-1/2 sm:top-1/2 sm:right-auto sm:bottom-auto sm:w-[min(96vw,72rem)] sm:max-h-[88vh] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:flex-none sm:rounded-[2rem] sm:border-b',
             'sm:data-[state=closed]:zoom-out-95 sm:data-[state=open]:zoom-in-95',
             'sm:data-[state=closed]:slide-out-to-top-[52%] sm:data-[state=open]:slide-in-from-top-[52%]',
             'motion-reduce:data-[state=open]:animate-none motion-reduce:data-[state=closed]:animate-none',
@@ -69,9 +68,6 @@ export function TransitionOverlayFrame({
 
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-36 bg-gradient-to-b from-primary/12 via-transparent to-transparent" />
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-primary/10 via-transparent to-transparent" />
-          <div aria-hidden="true" className="pointer-events-none absolute -left-16 top-8 h-44 w-44 rounded-full bg-primary/10 blur-3xl" />
-          <div aria-hidden="true" className="pointer-events-none absolute -right-12 bottom-6 h-52 w-52 rounded-full bg-secondary/10 blur-3xl" />
-
           {dismissible && (
             <DialogPrimitive.Close asChild>
               <button

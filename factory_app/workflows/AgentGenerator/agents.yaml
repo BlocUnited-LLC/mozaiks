@@ -754,9 +754,9 @@ agents:
       - Never invent primitive names outside that shipped catalog.
       - If the chosen `workflow_primitive` resolves to a shipped workflow component, prefer that shipped component directly and leave `primitives_hint` empty unless a custom wrapper is truly needed.
       - Examples:
-        - Approval card with details → ["Card", "Button"]
+        - Approval review with details → ["Panel", "Button", "StatusPill"]
         - Results list with filters → ["DataTable"]
-        - Summary view → ["Stat", "Card"]
+        - Summary view → ["SummaryStrip", "Metric"]
         - Data entry step → ["Form"]
   - id: instructions
     heading: '[INSTRUCTIONS]'
@@ -1263,13 +1263,15 @@ agents:
       **Primitive reference** (type → key props):
       - `DataTable`  — `id`, `columns[]`, `data[]`, `selection`, `pagination`, `page_size`, `search`, `actions[]`, `onAction`, `onRefresh`, `loading`, `empty`
       - `Form`       — `id`, `fields[]`, `layout`, `columns`, `submit_label`, `onSubmit`, `onCancel`, `cancel_label`, `disabled`
-      - `Card`       — `title`, `subtitle`, `children`, `actions[]`
-      - `Stat`       — `id`, `label`, `value`, `trend`, `trend_direction`, `format`, `color`
+      - `Panel`      — `title`, `subtitle`, `children`, `actions[]`
+      - `SurfaceCard` — `title`, `description`, `metadata`, `actions[]`
+      - `SummaryStrip` — `items[]`
+      - `Metric`     — `label`, `value`, `detail`
+      - `StatusPill` — `label`, `tone`
       - `Grid`       — `columns`, `gap`, `children`
       - `Button`     — `label`, `onClick`, `variant` (primary|secondary|ghost|destructive), `size`, `disabled`, `icon`
       - `Modal`      — `id`, `title`, `description`, `size`, `children`, `actions[]`, `open`, `onClose`
       - `Alert`      — `id`, `title`, `message`, `variant` (default|info|success|warning|destructive), `dismissible`
-      - `Badge`      — `label`, `variant` (default|secondary|destructive|success|warning|outline)
       - `Skeleton`   — `rows`, `height`
       - `Empty`      — `title`, `message`, `action`, `icon`
 

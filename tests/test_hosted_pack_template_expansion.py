@@ -20,6 +20,7 @@ Verifies:
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -30,11 +31,14 @@ import yaml
 WORKSPACE = Path(__file__).resolve().parents[1]
 _TOOLS_DIR = WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "tools"
 
-# Optional integration path — exists only in mozaiks-app workspace
-_MOZAIKS_APP_ROOT = WORKSPACE.parent / "mozaiks-app"
-_WALLET_PACKS_ROOT = _MOZAIKS_APP_ROOT / "app_generator" / "capability_packs"
+# Optional hosted-pack integration path. This is opt-in so the OSS suite never
+# depends on a sibling proprietary consumer workspace.
+_PACKS_ROOT_ENV = os.getenv("MOZAIKS_HOSTED_PACKS_ROOT", "").strip()
+_WALLET_PACKS_ROOT = Path(_PACKS_ROOT_ENV).expanduser().resolve() if _PACKS_ROOT_ENV else None
 _WALLET_TEMPLATE_PATH = (
     _WALLET_PACKS_ROOT / "wallet" / "backend_templates" / "wallet_client.py"
+    if _WALLET_PACKS_ROOT
+    else None
 )
 
 # ---------------------------------------------------------------------------
@@ -205,11 +209,13 @@ class TestTemplateResolution:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(
-    not _WALLET_TEMPLATE_PATH.exists(),
-    reason="mozaiks-app wallet template not present in this environment",
+    _WALLET_TEMPLATE_PATH is None or not _WALLET_TEMPLATE_PATH.exists(),
+    reason="Set MOZAIKS_HOSTED_PACKS_ROOT to run hosted wallet template integration checks",
 )
 class TestRealWalletTemplateContent:
     def test_template_content_matches_hosted_wallet_source(self, resolver):
+        assert _WALLET_PACKS_ROOT is not None
+        assert _WALLET_TEMPLATE_PATH is not None
         pack_sources = [
             {
                 "id": "mozaiks_app_hosted",

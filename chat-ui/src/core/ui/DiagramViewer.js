@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Badge, Card } from '../../ui/primitives/index.js';
+import { StatusPill, SurfaceCard } from '../../ui/primitives/index.js';
 
 function looksLikeMermaid(diagramText, diagramType) {
   const normalizedType = String(diagramType || '').trim().toLowerCase();
@@ -106,17 +106,12 @@ export default function DiagramViewer({ payload = {} }) {
   }, [diagramText, useMermaidRenderer]);
 
   return (
-    <Card
+    <SurfaceCard
       title={payload.title || 'Diagram viewer'}
       subtitle={payload.summary || payload.notes || 'Read-only diagram artifact.'}
-      className="border-border/80 bg-card/95 shadow-sm"
+      headerAction={<StatusPill label={payload.diagram_type || (useMermaidRenderer ? 'mermaid' : 'artifact')} tone="default" />}
     >
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge label="diagram_viewer" variant="secondary" />
-          <Badge label={payload.diagram_type || (useMermaidRenderer ? 'mermaid' : 'artifact')} variant="outline" />
-        </div>
-
         {useMermaidRenderer ? (
           <div className="rounded-md border border-border/60 bg-muted/40 p-4">
             <div ref={diagramRef} className="overflow-x-auto" />
@@ -165,6 +160,6 @@ export default function DiagramViewer({ payload = {} }) {
           </div>
         ) : null}
       </div>
-    </Card>
+    </SurfaceCard>
   );
 }

@@ -107,7 +107,7 @@ export function LauncherScreen({ transition, onResolve, overlayTitleId, overlayD
   );
 
   return (
-    <div className="relative overflow-hidden">
+    <div className="relative min-h-full flex-1 overflow-hidden">
 
       {background && (
         <img

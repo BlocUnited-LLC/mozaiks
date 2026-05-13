@@ -48,7 +48,7 @@ export function ConfirmScreen({ transition, onResolve, overlayTitleId, overlayDe
   }, [onResolve, hasCancelRoute, cancelOpt]);
 
   return (
-    <div className="p-6 text-center sm:p-8">
+    <div className="min-h-full flex-1 p-6 text-center sm:p-8">
       <div className="mx-auto max-w-xl">
         <p className="text-xs font-semibold uppercase tracking-widest text-primary/80">Confirmation</p>
         <h1 id={overlayTitleId} className="mt-3 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">

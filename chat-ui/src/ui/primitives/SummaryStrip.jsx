@@ -16,7 +16,7 @@ export function SummaryStrip({ items = [], className }) {
         className,
       )}
     >
-      <div className="grid grid-cols-2 gap-px bg-border/26 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px bg-border/40 md:grid-cols-4">
         {normalizedItems.map((item, index) => (
           <div
             key={item.id || item.label}
@@ -28,7 +28,7 @@ export function SummaryStrip({ items = [], className }) {
           >
             <div className="text-[12px] font-medium text-muted-foreground/84">{item.label}</div>
             <div className="mt-1 flex flex-wrap items-end gap-x-2 gap-y-1">
-              <div className="text-[1.45rem] font-semibold leading-none tracking-[-0.035em] text-foreground sm:text-[1.62rem]">
+              <div className="text-[1.45rem] font-semibold leading-none text-foreground sm:text-[1.62rem]">
                 {item.value}
               </div>
               {item.detail ? (

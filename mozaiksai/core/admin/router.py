@@ -368,7 +368,7 @@ def _resolve_admin_app_root() -> Path:
 
 
 def _load_module_admin_panels(app_root: Path) -> list[dict]:
-    """Load feature-owned admin panels declared by modules/{module}/admin.yaml."""
+    """Load feature-owned admin panels declared by modules/{module}/contracts/admin.yaml."""
     from mozaiksai.core.runtime.app.module_loader import ModuleAdminManifest
 
     modules_dir = app_root / "modules"
@@ -379,7 +379,7 @@ def _load_module_admin_panels(app_root: Path) -> list[dict]:
     for module_dir in sorted(modules_dir.iterdir(), key=lambda item: item.name.lower()):
         if not module_dir.is_dir():
             continue
-        admin_path = module_dir / "admin.yaml"
+        admin_path = module_dir / "contracts" / "admin.yaml"
         if not admin_path.exists():
             continue
         try:
