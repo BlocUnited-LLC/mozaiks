@@ -28,7 +28,11 @@ async def handle_enter_general_mode(
         raise ValueError("WebSocket ID not found in connection metadata")
 
     session_registry.enter_general_mode(ws_id)
-    general_ctx = await transport._ensure_general_chat_context(chat_id=chat_id)
+    requested_general_chat_id = data.get("general_chat_id") or data.get("requested_general_chat_id")
+    general_ctx = await transport._ensure_general_chat_context(
+        chat_id=chat_id,
+        requested_general_chat_id=requested_general_chat_id,
+    )
     general_chat_id = general_ctx.get("chat_id")
 
     logger.info(f"Entered general mode (ws_id={ws_id}, general_chat={general_chat_id})")

@@ -1,4 +1,5 @@
 recursive-include factory_app/app *
+recursive-include factory_app/capability_packs *
 recursive-include factory_app/workflows *
 recursive-include web_shell *.js *.jsx *.css *.html *.json *.md
 include web_shell/.env.example
@@ -12,4 +13,6 @@ include chat-ui/vite.embed.config.js
 include chat-ui/README.md
 prune web_shell/node_modules
 prune web_shell/dist
+prune web_shell/test-results
+prune web_shell/playwright-report
 global-exclude *.py[cod]

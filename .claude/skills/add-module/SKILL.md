@@ -19,7 +19,7 @@ app/modules/{name}/
 ├── module.yaml              ← required: identity, actions, capabilities
 ├── contracts/               ← optional companion manifests
 │   ├── events.yaml          ← domain events this module may publish
-│   ├── reactions.yaml       ← event reactions owned by this module
+│   ├── subscriptions.yaml   ← event reactions owned by this module
 │   ├── notifications.yaml   ← notification rules derived from events
 │   ├── settings.yaml        ← user/app settings schema
 │   └── admin.yaml           ← admin panels (omit if none)
@@ -116,14 +116,14 @@ events:
       required: [record_id, owner_id]
 ```
 
-### 3. Write `contracts/reactions.yaml`
+### 3. Write `contracts/subscriptions.yaml`
 
 Only needed when this module reacts to events from other modules.
 
 ```yaml
-reactions: []
+subscriptions: []
 # Add entries when this module reacts to events from other modules.
-# Each reaction routes an event to a handler method on this module's handler class.
+# Each subscription routes an event to a handler method on this module's handler class.
 #
 # Example:
 #   - id: {name}.on_other_event
@@ -351,14 +351,16 @@ Modules are loaded at startup. No registration step needed.
 ## Event Reactions (module-to-module)
 
 When this module needs to react to an event from another module without starting
-a workflow, declare it in `contracts/reactions.yaml` and add the handler method:
+a workflow, declare it in `contracts/subscriptions.yaml` and add the handler method:
 
 ```yaml
-# contracts/reactions.yaml
-reactions:
+# contracts/subscriptions.yaml
+subscriptions:
   - id: {name}.on_other_event
-    event: domain.other_module.something_happened
-    handler_method: handle_something
+    event_type: domain.other_module.something_happened
+    target:
+      kind: handler
+      handler_method: handle_something
 ```
 
 Add `handle_something` as a method on `{Name}Handler` (delegate to service):

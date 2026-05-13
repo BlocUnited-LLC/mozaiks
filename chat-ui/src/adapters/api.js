@@ -576,7 +576,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
     return null;
   }
 
-  async startChat(appId, workflowname, userId, fetchOpts = {}, contextVariables = null, triggerMeta = null) {
+  async startChat(appId, workflowname, userId, fetchOpts = {}, contextVariables = null, triggerMeta = null, sessionOptions = null) {
     const actualworkflowname = resolveWorkflow(workflowname);
     const clientRequestId = crypto?.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random().toString(36).slice(2));
     const requestKey = this._getStartChatKey(appId, actualworkflowname, userId);
@@ -597,6 +597,9 @@ export class WebSocketApiAdapter extends ApiAdapter {
         }
         if (triggerMeta && typeof triggerMeta === 'object') {
           body.trigger_meta = triggerMeta;
+        }
+        if (sessionOptions?.transportPurpose && typeof sessionOptions.transportPurpose === 'string') {
+          body.transport_purpose = sessionOptions.transportPurpose.trim();
         }
         const response = await authFetch(`${baseUrl}/api/chats/${encodeURIComponent(appId)}/${encodeURIComponent(actualworkflowname)}/start`, {
           method: 'POST',
@@ -763,7 +766,7 @@ export class RestApiAdapter extends ApiAdapter {
     return null;
   }
 
-  async startChat(appId, workflowname, userId, fetchOpts = {}, contextVariables = null, triggerMeta = null) {
+  async startChat(appId, workflowname, userId, fetchOpts = {}, contextVariables = null, triggerMeta = null, sessionOptions = null) {
     const actualworkflowname = resolveWorkflow(workflowname);
     const clientRequestId = crypto?.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random().toString(36).slice(2));
     const requestKey = this._getStartChatKey(appId, actualworkflowname, userId);
@@ -777,6 +780,9 @@ export class RestApiAdapter extends ApiAdapter {
         }
         if (triggerMeta && typeof triggerMeta === 'object') {
           body.trigger_meta = triggerMeta;
+        }
+        if (sessionOptions?.transportPurpose && typeof sessionOptions.transportPurpose === 'string') {
+          body.transport_purpose = sessionOptions.transportPurpose.trim();
         }
         const response = await authFetch(`${baseUrl}/api/chats/${encodeURIComponent(appId)}/${encodeURIComponent(actualworkflowname)}/start`, {
           method: 'POST',

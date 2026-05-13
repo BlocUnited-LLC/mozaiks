@@ -8,34 +8,13 @@ noisy workflow UI can be revised before bundle assembly/download.
 
 from __future__ import annotations
 
-import re
 from pathlib import PurePosixPath
-from typing import Annotated, Any, Dict, Iterable, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from autogen.tools.dependency_injection import Field
-
-_COPY_FLAGS = (
-    "placeholder",
-    "lorem",
-    "coming soon",
-    "todo",
-    "tbd",
-    "posture",
-    "handoff",
-    "control room",
-    "kpi wall",
-    "dashboard",
-)
-_FONT_FLAGS = ("rajdhani", "orbitron", "fagrak")
-_LEGACY_COLOR_PATTERNS = (
-    re.compile(r"\bbg-(gray|slate|zinc|neutral|stone|white|black)-"),
-    re.compile(r"\btext-(gray|slate|zinc|neutral|stone|white|black)-"),
-    re.compile(r"\bborder-(gray|slate|zinc|neutral|stone|white|black)-"),
-)
-_HEX_COLOR_RE = re.compile(r"#[0-9a-fA-F]{3,8}\b")
-_RGB_COLOR_RE = re.compile(r"\brgba?\(")
-_PUBLIC_IMPORT_RE = re.compile(
-    r"import\s*\{(?P<specifiers>[^}]+)\}\s*from\s*['\"]@mozaiks/chat-ui/ui['\"]"
+from factory_app.workflows.generated_ui_contract import (
+    audit_generated_react_files,
+    dedupe,
 )
 
 
@@ -152,30 +131,6 @@ def _expected_workflow_ui_targets(context_variables: Optional[Any]) -> Dict[str,
     return targets
 
 
-def _parse_public_imports(content: str) -> List[str]:
-    imported: List[str] = []
-    for match in _PUBLIC_IMPORT_RE.finditer(content):
-        for raw in match.group("specifiers").split(","):
-            token = raw.strip()
-            if not token:
-                continue
-            if " as " in token:
-                token = token.split(" as ", 1)[0].strip()
-            imported.append(token)
-    return imported
-
-
-def _dedupe(items: Iterable[str]) -> List[str]:
-    seen: set[str] = set()
-    ordered: List[str] = []
-    for item in items:
-        if item in seen:
-            continue
-        seen.add(item)
-        ordered.append(item)
-    return ordered
-
-
 def _audit_workflow_ui_files(
     code_files: List[Dict[str, Any]],
     *,
@@ -211,101 +166,16 @@ def _audit_workflow_ui_files(
                 f"{component_name} ({workflow_primitive})."
             )
 
-    for item in ui_files:
-        filename = str(item["filename"])
-        content = str(item["content"])
-        component_name = PurePosixPath(filename).stem
-        suffix = PurePosixPath(filename).suffix.lower()
-        lower = content.lower()
+    warnings.extend(
+        audit_generated_react_files(
+            ui_files,
+            source_label="generated workflow-local React",
+            require_jsx=True,
+            include_ui_index=False,
+        )
+    )
 
-        if suffix != ".jsx":
-            warnings.append(
-                f"{filename} uses {suffix or 'no extension'}; generated workflow-local React must use .jsx."
-            )
-
-        for deep_import in (
-            "@mozaiks/chat-ui/ui/primitives/",
-            "chat-ui/src/",
-            "../../ui/",
-            "../ui/",
-        ):
-            if deep_import in content:
-                warnings.append(
-                    f"{filename} uses brittle deep UI imports ({deep_import}); use the public @mozaiks/chat-ui/ui entrypoint."
-                )
-
-        imported = set(_parse_public_imports(content))
-        discouraged_imports = sorted(imported & {"Card", "Stat", "Badge"})
-        if discouraged_imports:
-            warnings.append(
-                f"{filename} imports discouraged runtime primitives: {', '.join(discouraged_imports)}."
-            )
-
-        for discouraged_tag in ("Card", "Stat", "Badge"):
-            if re.search(rf"<{discouraged_tag}\b", content):
-                warnings.append(
-                    f"{filename} renders discouraged runtime primitive <{discouraged_tag}>."
-                )
-
-        if "fontFamily" in content or "font-family" in lower:
-            warnings.append(
-                f"{filename} hardcodes font-family styling; use semantic theme tokens instead."
-            )
-
-        literal_fonts = [font for font in _FONT_FLAGS if font in lower]
-        if literal_fonts:
-            warnings.append(
-                f"{filename} references literal brand fonts ({', '.join(sorted(set(literal_fonts)))}); use semantic theme tokens instead."
-            )
-
-        if _HEX_COLOR_RE.search(content) or _RGB_COLOR_RE.search(content):
-            warnings.append(
-                f"{filename} hardcodes color values; use semantic theme tokens instead."
-            )
-
-        for pattern in _LEGACY_COLOR_PATTERNS:
-            if pattern.search(content):
-                warnings.append(
-                    f"{filename} uses legacy color utility classes; use semantic theme tokens instead."
-                )
-                break
-
-        matched_copy_flags = [flag for flag in _COPY_FLAGS if flag in lower]
-        if matched_copy_flags:
-            warnings.append(
-                f"{filename} contains placeholder/internal copy ({', '.join(sorted(set(matched_copy_flags)))})."
-            )
-
-        status_pill_count = len(re.findall(r"<StatusPill\b", content))
-        if status_pill_count > 2:
-            warnings.append(
-                f"{filename} renders {status_pill_count} StatusPill components; compact workflow UI should avoid repeated status chips."
-            )
-
-        container_count = len(re.findall(r"<(Panel|SurfaceCard)\b", content))
-        if container_count > 2:
-            warnings.append(
-                f"{filename} renders {container_count} primary wrapper surfaces; workflow UI should keep one focused working area."
-            )
-
-        metric_count = len(re.findall(r"<Metric\b", content))
-        if metric_count > 3:
-            warnings.append(
-                f"{filename} renders {metric_count} Metric components; avoid KPI-strip workflow UI."
-            )
-
-        summary_strip_count = len(re.findall(r"<SummaryStrip\b", content))
-        if summary_strip_count > 1:
-            warnings.append(
-                f"{filename} renders multiple SummaryStrip components; keep workflow UI compact."
-            )
-
-        if component_name.endswith("Dashboard"):
-            warnings.append(
-                f"{filename} uses dashboard-style naming ({component_name}); workflow UI should describe the actual task surface."
-            )
-
-    return _dedupe(warnings)
+    return dedupe(warnings)
 
 
 def save_workflow_ui_files_output(

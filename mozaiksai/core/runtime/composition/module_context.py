@@ -10,7 +10,7 @@ builds this context from the incoming request and injects it so that:
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine, Dict, Optional
+from typing import Any, Callable, Coroutine, Dict, List, Optional
 
 
 @dataclass
@@ -34,6 +34,11 @@ class ModuleContext:
 
     # Auth token forwarded from the incoming request (for external API calls)
     auth_token: Optional[str] = None
+
+    # Setting definitions declared in settings.yaml for this module.
+    # Each entry is a setting definition dict: {id, type, default, label, ...}.
+    # Handlers use this to resolve defaults or validate setting-aware logic.
+    settings: Optional[List[Dict[str, Any]]] = None
 
     # Event emitter — async callable(event_type, payload) -> None
     # Injected by ModuleExecutor; no-op if not wired.

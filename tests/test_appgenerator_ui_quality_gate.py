@@ -118,6 +118,70 @@ def test_review_ui_quality_routes_lane_mismatch_warnings_to_schema_revision() ->
     assert "Honor the planned UI lane" in context.data["app_ui_quality_revision_request"]
 
 
+def test_review_ui_quality_audits_persisted_page_schemas() -> None:
+    context = _Context(
+        {
+            "app_ui_quality_warnings": [],
+            "app_schema_ready": True,
+            "app_manifest": {"app_name": "Operations", "pages": ["Operations"]},
+            "app_pages": [
+                {
+                    "name": "Operations Dashboard",
+                    "route": "/operations",
+                    "title": "Operations Dashboard",
+                    "sections": [
+                        {
+                            "id": "summary-a",
+                            "primitive": "SummaryStrip",
+                            "config": {"items": [{"label": "Total", "value": 1}]},
+                        },
+                        {
+                            "id": "summary-b",
+                            "primitive": "SummaryStrip",
+                            "config": {"items": [{"label": "Open", "value": 1}]},
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+
+    result = ui_quality_module.review_ui_quality(context_variables=context)
+
+    assert result["status"] == "needs_revision"
+    assert any("dashboard-style page naming" in warning for warning in result["warnings"])
+    assert any("uses 2 SummaryStrip sections" in warning for warning in result["warnings"])
+
+
+def test_review_ui_quality_audits_custom_route_react() -> None:
+    context = _Context(
+        {
+            "app_ui_quality_warnings": [],
+            "app_schema_ready": True,
+            "app_manifest": {"app_name": "Deal Room", "pages": [], "custom_routes": ["deal-room"]},
+            "app_pages": [],
+            "app_custom_route_bundle": {
+                "route_manifest": [{"id": "deal-room"}],
+                "page_files": [
+                    {
+                        "path": "ui/pages/custom/DealRoom.jsx",
+                        "content": (
+                            "import { Card } from '@mozaiks/chat-ui/ui';\n"
+                            "export default function DealRoom(){ return <Card>Placeholder</Card>; }\n"
+                        ),
+                    }
+                ],
+            },
+        }
+    )
+
+    result = ui_quality_module.review_ui_quality(context_variables=context)
+
+    assert result["status"] == "needs_revision"
+    assert any("imports non-canonical component primitives: Card" in warning for warning in result["warnings"])
+    assert any("placeholder/internal copy" in warning for warning in result["warnings"])
+
+
 def test_review_ui_quality_blocks_after_revision_budget() -> None:
     context = _Context(
         {
@@ -143,7 +207,7 @@ async def test_assemble_app_tasks_requires_passed_ui_quality_gate() -> None:
         {
             "app_id": "ops-portal",
             "app_ui_quality_status": "needs_revision",
-            "app_ui_quality_warnings": ["Dashboard uses discouraged Stat primitive."],
+            "app_ui_quality_warnings": ["Dashboard repeats low-value metrics."],
             "_mfj_resume_inject_as": "mfj_app_task_results",
             "mfj_app_task_results": {},
         }

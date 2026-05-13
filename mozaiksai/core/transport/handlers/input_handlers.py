@@ -30,6 +30,13 @@ async def handle_user_input_submit(
     ui_context_payload = data.get("context") or data.get("ui_context") or {}
     if not isinstance(ui_context_payload, dict):
         ui_context_payload = {}
+    requested_general_chat_id = (
+        ui_context_payload.get("general_chat_id")
+        or ui_context_payload.get("requested_general_chat_id")
+        or data.get("general_chat_id")
+    )
+    if requested_general_chat_id:
+        ui_context_payload["requested_general_chat_id"] = requested_general_chat_id
 
     logger.info(f"[INPUT] Received user.input.submit: chat={chat_id}, req_id={req_id}, text_len={len(text)}, ws_id={ws_id}")
 

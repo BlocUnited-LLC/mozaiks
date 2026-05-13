@@ -37,37 +37,6 @@
       "disabled": "boolean — default false"
     }
   },
-  "Card": {
-    "tier": "discouraged",
-    "use": "Use only for legacy schemas that already depend on Card.",
-    "avoid": "Prefer Panel or SurfaceCard; Card encourages generic over-boxed layouts.",
-    "required": [],
-    "properties": {
-      "title": "string",
-      "subtitle": "string",
-      "actions": "array of {id?,label,variant?,action_type,href?,event_type?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}",
-      "children": "array of {id?,primitive,title?,config?}"
-    }
-  },
-  "Stat": {
-    "tier": "discouraged",
-    "use": "Use only for legacy schemas that already depend on Stat.",
-    "avoid": "Prefer SummaryStrip or Metric; Stat encourages generic dashboard spam.",
-    "required": [
-      "label"
-    ],
-    "properties": {
-      "label": "string — KPI metric label. — REQUIRED",
-      "value": "any — Static metric value.",
-      "value_key": "string — Key path into api_endpoint response for dynamic value.",
-      "format": "string: number|currency|percentage|compact",
-      "trend": "any — Static trend value (positive = up).",
-      "trend_key": "string — Key path into api_endpoint response for dynamic trend.",
-      "trend_direction": "string: up_good|up_bad|neutral — default up_good",
-      "color": "string",
-      "icon": "string"
-    }
-  },
   "Grid": {
     "tier": "specialized",
     "use": "Use only to arrange a small number of child primitives when layout is essential.",
@@ -79,7 +48,7 @@
     "properties": {
       "columns": "integer — Number of grid columns. — REQUIRED",
       "gap": "string: sm|md|lg|1|2|3|4|6|8 — default 4",
-      "api_endpoint": "string — Optional shared data endpoint for child Stat/Card binding.",
+      "api_endpoint": "string — Optional shared data endpoint for child primitive binding.",
       "children": "array of {id?,primitive,title?,config?} — min 1 — REQUIRED"
     }
   },
@@ -124,18 +93,6 @@
       "message": "string — REQUIRED",
       "variant": "string: default|info|success|warning|destructive — default default",
       "dismissible": "boolean — default false"
-    }
-  },
-  "Badge": {
-    "tier": "discouraged",
-    "use": "Use only for legacy schemas that already depend on Badge.",
-    "avoid": "Prefer StatusPill; Badge encourages repeated status chips.",
-    "required": [
-      "label"
-    ],
-    "properties": {
-      "label": "string — REQUIRED",
-      "variant": "string"
     }
   },
   "Skeleton": {

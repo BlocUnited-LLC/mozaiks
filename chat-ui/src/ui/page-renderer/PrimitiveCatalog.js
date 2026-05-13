@@ -135,21 +135,6 @@ export const PRIMITIVE_CATALOG = {
     avoid: 'Prefer LoadingState for full-page loading.',
   },
 
-  Card: {
-    tier: 'discouraged',
-    use: 'Use only for legacy schemas that already depend on Card.',
-    avoid: 'Prefer Panel or SurfaceCard; Card encourages generic over-boxed layouts.',
-  },
-  Stat: {
-    tier: 'discouraged',
-    use: 'Use only for legacy schemas that already depend on Stat.',
-    avoid: 'Prefer SummaryStrip or Metric; Stat encourages generic dashboard spam.',
-  },
-  Badge: {
-    tier: 'discouraged',
-    use: 'Use only for legacy schemas that already depend on Badge.',
-    avoid: 'Prefer StatusPill; Badge encourages repeated status chips.',
-  },
 };
 
 export const DEFAULT_PAGE_RECIPE = [

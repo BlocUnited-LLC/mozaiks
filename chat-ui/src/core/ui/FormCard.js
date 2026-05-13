@@ -1,4 +1,4 @@
-import { Alert, Badge, Card, Form } from '../../ui/primitives/index.js';
+import { Alert, Form, StatusPill, SurfaceCard } from '../../ui/primitives/index.js';
 import { getPrimaryPrimitiveAction, sendPrimitiveResponse } from './workflowPrimitiveUtils.js';
 
 function applyInitialValues(fields, values) {
@@ -26,17 +26,12 @@ export default function FormCard({ payload = {}, onResponse, onCancel }) {
   });
 
   return (
-    <Card
+    <SurfaceCard
       title={payload.title || 'Complete the form'}
       subtitle={payload.summary || 'Provide the required details to continue the workflow.'}
-      className="border-border/80 bg-card/95 shadow-sm"
+      headerAction={<StatusPill label={payload.status || 'ready'} tone="default" />}
     >
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge label="form_card" variant="secondary" />
-          <Badge label={payload.status || 'ready'} variant="outline" />
-        </div>
-
         {payload.error ? <Alert message={payload.error} variant="warning" /> : null}
 
         <Form
@@ -54,6 +49,6 @@ export default function FormCard({ payload = {}, onResponse, onCancel }) {
           onCancel={onCancel ? () => onCancel({ status: 'cancelled', action: 'cancel' }) : undefined}
         />
       </div>
-    </Card>
+    </SurfaceCard>
   );
 }

@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Card } from '../../ui/primitives/index.js';
+import { Alert, Button, StatusPill, SurfaceCard } from '../../ui/primitives/index.js';
 import { normalizePrimitiveActions, normalizeSummaryItems, sendPrimitiveResponse } from './workflowPrimitiveUtils.js';
 
 const fallbackActions = [
@@ -11,17 +11,12 @@ export default function ConfirmationSummary({ payload = {}, onResponse, onCancel
   const actions = normalizePrimitiveActions(payload, fallbackActions);
 
   return (
-    <Card
+    <SurfaceCard
       title={payload.title || 'Confirm the summary'}
       subtitle={payload.summary || 'Review the captured details before continuing.'}
-      className="border-border/80 bg-card/95 shadow-sm"
+      headerAction={<StatusPill label={payload.status || 'review'} tone="default" />}
     >
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge label="confirmation_summary" variant="secondary" />
-          <Badge label={payload.status || 'review'} variant="outline" />
-        </div>
-
         {payload.error ? <Alert message={payload.error} variant="warning" /> : null}
 
         <div className="space-y-2">
@@ -47,6 +42,6 @@ export default function ConfirmationSummary({ payload = {}, onResponse, onCancel
           ) : null}
         </div>
       </div>
-    </Card>
+    </SurfaceCard>
   );
 }

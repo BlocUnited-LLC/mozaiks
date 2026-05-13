@@ -1,4 +1,4 @@
-schema_version: mozaiks.events
+schema_version: mozaiks.events.v1
 events:
   - type: domain.communications.thread_created
     version: 1

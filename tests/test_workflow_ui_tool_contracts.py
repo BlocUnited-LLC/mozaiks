@@ -4,6 +4,7 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 from mozaiksai.core.workflow.workflow_ui_catalog import get_workflow_shipped_component_names
 
@@ -544,15 +545,15 @@ def test_agent_generator_primitive_reference_matches_runtime_contract() -> None:
     assert "`DataTable`  — `id`, `columns[]`, `data[]`" in content
     assert "`Form`       — `id`, `fields[]`, `layout`, `columns`, `submit_label`" in content
     assert "`Grid`       — `columns`, `gap`, `children`" in content
-    assert "`Card`       — `title`, `subtitle`, `children`, `actions[]`" in content
-    assert "`Stat`       — `id`, `label`, `value`, `trend`, `trend_direction`, `format`, `color`" in content
+    assert "`Panel`      — `title`, `subtitle`, `children`, `actions[]`" in content
+    assert "`SummaryStrip` — `items[]`" in content
+    assert "`Metric`     — `label`, `value`, `detail`" in content
     assert "`Empty`      — `title`, `message`, `action`, `icon`" in content
 
     # Stale guidance that drifts from shipped primitive contracts
     assert "`rows[]`" not in content
     assert "`onRowClick`" not in content
     assert "`submitLabel`" not in content
-    assert "`items[]`" not in content
     assert "`renderItem`" not in content
 
 
@@ -594,9 +595,14 @@ def test_extended_orchestration_transition_components_are_file_backed() -> None:
 def test_platform_ui_fonts_flow_through_semantic_theme_tokens() -> None:
     from tests.conftest import active_app_root
     app_root = active_app_root()
-    typography = (app_root / "ui" / "theme" / "typography.js").read_text(encoding="utf-8")
-    app_card = (app_root / "ui" / "components" / "AppCard.jsx").read_text(encoding="utf-8")
-    dashboard = (app_root / "ui" / "pages" / "custom" / "Dashboard.jsx").read_text(encoding="utf-8")
+    typography_path = app_root / "ui" / "theme" / "typography.js"
+    app_card_path = app_root / "ui" / "components" / "AppCard.jsx"
+    dashboard_path = app_root / "ui" / "pages" / "custom" / "Dashboard.jsx"
+    if not (typography_path.exists() and app_card_path.exists() and dashboard_path.exists()):
+        pytest.skip("Product theme token fixtures are not present in the active app workspace")
+    typography = typography_path.read_text(encoding="utf-8")
+    app_card = app_card_path.read_text(encoding="utf-8")
+    dashboard = dashboard_path.read_text(encoding="utf-8")
 
     assert "var(--font-body" in typography
     assert "var(--font-heading" in typography

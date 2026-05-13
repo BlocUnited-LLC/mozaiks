@@ -202,6 +202,13 @@ async def _platform_startup() -> None:
                     loaded_module.name,
                     loaded_module.handler,
                     action_method_map=loaded_module.action_method_map,
+                    settings=(
+                        loaded_module.manifests.settings.settings
+                        if loaded_module.manifests.settings is not None
+                        else None
+                    ),
+                    action_permissions=loaded_module.action_permissions_map,
+                    action_schemas=loaded_module.action_schemas_map,
                 )
             executor_registry.register(module_executor)
             logger.info("MODULE_EXECUTOR_READY: %s module(s)", len(load_result.modules))
@@ -1783,6 +1790,10 @@ async def _execute_module_action(
         tenant_id=str(tenant_id) if tenant_id else None,
         auth_token=str(auth_token) if auth_token else None,
         correlation_id=str(correlation_id) if correlation_id else None,
+        # TODO: populate from principal.permissions once the auth permission
+        # resolver is wired. Until then, None bypasses enforcement (trusted
+        # HTTP surface — still protected by require_any_auth at the endpoint).
+        granted_permissions=None,
     )
 
     result = await module_executor.execute(module_request, context=None)
@@ -1791,6 +1802,8 @@ async def _execute_module_action(
 
     if result.error_code in {"MODULE_NOT_FOUND", "ACTION_NOT_FOUND"}:
         status_code = 404
+    elif result.error_code == "PERMISSION_DENIED":
+        status_code = 403
     elif result.error_code == "INVALID_PARAMS":
         status_code = 400
     else:
@@ -2712,6 +2725,16 @@ async def list_chats(
         raise HTTPException(status_code=500, detail="Failed to list chats") from exc
 
 
+def _is_ask_carrier_session(session: Dict[str, Any] | None) -> bool:
+    if not isinstance(session, dict):
+        return False
+    return str(session.get("transport_purpose") or "").strip().lower() == "ask_carrier"
+
+
+def _json_timestamp(value: Any) -> Any:
+    return value.isoformat() if hasattr(value, "isoformat") else value
+
+
 @app.get("/api/chats/exists/{app_id}/{workflow_name}/{chat_id}")
 async def chat_exists(
     app_id: str,
@@ -2724,7 +2747,9 @@ async def chat_exists(
         query: Dict[str, Any] = {"_id": chat_id, "workflow_name": workflow_name, **build_app_scope_filter(app_id)}
         if principal.user_id != "anonymous":
             query["user_id"] = principal.user_id
-        doc = await coll.find_one(query, {"_id": 1})
+        doc = await coll.find_one(query, {"_id": 1, "transport_purpose": 1})
+        if doc and _is_ask_carrier_session(doc):
+            return {"exists": False}
         return {"exists": doc is not None}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to check chat existence: {exc}") from exc
@@ -2751,6 +2776,7 @@ async def list_user_sessions(
             session
             for session in sessions
             if _is_runnable_workflow_name(session.get("workflow_name"), runnable_names)
+            and not _is_ask_carrier_session(session)
         ]
 
         result = []
@@ -2789,6 +2815,7 @@ async def get_most_recent_workflow_session(
             session
             for session in sessions
             if _is_runnable_workflow_name(session.get("workflow_name"), runnable_names)
+            and not _is_ask_carrier_session(session)
         ]
 
         if not sessions:
@@ -2827,6 +2854,7 @@ async def get_oldest_workflow_session(
             session
             for session in sessions
             if _is_runnable_workflow_name(session.get("workflow_name"), runnable_names)
+            and not _is_ask_carrier_session(session)
         ]
 
         if not sessions:
@@ -2930,6 +2958,31 @@ async def delete_general_chats(
         raise HTTPException(status_code=500, detail=f"Failed to delete general chats: {exc}") from exc
 
 
+@app.delete("/api/general_chats/{app_id}/{user_id}/{general_chat_id}")
+async def delete_general_chat(
+    app_id: str,
+    user_id: str,
+    general_chat_id: str,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
+    try:
+        deleted = await persistence_manager.delete_general_chat(
+            general_chat_id=general_chat_id,
+            app_id=app_id,
+            user_id=user_id,
+        )
+        return {
+            "success": True,
+            "deleted": bool(deleted),
+            "app_id": app_id,
+            "user_id": user_id,
+            "general_chat_id": general_chat_id,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to delete general chat: {exc}") from exc
+
+
 @app.get("/api/notifications/count")
 async def notifications_count_fallback(
     principal: UserPrincipal = Depends(require_user_scope),
@@ -2967,10 +3020,33 @@ async def list_general_chats_fallback(
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
+    bounded_limit = max(1, min(int(limit or 50), 200))
+    try:
+        sessions = await persistence_manager.list_general_chats(
+            app_id=app_id,
+            user_id=user_id,
+            limit=bounded_limit,
+        )
+        normalized_sessions = []
+        for session in sessions:
+            item = dict(session)
+            item["created_at"] = _json_timestamp(item.get("created_at"))
+            item["last_updated_at"] = _json_timestamp(item.get("last_updated_at"))
+            normalized_sessions.append(item)
+        return {
+            "app_id": app_id,
+            "user_id": user_id,
+            "limit": bounded_limit,
+            "sessions": normalized_sessions,
+            "count": len(normalized_sessions),
+            "source": "persistence",
+        }
+    except Exception as exc:
+        logger.debug("[GENERAL_CHATS_LIST] persistence fallback failed: %s", exc)
     return {
         "app_id": app_id,
         "user_id": user_id,
-        "limit": max(1, int(limit or 50)),
+        "limit": bounded_limit,
         "sessions": [],
         "count": 0,
         "source": "fallback",
@@ -2985,14 +3061,41 @@ async def general_chat_transcript_fallback(
     limit: int = 200,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    _ = principal
+    bounded_limit = max(1, min(int(limit or 200), 2000))
+    try:
+        transcript = await persistence_manager.fetch_general_chat_transcript(
+            general_chat_id=general_chat_id,
+            app_id=app_id,
+            after_sequence=int(after_sequence or -1),
+            limit=bounded_limit,
+        )
+        if transcript:
+            owner = str(transcript.get("user_id") or "")
+            if principal.user_id != "anonymous" and owner and owner != principal.user_id:
+                raise HTTPException(status_code=403, detail="Forbidden")
+            payload = dict(transcript)
+            payload["created_at"] = _json_timestamp(payload.get("created_at"))
+            payload["last_updated_at"] = _json_timestamp(payload.get("last_updated_at"))
+            messages = []
+            for message in payload.get("messages") or []:
+                item = dict(message)
+                item["timestamp"] = _json_timestamp(item.get("timestamp"))
+                messages.append(item)
+            payload["messages"] = messages
+            payload["found"] = True
+            payload["source"] = "persistence"
+            return payload
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.debug("[GENERAL_CHAT_TRANSCRIPT] persistence fallback failed: %s", exc)
     return {
         "app_id": app_id,
         "chat_id": general_chat_id,
         "label": general_chat_id,
         "messages": [],
         "last_sequence": max(-1, int(after_sequence or -1)),
-        "limit": max(1, int(limit or 200)),
+        "limit": bounded_limit,
         "found": False,
         "source": "fallback",
     }

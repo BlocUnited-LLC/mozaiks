@@ -51,8 +51,6 @@ export const UI_PRIMITIVES = /** @type {const} */ ({
 
   // Display primitives
   DATA_TABLE: 'DataTable',
-  CARD: 'Card',
-  STAT: 'Stat',
   TIMELINE: 'Timeline',
   FILE_LIST: 'FileList',
   CODE_BLOCK: 'CodeBlock',

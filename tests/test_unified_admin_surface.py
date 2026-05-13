@@ -114,8 +114,9 @@ def test_runtime_admin_config_discovers_module_admin_yaml(tmp_path) -> None:
 
     app_root = tmp_path / "platform"
     module_root = app_root / "modules" / "crm"
-    module_root.mkdir(parents=True)
-    (module_root / "admin.yaml").write_text(
+    contracts_root = module_root / "contracts"
+    contracts_root.mkdir(parents=True)
+    (contracts_root / "admin.yaml").write_text(
         yaml.safe_dump(
             {
                 "schema_version": "mozaiks.admin.v2",

@@ -16,8 +16,6 @@ import ArtifactWorkbench from './ArtifactWorkbench';
 // L1 agent-UI primitives (ui.render event system)
 import {
   DataTable,
-  Card,
-  Stat,
   Timeline,
   CodeBlock,
   ProgressTracker,
@@ -48,8 +46,6 @@ const CoreComponents = {
   ArtifactWorkbench,
   // L1 primitives — discoverable by WorkflowUIRouter via component name
   DataTable,
-  Card,
-  Stat,
   Timeline,
   CodeBlock,
   ProgressTracker,
@@ -73,8 +69,6 @@ export {
   ArtifactWorkbench,
   // L1 primitives
   DataTable,
-  Card,
-  Stat,
   Timeline,
   CodeBlock,
   ProgressTracker,

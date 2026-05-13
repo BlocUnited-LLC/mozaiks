@@ -139,19 +139,20 @@ def test_ask_chat_restore_contracts_are_pinned_in_source() -> None:
     assert "general_chat_id: preferredGeneralChatId || undefined" in chat_page_source
     assert "requested_general_chat_id" in general_mode_source
     assert 'ui_context_payload.get("general_chat_id")' in input_handler_source
-    assert "requested_general_chat_id=requested_general_chat_id" in input_handler_source
+    assert 'ui_context_payload["requested_general_chat_id"] = requested_general_chat_id' in input_handler_source
     assert 'data.get("general_chat_id")' in mode_handler_source
 
 
 def test_ask_bootstrap_sessions_do_not_count_as_workflow_runs() -> None:
     platform_source = _read("mozaiksai/hosts/platform.py")
+    runtime_source = _read("mozaiksai/hosts/runtime.py")
     chat_page_source = _read("chat-ui/src/pages/ChatPage.js")
     api_source = _read("chat-ui/src/adapters/api.js")
 
-    assert 'transport_purpose = str(data.get("transport_purpose") or "").strip().lower()' in platform_source
-    assert 'extra_fields["transport_purpose"] = "ask_carrier"' in platform_source
+    assert 'transport_purpose = str(data.get("transport_purpose") or "").strip().lower()' in runtime_source
+    assert 'extra_fields["transport_purpose"] = "ask_carrier"' in runtime_source
     assert 'and not _is_ask_carrier_session(session)' in platform_source
-    assert 'if _is_ask_carrier_session(chat_doc):' in platform_source
+    assert 'if doc and _is_ask_carrier_session(doc):' in platform_source
     assert "body.transport_purpose = sessionOptions.transportPurpose.trim();" in api_source
     assert "const shouldRestoreStoredWorkflowChat = !(" in chat_page_source
     assert "askCarrierMode ? { transportPurpose: 'ask_carrier' } : null" in chat_page_source

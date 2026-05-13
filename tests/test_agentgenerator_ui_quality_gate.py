@@ -93,8 +93,8 @@ def test_save_workflow_ui_files_output_persists_output_and_flags_noisy_ui() -> N
     assert context.data["workflow_ui_files_output"]["tools"][0]["filename"] == "ui/review/ChangeReviewPanel.jsx"
     assert context.data["workflow_ui_quality_status"] == "pending"
     warnings = context.data["workflow_ui_quality_warnings"]
-    assert any("discouraged runtime primitives: Card" in warning for warning in warnings)
-    assert any("renders discouraged runtime primitive <Card>" in warning for warning in warnings)
+    assert any("non-canonical component primitives: Card" in warning for warning in warnings)
+    assert any("renders non-canonical component primitive <Card>" in warning for warning in warnings)
     assert any("shipped shared component ApprovalCard" in warning for warning in warnings)
 
 
@@ -149,7 +149,7 @@ def test_review_workflow_ui_quality_routes_warnings_back_to_uifilegenerator() ->
     context = _Context(
         {
             "workflow_ui_quality_warnings": [
-                "ui/review/ChangeReviewPanel.jsx imports discouraged runtime primitives: Card."
+                "ui/review/ChangeReviewPanel.jsx imports non-canonical component primitives: Card."
             ],
             "workflow_ui_quality_revision_count": 0,
         }
@@ -162,7 +162,7 @@ def test_review_workflow_ui_quality_routes_warnings_back_to_uifilegenerator() ->
     assert result["status"] == "needs_revision"
     assert result["revision_count"] == 1
     assert context.data["workflow_ui_quality_status"] == "needs_revision"
-    assert "ChangeReviewPanel.jsx imports discouraged runtime primitives" in context.data[
+    assert "ChangeReviewPanel.jsx imports non-canonical component primitives" in context.data[
         "workflow_ui_quality_revision_request"
     ]
 
@@ -197,7 +197,7 @@ async def test_generate_and_download_requires_passed_workflow_ui_quality_gate() 
             "user_id": "user-1",
             "workflow_ui_quality_status": "needs_revision",
             "workflow_ui_quality_warnings": [
-                "ui/review/ChangeReviewPanel.jsx imports discouraged runtime primitives: Card."
+                "ui/review/ChangeReviewPanel.jsx imports non-canonical component primitives: Card."
             ],
         }
     )

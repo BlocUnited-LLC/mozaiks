@@ -99,10 +99,10 @@ domains:
     - developer platform
     - internal tool
     - vertical SaaS
+    capability_packs:
+      - entitlements
+      - payments
     modules:
-      subscriptions:
-        description: Plan selection, billing cycle, upgrades, downgrades, cancellations.
-        recommended_module_type: standard
       usage_metering:
         description: Per-unit or seat-based usage tracking for quota enforcement and billing.
         recommended_module_type: standard
@@ -246,13 +246,13 @@ domains:
     - fan community
     - tip and support
     - course and content
+    capability_packs:
+      - entitlements
+      - payments
     modules:
       creator_profiles:
         description: Creator identity, bio, payout setup, and analytics overview.
         recommended_module_type: transactional
-      subscriptions:
-        description: "Fan subscriptions to creators \u2014 tiers, billing, access gating."
-        recommended_module_type: standard
       tips:
         description: One-time fan tips and super-chats during live streams.
         recommended_module_type: messaging

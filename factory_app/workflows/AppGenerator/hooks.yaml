@@ -37,6 +37,10 @@ hooks:
   function: inject_cookie_cutter_contracts_context
 - hook_type: update_agent_state
   hook_agent: AppPlanAgent
+  filename: hook_capability_routing_context.py
+  function: inject_capability_routing_context
+- hook_type: update_agent_state
+  hook_agent: AppPlanAgent
   filename: hook_hosted_capabilities_context.py
   function: inject_hosted_capabilities_context
 - hook_type: update_agent_state

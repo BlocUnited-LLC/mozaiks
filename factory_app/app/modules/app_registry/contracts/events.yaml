@@ -1,4 +1,4 @@
-schema_version: mozaiks.events
+schema_version: mozaiks.events.v1
 events:
   - type: domain.app_registry.app_created
     version: 1

@@ -5,6 +5,7 @@
 # ==============================================================================
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 import hmac
 import json
@@ -491,6 +492,7 @@ async def start_chat(
     )
     client_request_id = data.get("client_request_id")
     force_new = str(data.get("force_new", "false")).lower() in {"1", "true", "yes", "on"}
+    transport_purpose = str(data.get("transport_purpose") or "").strip().lower()
     context_variables = _validate_context_for_workflow(
         workflow_name,
         data.get("context_variables") if isinstance(data.get("context_variables"), dict) else {},
@@ -537,6 +539,8 @@ async def start_chat(
     extra_fields: Dict[str, Any] = {}
     if client_request_id:
         extra_fields["client_request_id"] = client_request_id
+    if transport_purpose == "ask_carrier":
+        extra_fields["transport_purpose"] = "ask_carrier"
     extra_fields.update(context_variables)
 
     await persistence_manager.create_chat_session(
@@ -672,40 +676,266 @@ async def websocket_endpoint(
     user_id = ws_user.user_id
 
     try:
+        from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+        from mozaiksai.core.session.router import get_session_router
+        from mozaiksai.core.transport.session_registry import session_registry
+        from mozaiksai.core.workflow.pack.graph import workflow_has_mid_flight_journeys
+        from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
         coll = await _chat_coll()
+        hooks = get_platform_hooks()
+        workflow_names = hooks.call_workflow_ordering(list(workflow_manager.get_all_workflow_names()))
+
         existing = await coll.find_one(
             {"_id": chat_id, **build_app_scope_filter(app_id)},
-            {"_id": 1, "user_id": 1, "workflow_name": 1},
+            {
+                "_id": 1,
+                "user_id": 1,
+                "workflow_name": 1,
+                "last_artifact": 1,
+                "status": 1,
+                "last_sequence": 1,
+                "created_at": 1,
+                "messages": 1,
+            },
         )
         if existing:
             owner = existing.get("user_id")
-            existing_workflow = existing.get("workflow_name")
             if not owner or str(owner).strip() != str(user_id).strip():
                 await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Chat not found")
                 return
-            if existing_workflow and str(existing_workflow).strip() != str(workflow_name).strip():
-                await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Chat not found")
-                return
+
+        persisted_workflow = str((existing or {}).get("workflow_name") or "").strip()
+        resolved_persisted = (
+            hooks.call_workflow_name_resolver(persisted_workflow, workflow_names)
+            if persisted_workflow
+            else None
+        )
+        resolved_requested = hooks.call_workflow_name_resolver(workflow_name, workflow_names)
+
+        if resolved_persisted:
+            resolved_workflow_name = resolved_persisted
         else:
+            resolved_workflow_name = resolved_requested or workflow_name
+            if existing and persisted_workflow and persisted_workflow != resolved_workflow_name:
+                await coll.update_one(
+                    {"_id": chat_id, **build_app_scope_filter(app_id)},
+                    {"$set": {"workflow_name": resolved_workflow_name, "last_updated_at": datetime.now(UTC)}},
+                )
+                existing["workflow_name"] = resolved_workflow_name
+                existing["last_updated_at"] = datetime.now(UTC)
+
+        try:
+            prereqs_ok, prereq_reason = await hooks.call_chat_prereqs(
+                app_id=app_id,
+                user_id=user_id,
+                workflow_name=resolved_workflow_name,
+                persistence=persistence_manager,
+            )
+        except Exception:
+            await websocket.accept()
+            await websocket.send_json(
+                {
+                    "type": "chat.error",
+                    "data": {
+                        "message": "Failed to validate workflow prerequisites. Please try again.",
+                        "error_code": "PREREQ_VALIDATION_ERROR",
+                        "workflow_name": resolved_workflow_name,
+                        "chat_id": chat_id,
+                    },
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+            )
+            await websocket.close(code=1011, reason="Prerequisite validation failed")
+            return
+
+        if not prereqs_ok:
+            await websocket.accept()
+            await websocket.send_json(
+                {
+                    "type": "chat.error",
+                    "data": {
+                        "message": prereq_reason or "Workflow prerequisites are not met.",
+                        "error_code": "WORKFLOW_PREREQS_NOT_MET",
+                        "workflow_name": resolved_workflow_name,
+                        "chat_id": chat_id,
+                    },
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+            )
+            await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Prerequisites not met")
+            return
+
+        if not existing:
             await persistence_manager.create_chat_session(
                 chat_id=chat_id,
                 app_id=app_id,
-                workflow_name=workflow_name,
+                workflow_name=resolved_workflow_name,
                 user_id=user_id,
             )
+            existing = await coll.find_one(
+                {"_id": chat_id, **build_app_scope_filter(app_id)},
+                {
+                    "_id": 1,
+                    "user_id": 1,
+                    "workflow_name": 1,
+                    "last_artifact": 1,
+                    "status": 1,
+                    "last_sequence": 1,
+                    "created_at": 1,
+                    "messages": 1,
+                },
+            ) or {
+                "_id": chat_id,
+                "user_id": user_id,
+                "workflow_name": resolved_workflow_name,
+                "status": 0,
+                "last_sequence": 0,
+                "messages": [],
+            }
+
+        session_router = get_session_router()
+        resume_resolution = await session_router.resolve_resume(
+            app_id=app_id,
+            user_id=user_id,
+            requested_workflow_id=resolved_workflow_name,
+            requested_chat_id=chat_id,
+        )
+        resolved_chat_id = str(resume_resolution.get("chat_id") or chat_id)
+        resolved_doc = await coll.find_one(
+            {"_id": resolved_chat_id, **build_app_scope_filter(app_id)},
+            {
+                "_id": 1,
+                "user_id": 1,
+                "workflow_name": 1,
+                "last_artifact": 1,
+                "status": 1,
+                "last_sequence": 1,
+                "created_at": 1,
+                "messages": 1,
+            },
+        )
+
+        created_resolved_chat = False
+        if not resolved_doc:
+            await persistence_manager.create_chat_session(
+                chat_id=resolved_chat_id,
+                app_id=app_id,
+                workflow_name=resolved_workflow_name,
+                user_id=user_id,
+            )
+            created_resolved_chat = True
+            await session_router.bind_workflow_session(
+                app_id=app_id,
+                user_id=user_id,
+                workflow_id=resolved_workflow_name,
+                chat_id=resolved_chat_id,
+            )
+            resolved_doc = await coll.find_one(
+                {"_id": resolved_chat_id, **build_app_scope_filter(app_id)},
+                {
+                    "_id": 1,
+                    "user_id": 1,
+                    "workflow_name": 1,
+                    "last_artifact": 1,
+                    "status": 1,
+                    "last_sequence": 1,
+                    "created_at": 1,
+                    "messages": 1,
+                },
+            ) or {
+                "_id": resolved_chat_id,
+                "user_id": user_id,
+                "workflow_name": resolved_workflow_name,
+                "status": 0,
+                "last_sequence": 0,
+                "messages": [],
+            }
+
+        owner = resolved_doc.get("user_id")
+        if not owner or str(owner).strip() != str(user_id).strip():
+            await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Chat not found")
+            return
+
+        resolved_doc_workflow = str(resolved_doc.get("workflow_name") or "").strip()
+        if resolved_doc_workflow and resolved_doc_workflow != resolved_workflow_name:
+            maybe_resolved = hooks.call_workflow_name_resolver(resolved_doc_workflow, workflow_names)
+            if maybe_resolved:
+                resolved_workflow_name = maybe_resolved
+            else:
+                await coll.update_one(
+                    {"_id": resolved_chat_id, **build_app_scope_filter(app_id)},
+                    {"$set": {"workflow_name": resolved_workflow_name, "last_updated_at": datetime.now(UTC)}},
+                )
+                resolved_doc["workflow_name"] = resolved_workflow_name
+
+        session_state = resume_resolution.get("session_state")
+        if session_state is None:
+            if created_resolved_chat:
+                session_state = await session_router.get_session_snapshot(app_id=app_id, user_id=user_id)
+            else:
+                session_state = {}
+
+        cache_seed = await persistence_manager.get_or_assign_cache_seed(resolved_chat_id, app_id)
+        ws_id = id(websocket)
+        session_registry.add_workflow(
+            ws_id=ws_id,
+            chat_id=resolved_chat_id,
+            workflow_name=resolved_workflow_name,
+            app_id=app_id,
+            user_id=user_id,
+            auto_activate=True,
+        )
+
+        created_at = resolved_doc.get("created_at")
+        chat_meta = {
+            "kind": "chat_meta",
+            "chat_id": resolved_chat_id,
+            "workflow_name": resolved_workflow_name,
+            "app_id": app_id,
+            "user_id": user_id,
+            "has_children": bool(workflow_has_mid_flight_journeys(resolved_workflow_name)),
+            "cache_seed": cache_seed,
+            "chat_exists": True,
+            "last_artifact": resolved_doc.get("last_artifact"),
+            "status": int(resolved_doc.get("status", 0) or 0),
+            "last_sequence": int(resolved_doc.get("last_sequence", 0) or 0),
+            "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else created_at,
+            "session_state": session_state or {},
+        }
+        await simple_transport.send_event_to_ui(chat_meta, resolved_chat_id)
+
+        config = workflow_manager.get_config(resolved_workflow_name) or {}
+        startup_mode = str(config.get("workflow_startup_mode") or "").strip().lower()
+        messages = resolved_doc.get("messages") or []
+        if startup_mode == "agentdriven" and not messages and chat_meta["last_sequence"] == 0:
+            conn = simple_transport.connections.setdefault(resolved_chat_id, {})
+            conn["autostarted"] = True
+            asyncio.create_task(
+                simple_transport.handle_user_input_from_api(
+                    chat_id=resolved_chat_id,
+                    user_id=user_id,
+                    workflow_name=resolved_workflow_name,
+                    message=None,
+                    app_id=app_id,
+                )
+            )
+
+        try:
+            await simple_transport.handle_websocket(
+                websocket=websocket,
+                chat_id=resolved_chat_id,
+                user_id=user_id,
+                workflow_name=resolved_workflow_name,
+                app_id=app_id,
+                ws_id=ws_id,
+            )
+        finally:
+            session_registry.remove_session(ws_id)
     except Exception as ownership_err:
         wf_logger.warning("WS_CHAT_PREP_FAILED: %s", ownership_err)
         await websocket.close(code=1011, reason="Failed to prepare chat session")
         return
-
-    await simple_transport.handle_websocket(
-        websocket=websocket,
-        chat_id=chat_id,
-        user_id=user_id,
-        workflow_name=workflow_name,
-        app_id=app_id,
-        ws_id=id(websocket),
-    )
 
 
 @app.post("/chat/{app_id}/{chat_id}/{user_id}/input")

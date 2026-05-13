@@ -116,7 +116,7 @@ agents:
       AppSchemaAgent — be explicit about navigation, layout choices, primitive types,
       and the intended brand/experience posture.
 
-      Available primitives: DataTable, Form, Stat, Grid, Card, Button, Modal, Alert, Badge, Skeleton, Empty
+      Available primitives: PageHeader, ResourceTable, SummaryStrip, InlineEmptyState, LoadingState, ErrorState, Panel, SurfaceCard, StatusPill, Metric, SegmentedBar, DataTable, Form, Grid, Button, Modal, Alert, Skeleton, Empty, Timeline, CodeBlock, ProgressTracker, AlertBanner, ActionButton, FileList
       Available layouts: grid, sidebar, full-width, split
 
       Format:
@@ -151,24 +151,18 @@ agents:
         - name: Dashboard
           route: /dashboard
           layout: grid
-          intent: "Landing page showing KPI metrics and recent activity"
+          intent: "Landing page showing the most useful app summary and recent activity"
           sections:
-            - id: kpi-row
-              primitive: Grid
-              intent: "3-column row of KPI stats"
-              columns: 3
-              gap: md
-              children:
-                - primitive: Stat
-                  label: Total Users
-                  value_key: total_users
-                  format: number
-                - primitive: Stat
-                  label: Monthly Revenue
-                  value_key: monthly_revenue
-                  format: currency
-                  trend_key: monthly_revenue_trend
-                  trend_direction: up_good
+            - id: summary
+              primitive: SummaryStrip
+              intent: "Compact summary with only decision-critical metrics"
+              items:
+                - label: Total Users
+                  value: 0
+                  detail: Replace with live module data during implementation
+                - label: Monthly Revenue
+                  value: $0
+                  detail: Replace with live module data during implementation
             - id: activity-table
               primitive: DataTable
               intent: "Recent activity log, read-only, no selection needed"

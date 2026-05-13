@@ -22,6 +22,7 @@ from mozaiksai.core.workflow.generator_support.agent_endpoints import (
 )
 from mozaiksai.core.workflow.generator_support.workflow_artifacts import record_workflow_artifacts
 from mozaiksai.core.workflow.generator_support.workflow_exports import record_workflow_export
+from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from .export_agent_workflow import export_agent_workflow_to_github
 from .workflow_converter import create_workflow_files, promote_generated_workflow
 
@@ -222,8 +223,6 @@ async def generate_and_download(
         return {"status": "error", "message": "chat_id and app_id are required"}
 
     # PHASE 1: Gather latest agent JSON outputs (always needed for metadata or file creation)
-    from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
-
     pm = AG2PersistenceManager()
     wf_logger.info(f"🔍 [GATHER] Calling gather_latest_agent_jsons for chat_id={chat_id} app_id={app_id}")
     collected = await pm.gather_latest_agent_jsons(chat_id=chat_id, app_id=app_id)

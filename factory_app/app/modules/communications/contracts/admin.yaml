@@ -1,4 +1,4 @@
-schema_version: mozaiks.admin
+schema_version: mozaiks.admin.v2
 panels:
   - id: communications.overview
     label: Communications
@@ -8,18 +8,17 @@ panels:
     renderer: schema
     layout: grid
     sections:
-      - id: communications-active-threads
-        primitive: Stat
-        title: Active threads
+      - id: communications-summary
+        primitive: SummaryStrip
+        title: Communications summary
         config:
-          label: Active threads
-          value_key: metrics.active_threads
-      - id: communications-unread-messages
-        primitive: Stat
-        title: Unread messages
-        config:
-          label: Unread messages
-          value_key: metrics.unread_messages
+          items:
+            - label: Active threads
+              value: 0
+              detail: Threads with recent activity
+            - label: Unread messages
+              value: 0
+              detail: Messages awaiting review
       - id: communications-announcements
         primitive: DataTable
         title: Recent announcements

@@ -76,6 +76,7 @@ Examples:
 - files/media
 - audit/activity
 - messaging/community
+- entitlements (SaaS plan/tier management, feature gates, trial lifecycle)
 
 These packs should live in this repo because they are part of the public Mozaiks
 value proposition.
@@ -459,6 +460,48 @@ With that input:
 - payouts
 - investor distributions
 - campaign revenue allocation
+
+## Naming Clarity — subscriptions.yaml vs SaaS Subscriptions
+
+These two things share a word but have nothing to do with each other:
+
+**`subscriptions.yaml` (module contract file)**
+
+Every module may have one. It declares which domain events from other modules
+this module reacts to. Pub-sub routing. Has nothing to do with billing or plans.
+
+```yaml
+# modules/orders/contracts/subscriptions.yaml
+subscriptions:
+  - id: orders.on_payment_succeeded
+    event_type: hosted.billing.payment_succeeded
+    target:
+      kind: handler
+      handler_method: handle_payment_succeeded
+```
+
+**`entitlements` capability pack**
+
+A framework pack for SaaS plan/tier management and feature access control.
+Owns the plan catalog, user plan assignment, trial lifecycle, and feature gates.
+Connects to the `payments_integration` hosted pack via domain events.
+
+An app selects this pack when it needs to gate features by plan, manage
+free/paid tiers, or run trials. It has no relation to the `subscriptions.yaml`
+module contract file.
+
+```yaml
+# app/app.json (simplified)
+capability_packs:
+  - entitlements
+  - payments_integration
+```
+
+The entitlements pack itself uses `subscriptions.yaml` internally (like any
+module) to react to `hosted.billing.payment_succeeded` and upgrade the user's
+plan state. That is not circular — it is the correct pattern.
+
+---
 
 ## Decision Test
 

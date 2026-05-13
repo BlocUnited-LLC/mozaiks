@@ -1,4 +1,4 @@
-schema_version: mozaiks.notifications
+schema_version: mozaiks.notifications.v1
 notifications:
   - id: communications.message_sent.in_app
     event_type: domain.communications.message_sent

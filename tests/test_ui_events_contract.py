@@ -88,7 +88,7 @@ def test_render_data_invalid_display_mode() -> None:
     with pytest.raises(ValidationError):
         UIRenderData(
             tool_call_id="tc-3",
-            component="Card",
+            component="DataTable",
             display_mode="popup",  # type: ignore[arg-type]
         )
 
@@ -96,7 +96,7 @@ def test_render_data_invalid_display_mode() -> None:
 def test_render_data_model_dump_serialises_enum_as_string() -> None:
     data = UIRenderData(
         tool_call_id="tc-4",
-        component="Stat",
+        component="Metric",
         display_mode=UIDisplayMode.ARTIFACT,
     )
     dumped = data.model_dump()
@@ -107,7 +107,7 @@ def test_render_data_model_dump_serialises_enum_as_string() -> None:
 
 def test_render_data_missing_required_fields() -> None:
     with pytest.raises(ValidationError):
-        UIRenderData(component="Card", display_mode=UIDisplayMode.INLINE)  # type: ignore[call-arg]
+        UIRenderData(component="DataTable", display_mode=UIDisplayMode.INLINE)  # type: ignore[call-arg]
 
 
 # ---------------------------------------------------------------------------

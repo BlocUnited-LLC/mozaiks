@@ -302,40 +302,14 @@ export const PRIMITIVE_SCHEMAS = {
     },
   },
 
-  Stat: {
-    type: 'object',
-    required: ['label'],
-    properties: {
-      label:           { type: 'string', description: 'KPI metric label.' },
-      value:           { description: 'Static metric value.' },
-      value_key:       { type: 'string', description: 'Key path into api_endpoint response for dynamic value.' },
-      format:          { type: 'string', enum: ['number', 'currency', 'percentage', 'compact'] },
-      trend:           { description: 'Static trend value (positive = up).' },
-      trend_key:       { type: 'string', description: 'Key path into api_endpoint response for dynamic trend.' },
-      trend_direction: { type: 'string', enum: ['up_good', 'up_bad', 'neutral'], default: 'up_good' },
-      color:           { type: 'string' },
-      icon:            { type: 'string' },
-    },
-  },
-
   Grid: {
     type: 'object',
     required: ['columns', 'children'],
     properties: {
       columns:      { type: 'integer', minimum: 1, maximum: 6, description: 'Number of grid columns.' },
       gap:          { type: 'string', enum: ['sm', 'md', 'lg', '1', '2', '3', '4', '6', '8'], default: '4' },
-      api_endpoint: { type: 'string', description: 'Optional shared data endpoint for child Stat/Card binding.' },
+      api_endpoint: { type: 'string', description: 'Optional shared data endpoint for child primitive binding.' },
       children:     { type: 'array', minItems: 1, items: SHARED_DEFINITIONS.childSection },
-    },
-  },
-
-  Card: {
-    type: 'object',
-    properties: {
-      title:    { type: 'string' },
-      subtitle: { type: 'string' },
-      actions:  { type: 'array', items: SHARED_DEFINITIONS.action },
-      children: { type: 'array', items: SHARED_DEFINITIONS.childSection },
     },
   },
 
@@ -371,15 +345,6 @@ export const PRIMITIVE_SCHEMAS = {
       message:     { type: 'string' },
       variant:     { type: 'string', enum: ['default', 'info', 'success', 'warning', 'destructive'], default: 'default' },
       dismissible: { type: 'boolean', default: false },
-    },
-  },
-
-  Badge: {
-    type: 'object',
-    required: ['label'],
-    properties: {
-      label:   { type: 'string' },
-      variant: { type: 'string' },
     },
   },
 

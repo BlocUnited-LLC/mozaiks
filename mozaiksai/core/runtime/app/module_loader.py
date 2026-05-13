@@ -200,6 +200,19 @@ class ModuleDefinition(ModuleContractModel):
     def action_method_map(self) -> Dict[str, str]:
         return {action.id: action.handler_method for action in self.actions}
 
+    @property
+    def action_permissions_map(self) -> Dict[str, List[str]]:
+        """Maps each action id to its declared required permission ids."""
+        return {action.id: list(action.permissions) for action in self.actions}
+
+    @property
+    def action_schemas_map(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
+        """Maps each action id to its declared input/output JSON Schemas."""
+        return {
+            action.id: {"input": action.input_schema, "output": action.output_schema}
+            for action in self.actions
+        }
+
     @model_validator(mode="after")
     def _validate_unique_ids(self) -> "ModuleDefinition":
         action_ids = [action.id for action in self.actions]
@@ -250,7 +263,7 @@ class ModuleEvent(ModuleContractModel):
 
 
 class ModuleEventsManifest(ModuleContractModel):
-    schema_version: Literal["mozaiks.events.v1"]
+    schema_version: Literal["mozaiks.events.v1"] = "mozaiks.events.v1"
     events: List[ModuleEvent] = Field(default_factory=list)
 
     @property
@@ -266,17 +279,17 @@ class ModuleEventsManifest(ModuleContractModel):
 
 
 class ModuleSubscriptionsManifest(ModuleContractModel):
-    schema_version: Literal["mozaiks.subscriptions.v1"]
+    schema_version: Literal["mozaiks.subscriptions.v1"] = "mozaiks.subscriptions.v1"
     subscriptions: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class ModuleNotificationsManifest(ModuleContractModel):
-    schema_version: Literal["mozaiks.notifications.v1"]
+    schema_version: Literal["mozaiks.notifications.v1"] = "mozaiks.notifications.v1"
     notifications: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class ModuleSettingsManifest(ModuleContractModel):
-    schema_version: Literal["mozaiks.settings.v1"]
+    schema_version: Literal["mozaiks.settings.v1"] = "mozaiks.settings.v1"
     settings: List[Dict[str, Any]] = Field(default_factory=list)
     features: List[Dict[str, Any]] = Field(default_factory=list)
 
@@ -359,7 +372,7 @@ class ModuleAdminManifest(ModuleContractModel):
     resolve them on demand when a panel requests dynamic data.
     """
 
-    schema_version: Literal["mozaiks.admin.v2"]
+    schema_version: Literal["mozaiks.admin.v2"] = "mozaiks.admin.v2"
     panels: List[ModuleAdminPanel] = Field(default_factory=list)
     hooks: List[str] = Field(default_factory=list)
 
@@ -399,11 +412,11 @@ class ModuleRuntimeExtensionsManifest(ModuleContractModel):
 
 
 class ModuleCompanionManifests(ModuleContractModel):
-    events: ModuleEventsManifest
-    subscriptions: ModuleSubscriptionsManifest
-    notifications: ModuleNotificationsManifest
-    settings: ModuleSettingsManifest
-    admin: ModuleAdminManifest
+    events: Optional[ModuleEventsManifest] = None
+    subscriptions: Optional[ModuleSubscriptionsManifest] = None
+    notifications: Optional[ModuleNotificationsManifest] = None
+    settings: Optional[ModuleSettingsManifest] = None
+    admin: Optional[ModuleAdminManifest] = None
     runtime_extensions: Optional[ModuleRuntimeExtensionsManifest] = None
 
 
@@ -430,6 +443,14 @@ class LoadedModule:
     def action_method_map(self) -> Dict[str, str]:
         return self.definition.action_method_map
 
+    @property
+    def action_permissions_map(self) -> Dict[str, List[str]]:
+        return self.definition.action_permissions_map
+
+    @property
+    def action_schemas_map(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
+        return self.definition.action_schemas_map
+
     def __repr__(self) -> str:
         return f"<LoadedModule name={self.name!r} handler={type(self.handler).__name__}>"
 
@@ -442,7 +463,8 @@ class ModuleLoader:
     """Loads canonical module contracts from a platform bundle directory."""
 
     YAML_FILENAME = "module.yaml"
-    REQUIRED_MANIFESTS = {
+    CONTRACTS_DIRNAME = "contracts"
+    OPTIONAL_MANIFESTS = {
         "events": ("events.yaml", ModuleEventsManifest),
         "subscriptions": ("subscriptions.yaml", ModuleSubscriptionsManifest),
         "notifications": ("notifications.yaml", ModuleNotificationsManifest),
@@ -521,10 +543,11 @@ class ModuleLoader:
         definition: ModuleDefinition,
     ) -> ModuleCompanionManifests:
         parsed: Dict[str, Any] = {}
-        for key, (filename, model) in self.REQUIRED_MANIFESTS.items():
-            path = module_dir / filename
+        contracts_dir = module_dir / self.CONTRACTS_DIRNAME
+        for key, (filename, model) in self.OPTIONAL_MANIFESTS.items():
+            path = contracts_dir / filename
             if not path.exists():
-                raise ModuleLoadError(f"{filename} is required for canonical module {definition.name!r}")
+                continue
             try:
                 parsed[key] = model.model_validate(_load_yaml_file(path))
             except Exception as exc:
@@ -542,13 +565,14 @@ class ModuleLoader:
                 ) from exc
 
         manifests = ModuleCompanionManifests.model_validate(parsed)
-        declared_events = manifests.events.event_types
-        for event in manifests.events.events:
-            if event.producer != definition.name:
-                raise ModuleLoadError(
-                    f"events.yaml event {event.type!r} producer {event.producer!r} "
-                    f"must match module id {definition.name!r}"
-                )
+        declared_events: set[str] = manifests.events.event_types if manifests.events is not None else set()
+        if manifests.events is not None:
+            for event in manifests.events.events:
+                if event.producer != definition.name:
+                    raise ModuleLoadError(
+                        f"events.yaml event {event.type!r} producer {event.producer!r} "
+                        f"must match module id {definition.name!r}"
+                    )
 
         for action in definition.actions:
             for event_type in action.emits:
@@ -565,25 +589,27 @@ class ModuleLoader:
         definition: ModuleDefinition,
         manifests: ModuleCompanionManifests,
     ) -> None:
-        declared_events = manifests.events.event_types
+        declared_events: set[str] = manifests.events.event_types if manifests.events is not None else set()
 
-        for subscription in manifests.subscriptions.subscriptions:
-            if not isinstance(subscription, dict):
-                raise ModuleLoadError("subscriptions.yaml entries must be objects")
-            event_type = str(subscription.get("event_type") or "").strip()
-            if event_type and not self._is_known_or_canonical_event(event_type, declared_events):
-                raise ModuleLoadError(
-                    f"subscriptions.yaml references non-canonical event {event_type!r}"
-                )
+        if manifests.subscriptions is not None:
+            for subscription in manifests.subscriptions.subscriptions:
+                if not isinstance(subscription, dict):
+                    raise ModuleLoadError("subscriptions.yaml entries must be objects")
+                event_type = str(subscription.get("event_type") or "").strip()
+                if event_type and not self._is_known_or_canonical_event(event_type, declared_events):
+                    raise ModuleLoadError(
+                        f"subscriptions.yaml references non-canonical event {event_type!r}"
+                    )
 
-        for notification in manifests.notifications.notifications:
-            if not isinstance(notification, dict):
-                raise ModuleLoadError("notifications.yaml entries must be objects")
-            event_type = str(notification.get("event_type") or "").strip()
-            if event_type and not self._is_known_or_canonical_event(event_type, declared_events):
-                raise ModuleLoadError(
-                    f"notifications.yaml references non-canonical event {event_type!r}"
-                )
+        if manifests.notifications is not None:
+            for notification in manifests.notifications.notifications:
+                if not isinstance(notification, dict):
+                    raise ModuleLoadError("notifications.yaml entries must be objects")
+                event_type = str(notification.get("event_type") or "").strip()
+                if event_type and not self._is_known_or_canonical_event(event_type, declared_events):
+                    raise ModuleLoadError(
+                        f"notifications.yaml references non-canonical event {event_type!r}"
+                    )
 
     @staticmethod
     def _is_known_or_canonical_event(event_type: str, declared_events: set[str]) -> bool:

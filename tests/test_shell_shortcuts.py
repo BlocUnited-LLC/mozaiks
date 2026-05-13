@@ -119,7 +119,7 @@ navigation:
   order: 10
 sections:
   - id: overview
-    primitive: Card
+    primitive: Panel
     config: {}
 """.strip(),
         encoding="utf-8",
@@ -136,7 +136,7 @@ navigation:
   order: 20
 sections:
   - id: inbox
-    primitive: Card
+    primitive: Panel
     config: {}
 """.strip(),
         encoding="utf-8",
@@ -152,7 +152,7 @@ navigation:
   order: 30
 sections:
   - id: billing
-    primitive: Card
+    primitive: Panel
     config: {}
 """.strip(),
         encoding="utf-8",

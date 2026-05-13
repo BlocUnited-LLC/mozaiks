@@ -11,9 +11,7 @@ def test_component_and_page_primitive_catalogs_match_runtime_exports() -> None:
         "ActionButton",
         "Alert",
         "AlertBanner",
-        "Badge",
         "Button",
-        "Card",
         "CodeBlock",
         "DataTable",
         "Empty",
@@ -31,7 +29,6 @@ def test_component_and_page_primitive_catalogs_match_runtime_exports() -> None:
         "ResourceTable",
         "SegmentedBar",
         "Skeleton",
-        "Stat",
         "StatusPill",
         "SummaryStrip",
         "SurfaceCard",
@@ -53,6 +50,9 @@ def test_component_and_page_primitive_catalogs_match_runtime_exports() -> None:
 
     assert ui_primitives.get_component_ui_primitive_names() == expected_component
     assert ui_primitives.get_page_ui_primitive_names() == expected_page
+    for removed_name in ("Badge", "Card", "Stat"):
+        assert removed_name not in expected_component
+        assert removed_name not in expected_page
 
 
 def test_component_guidance_includes_live_import_paths() -> None:
@@ -88,5 +88,22 @@ def test_page_primitive_validation_rejects_unknown_names() -> None:
     else:
         raise AssertionError("Expected ValueError for unsupported primitive")
 
+    assert "Card" in message
     assert "Wizard" in message
     assert "Allowed primitives" in message
+
+
+def test_component_primitive_validation_rejects_removed_names() -> None:
+    try:
+        ui_primitives.validate_component_ui_primitives(
+            ["Card", "Stat", "Badge"],
+            context="generated workflow UI imports",
+        )
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("Expected ValueError for removed component primitives")
+
+    assert "Card" in message
+    assert "Stat" in message
+    assert "Badge" in message

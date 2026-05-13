@@ -399,11 +399,11 @@ runtime state.
 
 | Canonical contract | Runtime status |
 |--------------------|----------------|
-| `contracts/` subdirectory path | Runtime loads from flat module root today; update `ModuleLoader` to support `contracts/` |
-| `reactions.yaml` filename | Runtime loads `subscriptions.yaml` today; rename file + update loader |
-| All companion manifests optional | Runtime requires all 6 manifests today; make each optional |
+| `contracts/` subdirectory path | Fully wired — `ModuleLoader` loads from `contracts/` subdir |
+| `subscriptions.yaml` (was reactions) | Fully wired — canonical filename in loader and router |
+| All companion manifests optional | Fully wired — absent files yield `None`, not empty defaults |
 | `settings.py` injected into ctx | Not yet injected; add `ctx.settings` |
-| `reactions.yaml` handler routing | `ModuleEventRouter` stores subscriptions but does not invoke handler methods |
+| `subscriptions.yaml` handler routing | Fully wired — handler, capability, and notification targets all dispatch |
 | `notifications.py` audience hooks | Stored but not called by `ModuleEventRouter` |
 | Module permissions enforcement | Declared but not enforced by `ModuleExecutor` |
 | Input/output schema validation | Declared but not validated by `ModuleExecutor` |

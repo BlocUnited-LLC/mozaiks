@@ -8,6 +8,12 @@ from typing import Annotated, Any, Dict, List, Optional
 
 import yaml
 from autogen.tools.dependency_injection import Field
+from factory_app.workflows.generated_ui_contract import (
+    audit_generated_react_files,
+    audit_page_schemas,
+    custom_route_bundle_page_files,
+    dedupe,
+)
 from mozaiksai.core.workflow.ui_primitives import (
     get_page_ui_primitive_names,
     validate_page_ui_primitives,
@@ -143,16 +149,11 @@ def _key_value_entries_to_dict(value: Any) -> Any:
     return value
 
 
-def _normalize_action_payloads(action: Any) -> Any:
+def _normalize_action_data(action: Any) -> Any:
     action = _strip_none(_to_plain(action))
     if not isinstance(action, dict):
         return action
-    if not _is_non_empty_string(action.get("href")):
-        for alias in ("endpoint", "api_endpoint", "url"):
-            if _is_non_empty_string(action.get(alias)):
-                action["href"] = action.get(alias)
-                break
-    for field in ("context_variables", "payload", "event_payload"):
+    for field in ("context_variables", "payload"):
         if field in action:
             action[field] = _key_value_entries_to_dict(action.get(field))
     return _strip_none(action)
@@ -161,18 +162,12 @@ def _normalize_action_payloads(action: Any) -> Any:
 def _normalize_config_actions(config: Dict[str, Any]) -> Dict[str, Any]:
     for field in ("action", "submit_action", "cancel_action"):
         if field in config:
-            config[field] = _normalize_action_payloads(config.get(field))
-    submit_action = config.get("submit_action")
-    if isinstance(submit_action, dict) and not _is_non_empty_string(submit_action.get("href")):
-        for alias in ("submit_endpoint", "endpoint", "api_endpoint", "url"):
-            if _is_non_empty_string(config.get(alias)):
-                submit_action["href"] = config.get(alias)
-                break
+            config[field] = _normalize_action_data(config.get(field))
     if isinstance(config.get("actions"), list):
-        config["actions"] = [_normalize_action_payloads(action) for action in config["actions"]]
+        config["actions"] = [_normalize_action_data(action) for action in config["actions"]]
     empty = config.get("empty")
     if isinstance(empty, dict) and "action" in empty:
-        empty["action"] = _normalize_action_payloads(empty.get("action"))
+        empty["action"] = _normalize_action_data(empty.get("action"))
     return config
 
 
@@ -187,7 +182,6 @@ _OPTIONAL_STRING_KEYS = {
     "icon",
     "id",
     "message",
-    "modal_id",
     "placeholder",
     "size",
     "subtitle",
@@ -398,8 +392,6 @@ VALID_FIELD_TYPES = {"text", "email", "password", "number", "textarea", "select"
 VALID_GRID_GAPS = {"sm", "md", "lg", "1", "2", "3", "4", "6", "8", "10", "12"}
 VALID_MODAL_SIZES = {"small", "medium", "large", "full"}
 VALID_SELECTION_MODES = {"none", "single", "multi"}
-VALID_STAT_FORMATS = {"number", "currency", "percentage", "compact"}
-VALID_TREND_DIRECTIONS = {"up_good", "up_bad", "neutral"}
 VALID_ASSET_SOURCES = {"local", "remote", "uploaded", "generated", "stock"}
 VALID_CUSTOM_PAGE_EXTENSIONS = {".js", ".jsx"}
 VALID_SHELL_MODES = {"standard", "workspace", "conversation", "focused", "immersive", "public"}
@@ -659,10 +651,6 @@ def _validate_action(action: Any, *, path: str) -> None:
     if context_variables is not None and not isinstance(context_variables, dict):
         raise ValueError(f"{path}.context_variables must be an object or null")
 
-    legacy_payload = action.get("event_payload")
-    if legacy_payload is not None and not isinstance(legacy_payload, dict):
-        raise ValueError(f"{path}.event_payload must be an object or null")
-
     requires_selection = action.get("requires_selection")
     if requires_selection is not None and not isinstance(requires_selection, bool):
         raise ValueError(f"{path}.requires_selection must be a boolean")
@@ -737,8 +725,8 @@ def _validate_form_field(field: Any, *, path: str) -> None:
     if not _is_non_empty_string(field.get("label")):
         raise ValueError(f"{path}.label is required")
 
-    field_type = field.get("type") or field.get("field_type")
-    if field_type not in VALID_FIELD_TYPES:
+    resolved_type = field.get("type")
+    if resolved_type not in VALID_FIELD_TYPES:
         raise ValueError(f"{path}.type must be one of {sorted(VALID_FIELD_TYPES)}")
 
     required = field.get("required")
@@ -803,7 +791,7 @@ def _validate_section_config(primitive: str, config: Any, *, path: str) -> None:
         if page_size is not None and (not isinstance(page_size, int) or page_size <= 0):
             raise ValueError(f"{path}.page_size must be a positive integer")
 
-        _validate_action_list(config.get("actions") or config.get("toolbar_actions"), path=f"{path}.actions")
+        _validate_action_list(config.get("actions"), path=f"{path}.actions")
         _validate_empty_state(config.get("empty"), path=f"{path}.empty")
         return
 
@@ -833,36 +821,13 @@ def _validate_section_config(primitive: str, config: Any, *, path: str) -> None:
         if submit_action is not None:
             _validate_action(submit_action, path=f"{path}.submit_action")
 
-        submit_endpoint = config.get("submit_endpoint")
-        if submit_action is None and submit_endpoint is not None and not _is_non_empty_string(submit_endpoint):
-            raise ValueError(f"{path}.submit_endpoint must be a non-empty string")
-
         cancel_action = config.get("cancel_action")
         if cancel_action is not None:
             _validate_action(cancel_action, path=f"{path}.cancel_action")
         return
 
-    if primitive == "Stat":
-        if not _is_non_empty_string(config.get("label")):
-            raise ValueError(f"{path}.label is required")
-        if config.get("value") is None and not _is_non_empty_string(config.get("value_key")):
-            raise ValueError(f"{path} must define either value or value_key")
-
-        stat_format = config.get("format")
-        if stat_format is not None and stat_format not in VALID_STAT_FORMATS:
-            raise ValueError(f"{path}.format must be one of {sorted(VALID_STAT_FORMATS)}")
-
-        trend_direction = config.get("trend_direction")
-        if trend_direction is not None and trend_direction not in VALID_TREND_DIRECTIONS:
-            raise ValueError(
-                f"{path}.trend_direction must be one of {sorted(VALID_TREND_DIRECTIONS)}"
-            )
-
-        _validate_optional_string(config.get("color"), field=f"{path}.color")
-        return
-
     if primitive == "Grid":
-        columns = config.get("columns", config.get("cols"))
+        columns = config.get("columns")
         if not isinstance(columns, int) or not 1 <= columns <= 6:
             raise ValueError(f"{path}.columns must be an integer between 1 and 6")
 
@@ -871,13 +836,6 @@ def _validate_section_config(primitive: str, config: Any, *, path: str) -> None:
             raise ValueError(f"{path}.gap must be one of {sorted(VALID_GRID_GAPS)}")
 
         _validate_children(config.get("children"), path=f"{path}.children", required=True)
-        return
-
-    if primitive == "Card":
-        _validate_optional_string(config.get("title"), field=f"{path}.title")
-        _validate_optional_string(config.get("subtitle"), field=f"{path}.subtitle")
-        _validate_action_list(config.get("actions"), path=f"{path}.actions")
-        _validate_children(config.get("children"), path=f"{path}.children")
         return
 
     if primitive == "Button":
@@ -900,7 +858,6 @@ def _validate_section_config(primitive: str, config: Any, *, path: str) -> None:
                     "workflow_id": config.get("workflow_id"),
                     "context_variables": config.get("context_variables"),
                     "href": config.get("href"),
-                    "event_payload": config.get("event_payload"),
                 },
                 path=f"{path}.action",
             )
@@ -909,8 +866,6 @@ def _validate_section_config(primitive: str, config: Any, *, path: str) -> None:
     if primitive == "Modal":
         _validate_optional_string(config.get("title"), field=f"{path}.title")
         _validate_optional_string(config.get("description"), field=f"{path}.description")
-        _validate_optional_string(config.get("modal_id"), field=f"{path}.modal_id")
-
         size = config.get("size")
         if size is not None and size not in VALID_MODAL_SIZES:
             raise ValueError(f"{path}.size must be one of {sorted(VALID_MODAL_SIZES)}")
@@ -938,12 +893,6 @@ def _validate_section_config(primitive: str, config: Any, *, path: str) -> None:
             raise ValueError(f"{path}.dismissible must be a boolean")
         return
 
-    if primitive == "Badge":
-        if not _is_non_empty_string(config.get("label")):
-            raise ValueError(f"{path}.label is required")
-        _validate_optional_string(config.get("variant"), field=f"{path}.variant")
-        return
-
     if primitive == "Skeleton":
         rows = config.get("rows")
         if rows is not None and (not isinstance(rows, int) or rows <= 0):
@@ -960,19 +909,6 @@ def _validate_section_config(primitive: str, config: Any, *, path: str) -> None:
             _validate_action(action, path=f"{path}.action")
             return
 
-        if config.get("action_label") is not None:
-            _validate_action(
-                {
-                    "label": config.get("action_label"),
-                    "action_type": config.get("action_type") or "event",
-                    "event_type": config.get("action_event") or config.get("event_type"),
-                    "workflow_id": config.get("workflow_id"),
-                    "context_variables": config.get("context_variables"),
-                    "href": config.get("href"),
-                    "event_payload": config.get("action_payload") or config.get("event_payload"),
-                },
-                path=f"{path}.action",
-            )
         return
 
 
@@ -1479,6 +1415,15 @@ def save_app_schema(
     if resolved_database_intent_bundle is None:
         resolved_database_intent_bundle = _context_get(context_variables, "database_intent_bundle")
     _validate_database_intent_bundle(resolved_database_intent_bundle)
+    app_ui_quality_warnings = dedupe(
+        audit_page_schemas(page_list)
+        + audit_generated_react_files(
+            custom_route_bundle_page_files(custom_route_bundle),
+            source_label="custom route React",
+            require_jsx=False,
+            include_ui_index=False,
+        )
+    )
 
     # Persist to context_variables for downstream agents
     if context_variables and hasattr(context_variables, "set"):
@@ -1492,6 +1437,7 @@ def save_app_schema(
             context_variables.set("app_custom_route_bundle", custom_route_bundle)
             context_variables.set("app_schema_ready", True)
             context_variables.set("available_page_primitives", list(get_page_ui_primitive_names()))
+            context_variables.set("app_ui_quality_warnings", app_ui_quality_warnings)
         except Exception as exc:
             _logger.error("Failed to store app schema in context_variables: %s", exc)
             return f"Error persisting app schema to context: {exc}"

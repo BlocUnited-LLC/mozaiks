@@ -7,13 +7,10 @@ models:
         values:
         - DataTable
         - Form
-        - Stat
         - Grid
-        - Card
         - Button
         - Modal
         - Alert
-        - Badge
         - Skeleton
         - Empty
         - PageHeader
@@ -365,6 +362,7 @@ models:
         - page_bundle
         - agent_backend_integration
         - control_plane_surface
+        - pack_overlay
         description: >
           Explicit build-task type used for downstream execution planning. Persistent
           app pages use the declarative AppSchemaAgent path. `page_bundle` means a
@@ -373,6 +371,10 @@ models:
           NOT use backend_foundation or api_surface for control_plane surfaces.
           `api_surface` is the only valid task_type for surface_kind=external_integration.
           `page_bundle` is the only valid task_type for surface_kind=ui_only.
+          `pack_overlay` generates ONLY the app-specific wiring for a selected framework_pack
+          (subscriptions/event-flow bindings, facade module actions, page composition overlays).
+          Must start at ConfigMiddlewareAgent. capability_pack_id MUST identify the framework_pack.
+          Do NOT use pack_overlay to regenerate pack internals (handler.py, service.py, etc.).
       capability_pack_id:
         type: union
         variants:
@@ -390,7 +392,11 @@ models:
         - control_plane
         - external_integration
         - ui_only
-        description: Surface kind realized by this task.
+        - framework_pack
+        description: >
+          Surface kind realized by this task.
+          `framework_pack` is paired with task_type=pack_overlay — indicates the task
+          generates app-specific wiring for a selected framework_pack, not module internals.
       execution_target:
         type: str
         description: Runtime or generator system responsible for executing the task.
@@ -1233,7 +1239,7 @@ models:
     fields:
       path:
         type: str
-        description: Module-local Python stub path such as backend/handler.py, backend/service.py, backend/repo.py, backend/policy.py, backend/models.py, or backend/settings.py.
+        description: Module-local Python stub path such as backend/handler.py, backend/service.py, backend/repo.py, backend/policy.py, backend/schemas.py, or backend/settings.py.
       kind:
         type: literal
         values:
@@ -1343,7 +1349,7 @@ models:
       python_stubs:
         type: optional_list
         items: ModulePythonStub
-        description: Python implementation stubs required by the contract. Durable module surfaces should normally declare backend/handler.py, backend/service.py, backend/repo.py, backend/policy.py, and backend/models.py, plus any bounded hook files referenced by YAML.
+        description: Python implementation stubs required by the contract. Durable module surfaces should normally declare backend/handler.py, backend/service.py, backend/repo.py, backend/policy.py, and backend/schemas.py, plus any bounded hook files referenced by YAML.
       js_stubs:
         type: optional_list
         items: ModuleJsStub
@@ -1496,10 +1502,6 @@ models:
         type: optional_list
         items: AppPrimitiveKeyValue
         description: Generic scalar payload entries used by event, submit, or delete actions. save_app_schema persists these as an object.
-      event_payload:
-        type: optional_list
-        items: AppPrimitiveKeyValue
-        description: Legacy event payload entries. Prefer payload for new schemas.
       requires_selection:
         type: bool
         description: Whether a row/item must be selected before this action is enabled.
@@ -1790,72 +1792,6 @@ models:
         description: Whether the form is disabled.
         default: false
 
-  AppStatConfig:
-    type: model
-    fields:
-      label:
-        type: str
-        description: Stat label.
-      value:
-        type: AppPrimitiveValue
-        description: Static value. Null when value_key is used.
-      value_key:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Data key for dynamic value.
-      format:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: "Optional format: number, currency, percentage, or compact."
-      trend:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Optional static trend label.
-      trend_key:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Optional dynamic trend key.
-      trend_direction:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: "Optional trend direction: up_good, up_bad, or neutral."
-      color:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Optional semantic color hint.
-
-  AppCardLeafConfig:
-    type: model
-    fields:
-      title:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Optional card title.
-      subtitle:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Optional card subtitle.
-      actions:
-        type: optional_list
-        items: AppPageAction
-        description: Optional card actions.
-
   AppButtonConfig:
     type: model
     fields:
@@ -1929,19 +1865,6 @@ models:
         type: bool
         description: Whether the alert is dismissible.
         default: false
-
-  AppBadgeConfig:
-    type: model
-    fields:
-      label:
-        type: str
-        description: Badge label.
-      variant:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Optional badge variant.
 
   AppSkeletonConfig:
     type: model
@@ -2447,12 +2370,9 @@ models:
     - AppSegmentedBarConfig
     - AppDataTableConfig
     - AppFormConfig
-    - AppStatConfig
-    - AppCardLeafConfig
     - AppButtonConfig
     - AppModalLeafConfig
     - AppAlertConfig
-    - AppBadgeConfig
     - AppSkeletonConfig
     - AppEmptyConfig
     - AppTimelineConfig
@@ -2476,12 +2396,9 @@ models:
         values:
         - DataTable
         - Form
-        - Stat
-        - Card
         - Button
         - Modal
         - Alert
-        - Badge
         - Skeleton
         - Empty
         - PageHeader
@@ -2537,30 +2454,6 @@ models:
         items: AppPageChildSection
         description: Child primitive sections. Required for Grid.
 
-  AppCardConfig:
-    type: model
-    fields:
-      title:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Optional card title.
-      subtitle:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Optional card subtitle.
-      actions:
-        type: optional_list
-        items: AppPageAction
-        description: Optional card actions.
-      children:
-        type: optional_list
-        items: AppPageChildSection
-        description: Optional child sections.
-
   AppModalConfig:
     type: model
     fields:
@@ -2607,13 +2500,10 @@ models:
     - AppSegmentedBarConfig
     - AppDataTableConfig
     - AppFormConfig
-    - AppStatConfig
     - AppGridConfig
-    - AppCardConfig
     - AppButtonConfig
     - AppModalConfig
     - AppAlertConfig
-    - AppBadgeConfig
     - AppSkeletonConfig
     - AppEmptyConfig
     - AppTimelineConfig
@@ -2634,13 +2524,10 @@ models:
         values:
         - DataTable
         - Form
-        - Stat
         - Grid
-        - Card
         - Button
         - Modal
         - Alert
-        - Badge
         - Skeleton
         - Empty
         - PageHeader

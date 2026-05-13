@@ -141,10 +141,12 @@ agents:
          - Use `concept_blueprint.capability_pack_hints` and `build_plan.capability_packs` when available.
          - Capability packs remain planning units; they are not automatically modules.
          - Every capability pack must declare `surface_id` and `surface_kind`.
-         - Prefer canonical packs such as `crud_pack`, `messaging_pack`, `marketplace_pack`, `campaigns_pack`, `billing_pack`, `notifications_pack`, `analytics_pack`, and `agent_backend_integration`.
+         - Prefer canonical packs such as `crud_pack`, `messaging_pack`, `marketplace_pack`, `campaigns_pack`, `billing_pack`, `notifications_pack`, `analytics_pack`, `entitlements`, and `agent_backend_integration`.
+           Use `entitlements` for any app that needs SaaS plan/tier management, feature gates, or trial lifecycle — this is a framework_pack, not a module to generate.
          - **NEVER include these as capability packs** — they are first-class runtime features already provided by the Mozaiks platform host and must not be scaffolded:
-           `user_management`, `auth`, `authentication`, `login`, `registration`, `profile`, `user_profile`, `admin_users`, `settings`, `notifications`, `subscriptions`, `websocket`
+           `user_management`, `auth`, `authentication`, `login`, `registration`, `profile`, `user_profile`, `admin_users`, `settings`, `notifications`, `websocket`
            If the product spec mentions any of these, reference them as existing runtime capabilities in `backend_scope`, not as packs to generate.
+           SaaS plan/subscription management is NOT in this list — use the `entitlements` framework_pack for that.
          - If the product needs domain-specific profile records (for example investor profiles, founder profiles, vendor profiles, or creator profiles), model them as module-owned entities/actions/events inside the relevant capability pack. They do not replace the host-owned `/api/me` account/profile contract.
          - Distinguish deterministic product behavior from optional agentic augmentation.
       5. Derive the minimum complete set of pages/screens required by the selected capability packs, and identify whether each route is global navigation, local/module navigation, profile/account navigation, footer/legal navigation, or direct-link only. Also classify the intended shell chrome mode for each route: standard, workspace, conversation, focused, immersive, or public.
@@ -190,8 +192,10 @@ agents:
         - Required fields per primitive (consult [SHIPPED PAGE PRIMITIVES] if injected):
           - DataTable: `columns` (list of string column names or column objects)
           - Form: `fields` (list of {name, label, type} objects)
-          - Stat: `label` + either `value` (static) or `value_key` (dynamic)
           - Grid: `columns` (integer 1-6) + `children` (list of child section hints)
+          - SummaryStrip: `items` (1-4 useful metrics)
+          - Metric: `label` + `value`
+          - StatusPill: `label`
           - ActionButton: `actions` (list of {label, action_type, ...})
           - Alert / AlertBanner: `message`
           - Button: `label`
@@ -199,7 +203,7 @@ agents:
           - CodeBlock: `code`
           - ProgressTracker: `stages` (list of {label, status})
           - FileList: `files`
-          - Card / Modal / Skeleton / Empty / Badge: no required fields, but include identifying config
+          - Modal / Skeleton / Empty / Panel / SurfaceCard: no required fields, but include identifying config
         - Omit `config_hint` (null) only when the primitive config is entirely determined by page context that AppSchemaAgent will have but you do not.
       12. Treat generated app code as modules or integration surfaces into the existing Mozaiks runtime where possible, not as a fully bespoke platform rewrite. That means:
         - keep runtime-owned bootstrapping thin
@@ -234,6 +238,7 @@ agents:
         - `surface_kind = workflow` packs describe agentic behavior and UI/workflow touchpoints, but do not generate runtime modules here.
         - `surface_kind = control_plane` packs should use app-level orchestration tasks such as `backend_foundation` or `api_surface`, not `module_contract`.
         - `surface_kind = external_integration` packs should use `api_surface` or `agent_backend_integration` tasks, not `module_contract`.
+        - `surface_kind = framework_pack` packs MUST use `pack_overlay` tasks (`task_type: pack_overlay`, `initial_agent: ConfigMiddlewareAgent`). A `pack_overlay` task generates ONLY app-specific wiring — subscriptions/event-flow bindings, facade module actions, page composition overlays. Do NOT use `module_contract` for framework_pack surfaces. Do NOT regenerate pack internals. `capability_pack_id` MUST be set.
         - Connector credentials, API-key metadata, and workspace integration records are platform-owned integration state. Do not turn them into app-owned module entities or collections.
         - Use the app connector inventory as the source of truth for which third-party integrations are already ready. If the plan references Stripe, Twilio, SendGrid, or similar services that are not ready in the connector inventory, keep the integration in the product plan but explicitly mark it as a missing configuration dependency.
         - `surface_kind = ui_only` packs should use `page_bundle` tasks only unless another surface owns their backend mutations.
@@ -257,6 +262,21 @@ agents:
         - Build tasks must describe strict structured-output-first contracts, not loose config blobs.
         - Use finite taxonomies and stable ids for module kinds, event namespaces, target kinds, admin sections, and capability ids.
         - If a capability pack needs customization beyond canonical YAML, declare bounded stub work explicitly in the task description and owned_paths; do not imply hidden files or ad hoc extension points.
+      12f. **backend helper file declaration rule**:
+        - Declare every backend helper file explicitly in build task metadata with a short rationale before a downstream agent may generate it.
+        - Valid helper examples include `backend/integrations/stripe_client.py` for external provider clients, `backend/routes_webhooks.py` for raw webhook routing, and `backend/usage_check.py` for a usage or entitlement wrapper.
+        - Do not declare helper files for arbitrary service splitting, persistence, authorization, typed shapes, or generic business logic that belongs in the canonical module layers; do not let ServiceAgent invent helper files outside AppPlanAgent declarations.
+      12g. **module_interface.yaml rule** — when a workflow calls module actions via `backend_request()`:
+        - Plan one `agent_backend_integration` build task per workflow that integrates with app modules.
+        - `owned_paths` for this task MUST include `workflows/{workflow_name}/module_interface.yaml`.
+        - `initial_message` must enumerate every module action the workflow calls: `module_id` + `action_id` for each.
+        - `initial_message` must list any domain events the workflow emits back via `emit_event`.
+        - `context_variables` for this task MUST include these three entries (the assembly tool reads them to generate the YAML):
+            - key: `workflow_name`, value: the workflow directory name (e.g. `RecommendationEngine`)
+            - key: `module_actions`, value: JSON string — array of objects with `module_id`, `action_id`, `description` for every module action this workflow calls via backend_request(). Example: `[{"module_id": "orders", "action_id": "create_order", "description": "Create a new order"}]`
+            - key: `emits_events`, value: JSON string — array of objects with `event_type` and `target_module_id` for every domain event this workflow emits via emit_event(). Use `[]` if none.
+        - This file survives module regeneration and lets the regenerator detect breaking action renames or removals.
+        - Do NOT skip this task for workflows that call module actions. A workflow without module_interface.yaml has an undeclared dependency contract.
       13. Keep `generation_order` concrete and usable by downstream agents. Prefer high-level phases like:
          - backend-foundation
          - data-models
@@ -270,11 +290,13 @@ agents:
          - `name` MUST be `AppGenerator`
          - `initial_agent` MUST match the task's designated starting agent
          - `initial_message` MUST instruct the child run to execute only that task and only its owned paths
-         - `context_variables` MUST include:
+         - `context_variables` MUST be a list of `{ "key": "<name>", "value": <scalar> }` entries, not an object.
+         - Include only scalar seeds in child specs:
            - `task_run_mode`: true
-           - `current_build_task`: the full task object
            - `current_build_task_id`: task id
            - `current_build_task_type`: task type
+         - Do not include the full `current_build_task` object in structured output; the `app_build_plan` tool hydrates it deterministically from `build_tasks`.
+         - Hosted adapter child context is semantically equivalent to a hydrated map containing `"current_build_task_type": "api_surface"`, `"surface_kind": "external_integration"`, and owned paths such as `"backend/integrations/wallet_client.py"`; still emit `context_variables` as the canonical list format above.
       15. Emit ONLY valid AppBuildPlanOutput JSON.
       16. Hosted-pack page binding rule: When a hosted_pack is in capability_packs with
           surface_kind: external_integration, page tasks MUST bind to the app-owned
@@ -408,33 +430,22 @@ agents:
             "description": "Backend foundation task",
             "initial_agent": "ConfigMiddlewareAgent",
             "initial_message": "Execute only the backend foundation task. Generate only the owned paths declared in current_build_task and then stop.",
-            "context_variables": {
-              "task_run_mode": true,
-              "current_build_task_id": "task_backend_foundation",
-              "current_build_task_type": "backend_foundation",
-              "current_build_task": {
-                "task_id": "task_backend_foundation"
-              }
-            }
+            "context_variables": [
+              { "key": "task_run_mode", "value": true },
+              { "key": "current_build_task_id", "value": "task_backend_foundation" },
+              { "key": "current_build_task_type", "value": "backend_foundation" }
+            ]
           },
           {
             "name": "AppGenerator",
             "description": "Hosted wallet adapter",
             "initial_agent": "ControllerAgent",
             "initial_message": "Execute only the wallet adapter task. Generate backend/integrations/wallet_client.py as a thin Python client.",
-            "context_variables": {
-              "task_run_mode": true,
-              "current_build_task_id": "task_wallet_adapter",
-              "current_build_task_type": "api_surface",
-              "current_build_task": {
-                "task_id": "task_wallet_adapter",
-                "task_type": "api_surface",
-                "capability_pack_id": "wallet",
-                "surface_kind": "external_integration",
-                "owned_paths": ["backend/integrations/wallet_client.py"],
-                "initial_agent": "ControllerAgent"
-              }
-            }
+            "context_variables": [
+              { "key": "task_run_mode", "value": true },
+              { "key": "current_build_task_id", "value": "task_wallet_adapter" },
+              { "key": "current_build_task_type", "value": "api_surface" }
+            ]
           }
         ]
       }
@@ -465,7 +476,6 @@ agents:
       - `design_surface_map`: canonical typed surface realization contract from DesignDocs when available. Use it to confirm which surface owns each persistent page.
       - `captured_theme_config`: canonical ThemeCapture output when available. This is the strongest visual input and should be preferred over heuristic inference.
       - `experience_spec_document`: canonical persistent UI intent document from DesignDocs. In the current pipeline this is serialized under `ui_schema`.
-      - `ui_design_document`: legacy alias for the same DesignDocs artifact when present.
       - `frontend_design_document`: free-form frontend design document (fallback context).
 
       **Platform primitive system**:
@@ -477,14 +487,15 @@ agents:
       - Page `event_type` values are for `ui.*` primitive reactions only.
       - `DataTable`: sortable, filterable, paginated table. Config: `columns` (strings or column objects), optional `api_endpoint`, optional `data`, `selection` (none|single|multi), `pagination`, `page_size`, `search`, `actions`, `empty`.
       - `Form`: declarative form. Config: `fields` [{name, label, type (text|email|password|number|textarea|select|checkbox), required, placeholder, default_value, options}], optional `layout`, `columns`, `submit_label`, `submit_action`, `cancel_action`, `disabled`.
-      - `Stat`: KPI metric display. Config: `label`, either `value` or `value_key`, optional `format` (number|currency|percentage|compact), optional `trend` or `trend_key`, `trend_direction` (up_good|up_bad|neutral), `color`.
-      - `Grid`: responsive layout container. Config: `columns` (1-6), `gap` (sm|md|lg), `children` (inline primitive list). If a Grid declares `api_endpoint`, its child Stats/Cards can bind into that response using `value_key`, `trend_key`, and interpolated action payloads.
-      - `Card`: content card with optional `title`, `subtitle`, `actions`, and `children`.
-      - `Modal`: overlay dialog. Config: `title`, `description`, `size` (small|medium|large|full), `actions`, `children`. Use the section `id` as the modal target for `ui.modal.open` / `ui.modal.close`; only use `modal_id` when adapting older schemas.
+      - `SummaryStrip`: compact page summary. Config: `items` with 1-4 `{label, value, detail?}` entries. Do not use it unless the metrics directly help the user decide or act.
+      - `Metric`: one metric inside a purposeful detail surface. Config: `label`, `value`, optional `detail`.
+      - `StatusPill`: one compact state label. Config: `label`, optional `tone`.
+      - `Grid`: responsive layout container. Config: `columns` (1-6), `gap` (sm|md|lg), `children` (inline primitive list). Use only when layout is essential.
+      - `Panel` / `SurfaceCard`: purposeful supporting content surfaces. Keep copy concise and avoid nested panels.
+      - `Modal`: overlay dialog. Config: `title`, `description`, `size` (small|medium|large|full), `actions`, `children`. Use the section `id` as the modal target for `ui.modal.open` / `ui.modal.close`.
       - Prefer `Modal` for secondary edit/create/drill-in interactions when the main page should stay compact. Do not duplicate the same editor inline beneath the same summary card unless the workflow truly requires side-by-side editing.
       - Prefer compact summary cards plus a focused follow-up interaction over repeating the same entity title, metadata, and form fields in multiple stacked sections.
       - `Alert`: status message. Config: optional `title`, required `message`, optional `variant` (default|info|success|warning|destructive), `dismissible`.
-      - `Badge`: status indicator. Config: `label`, optional `variant`.
       - `Button`: action button. Config: `label`, optional `variant`, `size`, and `action`.
       - `Skeleton`: loading placeholder. Config: `rows`, `height`.
       - `Empty`: empty-state placeholder. Config: `title`, `message`, optional `action`, `icon`.
@@ -494,7 +505,7 @@ agents:
       - `AlertBanner`: prominent info/warning/error/success banner with optional actions. Config: `title?`, `message` (required), `variant?` (info|success|warning|destructive), `dismissible?`, `actions?`.
       - `ActionButton`: single action or labeled button group. Config: `title?`, `layout?` (row|column), `actions` [{`id?`, `label`, `variant?`, `action?`}].
       - `FileList`: file listing with status indicators and optional download links. Config: `title?`, `files` [{`name`, `type?`, `size?`, `url?`, `status?` (ready|generating|error)}].
-      - Legacy aliases like `toolbar_actions`, `submit_endpoint`, `field_type`, `cols`, `modal_id`, and `event_payload` are tolerated by the runtime adapter, but new schemas must use the canonical keys above.
+      - Use canonical keys only: `actions`, `submit_action`, `type`, `columns`, section `id`, and `payload`.
 
       **Page layout options**: grid | sidebar | full-width | split
 
@@ -561,7 +572,7 @@ agents:
       - Each persistent route must have exactly one owner: either an AppPageSchema.route or an AppCustomRouteEntry.path, never both.
       - sections[*].id must be unique within a page and kebab-cased.
       - sections[*].config must be a valid object for the declared primitive type.
-      - Use canonical schema keys (`actions`, `submit_action`, `payload`, `columns`) instead of legacy aliases.
+      - Use canonical schema keys only: `actions`, `submit_action`, `payload`, and `columns`.
       - Use `ui.*` events only for transient browser reactions such as refresh, modal open/close, field set, toast, or navigation. Do not emit `domain.*`, `workflow.*`, `runtime.*`, `platform.*`, or `hosted.*` from page schemas.
       - Use `action_type: workflow` only for direct session launches from persistent pages. Do not fake workflow starts with `navigate` or `event` actions.
       - Persistent page ownership is exclusive to `AppSchemaAgent`. If custom full-page React is required, it must still be emitted through AppSchemaOutput.custom_route_bundle rather than a second freeform frontend lane.
@@ -616,7 +627,7 @@ agents:
 
       ```json
       {
-        "agent_message": "Generated manifest and 3 page schemas using DataTable, Form, and Stat primitives.",
+        "agent_message": "Generated manifest and 3 page schemas using PageHeader, ResourceTable, and Form primitives.",
         "manifest": {
           "app_name": "My App",
           "version": "1.0.0",
@@ -641,10 +652,10 @@ agents:
                 "primitive": "Grid",
                 "title": null,
                 "config": { "columns": 3, "gap": "md", "children": [
-                  { "primitive": "Stat", "config": { "label": "Total Users", "value": 1204, "format": "number" } },
-                  { "primitive": "Stat", "config": { "label": "Revenue", "value": 182340, "format": "currency", "trend": 12.4, "trend_direction": "up_good" } }
+                  { "primitive": "Metric", "config": { "label": "Total Users", "value": 1204, "detail": "Active users" } },
+                  { "primitive": "Metric", "config": { "label": "Revenue", "value": "$182.3k", "detail": "Monthly revenue" } }
                 ]},
-                "event_triggers": ["ui.stat.update"],
+                "event_triggers": [],
                 "roles": null
               },
               {
@@ -1017,7 +1028,7 @@ agents:
            - `backend/service.py`
            - `backend/repo.py`
            - `backend/policy.py`
-           - `backend/models.py`
+           - `backend/schemas.py`
          - Add optional hook files only when the YAML contract references them, such as `backend/settings.py`, `backend/subscriptions.py`, `backend/notifications.py`, or `backend/admin.py`.
          - If the module requires an `api_router` runtime extension (e.g. Stripe webhooks, inbound SMS hooks), also add `backend/router.py`.
          - If the module requires a `startup_service` runtime extension (e.g. persistent WebSocket or market-feed connection), also add `backend/worker.py`.
@@ -1316,7 +1327,7 @@ agents:
     content: |-
       - Generate the module backend files declared by ConfigMiddlewareAgent.
       - Keep `backend/handler.py` thin and aligned with `module.yaml.actions[].handler_method`.
-      - Implement `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and `backend/models.py` when declared by `module_contract.python_stubs`.
+      - Implement `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and `backend/schemas.py` when declared by `module_contract.python_stubs`.
       - Generate optional hook stubs referenced by settings.yaml, subscriptions.yaml, notifications.yaml, or admin.yaml.
       - After each mutating action, publish the corresponding namespaced domain event declared in events.yaml.
       - Reference model details directly from the Code Context.
@@ -1338,7 +1349,7 @@ agents:
         - `backend/service.py` — business logic + event publication
         - `backend/repo.py` — persistence
         - `backend/policy.py` — ownership/authz/transition checks
-        - `backend/models.py` — typed DTOs, enums, normalization helpers
+        - `backend/schemas.py` — typed DTOs, enums, normalization helpers
         - `module_contract.module_yaml.module.type` selects the cookie-cutter backend conventions from the injected `[MODULE ARCHETYPES CONTEXT]`. Do not invent a parallel module taxonomy or restate a different set of type rules.
       - Optional hook files go in `modules/{capability_pack_id}/backend/settings.py`, `subscriptions.py`, `notifications.py`, or `admin.py` only when referenced by YAML.
       - `module_contract.python_stubs` is the authoritative list of backend stub files to implement. Do not invent undeclared Python files.
@@ -1360,7 +1371,7 @@ agents:
       7. Put state transitions and event publication in `backend/service.py` when that file is declared.
       8. Put persistence queries/writes in `backend/repo.py` when that file is declared.
       9. Put authorization, ownership, and transition checks in `backend/policy.py` when that file is declared.
-      10. Put DTOs, enums, and normalization helpers in `backend/models.py` when that file is declared.
+      10. Put DTOs, enums, and normalization helpers in `backend/schemas.py` when that file is declared.
       11. After every mutating action, publish the corresponding event from `events.yaml` using the exact namespaced event type declared there.
       12. If `app_backend_url` is null, stub event publishing with `# TODO: publish {event_type} when backend is live`.
       13. Generate optional hook files only when the YAML references them and `module_contract.python_stubs` declares them.
@@ -1409,7 +1420,7 @@ agents:
             "content": "class TaskManagerPolicy:\n    async def require_create(self, *, context, payload):\n        user_id = getattr(context, \"user_id\", None)\n        if not user_id:\n            raise PermissionError(\"Authenticated user required\")\n        return True\n"
           },
           {
-            "path": "modules/task_manager/backend/models.py",
+            "path": "modules/task_manager/backend/schemas.py",
             "kind": "schemas",
             "purpose": "Owns typed DTOs and normalization helpers for task actions.",
             "contract_refs": ["module_yaml.actions[*].input_schema", "module_yaml.actions[*].output_schema"],
@@ -1421,7 +1432,7 @@ agents:
           { "filename": "modules/task_manager/backend/service.py", "content": "from .policy import TaskManagerPolicy\nfrom .repo import TaskManagerRepo\nfrom .schemas import CreateTaskInput, TaskCreatedOutput\n\n\nclass TaskManagerService:\n    def __init__(self, repo=None, policy=None):\n        self.repo = repo or TaskManagerRepo()\n        self.policy = policy or TaskManagerPolicy()\n\n    async def create_task(self, *, context, data: dict):\n        payload = CreateTaskInput.from_payload(data)\n        await self.policy.require_create(context=context, payload=payload)\n        record = await self.repo.create_task(context=context, payload=payload)\n        event_payload = {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n        await context.events.publish(\"domain.task_manager.task_created\", event_payload)\n        return TaskCreatedOutput.from_record(record)\n" },
           { "filename": "modules/task_manager/backend/repo.py", "content": "class TaskManagerRepo:\n    async def create_task(self, *, context, payload):\n        db = getattr(context, \"db\", None)\n        if db is None:\n            raise RuntimeError(\"TaskManagerRepo requires context.db\")\n        document = {\"title\": payload.title, \"status\": \"open\", \"owner_id\": getattr(context, \"user_id\", None)}\n        result = await db.tasks.insert_one(document)\n        document[\"task_id\"] = str(result.inserted_id)\n        return document\n" },
           { "filename": "modules/task_manager/backend/policy.py", "content": "class TaskManagerPolicy:\n    async def require_create(self, *, context, payload):\n        user_id = getattr(context, \"user_id\", None)\n        if not user_id:\n            raise PermissionError(\"Authenticated user required\")\n        return True\n" },
-          { "filename": "modules/task_manager/backend/models.py", "content": "class CreateTaskInput:\n    def __init__(self, *, title: str):\n        self.title = title\n\n    @classmethod\n    def from_payload(cls, payload: dict):\n        title = str((payload or {}).get(\"title\") or \"\").strip()\n        if not title:\n            raise ValueError(\"title is required\")\n        return cls(title=title)\n\n\nclass TaskCreatedOutput:\n    @staticmethod\n    def from_record(record: dict):\n        return {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n" }
+          { "filename": "modules/task_manager/backend/schemas.py", "content": "class CreateTaskInput:\n    def __init__(self, *, title: str):\n        self.title = title\n\n    @classmethod\n    def from_payload(cls, payload: dict):\n        title = str((payload or {}).get(\"title\") or \"\").strip()\n        if not title:\n            raise ValueError(\"title is required\")\n        return cls(title=title)\n\n\nclass TaskCreatedOutput:\n    @staticmethod\n    def from_record(record: dict):\n        return {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n" }
         ],
         "agent_message": "Implemented task_manager backend stubs."
       }

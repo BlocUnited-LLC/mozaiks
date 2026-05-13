@@ -209,7 +209,7 @@ function validatePrimitiveCatalog(registryEntries, primitiveCatalog) {
   const registryNames = registryEntries.map((entry) => entry.name);
   const catalogNames = Object.keys(primitiveCatalog);
   const registrySet = new Set(registryNames);
-  const allowedTiers = new Set(['default', 'support', 'specialized', 'discouraged']);
+  const allowedTiers = new Set(['default', 'support', 'specialized']);
 
   assertNoDuplicates(catalogNames, 'PrimitiveCatalog.js');
 

@@ -9,6 +9,16 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const themeConfig = JSON.parse(
   fs.readFileSync(path.join(repoRoot, 'factory_app', 'app', 'brand', 'theme_config.json'), 'utf8'),
 );
+const shellConfig = JSON.parse(
+  fs.readFileSync(path.join(repoRoot, 'factory_app', 'app', 'config', 'shell.json'), 'utf8'),
+);
+const routeManifest = JSON.parse(
+  fs.readFileSync(path.join(repoRoot, 'factory_app', 'app', 'ui', 'route_manifest.json'), 'utf8'),
+);
+const composedShellConfig = {
+  ...shellConfig,
+  pages: routeManifest.pages || [],
+};
 const APP_ID = 'campaign-revision-workbench';
 
 const appsPayload = {
@@ -147,6 +157,14 @@ function buildAppConsolePayload(appId = APP_ID) {
 }
 
 async function mockConsoleApis(page) {
+  await page.route('**/api/shell-config', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(composedShellConfig),
+    });
+  });
+
   await page.route('**/api/theme-config', async (route) => {
     await route.fulfill({
       status: 200,
@@ -168,6 +186,14 @@ async function mockConsoleApis(page) {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({ count: 9, unread_count: 9 }),
+    });
+  });
+
+  await page.route('**/api/workflows', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([]),
     });
   });
 
@@ -327,9 +353,9 @@ test('workspace hosting route stays responsive across desktop and mobile widths'
 
   await expect(main.getByRole('heading', { name: 'Hosting', exact: true })).toBeVisible();
   await expect(main.getByPlaceholder('Search hosting...')).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Managed hosting by app' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Provider posture' })).toBeVisible();
-  await expect(main.getByText('No domains assigned')).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Domains' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Environment readiness' })).toBeVisible();
+  await expect(main.getByText('No domains assigned yet').first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -349,8 +375,7 @@ test('workspace usage route stays responsive across desktop and mobile widths', 
   await expect(main.getByRole('heading', { name: 'Usage', exact: true })).toBeVisible();
   await expect(main.getByRole('button', { name: 'Export CSV' })).toBeVisible();
   await expect(main.getByPlaceholder('Search workflows or apps...')).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Workflow token usage' })).toBeVisible();
-  await expect(main.getByText('Input Tokens')).toBeVisible();
+  await expect(main.getByText('Tokens Used')).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -359,6 +384,9 @@ test('workspace usage route stays responsive across desktop and mobile widths', 
   if (viewport.width < 768) {
     await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeVisible();
   } else {
+    await expect(main.getByRole('columnheader', { name: 'Workflow' })).toBeVisible();
+    await expect(main.getByRole('columnheader', { name: 'Input' })).toBeVisible();
+    await expect(main.getByRole('row', { name: /RevisionOrchestrator Workspace/i }).first()).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeHidden();
   }
 });
@@ -464,7 +492,7 @@ test('app hosting route stays responsive across desktop and mobile widths', asyn
   await expect(main.getByRole('heading', { name: 'Hosting control center' })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Hosting readiness' })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Provider resources' })).toBeVisible();
-  await expect(main.getByText('No domains assigned yet')).toBeVisible();
+  await expect(main.getByText('No domains assigned yet').first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -484,7 +512,7 @@ test('app usage route stays responsive across desktop and mobile widths', async 
   await expect(main.getByRole('heading', { name: 'Usage', exact: true })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Workflow token breakdown' })).toBeVisible();
   await expect(main.getByRole('button', { name: 'Export CSV' })).toBeVisible();
-  await expect(main.getByText('Input Tokens')).toBeVisible();
+  await expect(main.getByRole('columnheader', { name: 'Input' })).toBeVisible();
   await expect(main.getByText('RevisionOrchestrator').first()).toBeVisible();
   await expect(main.getByText('Average latency')).toBeVisible();
   await expectNoHorizontalOverflow(page);
@@ -629,7 +657,7 @@ test('mobile workspace console navigation keeps route transitions stable', async
     {
       href: '/hosting',
       heading: 'Hosting',
-      detail: async () => expect(main.getByRole('heading', { name: 'Managed hosting by app' })).toBeVisible(),
+      detail: async () => expect(main.getByRole('heading', { name: 'Environment readiness' })).toBeVisible(),
     },
     {
       href: '/billing',

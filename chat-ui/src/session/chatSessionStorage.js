@@ -3,6 +3,7 @@ import platform from '../platform/index.js';
 const CURRENT_CHAT_ID_KEY = 'mozaiks.current_chat_id';
 const CURRENT_WORKFLOW_NAME_KEY = 'mozaiks.current_workflow_name';
 const CONVERSATION_MODE_KEY = 'mozaiks.conversation_mode';
+const ACTIVE_GENERAL_CHAT_ID_KEY = 'mozaiks.active_general_chat_id';
 
 const readValue = (key) => {
   try {
@@ -50,6 +51,15 @@ export const setStoredActiveChatId = (chatId) => {
 };
 
 export const clearStoredActiveChatId = () => removeValue(CURRENT_CHAT_ID_KEY);
+
+export const getStoredActiveGeneralChatId = () => readValue(ACTIVE_GENERAL_CHAT_ID_KEY);
+
+export const setStoredActiveGeneralChatId = (generalChatId) => {
+  if (!generalChatId) return removeValue(ACTIVE_GENERAL_CHAT_ID_KEY);
+  return writeValue(ACTIVE_GENERAL_CHAT_ID_KEY, String(generalChatId));
+};
+
+export const clearStoredActiveGeneralChatId = () => removeValue(ACTIVE_GENERAL_CHAT_ID_KEY);
 
 export const getStoredActiveWorkflowName = () => readValue(CURRENT_WORKFLOW_NAME_KEY);
 
@@ -136,6 +146,7 @@ export const clearStoredArtifactState = (chatId) => {
 
 export const getStoredChatSessionSnapshot = () => ({
   activeChatId: getStoredActiveChatId(),
+  activeGeneralChatId: getStoredActiveGeneralChatId(),
   activeWorkflowName: getStoredActiveWorkflowName(),
   conversationMode: getStoredConversationMode(),
 });

@@ -14,9 +14,10 @@ exposed to page schemas through `PrimitiveRegistry.js` and
 `primitive_schemas.json`. App-specific files may compose those primitives, but
 must not become a hidden second primitive catalog. First-party console adapters
 such as `ConsoleShared.jsx` are not primitive ownership points.
-Generated custom-route helper components may live under `app/ui/components/*.jsx`,
-but only through the typed `custom_route_bundle.component_files` contract and
-only as support files for owning custom routes.
+Generated custom-route React lives under `app/ui/pages/custom/*.jsx` through
+the typed `custom_route_bundle.page_files` contract. App-level helper
+components should be introduced only through an explicit future contract, not by
+inventing ad hoc component directories.
 
 Important distinction:
 
@@ -25,8 +26,9 @@ Important distinction:
 - shipped/runtime component primitives = everything workflow/local React can still import
 - generated-component primitives = the narrower AgentGenerator-safe subset
 
-`Card`, `Stat`, and `Badge` remain runtime-supported, but they are not
-canonical new generated-page or workflow-local generated-component output.
+`Card`, `Stat`, and `Badge` are removed from the generated UI contract. Use
+`Panel`, `SurfaceCard`, `SummaryStrip`, `Metric`, `StatusPill`,
+`ResourceTable`, and task-specific primitives instead.
 
 When changing declarative page primitives, update `PrimitiveRegistry.js`,
 `PrimitiveSchemas.js`, and `PrimitiveCatalog.js`, then regenerate/check the
@@ -112,9 +114,14 @@ The notifications page proves the intended primitive pattern:
 
 ## Generator Validation
 
+`factory_app/workflows/generated_ui_contract.py` is the shared hard gate for
+generated UI. It audits both declarative page schemas and generated/custom React
+so AppGenerator and AgentGenerator cannot drift into separate UI standards.
+
 `save_app_schema` records `app_ui_quality_warnings` in workflow context for
-generated page bundles. `AppUIQualityAgent` then calls `review_ui_quality` and
-sets `app_ui_quality_status`:
+generated page bundles, including `ui/pages/*.yaml` and optional
+`custom_route_bundle.page_files`. `AppUIQualityAgent` then calls
+`review_ui_quality` and sets `app_ui_quality_status`:
 
 - `passed`: no warnings remain, so AssemblyAgent may assemble the bundle.
 - `needs_revision`: AppSchemaAgent must simplify or remove the flagged UI and
@@ -181,21 +188,17 @@ the test must pass on desktop and mobile, with no `console.error`, no
 
 Current warning classes include:
 
-- catalog-discouraged primitives (`Card`, `Stat`, `Badge`) in generated pages
+- removed primitives (`Card`, `Stat`, `Badge`) in generated pages or generated React
+- unknown declarative page primitives
 - build-plan lane mismatches between `app_build_plan.pages[*].ui_surface` and the emitted page/custom-route bundle
-- multiple `PageHeader` sections on one page
-- more than 6 top-level sections
-- `SummaryStrip` with more than 4 items
-- `Grid` used to pack more than 6 child primitives into one section
-- more than 4 `Stat` primitives on one page
-- more than 2 `Badge` primitives on one page
-- repeated `Card` primitives or nested cards
-- placeholder/internal copy such as `placeholder`, `surface`, `posture`, or `handoff`
-- collection-style pages that do not use `ResourceTable`, `DataTable`, or a concise `Empty` state
-- custom React that imports/renders discouraged primitives (`Card`, `Stat`, `Badge`)
+- dashboard-style page/component naming
+- repeated `SummaryStrip`, `StatusPill`, `Metric`, `Panel`, or `SurfaceCard` patterns
+- nested `Panel`/`SurfaceCard` wrappers
+- placeholder/internal copy such as `placeholder`, `todo`, `posture`, `handoff`, `control room`, or `kpi wall`
+- custom React that imports/renders removed primitives (`Card`, `Stat`, `Badge`)
 - custom React that uses brittle deep primitive imports instead of the public `@mozaiks/chat-ui/ui` entrypoint
 - custom React that hardcodes font families, literal brand fonts, raw color values, or non-semantic color utilities
-- custom React that repeats status pills, wrapper surfaces, metric strips, or dashboard-style component naming
+- custom React that uses `.js` for workflow-local generated React instead of `.jsx`
 
 ## Workflow UI Rules
 
@@ -203,7 +206,7 @@ Current warning classes include:
 - Prefer inline UI before artifact-tray UI.
 - Generate custom workflow UI only when the interaction is structured enough to require it.
 - Keep workflow review surfaces compact: one title, one summary, one action group.
-- For new workflow-local React, prefer `Panel`, `SurfaceCard`, `StatusPill`, `InlineEmptyState`, `LoadingState`, and `ErrorState` over `Card`, `Badge`, and `Stat`.
+- For new workflow-local React, prefer `Panel`, `SurfaceCard`, `StatusPill`, `InlineEmptyState`, `LoadingState`, and `ErrorState`.
 - Workflow-local React should not ship if it uses deep primitive imports, hardcoded brand fonts, raw color values, dashboard-style naming, or repeated primary wrapper surfaces.
 
 ## Visual Standard

@@ -4,6 +4,8 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.import_utils import active_app_root
 
 
@@ -13,6 +15,13 @@ def _workspace() -> Path:
 
 def _read(relative_path: str) -> str:
     return (_workspace() / relative_path).read_text(encoding="utf-8")
+
+
+def _product_app_root() -> Path:
+    app_root = active_app_root()
+    if not (app_root / "modules" / "investor_marketplace").is_dir():
+        pytest.skip("Product workspace not configured — investor_marketplace module missing")
+    return app_root
 
 
 def test_mozaiks_platform_has_platform_scoped_ai_config() -> None:
@@ -54,10 +63,7 @@ def test_mozaiks_platform_app_yaml_is_removed() -> None:
 def test_app_loader_discovers_platform_bundle_without_app_yaml() -> None:
     from mozaiksai.core.runtime.app.loader import AppLoader
 
-    app_root = active_app_root()
-    # Skip if running against the factory app workspace (not a product workspace)
-    if not (app_root / "modules" / "investor_marketplace").is_dir():
-        pytest.skip("Product workspace not configured — investor_marketplace module missing")
+    app_root = _product_app_root()
     result = asyncio.run(AppLoader.load(str(app_root)))
 
     assert result.definition.name == "Mozaiks Platform"
@@ -71,7 +77,7 @@ def test_app_loader_discovers_platform_bundle_without_app_yaml() -> None:
 
 
 def test_mozaiks_platform_route_manifest_owns_dashboard_route() -> None:
-    app_root = active_app_root()
+    app_root = _product_app_root()
     manifest_path = app_root / "ui" / "route_manifest.json"
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
 
@@ -92,7 +98,7 @@ def test_mozaiks_platform_workflow_registry_owns_create_route() -> None:
 
 
 def test_mozaiks_platform_workflow_registry_uses_shared_base_and_local_overlay() -> None:
-    app_root = active_app_root()
+    app_root = _product_app_root()
     shared_registry_path = _workspace() / "factory_app" / "workflows" / "extended_orchestration" / "extension_registry.json"
     overlay_registry_path = app_root / "workflows" / "extended_orchestration" / "extension_registry.json"
     shared = json.loads(shared_registry_path.read_text(encoding="utf-8"))
@@ -110,12 +116,12 @@ def test_mozaiks_platform_workflow_registry_uses_shared_base_and_local_overlay()
 
 
 def test_mozaiks_platform_navigation_json_is_removed() -> None:
-    app_root = active_app_root()
+    app_root = _product_app_root()
     assert not (app_root / "config" / "navigation.json").exists()
 
 
 def test_mozaiks_platform_app_manifest_owns_startup() -> None:
-    app_root = active_app_root()
+    app_root = _product_app_root()
     data = json.loads((app_root / "app.json").read_text(encoding="utf-8"))
 
     assert data["appName"] == "Mozaiks Platform"
@@ -123,7 +129,7 @@ def test_mozaiks_platform_app_manifest_owns_startup() -> None:
 
 
 def test_mozaiks_platform_shell_config_owns_shell_ui() -> None:
-    app_root = active_app_root()
+    app_root = _product_app_root()
     data = json.loads((app_root / "config" / "shell.json").read_text(encoding="utf-8"))
 
     header_actions = {item["id"]: item for item in data["header"]["actions"]}

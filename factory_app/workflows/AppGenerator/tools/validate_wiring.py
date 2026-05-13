@@ -6,7 +6,7 @@ Runs at IntegrationTestAgent time, after AppSchemaAgent and assembly are complet
 Algorithm
 ---------
 1. Extract every api_endpoint string from page sections in context_variables.app_pages
-   (recursively, including nested children in Grid / Card / Modal sections).
+   (recursively, including nested children in compositional sections).
 2. Build a registry of valid "{module_id}/{action_id}" paths from two sources:
      a. context_variables.app_build_plan.capability_packs  (planned actions)
      b. modules/*/module.yaml files on disk in the generated app directory (actual actions)

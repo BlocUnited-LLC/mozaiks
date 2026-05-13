@@ -217,8 +217,8 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
 
     module_contract = file_contracts["task_contracts"]["module_contract"]
     assert module_contract["required_outputs"] == ["modules/{pack_name}/module.yaml"]
-    assert "modules/{pack_name}/subscriptions.yaml" in module_contract["optional_outputs"]
-    assert "modules/{pack_name}/admin.yaml" in module_contract["optional_outputs"]
+    assert "modules/{pack_name}/contracts/subscriptions.yaml" in module_contract["optional_outputs"]
+    assert "modules/{pack_name}/contracts/admin.yaml" in module_contract["optional_outputs"]
     assert "backend/handler.py" in module_contract["downstream_python_defaults"]
     assert "backend/notifications.py" in module_contract["optional_python_hooks"]
     assert "ui/index.js" in module_contract["optional_js_stubs"]

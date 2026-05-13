@@ -55,9 +55,7 @@ _ALL_SHIPPED = (
     "ActionButton",
     "Alert",
     "AlertBanner",
-    "Badge",
     "Button",
-    "Card",
     "CodeBlock",
     "DataTable",
     "Empty",
@@ -75,7 +73,6 @@ _ALL_SHIPPED = (
     "ResourceTable",
     "SegmentedBar",
     "Skeleton",
-    "Stat",
     "StatusPill",
     "SummaryStrip",
     "SurfaceCard",
@@ -138,7 +135,7 @@ class TestValidatePageUIPrimitives:
     def test_rejects_mixed_valid_and_invalid(self) -> None:
         with pytest.raises(ValueError) as exc_info:
             ui_primitives.validate_page_ui_primitives(
-                ["Card", "Wizard", "Timeline", "FakeWidget"],
+                ["Button", "Wizard", "Timeline", "FakeWidget"],
                 context="test.mixed",
             )
         message = str(exc_info.value)
@@ -161,15 +158,15 @@ class TestValidatePageUIPrimitives:
 
     def test_skips_whitespace_only_entries(self) -> None:
         result = ui_primitives.validate_page_ui_primitives(
-            ["  ", "Card", "  "], context="test.ws"
+            ["  ", "Button", "  "], context="test.ws"
         )
-        assert result == ["Card"]
+        assert result == ["Button"]
 
     def test_deduplicates_entries(self) -> None:
         result = ui_primitives.validate_page_ui_primitives(
-            ["Card", "Card", "Stat"], context="test.dedup"
+            ["Button", "Button", "Panel"], context="test.dedup"
         )
-        assert result == ["Card", "Stat"]
+        assert result == ["Button", "Panel"]
 
 
 # ---------------------------------------------------------------------------

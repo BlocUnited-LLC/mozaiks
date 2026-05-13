@@ -21,9 +21,12 @@ def _write_canonical_module(
 ) -> Path:
     module_dir = root / "modules" / module_id
     (module_dir / "backend").mkdir(parents=True)
+    (module_dir / "contracts").mkdir(parents=True)
     (root / "app.json").write_text('{"appName": "Contract Test"}', encoding="utf-8")
 
     action_event = action_emits if action_emits is not None else emitted_event
+    emits_yaml = f"[{action_event}]" if action_event else "[]"
+    emits_line = f"    emits: {emits_yaml}"
     module_dir.joinpath("module.yaml").write_text(
         f"""
 schema_version: mozaiks.module.v1
@@ -47,7 +50,7 @@ actions:
       type: object
       required: [task_id]
     permissions: [tasks.write]
-    emits: [{action_event}]
+{emits_line}
 capabilities:
   - capability_id: tasks.create
     kind: action
@@ -61,7 +64,7 @@ capabilities:
     )
 
     if include_events_manifest:
-        module_dir.joinpath("events.yaml").write_text(
+        module_dir.joinpath("contracts", "events.yaml").write_text(
             f"""
 schema_version: mozaiks.events.v1
 events:
@@ -96,8 +99,9 @@ subscriptions:
       kind: notification
       notification_id: task_created
 """.lstrip()
-    module_dir.joinpath("subscriptions.yaml").write_text(subscriptions_yaml, encoding="utf-8")
-    module_dir.joinpath("notifications.yaml").write_text(
+    module_dir.joinpath("contracts", "subscriptions.yaml").write_text(subscriptions_yaml, encoding="utf-8")
+    if subscription_target != "capability":
+        module_dir.joinpath("contracts", "notifications.yaml").write_text(
         """
 schema_version: mozaiks.notifications.v1
 notifications:
@@ -107,7 +111,7 @@ notifications:
 """.lstrip(),
         encoding="utf-8",
     )
-    module_dir.joinpath("settings.yaml").write_text(
+    module_dir.joinpath("contracts", "settings.yaml").write_text(
         """
 schema_version: mozaiks.settings.v1
 settings: []
@@ -115,7 +119,7 @@ features: []
 """.lstrip(),
         encoding="utf-8",
     )
-    module_dir.joinpath("admin.yaml").write_text(
+    module_dir.joinpath("contracts", "admin.yaml").write_text(
         """
 schema_version: mozaiks.admin.v2
 panels: []
@@ -309,10 +313,11 @@ async def test_app_loader_discovers_canonical_modules(tmp_path: Path) -> None:
 
 
 def test_module_loader_rejects_missing_companion_manifest(tmp_path: Path) -> None:
-    _write_canonical_module(tmp_path, include_events_manifest=False)
+    _write_canonical_module(tmp_path, include_events_manifest=False, action_emits="")
 
-    with pytest.raises(ModuleLoadError, match="events.yaml is required"):
-        ModuleLoader(str(tmp_path)).load("tasks")
+    loaded = ModuleLoader(str(tmp_path)).load("tasks")
+
+    assert loaded.manifests.events is None
 
 
 def test_module_loader_rejects_undeclared_emitted_event(tmp_path: Path) -> None:
@@ -333,9 +338,195 @@ def test_module_loader_rejects_non_module_owned_event_namespace(tmp_path: Path) 
         ModuleLoader(str(tmp_path)).load("tasks")
 
 
+@pytest.mark.asyncio
+async def test_module_executor_injects_settings_into_context(tmp_path: Path) -> None:
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("contracts", "settings.yaml").write_text(
+        """
+schema_version: mozaiks.settings.v1
+settings:
+  - id: max_items
+    type: integer
+    default: 50
+    label: Maximum items per page
+features: []
+""".lstrip(),
+        encoding="utf-8",
+    )
+    # Patch handler to capture ctx.settings
+    module_dir.joinpath("backend", "handler.py").write_text(
+        """
+class TasksModule:
+    async def create_task(self, ctx, *, title):
+        return {"settings": ctx.settings, "app_id": ctx.app_id}
+""".lstrip(),
+        encoding="utf-8",
+    )
+    loaded = ModuleLoader(str(tmp_path)).load("tasks")
+    executor = ModuleExecutor()
+    executor.register(
+        loaded.name,
+        loaded.handler,
+        action_method_map=loaded.action_method_map,
+        settings=loaded.manifests.settings.settings if loaded.manifests.settings is not None else None,
+    )
+
+    result = await executor.execute(
+        ModuleRequest(module="tasks", action="create", params={"title": "x"}, app_id="app_1")
+    )
+
+    assert result.success is True
+    assert result.data["settings"] == [{"id": "max_items", "type": "integer", "default": 50, "label": "Maximum items per page"}]
+
+
+@pytest.mark.asyncio
+async def test_module_executor_settings_is_none_when_not_registered(tmp_path: Path) -> None:
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("backend", "handler.py").write_text(
+        """
+class TasksModule:
+    async def create_task(self, ctx, *, title):
+        return {"settings": ctx.settings}
+""".lstrip(),
+        encoding="utf-8",
+    )
+    loaded = ModuleLoader(str(tmp_path)).load("tasks")
+    executor = ModuleExecutor()
+    executor.register(loaded.name, loaded.handler, action_method_map=loaded.action_method_map)
+
+    result = await executor.execute(
+        ModuleRequest(module="tasks", action="create", params={"title": "x"}, app_id="app_1")
+    )
+
+    assert result.success is True
+    assert result.data["settings"] is None
+
+
+@pytest.mark.asyncio
+async def test_module_executor_enforces_action_permissions(tmp_path: Path) -> None:
+    loaded = ModuleLoader(str(tmp_path)).load(_write_canonical_module(tmp_path).name)
+    executor = ModuleExecutor()
+    executor.register(
+        loaded.name,
+        loaded.handler,
+        action_method_map=loaded.action_method_map,
+        action_permissions=loaded.action_permissions_map,
+    )
+
+    # Caller has the required permission → allowed
+    result_ok = await executor.execute(
+        ModuleRequest(
+            module="tasks",
+            action="create",
+            params={"title": "x"},
+            app_id="app_1",
+            granted_permissions=["tasks.write"],
+        )
+    )
+    assert result_ok.success is True
+
+    # Caller has no permissions at all → denied
+    result_denied = await executor.execute(
+        ModuleRequest(
+            module="tasks",
+            action="create",
+            params={"title": "x"},
+            app_id="app_1",
+            granted_permissions=[],
+        )
+    )
+    assert result_denied.success is False
+    assert result_denied.error_code == "PERMISSION_DENIED"
+    assert "tasks.write" in (result_denied.error or "")
+
+
+@pytest.mark.asyncio
+async def test_module_executor_bypasses_enforcement_when_granted_permissions_is_none(tmp_path: Path) -> None:
+    loaded = ModuleLoader(str(tmp_path)).load(_write_canonical_module(tmp_path).name)
+    executor = ModuleExecutor()
+    executor.register(
+        loaded.name,
+        loaded.handler,
+        action_method_map=loaded.action_method_map,
+        action_permissions=loaded.action_permissions_map,
+    )
+
+    # granted_permissions=None → trusted call, bypasses enforcement
+    result = await executor.execute(
+        ModuleRequest(module="tasks", action="create", params={"title": "x"}, app_id="app_1")
+    )
+    assert result.success is True
+
+
+def test_module_definition_action_permissions_map(tmp_path: Path) -> None:
+    loaded = ModuleLoader(str(tmp_path)).load(_write_canonical_module(tmp_path).name)
+    perms_map = loaded.action_permissions_map
+    assert "create" in perms_map
+    assert perms_map["create"] == ["tasks.write"]
+
+
+def test_module_definition_action_schemas_map(tmp_path: Path) -> None:
+    loaded = ModuleLoader(str(tmp_path)).load(_write_canonical_module(tmp_path).name)
+    schemas = loaded.action_schemas_map
+    assert "create" in schemas
+    assert schemas["create"]["input"] == {"type": "object", "required": ["title"]}
+    assert schemas["create"]["output"] == {"type": "object", "required": ["task_id"]}
+
+
+@pytest.mark.asyncio
+async def test_module_executor_rejects_invalid_input(tmp_path: Path) -> None:
+    loaded = ModuleLoader(str(tmp_path)).load(_write_canonical_module(tmp_path).name)
+    executor = ModuleExecutor()
+    executor.register(
+        loaded.name,
+        loaded.handler,
+        action_method_map=loaded.action_method_map,
+        action_schemas=loaded.action_schemas_map,
+    )
+
+    # Missing required 'title' → INVALID_PARAMS
+    result = await executor.execute(
+        ModuleRequest(module="tasks", action="create", params={}, app_id="app_1")
+    )
+    assert result.success is False
+    assert result.error_code == "INVALID_PARAMS"
+    assert "title" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_module_executor_accepts_valid_input(tmp_path: Path) -> None:
+    loaded = ModuleLoader(str(tmp_path)).load(_write_canonical_module(tmp_path).name)
+    executor = ModuleExecutor()
+    executor.register(
+        loaded.name,
+        loaded.handler,
+        action_method_map=loaded.action_method_map,
+        action_schemas=loaded.action_schemas_map,
+    )
+
+    result = await executor.execute(
+        ModuleRequest(module="tasks", action="create", params={"title": "My Task"}, app_id="app_1")
+    )
+    assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_module_executor_skips_validation_when_no_schema(tmp_path: Path) -> None:
+    loaded = ModuleLoader(str(tmp_path)).load(_write_canonical_module(tmp_path).name)
+    executor = ModuleExecutor()
+    # Register without schemas → no validation
+    executor.register(loaded.name, loaded.handler, action_method_map=loaded.action_method_map)
+
+    result = await executor.execute(
+        ModuleRequest(module="tasks", action="create", params={}, app_id="app_1")
+    )
+    # No schema → dispatched even with missing params (handler gets TypeError → INVALID_PARAMS from existing guard)
+    assert result.error_code in (None, "INVALID_PARAMS")  # either path is acceptable without schema
+
+
 def test_module_loader_rejects_schema_admin_panel_without_sections(tmp_path: Path) -> None:
     module_dir = _write_canonical_module(tmp_path)
-    module_dir.joinpath("admin.yaml").write_text(
+    module_dir.joinpath("contracts", "admin.yaml").write_text(
         """
 schema_version: mozaiks.admin.v2
 panels:

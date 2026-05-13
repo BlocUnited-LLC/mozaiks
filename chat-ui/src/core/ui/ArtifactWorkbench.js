@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Badge, Button, Card } from '../../ui/primitives/index.js';
+import { Button, StatusPill, SurfaceCard } from '../../ui/primitives/index.js';
 import { normalizePrimitiveActions, sendPrimitiveResponse } from './workflowPrimitiveUtils.js';
 
 const fallbackActions = [
@@ -17,17 +17,12 @@ export default function ArtifactWorkbench({ payload = {}, onResponse, onCancel }
   const activeSection = sections.find((section) => String(section.id) === String(activeSectionId)) || sections[0] || null;
 
   return (
-    <Card
+    <SurfaceCard
       title={payload.title || 'Artifact workbench'}
       subtitle={payload.summary || 'Review the generated artifact sections and choose how to proceed.'}
-      className="border-border/80 bg-card/95 shadow-sm"
+      headerAction={<StatusPill label={`${sections.length} section${sections.length === 1 ? '' : 's'}`} tone="default" />}
     >
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge label="artifact_workbench" variant="secondary" />
-          <Badge label={`${sections.length} section${sections.length === 1 ? '' : 's'}`} variant="outline" />
-        </div>
-
         {sections.length > 0 ? (
           <>
             <div className="flex flex-wrap gap-2">
@@ -71,6 +66,6 @@ export default function ArtifactWorkbench({ payload = {}, onResponse, onCancel }
           ) : null}
         </div>
       </div>
-    </Card>
+    </SurfaceCard>
   );
 }

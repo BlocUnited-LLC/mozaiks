@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 
 import pytest
@@ -8,16 +9,19 @@ import yaml
 
 
 WORKSPACE = Path(__file__).resolve().parents[1]
-MOZAIKS_APP_ROOT = WORKSPACE.parent / "mozaiks-app"
-PACKS_ROOT = MOZAIKS_APP_ROOT / "app_generator" / "capability_packs"
+_PACKS_ROOT_ENV = os.getenv("MOZAIKS_HOSTED_PACKS_ROOT", "").strip()
+PACKS_ROOT = Path(_PACKS_ROOT_ENV) if _PACKS_ROOT_ENV else WORKSPACE / ".missing-hosted-packs"
 MOZAIKSPAY_ROOT = PACKS_ROOT / "mozaikspay"
 MOZAIKSPAY_MANIFEST = MOZAIKSPAY_ROOT / "manifest.yaml"
 MOZAIKSPAY_TEMPLATE = MOZAIKSPAY_ROOT / "backend_templates" / "mozaikspay_client.py"
 
 
 pytestmark = pytest.mark.skipif(
-    not MOZAIKSPAY_MANIFEST.exists(),
-    reason="mozaiks-app mozaikspay capability pack is not present in this environment",
+    not _PACKS_ROOT_ENV or not MOZAIKSPAY_MANIFEST.exists(),
+    reason=(
+        "Set MOZAIKS_HOSTED_PACKS_ROOT to a hosted capability_packs directory "
+        "to validate the optional MozaiksPay hosted pack."
+    ),
 )
 
 

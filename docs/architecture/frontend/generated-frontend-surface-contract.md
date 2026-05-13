@@ -89,6 +89,7 @@ Persistent AppGenerator pages have a deterministic gate before assembly:
 
 - `AppSchemaAgent` emits `AppSchemaOutput`
 - `save_app_schema` persists `app.json`, `ui/pages/*.yaml`, optional custom route artifacts, and `app_ui_quality_warnings`
+- `factory_app/workflows/generated_ui_contract.py` audits both declarative page schemas and optional `custom_route_bundle.page_files`
 - `AppUIQualityAgent` calls `review_ui_quality`
 - `app_ui_quality_status == "passed"` is required before `AssemblyAgent`
 - `needs_revision` routes back to `AppSchemaAgent`; `blocked` routes to user/operator review
@@ -136,6 +137,7 @@ Workflow UI owns:
 Workflow-local React now has a deterministic gate:
 
 - `UIFileGenerator` persists its emitted UI files through `save_workflow_ui_files_output`
+- `factory_app/workflows/generated_ui_contract.py` audits generated workflow-local React with the same primitive/copy/style rules used by AppGenerator custom React
 - `WorkflowUIQualityAgent` calls `review_workflow_ui_quality`
 - `workflow_ui_quality_status == "passed"` is required before backend tool generation and bundle delivery
 - `needs_revision` routes back to `UIFileGenerator`; `blocked` routes to user/operator review
@@ -154,6 +156,7 @@ Rules:
 - runtime-enriched workflow payloads should carry manifest-owned `workflow_primitive`, `ui_realization`, and `ui_contract`
 - shipped shared workflow components should derive their actions from `ui_contract.actions_schema`
 - workflow-local React is only for genuine customization or primitive gaps
+- workflow-local React must import shared primitives from `@mozaiks/chat-ui/ui`; deep `chat-ui/src` imports and removed primitives (`Card`, `Stat`, `Badge`) fail the gate
 - `UIFileGenerator` should emit canonical `CodeFile` entries under the workflow's
   `tools/` and `ui/` tree, not ad hoc frontend payload shapes
 - workflow assembly synthesizes `ui/index.js` deterministically from the

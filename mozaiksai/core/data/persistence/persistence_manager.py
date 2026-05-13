@@ -993,6 +993,26 @@ class AG2PersistenceManager:
         }
         return payload
 
+    async def delete_general_chat(
+        self,
+        *,
+        general_chat_id: str,
+        app_id: Optional[str] = None,
+        user_id: str,
+    ) -> bool:
+        coll = await self._general_coll()
+        resolved_app_id = coalesce_app_id(app_id=app_id)
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        result = await coll.delete_one(
+            {
+                "_id": str(general_chat_id),
+                "user_id": str(user_id),
+                **build_app_scope_filter(str(resolved_app_id)),
+            }
+        )
+        return bool(result.deleted_count)
+
     async def fetch_event_diff(self, *, chat_id: str, app_id: Optional[str] = None, last_sequence: int) -> List[Dict[str, Any]]:
         """Return message diff (messages with sequence > last_sequence).
 

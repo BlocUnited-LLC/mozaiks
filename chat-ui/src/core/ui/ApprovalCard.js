@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, Badge, Button, Card } from '../../ui/primitives/index.js';
+import { Alert, Button, StatusPill, SurfaceCard } from '../../ui/primitives/index.js';
 import { normalizePrimitiveActions, sendPrimitiveResponse } from './workflowPrimitiveUtils.js';
 
 const fallbackActions = [
@@ -26,17 +26,16 @@ export default function ApprovalCard({ payload = {}, onResponse, onCancel, workf
   };
 
   return (
-    <Card
+    <SurfaceCard
       title={payload.title || 'Approval required'}
       subtitle={payload.summary || 'Review the details below and choose how the workflow should proceed.'}
-      className="border-border/80 bg-card/95 shadow-sm"
+      headerAction={(
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <StatusPill label={payload.status || 'ready'} tone="default" />
+        </div>
+      )}
     >
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge label="approval_card" variant="secondary" />
-          <Badge label={payload.status || 'ready'} variant="outline" />
-        </div>
-
         {payload.error ? <Alert message={payload.error} variant="warning" /> : null}
 
         {checkpoints.length > 0 ? (
@@ -84,6 +83,6 @@ export default function ApprovalCard({ payload = {}, onResponse, onCancel, workf
           ) : null}
         </div>
       </div>
-    </Card>
+    </SurfaceCard>
   );
 }

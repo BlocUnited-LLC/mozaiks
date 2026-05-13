@@ -21,13 +21,10 @@
 
 import { DataTable }       from '../primitives/DataTable.jsx';
 import { Form }            from '../primitives/Form.jsx';
-import { Card }            from '../primitives/Card.jsx';
-import { Stat }            from '../primitives/Stat.jsx';
 import { Grid }            from '../primitives/Grid.jsx';
 import { Button }          from '../primitives/Button.jsx';
 import { Modal }           from '../primitives/Modal.jsx';
 import { Alert }           from '../primitives/Alert.jsx';
-import { Badge }           from '../primitives/Badge.jsx';
 import { Skeleton, Empty } from '../primitives/Skeleton.jsx';
 import { Timeline }        from '../primitives/Timeline.jsx';
 import { CodeBlock }       from '../primitives/CodeBlock.jsx';
@@ -54,13 +51,10 @@ import { PRIMITIVE_SCHEMAS } from './PrimitiveSchemas.js';
 const PRIMITIVES = {
   DataTable:       { Component: DataTable,       schema: PRIMITIVE_SCHEMAS.DataTable },
   Form:            { Component: Form,            schema: PRIMITIVE_SCHEMAS.Form },
-  Card:            { Component: Card,            schema: PRIMITIVE_SCHEMAS.Card },
-  Stat:            { Component: Stat,            schema: PRIMITIVE_SCHEMAS.Stat },
   Grid:            { Component: Grid,            schema: PRIMITIVE_SCHEMAS.Grid },
   Button:          { Component: Button,          schema: PRIMITIVE_SCHEMAS.Button },
   Modal:           { Component: Modal,           schema: PRIMITIVE_SCHEMAS.Modal },
   Alert:           { Component: Alert,           schema: PRIMITIVE_SCHEMAS.Alert },
-  Badge:           { Component: Badge,           schema: PRIMITIVE_SCHEMAS.Badge },
   Skeleton:        { Component: Skeleton,        schema: PRIMITIVE_SCHEMAS.Skeleton },
   Empty:           { Component: Empty,           schema: PRIMITIVE_SCHEMAS.Empty },
   Timeline:        { Component: Timeline,        schema: PRIMITIVE_SCHEMAS.Timeline },

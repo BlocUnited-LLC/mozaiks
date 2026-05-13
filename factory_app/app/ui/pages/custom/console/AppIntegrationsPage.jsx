@@ -301,10 +301,11 @@ export default function AppIntegrationsPage() {
   const vaultConfigured = Boolean(vaultAdapter?.configured)
   const savedKeysCount = connectors.filter((connector) => Boolean(connector.secret_available)).length
   const editingConnector = connectors.find((connector) => connector.service === activeService) || null
+  const integrationScopeLabel = 'External Integrations'
   const summaryItems = [
     {
       id: 'integrations',
-      label: 'Enabled Integrations',
+      label: integrationScopeLabel,
       value: connectorSummary.total || connectors.length,
       detail: 'App-level external services',
     },

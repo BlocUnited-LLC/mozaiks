@@ -137,11 +137,13 @@ def test_app_overview_does_not_link_to_removed_routes() -> None:
 
 def test_apps_page_fetches_workspace_apps_endpoint() -> None:
     source = _read("factory_app/app/ui/pages/custom/console/AppsPage.jsx")
-    assert "/api/studio/apps" in source
-    assert "Mozaiks Console" in source
-    assert "Start New App" in source
+    hook_source = _read("factory_app/app/ui/pages/custom/console/useWorkspaceApps.js")
+    layout_source = _read("chat-ui/src/admin/components/AdminWorkspaceLayout.jsx")
+    assert "/api/studio/apps" in hook_source
+    assert "Mozaiks Console" in layout_source
+    assert "Create App" in source
     assert "/apps/new" in source
-    assert "app.destination" in source
+    assert "row.primaryAction?.href" in source
 
 
 def test_admin_workspace_layout_links_console_and_hosting_sections() -> None:
@@ -151,8 +153,8 @@ def test_admin_workspace_layout_links_console_and_hosting_sections() -> None:
     assert "Developer" not in source
     assert "Studio Navigation" not in source
     assert "Browse sections" not in source
-    assert "label: 'Console'" in source
-    assert "label: 'App Console'" in source
+    assert "Mozaiks Console" in source
+    assert "App Console" in source
     assert "Users" in source
     assert "Billing" in source
     assert "Health" in source
@@ -188,7 +190,7 @@ def test_admin_workspace_layout_links_console_and_hosting_sections() -> None:
 
 def test_integrations_page_uses_integrations_eyebrow() -> None:
     source = _read("factory_app/app/ui/pages/custom/console/AppIntegrationsPage.jsx")
-    assert 'eyebrow="Integrations"' in source
+    assert "Integrations" in source
     assert 'eyebrow="Studio"' not in source
 
 

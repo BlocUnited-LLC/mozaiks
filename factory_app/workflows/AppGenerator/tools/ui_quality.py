@@ -8,6 +8,12 @@ state so AG2 handoffs can send noisy UI back to AppSchemaAgent before assembly.
 from typing import Annotated, Any, Dict, List, Optional
 
 from autogen.tools.dependency_injection import Field
+from factory_app.workflows.generated_ui_contract import (
+    audit_generated_react_files,
+    audit_page_schemas,
+    custom_route_bundle_page_files,
+    dedupe,
+)
 
 
 def _context_get(context_variables: Optional[Any], key: str, default: Any = None) -> Any:
@@ -113,6 +119,18 @@ def review_ui_quality(
         warnings.append("AppSchemaAgent did not persist app_manifest.")
     if not has_declarative_pages and not has_custom_routes:
         warnings.append("AppSchemaAgent did not persist any declarative pages or custom routes.")
+    if has_declarative_pages:
+        warnings.extend(audit_page_schemas(app_pages))
+    if has_custom_routes:
+        warnings.extend(
+            audit_generated_react_files(
+                custom_route_bundle_page_files(custom_route_bundle),
+                source_label="custom route React",
+                require_jsx=False,
+                include_ui_index=False,
+            )
+        )
+    warnings = dedupe(warnings)
 
     prior_attempts = _as_int(
         _context_get(context_variables, "app_ui_quality_revision_count", 0), 0
