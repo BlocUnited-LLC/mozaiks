@@ -43,7 +43,9 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: web_shell/package-lock.json
+          cache-dependency-path: |
+            web_shell/package-lock.json
+            chat-ui/package-lock.json
 
       - name: Resolve release metadata
         id: meta
@@ -78,6 +80,7 @@ jobs:
           MOZAIKS_FACTORY_APP_PATH: ${{ github.workspace }}/factory_app
           MOZAIKS_CHAT_UI_PATH: ${{ github.workspace }}/chat-ui
         run: |
+          npm --prefix ../chat-ui ci
           npm ci
           npm run build
 
