@@ -1831,6 +1831,15 @@ models:
       context_variables:
         type: optional_dict
         description: Deterministic context variables seeded when this option is selected. Keys must be declared by the target workflow context_variables.yaml.
+  PackGraphShellMode:
+    type: literal
+    values:
+    - standard
+    - workspace
+    - conversation
+    - focused
+    - immersive
+    - public
   PackGraphTransitionUI:
     type: model
     fields:
@@ -1842,6 +1851,16 @@ models:
         values:
         - screen
         description: Transition render mode
+      shell_mode:
+        type: union
+        variants:
+        - PackGraphShellMode
+        - 'null'
+        default: null
+        description: >
+          Shell chrome mode while this transition is active. Use focused for setup,
+          choice, approval, and review screens unless the transition should inherit
+          normal app chrome.
       props:
         type: optional_dict
         description: Optional transition presentation props consumed by the selected shell component.
@@ -1976,6 +1995,37 @@ models:
       PackMetadata:
         type: PackMetadata
         description: Pack metadata wrapper
+  WorkflowUIQualityReviewRequest:
+    type: model
+    fields:
+      status:
+        type: literal
+        values:
+        - passed
+        - needs_revision
+        - blocked
+        description: Agent's expected status hint before review_workflow_ui_quality runs.
+      warnings:
+        type: optional_list
+        items: str
+        description: Warning snapshot from context, if visible to the agent.
+      revision_count:
+        type: int
+        description: Current revision count snapshot.
+        default: 0
+      max_revision_attempts:
+        type: int
+        description: Maximum automated UIFileGenerator revision loops before blocking.
+        default: 2
+      revision_request:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Current revision request snapshot, if any.
+      agent_message:
+        type: str
+        description: Concise quality-gate message before review_workflow_ui_quality runs.
 
 registry:
   InterviewAgent: null
@@ -1988,6 +2038,7 @@ registry:
   ContextVariablesAgent: ContextVariablesPlanOutput
   ToolsManagerAgent: ToolsManifestOutput
   UIFileGenerator: UIToolsFilesOutput
+  WorkflowUIQualityAgent: WorkflowUIQualityReviewRequest
   AgentToolsFileGenerator: AgentToolsFilesOutput
   HookAgent: HookFilesOutput
   AgentsAgent: RuntimeAgentsOutput

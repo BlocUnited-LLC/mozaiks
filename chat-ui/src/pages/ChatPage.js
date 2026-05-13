@@ -5840,12 +5840,7 @@ useEffect(() => {
     </div>
   ) : null;
 
-  const shouldReserveArtifactSpace = conversationMode === 'workflow';
-  const mobileChatPaddingBottomClass = shouldReserveArtifactSpace
-    ? (mobileDrawerState === 'expanded'
-        ? 'pb-[calc(env(safe-area-inset-bottom,0px)+0.5rem)]'
-        : 'pb-[calc(env(safe-area-inset-bottom,0px)+5rem)]')
-    : 'pb-[calc(env(safe-area-inset-bottom,0px)+0.5rem)]';
+  const mobileChatPaddingBottomClass = 'pb-[calc(env(safe-area-inset-bottom,0px)+0.5rem)]';
   const mobileChatTopMarginClass = 'mt-0';
 
   const isChatPageSurface = isPrimaryChatRoute && !isInWidgetMode && !isViewMode;
@@ -5996,6 +5991,7 @@ useEffect(() => {
         pendingHarnessDecisionBusy={pendingHarnessDecisionBusy}
         pendingHarnessDecisionError={pendingHarnessDecisionError}
         onPendingHarnessDecisionAction={handlePendingHarnessDecisionAction}
+        hasUnseenArtifact={hasUnseenArtifact}
       />
     </ErrorBoundary>
   );

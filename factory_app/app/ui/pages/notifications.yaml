@@ -1,0 +1,67 @@
+name: notifications
+route: /notifications
+title: Notifications
+layout: full-width
+roles: []
+sections:
+  - id: notifications-header
+    primitive: PageHeader
+    title: null
+    config:
+      title: Notifications
+      subtitle: Review alerts from app builds, deployments, and workflow runs.
+      title_font: body
+  - id: notifications-list
+    primitive: ResourceTable
+    title: null
+    config:
+      api_endpoint: /api/notifications
+      data_key: notifications
+      columns:
+        - key: notification
+          label: Notification
+          type: stack
+        - key: status
+          label: Status
+          type: badge
+        - key: module_id
+          label: Source
+        - key: created_at
+          label: Created
+          type: date
+          sortable: true
+      selection: none
+      search: true
+      search_placeholder: Search notifications...
+      search_keys:
+        - title
+        - body
+        - module_id
+        - event_type
+      filters:
+        - label: All
+          value: all
+        - label: Unread
+          value: unread
+          field: status_value
+          match_values:
+            - unread
+        - label: Read
+          value: read
+          field: status_value
+          match_values:
+            - read
+      default_filter: all
+      sorts:
+        - label: Recently created
+          value: recent
+          key: created_at
+          direction: desc
+          type: date
+      default_sort: recent
+      pagination: true
+      page_size: 20
+      empty:
+        title: No notifications
+        message: New build, deployment, and workflow alerts appear here.
+        error_title: Could not load notifications

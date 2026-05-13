@@ -383,6 +383,84 @@ export function SectionRenderer({
   let primitiveProps;
 
   switch (section.primitive) {
+    case 'PageHeader': {
+      const headerActions = materializeActions(config.actions, executeAction, section.id);
+      const actionLookup = new Map(headerActions.map((action) => [action.id ?? action.label, action]));
+      primitiveProps = {
+        id: componentId,
+        title: config.title,
+        subtitle: config.subtitle,
+        actions: headerActions,
+        title_font: config.title_font ?? config.titleFont ?? 'body',
+        onAction: (actionId) => {
+          const action = actionLookup.get(actionId);
+          if (action) void executeAction(action, {});
+        },
+      };
+      break;
+    }
+    case 'SummaryStrip':
+      primitiveProps = {
+        id: componentId,
+        items: Array.isArray(config.items) ? config.items : [],
+      };
+      break;
+    case 'InlineEmptyState': {
+      const action = buildEmptyAction(config, executeAction, section.id);
+      primitiveProps = {
+        id: componentId,
+        title: config.title,
+        description: config.description ?? config.message,
+        action,
+      };
+      break;
+    }
+    case 'LoadingState':
+      primitiveProps = {
+        id: componentId,
+        label: config.label,
+      };
+      break;
+    case 'ErrorState':
+      primitiveProps = {
+        id: componentId,
+        title: config.title,
+        message: config.message,
+      };
+      break;
+    case 'Panel':
+    case 'SurfaceCard':
+      primitiveProps = {
+        id: componentId,
+        title: config.title,
+        eyebrow: config.eyebrow,
+        subtitle: config.subtitle,
+        accent: config.accent,
+        children: nestedChildren.length ? nestedChildren : undefined,
+      };
+      break;
+    case 'StatusPill':
+      primitiveProps = {
+        id: componentId,
+        label: config.label,
+        tone: config.tone ?? 'default',
+      };
+      break;
+    case 'Metric':
+      primitiveProps = {
+        id: componentId,
+        label: config.label,
+        value: config.value,
+        detail: config.detail,
+      };
+      break;
+    case 'SegmentedBar':
+      primitiveProps = {
+        id: componentId,
+        segments: Array.isArray(config.segments) ? config.segments : [],
+      };
+      break;
+    case 'ResourceTable':
     case 'DataTable': {
       const actions = materializeActions(config.toolbar_actions ?? config.actions, executeAction, section.id);
       const emptyAction = buildEmptyAction(config.empty, executeAction, `${section.id}-empty`);
@@ -413,6 +491,7 @@ export function SectionRenderer({
             : undefined,
         loading: effectiveLoading,
         onRefresh: refreshTargetId ? refetchCurrentSection : undefined,
+        variant: section.primitive === 'ResourceTable' ? 'resource' : undefined,
       };
       break;
     }

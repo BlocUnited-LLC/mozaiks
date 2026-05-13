@@ -1,0 +1,1 @@
+Generate the persistent app UI from the seeded upstream context. Treat app_build_plan as mandatory source material: manifest.app_name must be Support Operations, pages must be /tickets and /settings, and sections must use the provided PageHeader, ResourceTable, and Form hints. Do not interview the user. Do not invent generic Home/Profile/Dashboard pages or MyApplication copy.

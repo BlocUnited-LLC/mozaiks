@@ -20,10 +20,10 @@ const DialogOverlay = forwardRef(({ className, ...props }, ref) => (
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
 const sizeClasses = {
-  small:  'max-w-sm',
-  medium: 'max-w-lg',
-  large:  'max-w-2xl',
-  full:   'max-w-[95vw] h-[95vh]',
+  small: 'sm:max-w-sm',
+  medium: 'sm:max-w-lg',
+  large: 'sm:max-w-2xl',
+  full: 'sm:max-w-[95vw] sm:h-[95vh]',
 };
 
 const DialogContent = forwardRef(({ className, children, size = 'medium', ...props }, ref) => (
@@ -32,13 +32,14 @@ const DialogContent = forwardRef(({ className, children, size = 'medium', ...pro
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        'fixed left-[50%] top-[50%] z-50 grid w-full translate-x-[-50%] translate-y-[-50%] gap-4 border border-border bg-background p-6 shadow-lg duration-200',
+        'fixed inset-x-0 bottom-0 z-50 grid w-full gap-4 border border-border bg-background p-5 shadow-lg duration-200',
         'data-[state=open]:animate-in data-[state=closed]:animate-out',
         'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
-        'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
-        'data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%]',
-        'data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]',
-        'rounded-lg',
+        'data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom',
+        'rounded-t-[1.75rem] border-b-0 sm:left-[50%] sm:top-[50%] sm:right-auto sm:bottom-auto sm:w-full sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-[1.75rem] sm:border-b',
+        'sm:data-[state=closed]:zoom-out-95 sm:data-[state=open]:zoom-in-95',
+        'sm:data-[state=closed]:slide-out-to-left-1/2 sm:data-[state=closed]:slide-out-to-top-[48%]',
+        'sm:data-[state=open]:slide-in-from-left-1/2 sm:data-[state=open]:slide-in-from-top-[48%]',
         sizeClasses[size] ?? sizeClasses.medium,
         className
       )}
@@ -56,7 +57,7 @@ const DialogHeader = ({ className, ...props }) => (
 DialogHeader.displayName = 'DialogHeader';
 
 const DialogFooter = ({ className, ...props }) => (
-  <div className={cn('flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2', className)} {...props} />
+  <div className={cn('flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end', className)} {...props} />
 );
 DialogFooter.displayName = 'DialogFooter';
 

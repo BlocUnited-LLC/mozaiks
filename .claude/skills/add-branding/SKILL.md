@@ -32,7 +32,7 @@ For assets:
 |------|----------|
 | `app/app.json` | App name, auth requirement, admin emails, startup landing spot |
 | `app/brand/theme_config.json` | Colors, fonts, spacing, dark/light mode, shell chrome |
-| `app/config/shell.json` | Header, footer, profile, notification chrome |
+| `app/config/shell.json` | Compact shell shortcuts, navigation policy, chrome mode policy, plus header/footer/profile/notification/mobile overrides |
 | `app/config/ai.json` | Entry workflow, startup mode |
 
 ## Rules
@@ -42,6 +42,77 @@ For assets:
 - Keep workflow startup settings in `ai.json`
 - Shell branding (logos, fonts, login theme) belongs in `app/brand/`
 - `app/app.json` is for app identity and startup intent — not colors or shell chrome
+- Prefer `app/config/shell.json -> shortcuts` for common shell items so the file stays small.
+- Prefer route-level `ui/pages/*.yaml -> navigation` for page-owned navigation entries; use `app/config/shell.json -> navigation.policy` for app-wide placement rules.
+- Prefer route-level `ui/pages/*.yaml -> shell_mode` for per-route header/footer/bottom-bar behavior; use `app/config/shell.json -> chrome` only for app-wide mode defaults.
+- Use explicit `header`, `profile`, `notifications`, `footer`, or `mobile` objects only when labels, icons, roles, or paths need custom overrides.
+- Common shortcut ids include `dashboard`, `wallet`, `create`, `profile`, `messages`, `notifications`, `settings`, `admin`, `support`, `signout`, `signin`, `legal`, `terms`, `cookies`, and `privacy`.
+
+## Shell Shortcuts
+
+```json
+{
+  "shortcuts": {
+    "header": ["dashboard", "wallet"],
+    "profile": ["profile", "wallet", "signout", "signin"],
+    "mobile": ["dashboard", "wallet", "create", "profile"],
+    "footer": ["legal", "terms", "cookies"],
+    "footerHideOnMobile": true
+  }
+}
+```
+
+The backend expands this into the full shell config returned by `/api/shell-config`.
+
+## Dynamic Navigation Policy
+
+```json
+{
+  "navigation": {
+    "policy": {
+      "desktop": { "global": "header", "local": "sidebar", "footer": "visible" },
+      "mobile": { "global": "bottomBar", "local": "sheet", "footer": "hidden" },
+      "maxMobileItems": 5,
+      "autoFromPages": false
+    }
+  }
+}
+```
+
+Keep `autoFromPages` false unless you intentionally want every page route to
+become global navigation.
+
+## Dynamic Chrome Modes
+
+Pages choose a `shell_mode`:
+
+```yaml
+shell_mode: workspace
+```
+
+Mode meanings:
+- `standard`: normal app page.
+- `workspace`: dense dashboard, admin/profile/module workspace, or local nav surface.
+- `conversation`: chat, DM, inbox thread, or support conversation.
+- `focused`: onboarding, setup, review, approval, checkout, or transition-like screen.
+- `immersive`: full-viewport map, canvas, media, game, or kiosk.
+- `public`: public, legal, marketing, or unauthenticated route.
+
+Override mode behavior in `shell.json` only when the app-wide default is wrong:
+
+```json
+{
+  "chrome": {
+    "defaultMode": "standard",
+    "modes": {
+      "conversation": {
+        "desktop": { "header": true, "footer": false, "bottomBar": false, "localNav": false },
+        "mobile": { "header": true, "footer": false, "bottomBar": false, "localNav": false }
+      }
+    }
+  }
+}
+```
 
 ## Verification
 

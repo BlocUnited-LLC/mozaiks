@@ -139,32 +139,22 @@ def validate_page_ui_primitives(
     )
 
 
-def _group_exports_by_source(
-    exports: Tuple[UIPrimitiveExport, ...],
-) -> Dict[str, List[str]]:
-    grouped: Dict[str, List[str]] = {}
-    for entry in exports:
-        grouped.setdefault(entry.source_file, []).append(entry.name)
-    return dict(sorted(grouped.items()))
-
-
 def format_component_ui_primitive_guidance() -> str:
     names = ", ".join(get_component_ui_primitive_names())
-    grouped = _group_exports_by_source(get_component_ui_primitive_exports())
-    import_lines = [
-        f"import {{ {', '.join(names_for_source)} }} from '@mozaiks/chat-ui/ui/primitives/{source_file}'"
-        for source_file, names_for_source in grouped.items()
-    ]
-    imports_block = "\n".join(import_lines)
     return (
-        "Live shipped agent/UI primitives from `@mozaiks/chat-ui/ui/primitives/index.js`:\n"
+        "Live shipped agent/UI primitives from the public `@mozaiks/chat-ui/ui` entrypoint:\n"
         f"- {names}\n\n"
         "Use ONLY these names in `primitives_hint` and generated component imports.\n"
-        "Suggested import statements:\n"
+        "Import primitives from the public UI barrel, never from deep primitive files:\n"
         "```js\n"
-        f"{imports_block}\n"
+        f"import {{ {names} }} from '@mozaiks/chat-ui/ui'\n"
         "```"
     )
+
+
+def format_generated_component_ui_primitive_guidance() -> str:
+    """Guidance wrapper for generated workflow/custom React components."""
+    return format_component_ui_primitive_guidance()
 
 
 @lru_cache(maxsize=1)
@@ -181,6 +171,10 @@ def _load_primitive_schemas() -> Optional[Dict[str, Dict]]:
         return {k: v for k, v in raw.items() if not k.startswith("_")}
     except Exception:
         return None
+
+
+def load_primitive_schemas() -> Optional[Dict[str, Dict]]:
+    return _load_primitive_schemas()
 
 
 def format_page_ui_primitive_guidance() -> str:
@@ -205,9 +199,16 @@ def format_page_ui_primitive_guidance() -> str:
     )
 
 
+def format_generated_page_ui_primitive_guidance() -> str:
+    """Guidance wrapper for generated declarative page schemas."""
+    return format_page_ui_primitive_guidance()
+
+
 __all__ = [
     "UIPrimitiveExport",
     "format_component_ui_primitive_guidance",
+    "format_generated_component_ui_primitive_guidance",
+    "format_generated_page_ui_primitive_guidance",
     "format_page_ui_primitive_guidance",
     "get_component_ui_primitive_exports",
     "get_component_ui_primitive_names",

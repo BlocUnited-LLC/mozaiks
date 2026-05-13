@@ -25,6 +25,7 @@ from mozaiksai.core.workflow.generator_support.agent_endpoints import (
     resolve_agent_websocket_url,
 )
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+    collect_generated_app_file_map,
     extract_code_file_map_from_payload,
 )
 from mozaiksai.core.workflow.generator_support.workflow_exports import get_latest_workflow_export
@@ -75,6 +76,42 @@ def _discover_code_files(col: Dict[str, Any]) -> Dict[str, str]:
                     pass
         except Exception:
             continue
+    return out
+
+
+def _context_get(context_variables: Optional[Any], key: str) -> Optional[Any]:
+    if context_variables is None:
+        return None
+    if hasattr(context_variables, "get"):
+        try:
+            return context_variables.get(key)
+        except Exception:
+            pass
+    data = getattr(context_variables, "data", None)
+    if isinstance(data, dict):
+        return data.get(key)
+    if isinstance(context_variables, dict):
+        return context_variables.get(key)
+    return None
+
+
+def _is_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "passed", "ready"}
+    return bool(value)
+
+
+def _discover_context_files(context_variables: Optional[Any]) -> Dict[str, str]:
+    raw = _context_get(context_variables, "generated_files")
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, str] = {}
+    for rel_path, content in raw.items():
+        safe = _safe_relpath(str(rel_path))
+        if safe:
+            out[safe] = str(content)
     return out
 
 
@@ -371,6 +408,17 @@ async def generate_and_download(
     pm = AG2PersistenceManager()
     collected = await pm.gather_latest_agent_jsons(chat_id=chat_id, app_id=app_id)
     files_map = _discover_code_files(collected)
+    if not files_map:
+        files_map = _discover_context_files(context_variables)
+    if not files_map and _is_truthy(_context_get(context_variables, "app_schema_ready")):
+        files_map = collect_generated_app_file_map(
+            _context_get(context_variables, "generated_app_dir")
+        )
+        if files_map and context_variables is not None and hasattr(context_variables, "set"):
+            try:
+                context_variables.set("generated_files", files_map)
+            except Exception:
+                pass
     if not files_map:
         return {"status": "error", "message": "No code_files found to bundle."}
     await _inject_agent_context_env(files_map=files_map, app_id=str(app_id), context_variables=context_variables)

@@ -266,7 +266,7 @@ def build_exposure_update_hook(
         UpdateSystemMessage hook or None if no valid exposures
     """
     valid_exposures = [exp for exp in exposures if isinstance(exp, dict)]
-    if not valid_exposures:
+    if not valid_exposures and not fallback_variables:
         return None
 
     def _update(agent: ConversableAgent, messages: List[Dict[str, Any]]) -> str:

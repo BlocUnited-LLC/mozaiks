@@ -62,7 +62,7 @@ Top-level shape:
   "transitions": [{
     "id": "choose_path",
     "transition_type": "user_choice",
-    "ui": { "component": "LauncherScreen", "mode": "screen" },
+    "ui": { "component": "LauncherScreen", "mode": "screen", "shell_mode": "focused" },
     "options": [
       { "id": "build", "route_to": "ValueEngine" }
     ]
@@ -101,12 +101,18 @@ Defines workflow-owned shell routes:
 
 Use entrypoints only for routes that enter workflows or transition screens.
 Persistent product pages are discovered from page/UI owner manifests.
+Entrypoints that mount transition UI should usually set
+`meta.shellMode: "focused"` so the shell suppresses footer and mobile bottom
+navigation while the routing choice is active.
 
 ### 2.4 `transitions[]`
 Defines router decision points:
 - `id` (string, required): transition id.
 - `transition_type` (string, required): `user_choice`, `user_choice_context`, `user_choice_route`, `condition`, `confirm`, `silent`, `progress_view`, or `prerequisite_redirect`.
 - `ui` (object, required for `user_choice` and `confirm`): registered shell component binding, never a file path.
+- `ui.shell_mode` (string, optional): shell chrome mode while the transition is
+  active. Use `focused` for choice, setup, approval, and review screens unless
+  the transition intentionally needs normal product chrome.
 - `options` (list, optional): selectable targets for `user_choice`; each option declares its own `route_to`, the UI emits option id, and the router resolves the target.
 - `options[].sequence` (string, optional): explicit sequence override for the selected branch.
 - `route_to` (string, optional): direct target for single-route transitions.

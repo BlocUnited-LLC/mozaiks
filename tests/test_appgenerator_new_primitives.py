@@ -1,15 +1,14 @@
 """
-Tests for AppGenerator new L3 primitives: Timeline, CodeBlock, ProgressTracker,
-AlertBanner, ActionButton, FileList.
+Tests for AppGenerator shipped page primitives.
 
 Covers:
-  - All 6 new primitives are present in get_page_ui_primitive_names()
-  - validate_page_ui_primitives accepts each new primitive individually
-  - validate_page_ui_primitives accepts all 17 shipped primitives at once
+  - Newer primitives are present in get_page_ui_primitive_names()
+  - validate_page_ui_primitives accepts each newer primitive individually
+  - validate_page_ui_primitives accepts all shipped primitives at once
   - validate_page_ui_primitives rejects unknown names with an actionable message
   - validate_page_ui_primitives handles None / empty / whitespace / duplicates
-  - structured_outputs.yaml AppPageSection.primitive contains all 6 new names
-  - format_page_ui_primitive_guidance() mentions all 6 new names
+  - structured_outputs.yaml AppPageSection.primitive contains all shipped names
+  - format_page_ui_primitive_guidance() mentions newer names
 """
 from __future__ import annotations
 
@@ -33,6 +32,17 @@ _STRUCTURED_OUTPUTS = (
 )
 
 _NEW_PRIMITIVES = (
+    "PageHeader",
+    "ResourceTable",
+    "SummaryStrip",
+    "InlineEmptyState",
+    "LoadingState",
+    "ErrorState",
+    "Panel",
+    "SurfaceCard",
+    "StatusPill",
+    "Metric",
+    "SegmentedBar",
     "Timeline",
     "CodeBlock",
     "ProgressTracker",
@@ -51,13 +61,24 @@ _ALL_SHIPPED = (
     "CodeBlock",
     "DataTable",
     "Empty",
+    "ErrorState",
     "FileList",
     "Form",
     "Grid",
+    "InlineEmptyState",
+    "LoadingState",
+    "Metric",
     "Modal",
+    "PageHeader",
+    "Panel",
     "ProgressTracker",
+    "ResourceTable",
+    "SegmentedBar",
     "Skeleton",
     "Stat",
+    "StatusPill",
+    "SummaryStrip",
+    "SurfaceCard",
     "Timeline",
 )
 
@@ -66,7 +87,7 @@ _ALL_SHIPPED = (
 # get_page_ui_primitive_names()
 # ---------------------------------------------------------------------------
 
-def test_get_page_ui_primitive_names_returns_all_17() -> None:
+def test_get_page_ui_primitive_names_returns_all_shipped() -> None:
     names = ui_primitives.get_page_ui_primitive_names()
     assert set(names) == set(_ALL_SHIPPED), (
         f"Unexpected catalog. Missing: {set(_ALL_SHIPPED) - set(names)}. "

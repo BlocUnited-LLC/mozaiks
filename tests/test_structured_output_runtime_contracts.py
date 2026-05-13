@@ -43,6 +43,7 @@ def test_agentgenerator_structured_outputs_load_optional_dict_contracts() -> Non
     )
 
     assert entrypoint.meta is None
+    assert transition_ui.shell_mode is None
     assert transition_ui.props is None
     assert option.context_variables is None
 
@@ -72,7 +73,7 @@ def test_appgenerator_structured_outputs_load_child_workflow_spec_contract() -> 
     assert child.context_variables["current_build_task_id"] == "task_backend_foundation"
 
 
-def test_appgenerator_app_schema_output_schema_marks_section_fields_required() -> None:
+def test_appgenerator_app_schema_output_schema_uses_strict_section_config_union() -> None:
     workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
 
     _workflow_manager_mod.UnifiedWorkflowManager._instance = None
@@ -84,6 +85,7 @@ def test_appgenerator_app_schema_output_schema_marks_section_fields_required() -
     _, registry = _structured_mod.load_workflow_structured_outputs("AppGenerator")
     schema = registry["AppSchemaAgent"].model_json_schema()
     section_schema = schema["properties"]["pages"]["items"]["properties"]["sections"]["items"]
+    config_schema = section_schema["properties"]["config"]
 
     assert section_schema["required"] == [
         "id",
@@ -93,10 +95,11 @@ def test_appgenerator_app_schema_output_schema_marks_section_fields_required() -
         "event_triggers",
         "roles",
     ]
-    assert section_schema["properties"]["config"]["required"] == []
+    assert "anyOf" in config_schema
+    assert "additionalProperties" not in config_schema
 
 
-def test_appgenerator_app_schema_output_disables_provider_strict_response_format() -> None:
+def test_appgenerator_app_schema_output_supports_provider_strict_response_format() -> None:
     workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
 
     _workflow_manager_mod.UnifiedWorkflowManager._instance = None
@@ -110,11 +113,11 @@ def test_appgenerator_app_schema_output_disables_provider_strict_response_format
         registry["AppSchemaAgent"]
     )
 
-    assert supported is False
-    assert offending_path == "AppSchemaOutput.pages[].sections[].config"
+    assert supported is True
+    assert offending_path is None
 
 
-def test_get_llm_for_workflow_skips_response_format_for_open_ended_object_models() -> None:
+def test_get_llm_for_workflow_keeps_response_format_for_app_schema_agent() -> None:
     workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
 
     _workflow_manager_mod.UnifiedWorkflowManager._instance = None
@@ -123,6 +126,8 @@ def test_get_llm_for_workflow_skips_response_format_for_open_ended_object_models
     _structured_mod._workflow_registries.clear()
     _structured_mod._workflow_structured_agents.clear()
 
+    _, registry = _structured_mod.load_workflow_structured_outputs("AppGenerator")
+    expected_model = registry["AppSchemaAgent"]
     seen: dict[str, object] = {}
 
     async def _fake_get_llm_config(*, response_format=None, extra_config=None, cache=True):
@@ -141,8 +146,8 @@ def test_get_llm_for_workflow_skips_response_format_for_open_ended_object_models
     finally:
         _structured_mod.get_llm_config = original
 
-    assert seen["response_format"] is None
-    assert "response_format" not in cfg
+    assert seen["response_format"] is expected_model
+    assert cfg == {"config_list": [], "tools": []}
 
 
 def test_get_llm_for_workflow_keeps_response_format_for_strict_safe_models() -> None:

@@ -15,7 +15,6 @@ import zipfile
 from logs.logging_config import get_workflow_logger
 from logs.runtime_artifacts import get_agent_outputs_dir
 from mozaiksai.core.chat_attachments import inject_bundle_attachments_into_payload
-from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
 from mozaiksai.core.workflow.generator_support.agent_endpoints import (
     resolve_agent_api_url,
@@ -191,6 +190,14 @@ async def generate_and_download(
         app_id = context_variables.get('app_id')
         workflow_name = context_variables.get('workflow_name')
         user_id = context_variables.get('user_id')
+        workflow_ui_quality_status = context_variables.get('workflow_ui_quality_status')
+        if workflow_ui_quality_status and workflow_ui_quality_status != "passed":
+            warnings = context_variables.get('workflow_ui_quality_warnings') or []
+            warning_text = "; ".join(str(item) for item in warnings[:3]) if isinstance(warnings, list) else str(warnings)
+            raise ValueError(
+                "workflow_ui_quality_status must be 'passed' before workflow bundle generation. "
+                f"Current status: {workflow_ui_quality_status}. {warning_text}".strip()
+            )
 
     wf_logger = get_workflow_logger(workflow_name=(workflow_name or "missing"), chat_id=chat_id, app_id=app_id)
     tlog = None
@@ -215,6 +222,8 @@ async def generate_and_download(
         return {"status": "error", "message": "chat_id and app_id are required"}
 
     # PHASE 1: Gather latest agent JSON outputs (always needed for metadata or file creation)
+    from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+
     pm = AG2PersistenceManager()
     wf_logger.info(f"🔍 [GATHER] Calling gather_latest_agent_jsons for chat_id={chat_id} app_id={app_id}")
     collected = await pm.gather_latest_agent_jsons(chat_id=chat_id, app_id=app_id)

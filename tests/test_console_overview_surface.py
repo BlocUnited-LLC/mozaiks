@@ -37,10 +37,18 @@ async def test_platform_app_exposes_console_routes_only_on_studio_surface(monkey
     assert "os.getenv" not in studio_source
     assert "STUDIO_SHELL_ROUTES" not in platform_source
     assert "/usage" in console_pages
-    assert "/operations" in console_pages
     assert "/billing" in console_pages
-    assert "/settings" in console_pages
+    assert "/hosting" in console_pages
+    assert "/operations" not in console_pages
+    assert "/settings" not in console_pages
     assert "/apps/:appId/overview" in console_pages
+    assert "/apps/:appId/billing" in console_pages
+    assert "/apps/:appId/hosting" in console_pages
+    assert "/apps/:appId/build" not in console_pages
+    assert "/apps/:appId/deploy" not in console_pages
+    assert "/apps/:appId/operations" not in console_pages
+    assert "/apps/:appId/settings" not in console_pages
+    assert "/apps/:appId/admin" not in console_pages
     assert console_pages["/apps/:appId/overview"]["component"] == "AppOverviewPage"
     assert console_pages["/apps/:appId/overview"]["meta"]["requiresRole"] == "admin"
     assert "/apps/:appId/overview" not in platform_paths

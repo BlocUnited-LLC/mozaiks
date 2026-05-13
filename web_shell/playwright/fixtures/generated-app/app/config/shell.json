@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "landing_spot": "/tickets",
+  "header": {
+    "actions": []
+  },
+  "footer": {
+    "visible": false
+  }
+}

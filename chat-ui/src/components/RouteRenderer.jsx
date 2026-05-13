@@ -18,6 +18,7 @@ import { TransitionScreen } from '../ui/screens/TransitionScreen';
 import { useChatUI } from '../context/ChatUIContext';
 import Header from './layout/Header';
 import Footer from './layout/Footer';
+import MobileBottomBar from './layout/MobileBottomBar';
 import { useTheme } from '../styles/useTheme';
 import { getChatBackgroundSrc } from '../styles/brandAssets';
 
@@ -63,6 +64,30 @@ const resolveRouteUserId = (user) => {
     user?.email ||
     null
   );
+};
+
+const resolveShellMode = (route, chrome) => {
+  const declared =
+    route?.meta?.shellMode ||
+    route?.meta?.shell_mode ||
+    route?.shellMode ||
+    route?.shell_mode;
+  if (declared && chrome?.modes?.[declared]) return declared;
+  if (chrome?.defaultMode && chrome?.modes?.[chrome.defaultMode]) return chrome.defaultMode;
+  return 'standard';
+};
+
+const isChromeSlotVisible = (value, fallback = false) => {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === 'string') return !['hidden', 'false', 'none'].includes(value.toLowerCase());
+  return value !== false;
+};
+
+const viewportClassName = ({ desktop, mobile }) => {
+  if (desktop && mobile) return '';
+  if (desktop && !mobile) return 'hidden md:block';
+  if (!desktop && mobile) return 'md:hidden';
+  return 'hidden';
 };
 
 /**
@@ -240,11 +265,32 @@ function WorkflowEntryRoute({ route }) {
   return <DefaultLoadingFallback />;
 }
 
-function ShellChromeLayout({ children }) {
+function ShellChromeLayout({ children, route }) {
   const { user, config } = useChatUI();
+  const { chrome } = useNavigation();
   const defaultAppId = config?.chat?.defaultAppId || null;
   const { theme: chatTheme, loading: themeLoading } = useTheme(defaultAppId);
   const chatBackgroundSrc = getChatBackgroundSrc(chatTheme);
+  const shellMode = resolveShellMode(route, chrome);
+  const modeChrome = chrome?.modes?.[shellMode] || chrome?.modes?.standard || {};
+  const desktopChrome = modeChrome.desktop || {};
+  const mobileChrome = modeChrome.mobile || {};
+
+  const showHeaderDesktop = isChromeSlotVisible(desktopChrome.header, true);
+  const showHeaderMobile = isChromeSlotVisible(mobileChrome.header, true);
+  const showFooterDesktop = isChromeSlotVisible(desktopChrome.footer, false);
+  const showFooterMobile = isChromeSlotVisible(mobileChrome.footer, false);
+  const showBottomBarMobile = isChromeSlotVisible(mobileChrome.bottomBar, false);
+
+  const frameClassName = [
+    'relative z-0 flex min-h-screen flex-col',
+    showHeaderMobile ? 'pt-14' : 'pt-0',
+    showHeaderDesktop ? 'md:pt-16' : 'md:pt-0',
+    showBottomBarMobile ? 'pb-20' : 'pb-0',
+    'md:pb-0',
+  ].join(' ');
+  const headerClassName = viewportClassName({ desktop: showHeaderDesktop, mobile: showHeaderMobile });
+  const footerClassName = viewportClassName({ desktop: showFooterDesktop, mobile: showFooterMobile });
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[var(--color-background)] text-[var(--color-text-primary)]">
@@ -253,11 +299,24 @@ function ShellChromeLayout({ children }) {
         alt=""
         className="fixed inset-0 -z-10 h-full w-full object-cover"
       />
-      <Header user={user} chatTheme={chatTheme} themeLoading={themeLoading} />
-      <div className="relative z-0 flex min-h-screen flex-col pt-14 md:pt-16">
+      {(showHeaderDesktop || showHeaderMobile) && (
+        <div className={headerClassName}>
+          <Header user={user} chatTheme={chatTheme} themeLoading={themeLoading} />
+        </div>
+      )}
+      <div className={frameClassName}>
         <main className="flex min-h-0 flex-1 flex-col">{children}</main>
-        <Footer />
+        {(showFooterDesktop || showFooterMobile) && (
+          <div className={footerClassName}>
+            <Footer />
+          </div>
+        )}
       </div>
+      {showBottomBarMobile && (
+        <div className="md:hidden">
+          <MobileBottomBar />
+        </div>
+      )}
     </div>
   );
 }
@@ -292,7 +351,7 @@ const RouteWrapper = ({
 
   const content = <Component route={route} />;
   if (wrapInAppShell) {
-    return <ShellChromeLayout>{content}</ShellChromeLayout>;
+    return <ShellChromeLayout route={route}>{content}</ShellChromeLayout>;
   }
   return content;
 };

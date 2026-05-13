@@ -1,0 +1,13 @@
+{
+  "appName": "Support Operations",
+  "appId": "support-operations",
+  "startup": {
+    "landing_spot": "/tickets"
+  },
+  "targets": {
+    "web": true,
+    "mobile": true
+  },
+  "authRequired": false,
+  "admins": []
+}

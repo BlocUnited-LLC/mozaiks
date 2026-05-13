@@ -8,6 +8,10 @@ hooks:
   filename: hook_primitive_catalog.py
   function: inject_primitive_catalog
 - hook_type: update_agent_state
+  hook_agent: AppUIQualityAgent
+  filename: hook_app_ui_quality_gate.py
+  function: run_app_ui_quality_gate
+- hook_type: update_agent_state
   hook_agent: InterviewAgent
   filename: hook_agent_backend_context.py
   function: inject_agent_backend_context
@@ -31,6 +35,10 @@ hooks:
   hook_agent: AppPlanAgent
   filename: hook_file_contract_context.py
   function: inject_cookie_cutter_contracts_context
+- hook_type: update_agent_state
+  hook_agent: AppPlanAgent
+  filename: hook_hosted_capabilities_context.py
+  function: inject_hosted_capabilities_context
 - hook_type: update_agent_state
   hook_agent: AppSchemaAgent
   filename: hook_file_contract_context.py

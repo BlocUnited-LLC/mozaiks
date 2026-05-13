@@ -23,6 +23,13 @@ task_contracts:
       - config/asset_manifest.json
     hard_constraints:
       - Persistent app pages stay declarative by default.
+      - Prefer compact config/shell.json shortcuts for common shell chrome instead of repeating full header/profile/mobile/footer arrays.
+      - Shell shortcuts may target header, profile, mobile, and footer slots using primitive ids such as dashboard, wallet, create, profile, messages, notifications, signout, signin, legal, terms, cookies, and privacy.
+      - Prefer route-level AppPageSchema.navigation for page-owned global/local/profile/footer nav contributions; keep config/shell.json focused on app-wide navigation policy and built-in chrome shortcuts.
+      - Use config/shell.json navigation.policy for placement rules such as desktop global=header, desktop local=sidebar, mobile global=bottomBar, mobile local=sheet, and mobile footer=hidden.
+      - Put route chrome intent on AppPageSchema.shell_mode; use config/shell.json chrome only for app-wide mode-policy overrides.
+      - Use shell_mode=conversation for DM/chat/thread routes, workspace for dense module/profile/admin-like work surfaces, focused for setup/review flows, immersive for full-viewport experiences, public for public/legal routes, and standard for ordinary pages.
+      - Use explicit shell arrays only when labels, icons, role gates, or custom paths differ from the shortcut catalog.
       - "Workflow launches from pages use action_type: workflow."
       - Durable page mutations bind through declared api_endpoint values or canonical module actions.
       - Do not emit raw frontend source outside the bounded custom route bundle.
@@ -71,6 +78,23 @@ task_contracts:
       - Emit integration glue only.
       - Do not generate a standalone platform or alternate host.
 
+  control_plane_surface:
+    owner_agent: ConfigMiddlewareAgent
+    summary: >
+      App-side coordination glue for a control-plane surface. Control-plane surfaces
+      manage build, session, or lifecycle state within the app — they are not runtime
+      modules and do not follow the module_contract file pattern.
+    required_outputs: []
+    optional_outputs:
+      - backend/control_plane/{surface_id}.py
+      - backend/control_plane/__init__.py
+    hard_constraints:
+      - Do NOT generate module.yaml, handler.py, service.py, repo.py, or other module_contract files.
+      - Do NOT register this surface as a runtime module under app/modules/.
+      - Stay within current_build_task.owned_paths.
+      - Control-plane artifacts coordinate app-level lifecycle state only — no business domain logic.
+      - Do not duplicate platform control-plane logic already provided by the host.
+
   api_surface:
     owner_agent: ControllerAgent
     summary: Optional external API adapter lane. Default app behavior uses the platform module API.
@@ -79,11 +103,15 @@ task_contracts:
       - modules/{pack_name}/backend/api.py
       - backend/admin_config.py
       - backend/routes/admin.py
+      - backend/integrations/{pack_id}_client.py
     hard_constraints:
       - Default module access is /api/modules/{module_name}/{action_name}.
       - Emit bespoke REST adapters only when explicitly requested.
       - Delegate behavior to backend/handler.py instead of duplicating business logic.
       - App-backend admin config is a separate contract and must expose only GET /api/admin/config.
+      - For hosted-pack adapter tasks (owned_paths under backend/integrations/), generate thin client wrappers only — no hosted business logic, no proprietary pack internals in generated files.
+      - Hosted adapter clients must target the stable hosted API contract supplied by the deployment host (e.g. POST {MOZAIKS_APP_URL}/api/modules/{module_id}/{action_id}). Do not embed host-specific secrets or Stripe credentials in generated files.
+      - Pages must not bind directly to /api/modules/{hosted_pack_id}/{action}. When hosted-pack data must appear on a persistent page, AppGenerator generates an app-owned façade module (generated_module) whose service calls the hosted adapter client. Pages bind to /api/modules/{facade_module_id}/{action} using the standard page→module convention.
 
   agent_backend_integration:
     owner_agent: AppPlanAgent
@@ -96,3 +124,67 @@ task_contracts:
       - Treat upstream agent metadata as exact values, not inferred values.
       - Persistent pages launch workflows declaratively; live workflow UI stays workflow-owned.
       - Do not convert agent integrations into app-owned module collections by default.
+
+backend_helper_files:
+  description: >
+    Rules for backend/{helper_name}.py files generated under app/modules/{module_id}/backend/.
+    Helper files are explicit build outputs — they must be declared before generation.
+    They are not a catch-all for logic that does not fit canonical layers.
+
+  canonical_layers:
+    - backend/handler.py   # thin dispatch only — one method per declared action
+    - backend/service.py   # business logic and event publication
+    - backend/repo.py      # persistence queries and writes
+    - backend/policy.py    # authorization, ownership, transition checks
+    - backend/schemas.py   # typed DTOs, enums, normalization helpers (also named models.py in generator output)
+
+  helper_contract:
+    canonical_location: backend/{helper_name}.py
+    kind: helper
+    generated_by: ServiceAgent
+    required: false
+    allowed_when:
+      - external provider client (e.g. backend/stripe_client.py wrapping the Stripe SDK)
+      - runtime_extensions.yaml api_router entrypoint implementation (e.g. backend/routes_webhooks.py)
+      - runtime_extensions.yaml startup_service entrypoint implementation (e.g. backend/event_subscriber.py)
+      - module-local adapter or client wrapper for an external service
+      - complex domain helper that would bloat service.py without creating a new canonical layer
+      - integration helper tying two hosted capabilities together at the module level
+      - event subscriber startup logic when declared as a startup_service extension
+      - usage/entitlement wrapper bridging a hosted capability into this module's action layer
+    prohibited_for:
+      - generic business logic that belongs in service.py
+      - persistence or database access that belongs in repo.py
+      - authorization or scoping that belongs in policy.py
+      - typed shapes or DTOs that belong in schemas.py / models.py
+      - transport or WebSocket infrastructure (use runtime_extensions.yaml startup_service instead)
+      - workflow or agent orchestration logic
+      - arbitrary file splitting to break up long files
+    rules:
+      - must be declared in current_build_task.owned_paths or python_stubs before ServiceAgent generates it
+      - must be imported by at least one canonical backend layer (handler.py, service.py) or referenced by runtime_extensions.yaml
+      - must be module-local — no cross-module imports except to hosted capability service interfaces
+      - must not create new public module actions or bypass the handler dispatch contract
+      - AppPlanAgent must declare it with a short rationale in the build task initial_message
+      - ConfigMiddlewareAgent must add it to python_stubs before ServiceAgent runs
+      - ServiceAgent must not invent helper files that do not appear in python_stubs
+
+  runtime_extension_entrypoints:
+    description: >
+      When runtime_extensions.yaml is declared, each extension type requires an explicit backend file
+      that must be declared in python_stubs.
+    api_router:
+      required_stub: backend/{router_file}.py  # e.g. backend/routes_webhooks.py
+      factory_function: get_router
+      note: Must be declared in python_stubs. ServiceAgent must not generate it unless declared.
+    startup_service:
+      required_stub: backend/{worker_file}.py  # e.g. backend/event_subscriber.py
+      service_class: "{ServiceClass}"
+      note: Must be declared in python_stubs. ServiceAgent must not generate it unless declared.
+
+  examples:
+    - backend/stripe_client.py     # Stripe SDK wrapper — external provider client
+    - backend/routes_webhooks.py   # api_router entrypoint — Stripe webhook receiver
+    - backend/event_subscriber.py  # startup_service entrypoint — event bus subscription
+    - backend/usage_check.py       # module-local wrapper over hosted_usage capability
+    - backend/entitlement_check.py # module-local wrapper binding pack_id to hosted_entitlements guard

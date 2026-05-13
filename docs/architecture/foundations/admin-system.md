@@ -1,18 +1,22 @@
 # Admin System
 
-Mozaiks has one visible app-admin route family:
+Mozaiks does not currently expose a customer-facing app-admin route family in
+the production console.
+
+The production app console keeps these pages visible instead:
 
 ```text
-/apps/:appId/admin
+/apps/:appId/overview
 /apps/:appId/users
 /apps/:appId/usage
-/apps/:appId/operations
-/apps/:appId/settings
+/apps/:appId/billing
+/apps/:appId/hosting
+/apps/:appId/integrations
 ```
 
-These routes are rendered by the framework-owned `AdminPortal` component inside
-the app console. The shell is fixed and semantic. Build, Deploy, and
-Integrations are separate product surfaces, not admin sections.
+Framework-owned admin composition remains internal and host-owned. Build,
+Billing, Hosting, and Integrations are product surfaces; they are not admin
+sections.
 
 Terminology note:
 
@@ -65,7 +69,8 @@ That means:
 - generated apps should set `app/app.json` `admins` for bootstrap access
 - generators should not emit `app/config/admin.json`
 - runtime/operator panels remain framework-owned
-- Build and other product routes remain separate surfaces, not admin sections
+- the workflow-owned build sequence and other product routes remain separate
+  product concerns, not admin sections
 
 Example:
 
@@ -76,16 +81,16 @@ Example:
 }
 ```
 
-The platform injects the admin route family with the `AdminPortal` component.
-Generators must not create a separate admin page, route family, page schema, or
-admin React shell.
+The platform may still mount framework-owned admin panels through
+`AdminPortal`, but generators must not create a separate app-admin page, route
+family, page schema, or admin React shell for the production console.
 
 ## Built-In Section Registry
 
 The built-in admin sections are framework-owned. They provide the semantic
 taxonomy for:
 
-- admin shell route injection
+- internal admin shell route injection
 - sidebar and drawer navigation
 - section-level rendering inside `AdminPortal`
 - placement of runtime, module, and app-backend panels

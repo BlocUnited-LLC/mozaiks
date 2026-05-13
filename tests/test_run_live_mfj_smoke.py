@@ -18,6 +18,8 @@ from scripts.run_live_mfj_smoke import (
     _configure_event_loop_policy,
     _is_generic_feedback_pending_input,
     _is_input_request_tool_call,
+    _extract_final_context,
+    _load_context_file,
     _load_prompt_file,
     _load_tool_response_file,
     _resolve_assistant_message,
@@ -37,6 +39,7 @@ def test_smoke_result_as_dict_serializes_nested_datetimes() -> None:
             "ended_at": datetime(2026, 3, 31, 23, 30, tzinfo=timezone.utc),
             "nested": {"when": datetime(2026, 3, 31, 23, 31, tzinfo=timezone.utc)},
         },
+        final_context={},
         event_count=2,
         observed_event_types=["chat.text", "chat.workflow_complete"],
     )
@@ -149,6 +152,30 @@ def test_load_prompt_file_reads_non_empty_prompt(tmp_path: Path) -> None:
     prompt = _load_prompt_file(fixture)
 
     assert prompt == "Plan a deterministic approval workflow."
+
+
+def test_load_context_file_requires_object(tmp_path: Path) -> None:
+    fixture = tmp_path / "context.json"
+    fixture.write_text(json.dumps({"app_build_plan": {"app_name": "Support Operations"}}), encoding="utf-8")
+
+    assert _load_context_file(fixture) == {"app_build_plan": {"app_name": "Support Operations"}}
+
+
+def test_extract_final_context_excludes_canonical_chat_fields() -> None:
+    context = _extract_final_context(
+        {
+            "_id": "chat-1",
+            "app_id": "app-1",
+            "messages": [],
+            "app_ui_quality_status": "needs_revision",
+            "app_pages": [{"name": "Tickets"}],
+        }
+    )
+
+    assert context == {
+        "app_ui_quality_status": "needs_revision",
+        "app_pages": [{"name": "Tickets"}],
+    }
 
 
 def test_configure_event_loop_policy_uses_selector_on_windows(monkeypatch) -> None:

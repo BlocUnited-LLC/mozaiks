@@ -27,7 +27,7 @@ def test_runtime_exposes_build_summary_helper() -> None:
     assert '"state_file"' not in source
 
 
-def test_studio_host_exposes_build_endpoint_and_route() -> None:
+def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     studio_source = _read("mozaiksai/hosts/studio.py")
     manifest_source = _read("factory_app/app/ui/route_manifest.json")
     assert '@app.get("/api/studio/apps")' in studio_source
@@ -37,29 +37,39 @@ def test_studio_host_exposes_build_endpoint_and_route() -> None:
     assert 'build_shell_config(surface="studio")' in studio_source
     assert '"path": "/apps/new"' in manifest_source
     assert '"path": "/usage"' in manifest_source
-    assert '"path": "/operations"' in manifest_source
     assert '"path": "/billing"' in manifest_source
-    assert '"path": "/settings"' in manifest_source
+    assert '"path": "/hosting"' in manifest_source
+    assert '"path": "/operations"' not in manifest_source
+    assert '"path": "/settings"' not in manifest_source
     assert '"path": "/apps"' in manifest_source
     assert '"component": "AppsPage"' in manifest_source
-    assert '"path": "/apps/:appId/build"' in manifest_source
-    assert '"component": "AppBuildPage"' in manifest_source
-    assert '"path": "/apps/:appId/deploy"' in manifest_source
     assert '"path": "/apps/:appId/users"' in manifest_source
     assert '"path": "/apps/:appId/usage"' in manifest_source
-    assert '"path": "/apps/:appId/operations"' in manifest_source
-    assert '"path": "/apps/:appId/settings"' in manifest_source
+    assert '"path": "/apps/:appId/billing"' in manifest_source
+    assert '"path": "/apps/:appId/hosting"' in manifest_source
+    assert '"path": "/apps/:appId/build"' not in manifest_source
+    assert '"path": "/apps/:appId/deploy"' not in manifest_source
+    assert '"path": "/apps/:appId/operations"' not in manifest_source
+    assert '"path": "/apps/:appId/settings"' not in manifest_source
     assert '"surfaces": ["studio"]' in manifest_source
     assert '"requiresRole": "admin"' in manifest_source
 
 
-def test_factory_app_ui_barrel_registers_build_page() -> None:
+def test_factory_app_ui_barrel_registers_hosting_pages_and_omits_removed_pages() -> None:
     source = _read("factory_app/app/ui/index.js")
     assert "AppsPage" in source
     assert "registerComponent('AppsPage'" in source
-    assert "AppBuildPage" in source
-    assert "registerComponent('AppBuildPage'" in source
-    assert "./pages/custom/console/AppBuildPage.jsx" in source
+    assert "WorkspaceHostingPage" in source
+    assert "registerComponent('WorkspaceHostingPage'" in source
+    assert "AppHostingPage" in source
+    assert "registerComponent('AppHostingPage'" in source
+    assert "./pages/custom/console/AppHostingPage.jsx" in source
+    assert "AppBuildPage" not in source
+    assert "AppDeployPage" not in source
+    assert "AppOperationsPage" not in source
+    assert "AppSettingsPage" not in source
+    assert "WorkspaceOperationsPage" not in source
+    assert "WorkspaceSettingsPage" not in source
 
 
 def test_core_components_do_not_register_build_page() -> None:
@@ -67,27 +77,21 @@ def test_core_components_do_not_register_build_page() -> None:
     assert "AppBuildPage" not in source
 
 
-def test_build_page_fetches_endpoint_and_uses_workflow_start() -> None:
-    source = _read("factory_app/app/ui/pages/custom/console/AppBuildPage.jsx")
-    assert "/api/studio/build?app_id=" in source
-    assert "/api/studio/build/history?app_id=" in source
-    assert "method: 'PUT'" in source
-    assert "useWorkflowStart" in source
-    assert "buildRefinementTriggerPayload" in source
-    assert "RefinementControls" in source
-    assert "ConsoleSlideOver" in source
-    assert "AdminWorkspaceLayout" in source
-    assert "Save Draft" in source
-    assert "Start Build Conversation" in source
-    assert "App Validation" in source
-    assert "app_validation_strategy" in source
-    assert "request_kind" in source
-    assert "trigger_source: 'action'" in source
-    assert "action_id: 'build_request'" in source
-    assert "app_id: appId" in source
-    assert "build_registry_id" in source
-    assert "trigger_source: 'refinement'" in source
-    assert "trigger_payload:" in source
+def test_removed_console_pages_are_deleted_from_factory_app() -> None:
+    workspace = _workspace()
+
+    for relative_path in (
+        "factory_app/app/ui/pages/custom/console/AppBuildPage.jsx",
+        "factory_app/app/ui/pages/custom/console/AppDeployPage.jsx",
+        "factory_app/app/ui/pages/custom/console/AppOperationsPage.jsx",
+        "factory_app/app/ui/pages/custom/console/AppSettingsPage.jsx",
+        "factory_app/app/ui/pages/custom/console/WorkspaceOperationsPage.jsx",
+        "factory_app/app/ui/pages/custom/console/WorkspaceSettingsPage.jsx",
+    ):
+        assert not (workspace / relative_path).exists()
+
+    assert (workspace / "factory_app/app/ui/pages/custom/console/AppHostingPage.jsx").exists()
+    assert (workspace / "factory_app/app/ui/pages/custom/console/WorkspaceHostingPage.jsx").exists()
 
 
 def test_refinement_ui_moves_into_factory_app() -> None:
@@ -114,9 +118,12 @@ def test_factory_app_refinement_controls_are_live_and_controlled() -> None:
     assert "StatusPill" in source
 
 
-def test_app_overview_links_to_build_surface() -> None:
+def test_app_overview_does_not_link_to_removed_routes() -> None:
     source = _read("factory_app/app/ui/pages/custom/console/AppOverviewPage.jsx")
-    assert 'to={`/apps/${appId}/build`}' in source
+    assert 'to={`/apps/${appId}/build`}' not in source
+    assert 'to={`/apps/${appId}/deploy`}' not in source
+    assert 'to={`/apps/${appId}/operations`}' not in source
+    assert 'to={`/apps/${appId}/settings`}' not in source
 
 
 def test_apps_page_fetches_workspace_apps_endpoint() -> None:
@@ -128,7 +135,7 @@ def test_apps_page_fetches_workspace_apps_endpoint() -> None:
     assert "app.destination" in source
 
 
-def test_admin_workspace_layout_links_admin_console_and_build() -> None:
+def test_admin_workspace_layout_links_console_and_hosting_sections() -> None:
     source = _read("chat-ui/src/admin/components/AdminWorkspaceLayout.jsx")
     assert "Admin Dashboard" not in source
     assert "Mozaiks Console" in source
@@ -138,20 +145,30 @@ def test_admin_workspace_layout_links_admin_console_and_build() -> None:
     assert "label: 'Console'" in source
     assert "label: 'App Console'" in source
     assert "Users" in source
-    assert "Billing & Hosting" in source
+    assert "Billing" in source
+    assert "Hosting" in source
     assert "Usage" in source
     assert "Integrations" in source
     assert "buildAppPath(appId, item.suffix)" in source
     assert "path: '/apps'" in source
     assert "path: '/usage'" in source
-    assert "path: '/operations'" in source
     assert "path: '/billing'" in source
-    assert "path: '/settings'" in source
-    assert "suffix: '/build'" in source
-    assert "suffix: '/deploy'" in source
-    assert "suffix: '/admin'" in source
+    assert "path: '/hosting'" in source
+    assert "path: '/operations'" not in source
+    assert "path: '/settings'" not in source
+    assert "suffix: '/users'" in source
+    assert "suffix: '/integrations'" in source
+    assert "suffix: '/usage'" in source
+    assert "suffix: '/billing'" in source
+    assert "suffix: '/hosting'" in source
+    assert "suffix: '/build'" not in source
+    assert "suffix: '/deploy'" not in source
+    assert "suffix: '/admin'" not in source
+    assert "suffix: '/operations'" not in source
+    assert "suffix: '/settings'" not in source
     assert "AdminWorkspaceLayout" in source
-    assert "Open admin navigation" in source
+    assert "Open console navigation" in source
+    assert "Console navigation" in source
     assert "lg:hidden" in source
     assert "lg:block" in source
     assert "description:" not in source

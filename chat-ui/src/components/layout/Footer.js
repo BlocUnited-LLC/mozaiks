@@ -16,8 +16,12 @@ const Footer = () => {
   const links = footerConfig.links || DEFAULT_FOOTER_CONFIG.links || [];
   if (links.length === 0) return null;
 
+  const footerClassName = footerConfig.hideOnMobile || footerConfig.mobileVisible === false
+    ? "shell-footer shell-footer--hide-mobile"
+    : "shell-footer";
+
   return (
-    <footer className="shell-footer">
+    <footer className={footerClassName}>
       <div className="shell-footer-frame">
         {links.map((link, i) => (
           <React.Fragment key={link.label || i}>

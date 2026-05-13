@@ -47,15 +47,16 @@ function buildInitialValues(fields) {
   );
 }
 
-function FieldRenderer({ field, value, onChange, disabled }) {
+function FieldRenderer({ field, value, onChange, disabled, fieldId }) {
   const baseClass = 'w-full';
   switch (field.type) {
     case 'textarea':
       return (
         <textarea
+          id={fieldId}
           className={cn(
             baseClass,
-            'min-h-[80px] rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50'
+            'min-h-[120px] rounded-[var(--shell-control-radius,1rem)] border border-input bg-transparent px-4 py-3 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50'
           )}
           placeholder={field.placeholder}
           value={value}
@@ -67,7 +68,7 @@ function FieldRenderer({ field, value, onChange, disabled }) {
     case 'select':
       return (
         <Select value={value} onValueChange={onChange} disabled={disabled}>
-          <SelectTrigger className={baseClass}>
+          <SelectTrigger id={fieldId} className={cn(baseClass, 'h-11 rounded-[var(--shell-control-radius,1rem)] px-4')}>
             <SelectValue placeholder={field.placeholder ?? `Select ${field.label}`} />
           </SelectTrigger>
           <SelectContent>
@@ -81,6 +82,7 @@ function FieldRenderer({ field, value, onChange, disabled }) {
       return (
         <div className="flex items-center gap-2">
           <input
+            id={fieldId}
             type="checkbox"
             checked={!!value}
             onChange={(e) => onChange(e.target.checked)}
@@ -93,13 +95,14 @@ function FieldRenderer({ field, value, onChange, disabled }) {
     default:
       return (
         <Input
+          id={fieldId}
           type={field.type ?? 'text'}
           placeholder={field.placeholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           required={field.required}
-          className={baseClass}
+          className={cn(baseClass, 'h-11 rounded-[var(--shell-control-radius,1rem)] px-4')}
         />
       );
   }
@@ -158,29 +161,34 @@ export function Form({
   return (
     <form onSubmit={handleSubmit} className={cn(className)} noValidate>
       <div className={gridClass}>
-        {fields.map((field) => (
-          <div key={field.name} className="space-y-1.5">
-            <label className="text-sm font-medium text-foreground">
-              {field.label}
-              {field.required && <span className="text-destructive ml-1">*</span>}
-            </label>
-            <FieldRenderer
-              field={field}
-              value={values[field.name]}
-              onChange={(val) => setField(field.name, val)}
-              disabled={disabled || loading}
-            />
-            {errors[field.name] && (
-              <p className="text-xs text-destructive">{errors[field.name]}</p>
-            )}
-          </div>
-        ))}
+        {fields.map((field) => {
+          const fieldId = `${id || 'form'}-${field.name}`.replace(/[^A-Za-z0-9_-]/g, '-');
+          return (
+            <div key={field.name} className="space-y-1.5">
+              <label htmlFor={fieldId} className="text-sm font-medium text-foreground">
+                {field.label}
+                {field.required && <span className="text-destructive ml-1">*</span>}
+              </label>
+              <FieldRenderer
+                field={field}
+                fieldId={fieldId}
+                value={values[field.name]}
+                onChange={(val) => setField(field.name, val)}
+                disabled={disabled || loading}
+              />
+              {errors[field.name] && (
+                <p className="text-xs text-destructive">{errors[field.name]}</p>
+              )}
+            </div>
+          );
+        })}
       </div>
-      <div className="flex items-center gap-2 mt-6">
+      <div className="mt-6 flex flex-col-reverse gap-3 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:justify-end">
         <Button
           type="submit"
           label={loading ? 'Saving…' : submit_label}
           variant="primary"
+          className="w-full sm:w-auto"
           disabled={disabled || loading}
         />
         {onCancel && (
@@ -189,6 +197,7 @@ export function Form({
             label={cancel_label}
             variant="ghost"
             onClick={onCancel}
+            className="w-full sm:w-auto"
             disabled={loading}
           />
         )}

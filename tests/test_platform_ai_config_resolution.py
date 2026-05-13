@@ -129,10 +129,11 @@ def test_mozaiks_platform_shell_config_owns_shell_ui() -> None:
     header_actions = {item["id"]: item for item in data["header"]["actions"]}
     assert "landing_spot" not in data
     assert data["header"]["logo"]["href"] == "/marketplace"
-    assert data["header"]["pages"] == []
     assert "notifications" not in data
     assert "profile" not in data
-    assert data["footer"]["visible"] is True
+    assert data["shortcuts"]["header"] == ["dashboard", "wallet"]
+    assert data["shortcuts"]["footer"] == ["legal", "terms", "cookies"]
+    assert data["shortcuts"]["footerHideOnMobile"] is True
     assert header_actions["create-app"]["path"] == "/create"
 
 

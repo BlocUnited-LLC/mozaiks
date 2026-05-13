@@ -53,6 +53,13 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "AppCustomRouteEntry",
         "AppCustomPageFile",
         "AppCustomRouteBundle",
+        "AppPageNavigation",
+        "AppShellMode",
+        "AppShellNavigationPatch",
+        "AppShellNavigationPolicyPatch",
+        "AppShellChromePatch",
+        "AppShellChromeModePatch",
+        "AppShellChromeViewportPatch",
         "ModuleContractBundle",
         "ConfigMiddlewareOutput",
         "ImplementedPythonStub",
@@ -80,6 +87,22 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert models["AppManifest"]["fields"]["custom_routes"]["items"] == "str"
     assert models["AppCustomRouteBundle"]["fields"]["route_manifest"]["items"] == "AppCustomRouteEntry"
     assert models["AppCustomRouteBundle"]["fields"]["page_files"]["items"] == "AppCustomPageFile"
+    assert models["AppPageSchema"]["fields"]["navigation"]["variants"] == ["AppPageNavigation", "null"]
+    assert models["AppPageSchema"]["fields"]["shell_mode"]["variants"] == ["AppShellMode", "null"]
+    assert models["AppBuildPage"]["fields"]["shell_mode_hint"]["variants"] == ["str", "null"]
+    assert models["AppShellMode"]["values"] == [
+        "standard",
+        "workspace",
+        "conversation",
+        "focused",
+        "immersive",
+        "public",
+    ]
+    assert models["AppPageNavigation"]["fields"]["scope"]["values"] == ["global", "local", "profile", "footer"]
+    assert models["AppShellConfigPatch"]["fields"]["navigation"]["variants"] == ["AppShellNavigationPatch", "null"]
+    assert models["AppShellConfigPatch"]["fields"]["chrome"]["variants"] == ["AppShellChromePatch", "null"]
+    assert models["AppShellChromePatch"]["fields"]["defaultMode"]["variants"] == ["AppShellMode", "null"]
+    assert models["AppShellNavigationItemPatch"]["fields"]["scope"]["values"] == ["global", "local", "profile", "footer"]
     assert models["ModuleManifest"]["fields"]["module"]["type"] == "ModuleIdentity"
     assert models["ModuleAdminManifest"]["fields"]["schema_version"]["description"] == "Must be mozaiks.admin.v2."
     assert models["AppBackendAdminConfig"]["fields"]["schema_version"]["values"] == ["mozaiks.admin.app_backend.v1"]

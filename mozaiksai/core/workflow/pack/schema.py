@@ -20,6 +20,9 @@ class TransitionUIBinding(BaseModel):
 
     component: str
     mode: Literal["screen"] = "screen"
+    shell_mode: Optional[
+        Literal["standard", "workspace", "conversation", "focused", "immersive", "public"]
+    ] = None
     props: Dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("component")

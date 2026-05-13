@@ -25,6 +25,7 @@ from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     resolve_app_validation_strategy,
 )
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+    collect_generated_app_file_map,
     extract_code_file_map_from_payload,
 )
 
@@ -109,6 +110,14 @@ def _safe_relpath(raw: str) -> Optional[str]:
     if any(part in {".."} for part in p.parts):
         return None
     return str(p)
+
+
+def _is_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "passed", "ready"}
+    return bool(value)
 
 
 def _extract_code_files(collected: Dict[str, Any]) -> Dict[str, str]:
@@ -234,6 +243,12 @@ async def _resolve_files(
                     safe_ctx[safe] = str(content)
                 if safe_ctx:
                     return safe_ctx, chat_id, app_id
+            if _is_truthy(context_variables.get("app_schema_ready")):
+                schema_files = collect_generated_app_file_map(
+                    context_variables.get("generated_app_dir")
+                )
+                if schema_files:
+                    return schema_files, chat_id, app_id
     except Exception:
         pass
 

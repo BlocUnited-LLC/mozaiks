@@ -153,6 +153,7 @@ const ModernChatInterface = ({
   onAgentAction,
   onArtifactToggle,
   artifactToggleLabel,
+  hasUnseenArtifact = false,
   connectionStatus,
   transportType,
   workflowName,
@@ -527,13 +528,13 @@ const ModernChatInterface = ({
               <button
                 type="button"
                 onClick={historyToggleHandler}
-                className="md:hidden inline-flex flex-col gap-1.5 p-2 rounded-lg border border-[rgba(var(--color-primary-light-rgb),0.35)] text-white/80 hover:text-white hover:border-[rgba(var(--color-primary-light-rgb),0.7)] transition focus:outline-none focus:ring-2 focus:ring-[rgba(var(--color-primary-light-rgb),0.6)]"
+                className="md:hidden inline-flex flex-col gap-[5px] p-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-all duration-200 focus:outline-none flex-shrink-0"
                 aria-label={`Show recent ${conversationMode === 'workflow' ? 'workflows' : 'chats'}`}
                 title={historyMenuLabel || 'Recents'}
               >
-                <span className="w-5 h-0.5 bg-current rounded-full"></span>
-                <span className="w-5 h-0.5 bg-current rounded-full"></span>
-                <span className="w-5 h-0.5 bg-current rounded-full"></span>
+                <span className="w-5 h-[2px] bg-current rounded-full"></span>
+                <span className="w-4 h-[2px] bg-current rounded-full"></span>
+                <span className="w-5 h-[2px] bg-current rounded-full"></span>
               </button>
             )}
             {/* Chat Icon + Title */}
@@ -627,12 +628,12 @@ const ModernChatInterface = ({
                   }
                 }}
                 disabled={modeTogglePending}
-                className={`md:hidden group relative p-2 rounded-lg bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.15)] to-[rgba(var(--color-secondary-rgb),0.15)] border border-[rgba(var(--color-primary-light-rgb),0.35)] hover:border-[rgba(var(--color-primary-light-rgb),0.7)] transition-all duration-300 backdrop-blur-sm flex-shrink-0 ${modeTogglePending ? 'opacity-60 cursor-not-allowed pointer-events-none' : ''}`}
+                className={`md:hidden group relative p-2 rounded-lg bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.15)] to-[rgba(var(--color-secondary-rgb),0.15)] border transition-all duration-300 backdrop-blur-sm flex-shrink-0 ${modeTogglePending ? 'opacity-60 cursor-not-allowed pointer-events-none' : ''} ${hasUnseenArtifact && conversationMode === 'workflow' ? 'border-[rgba(var(--color-secondary-rgb),0.8)] shadow-[0_0_12px_rgba(var(--color-secondary-rgb),0.6)] animate-pulse' : 'border-[rgba(var(--color-primary-light-rgb),0.35)] hover:border-[rgba(var(--color-primary-light-rgb),0.7)]'}`}
                 title={modeTogglePending ? 'Switching modes…' : (conversationMode === 'ask' ? 'Switch to Workflow Mode' : (artifactToggleLabel || 'Toggle Artifact Canvas'))}
               >
                 <img
                   src={brandLogoSrc}
-                  className="w-7 h-7 opacity-80 group-hover:opacity-100 transition-all duration-300 group-hover:scale-105"
+                  className={`w-7 h-7 transition-all duration-300 group-hover:scale-105 ${hasUnseenArtifact && conversationMode === 'workflow' ? 'opacity-100' : 'opacity-80 group-hover:opacity-100'}`}
                   alt={conversationMode === 'ask' ? 'Switch to Workflow' : 'Artifact Canvas'}
                   onError={applyBrandImageFallback}
                 />

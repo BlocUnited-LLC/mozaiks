@@ -30,8 +30,7 @@ def test_admin_portal_embeds_app_admin_panels() -> None:
     assert "AdminWorkspaceLayout" in source
     assert "AdminOverviewPanel" in source
     assert "AdminSectionRoute" in source
-    assert "^\\/apps\\/[^/]+\\/(?:admin|users|usage|operations|settings)\\/?$" in source
-    assert "'operations'" in source
+    assert "^\\/apps\\/[^/]+\\/(?:users|usage)\\/?$" in source
     assert "raw === 'activity'" not in source
     assert "raw === 'audit'" not in source
     assert "raw === 'logs'" not in source
@@ -52,21 +51,18 @@ def test_platform_shell_registers_admin_section_routes() -> None:
     platform_source = _read("mozaiksai/hosts/platform.py")
     contract_source = _read("mozaiksai/core/admin/contract.py")
 
-    for path in [
-        "/apps/:appId/admin",
-        "/apps/:appId/users",
-        "/apps/:appId/usage",
-        "/apps/:appId/operations",
-        "/apps/:appId/settings",
-    ]:
+    for path in ["/apps/:appId/users", "/apps/:appId/usage"]:
         assert path in contract_source
+
+    for path in ["/apps/:appId/admin", "/apps/:appId/operations", "/apps/:appId/settings"]:
+        assert path not in contract_source
 
     assert '"component": "AdminPortal"' in platform_source
     assert "build_admin_shell_routes" in platform_source
     assert "/apps/:appId/users" in _read("factory_app/app/ui/route_manifest.json")
     assert "/apps/:appId/usage" in _read("factory_app/app/ui/route_manifest.json")
-    assert "/apps/:appId/operations" in _read("factory_app/app/ui/route_manifest.json")
-    assert "/apps/:appId/settings" in _read("factory_app/app/ui/route_manifest.json")
+    assert "/apps/:appId/operations" not in _read("factory_app/app/ui/route_manifest.json")
+    assert "/apps/:appId/settings" not in _read("factory_app/app/ui/route_manifest.json")
     assert '"payments": "billing"' not in contract_source
     assert '"usage-health": "operations"' not in contract_source
 

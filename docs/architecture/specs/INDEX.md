@@ -29,6 +29,9 @@ as the current source of truth.
 - [agentic-app-generation-strategy.md](./agentic-app-generation-strategy.md) - app-generation architecture
 - [appgenerator-output-assembly-contract.md](./appgenerator-output-assembly-contract.md) - AppGenerator bundle output contract
 - [agentgenerator-output-assembly-contract.md](./agentgenerator-output-assembly-contract.md) - AgentGenerator workflow output contract
+- [shell-navigation.md](./shell-navigation.md) - dynamic route-aware shell navigation policy
+- [shell-chrome-modes.md](./shell-chrome-modes.md) - route-level header/footer/bottom-bar chrome modes
+- [shell-shortcuts.md](./shell-shortcuts.md) - compact `shell.json` shortcut authoring layer
 
 Historical documents and package proposals are useful context, but they are
 superseded wherever they conflict with `ARCHITECTURE.md`.

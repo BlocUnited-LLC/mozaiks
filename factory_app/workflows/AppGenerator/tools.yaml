@@ -10,6 +10,15 @@ tools:
     Called automatically after AppSchemaAgent speaks.
   tool_type: Agent_Tool
   auto_tool_call: true
+- agent: AppUIQualityAgent
+  file: ui_quality.py
+  function: review_ui_quality
+  description: >
+    Review persisted AppSchemaAgent output for production UI quality issues and
+    set app_ui_quality_status to passed, needs_revision, or blocked for the
+    AppGenerator handoff gate.
+  tool_type: Agent_Tool
+  auto_tool_call: true
 - agent: AppPlanAgent
   file: app_build_plan.py
   function: app_build_plan

@@ -1,0 +1,234 @@
+{
+  "platform_user_email": "builder@example.com",
+  "build_mode": "initial",
+  "app_type": "greenfield_app",
+  "interview_complete": true,
+  "concept_overview": "Build a clean internal support operations app for a helpdesk lead. The app tracks support tickets, reviews queue health, and lets operators update ticket status without external integrations.",
+  "concept_blueprint": {
+    "product_name": "Support Operations",
+    "primary_user": "Helpdesk lead",
+    "core_entities": ["tickets", "customers", "operators"],
+    "primary_jobs": [
+      "scan tickets that need attention",
+      "open a ticket and update its status",
+      "review simple support queue health"
+    ],
+    "non_goals": [
+      "external CRM integrations",
+      "fake analytics dashboards",
+      "custom canvas UI"
+    ]
+  },
+  "frontend_design_document": "Persistent UI should be sparse and scan-first. Use one page title, one short subtitle, a compact ticket list, and clear row actions. Do not create generic dashboard panels, decorative feeds, or repeated KPI cards.",
+  "ui_design_document": "Pages:\n- Tickets: PageHeader + ResourceTable. Columns: ticket, priority, status, updated, action. Include search and filters.\n- Queue Settings: PageHeader + Form for default assignment queue and SLA threshold.\nUse ResourceTable for collection pages and Form for settings. Use SummaryStrip only if it materially helps scanning.",
+  "experience_spec_document": "The app has durable pages for /tickets and /settings. /tickets is the landing page. The UI is declarative_page by default. No route needs custom_react_page.",
+  "design_surface_map": {
+    "version": "1",
+    "surfaces": [
+      {
+        "id": "tickets",
+        "kind": "page",
+        "route": "/tickets",
+        "ui_surface": "declarative_page",
+        "owner": "AppSchemaAgent"
+      },
+      {
+        "id": "settings",
+        "kind": "page",
+        "route": "/settings",
+        "ui_surface": "declarative_page",
+        "owner": "AppSchemaAgent"
+      }
+    ]
+  },
+  "database_intent_bundle": {
+    "version": "1",
+    "app_id": "support-operations-smoke",
+    "artifact_version_id": null,
+    "surfaces": [
+      {
+        "surface_id": "tickets",
+        "surface_kind": "module",
+        "collections": [
+          {
+            "name": "tickets",
+            "scope": "app",
+            "ownership": {
+              "surface_id": "tickets",
+              "surface_kind": "module"
+            },
+            "fields": [
+              {"name": "app_id", "type": "string", "required": true},
+              {"name": "ticket_id", "type": "string", "required": true},
+              {"name": "subject", "type": "string", "required": true},
+              {"name": "priority", "type": "string", "required": true},
+              {"name": "status", "type": "string", "required": true},
+              {"name": "updated_at", "type": "datetime", "required": true}
+            ],
+            "indexes": [
+              {"keys": [["app_id", 1], ["ticket_id", 1]], "unique": true}
+            ],
+            "search_by": "ticket_id",
+            "lifecycle": {
+              "write_mode": "module_action",
+              "migration_policy": "additive_only"
+            }
+          }
+        ]
+      }
+    ],
+    "shared_collections": [],
+    "policies": {
+      "default_scope_field": "app_id",
+      "allow_destructive_migrations": false
+    }
+  },
+  "captured_theme_config": {
+    "theme": {
+      "appearance": "dark",
+      "density": "comfortable"
+    },
+    "typography": {
+      "heading": {
+        "family": "Rajdhani"
+      },
+      "body": {
+        "family": "Rajdhani"
+      },
+      "display": {
+        "family": "Orbitron"
+      }
+    }
+  },
+  "app_build_plan": {
+    "app_name": "Support Operations",
+    "app_slug": "support-operations",
+    "auth_strategy": "role-based",
+    "roles": ["admin", "operator"],
+    "capability_packs": [
+      {
+        "pack_id": "support_operations",
+        "ownership_class": "generated_module",
+        "reason": "App-specific deterministic ticket management."
+      }
+    ],
+    "modules": [
+      {
+        "module_id": "tickets",
+        "purpose": "Own ticket persistence, updates, and queue status."
+      }
+    ],
+    "pages": [
+      {
+        "name": "Tickets",
+        "route": "/tickets",
+        "purpose": "Scan and act on support tickets.",
+        "primary_entities": ["tickets"],
+        "primary_actions": ["open_ticket", "update_status"],
+        "ui_surface": "declarative_page",
+        "ui_layout": "resource_table",
+        "sections_hint": [
+          {
+            "primitive": "PageHeader",
+            "section_id_hint": "tickets-header",
+            "title_hint": "Tickets",
+            "config_hint": {
+              "title": "Tickets",
+              "subtitle": "Review tickets and continue the next support action.",
+              "title_font": "body"
+            }
+          },
+          {
+            "primitive": "ResourceTable",
+            "section_id_hint": "tickets-table",
+            "title_hint": "Ticket queue",
+            "config_hint": {
+              "api_endpoint": "/api/modules/tickets/list",
+              "data_key": "tickets",
+              "search": true,
+              "search_placeholder": "Search tickets...",
+              "columns": [
+                {"key": "subject", "label": "Ticket", "type": "stack"},
+                {"key": "priority", "label": "Priority", "type": "badge"},
+                {"key": "status", "label": "Status", "type": "badge"},
+                {"key": "updated_at", "label": "Updated", "type": "date"},
+                {"key": "actions", "label": "Action", "type": "actions"}
+              ],
+              "filters": [
+                {"label": "All", "value": "all"},
+                {"label": "Open", "value": "open", "field": "status", "match_values": ["open"]},
+                {"label": "Waiting", "value": "waiting", "field": "status", "match_values": ["waiting"]}
+              ],
+              "actions": [
+                {
+                  "id": "open-ticket",
+                  "label": "Open",
+                  "action_type": "navigate",
+                  "href": "/tickets/{ticket_id}"
+                }
+              ],
+              "empty": {
+                "title": "No tickets yet",
+                "message": "New support tickets will appear here."
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "QueueSettings",
+        "route": "/settings",
+        "purpose": "Configure queue defaults.",
+        "primary_entities": ["settings"],
+        "primary_actions": ["save_settings"],
+        "ui_surface": "declarative_page",
+        "ui_layout": "form",
+        "sections_hint": [
+          {
+            "primitive": "PageHeader",
+            "section_id_hint": "settings-header",
+            "title_hint": "Settings",
+            "config_hint": {
+              "title": "Settings",
+              "subtitle": "Set queue defaults for the support team.",
+              "title_font": "body"
+            }
+          },
+          {
+            "primitive": "Form",
+            "section_id_hint": "queue-settings-form",
+            "title_hint": "Queue defaults",
+            "config_hint": {
+              "fields": [
+                {"name": "default_queue", "label": "Default queue", "type": "text", "required": true},
+                {"name": "sla_hours", "label": "SLA hours", "type": "number", "required": true}
+              ],
+              "submit_label": "Save settings",
+              "submit_action": {
+                "label": "Save settings",
+                "action_type": "submit",
+                "href": "/api/modules/tickets/save_settings"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "workflow_touchpoints": [],
+    "build_tasks": [
+      {
+        "task_id": "page_bundle",
+        "task_type": "page_bundle",
+        "owner_agent": "AppSchemaAgent",
+        "description": "Generate declarative persistent pages for tickets and queue settings.",
+        "depends_on": []
+      }
+    ]
+  },
+  "app_plan_ready": true,
+  "app_validation_strategy": "skip",
+  "integration_tests_passed": true,
+  "available_hosted_packs": [],
+  "runtime_capabilities": [],
+  "pack_sources": []
+}

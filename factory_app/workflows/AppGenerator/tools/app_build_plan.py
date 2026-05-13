@@ -24,13 +24,21 @@ _ALLOWED_TASK_TYPES = {
     "api_surface",
     "page_bundle",
     "agent_backend_integration",
+    "control_plane_surface",
 }
 _CANONICAL_INITIAL_AGENTS = {
     "backend_foundation": "ConfigMiddlewareAgent",
     "module_contract": "ConfigMiddlewareAgent",
+    "control_plane_surface": "ConfigMiddlewareAgent",
     "api_surface": "ControllerAgent",
     "page_bundle": "AppSchemaAgent",
 }
+_SURFACE_KIND_ALLOWED_TASK_TYPES: dict[str, frozenset[str]] = {
+    "external_integration": frozenset({"api_surface"}),
+    "control_plane": frozenset({"control_plane_surface"}),
+    "ui_only": frozenset({"page_bundle"}),
+}
+_WORKFLOW_SURFACE_KIND = "workflow"
 
 
 def _normalize_string_list(value: Any) -> List[str]:
@@ -82,13 +90,55 @@ def _normalized_owned_paths(task: Dict[str, Any]) -> List[str]:
     return paths
 
 
-def _validate_build_tasks(build_tasks: List[Dict[str, Any]]) -> None:
+def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: frozenset[str] | None = None) -> None:
+    hosted_pack_ids = hosted_pack_ids or frozenset()
     for task in build_tasks:
         task_id = str(task.get("task_id") or "<unknown>")
         task_type = str(task.get("task_type") or "<missing>")
         initial_agent = str(task.get("initial_agent") or "<missing>")
         capability_pack_id = task.get("capability_pack_id")
         owned_paths = _normalized_owned_paths(task)
+        surface_kind_raw = task.get("surface_kind")
+        normalized_capability_pack_id = str(capability_pack_id or "").strip()
+
+        if normalized_capability_pack_id in hosted_pack_ids:
+            hosted_module_prefix = f"modules/{normalized_capability_pack_id}/"
+            if task_type == "module_contract":
+                raise ValueError(
+                    "Build task "
+                    f"'{task_id}' tries to generate module_contract files for hosted pack "
+                    f"'{normalized_capability_pack_id}'. Hosted packs must use api_surface adapters "
+                    "with surface_kind=external_integration, not app-local module ownership."
+                )
+            if any(path.replace("\\", "/").startswith(hosted_module_prefix) for path in owned_paths):
+                raise ValueError(
+                    "Build task "
+                    f"'{task_id}' owns '{hosted_module_prefix}' for hosted pack "
+                    f"'{normalized_capability_pack_id}'. Hosted pack adapters must live under backend/integrations/."
+                )
+            if task_type == "api_surface" and surface_kind_raw and surface_kind_raw != "external_integration":
+                raise ValueError(
+                    f"Build task '{task_id}' is an adapter for hosted pack '{normalized_capability_pack_id}' "
+                    f"but declares surface_kind='{surface_kind_raw}'. "
+                    "Hosted pack adapter tasks must use surface_kind='external_integration'."
+                )
+
+        if surface_kind_raw == _WORKFLOW_SURFACE_KIND:
+            raise ValueError(
+                f"Build task '{task_id}' declares surface_kind='workflow'. "
+                "Workflow surfaces are owned by AgentGenerator, not AppGenerator. "
+                "Remove this task from AppBuildPlan and use a workflow_touchpoint entry instead."
+            )
+
+        if surface_kind_raw in _SURFACE_KIND_ALLOWED_TASK_TYPES:
+            permitted = _SURFACE_KIND_ALLOWED_TASK_TYPES[surface_kind_raw]
+            if task_type not in permitted:
+                permitted_str = ", ".join(sorted(permitted))
+                raise ValueError(
+                    f"Build task '{task_id}' uses task_type='{task_type}' with "
+                    f"surface_kind='{surface_kind_raw}'. Only these task types are valid "
+                    f"for surface_kind='{surface_kind_raw}': {permitted_str}."
+                )
 
         if task_type == "page_bundle" and initial_agent != "AppSchemaAgent":
             raise ValueError(
@@ -198,12 +248,67 @@ def app_build_plan(
     generation_order = _normalize_string_list(AppBuildPlan.get("generation_order"))
     agent_backend_required = bool(AppBuildPlan.get("agent_backend_required", False))
 
-    _validate_build_tasks(build_tasks)
+    hosted_pack_ids = frozenset(
+        str(p.get("capability_pack_id") or "").strip()
+        for p in capability_packs
+        if isinstance(p, dict) and p.get("capability_source") == "hosted_pack"
+    ) - {""}
+    _validate_build_tasks(build_tasks, hosted_pack_ids=hosted_pack_ids)
 
     if not app_kind:
         raise ValueError("AppBuildPlan.app_kind is required")
     if not pages:
         raise ValueError("AppBuildPlan.pages must contain at least one page")
+
+    child_workflows: List[Dict[str, Any]] = []
+    if workflows:
+        appgenerator_workflows = [w for w in workflows if w.get("name") == "AppGenerator"]
+        appgenerator_task_ids = {str(t.get("task_id")) for t in build_tasks}
+        covered_task_ids = {
+            str(w.get("context_variables", {}).get("current_build_task_id"))
+            for w in appgenerator_workflows
+        }
+
+        uncovered = appgenerator_task_ids - covered_task_ids
+        if uncovered:
+            raise ValueError(
+                f"Child workflows must cover every AppGenerator build task. "
+                f"Missing coverage for: {sorted(uncovered)}. "
+                "Each AppGenerator build task must have a matching child workflow."
+            )
+
+        task_by_id = {str(t.get("task_id")): t for t in build_tasks}
+
+        for workflow in appgenerator_workflows:
+            ctx = dict(workflow.get("context_variables") or {})
+            child_task_id = str(ctx.get("current_build_task_id") or "")
+            child_task_type = str(ctx.get("current_build_task_type") or "")
+            child_initial_agent = str(workflow.get("initial_agent") or "")
+
+            canonical_task = task_by_id.get(child_task_id)
+            if canonical_task:
+                expected_task_type = str(canonical_task.get("task_type") or "")
+                if child_task_type and expected_task_type and child_task_type != expected_task_type:
+                    raise ValueError(
+                        f"Child workflow for task '{child_task_id}' declares "
+                        f"current_build_task_type='{child_task_type}' but the build plan "
+                        f"task has task_type='{expected_task_type}'. These must match."
+                    )
+
+                expected_agent = _CANONICAL_INITIAL_AGENTS.get(expected_task_type or child_task_type)
+                if expected_agent and child_initial_agent != expected_agent:
+                    raise ValueError(
+                        f"Child workflow for task '{child_task_id}' (task_type='{expected_task_type or child_task_type}') "
+                        f"starts at '{expected_agent}', not '{child_initial_agent}'. "
+                        f"task_type='{expected_task_type or child_task_type}' must use '{expected_agent}'."
+                    )
+
+                hydrated_task = dict(canonical_task)
+                ctx["current_build_task"] = hydrated_task
+
+            hydrated_workflow = dict(workflow)
+            hydrated_workflow["context_variables"] = ctx
+            child_workflows.append(hydrated_workflow)
 
     normalized_plan = {
         "agent_message": agent_message or "App build plan cached successfully.",
@@ -227,14 +332,17 @@ def app_build_plan(
         try:
             context_variables.set("app_build_plan", normalized_plan)
             context_variables.set("app_plan_ready", True)
+            if child_workflows:
+                context_variables.set("app_child_workflows", child_workflows)
             _logger.info(
-                "Cached AppBuildPlan: kind=%s pages=%d entities=%d packs=%d build_tasks=%d integrations=%d",
+                "Cached AppBuildPlan: kind=%s pages=%d entities=%d packs=%d build_tasks=%d integrations=%d child_workflows=%d",
                 app_kind,
                 len(pages),
                 len(entities),
                 len(capability_packs),
                 len(build_tasks),
                 len(external_integrations),
+                len(child_workflows),
             )
         except Exception as exc:
             _logger.error("Failed to cache AppBuildPlan: %s", exc)
@@ -242,6 +350,7 @@ def app_build_plan(
     else:
         _logger.warning("context_variables not available or missing 'set' method")
 
+    child_workflows_line = f"\nChild workflows: {len(child_workflows)}" if child_workflows else ""
     return (
         f"{normalized_plan['agent_message']}\n\n"
         f"App kind: {app_kind}\n"
@@ -252,6 +361,7 @@ def app_build_plan(
         f"Roles: {len(roles)}\n"
         f"Agent backend required: {agent_backend_required}\n"
         f"Integrations: {len(external_integrations)}"
+        f"{child_workflows_line}"
     )
 
 

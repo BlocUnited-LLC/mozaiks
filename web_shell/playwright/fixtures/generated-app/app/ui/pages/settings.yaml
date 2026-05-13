@@ -1,0 +1,51 @@
+name: settings
+route: /settings
+title: null
+layout: full-width
+roles: []
+sections:
+  - id: settings-header
+    primitive: PageHeader
+    title: null
+    config:
+      title: Settings
+      subtitle: Configure app-level support defaults.
+      title_font: body
+  - id: settings-form
+    primitive: Form
+    title: null
+    config:
+      layout: grid
+      columns: 2
+      submit_label: Save Settings
+      submit_action:
+        id: save-settings
+        label: Save Settings
+        action_type: submit
+        href: /api/modules/settings/update
+      fields:
+        - name: app_name
+          label: App Name
+          type: text
+          required: true
+          default_value: Support Operations
+        - name: support_email
+          label: Support Email
+          type: email
+          required: true
+          default_value: support@example.com
+        - name: priority
+          label: Default Priority
+          type: select
+          default_value: normal
+          options:
+            - value: low
+              label: Low
+            - value: normal
+              label: Normal
+            - value: urgent
+              label: Urgent
+        - name: notes
+          label: Internal Notes
+          type: textarea
+          placeholder: Add operating notes for support admins.

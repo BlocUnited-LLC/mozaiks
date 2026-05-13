@@ -81,8 +81,34 @@ performance_logger = get_workflow_logger("performance.orchestration")
 
 __all__ = [
     'run_workflow_orchestration',
-    'create_ag2_pattern'
+    'create_ag2_pattern',
+    '_merge_persisted_extra_context',
 ]
+
+
+def _merge_persisted_extra_context(context: Any, extra_ctx: Dict[str, Any]) -> None:
+    """Merge persisted session extra context into context variables.
+
+    Unconditionally overrides existing context values with values from extra_ctx.
+    Sets is_child_workflow=True when parent_chat_id is present in extra_ctx.
+    """
+    if not isinstance(extra_ctx, dict) or not extra_ctx:
+        return
+    for k, v in extra_ctx.items():
+        try:
+            if hasattr(context, "set"):
+                context.set(k, v)
+            elif hasattr(context, "__setitem__"):
+                context[k] = v
+        except Exception:
+            continue
+    try:
+        parent_chat_id = extra_ctx.get("parent_chat_id")
+        if parent_chat_id:
+            if hasattr(context, "set"):
+                context.set("is_child_workflow", True)
+    except Exception:
+        pass
 
 
 def _make_static_greeting_reply(greeting: str):
@@ -129,8 +155,11 @@ async def _resume_or_initialize_chat(
     initial_message: Optional[str],
     initial_agent_name: Optional[str],
     wf_logger,
+    suppress_config_seed: bool = False,
 ):
     def _build_hidden_config_seed() -> Optional[Dict[str, Any]]:
+        if suppress_config_seed:
+            return None
         seed = config.get("initial_message")
         if not isinstance(seed, str) or not seed.strip():
             return None
@@ -448,6 +477,15 @@ async def _create_ag2_pattern(
     # Optionally attach user_id if provided
     if user_id and not ag2_context.get("user_id"):
         ag2_context.set("user_id", user_id)
+
+    # Agents are constructed before the AG2 Pattern exists. Rebind them to the
+    # Pattern-owned context so hooks, tools, handoffs, and downstream agents all
+    # read/write the same state container.
+    for agent in agents_list:
+        try:
+            setattr(agent, "context_variables", ag2_context)
+        except Exception:
+            pass
 
     # Log final context state with emphasis on routing keys
     context_keys = list(ag2_context.data.keys())
@@ -1182,6 +1220,7 @@ async def run_workflow_orchestration(
             # -----------------------------------------------------------------
             # 10.5) Lifecycle Tools: before_chat trigger
             # -----------------------------------------------------------------
+            lifecycle_manager = None
             try:
                 from mozaiksai.core.workflow.execution.lifecycle import get_lifecycle_manager
                 lifecycle_manager = get_lifecycle_manager(workflow_name)
@@ -1229,6 +1268,17 @@ async def run_workflow_orchestration(
                 lifecycle_manager=lifecycle_manager,
             )
             response = stream_state["response"]
+
+            try:
+                await persistence_manager.persist_context_variables(
+                    chat_id=chat_id,
+                    app_id=app_id,
+                    variables=_safe_context_snapshot(ag2_context),
+                )
+            except Exception as persist_context_err:
+                wf_logger.debug(
+                    f" [{workflow_name_upper}] Failed persisting final AG2 context: {persist_context_err}"
+                )
 
             # Final usage reconciliation
             await _reconcile_final_usage(

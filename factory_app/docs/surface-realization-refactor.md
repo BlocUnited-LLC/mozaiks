@@ -432,7 +432,7 @@ Target behavior:
 - `surface_kind=workflow` is delegated to AgentGenerator artifacts plus page
   launch wiring where needed
 
-### 4.2 New AppBuild Surface Layer
+### 4.2 New App Surface Planning Layer
 
 Add a new `AppSurface` model in:
 
@@ -553,23 +553,32 @@ This is the type of output the refactor should make possible.
 
 ## 6. Migration Order
 
-Implement in this order:
+**Status: complete as of 2026-05-12.**
 
-1. `ValueEngine`
-   - add `surface_candidate_hints`
-   - preserve them in build plan persistence
-   - decouple hosted module naming
-2. `DesignDocs`
-   - add required `surface_map` contract
-   - add ownership rules for pages/events/surfaces
-3. `AgentGenerator`
-   - rename `modules` -> `workflow_stages`
-   - rename `module_index` -> `stage_index`
-   - consume `surface_map` and ignore non-workflow surfaces
-4. `AppGenerator`
-   - introduce `surfaces`
-   - emit task types from `surface_kind`
-   - stop mapping every business capability pack directly to a module
+1. `ValueEngine` ✓
+   - `surface_candidate_hints` added to `ConceptBlueprint`
+   - preserved in build plan persistence via `decompose.py`
+   - `build_registry_id` replaces `app_record_id`
+2. `DesignDocs` ✓
+   - required `surface_map` contract in `agents.yaml`
+   - ownership rules for pages, events, and surfaces
+   - `save_design_doc.py` persists `design_surface_map` to context
+3. `AgentGenerator` ✓
+   - renamed `modules` → `workflow_stages`
+   - renamed `module_index` → `stage_index`
+   - consumes `design_surface_map` and only generates for `surface_kind=workflow`
+4. `AppGenerator` ✓
+   - `AppSurface` / `AppSurfaceMap` models in `structured_outputs.yaml`
+   - `surface_kind` on every `AppBuildTask`
+   - `control_plane_surface` task type added
+   - `app_build_plan.py` enforces `surface_kind` ↔ `task_type` consistency:
+     - `surface_kind=workflow` → rejected (AgentGenerator owns these)
+     - `surface_kind=external_integration` → only `api_surface`
+     - `surface_kind=control_plane` → only `control_plane_surface`
+     - `surface_kind=ui_only` → only `page_bundle`
+   - `file_contracts.yaml` defines `control_plane_surface` contract
+   - `hook_file_contract_context.py` routes `control_plane_surface` to its contract
+   - `agents.yaml` updated to use `control_plane_surface` task type in prompts
 
 ## 7. Summary
 
@@ -580,4 +589,5 @@ The correct mental model after this refactor is:
 - `AgentGenerator` builds workflows
 - `AppGenerator` builds app/runtime surfaces
 
-That is the clean boundary the current system is missing.
+This boundary is now enforced at both the structured-output model level
+(task_type literal values) and the runtime validation level (app_build_plan.py).

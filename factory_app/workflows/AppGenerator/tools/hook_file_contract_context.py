@@ -155,7 +155,7 @@ def _build_file_contracts_body(agent: Any, file_contracts: Dict[str, Any]) -> st
     task_type = _current_task_type(agent)
 
     if agent_name == "ConfigMiddlewareAgent":
-        if task_type in {"module_contract", "backend_foundation"}:
+        if task_type in {"module_contract", "backend_foundation", "control_plane_surface"}:
             target_contract_names = [task_type]
         else:
             target_contract_names = ["module_contract", "backend_foundation"]

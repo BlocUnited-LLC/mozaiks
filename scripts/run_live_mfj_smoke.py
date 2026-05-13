@@ -87,6 +87,7 @@ class SmokeResult:
     prompt: str
     assistant_message: Optional[str]
     structured_output: Dict[str, Any]
+    final_context: Dict[str, Any]
     event_count: int
     observed_event_types: List[str]
 
@@ -100,6 +101,7 @@ class SmokeResult:
                 "prompt": self.prompt,
                 "assistant_message": self.assistant_message,
                 "structured_output": self.structured_output,
+                "final_context": self.final_context,
                 "event_count": self.event_count,
                 "observed_event_types": self.observed_event_types,
             }
@@ -295,6 +297,36 @@ def _load_prompt_file(path: Path) -> str:
     if not prompt:
         raise ValueError("prompt file must contain non-empty text")
     return prompt
+
+
+def _load_context_file(path: Path) -> Dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("context file must contain a top-level JSON object")
+    return payload
+
+
+def _extract_final_context(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(doc, dict):
+        return {}
+    protected = {
+        "_id",
+        "chat_id",
+        "app_id",
+        "workflow_name",
+        "user_id",
+        "status",
+        "created_at",
+        "last_updated_at",
+        "last_sequence",
+        "messages",
+        "last_artifact",
+    }
+    return {
+        str(key): value
+        for key, value in doc.items()
+        if isinstance(key, str) and key not in protected
+    }
 
 
 def _build_tool_response_queues(tool_responses: Optional[Dict[str, Any]]) -> Dict[str, Deque[Any]]:
@@ -735,6 +767,8 @@ async def run_live_mfj_smoke(
     timeout_seconds: float = 180.0,
     workflow_name: str = DEFAULT_ACTIVE_WORKFLOW,
     workflows_root: Optional[Path] = None,
+    initial_context: Optional[Dict[str, Any]] = None,
+    initial_agent: Optional[str] = None,
     tool_response_text: Optional[str] = None,
     user_replies: Optional[List[str]] = None,
     tool_response_payloads: Optional[Dict[str, Any]] = None,
@@ -787,6 +821,7 @@ async def run_live_mfj_smoke(
             app_id=app_id,
             workflow_name=workflow_name,
             user_id=user_id,
+            extra_fields=initial_context if isinstance(initial_context, dict) else None,
         )
 
         ws_url = f"ws://127.0.0.1:{port}/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}"
@@ -840,6 +875,7 @@ async def run_live_mfj_smoke(
                     user_id=user_id,
                     ws_id=ws_id,
                     initial_message=prompt,
+                    initial_agent_name_override=initial_agent,
                 )
             )
             collect_task = asyncio.create_task(
@@ -887,6 +923,7 @@ async def run_live_mfj_smoke(
 
         final_doc: Optional[Dict[str, Any]] = None
         structured_output: Dict[str, Any] = {}
+        final_context: Dict[str, Any] = {}
         try:
             coll = await pm._coll()
             run_status_value = str((workflow_result or {}).get("run_status") or "").strip().lower()
@@ -920,8 +957,10 @@ async def run_live_mfj_smoke(
                     timeout_seconds=15.0,
                 )
             structured_output = _extract_latest_structured_output(final_doc)
+            final_context = _extract_final_context(final_doc)
         except Exception:
             structured_output = {}
+            final_context = {}
 
         observed_event_types = [str(event.get("type") or "") for event in events]
         assistant_message = _resolve_assistant_message(events, structured_output)
@@ -938,6 +977,7 @@ async def run_live_mfj_smoke(
             prompt=prompt,
             assistant_message=assistant_message,
             structured_output=structured_output,
+            final_context=final_context,
             event_count=len(events),
             observed_event_types=observed_event_types,
         )
@@ -995,6 +1035,16 @@ def main() -> int:
         help="Optional text file containing the prompt to send into the workflow.",
     )
     parser.add_argument(
+        "--context-file",
+        default=None,
+        help="Optional JSON file used as initial workflow context variables.",
+    )
+    parser.add_argument(
+        "--initial-agent",
+        default=None,
+        help="Optional agent name override used to start the workflow at a specific agent.",
+    )
+    parser.add_argument(
         "--workflows-root",
         default=str(_resolve_default_workflows_root()),
         help="Root directory containing workflow folders.",
@@ -1021,15 +1071,29 @@ def main() -> int:
         default=None,
         help="Optional JSON file with scripted input_replies and structured tool_responses.",
     )
+    parser.add_argument(
+        "--expect-output-contains",
+        action="append",
+        default=[],
+        help="Fail if the final smoke payload does not contain this text. Repeatable.",
+    )
+    parser.add_argument(
+        "--fail-on-needs-revision",
+        action="store_true",
+        help="Fail if the final UI quality status is needs_revision or blocked.",
+    )
     args = parser.parse_args()
 
     scripted_responses = None
     scripted_replies: List[str] = list(args.user_reply or [])
     default_input_reply = None
     assistant_reply_rules = None
+    initial_context = None
     prompt = str(args.prompt)
     if args.prompt_file:
         prompt = _load_prompt_file(Path(args.prompt_file))
+    if args.context_file:
+        initial_context = _load_context_file(Path(args.context_file))
     if args.tool_response_file:
         scripted_responses = _load_tool_response_file(Path(args.tool_response_file))
         scripted_replies = list(scripted_responses.get("input_replies") or []) + scripted_replies
@@ -1042,6 +1106,8 @@ def main() -> int:
             timeout_seconds=args.timeout_seconds,
             workflow_name=args.workflow,
             workflows_root=Path(args.workflows_root),
+            initial_context=initial_context,
+            initial_agent=str(args.initial_agent).strip() if args.initial_agent else None,
             tool_response_text=args.tool_response_text,
             user_replies=scripted_replies or None,
             tool_response_payloads=(scripted_responses or {}).get("tool_responses"),
@@ -1049,8 +1115,28 @@ def main() -> int:
             assistant_reply_rules=assistant_reply_rules,
         )
     )
-    exit_code = 0 if result.success else 1
-    print(json.dumps(result.as_dict(), indent=2), flush=True)
+    result_payload = result.as_dict()
+    validation_errors: List[str] = []
+    output_text = json.dumps(result_payload, ensure_ascii=False)
+    for expected in args.expect_output_contains or []:
+        expected_text = str(expected or "")
+        if expected_text and expected_text not in output_text:
+            validation_errors.append(f"missing expected output text: {expected_text}")
+    if args.fail_on_needs_revision:
+        quality_status = str(
+            (result.final_context or {}).get("app_ui_quality_status")
+            or (result.structured_output or {}).get("status")
+            or ""
+        ).strip()
+        if quality_status != "passed":
+            validation_errors.append(
+                f"UI quality gate did not pass; status={quality_status or 'missing'}"
+            )
+
+    exit_code = 0 if result.success and not validation_errors else 1
+    if validation_errors:
+        result_payload["validation_errors"] = validation_errors
+    print(json.dumps(result_payload, indent=2), flush=True)
     try:
         from mozaiksai.core.core_config import close_mongo_client
 

@@ -1,0 +1,27 @@
+{
+  "theme": {
+    "name": "Support Operations",
+    "appearance": "dark",
+    "branding": {
+      "app_name": "Support Operations",
+      "logo_url": "/assets/images/logo.png",
+      "favicon_url": "/assets/favicon.ico"
+    },
+    "colors": {
+      "primary": "#4fb7d8",
+      "accent": "#8b7cf6",
+      "background": "#050b16",
+      "surface": "#0a1220",
+      "text": "#f5f7fb"
+    },
+    "typography": {
+      "heading_font": "Rajdhani",
+      "body_font": "Rajdhani",
+      "display_font": "Orbitron"
+    }
+  },
+  "assets": {
+    "logo": "images/logo.png",
+    "favicon": "favicon.ico"
+  }
+}

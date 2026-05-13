@@ -47,6 +47,9 @@ Do not put MFJ graphs in the global registry.
 - Do not put product-specific presets such as dogfood shortcuts in the global transition schema.
 - Transition `context_variables` may seed deterministic context only when the target workflow declares those keys in `context_variables.yaml`.
 - Use `entrypoints[]` entries with `transition: <id>` to enter a transition screen.
+- Transition entry routes should use `meta.shellMode: "focused"` and transition
+  UI should use `ui.shell_mode: "focused"` unless the transition intentionally
+  needs normal product chrome.
 
 ## Transitions
 
@@ -59,7 +62,8 @@ semantic and workflow-agnostic.
   "transition_type": "user_choice_context",
   "ui": {
     "component": "AppTypeSelector",
-    "mode": "screen"
+    "mode": "screen",
+    "shell_mode": "focused"
   },
   "options": [
     {

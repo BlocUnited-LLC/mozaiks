@@ -376,17 +376,19 @@ def test_save_app_schema_writes_custom_route_bundle(monkeypatch, tmp_path: Path)
     assert context.data["app_schema_ready"] is True
 
 
-def test_save_app_schema_rejects_manifest_page_mismatch(monkeypatch, tmp_path: Path) -> None:
+def test_save_app_schema_canonicalizes_manifest_page_index(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    context = _Context()
     manifest = _base_manifest()
-    manifest["pages"] = ["Users"]
+    manifest["pages"] = ["StaleName"]
 
-    with pytest.raises(ValueError, match="manifest.pages"):
-        save_app_schema_module.save_app_schema(
-            manifest=manifest,
-            pages=[_base_page()],
-            context_variables=_Context(),
-        )
+    save_app_schema_module.save_app_schema(
+        manifest=manifest,
+        pages=[_base_page()],
+        context_variables=context,
+    )
+
+    assert context.data["app_manifest"]["pages"] == ["Dashboard"]
 
 
 def test_save_app_schema_rejects_custom_route_overlap(monkeypatch, tmp_path: Path) -> None:
@@ -449,6 +451,134 @@ def test_save_app_schema_rejects_invalid_form_select_options(monkeypatch, tmp_pa
         )
 
 
+def test_save_app_schema_strips_blank_optional_form_placeholder(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    page = _base_page()
+    page["sections"] = [
+        {
+            "id": "settings",
+            "primitive": "Form",
+            "config": {
+                "fields": [
+                    {
+                        "name": "sla_hours",
+                        "label": "SLA hours",
+                        "type": "number",
+                        "placeholder": "",
+                    }
+                ],
+                "submit_action": {
+                    "label": "Save",
+                    "action_type": "submit",
+                    "endpoint": "/api/modules/tickets/save_settings",
+                    "event_type": "",
+                },
+            },
+        }
+    ]
+
+    save_app_schema_module.save_app_schema(
+        manifest=_base_manifest(),
+        pages=[page],
+        context_variables=_Context(),
+    )
+
+    dashboard_yaml = (tmp_path / "ui" / "pages" / "Dashboard.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "placeholder" not in dashboard_yaml
+    assert "event_type" not in dashboard_yaml
+    assert "href: /api/modules/tickets/save_settings" in dashboard_yaml
+
+
+def test_save_app_schema_promotes_form_api_endpoint_to_submit_href(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    page = _base_page()
+    page["sections"] = [
+        {
+            "id": "settings",
+            "primitive": "Form",
+            "config": {
+                "api_endpoint": "/api/modules/tickets/save_settings",
+                "fields": [
+                    {
+                        "name": "default_queue",
+                        "label": "Default queue",
+                        "type": "text",
+                        "required": True,
+                    }
+                ],
+                "submit_label": "Save settings",
+                "submit_action": {
+                    "label": "Save settings",
+                    "action_type": "submit",
+                },
+            },
+        }
+    ]
+
+    save_app_schema_module.save_app_schema(
+        manifest=_base_manifest(),
+        pages=[page],
+        context_variables=_Context(),
+    )
+
+    dashboard_yaml = (tmp_path / "ui" / "pages" / "Dashboard.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "href: /api/modules/tickets/save_settings" in dashboard_yaml
+
+
+def test_save_app_schema_derives_missing_submit_href_from_build_plan(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    context = _Context(
+        {
+            "app_build_plan": {
+                "modules": [{"module_id": "tickets"}],
+                "pages": [
+                    {
+                        "name": "QueueSettings",
+                        "route": "/dashboard",
+                        "primary_actions": ["save_settings"],
+                    }
+                ],
+            }
+        }
+    )
+    page = _base_page()
+    page["sections"] = [
+        {
+            "id": "settings",
+            "primitive": "Form",
+            "config": {
+                "fields": [
+                    {
+                        "name": "default_queue",
+                        "label": "Default queue",
+                        "type": "text",
+                    }
+                ],
+                "submit_label": "Save settings",
+                "submit_action": {
+                    "label": "Save settings",
+                    "action_type": "submit",
+                },
+            },
+        }
+    ]
+
+    save_app_schema_module.save_app_schema(
+        manifest=_base_manifest(),
+        pages=[page],
+        context_variables=context,
+    )
+
+    dashboard_yaml = (tmp_path / "ui" / "pages" / "Dashboard.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "href: /api/modules/tickets/save_settings" in dashboard_yaml
+
+
 def test_save_app_schema_writes_shell_and_deep_merges_theme_patch(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     context = _Context()
@@ -488,6 +618,23 @@ def test_save_app_schema_writes_shell_and_deep_merges_theme_patch(monkeypatch, t
         shell_config={
             "header": {"actions": [{"id": "launch", "label": "Launch", "variant": "gradient"}]},
             "footer": {"visible": False},
+            "navigation": {
+                "policy": {
+                    "desktop": {"global": "header", "local": "sidebar", "footer": "visible"},
+                    "mobile": {"global": "bottomBar", "local": "sheet", "footer": "hidden"},
+                    "maxMobileItems": 4,
+                    "autoFromPages": False,
+                }
+            },
+            "chrome": {
+                "defaultMode": "standard",
+                "modes": {
+                    "conversation": {
+                        "desktop": {"header": True, "footer": False, "bottomBar": False, "localNav": False},
+                        "mobile": {"header": True, "footer": False, "bottomBar": False, "localNav": False},
+                    }
+                },
+            },
         },
         context_variables=context,
     )
@@ -505,12 +652,29 @@ def test_save_app_schema_writes_shell_and_deep_merges_theme_patch(monkeypatch, t
     assert merged_shell["header"]["actions"][0]["label"] == "Launch"
     assert merged_shell["footer"]["visible"] is False
     assert merged_shell["footer"]["links"][0]["label"] == "Docs"
+    assert merged_shell["navigation"]["policy"]["mobile"]["local"] == "sheet"
+    assert merged_shell["navigation"]["policy"]["maxMobileItems"] == 4
+    assert merged_shell["chrome"]["defaultMode"] == "standard"
+    assert merged_shell["chrome"]["modes"]["conversation"]["mobile"]["bottomBar"] is False
 
     assert context.data["app_theme_config_patch"]["theme"]["density"] == "spacious"
     assert context.data["app_shell_config"]["footer"]["visible"] is False
     assert context.data["app_asset_manifest"] is None
     assert "brand/theme_config.json" in result
     assert "config/shell.json" in result
+
+
+def test_save_app_schema_rejects_invalid_shell_mode(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    page = _base_page()
+    page["shell_mode"] = "floating-toolbar"
+
+    with pytest.raises(ValueError, match="shell_mode"):
+        save_app_schema_module.save_app_schema(
+            manifest=_base_manifest(),
+            pages=[page],
+            context_variables=_Context(),
+        )
 
 
 def test_save_app_schema_writes_and_merges_asset_manifest(monkeypatch, tmp_path: Path) -> None:

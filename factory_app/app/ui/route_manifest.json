@@ -26,7 +26,7 @@
     },
     {
       "path": "/usage",
-      "component": "ConsolePage",
+      "component": "WorkspaceUsagePage",
       "label": "Usage",
       "order": 5,
       "meta": {
@@ -37,38 +37,38 @@
       }
     },
     {
-      "path": "/operations",
-      "component": "ConsolePage",
-      "label": "Operations",
+      "path": "/billing",
+      "component": "WorkspaceBillingPage",
+      "label": "Billing",
       "order": 6,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
-        "title": "Operations",
+        "title": "Billing",
         "appShell": true
       }
     },
     {
-      "path": "/billing",
-      "component": "ConsolePage",
-      "label": "Billing & Hosting",
+      "path": "/hosting",
+      "component": "WorkspaceHostingPage",
+      "label": "Hosting",
       "order": 7,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
-        "title": "Billing & Hosting",
+        "title": "Hosting",
         "appShell": true
       }
     },
     {
-      "path": "/settings",
+      "path": "/apps/:appId",
       "component": "ConsolePage",
-      "label": "Workspace Settings",
-      "order": 8,
+      "label": "App Console",
+      "order": 19,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
-        "title": "Workspace Settings",
+        "title": "App Console",
         "appShell": true
       }
     },
@@ -85,34 +85,10 @@
       }
     },
     {
-      "path": "/apps/:appId/build",
-      "component": "AppBuildPage",
-      "label": "Build",
-      "order": 21,
-      "meta": {
-        "surfaces": ["studio"],
-        "requiresRole": "admin",
-        "title": "Build",
-        "appShell": true
-      }
-    },
-    {
-      "path": "/apps/:appId/deploy",
-      "component": "ConsolePage",
-      "label": "Deploy",
-      "order": 22,
-      "meta": {
-        "surfaces": ["studio"],
-        "requiresRole": "admin",
-        "title": "Deploy",
-        "appShell": true
-      }
-    },
-    {
       "path": "/apps/:appId/users",
-      "component": "AdminPortal",
+      "component": "AppUsersPage",
       "label": "Users",
-      "order": 23,
+      "order": 21,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -124,7 +100,7 @@
       "path": "/apps/:appId/integrations",
       "component": "AppIntegrationsPage",
       "label": "Integrations",
-      "order": 24,
+      "order": 22,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -134,9 +110,9 @@
     },
     {
       "path": "/apps/:appId/usage",
-      "component": "AdminPortal",
+      "component": "AppUsagePage",
       "label": "Usage",
-      "order": 25,
+      "order": 23,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -145,26 +121,26 @@
       }
     },
     {
-      "path": "/apps/:appId/operations",
-      "component": "AdminPortal",
-      "label": "Operations",
-      "order": 26,
+      "path": "/apps/:appId/billing",
+      "component": "AppBillingPage",
+      "label": "Billing",
+      "order": 24,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
-        "title": "Operations",
+        "title": "Billing",
         "appShell": true
       }
     },
     {
-      "path": "/apps/:appId/settings",
-      "component": "AdminPortal",
-      "label": "Settings",
-      "order": 27,
+      "path": "/apps/:appId/hosting",
+      "component": "AppHostingPage",
+      "label": "Hosting",
+      "order": 25,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
-        "title": "Settings",
+        "title": "Hosting",
         "appShell": true
       }
     }

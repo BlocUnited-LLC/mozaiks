@@ -7,7 +7,7 @@ ui_primitives = import_module_directly("mozaiksai.core.workflow.ui_primitives")
 
 
 def test_component_and_page_primitive_catalogs_match_runtime_exports() -> None:
-    expected = (
+    expected_page = (
         "ActionButton",
         "Alert",
         "AlertBanner",
@@ -17,40 +17,63 @@ def test_component_and_page_primitive_catalogs_match_runtime_exports() -> None:
         "CodeBlock",
         "DataTable",
         "Empty",
+        "ErrorState",
         "FileList",
         "Form",
         "Grid",
+        "InlineEmptyState",
+        "LoadingState",
+        "Metric",
         "Modal",
+        "PageHeader",
+        "Panel",
         "ProgressTracker",
+        "ResourceTable",
+        "SegmentedBar",
         "Skeleton",
         "Stat",
+        "StatusPill",
+        "SummaryStrip",
+        "SurfaceCard",
         "Timeline",
     )
+    expected_component = tuple(
+        sorted(
+            set(expected_page)
+            | {
+                "CollectionToolbar",
+                "IconButton",
+                "LinkButton",
+                "ResourceList",
+                "SegmentedControl",
+                "SlideOver",
+            }
+        )
+    )
 
-    assert ui_primitives.get_component_ui_primitive_names() == expected
-    assert ui_primitives.get_page_ui_primitive_names() == expected
+    assert ui_primitives.get_component_ui_primitive_names() == expected_component
+    assert ui_primitives.get_page_ui_primitive_names() == expected_page
 
 
 def test_component_guidance_includes_live_import_paths() -> None:
     guidance = ui_primitives.format_component_ui_primitive_guidance()
 
     assert "DataTable" in guidance
-    # format_component_ui_primitive_guidance() uses the @mozaiks/chat-ui package alias
-    assert "@mozaiks/chat-ui/ui/primitives/DataTable.jsx" in guidance
-    assert "@mozaiks/chat-ui/ui/primitives/Skeleton.jsx" in guidance
+    assert "from '@mozaiks/chat-ui/ui'" in guidance
+    assert "@mozaiks/chat-ui/ui/primitives/" not in guidance
 
 
 def test_component_guidance_includes_new_primitives() -> None:
     guidance = ui_primitives.format_component_ui_primitive_guidance()
 
-    for name in ("Timeline", "CodeBlock", "ProgressTracker", "AlertBanner", "ActionButton", "FileList"):
+    for name in ("PageHeader", "ResourceTable", "Timeline", "CodeBlock", "ProgressTracker", "AlertBanner", "ActionButton", "FileList"):
         assert name in guidance, f"Expected '{name}' in component guidance"
 
 
 def test_page_guidance_includes_new_primitives() -> None:
     guidance = ui_primitives.format_page_ui_primitive_guidance()
 
-    for name in ("Timeline", "CodeBlock", "ProgressTracker", "AlertBanner", "ActionButton", "FileList"):
+    for name in ("PageHeader", "ResourceTable", "Timeline", "CodeBlock", "ProgressTracker", "AlertBanner", "ActionButton", "FileList"):
         assert name in guidance, f"Expected '{name}' in page primitive guidance"
 
 

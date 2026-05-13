@@ -80,8 +80,18 @@ Prefer:
 
 When working in `app/config/`:
 - keep startup and workflow boot behavior in `ai.json`
-- keep shell chrome config in `shell.json`
+- keep shell navigation policy and chrome mode policy in `shell.json`
 - keep branding/theme assets in `app/brand/theme_config.json`
+
+Route-level shell intent belongs on the route, not in ad hoc React wrappers:
+- `app/ui/pages/*.yaml -> shell_mode`
+- `app/ui/route_manifest.json -> pages[].meta.shellMode`
+- `extension_registry.json -> entrypoints[].meta.shellMode`
+
+Use `conversation` for DM/chat/thread routes, `workspace` for dense module or
+profile workspaces, `focused` for setup/review/transition screens, `immersive`
+for full-viewport experiences, `public` for public/legal routes, and `standard`
+for ordinary app pages.
 
 ## UI Editing Rules
 

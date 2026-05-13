@@ -35,6 +35,19 @@ import { ProgressTracker } from '../primitives/ProgressTracker.jsx';
 import { AlertBanner }     from '../primitives/AlertBanner.jsx';
 import { ActionButton }    from '../primitives/ActionButton.jsx';
 import { FileList }        from '../primitives/FileList.jsx';
+import { PageHeader }      from '../primitives/PageHeader.jsx';
+import { ResourceTable }   from '../primitives/ResourceTable.jsx';
+import { SummaryStrip }    from '../primitives/SummaryStrip.jsx';
+import {
+  ErrorState,
+  InlineEmptyState,
+  LoadingState,
+  Metric,
+  Panel,
+  SegmentedBar,
+  StatusPill,
+  SurfaceCard,
+} from '../primitives/Surface.jsx';
 
 import { PRIMITIVE_SCHEMAS } from './PrimitiveSchemas.js';
 
@@ -56,6 +69,17 @@ const PRIMITIVES = {
   AlertBanner:     { Component: AlertBanner,     schema: PRIMITIVE_SCHEMAS.AlertBanner },
   ActionButton:    { Component: ActionButton,    schema: PRIMITIVE_SCHEMAS.ActionButton },
   FileList:        { Component: FileList,        schema: PRIMITIVE_SCHEMAS.FileList },
+  PageHeader:      { Component: PageHeader,      schema: PRIMITIVE_SCHEMAS.PageHeader },
+  ResourceTable:   { Component: ResourceTable,   schema: PRIMITIVE_SCHEMAS.ResourceTable },
+  SummaryStrip:    { Component: SummaryStrip,    schema: PRIMITIVE_SCHEMAS.SummaryStrip },
+  InlineEmptyState:{ Component: InlineEmptyState,schema: PRIMITIVE_SCHEMAS.InlineEmptyState },
+  LoadingState:    { Component: LoadingState,    schema: PRIMITIVE_SCHEMAS.LoadingState },
+  ErrorState:      { Component: ErrorState,      schema: PRIMITIVE_SCHEMAS.ErrorState },
+  Panel:           { Component: Panel,           schema: PRIMITIVE_SCHEMAS.Panel },
+  SurfaceCard:     { Component: SurfaceCard,     schema: PRIMITIVE_SCHEMAS.SurfaceCard },
+  StatusPill:      { Component: StatusPill,      schema: PRIMITIVE_SCHEMAS.StatusPill },
+  Metric:          { Component: Metric,          schema: PRIMITIVE_SCHEMAS.Metric },
+  SegmentedBar:    { Component: SegmentedBar,    schema: PRIMITIVE_SCHEMAS.SegmentedBar },
 };
 
 /**

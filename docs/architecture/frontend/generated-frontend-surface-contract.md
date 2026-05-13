@@ -11,6 +11,15 @@ Mozaiks should not flatten those surfaces into one generic AG-UI-style contract.
 
 ## Canonical surfaces
 
+Finite surface IDs are defined in
+`mozaiksai/core/workflow/ui_surface_taxonomy.py` and injected into generator
+prompts. Agents must emit only these IDs:
+
+- `declarative_page`
+- `custom_react_page`
+- `agent_tool`
+- `transition`
+
 | Surface | Owner | Contract | Runtime path |
 | --- | --- | --- | --- |
 | Persistent App UI | AppGenerator | `app.json` + `ui/pages/*.yaml` | `SchemaPage` -> `PageRenderer` -> page primitives |
@@ -74,6 +83,45 @@ Rules:
 - `context_variables` must stay deterministic and match the target workflow context contract
 - do not fake workflow launch with `navigate` or `ui.*` events
 
+## App UI Quality Gate
+
+Persistent AppGenerator pages have a deterministic gate before assembly:
+
+- `AppSchemaAgent` emits `AppSchemaOutput`
+- `save_app_schema` persists `app.json`, `ui/pages/*.yaml`, optional custom route artifacts, and `app_ui_quality_warnings`
+- `AppUIQualityAgent` calls `review_ui_quality`
+- `app_ui_quality_status == "passed"` is required before `AssemblyAgent`
+- `needs_revision` routes back to `AppSchemaAgent`; `blocked` routes to user/operator review
+
+This is the production bar for schema-driven UI. The gate is runtime state, not
+prompt prose, so live AG2 runs cannot assemble generated app UI until the
+quality status passes.
+
+After the gate passes, assembly must collect files from the persisted
+`generated_app_dir` app workspace. The schema-driven path does not rely on the
+LLM to reconstruct `code_files` from chat history. Downstream assembly,
+validation, and download tools read the canonical saved artifacts:
+
+- `app.json`
+- `ui/pages/*.yaml`
+- optional `ui/route_manifest.json`
+- optional `ui/pages/custom/*`
+- optional `ui/index.js`
+- optional `brand/theme_config.json`
+- optional `config/*.json`
+
+The first browser-level acceptance target for this lane is:
+
+```powershell
+npm --prefix web_shell run test:generated-ui
+```
+
+That Playwright suite serves a generated app fixture as the active app root,
+loads canonical `ui/pages/*.yaml` through `SchemaPage`, and verifies primitive
+rendering across desktop and mobile. It complements the AG2 quality gate: the
+gate decides whether agents may assemble artifacts, while Playwright proves that
+the approved artifacts render cleanly in the shell.
+
 ## Workflow UI
 
 Workflow UI owns:
@@ -84,6 +132,13 @@ Workflow UI owns:
 - diagrams
 - transient review and planning surfaces
 - response-required checkpoint UI
+
+Workflow-local React now has a deterministic gate:
+
+- `UIFileGenerator` persists its emitted UI files through `save_workflow_ui_files_output`
+- `WorkflowUIQualityAgent` calls `review_workflow_ui_quality`
+- `workflow_ui_quality_status == "passed"` is required before backend tool generation and bundle delivery
+- `needs_revision` routes back to `UIFileGenerator`; `blocked` routes to user/operator review
 
 Rules:
 
@@ -96,7 +151,6 @@ Rules:
 - inline React components are for structured workflow interaction, not default
   free-text reply
 - shared workflow components live in `chat-ui/src/core/ui/` and are mounted by `WorkflowUIRouter`
-- runtime-enriched workflow payloads should carry manifest-owned `workflow_primitive` and `ui_contract`
 - runtime-enriched workflow payloads should carry manifest-owned `workflow_primitive`, `ui_realization`, and `ui_contract`
 - shipped shared workflow components should derive their actions from `ui_contract.actions_schema`
 - workflow-local React is only for genuine customization or primitive gaps
@@ -175,7 +229,7 @@ Event-driven workflow routing:
 Rules:
 
 - page actions use workflow registry ids
-- `event_flows` and `subscriptions.yaml` use workflow capability ids
+- `event_flows` and runtime trigger/reaction contracts use workflow capability ids
 - startup mode shapes user expectations only; the runtime decides who speaks first after session launch
 
 ## What to borrow from AG-UI and CopilotKit

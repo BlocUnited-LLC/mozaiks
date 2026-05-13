@@ -246,7 +246,7 @@ async def create_agents(
 
         base_system_message = system_message
         update_hooks: List[Callable[..., Any] | UpdateSystemMessage] = []
-        if agent_exposures:
+        if agent_exposures or agent_variables:
             system_message = _apply_context_exposures(
                 base_system_message,
                 agent_exposures,

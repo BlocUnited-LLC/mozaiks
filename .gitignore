@@ -87,3 +87,12 @@ infra/keycloak/themes/mozaiks/login/resources/img/
 # Misc
 nul
 *.log
+
+# Build artifacts
+tmpdist/
+.tmp-build-output.txt
+.tmp-*/
+
+# Playwright test outputs
+web_shell/test-results/
+web_shell/playwright-report/

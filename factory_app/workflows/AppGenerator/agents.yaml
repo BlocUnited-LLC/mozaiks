@@ -147,7 +147,7 @@ agents:
            If the product spec mentions any of these, reference them as existing runtime capabilities in `backend_scope`, not as packs to generate.
          - If the product needs domain-specific profile records (for example investor profiles, founder profiles, vendor profiles, or creator profiles), model them as module-owned entities/actions/events inside the relevant capability pack. They do not replace the host-owned `/api/me` account/profile contract.
          - Distinguish deterministic product behavior from optional agentic augmentation.
-      5. Derive the minimum complete set of pages/screens required by the selected capability packs.
+      5. Derive the minimum complete set of pages/screens required by the selected capability packs, and identify whether each route is global navigation, local/module navigation, profile/account navigation, footer/legal navigation, or direct-link only. Also classify the intended shell chrome mode for each route: standard, workspace, conversation, focused, immersive, or public.
       6. Derive the canonical entities and required operations for each entity.
       7. Make auth explicit: public, basic login, role-based, or third-party auth.
       8. Capture any visual/style preference the user stated during the interview (e.g. "dark", "minimal", "techy") as `theme_preferences` — raw text, no translation needed. Set to null if no preference was stated.
@@ -182,7 +182,9 @@ agents:
         - `page_bundle` tasks must start at `AppSchemaAgent` and produce the declarative page bundle, not raw React files.
         - If the shipped primitive system cannot represent a requested persistent surface, first try to narrow it into the existing primitives. Only when a real primitive gap remains should AppSchemaAgent use the bounded custom route contract.
         - Custom full-page React is a rare explicit escape hatch, not a default page lane. When needed, it must be emitted only through the typed `custom_route_bundle` contract that persists `ui/route_manifest.json` + `ui/pages/custom/*.jsx` and never through ad hoc raw frontend files.
-      11b. For every page in `pages[]`, populate typed `sections_hint` as `PrimitiveSectionHint[]`:
+      11b. For every page in `pages[]`, populate `shell_mode_hint` and typed `sections_hint`:
+        - `shell_mode_hint` must be one of `standard`, `workspace`, `conversation`, `focused`, `immersive`, `public`, or null only when genuinely ambiguous.
+        - Use `conversation` for DM/chat/thread pages, `workspace` for dense module/profile/admin-like work surfaces, `focused` for setup/review/transition-adjacent pages, `public` for legal/marketing/public pages, `immersive` for canvas/media/full-viewport experiences, and `standard` for ordinary app pages.
         - Include one hint per expected UI section. AppSchemaAgent will refine and extend these — do not leave them empty.
         - Each hint must include `primitive` (exact registered name), `config_hint` (partial config with required fields), `section_id_hint` (kebab-case), and `title_hint`.
         - Required fields per primitive (consult [SHIPPED PAGE PRIMITIVES] if injected):
@@ -224,6 +226,11 @@ agents:
         - Do NOT include admin pages in `pages[]`, generated page routes, or admin tasks targeting React files.
       12b. **surface realization rule**:
         - Only capability packs with `surface_kind = module` may emit `task_type: module_contract`.
+        Capability source rules:
+        - `host_universal` capabilities: do NOT scaffold or plan any code — they are already in the platform runtime.
+        - `hosted_pack` capabilities: Do NOT plan a `module_contract` build task for it. The module already exists in the deployed host. Include it as a capability_pack entry with `implementation_mode: external_integration` and `capability_source: hosted_pack`. Plan an `api_surface` adapter task (owned by ControllerAgent) to generate the thin adapter client at `backend/integrations/{pack_id}_client.py`.
+        - `generated_module` capabilities: must generate full module contracts and backend files — plan `module_contract` build tasks for these packs.
+        - `external_adapter` capabilities: generate adapter/client wiring only — no hosted business logic.
         - `surface_kind = workflow` packs describe agentic behavior and UI/workflow touchpoints, but do not generate runtime modules here.
         - `surface_kind = control_plane` packs should use app-level orchestration tasks such as `backend_foundation` or `api_surface`, not `module_contract`.
         - `surface_kind = external_integration` packs should use `api_surface` or `agent_backend_integration` tasks, not `module_contract`.
@@ -255,8 +262,10 @@ agents:
          - data-models
          - business-services
          - api-routes
+         - integration-adapters
         - app-schema-bundle
         - validation-export
+        Adapter task decision rule: For each `hosted_pack` with `surface_kind: external_integration`, plan one `api_surface` task whose owned_paths live under `backend/integrations/` — no hosted business logic in these files, only thin client wiring. Do NOT place adapter files under `modules/{pack_id}/`.
       14. Emit `workflows` child specs derived directly from `build_tasks`:
          - `name` MUST be `AppGenerator`
          - `initial_agent` MUST match the task's designated starting agent
@@ -267,6 +276,11 @@ agents:
            - `current_build_task_id`: task id
            - `current_build_task_type`: task type
       15. Emit ONLY valid AppBuildPlanOutput JSON.
+      16. Hosted-pack page binding rule: When a hosted_pack is in capability_packs with
+          surface_kind: external_integration, page tasks MUST bind to the app-owned
+          facade module (e.g. /api/modules/{facade_module_id}/), NEVER to
+          /api/modules/{hosted_pack_id}/ directly. The facade_module_id is the
+          capability_pack_id of the module_contract facade task, NOT the hosted_pack_id.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -402,6 +416,24 @@ agents:
                 "task_id": "task_backend_foundation"
               }
             }
+          },
+          {
+            "name": "AppGenerator",
+            "description": "Hosted wallet adapter",
+            "initial_agent": "ControllerAgent",
+            "initial_message": "Execute only the wallet adapter task. Generate backend/integrations/wallet_client.py as a thin Python client.",
+            "context_variables": {
+              "task_run_mode": true,
+              "current_build_task_id": "task_wallet_adapter",
+              "current_build_task_type": "api_surface",
+              "current_build_task": {
+                "task_id": "task_wallet_adapter",
+                "task_type": "api_surface",
+                "surface_kind": "external_integration",
+                "owned_paths": ["backend/integrations/wallet_client.py"],
+                "initial_agent": "ControllerAgent"
+              }
+            }
           }
         ]
       }
@@ -428,7 +460,7 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Primary inputs**:
-      - `app_build_plan`: canonical capability packs, page list, theme preferences, structured `brand_intent`, and `ui_layout` / `sections_hint` fields. `sections_hint` is now typed `PrimitiveSectionHint[]` — each entry carries `primitive` (validated name), `config_hint` (partial config with required fields already populated by AppPlanAgent), `section_id_hint`, and `title_hint`. Use `config_hint` as the base config for that section and extend it; do not discard it.
+      - `app_build_plan`: canonical capability packs, page list, theme preferences, structured `brand_intent`, and `ui_layout` / `shell_mode_hint` / `sections_hint` fields. `sections_hint` is now typed `PrimitiveSectionHint[]` — each entry carries `primitive` (validated name), `config_hint` (partial config with required fields already populated by AppPlanAgent), `section_id_hint`, and `title_hint`. Use `config_hint` as the base config for that section and extend it; do not discard it.
       - `design_surface_map`: canonical typed surface realization contract from DesignDocs when available. Use it to confirm which surface owns each persistent page.
       - `captured_theme_config`: canonical ThemeCapture output when available. This is the strongest visual input and should be preferred over heuristic inference.
       - `experience_spec_document`: canonical persistent UI intent document from DesignDocs. In the current pipeline this is serialized under `ui_schema`.
@@ -476,11 +508,32 @@ agents:
 
       **Artifact boundary**:
       - `theme_config_patch` owns visual tokens only: `theme`, `primitives`, and semantic `ui.chat` / `ui.shell` / `ui.page` spacing, sizing, density, and visual styling.
-      - `shell_config` owns shell content/behavior only: `header`, `profile`, `notifications`, `footer` labels, links, icons, and visibility.
+      - `shell_config` owns shell content/behavior only: `header`, `profile`, `notifications`, `footer` labels, links, icons, visibility, the app-wide `navigation.policy`, and compact `chrome` mode overrides.
       - `asset_manifest` owns reusable media inventory metadata (`asset_id`, source, path/url, alt/provenance, usage). Use it for logos/icons/hero imagery/video references.
       - Do NOT put raw spacing, padding, width, or density tokens in `shell_config`.
       - Do NOT put header actions, profile menu items, or footer links in `theme_config_patch`.
       - Do NOT use `theme_config_patch` or `shell_config` as free-form media dumps. Canonical media listings belong in `asset_manifest`.
+
+      **Dynamic shell navigation**:
+      - Prefer `AppPageSchema.navigation` for page-owned navigation contributions. This keeps `config/shell.json` focused on policy instead of a giant route list.
+      - Use `navigation.scope` deterministically:
+        - `global` for primary app destinations users visit repeatedly.
+        - `local` for workspace/module subsections that should not crowd the global shell.
+        - `profile` for account-owned destinations and settings.
+        - `footer` for legal/support links.
+      - Use `shell_config.navigation.policy` only when the app needs non-default placement behavior. Recommended default: desktop global `header`, desktop local `sidebar`, mobile global `bottomBar`, mobile local `sheet`, mobile footer `hidden`, `maxMobileItems: 5`.
+      - Do not duplicate the same route in `shortcuts`, `shell_config.navigation.items`, and `AppPageSchema.navigation`. Put page-owned routes on the page; use shortcuts for built-in/profile/footer chrome; use `navigation.items` only for app-level entries that are not owned by a page schema.
+      - Mobile bottom navigation must stay to five or fewer primary items. Extra global items belong in a sheet/more surface or profile menu.
+
+      **Dynamic shell chrome modes**:
+      - Every persistent page should choose a route-level `shell_mode` from: `standard`, `workspace`, `conversation`, `focused`, `immersive`, `public`.
+      - Use `standard` for normal product pages where desktop footer and mobile bottom nav are acceptable.
+      - Use `workspace` for dense dashboards, admin/module/profile workspaces, CRUD consoles, and pages with local navigation; this suppresses desktop footer while keeping mobile primary nav available.
+      - Use `conversation` for chat, DM, inbox thread, support conversation, or realtime messaging routes; this suppresses footer and bottom nav so the composer/thread owns the lower edge.
+      - Use `focused` for onboarding, setup, selection, review, approval, checkout, or workflow handoff screens; keep global distractions minimal.
+      - Use `immersive` for map/canvas/game/media/kiosk routes that must own the full viewport.
+      - Use `public` for public, legal, marketing, or unauthenticated informational pages.
+      - Use `shell_config.chrome` only to override the platform defaults for those modes. Do not encode per-route chrome in `shell_config`; the route owns `shell_mode`.
 
       Available font keys (use ONLY these exact strings):
         Body fonts:  "system", "rajdhani", "inter", "roboto", "opensans", "lato",
@@ -535,14 +588,16 @@ agents:
       3. For each page:
           a. Choose a `layout` that fits the page purpose.
           b. Produce ordered `sections` — each section uses one primitive and has a complete, valid `config`.
-          c. Set `roles` to null unless the plan restricts page access.
+          c. Set `shell_mode` using the semantic chrome mode rules above. Prefer `workspace` for module/profile/admin-like work surfaces and `conversation` for DM/chat thread surfaces.
+          d. Set `roles` to null unless the plan restricts page access.
+          e. Set `navigation` when the page should appear in shell or module navigation. Use `scope: global` for primary app routes, `scope: local` for page/workspace subsections, `scope: profile` for account destinations, and `null` for routes that should be reachable only by direct links or in-page actions.
       4. Build the `manifest`:
           a. `pages` — list every page name.
           b. `custom_routes` — null/empty unless you emit custom_route_bundle; otherwise list every custom route id in order.
           c. `auth_strategy` and `roles` from `app_build_plan`.
           d. `default_route` — the most logical landing page route and it must match a generated declarative page route or custom route path.
       5. Set `theme_config_patch` to null when upstream context does not establish a clear non-default direction, or when the approved direction already matches the platform default.
-      6. Set `shell_config` to null when the default platform shell is appropriate. Only emit it when the app needs specific header/profile/notification/footer content or visibility changes.
+      6. Set `shell_config` to null when the default platform shell is appropriate. Only emit it when the app needs specific header/profile/notification/footer content, shortcut chrome, a non-default `navigation.policy`, or a non-default `chrome` mode policy.
       7. If `captured_theme_config` is present, preserve its token structure where possible and only narrow it to the app-specific deltas you actually need.
       8. Set `asset_manifest` to null when shipped/default assets are sufficient. Emit it only when the app requires non-default image/icon/media inventory that should be cataloged.
       9. Set `custom_route_bundle` to null unless a persistent route truly requires custom full-page React.
@@ -576,7 +631,9 @@ agents:
             "route": "/dashboard",
             "title": "Dashboard",
             "layout": "grid",
+            "shell_mode": "workspace",
             "roles": null,
+            "navigation": { "id": "dashboard", "label": "Dashboard", "scope": "global", "order": 10, "visible": true, "placement": null },
             "sections": [
               {
                 "id": "kpi-row",
@@ -611,6 +668,65 @@ agents:
   max_consecutive_auto_reply: 6
   structured_outputs_required: true
 
+- name: AppUIQualityAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: |-
+      You are the App UI Quality Agent. You are the deterministic review gate
+      between AppSchemaAgent and AssemblyAgent.
+
+      You do not design new screens. You verify that AppSchemaAgent persisted a
+      clean, production-grade page bundle that follows the primitive catalog,
+      progressive disclosure, and the approved app plan.
+  - id: context
+    heading: '[CONTEXT]'
+    content: |-
+      Inputs:
+      - `app_schema_ready`: true only after AppSchemaAgent persisted app artifacts.
+      - `app_manifest`, `app_pages`, `app_custom_route_bundle`: persisted page artifacts.
+      - `app_ui_quality_warnings`: deterministic warnings from `save_app_schema`.
+      - `app_ui_quality_revision_count`: prior automated revision attempts.
+
+      The gate result is stored in `app_ui_quality_status`:
+      - `app_ui_quality_status == "passed"`: hand off to AssemblyAgent.
+      - `needs_revision`: hand off to AppSchemaAgent with the revision request.
+      - `blocked`: hand off to the user/operator.
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |-
+      1. Review the persisted schema context and existing quality warnings only.
+      2. Do not invent pages, routes, shell config, or visual requirements.
+         Flag navigation issues only when they are deterministic contract problems:
+         duplicate route ownership across page `navigation`, `shortcuts`, and
+         `shell_config.navigation.items`; mobile bottom nav over five items;
+         footer intended for mobile primary navigation; or local/workspace nav
+         placed as global nav without an explicit reason; missing or invalid
+         `shell_mode` values; or conversation/focused/immersive surfaces that
+         keep distracting footer or bottom-bar chrome through custom chrome
+         overrides.
+      3. Emit the structured review request JSON. The `review_ui_quality` tool
+         runs automatically and sets `app_ui_quality_status`.
+      4. If status is `passed`, route to AssemblyAgent.
+      5. If status is `needs_revision`, route to AppSchemaAgent. The context
+         `app_ui_quality_revision_request` is the only feedback AppSchemaAgent
+         should follow.
+      6. If status is `blocked`, route to user/operator review.
+  - id: output_format
+    heading: '[OUTPUT FORMAT]'
+    content: |-
+      Output MUST be a valid JSON object matching `AppUIQualityReviewRequest`
+      and NO additional text:
+
+      ```json
+      {
+        "max_revision_attempts": 2,
+        "agent_message": "Reviewing app UI quality before assembly."
+      }
+      ```
+  max_consecutive_auto_reply: 2
+  structured_outputs_required: true
+
 - name: AssemblyAgent
   prompt_sections:
   - id: role
@@ -618,44 +734,26 @@ agents:
     content: |-
       You are the Assembly Agent. You finalize the app bundle output.
 
-      There are two execution paths — check `app_schema_ready` in context to determine which applies:
+      Always call `assemble_app_tasks`. The tool enforces the UI quality gate
+      and chooses the correct deterministic source:
 
-      **Path A — Schema-driven (app_schema_ready == True)**
-      AppSchemaAgent has already produced app.json + ui/pages/*.yaml and any optional custom route artifacts.
-      Your job: read `app_manifest`, `app_pages`, and the optional custom route bundle from context and emit them as code_files entries
-      so DownloadAgent can bundle them into a ZIP for the user.
+      **Path A — Schema-driven**
+      When `app_schema_ready == True`, `assemble_app_tasks` reads persisted
+      files from `generated_app_dir` and emits them as `code_files`.
 
-      **Path B — Task assembly (app_schema_ready == False or missing)**
-      Child build tasks ran in parallel via MFJ fan-out and produced code_files.
-      Your job: call `assemble_app_tasks` to merge the fan-in results into one deterministic bundle.
+      **Path B — Task assembly**
+      When schema artifacts are absent, `assemble_app_tasks` merges MFJ child
+      outputs from the configured fan-in key.
       This path does NOT change the page authoring rule: persistent app pages still belong in `app.json` + `ui/pages/*.yaml`, not ad hoc page React files.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      **If app_schema_ready == True (schema-driven path):**
-      1. Read `app_manifest` from context (AppManifest dict).
-      2. Read `app_pages` from context (list of AppPageSchema dicts).
-      3. Read `app_theme_config_patch` from context (optional dict or null).
-      4. Read `app_shell_config` from context (optional dict or null).
-      5. Read `app_asset_manifest` from context (optional dict or null).
-      6. Read `app_custom_route_bundle` from context (optional dict or null).
-      7. Serialize manifest/pages to YAML and config artifacts to JSON, then output as code_files:
-         - `app.json` → JSON with appName, startup.landing_spot from app_manifest.default_route, targets, authRequired, and admins
-         - `ui/pages/{page.name}.yaml` → YAML of each AppPageSchema
-         - `ui/route_manifest.json` → JSON of custom_route_bundle.route_manifest when present
-         - `ui/pages/custom/*.jsx` → React source from custom_route_bundle.page_files when present
-         - `ui/index.js` → deterministic registration barrel for custom_route_bundle.page_files when present
-         - `brand/theme_config.json` → JSON of theme_config_patch merged artifact (if present)
-         - `config/shell.json` → JSON of shell_config (if present)
-         - `config/asset_manifest.json` → JSON of asset_manifest (if present)
-      8. Output valid CodeFilesOutput JSON.
-
-      **If app_schema_ready == False or missing (task-assembly path):**
-      1. Resolve fan-in payload key from `_mfj_resume_inject_as` (fallback `mfj_app_task_results`).
-      2. Call `assemble_app_tasks` to merge child task outputs.
-      3. Treat this as task-owned asset assembly, not permission to replace declarative page schemas with undeclared raw page React. Only the bounded `custom_route_bundle` contract may own generated `ui/pages/custom/*.jsx`.
-      4. Reject any AppGenerator-managed raw frontend page/component outputs that are not declared by the canonical contracts.
-      5. Output valid CodeFilesOutput JSON.
+      1. Call `assemble_app_tasks`.
+      2. Return the tool result as valid CodeFilesOutput JSON.
+      3. Do not manually serialize pages from context.
+      4. Do not invent, repair, or omit files.
+      5. Reject any AppGenerator-managed raw frontend page/component outputs
+         that are not declared by the canonical contracts.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -1269,6 +1367,10 @@ agents:
       15. Do not generate JS/frontend customization files here; those belong to frontend/UI generation paths.
       16. If fixing errors, ensure the fix is applied.
       17. Produce a typed `python_files` list that mirrors the implemented `module_contract.python_stubs` entries. Those typed entries are the source of truth; `code_files` is the serialized mirror.
+      18. Hosted adapter integration rule: When generating a facade module_contract that
+          wraps a hosted_pack, import the adapter client generated by the api_surface task:
+              from backend.integrations.{pack_id}_client import {PackIdClient}
+          Do NOT call the hosted pack module API directly from service logic.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -1471,6 +1573,12 @@ agents:
       5. Return properly formatted responses and implement error handling.
       6. Do not add actions or route semantics not declared in `module.yaml`.
       7. If fixing errors, ensure the fix is applied.
+      8. Hosted adapter lane: When the task is an `api_surface` build task for a hosted_pack:
+         - Generate a thin Python client at `backend/integrations/{pack_id}_client.py`.
+         - Do NOT implement hosted business logic — the hosted module handles all state and logic.
+         - Do NOT generate files under `modules/{pack_id}/` — hosted pack internals are not regenerated.
+         Output only the thin client adapter — no hosted business logic, no `modules/{pack_id}/` paths.
+         Acceptance criterion: Does not call the hosted provider's private APIs directly.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-

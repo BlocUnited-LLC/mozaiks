@@ -1,48 +1,4 @@
 # Getting Started
-
-If you have never used Mozaiks before, start here.
-
-The recommended first experience is:
-
-1. set your environment
-2. create a local workspace
-3. open the Mozaiks Console
-4. build your app through the `factory_app` workflows
-
-You do **not** need to hand-author workflows, modules, or branding before you
-open the Mozaiks Console.
-
-## What Mozaiks Is Doing
-
-There are three layers involved in the first-run experience:
-
-- `mozaiks` CLI
-  - bootstraps a local workspace and launches the app
-- Mozaiks Console
-  - browser UI where you create and manage apps and builds
-- `factory_app`
-  - the shared build workflows that decompose intent and generate the app
-
-Important:
-
-- the local workspace scaffold is **not** the finished app
-- the generated app is staged separately first
-- the Console and the generator workflows are the primary build path
-
-## Recommended Path For First-Time Users
-
-Use the full Mozaiks repo checkout and launch the Console locally.
-
-Why this is the recommended path:
-
-- the Console lives in the shared frontend shell
-- the builder workflows live in `factory_app`
-- those pieces are available in the repo checkout
-
-If a public `mozaiks` release is not yet available on PyPI, use the full repo
-checkout path below. The repo-first path remains the most complete builder
-experience during active framework development.
-
 ## Prerequisites
 
 You need:

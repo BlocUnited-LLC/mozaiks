@@ -18,10 +18,12 @@ The loader validates the contract before the module is registered for runtime
 execution.
 """
 
+import importlib
 import importlib.util
 import inspect
 import sys
 from pathlib import Path, PurePosixPath
+from types import ModuleType
 from typing import Any, Dict, List, Literal, Optional
 
 import yaml
@@ -500,7 +502,7 @@ class ModuleLoader:
         if not handler_path.exists():
             raise ModuleLoadError(f"handler entrypoint file not found: {handler_path_rel}")
 
-        handler = self._import_handler(name, handler_path, class_name, definition)
+        handler = self._import_handler(name, module_dir, handler_path, class_name, definition)
 
         logger.info(
             f"MODULE_LOADED: {name!r} v{definition.version} "
@@ -592,18 +594,34 @@ class ModuleLoader:
     def _import_handler(
         self,
         name: str,
+        module_dir: Path,
         handler_path: Path,
         class_name: str,
         definition: ModuleDefinition,
     ) -> Any:
         """Import backend/handler.py and instantiate the declared handler class."""
-        module_key = f"mozaiks_module_{name.replace('.', '_').replace('-', '_')}_handler"
+        package_root = f"mozaiks_runtime_module_{name.replace('.', '_').replace('-', '_')}"
+        relative_module = handler_path.relative_to(module_dir).with_suffix("")
+        module_key = ".".join((package_root, *relative_module.parts))
+
+        self._clear_registered_module_package(package_root)
+        self._register_module_package(package_root, module_dir)
+
+        package_name = package_root
+        package_path = module_dir
+        for part in relative_module.parts[:-1]:
+            package_name = f"{package_name}.{part}"
+            package_path = package_path / part
+            self._register_module_package(package_name, package_path)
+
+        importlib.invalidate_caches()
 
         spec = importlib.util.spec_from_file_location(module_key, handler_path)
         if spec is None or spec.loader is None:
             raise ModuleLoadError(f"Cannot create import spec for {handler_path}")
 
         mod = importlib.util.module_from_spec(spec)
+        mod.__package__ = module_key.rpartition(".")[0]
         sys.modules[module_key] = mod
 
         try:
@@ -633,6 +651,21 @@ class ModuleLoader:
             raise ModuleLoadError(
                 f"Failed to instantiate handler class {class_name!r} for module {name!r}: {exc}"
             ) from exc
+
+    @staticmethod
+    def _clear_registered_module_package(package_root: str) -> None:
+        prefix = f"{package_root}."
+        for module_name in list(sys.modules):
+            if module_name == package_root or module_name.startswith(prefix):
+                sys.modules.pop(module_name, None)
+
+    @staticmethod
+    def _register_module_package(package_name: str, package_path: Path) -> None:
+        package = ModuleType(package_name)
+        package.__file__ = str(package_path / "__init__.py")
+        package.__package__ = package_name
+        package.__path__ = [str(package_path)]
+        sys.modules[package_name] = package
 
     @staticmethod
     def _display_path(path: Path) -> str:

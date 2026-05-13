@@ -9,8 +9,7 @@
 The route model must follow the customer-facing IA directly.
 
 This spec exists so route and navigation work uses one canonical vocabulary:
-`Apps`, `Build`, `Deploy`, `Usage`, `Operations`, `Integrations`, `Users`,
-`Settings`, and `Admin`.
+`Apps`, `Overview`, `Usage`, `Billing`, `Hosting`, `Integrations`, and `Users`.
 
 ## Target Customer-Facing Route Families
 
@@ -19,23 +18,19 @@ This spec exists so route and navigation work uses one canonical vocabulary:
 ```text
 /apps
 /usage
-/operations
 /billing
-/settings
+/hosting
 ```
 
 ### App-Level
 
 ```text
 /apps/:appId/overview
-/apps/:appId/build
-/apps/:appId/deploy
-/apps/:appId/usage
-/apps/:appId/operations
-/apps/:appId/integrations
 /apps/:appId/users
-/apps/:appId/settings
-/apps/:appId/admin
+/apps/:appId/usage
+/apps/:appId/billing
+/apps/:appId/hosting
+/apps/:appId/integrations
 ```
 
 ## Entry Rules
@@ -43,7 +38,7 @@ This spec exists so route and navigation work uses one canonical vocabulary:
 - The default customer-facing landing area should become `/apps`.
 - `Create App` should create a draft app record immediately.
 - After creation, the user should be routed directly to
-  `/apps/:appId/build`.
+  `/apps/:appId/overview`.
 - The user should not remain in a free-floating create chat with no app record.
 
 ## Canonical Product Route Families
@@ -52,24 +47,6 @@ New product surfaces must live under these route families:
 
 - `/apps`
 - `/apps/:appId/*`
-
-## Admin Route Rule
-
-`Admin` is part of the App Console.
-
-The first-party app console uses:
-
-```text
-/apps/:appId/admin
-/apps/:appId/users
-/apps/:appId/usage
-/apps/:appId/operations
-/apps/:appId/settings
-```
-
-The framework-owned admin shell still renders inside that app context. Product
-documentation should not describe a separate top-level `/admin` area or a
-separate customer-facing admin product.
 
 ## Workspace Readiness Redistribution
 
@@ -80,23 +57,34 @@ Redistribute it as follows:
 
 - workspace readiness and "what next" copy -> `Apps` empty states and app
   creation entry
-- provider/model defaults -> `Settings`
-- workspace diagnostics -> `Settings` or a future diagnostics subsection
-- current build entry -> app-specific `Build`
+- finance posture -> `Billing`
+- hosting posture -> `Hosting`
+- current workflow entry -> workflow-owned create/refinement paths, not a
+  persistent console route
 
 The visible product does not use a top-level `Studio` route.
 
-## Build Route Rules
+## Billing Route Rules
 
-`Build` should be app-scoped.
+Use `Billing` for:
 
-Implications:
+- revenue
+- recurring value
+- payment posture
+- commercial readiness
 
-- initial create flow becomes one way to enter `Build`
-- revision flow also re-enters `Build`
-- build history and artifact review belong to the app context
-- the user should always feel they are evolving one app, not entering a generic
-  builder area detached from the app lifecycle
+Do not merge Billing into Hosting.
+
+## Hosting Route Rules
+
+Use `Hosting` for:
+
+- domains
+- environment posture
+- managed rollout readiness
+- production handoff state
+
+Do not merge Hosting back into Billing or present it as `Deploy`.
 
 ## Integrations Route Rules
 
@@ -109,16 +97,6 @@ Rules:
   `/settings`
 - avoid visible `Adapters` terminology
 
-## Operations Route Rules
-
-Use `Operations` for:
-
-- incidents
-- failures
-- runtime health
-- deployment health
-- workflow or orchestration problems when surfaced to users
-
 Use `Usage` for:
 
 - tokens
@@ -126,7 +104,8 @@ Use `Usage` for:
 - API volume
 - counts and consumption metrics
 
-Do not overload `Activity` to mean both history and health.
+Do not add unfinished `Operations`, `Settings`, or `Admin` pages to the
+production console route model.
 
 ## Implementation Rule
 
@@ -145,5 +124,6 @@ These should disappear from future customer-facing route families:
 Preferred visible replacements:
 
 - `apps`
-- `build`
+- `billing`
+- `hosting`
 - `integrations`

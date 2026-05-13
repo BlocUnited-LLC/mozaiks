@@ -1,144 +1,187 @@
-import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useMemo } from 'react'
+import { useParams } from 'react-router-dom'
 
 import { AdminWorkspaceLayout } from '@mozaiks/chat-ui/admin/components/AdminWorkspaceLayout.jsx'
 import {
-  API_BASE,
-  StatusPill,
-  SurfaceCard,
-  Metric,
-  ConsoleLoadingState,
   ConsoleErrorState,
-} from './ConsolePrimitives.jsx'
+  ConsoleLoadingState,
+  Panel,
+  StatusPill,
+} from '../../../components/ConsoleShared.jsx'
+import AppConsoleHero, {
+  formatCompactNumber,
+  formatCurrencyValue,
+  formatDateTimeLabel,
+} from './AppConsoleChrome.jsx'
+import { getAppConsoleSnapshot } from './appConsoleDataHelpers.js'
+import {
+  getAppJourneyLabel,
+  getApprovalStateLabel,
+  getPlanStateLabel,
+  getRuntimeHealthLabel,
+  getRuntimeReadinessLabel,
+} from './appConsoleModel.js'
+import { useAppConsoleData } from './useAppConsoleData.js'
 
+
+function getWorkflowNames(snapshot) {
+  return Array.from(new Set([
+    ...snapshot.workflowNames,
+    ...snapshot.runs.map((run) => run.workflow_name).filter(Boolean),
+  ]))
+}
+
+function validationTone(value) {
+  if (value === 'passed') return 'success'
+  if (value === 'failed') return 'destructive'
+  return 'warning'
+}
 
 export default function AppOverviewPage() {
   const { appId = 'workspace-app' } = useParams()
-  const [summary, setSummary] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
-      try {
-        const res = await fetch(`${API_BASE}/api/studio/overview?app_id=${encodeURIComponent(appId)}`)
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-        const payload = await res.json()
-        if (!cancelled) { setSummary(payload); setError(null) }
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'App overview could not be loaded.')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    load()
-    return () => { cancelled = true }
-  }, [])
+  const { data, loading, error, dataMode } = useAppConsoleData(appId)
+  const snapshot = useMemo(() => getAppConsoleSnapshot(appId, data, dataMode), [appId, data, dataMode])
 
   if (loading) return <ConsoleLoadingState label="Loading App Overview…" />
-  if (error || !summary) return <ConsoleErrorState title="App Overview Unavailable" message={error || 'No summary returned.'} />
+  if (error || !data?.summary) return <ConsoleErrorState title="App Overview Unavailable" message={error || 'No summary returned.'} />
 
-  const app = summary.app || {}
-  const ai = summary.ai || {}
-  const theme = summary.theme || {}
-  const admin = summary.admin || {}
-  const workspace = summary.workspace || {}
-  const shell = summary.shell || {}
-  const consoleSurface = summary.console || {}
-  const home = summary.home || {}
-
-  const journeyLabel = app.journey === 'brownfield_app' ? 'Brownfield App'
-    : app.journey === 'greenfield_app' ? 'Greenfield App'
-    : 'App Console'
-  const lifecycleLabel = app.lifecycle_label || 'Draft'
-
-  const readinessTone = workspace.runtime_readiness === 'entry_point_configured' ? 'success'
-    : workspace.runtime_readiness === 'no_workflows' ? 'warning'
-    : 'primary'
+  const build = data.buildState?.build || {}
+  const latestArtifact = snapshot.buildHistory[0] || null
+  const latestRun = snapshot.runs[0] || null
+  const workflowNames = getWorkflowNames(snapshot)
+  const summaryItems = [
+    {
+      id: 'journey',
+      label: 'Journey',
+      value: getAppJourneyLabel(snapshot.app.journey),
+      detail: getRuntimeReadinessLabel(snapshot.summary.workspace?.runtime_readiness),
+    },
+    {
+      id: 'workflows',
+      label: 'Workflow Count',
+      value: formatCompactNumber(workflowNames.length, '0'),
+      detail: workflowNames[0] || 'No workflows connected yet',
+    },
+    {
+      id: 'latest',
+      label: 'Latest Build',
+      value: latestArtifact ? `v${latestArtifact.version_number}` : 'Pending',
+      detail: latestArtifact ? formatDateTimeLabel(latestArtifact.created_at) : 'No saved build versions',
+    },
+    {
+      id: 'runtime',
+      label: 'Runtime Health',
+      value: getRuntimeHealthLabel(snapshot.lifecycleState, snapshot.stats.total_errors),
+      detail: formatCurrencyValue(snapshot.stats.total_cost, 'Pending'),
+    },
+  ]
 
   return (
     <AdminWorkspaceLayout>
-      <div className="flex flex-col gap-6">
-        <SurfaceCard title={app.name || 'App Overview'} eyebrow="Overview" accent>
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.9fr)]">
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <StatusPill tone="primary">{lifecycleLabel}</StatusPill>
-                <StatusPill tone="default">{journeyLabel}</StatusPill>
-                <StatusPill tone={readinessTone}>{workspace.runtime_readiness || 'unknown'}</StatusPill>
+      <div className="space-y-6">
+        <AppConsoleHero
+          appId={appId}
+          summary={data.summary}
+          dataMode={dataMode}
+          title="Overview"
+          subtitle="Keep the current build state, workflow coverage, and approval posture in one readable app-level control surface."
+          currentSection="overview"
+          summaryItems={summaryItems}
+        />
+
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)]">
+          <Panel eyebrow="Movement" title="Latest app movement" subtitle="Most recent build and runtime activity flowing through this app.">
+            <div className="space-y-3">
+              <div className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Latest build artifact</div>
+                    <div className="mt-1 text-base font-semibold text-foreground">
+                      {latestArtifact ? `Build version ${latestArtifact.version_number}` : 'No build version yet'}
+                    </div>
+                  </div>
+                  {latestArtifact ? (
+                    <StatusPill tone={validationTone(latestArtifact.validation_status)}>
+                      {latestArtifact.validation_status || 'pending'}
+                    </StatusPill>
+                  ) : null}
+                </div>
+                <div className="mt-2 text-sm text-muted-foreground">
+                  {latestArtifact ? formatDateTimeLabel(latestArtifact.created_at) : 'Build history will appear once a version is generated.'}
+                </div>
               </div>
-              <p className="mt-4 max-w-3xl text-sm leading-7 text-muted-foreground">
-                {app.description || theme.tagline || 'Track lifecycle state, current configuration, and the next recommended build step from one app console.'}
-              </p>
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <Metric label="Users" value={app.lifecycle_state === 'active' ? '—' : 'Pending'} detail="Visible after deployment" />
-                <Metric label="Revenue" value={app.lifecycle_state === 'active' ? '—' : 'Pending'} detail="App-level reporting" />
-                <Metric label="Token Usage" value={app.lifecycle_state === 'active' ? '—' : 'Pending'} detail="App-scoped runtime cost" />
-                <Metric label="Active Workflows" value={workspace.workflow_count ?? 0} detail={workspace.entry_point || 'No entry point yet'} />
+
+              <div className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4">
+                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Latest runtime activity</div>
+                <div className="mt-1 text-base font-semibold text-foreground">
+                  {latestRun?.workflow_name || 'No runtime activity yet'}
+                </div>
+                <div className="mt-2 text-sm text-muted-foreground">
+                  {latestRun ? `${latestRun.user_id || 'Operator'} · ${formatDateTimeLabel(latestRun.started_at)}` : 'Runs will appear once Build or Operations records activity.'}
+                </div>
               </div>
             </div>
+          </Panel>
 
-            <div className="rounded-3xl border border-border bg-background/75 p-5">
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Lifecycle</div>
-              <p className="mt-3 text-sm font-semibold text-foreground">{lifecycleLabel}</p>
-              <p className="mt-4 text-sm leading-7 text-foreground">{home.next_step}</p>
-              <dl className="mt-5 space-y-3 text-sm text-muted-foreground">
-                <div><span className="font-semibold text-foreground">Route:</span> {consoleSurface.route || `/apps/${appId}/overview`}</div>
-                <div><span className="font-semibold text-foreground">Workspace:</span> {consoleSurface.workspace_root || 'unknown'}</div>
-                <div><span className="font-semibold text-foreground">Runtime Health:</span> {app.lifecycle_state === 'active' ? 'Monitoring' : 'Not live yet'}</div>
-                <div><span className="font-semibold text-foreground">AI Provider:</span> {ai.provider || 'Not configured'}</div>
-              </dl>
-              <div className="mt-5">
-                <Link
-                  to={`/apps/${appId}/build`}
-                  className="inline-flex items-center justify-center rounded-2xl border border-primary/30 bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90"
-                >
-                  Open Build
-                </Link>
-              </div>
-            </div>
-          </div>
-        </SurfaceCard>
-
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-          <SurfaceCard title="Workspace Snapshot" eyebrow="Current Shape">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Metric label="Deployment" value={lifecycleLabel} detail="Current app lifecycle state" />
-              <Metric label="Header Pages" value={shell.header_page_count ?? 0} detail="Shell navigation pills" />
-              <Metric label="Header Actions" value={shell.header_action_count ?? 0} detail="From shell.json" />
-              <Metric label="Theme" value={theme.primary || 'Not set'} detail={theme.logo_alt || 'Logo not configured'} />
-            </div>
-            {app.first_goal && (
-              <div className="mt-5 rounded-2xl border border-border bg-muted/40 p-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">First Goal</div>
-                <p className="mt-2 text-sm leading-7 text-foreground">{app.first_goal}</p>
-              </div>
-            )}
-          </SurfaceCard>
-
-          <SurfaceCard title="App Configuration" eyebrow="Setup">
-            <dl className="space-y-4 text-sm leading-7 text-muted-foreground">
-              <div>
-                <span className="font-semibold text-foreground">Admin: </span>
-                {admin.enabled
-                  ? (admin.admins?.length ? admin.admins.join(', ') : 'framework shell active — no admins set')
-                  : 'not enabled'}
-              </div>
-              {app.existing_app_url && (
-                <div>
-                  <span className="font-semibold text-foreground">Existing App: </span>
-                  <a className="text-primary underline-offset-4 hover:underline" href={app.existing_app_url} target="_blank" rel="noreferrer">
-                    {app.existing_app_url}
-                  </a>
+          <Panel eyebrow="Coverage" title="Workflow coverage" subtitle="Keep the currently connected workflows explicit so routing decisions are visible before a deeper drill-down.">
+            <div className="space-y-3">
+              {workflowNames.length > 0 ? workflowNames.map((workflowName) => (
+                <div key={workflowName} className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4">
+                  <div className="font-semibold text-foreground">{workflowName}</div>
+                  <div className="mt-1 text-sm text-muted-foreground">Available to the current app console workflow set.</div>
+                </div>
+              )) : (
+                <div className="rounded-[1.5rem] border border-dashed border-border/70 bg-background/55 px-4 py-6 text-sm text-muted-foreground">
+                  No workflow coverage has been recorded yet.
                 </div>
               )}
-              <div>
-                <span className="font-semibold text-foreground">Host-Owned: </span>
-                {app.host_owned_summary || 'Capture what should remain outside Mozaiks before broader generation.'}
+            </div>
+          </Panel>
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)]">
+          <Panel eyebrow="Approvals" title="Pending Approvals" subtitle="Show the current plan and approval state before this app moves deeper into deploy and runtime operations.">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusPill tone={build.approval_state === 'approved' ? 'success' : build.approval_state === 'rejected' ? 'warning' : 'primary'}>
+                  {getApprovalStateLabel(build.approval_state)}
+                </StatusPill>
+                <StatusPill tone="default">{getPlanStateLabel(build.plan_state)}</StatusPill>
               </div>
-            </dl>
-          </SurfaceCard>
+
+              <div className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4 text-sm">
+                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Current request</div>
+                <div className="mt-2 text-foreground">
+                  {build.current_request?.text || 'The current request brief will appear here after Build saves the draft.'}
+                </div>
+                <div className="mt-3 text-muted-foreground">
+                  Request kind: {build.current_request?.request_kind || 'Not captured yet'}
+                </div>
+              </div>
+            </div>
+          </Panel>
+
+          <Panel eyebrow="Signals" title="Operating summary" subtitle="Keep cost, errors, and tooling signals visible before leaving overview for deeper page-level work.">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4 text-sm">
+                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Tool Calls</div>
+                <div className="mt-2 text-2xl font-semibold text-foreground">{formatCompactNumber(snapshot.stats.total_tool_calls, '0')}</div>
+              </div>
+              <div className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4 text-sm">
+                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Errors</div>
+                <div className="mt-2 text-2xl font-semibold text-foreground">{formatCompactNumber(snapshot.stats.total_errors, '0')}</div>
+              </div>
+              <div className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4 text-sm">
+                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Total Cost</div>
+                <div className="mt-2 text-2xl font-semibold text-foreground">{formatCurrencyValue(snapshot.stats.total_cost, 'Pending')}</div>
+              </div>
+              <div className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4 text-sm">
+                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Latest Activity</div>
+                <div className="mt-2 text-sm font-semibold text-foreground">{latestRun?.workflow_name || 'No runs yet'}</div>
+                <div className="mt-1 text-muted-foreground">{latestRun ? formatDateTimeLabel(latestRun.started_at) : 'Waiting for the first saved run.'}</div>
+              </div>
+            </div>
+          </Panel>
         </div>
       </div>
     </AdminWorkspaceLayout>

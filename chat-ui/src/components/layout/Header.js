@@ -91,22 +91,29 @@ const getDefaultProfileMenu = (user) => {
     },
   ];
 
-  items.push(
-    authed
-      ? {
-          id: "signout",
-          label: "Sign Out",
-          icon: "logout.svg",
-          action: "signout",
-          variant: "danger",
-        }
-      : {
-          id: "signin",
-          label: "Sign In",
-          icon: "profile.svg",
-          action: "signin",
-        },
-  );
+  if (authed) {
+    items.push({
+      id: "admin",
+      label: "Admin Portal",
+      icon: "settings.svg",
+      action: "navigate",
+      href: "/admin",
+    });
+    items.push({
+      id: "signout",
+      label: "Sign Out",
+      icon: "logout.svg",
+      action: "signout",
+      variant: "danger",
+    });
+  } else {
+    items.push({
+      id: "signin",
+      label: "Sign In",
+      icon: "profile.svg",
+      action: "signin",
+    });
+  }
 
   return items;
 };
@@ -333,6 +340,7 @@ const Header = ({
   const profileSubLabel = getUserSubLabel(currentUser, profileConfig.sublabel || "");
   const showProfile = profileConfig.show !== false;
   const showNotifications = notificationsConfig.show !== false;
+  const notificationsPath = notificationsConfig.path;
   const primaryActionLabel = primaryAction?.label || primaryAction?.id || "Action";
   const headerFrameStyle = {
     minHeight: "var(--shell-header-height, 4rem)",
@@ -406,7 +414,7 @@ const Header = ({
           {wordmarkSrc ? (
             <img
               src={wordmarkSrc}
-              className="h-7 max-w-[12rem] object-contain opacity-90"
+              className="h-6 max-w-[10.5rem] object-contain opacity-90 sm:h-7 sm:max-w-[12rem]"
               alt={brandName || "Brand"}
             />
           ) : (
@@ -488,7 +496,7 @@ const Header = ({
               <button
                 type="button"
                 onClick={() => executeAction(primaryAction)}
-                className="md:hidden inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-secondary)] border border-[rgba(var(--color-primary-light-rgb),0.5)] text-white hover:shadow-[0_8px_30px_rgba(var(--color-primary-light-rgb),0.4)] transition-all"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-[rgba(var(--color-primary-light-rgb),0.5)] bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-secondary)] text-white transition-all hover:shadow-[0_8px_30px_rgba(var(--color-primary-light-rgb),0.4)] md:hidden"
                 title={primaryActionLabel}
                 style={mobilePrimaryActionStyle}
               >
@@ -534,6 +542,18 @@ const Header = ({
                   <div className="p-4 text-sm text-[rgba(226,232,240,0.82)] transmission-typing-font">
                     {notificationCount > 0 ? "Unread alerts are available." : notificationsConfig.emptyText || "No notifications"}
                   </div>
+                  {notificationsPath && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleNavigationItem({ path: notificationsPath });
+                        setIsNotificationsOpen(false);
+                      }}
+                      className="mx-3 mb-3 flex w-[calc(100%-1.5rem)] items-center justify-center rounded-xl border border-[rgba(var(--color-primary-light-rgb),0.35)] px-3 py-2 text-xs font-semibold text-[var(--color-primary-light)] transition hover:bg-[rgba(var(--color-primary-rgb),0.12)] heading-font"
+                    >
+                      View all notifications
+                    </button>
+                  )}
                 </div>
               )}
             </div>

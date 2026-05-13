@@ -25,6 +25,9 @@ def test_pack_metadata_structured_output_transition_options_match_runtime_contra
     spec = yaml.safe_load(path.read_text(encoding="utf-8"))
     fields = spec["models"]["PackGraphTransitionOption"]["fields"]
     assert set(fields.keys()) == {"id", "route_to", "sequence", "context_variables"}
+    ui_fields = spec["models"]["PackGraphTransitionUI"]["fields"]
+    assert set(ui_fields.keys()) == {"component", "mode", "shell_mode", "props"}
+    assert ui_fields["shell_mode"]["variants"] == ["PackGraphShellMode", "null"]
 
 
 def test_pack_metadata_structured_output_entrypoints_match_runtime_contract() -> None:
@@ -96,7 +99,7 @@ def test_parse_global_pack_graph_allows_workflow_entrypoints() -> None:
                 {
                     "id": "app_type_selector",
                     "transition_type": "user_choice_context",
-                    "ui": {"component": "AppTypeSelector", "mode": "screen"},
+                    "ui": {"component": "AppTypeSelector", "mode": "screen", "shell_mode": "focused"},
                     "options": [{"id": "new_app", "route_to": "ValueEngine", "context_variables": {"app_type": "new"}}],
                 }
             ],
@@ -105,6 +108,7 @@ def test_parse_global_pack_graph_allows_workflow_entrypoints() -> None:
 
     assert graph.entrypoints[0].path == "/create"
     assert graph.entrypoints[0].transition == "app_type_selector"
+    assert graph.transitions[0].ui.shell_mode == "focused"
 
 
 def test_parse_global_pack_graph_allows_transition_option_sequence_override() -> None:

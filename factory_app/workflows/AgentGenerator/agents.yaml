@@ -1247,26 +1247,18 @@ agents:
   - id: primitives
     heading: '[PLATFORM PRIMITIVES — BUILDING BLOCKS]'
     content: |
-      Pre-built components in `@mozaiks/chat-ui/ui/primitives/`. Import and compose them
-      inside generated React components — do not reimplement common UI patterns.
+      Pre-built components are exported from the public `@mozaiks/chat-ui/ui` entrypoint.
+      Import and compose them inside generated React components — do not reimplement common UI patterns.
       The live shipped catalog is injected at runtime in `[SHIPPED UI PRIMITIVES]`.
-      Use only those names and import paths.
+      Use only those names and the public UI barrel import path.
 
       **Import paths** (canonical alias form):
       ```js
-      import { DataTable } from '@mozaiks/chat-ui/ui/primitives/DataTable.jsx'
-      import { Form }      from '@mozaiks/chat-ui/ui/primitives/Form.jsx'
-      import { Card }      from '@mozaiks/chat-ui/ui/primitives/Card.jsx'
-      import { Stat }      from '@mozaiks/chat-ui/ui/primitives/Stat.jsx'
-      import { Grid }      from '@mozaiks/chat-ui/ui/primitives/Grid.jsx'
-      import { Button }    from '@mozaiks/chat-ui/ui/primitives/Button.jsx'
-      import { Modal }     from '@mozaiks/chat-ui/ui/primitives/Modal.jsx'
-      import { Alert }     from '@mozaiks/chat-ui/ui/primitives/Alert.jsx'
-      import { Badge }     from '@mozaiks/chat-ui/ui/primitives/Badge.jsx'
-      import { Skeleton, Empty } from '@mozaiks/chat-ui/ui/primitives/Skeleton.jsx'
+      import { Button, Form, InlineEmptyState, LoadingState, Panel, StatusPill } from '@mozaiks/chat-ui/ui'
       ```
 
-      Never emit brittle deep relative imports into `chat-ui/src/...` or `../../ui/...`.
+      Never emit brittle deep imports into `@mozaiks/chat-ui/ui/primitives/...`,
+      `chat-ui/src/...`, or `../../ui/...`.
 
       **Primitive reference** (type → key props):
       - `DataTable`  — `id`, `columns[]`, `data[]`, `selection`, `pagination`, `page_size`, `search`, `actions[]`, `onAction`, `onRefresh`, `loading`, `empty`
@@ -1366,10 +1358,7 @@ agents:
       **React component** — receives shell props, renders UI, sends actions back:
       ```jsx
       import { useState } from 'react'
-      import { Alert } from '@mozaiks/chat-ui/ui/primitives/Alert.jsx'
-      import { Badge } from '@mozaiks/chat-ui/ui/primitives/Badge.jsx'
-      import { Card } from '@mozaiks/chat-ui/ui/primitives/Card.jsx'
-      import { Button } from '@mozaiks/chat-ui/ui/primitives/Button.jsx'
+      import { Alert, Button, Panel, StatusPill } from '@mozaiks/chat-ui/ui'
 
       export default function <Component>({
         payload = {},
@@ -1397,14 +1386,14 @@ agents:
         }
 
         return (
-          <Card title={payload.title || '<Title>'} variant="elevated">
+          <Panel
+            title={payload.title || '<Title>'}
+            action={<StatusPill label={payload.status || 'ready'} tone="primary" />}
+          >
             <div className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <Badge label={payload.status || 'ready'} variant="info" />
-                <span className="text-xs text-muted-foreground">
-                  {workflowName || 'GeneratedWorkflow'}
-                </span>
-              </div>
+              <span className="text-xs text-muted-foreground">
+                {workflowName || 'GeneratedWorkflow'}
+              </span>
               {payload.error ? <Alert message={payload.error} variant="warning" /> : null}
               <p className="text-sm text-muted-foreground">
                 {payload.summary || 'Review the generated output before continuing.'}
@@ -1441,7 +1430,7 @@ agents:
                 ) : null}
               </div>
             </div>
-          </Card>
+          </Panel>
         )
       }
       ```
@@ -1451,7 +1440,7 @@ agents:
       - Semantic tokens only: `bg-primary`, `text-foreground`, `bg-card`,
         `text-muted-foreground`, `border-border`, `bg-destructive`, `bg-warning/20`
       - Typography must come from semantic theme tokens/inherited shell classes; never hardcode `font-family` names in component code.
-      - UI tools render workflow-local surfaces only; do NOT generate global shell chrome wrappers (header/nav/profile/footer).
+      - UI tools render workflow-local surfaces only; do NOT generate global shell chrome wrappers (header/nav/profile/footer/mobile). Persistent shell chrome belongs in AppGenerator `shell_config`, preferably through compact shortcuts.
       - Never: `bg-gray-*`, `text-gray-*`, `bg-blue-*`, `text-white`, `bg-white`,
         hardcoded hex/rgb, `artifactDesignSystem` imports, or `useAppEventBus`
   - id: context
@@ -1515,6 +1504,40 @@ agents:
 
       Rules: installRequirements array (empty allowed); include entire file content. Output only the JSON object.
   max_consecutive_auto_reply: 5
+  structured_outputs_required: true
+- name: WorkflowUIQualityAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: You are the deterministic quality gate for workflow-local React UI generated by UIFileGenerator.
+  - id: objective
+    heading: '[OBJECTIVE]'
+    content: |-
+      - Review `workflow_ui_quality_warnings` persisted by `save_workflow_ui_files_output`.
+      - Call `review_workflow_ui_quality` exactly once.
+      - If status is `needs_revision`, route back to UIFileGenerator with `workflow_ui_quality_revision_request`.
+      - If `workflow_ui_quality_status == "passed"`, allow AgentToolsFileGenerator to continue.
+      - If status is `blocked`, stop for user/operator review.
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |-
+      Do not rewrite files yourself. This agent owns the quality gate decision only.
+      Use the tool result as the source of truth.
+  - id: output_format
+    heading: '[OUTPUT FORMAT]'
+    content: |-
+      Output MUST be a valid JSON object matching `WorkflowUIQualityReviewRequest` and NO additional text:
+      ```json
+      {
+        "status": "passed",
+        "warnings": [],
+        "revision_count": 0,
+        "max_revision_attempts": 2,
+        "revision_request": null,
+        "agent_message": "Reviewing workflow UI quality before backend tool generation."
+      }
+      ```
+  max_consecutive_auto_reply: 2
   structured_outputs_required: true
 - name: AgentToolsFileGenerator
   prompt_sections:
@@ -2144,7 +2167,7 @@ agents:
          - Use `entrypoints` for shell routes that enter this workflow pack.
          - Do not put persistent product page routes here; those belong in page/UI manifests.
          - For a transition entry screen, emit:
-           `{ "id": "create_item", "path": "/create", "label": "Create", "sequence": "build", "transition": "app_type_selector", "requiresAuth": true, "order": 100, "meta": {"title": "Create"} }`
+           `{ "id": "create_item", "path": "/create", "label": "Create", "sequence": "build", "transition": "app_type_selector", "requiresAuth": true, "order": 100, "meta": {"title": "Create", "shellMode": "focused"} }`
          - For a direct workflow start with no transition, use `workflow` instead of `transition`.
          - Each entrypoint must declare exactly one of `transition` or `workflow`.
 
@@ -2157,7 +2180,7 @@ agents:
       5. **Transitions**:
          - Set `transitions` to `[]` only when the generated application needs no user-facing journey decisions.
          - Emit surfaced transitions when the user intent requires choosing app mode, participation level, approval policy, import path, integration path, or another deterministic journey variable.
-         - Transition UI is declared as `ui: {"component": "<RegisteredTransitionComponent>", "mode": "screen"}`.
+         - Transition UI is declared as `ui: {"component": "<RegisteredTransitionComponent>", "mode": "screen", "shell_mode": "focused"}` for setup/choice/review screens. Use another shell mode only when the transition intentionally needs normal product chrome.
          - Transition UI components are file-backed React stubs exported from `extended_orchestration/ui/index.js`. The JSON references the component registry key only.
          - Prefer shell-owned transition primitives over workflow-local scaffolding.
          - Canonical shell transition options:
@@ -2214,7 +2237,7 @@ agents:
                 "sequence": "<workflow_sequence_id|null>",
                 "requiresAuth": true,
                 "order": 100,
-                "meta": {"title": "<title>"}
+                "meta": {"title": "<title>", "shellMode": "focused"}
               }
             ],
             "workflow_sequences": [
@@ -2231,7 +2254,7 @@ agents:
               {
                 "id": "<transition_id>",
                 "transition_type": "user_choice_context|user_choice_route|confirm|condition|silent|progress_view|prerequisite_redirect",
-                "ui": {"component": "<RegisteredTransitionComponent>", "mode": "screen"},
+                "ui": {"component": "<RegisteredTransitionComponent>", "mode": "screen", "shell_mode": "focused"},
                 "options": [
                   {
                     "id": "<semantic_option_id>",

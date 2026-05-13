@@ -5,7 +5,7 @@
 This document defines the canonical lifecycle across:
 
 - Mozaiks CLI
-- the Studio host and its visible workspace/build surfaces
+- the Studio host, its visible workspace console, and the workflow-owned build sequence
 - `factory_app`
 - the active app workspace
 - generated artifacts
@@ -14,8 +14,10 @@ This document defines the canonical lifecycle across:
 Terminology note:
 
 - `Studio` remains the current internal host and command name
-- customer-facing UX should prefer `Apps`, `Build`, `Integrations`, and
-  `Operations`
+- customer-facing UX should prefer `Apps`, `Usage`, `Billing`, `Hosting`, and
+  `Integrations`
+- `Build` refers to the workflow-owned agent sequence for create and
+  refinement, not a required persistent console page
 - when this document says `Studio` in ownership terms, it means the host and
   management composition layer, not a required visible product label
 
@@ -23,8 +25,8 @@ The current system has the right primitives, but the lifecycle is not explicit
 enough. That leads to confusion about:
 
 - whether `init` creates a real app or just a scaffold
-- whether the workspace/build surfaces are operating on the active workspace or
-  on staged artifacts
+- whether the workspace console and workflow-owned build sequence are operating
+  on the active workspace or on staged artifacts
 - when `factory_app` should mutate the live app root
 - how generated output becomes the app that later runs
 
@@ -125,7 +127,8 @@ Recommended command:
 - `mozaiks studio --open`
 
 This remains the current command path. Customer-facing UX should normalize to
-`Apps` as the landing surface and `Build` as the creation/refinement surface.
+`Apps` as the landing surface and route build/refinement through the
+workflow-owned agent sequence rather than a persistent `Build` page.
 
 Low-level equivalents:
 
@@ -149,7 +152,8 @@ Responsibilities:
 
 - allocate `build_registry_id`
 - associate `app_id`, `user_id`, app name, and initial status
-- expose build status to the `Apps` directory and app `Build` surfaces
+- expose build status to the `Apps` directory, app console summaries, and the
+  workflow-owned build sequence
 
 Important rule:
 
@@ -230,7 +234,8 @@ This phase determines whether staged artifacts are acceptable.
 
 Owned by:
 
-- the Studio host and Build review surfaces
+- the Studio host, app console summaries, and the workflow-owned build review
+  sequence
 - validation tools
 - optionally CLI for terminal-oriented users
 
@@ -247,7 +252,7 @@ Responsibilities:
 Review state transitions:
 
 - newly generated refinement children are persisted as `draft`
-- `draft` children are reviewed in Build with:
+- `draft` children are reviewed in the workflow-owned build sequence with:
   - changed-file diffs
   - selected refinement scope
   - validation outcome
@@ -262,7 +267,7 @@ Important rule:
 
 - `mozaiks gen` may remain a convenience path
 - but canonical review/history/diff/promotion must live in the workspace
-  console and Build surfaces
+  console and the workflow-owned build sequence
 
 Canonical frontend/workflow UI validation targets:
 
@@ -384,7 +389,7 @@ For most users:
 
 1. `mozaiks onboard`
 2. `mozaiks studio --open`
-3. build in `Build`
+3. launch the build workflow sequence from the workspace or app console
 4. review staged artifacts
 5. promote/export/deploy
 
@@ -434,7 +439,8 @@ Should:
 - become the primary entrypoint for actual building
 - start backend + frontend together
 - open the browser
-- route the user into the current build surface at `/apps/:appId/build`
+- route the user into the current app or workspace console and launch the
+  workflow-owned build sequence from there
 
 ### `mozaiks gen`
 

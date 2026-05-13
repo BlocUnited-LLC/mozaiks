@@ -9,7 +9,8 @@ needs full payload materialization including admin surface codegen.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from mozaiksai.core.workflow.generator_support.code_files import (
     extract_code_file_map_from_payload as _base_extract,
@@ -50,7 +51,54 @@ def extract_code_file_entries_from_payload(payload: Any) -> List[Dict[str, str]]
     return [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
 
 
+def collect_generated_app_file_map(
+    generated_app_dir: Any,
+    *,
+    allowed_roots: tuple[str, ...] = ("app.json", "ui", "brand", "config"),
+) -> Dict[str, str]:
+    """Read persisted schema artifacts from generated/apps/{app_id}/{build_id}/app.
+
+    This is the deterministic handoff from AppSchemaAgent/save_app_schema into
+    assembly, validation, and download. It intentionally collects only runtime
+    app artifact roots, not logs, cache files, or workflow internals.
+    """
+
+    if not isinstance(generated_app_dir, (str, Path)):
+        return {}
+    root = Path(generated_app_dir).resolve()
+    if not root.is_dir():
+        return {}
+
+    allowed = set(allowed_roots)
+    files: Dict[str, str] = {}
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        try:
+            rel = path.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        safe = safe_relpath(rel)
+        if not safe:
+            continue
+        first_part = safe.split("/", 1)[0]
+        if safe not in allowed and first_part not in allowed:
+            continue
+        try:
+            files[safe] = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+    return files
+
+
+def collect_generated_app_file_entries(generated_app_dir: Any) -> List[Dict[str, str]]:
+    file_map = collect_generated_app_file_map(generated_app_dir)
+    return [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
+
+
 __all__ = [
+    "collect_generated_app_file_entries",
+    "collect_generated_app_file_map",
     "extract_code_file_entries_from_payload",
     "extract_code_file_map_from_payload",
     "safe_relpath",

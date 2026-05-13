@@ -202,7 +202,7 @@ agents:
 
       Rules:
       - Every page in concept_overview must appear in the ui_schema.
-      - Include a short top-level `experience` block describing navigation model and brand direction.
+      - Include a short top-level `experience` block describing navigation model, brand direction, and whether primary destinations are global, local, profile, or footer navigation.
       - Include a required top-level `surface_map` block. This is the UI-facing mirror of the Backend doc's surface realization decisions and should use the same surface ids and surface kinds.
       - Include a short top-level `event_model` block when the app has mutations, notifications, subscriptions, or workflow reactions.
       - Keep the YAML deterministic enough to map directly into structured outputs; prefer finite values over freeform taxonomy drift.
@@ -213,10 +213,11 @@ agents:
       - Do not describe the same editor twice as both an inline form and a separate modal unless the page truly needs side-by-side editing to complete the workflow.
       - Use `ui.*` only for live UI reactions. Durable app changes must call module actions that emit declared `domain.*` events.
       - Do NOT invent capabilities not described in concept_overview.
-      - Keep UI schema workflow-agnostic and declarative: define page intent/primitive composition, not shell implementation details.
+      - Keep UI schema workflow-agnostic and declarative: define page intent/primitive composition and navigation intent, not shell implementation details.
       - Do NOT invent stub-reference fields in ui_schema. If customization must be file-backed, describe that need in prose for downstream generators instead of extending the YAML contract ad hoc.
       - Do NOT describe custom full-page React files in ui_schema. Those belong to the separate downstream custom route contract (`custom_route_bundle` → `ui/route_manifest.json` + `ui/pages/custom/*.jsx`) and should be called out only as an explicit escape hatch need.
-      - Do NOT define header/profile/notification/footer content objects in ui_schema; shell chrome content belongs to `config/shell.json`.
+      - Do NOT define header/profile/notification/footer content objects in ui_schema; shell chrome content belongs to `config/shell.json`, preferably through compact `shortcuts` and app-wide `navigation.policy`.
+      - The same boundary applies to mobile shell chrome such as `mobile.bottomBar`.
       - Do NOT encode raw visual token values (spacing scales, radius scales, typography families) in ui_schema; those belong to `brand/theme_config.json`.
       - Do NOT turn ui_schema into a media inventory. Reusable image/icon/video catalog entries belong in `config/asset_manifest.json`.
   - id: output_format

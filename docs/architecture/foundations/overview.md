@@ -56,7 +56,7 @@ contributors should share before reading implementation deep dives.
   not inside workflow prompts.
 - App events and workflow triggers connect ordinary app behavior to AI runs.
 - Durable persistence is required for the Studio host, the visible workspace
-  console/build surfaces, and the builder pipeline, with one canonical
+  console and workflow-owned build sequence, and the builder pipeline, with one canonical
   framework-owned Mongo namespace and explicit separation between runtime
   state, builder artifacts, and app business data.
 

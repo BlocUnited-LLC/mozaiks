@@ -420,6 +420,94 @@
   box-shadow: 0 0 14px rgba(var(--color-primary-rgb), 0.22);
 }
 
+.shell-mobile-bottom-bar {
+  position: fixed;
+  right: 0.75rem;
+  bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+  left: 0.75rem;
+  z-index: 55;
+  display: none;
+  align-items: stretch;
+  justify-content: space-around;
+  gap: 0.25rem;
+  min-height: 4.25rem;
+  padding: 0.45rem;
+  border: 1px solid rgba(var(--color-primary-rgb), 0.16);
+  border-radius: 1.25rem;
+  background: rgba(7, 16, 27, 0.92);
+  box-shadow: 0 18px 48px rgba(2, 6, 23, 0.34);
+  backdrop-filter: blur(18px);
+}
+
+.shell-mobile-bottom-item {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.24rem;
+  border: 0;
+  border-radius: 0.9rem;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-family: var(--font-body, system-ui, sans-serif);
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.shell-mobile-bottom-item.is-active,
+.shell-mobile-bottom-item:hover {
+  background: rgba(var(--color-primary-rgb), 0.14);
+  color: var(--color-text-primary);
+}
+
+.shell-mobile-bottom-glyph {
+  position: relative;
+  display: inline-flex;
+  width: 1.65rem;
+  height: 1.65rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.shell-mobile-bottom-label {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.66rem;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.shell-mobile-bottom-badge {
+  position: absolute;
+  top: -0.35rem;
+  right: -0.48rem;
+  display: inline-flex;
+  min-width: 1rem;
+  height: 1rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.18rem;
+  border-radius: 999px;
+  border: 1px solid rgba(7, 16, 27, 0.8);
+  background: var(--color-error);
+  color: #fff;
+  font-size: 0.58rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .cosmic-module-header-brand {
   font-family: var(--font-heading, 'Orbitron', 'Rajdhani', ui-sans-serif, system-ui, sans-serif);
   font-weight: 600;
@@ -481,5 +569,13 @@
   .shell-footer-link {
     font-size: 0.62rem;
     letter-spacing: 0.14em;
+  }
+
+  .shell-footer--hide-mobile {
+    display: none;
+  }
+
+  .shell-mobile-bottom-bar {
+    display: flex;
   }
 }

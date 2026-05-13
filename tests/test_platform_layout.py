@@ -24,7 +24,6 @@ def test_active_mozaiks_app_runtime_families_exist() -> None:
     assert (app_root / "config").is_dir()
     assert (app_root / "modules").is_dir()
     assert (app_root / "ui" / "pages").is_dir()
-    assert (app_root / "workflows").is_dir()
 
 
 def test_factory_app_runtime_families_exist() -> None:
@@ -39,7 +38,7 @@ def test_factory_app_runtime_families_exist() -> None:
     assert (FACTORY_APP_ROOT / "ui" / "index.js").exists()
     assert (FACTORY_APP_ROOT / "ui" / "route_manifest.json").exists()
     assert (FACTORY_APP_ROOT / "ui" / "pages").is_dir()
-    assert (FACTORY_APP_ROOT / "workflows").is_dir()
+    assert (ROOT / "factory_app" / "workflows").is_dir()
 
 
 def test_removed_platform_families_stay_removed() -> None:

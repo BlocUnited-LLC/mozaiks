@@ -162,7 +162,7 @@ to when there is any chance of ambiguity.
 Examples:
 
 - "Studio is an internal host/composition term."
-- "Build is the customer-facing creation and revision surface."
+- "Hosting is the customer-facing surface for managed rollout posture."
 - "Control Plane is runtime infrastructure, not a customer-facing dashboard."
 
 ## Product Copy Rule
@@ -171,11 +171,11 @@ Use the product term in visible UI even when the implementation name differs.
 
 Examples:
 
-- visible: `Build`
-- internal: `AppBuildPage`
+- visible: `Hosting`
+- internal: `AppHostingPage`
 
 - visible: `Integrations`
 - internal: `AppIntegrationsPage`
 
-- visible: `Admin`
-- internal: `AdminPortal`
+- visible: `Billing`
+- internal: `AppBillingPage`

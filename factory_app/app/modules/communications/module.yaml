@@ -3,7 +3,6 @@ module:
   id: communications
   display_name: Communications
   version: 1.0.0
-  type: messaging
   description: Standalone direct messages, group threads, and announcement delivery.
   owner: app
   visibility: private

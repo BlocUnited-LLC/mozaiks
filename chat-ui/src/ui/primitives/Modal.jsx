@@ -60,21 +60,22 @@ export function Modal({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent size={size} className={cn(className)}>
+      <DialogContent size={size} className={cn('gap-0 p-0', className)}>
         {(title || description) && (
-          <DialogHeader>
+          <DialogHeader className="px-4 pb-3 pt-4 sm:px-6 sm:pb-4 sm:pt-6">
             {title       && <DialogTitle>{title}</DialogTitle>}
             {description && <DialogDescription>{description}</DialogDescription>}
           </DialogHeader>
         )}
-        <div>{children}</div>
+        <div className="px-4 pb-4 sm:px-6 sm:pb-6">{children}</div>
         {actions.length > 0 && (
-          <DialogFooter className="gap-2">
+          <DialogFooter className="gap-2 border-t border-border/60 bg-background/80 px-4 py-4 backdrop-blur-sm sm:px-6">
             {actions.map((action) => (
               <Button
                 key={action.id}
                 label={action.label}
                 variant={action.variant ?? 'secondary'}
+                className="w-full sm:w-auto"
                 onClick={() => {
                   action.onClick?.();
                   if (action.closes_modal !== false) handleOpenChange(false);

@@ -60,6 +60,14 @@ def _safe_path_segment(value: Any, *, fallback: str) -> str:
     return text or fallback
 
 
+def _safe_action_segment(value: Any, *, fallback: str = "submit") -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        text = fallback
+    text = re.sub(r"[^a-z0-9]+", "_", text).strip("_")
+    return text or fallback
+
+
 def _resolve_artifact_ids(
     *,
     context_variables: Optional[Any],
@@ -89,6 +97,257 @@ def _normalize_list(value: Any) -> List[Any]:
     if not isinstance(value, list):
         return []
     return list(value)
+
+
+def _to_plain(value: Any) -> Any:
+    """Convert Pydantic-style structured output objects to plain containers."""
+    if hasattr(value, "model_dump"):
+        try:
+            return value.model_dump()
+        except Exception:
+            pass
+    if isinstance(value, dict):
+        return {key: _to_plain(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_to_plain(item) for item in value]
+    return value
+
+
+def _strip_none(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _strip_none(item)
+            for key, item in value.items()
+            if item is not None
+        }
+    if isinstance(value, list):
+        return [_strip_none(item) for item in value if item is not None]
+    return value
+
+
+def _key_value_entries_to_dict(value: Any) -> Any:
+    """Normalize strict key/value lists into runtime object payloads."""
+    value = _to_plain(value)
+    if value is None or isinstance(value, dict):
+        return _strip_none(value)
+    if isinstance(value, list):
+        normalized: Dict[str, Any] = {}
+        for entry in value:
+            if not isinstance(entry, dict):
+                continue
+            key = entry.get("key")
+            if not _is_non_empty_string(key):
+                continue
+            normalized[str(key)] = _strip_none(entry.get("value"))
+        return normalized
+    return value
+
+
+def _normalize_action_payloads(action: Any) -> Any:
+    action = _strip_none(_to_plain(action))
+    if not isinstance(action, dict):
+        return action
+    if not _is_non_empty_string(action.get("href")):
+        for alias in ("endpoint", "api_endpoint", "url"):
+            if _is_non_empty_string(action.get(alias)):
+                action["href"] = action.get(alias)
+                break
+    for field in ("context_variables", "payload", "event_payload"):
+        if field in action:
+            action[field] = _key_value_entries_to_dict(action.get(field))
+    return _strip_none(action)
+
+
+def _normalize_config_actions(config: Dict[str, Any]) -> Dict[str, Any]:
+    for field in ("action", "submit_action", "cancel_action"):
+        if field in config:
+            config[field] = _normalize_action_payloads(config.get(field))
+    submit_action = config.get("submit_action")
+    if isinstance(submit_action, dict) and not _is_non_empty_string(submit_action.get("href")):
+        for alias in ("submit_endpoint", "endpoint", "api_endpoint", "url"):
+            if _is_non_empty_string(config.get(alias)):
+                submit_action["href"] = config.get(alias)
+                break
+    if isinstance(config.get("actions"), list):
+        config["actions"] = [_normalize_action_payloads(action) for action in config["actions"]]
+    empty = config.get("empty")
+    if isinstance(empty, dict) and "action" in empty:
+        empty["action"] = _normalize_action_payloads(empty.get("action"))
+    return config
+
+
+_OPTIONAL_STRING_KEYS = {
+    "api_endpoint",
+    "cancel_label",
+    "color",
+    "description",
+    "event_type",
+    "height",
+    "href",
+    "icon",
+    "id",
+    "message",
+    "modal_id",
+    "placeholder",
+    "size",
+    "subtitle",
+    "submit_label",
+    "title",
+    "url",
+    "variant",
+    "width",
+    "workflow_id",
+}
+
+
+def _normalize_blank_optional_strings(value: Any) -> Any:
+    if isinstance(value, dict):
+        normalized: Dict[str, Any] = {}
+        for key, item in value.items():
+            if key in _OPTIONAL_STRING_KEYS and isinstance(item, str) and not item.strip():
+                normalized[key] = None
+            else:
+                normalized[key] = _normalize_blank_optional_strings(item)
+        return _strip_none(normalized)
+    if isinstance(value, list):
+        return [_normalize_blank_optional_strings(item) for item in value]
+    return value
+
+
+def _normalize_page_section(section: Any) -> Any:
+    section = _strip_none(_to_plain(section))
+    if not isinstance(section, dict):
+        return section
+    config = section.get("config")
+    if isinstance(config, dict):
+        config = _normalize_blank_optional_strings(config)
+        config = _normalize_config_actions(config)
+        children = config.get("children")
+        if isinstance(children, list):
+            config["children"] = [_normalize_page_section(child) for child in children]
+        section["config"] = _strip_none(config)
+    return _strip_none(section)
+
+
+def _derive_module_id_for_page(
+    page: Dict[str, Any],
+    context_variables: Optional[Any],
+) -> Optional[str]:
+    app_build_plan = _context_get(context_variables, "app_build_plan")
+    modules = []
+    if isinstance(app_build_plan, dict):
+        modules = app_build_plan.get("modules") or []
+    if isinstance(modules, list) and len(modules) == 1 and isinstance(modules[0], dict):
+        module_id = modules[0].get("module_id")
+        if _is_non_empty_string(module_id):
+            return str(module_id)
+
+    route = page.get("route")
+    if isinstance(app_build_plan, dict) and _is_non_empty_string(route):
+        for planned_page in app_build_plan.get("pages") or []:
+            if not isinstance(planned_page, dict) or planned_page.get("route") != route:
+                continue
+            primary_entities = planned_page.get("primary_entities") or []
+            if isinstance(primary_entities, list) and len(primary_entities) == 1:
+                candidate = primary_entities[0]
+                if _is_non_empty_string(candidate):
+                    return str(candidate)
+    return None
+
+
+def _derive_submit_action_id(
+    section: Dict[str, Any],
+    page: Dict[str, Any],
+    context_variables: Optional[Any],
+) -> Optional[str]:
+    config = section.get("config")
+    if not isinstance(config, dict):
+        return None
+    submit_action = config.get("submit_action")
+    if not isinstance(submit_action, dict):
+        return None
+
+    for candidate in (
+        submit_action.get("id"),
+        submit_action.get("action"),
+        config.get("submit_action_id"),
+        config.get("action_id"),
+    ):
+        if _is_non_empty_string(candidate):
+            return _safe_action_segment(candidate)
+
+    route = page.get("route")
+    app_build_plan = _context_get(context_variables, "app_build_plan")
+    if isinstance(app_build_plan, dict) and _is_non_empty_string(route):
+        for planned_page in app_build_plan.get("pages") or []:
+            if not isinstance(planned_page, dict) or planned_page.get("route") != route:
+                continue
+            primary_actions = planned_page.get("primary_actions") or []
+            if isinstance(primary_actions, list) and len(primary_actions) == 1:
+                candidate = primary_actions[0]
+                if _is_non_empty_string(candidate):
+                    return _safe_action_segment(candidate)
+
+    for candidate in (config.get("submit_label"), submit_action.get("label")):
+        if _is_non_empty_string(candidate):
+            return _safe_action_segment(candidate)
+    return None
+
+
+def _repair_missing_submit_hrefs(
+    page_list: List[Dict[str, Any]],
+    context_variables: Optional[Any],
+) -> None:
+    for page in page_list:
+        module_id = _derive_module_id_for_page(page, context_variables)
+        if not _is_non_empty_string(module_id):
+            continue
+        for section in page.get("sections") or []:
+            if not isinstance(section, dict):
+                continue
+            if section.get("primitive") != "Form":
+                continue
+            config = section.get("config")
+            if not isinstance(config, dict):
+                continue
+            submit_action = config.get("submit_action")
+            if not isinstance(submit_action, dict):
+                continue
+            if submit_action.get("action_type") != "submit":
+                continue
+            if _is_non_empty_string(submit_action.get("href")):
+                continue
+            action_id = _derive_submit_action_id(section, page, context_variables)
+            if not _is_non_empty_string(action_id):
+                continue
+            submit_action["href"] = f"/api/modules/{module_id}/{action_id}"
+
+
+def _normalize_page_schema(page: Any) -> Any:
+    page = _strip_none(_to_plain(page))
+    if not isinstance(page, dict):
+        return page
+    sections = page.get("sections")
+    if isinstance(sections, list):
+        page["sections"] = [_normalize_page_section(section) for section in sections]
+    return _strip_none(page)
+
+
+def _normalize_custom_route_bundle(bundle: Any) -> Any:
+    bundle = _strip_none(_to_plain(bundle))
+    if not isinstance(bundle, dict):
+        return bundle
+    route_manifest = bundle.get("route_manifest")
+    if isinstance(route_manifest, list):
+        bundle["route_manifest"] = [_strip_none(_to_plain(entry)) for entry in route_manifest]
+    page_files = bundle.get("page_files")
+    if isinstance(page_files, list):
+        bundle["page_files"] = [_strip_none(_to_plain(entry)) for entry in page_files]
+    return _strip_none(bundle)
+
+
+def _normalize_shell_config(shell_config: Any) -> Any:
+    return _strip_none(_to_plain(shell_config))
 
 
 def _require_dict(value: Any, field: str) -> Dict[str, Any]:
@@ -143,6 +402,7 @@ VALID_STAT_FORMATS = {"number", "currency", "percentage", "compact"}
 VALID_TREND_DIRECTIONS = {"up_good", "up_bad", "neutral"}
 VALID_ASSET_SOURCES = {"local", "remote", "uploaded", "generated", "stock"}
 VALID_CUSTOM_PAGE_EXTENSIONS = {".js", ".jsx"}
+VALID_SHELL_MODES = {"standard", "workspace", "conversation", "focused", "immersive", "public"}
 
 
 def _is_non_empty_string(value: Any) -> bool:
@@ -164,6 +424,13 @@ def _validate_optional_string(value: Any, *, field: str) -> None:
         return
     if not _is_non_empty_string(value):
         raise ValueError(f"{field} must be a non-empty string or null")
+
+
+def _validate_shell_mode(value: Any, *, field: str) -> None:
+    if value is None:
+        return
+    if value not in VALID_SHELL_MODES:
+        raise ValueError(f"{field} must be one of {sorted(VALID_SHELL_MODES)}")
 
 
 def _validate_asset_manifest(asset_manifest: Any) -> None:
@@ -274,6 +541,11 @@ def _validate_custom_route_bundle(custom_route_bundle: Any) -> None:
         meta = entry.get("meta")
         if meta is not None and not isinstance(meta, dict):
             raise ValueError(f"{path}.meta must be an object or null")
+        if isinstance(meta, dict):
+            _validate_shell_mode(
+                meta.get("shellMode", meta.get("shell_mode")),
+                field=f"{path}.meta.shellMode",
+            )
         if not _is_non_empty_string(entry.get("purpose")):
             raise ValueError(f"{path}.purpose is required")
         route_ids.add(route_id)
@@ -764,6 +1036,174 @@ def _validate_manifest_against_pages(
     if default_route not in page_routes + custom_route_paths:
         raise ValueError("manifest.default_route must match one of the generated declarative or custom page routes")
 
+
+def _canonicalize_manifest_routes(
+    manifest_dict: Dict[str, Any],
+    page_list: List[Dict[str, Any]],
+    custom_route_bundle: Optional[Dict[str, Any]],
+) -> None:
+    """Derive manifest route indexes from the emitted page/custom route objects.
+
+    The real runtime artifact is the page/custom route definition. The manifest
+    lists are redundant indexes, so the persistence layer owns canonicalization
+    to avoid letting duplicate model output drift.
+    """
+
+    manifest_dict["pages"] = [page["name"] for page in page_list]
+    custom_route_entries = list((custom_route_bundle or {}).get("route_manifest") or [])
+    manifest_dict["custom_routes"] = [route["id"] for route in custom_route_entries]
+
+
+def _validate_shell_shortcuts(shell_config: Optional[Dict[str, Any]]) -> None:
+    if not shell_config:
+        return
+    if not isinstance(shell_config, dict):
+        raise ValueError("shell_config must be an object")
+
+    shortcuts = shell_config.get("shortcuts")
+    if shortcuts is None:
+        return
+    if not isinstance(shortcuts, dict):
+        raise ValueError("shell_config.shortcuts must be an object")
+
+    shortcut_list_fields = {
+        "header",
+        "desktopHeader",
+        "profile",
+        "profileMenu",
+        "mobile",
+        "mobileBottomBar",
+        "footer",
+        "footerLinks",
+    }
+    for field in shortcut_list_fields:
+        value = shortcuts.get(field)
+        if value is None:
+            continue
+        if not isinstance(value, list) or any(not _is_non_empty_string(item) for item in value):
+            raise ValueError(f"shell_config.shortcuts.{field} must be a list of primitive ids")
+
+    placements = shortcuts.get("placements")
+    if placements is not None:
+        if not isinstance(placements, dict):
+            raise ValueError("shell_config.shortcuts.placements must be an object")
+        for key, value in placements.items():
+            if not _is_non_empty_string(key):
+                raise ValueError("shell_config.shortcuts.placements keys must be non-empty strings")
+            if not isinstance(value, list) or any(not _is_non_empty_string(item) for item in value):
+                raise ValueError(f"shell_config.shortcuts.placements.{key} must be a list of primitive ids")
+
+    items = shortcuts.get("items")
+    if items is not None:
+        if not isinstance(items, dict):
+            raise ValueError("shell_config.shortcuts.items must be an object")
+        for key, value in items.items():
+            if not _is_non_empty_string(key):
+                raise ValueError("shell_config.shortcuts.items keys must be non-empty strings")
+            if not isinstance(value, dict):
+                raise ValueError(f"shell_config.shortcuts.items.{key} must be an object")
+
+    footer_hide = shortcuts.get("footerHideOnMobile")
+    if footer_hide is not None and not isinstance(footer_hide, bool):
+        raise ValueError("shell_config.shortcuts.footerHideOnMobile must be a boolean")
+
+
+def _validate_shell_navigation(shell_config: Optional[Dict[str, Any]]) -> None:
+    if not shell_config:
+        return
+    if not isinstance(shell_config, dict):
+        raise ValueError("shell_config must be an object")
+
+    navigation = shell_config.get("navigation")
+    if navigation is None:
+        return
+    if not isinstance(navigation, dict):
+        raise ValueError("shell_config.navigation must be an object")
+
+    policy = navigation.get("policy") if isinstance(navigation.get("policy"), dict) else navigation
+    for viewport in ("desktop", "mobile"):
+        value = policy.get(viewport)
+        if value is None:
+            continue
+        if not isinstance(value, dict):
+            raise ValueError(f"shell_config.navigation.{viewport} must be an object")
+        for field in ("global", "local", "footer"):
+            if value.get(field) is not None and not _is_non_empty_string(value.get(field)):
+                raise ValueError(f"shell_config.navigation.{viewport}.{field} must be a non-empty string")
+
+    max_mobile = policy.get("maxMobileItems", policy.get("max_mobile_items"))
+    if max_mobile is not None and (not isinstance(max_mobile, int) or max_mobile < 1 or max_mobile > 5):
+        raise ValueError("shell_config.navigation.maxMobileItems must be an integer from 1 to 5")
+
+    auto_from_pages = policy.get("autoFromPages", policy.get("auto_from_pages"))
+    if auto_from_pages is not None and not isinstance(auto_from_pages, bool):
+        raise ValueError("shell_config.navigation.autoFromPages must be a boolean")
+
+    items = navigation.get("items")
+    if items is None:
+        return
+    if isinstance(items, dict):
+        iterable = items.values()
+    elif isinstance(items, list):
+        iterable = items
+    else:
+        raise ValueError("shell_config.navigation.items must be a list or object")
+    for item in iterable:
+        if isinstance(item, str):
+            continue
+        if not isinstance(item, dict):
+            raise ValueError("shell_config.navigation.items entries must be objects or shortcut ids")
+        if item.get("id") is not None and not _is_non_empty_string(item.get("id")):
+            raise ValueError("shell_config.navigation.items[*].id must be a non-empty string")
+        scope = item.get("scope")
+        if scope is not None and scope not in {"global", "local", "profile", "footer"}:
+            raise ValueError("shell_config.navigation.items[*].scope must be global, local, profile, or footer")
+        placement = item.get("placement")
+        if placement is not None and not isinstance(placement, (str, dict)):
+            raise ValueError("shell_config.navigation.items[*].placement must be a string or object")
+
+
+def _validate_shell_chrome(shell_config: Optional[Dict[str, Any]]) -> None:
+    if not shell_config:
+        return
+    if not isinstance(shell_config, dict):
+        raise ValueError("shell_config must be an object")
+
+    chrome = shell_config.get("chrome")
+    if chrome is None:
+        return
+    if not isinstance(chrome, dict):
+        raise ValueError("shell_config.chrome must be an object")
+
+    _validate_shell_mode(chrome.get("defaultMode", chrome.get("default_mode")), field="shell_config.chrome.defaultMode")
+
+    modes = chrome.get("modes")
+    if modes is None:
+        return
+    if not isinstance(modes, dict):
+        raise ValueError("shell_config.chrome.modes must be an object")
+
+    for mode, mode_policy in modes.items():
+        _validate_shell_mode(mode, field="shell_config.chrome.modes key")
+        if mode_policy is None:
+            continue
+        if not isinstance(mode_policy, dict):
+            raise ValueError(f"shell_config.chrome.modes.{mode} must be an object")
+        for viewport in ("desktop", "mobile"):
+            viewport_policy = mode_policy.get(viewport)
+            if viewport_policy is None:
+                continue
+            if not isinstance(viewport_policy, dict):
+                raise ValueError(f"shell_config.chrome.modes.{mode}.{viewport} must be an object")
+            for field in ("header", "footer", "bottomBar"):
+                value = viewport_policy.get(field)
+                if value is not None and not isinstance(value, bool):
+                    raise ValueError(f"shell_config.chrome.modes.{mode}.{viewport}.{field} must be a boolean")
+            local_nav = viewport_policy.get("localNav")
+            if local_nav is not None and not isinstance(local_nav, (bool, str)):
+                raise ValueError(f"shell_config.chrome.modes.{mode}.{viewport}.localNav must be a boolean or string")
+
+
 def _persist_to_filesystem(
     output_dir: Path,
     manifest_dict: Dict[str, Any],
@@ -979,13 +1419,20 @@ def save_app_schema(
     if manifest is None:
         raise ValueError("save_app_schema: manifest is required")
 
-    manifest_dict = _require_dict(manifest, "manifest")
+    manifest_dict = _require_dict(_strip_none(_to_plain(manifest)), "manifest")
     if not manifest_dict.get("app_name"):
         raise ValueError("manifest.app_name is required")
 
-    page_list = _normalize_list(pages)
+    page_list = [_normalize_page_schema(page) for page in _normalize_list(_to_plain(pages))]
     if page_list and not isinstance(page_list, list):
         raise ValueError("save_app_schema: pages must be a list")
+    _repair_missing_submit_hrefs(page_list, context_variables)
+
+    theme_config_patch = _strip_none(_to_plain(theme_config_patch))
+    shell_config = _normalize_shell_config(shell_config)
+    asset_manifest = _strip_none(_to_plain(asset_manifest))
+    database_intent_bundle = _strip_none(_to_plain(database_intent_bundle))
+    custom_route_bundle = _normalize_custom_route_bundle(custom_route_bundle)
 
     for page in page_list:
         if not isinstance(page, dict):
@@ -996,6 +1443,7 @@ def save_app_schema(
             raise ValueError(f"Page '{page.get('name')}' must have a valid route")
         if not _is_non_empty_string(page.get("title")):
             raise ValueError(f"Page '{page.get('name')}' must have a valid title")
+        _validate_shell_mode(page.get("shell_mode", page.get("shellMode")), field=f"Page '{page.get('name')}'.shell_mode")
         if not page.get("sections"):
             raise ValueError(f"Page '{page.get('name')}' must have at least one section")
         if not isinstance(page.get("sections"), list):
@@ -1021,7 +1469,11 @@ def save_app_schema(
         raise ValueError("save_app_schema: at least one declarative page or custom route bundle is required")
 
     _validate_custom_route_bundle(custom_route_bundle)
+    _canonicalize_manifest_routes(manifest_dict, page_list, custom_route_bundle)
     _validate_manifest_against_pages(manifest_dict, page_list, custom_route_bundle)
+    _validate_shell_shortcuts(shell_config)
+    _validate_shell_navigation(shell_config)
+    _validate_shell_chrome(shell_config)
     _validate_asset_manifest(asset_manifest)
     resolved_database_intent_bundle = database_intent_bundle
     if resolved_database_intent_bundle is None:

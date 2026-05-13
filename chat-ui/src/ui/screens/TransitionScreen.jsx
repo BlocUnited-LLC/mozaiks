@@ -30,7 +30,7 @@ import { useAppEventBus } from '../hooks/useAppEventBus';
 // ---------------------------------------------------------------------------
 
 const TransitionLoading = () => (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/78 px-4 backdrop-blur-md">
+  <div className="fixed inset-0 z-[70] flex items-center justify-center bg-background/78 px-4 backdrop-blur-md">
     <div className="flex w-full max-w-sm flex-col items-center gap-3 rounded-[1.75rem] border border-border/80 bg-background/90 px-8 py-10 text-center shadow-2xl shadow-black/35 backdrop-blur-xl">
       <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
       <p className="text-sm text-muted-foreground">Loading…</p>
@@ -39,7 +39,7 @@ const TransitionLoading = () => (
 );
 
 const TransitionError = ({ message, onRetry }) => (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/78 px-4 backdrop-blur-md">
+  <div className="fixed inset-0 z-[70] flex items-center justify-center bg-background/78 px-4 backdrop-blur-md">
     <div className="w-full max-w-md rounded-[1.75rem] border border-destructive/40 bg-background/90 p-8 text-center shadow-2xl shadow-black/35 backdrop-blur-xl">
       <h1 className="text-lg font-black text-destructive mb-3">Transition Error</h1>
       <p className="text-sm text-muted-foreground mb-5">{message}</p>

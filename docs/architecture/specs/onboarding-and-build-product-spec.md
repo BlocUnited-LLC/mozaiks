@@ -7,8 +7,10 @@
 Terminology note:
 
 - `Studio` remains the current internal host and command name.
-- customer-facing UX should prefer `Apps`, `Build`, `Integrations`, and
-  `Operations`
+- customer-facing UX should prefer `Apps`, `Usage`, `Billing`, `Hosting`, and
+   `Integrations`
+- `Build` is the workflow-owned agent sequence for create/refinement, not a
+   standalone persistent console page
 - the long-term visible model is a Workspace Console plus an App Console, not a
   top-level product area called `Studio`
 
@@ -61,8 +63,8 @@ Mozaiks should separate the user journey into three distinct layers:
    - writes or updates only app-owned configuration surfaces
 
 3. `mozaiks studio`
-   - launches the local, private workspace console and build surfaces through
-     the current Studio host
+    - launches the local, private workspace console and the workflow-owned build
+       sequence through the current Studio host
    - becomes the main place where the user asks agents to build, installs
      capabilities, reviews diffs, checks runtime health, and iterates
 
@@ -101,8 +103,8 @@ The Mozaiks experience should read as one product journey:
 4. Land in `Apps`
 5. Add or enable capabilities
 6. Create or open an app record
-7. Enter `Build`
-8. Submit the first build request
+7. Launch the build workflow sequence
+8. Submit the first build request through that workflow sequence
 9. Review proposed changes before write
 10. Run, validate, and refine from the same surface
 
@@ -138,11 +140,11 @@ Outputs should be constrained to app-owned configuration and planning artifacts,
 
 Responsibility:
 
-- open the current workspace console and build surfaces for the active
-  workspace
+- open the current workspace console and the workflow-owned build/refinement
+   entrypoints for the active workspace
 - show apps, build requests, installed capabilities, validation, runtime state,
   and admin access
-- keep the operations dashboard local-only and private for now
+- keep operator-only operations views local-only and private for now
 
 ### `mozaiks add`
 
@@ -158,17 +160,20 @@ Responsibility:
 - execute build or refinement requests against the current workspace
 - compile user intent into typed planning artifacts and then into owned file changes
 
-## Workspace Console And Build Information Architecture
+## Workspace Console And Workflow-Owned Build Information Architecture
 
 `mozaiks studio` is the current command and host entry point, but the visible
-product model should be:
+production-ready model should be:
 
 - `Apps` as the workspace-level landing area
-- `Build` as the app-specific creation and revision surface
-- `Operations`, `Usage`, `Integrations`, and `Admin` as supporting
-  app/workspace surfaces
+- `Usage`, `Billing`, and `Hosting` as workspace portfolio summaries
+- `Overview`, `Users`, `Integrations`, `Usage`, `Billing`, and `Hosting` as
+   app-console sections
+- the build/refinement experience launched into the workflow-owned agent
+   sequence from create and app-context actions, not exposed as a persistent
+   standalone React page
 
-Recommended sections:
+Recommended production-ready sections:
 
 ### 1. Apps
 
@@ -181,15 +186,49 @@ Shows:
 - recent runs and recent changes
 - current provider and model profile
 
-### 2. Build
+### 2. Usage
 
 Shows:
 
-- freeform build request box
-- current create plan
+- workspace usage signals
+- token and cost posture
+- recent portfolio activity that is already production-ready to expose
+
+### 3. Billing
+
+Shows:
+
+- revenue posture
+- recurring value
+- commercial readiness by app
+- finance follow-up signals that are already live
+
+### 4. Hosting
+
+Shows:
+
+- managed hosting posture
+- domains and environment readiness
+- release handoff state that is already production-ready to expose
+
+### 5. App Console
+
+Shows:
+
+- overview and current app posture
+- users and participation
+- integrations and credential posture
+- usage, billing, and hosting summaries for the current app
+
+### 6. Workflow-Owned Build Sequence
+
+Shows:
+
+- the active build or refinement request
+- current create/refinement plan
 - owned paths and acceptance criteria
-- approval state
-- recent create history
+- approval state, diffs, and validation outcomes
+- sequence-driven next steps managed by agents rather than a standalone page
 
 This is where the user says things like:
 
@@ -198,74 +237,27 @@ This is where the user says things like:
 - connect this existing backend first
 - redesign the app shell for a finance brand
 
-### 3. Capabilities
+Capabilities, deeper workflow tooling, and operator/admin controls may still
+exist, but they should not be documented as current production-ready persistent
+console pages unless they are actually shipped.
 
-Shows:
+## Build Workflow Request Flow
 
-- shipped capability packs
-- installed capability bundles
-- trust level and source of each bundle
-- dependencies and required external credentials
-
-User-facing label can be "Capabilities" even if the implementation assembles operations, pages, workflows, and config changes underneath.
-
-### 4. Pages And Shell
-
-Shows:
-
-- navigation and shell summary
-- installed pages
-- theme and brand config
-- entry points and app modes
-
-This is where `app/config/shell.json`, `app/brand/theme_config.json`, and related shell surfaces become inspectable instead of hidden files.
-
-### 5. Workflows
-
-Shows:
-
-- installed workflows
-- their entry points
-- required tools and structured outputs
-- recent runs and validation status
-
-### 6. Operations
-
-Shows:
-
-- logs
-- sessions and runs
-- token and cost telemetry
-- health checks
-- validation results
-
-### 7. Admin
-
-Shows:
-
-- local/private admin controls
-- framework admin access status
-- app-admin settings when available
-
-This should follow the two-tier admin boundary already defined in `admin-system.md`.
-
-## Build Request Flow
-
-The Build request loop should be artifact-first, not transcript-first.
+The build request loop should be artifact-first, not transcript-first.
 
 Canonical flow:
 
 1. user enters a build or refinement request
 2. system classifies the request: `greenfield_app`, `brownfield_app`, or `refinement`
 3. system produces typed planning artifacts
-4. Build renders a proposed plan:
+4. the workflow-owned build sequence renders a proposed plan:
    - owned paths
    - affected capabilities
    - approvals required
    - cost and runtime implications
 5. user approves
 6. execution writes changes
-7. Build shows:
+7. the workflow-owned build sequence shows:
    - diff summary
    - validation results
    - preview or next-step actions
@@ -279,8 +271,8 @@ This preserves the core Mozaiks model:
 ## Canonical Create Journeys
 
 Before additional routing or selector work lands, Mozaiks should treat the
-Build surface as three different user journeys that happen to share one entry
-box.
+workflow-owned build sequence as three different user journeys that happen to
+share one entry box.
 
 The important rule is: the user should feel one product, but the system should not
 pretend all create requests mean the same kind of work.
@@ -405,7 +397,7 @@ Practical implications:
    - `brownfield_app`: decide host access mode first, not new database ownership first
    - `refinement`: ask only when the requested change actually affects data/storage
 
-The system may still present all three from one Build surface, but the
+The system may still present all three from one build entrypoint, but the
 classifier and transition graph must treat them as different request kinds with
 different next questions.
 
@@ -433,7 +425,7 @@ Every installable capability should declare:
 
 ## Config Ownership
 
-Onboarding and Build should operate on app-bundle surfaces, not runtime internals.
+Onboarding and the workflow-owned build sequence should operate on app-bundle surfaces, not runtime internals.
 
 Primary writable surfaces:
 
@@ -456,7 +448,7 @@ They should not invent alternate sources of truth when canonical bundle files al
 
 ## Existing-App Track
 
-The Build flow must support the existing-app adoption ladder already defined elsewhere:
+The build workflow sequence must support the existing-app adoption ladder already defined elsewhere:
 
 - `Embed`
 - `Bridge`
@@ -489,7 +481,7 @@ The Reddit feedback makes several guardrails non-optional.
 
 ### Cost Clarity
 
-Build and Operations should show:
+The workflow-owned build sequence and the production console should show:
 
 - provider and model currently selected
 - whether usage is API-billed
@@ -498,7 +490,7 @@ Build and Operations should show:
 
 ### Trust Clarity
 
-Build should show:
+The workflow-owned build sequence should show:
 
 - whether a capability is first-party, local, or third-party
 - whether source code is present locally
@@ -508,14 +500,14 @@ Build should show:
 
 After onboarding, the user should never face a dead-end state.
 
-The `Apps` landing area or active `Build` surface should always recommend a
+The `Apps` landing area or active app console should always recommend a
 next step such as:
 
 - install your first capability
 - connect your existing backend
 - make your first build request
 - validate the workspace
-- open the local admin panel
+- open the relevant production-ready app or workspace section
 
 ### No Magic Installs
 

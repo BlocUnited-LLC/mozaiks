@@ -1,0 +1,47 @@
+name: tickets
+route: /tickets
+title: null
+layout: full-width
+roles: []
+sections:
+  - id: tickets-header
+    primitive: PageHeader
+    title: null
+    config:
+      title: Support Tickets
+      subtitle: Review active support work and route customer issues.
+      title_font: body
+      actions:
+        - id: new-ticket
+          label: New Ticket
+          variant: primary
+          action_type: event
+          event_type: ui.ticket.create_requested
+  - id: tickets-table
+    primitive: ResourceTable
+    title: null
+    config:
+      api_endpoint: /api/modules/tickets/list
+      data_key: tickets
+      columns:
+        - key: subject
+          label: Ticket
+          sortable: true
+        - key: status
+          label: Status
+          type: badge
+        - key: owner
+          label: Owner
+        - key: updated_at
+          label: Updated
+          type: date
+          sortable: true
+      selection: none
+      search: true
+      search_placeholder: Search tickets...
+      pagination: true
+      page_size: 8
+      empty:
+        title: No tickets
+        message: New support requests appear here when customers need help.
+        error_title: Could not load tickets

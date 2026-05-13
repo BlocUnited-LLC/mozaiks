@@ -2,7 +2,7 @@ import {
   ActionButton,
   IconButton,
   StatusPill,
-} from './ConsolePrimitives.jsx'
+} from '../../../components/ConsoleShared.jsx'
 import {
   getRefinementRequestPlaceholder,
   REFINEMENT_CHANGE_CLASSES,

@@ -33,7 +33,26 @@ export { CodeBlock }       from './CodeBlock.jsx';
 export { ProgressTracker } from './ProgressTracker.jsx';
 export { AlertBanner }     from './AlertBanner.jsx';
 export { ActionButton }    from './ActionButton.jsx';
+export { CollectionToolbar } from './CollectionToolbar.jsx';
 export { FileList }        from './FileList.jsx';
+export { PageHeader }      from './PageHeader.jsx';
+export { ResourceList }    from './ResourceList.jsx';
+export { ResourceTable }   from './ResourceTable.jsx';
+export { SummaryStrip }    from './SummaryStrip.jsx';
+export {
+  ErrorState,
+  IconButton,
+  InlineEmptyState,
+  LinkButton,
+  LoadingState,
+  Metric,
+  Panel,
+  SegmentedBar,
+  SegmentedControl,
+  SlideOver,
+  StatusPill,
+  SurfaceCard,
+} from './Surface.jsx';
 
 // Event bus — exported so App.jsx / providers can wire the WebSocket bridge
 export { mountAppEventBridge, useAppEvent, emitAppEvent } from '../hooks/useAppEventBus.js';

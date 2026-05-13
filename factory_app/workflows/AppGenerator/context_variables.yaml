@@ -506,6 +506,30 @@ definitions:
     source:
       type: computed
       default: false
+  app_child_workflows:
+    type: array
+    description: Hydrated child workflow specs for each AppGenerator build task, written by app_build_plan.
+    source:
+      type: computed
+      default: []
+  runtime_capabilities:
+    type: array
+    description: Hosted platform capabilities available at runtime (e.g. hosted_wallet). Null in OSS mode.
+    source:
+      type: computed
+      default: null
+  available_hosted_packs:
+    type: array
+    description: Hosted capability packs available for this deployment. Null in OSS mode.
+    source:
+      type: computed
+      default: null
+  pack_sources:
+    type: object
+    description: Pack source metadata for hosted capability packs. Null in OSS mode.
+    source:
+      type: computed
+      default: null
   app_manifest:
     type: object
     description: App manifest metadata used by AppSchemaAgent to persist app.json startup and validate page routes.
@@ -694,6 +718,9 @@ agents:
     - generated_workflow_trigger_events
     - app_build_plan
     - app_plan_ready
+    - runtime_capabilities
+    - available_hosted_packs
+    - pack_sources
   AppSchemaAgent:
     variables:
     - concept_overview
@@ -716,6 +743,7 @@ agents:
   AssemblyAgent:
     variables:
     - app_build_plan
+    - app_child_workflows
     - app_manifest
     - app_pages
     - app_theme_config_patch

@@ -176,9 +176,12 @@ class TestShellConfig:
         assert "profile" not in shell
         assert "notifications" not in shell
 
-    def test_has_footer(self, shell):
-        assert len(shell["footer"]["links"]) >= 3
-        assert shell["footer"]["visible"] is True
+    def test_has_compact_shell_shortcuts(self, shell):
+        shortcuts = shell["shortcuts"]
+        assert "profile" in shortcuts
+        assert "mobile" in shortcuts
+        assert shortcuts["footer"] == ["legal", "terms", "cookies"]
+        assert shortcuts["footerHideOnMobile"] is True
 
 
 # ── Framework-only tests (no app workspace needed) ──────────────────────────

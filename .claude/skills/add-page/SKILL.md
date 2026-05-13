@@ -41,6 +41,7 @@ touch app/ui/pages/<name>.yaml
 name: <name>
 title: <Page Title>
 layout: grid               # grid | sidebar | full-width | split
+shell_mode: standard       # standard | workspace | conversation | focused | immersive | public
 
 sections:
   - id: <section_id>
@@ -60,6 +61,49 @@ mozaiks serve .
 ```
 
 Pages are loaded at startup. The route `/<name>` is served automatically.
+
+### 4. Add shell access when needed
+
+If the page should be globally reachable, prefer route-level navigation metadata
+on the page itself:
+
+```yaml
+navigation:
+  scope: global
+  icon: dashboard
+  order: 20
+```
+
+Use `scope: local` for workspace/module subsections that should render through
+local navigation instead of crowding the global shell.
+
+Choose `shell_mode` for route chrome:
+- `standard`: normal app page.
+- `workspace`: dense dashboard, admin/profile/module workspace, or local nav surface.
+- `conversation`: chat, DM, inbox thread, or support conversation where the composer owns the bottom edge.
+- `focused`: onboarding, setup, review, approval, or checkout-style route.
+- `immersive`: map, canvas, media, game, or full-viewport route.
+- `public`: legal, marketing, or unauthenticated information route.
+
+Use compact shell shortcuts in `app/config/shell.json` for built-in chrome such
+as profile/auth/footer items:
+
+```json
+{
+  "shortcuts": {
+    "header": ["dashboard", "<name>"],
+    "mobile": ["dashboard", "<name>", "profile"]
+  }
+}
+```
+
+Use explicit `header`, `profile`, or `mobile.bottomBar` entries only when the
+label, icon, role gate, or path needs to differ from the route/page catalog.
+Use `app/config/shell.json -> navigation.policy` when the app needs a different
+placement model, such as desktop sidebar global nav or mobile local sheet nav.
+Use `app/config/shell.json -> chrome` only to override app-wide behavior for the
+standard shell modes. Do not encode per-route chrome there; the page owns
+`shell_mode`.
 
 ---
 
@@ -97,6 +141,7 @@ Pages are loaded at startup. The route `/<name>` is served automatically.
 name: dashboard
 title: Dashboard
 layout: grid
+shell_mode: workspace
 
 sections:
   - id: total_users
@@ -127,6 +172,7 @@ sections:
 name: new-customer
 title: New Customer
 layout: full-width
+shell_mode: focused
 
 sections:
   - id: customer_form
@@ -183,6 +229,8 @@ Use custom routes sparingly. Declarative `app/ui/pages/` is the default.
 - **Prefer declarative YAML** — if the primitives don't cover the use case, extend the primitive
 - Pages belong in `app/ui/pages/` — never in a module's backend directory
 - `api_endpoint` paths must be `/api/modules/{name}/{action_id}` routes
+- Page-owned shell access belongs in the page's `navigation` field. Use `app/config/shell.json -> shortcuts` for built-in chrome and `navigation.policy` for app-wide placement behavior.
+- Page-owned chrome intent belongs in `shell_mode`; use `conversation` for DM/chat routes and `workspace` for dense module/profile/admin-like pages.
 
 ---
 

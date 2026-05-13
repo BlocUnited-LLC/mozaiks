@@ -39,6 +39,16 @@ under `contracts/` only when the module needs them.
 The runtime auto-discovers and registers all modules at startup.
 Module routes are auto-mounted at `/api/modules/{name}/{action_id}`.
 
+Modules that need persistent app chrome access should expose a real page route
+and put navigation intent on that page. For example, a communications module
+that owns `/messages` should give the Messages page `navigation.scope: global`
+when it is a primary destination, or `navigation.scope: profile` when it is
+account-adjacent. Use `app/config/shell.json -> shortcuts` for built-in profile,
+auth, notification, and footer chrome rather than hardcoding menu entries.
+The page also owns chrome intent through `shell_mode`: use `conversation` for
+DM/chat/thread pages so the mobile bottom bar and footer do not compete with the
+composer, and `workspace` for inbox, queue, profile, or management surfaces.
+
 ---
 
 ## Steps to Add a Module
@@ -369,6 +379,7 @@ The event payload fields are unpacked as keyword arguments.
 name: items
 title: Items
 layout: full-width
+shell_mode: workspace
 sections:
   - id: items_table
     title: All Items

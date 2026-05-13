@@ -1,0 +1,26 @@
+{
+  "input_replies": [],
+  "default_input_reply": "Use the seeded upstream context exactly. Keep the UI declarative, minimal, and production-grade. Proceed without asking more questions.",
+  "assistant_reply_rules": [
+    {
+      "contains": "missing",
+      "reply": "Use the seeded support operations app context. Do not add unsupported requirements."
+    },
+    {
+      "contains": "approval",
+      "reply": "Approved. Continue with the generated UI artifact flow."
+    }
+  ],
+  "tool_responses": {
+    "DownloadCenter": {
+      "status": "submitted",
+      "action": "download_complete",
+      "download_accepted": true
+    },
+    "*": {
+      "status": "submitted",
+      "action": "approve",
+      "approved": true
+    }
+  }
+}

@@ -86,7 +86,7 @@ The MozaiksCore platform provides these capabilities automatically. NEVER design
 - Context variable storage and retrieval
 - NEVER CREATE: Database schemas, persistence logic, or history tracking
 
-**Token Management (MozaiksPay)**
+**Token Management (Platform Runtime)**
 - Real-time token usage tracking per app_id and user_id
 - Wallet balance management and low-balance warnings
 - Cost attribution per workflow and chat session
@@ -120,7 +120,7 @@ The MozaiksCore platform provides these capabilities automatically. NEVER design
 **Anti-Patterns to Avoid**:
 ❌ "ChatAgent" or "UserProxyAgent" - Runtime handles user communication
 ❌ "PersistenceAgent" or "DatabaseAgent" - Use context variables; runtime persists
-❌ "TokenTracker" or "UsageMonitor" - MozaiksPay handles automatically
+❌ "TokenTracker" or "UsageMonitor" - the hosted wallet service handles automatically
 ❌ "WebSocketHandler" or "MessageRouter" - Transport layer is provided
 ❌ "SessionManager" or "LoggingAgent" - Runtime manages these
 """
@@ -212,6 +212,18 @@ Before you emit your final JSON, verify these checks:
 □ No fabricated names that weren't in upstream outputs
 
 If any check fails, correct the error before emitting.
+"""
+
+UI_SURFACE_LANE_DISCIPLINE = """
+[UI SURFACE LANE DISCIPLINE]
+Generated frontend work must stay in the correct UI surface lane.
+
+- Persistent app pages are AppGenerator-owned `declarative_page` or bounded `custom_react_page` artifacts.
+- Agent UI tools are workflow-local, response-bearing chat surfaces owned by AgentGenerator.
+- Transition UI is for workflow-sequence routing and choice screens only.
+- Do NOT generate persistent app pages from AgentGenerator UI tool prompts.
+- Do NOT turn workflow-local UI into app routes, shell chrome, profile menus, notifications, or global navigation.
+- Use the shipped `@mozaiks/chat-ui/ui` primitives for generated React and keep custom surfaces bounded to the declared workflow UI contract.
 """
 
 
@@ -313,6 +325,11 @@ def inject_universal_prompts(agent, messages: List[Dict[str, Any]], groupchat: A
         if agent_name in artifact_producing_agents and "[CROSS-REFERENCE VALIDATION]" not in system_message:
             system_message += f"\n\n{VALIDATION_CHECKLIST}"
             sections_added.append("VALIDATION_CHECKLIST")
+
+        ui_surface_agents = {"ToolPlanningAgent", "ToolsManagerAgent", "UIFileGenerator", "PackMetadataAgent"}
+        if agent_name in ui_surface_agents and "[UI SURFACE LANE DISCIPLINE]" not in system_message:
+            system_message += f"\n\n{UI_SURFACE_LANE_DISCIPLINE}"
+            sections_added.append("UI_SURFACE_LANE_DISCIPLINE")
         
         # Update agent and log
         _apply_system_message(agent, system_message)

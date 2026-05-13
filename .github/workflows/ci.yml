@@ -94,6 +94,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_GC: "1"
+
+      - name: Responsive smoke
+        run: npm run test:responsive-smoke
+        env:
+          VITE_MOCK_MODE: "true"
+          MOZAIKS_FACTORY_APP_PATH: ${{ github.workspace }}/factory_app
+          MOZAIKS_CHAT_UI_PATH: ${{ github.workspace }}/chat-ui
+
       - name: Build
         run: npm run build
         env:

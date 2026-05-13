@@ -178,6 +178,62 @@ function validateShellConfig(config) {
   if (config.footer?.links && !Array.isArray(config.footer.links)) {
     issues.push({ level: 'error', file, message: '"footer.links" must be an array of { label, href } items.' });
   }
+  if (config.footer?.hideOnMobile !== undefined && typeof config.footer.hideOnMobile !== 'boolean') {
+    issues.push({ level: 'error', file, message: 'footer.hideOnMobile must be true or false.' });
+  }
+  if (config.footer?.mobileVisible !== undefined && typeof config.footer.mobileVisible !== 'boolean') {
+    issues.push({ level: 'error', file, message: 'footer.mobileVisible must be true or false.' });
+  }
+
+  const bottomBar = config.mobile?.bottomBar;
+  if (bottomBar !== undefined) {
+    if (!bottomBar || typeof bottomBar !== 'object' || Array.isArray(bottomBar)) {
+      issues.push({ level: 'error', file, message: 'mobile.bottomBar must be an object.' });
+    } else {
+      if (bottomBar.visible !== undefined && bottomBar.visible !== 'auto' && typeof bottomBar.visible !== 'boolean') {
+        issues.push({ level: 'error', file, message: 'mobile.bottomBar.visible must be true, false, or "auto".' });
+      }
+      if (bottomBar.items !== undefined && !Array.isArray(bottomBar.items)) {
+        issues.push({ level: 'error', file, message: 'mobile.bottomBar.items must be an array of menu items.' });
+      } else if (Array.isArray(bottomBar.items)) {
+        const visibleItems = bottomBar.items.filter((item) => item?.visible !== false);
+        if (visibleItems.length > 5) {
+          issues.push({ level: 'error', file, message: 'mobile.bottomBar.items may include at most five visible items.' });
+        }
+        bottomBar.items.forEach((item, i) => {
+          if (!item || typeof item !== 'object' || Array.isArray(item)) {
+            issues.push({ level: 'error', file, message: `mobile.bottomBar.items[${i}] must be an object.` });
+            return;
+          }
+          if (item.action === 'navigate' && !item.href && !item.path) {
+            issues.push({ level: 'error', file, message: `mobile.bottomBar.items[${i}] has action="navigate" but no "href" or "path".` });
+          }
+        });
+      }
+    }
+  }
+
+  const shortcuts = config.shortcuts;
+  if (shortcuts !== undefined) {
+    if (!shortcuts || typeof shortcuts !== 'object' || Array.isArray(shortcuts)) {
+      issues.push({ level: 'error', file, message: 'shortcuts must be an object.' });
+    } else {
+      ['header', 'desktopHeader', 'profile', 'profileMenu', 'mobile', 'mobileBottomBar', 'footer', 'footerLinks'].forEach((key) => {
+        if (shortcuts[key] !== undefined && (!Array.isArray(shortcuts[key]) || shortcuts[key].some((item) => typeof item !== 'string'))) {
+          issues.push({ level: 'error', file, message: `shortcuts.${key} must be an array of shell primitive ids.` });
+        }
+      });
+      if (shortcuts.placements !== undefined && (!shortcuts.placements || typeof shortcuts.placements !== 'object' || Array.isArray(shortcuts.placements))) {
+        issues.push({ level: 'error', file, message: 'shortcuts.placements must be an object mapping shell slots to primitive id arrays.' });
+      }
+      if (shortcuts.items !== undefined && (!shortcuts.items || typeof shortcuts.items !== 'object' || Array.isArray(shortcuts.items))) {
+        issues.push({ level: 'error', file, message: 'shortcuts.items must be an object keyed by primitive id.' });
+      }
+      if (shortcuts.footerHideOnMobile !== undefined && typeof shortcuts.footerHideOnMobile !== 'boolean') {
+        issues.push({ level: 'error', file, message: 'shortcuts.footerHideOnMobile must be true or false.' });
+      }
+    }
+  }
 
   return issues;
 }

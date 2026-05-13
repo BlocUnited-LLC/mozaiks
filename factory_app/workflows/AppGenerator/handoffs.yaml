@@ -28,12 +28,33 @@ handoff_rules:
   condition: null
   transition_target: AgentTarget
 - source_agent: AppSchemaAgent
-  target_agent: AssemblyAgent
+  target_agent: AppUIQualityAgent
   handoff_type: after_work
   condition_type: null
   condition_scope: null
   condition: null
   transition_target: AgentTarget
+- source_agent: AppUIQualityAgent
+  target_agent: AppSchemaAgent
+  handoff_type: condition
+  condition_type: expression
+  condition_scope: null
+  condition: ${app_ui_quality_status} == "needs_revision"
+  transition_target: AgentTarget
+- source_agent: AppUIQualityAgent
+  target_agent: AssemblyAgent
+  handoff_type: condition
+  condition_type: expression
+  condition_scope: null
+  condition: ${app_ui_quality_status} == "passed"
+  transition_target: AgentTarget
+- source_agent: AppUIQualityAgent
+  target_agent: user
+  handoff_type: condition
+  condition_type: expression
+  condition_scope: null
+  condition: ${app_ui_quality_status} == "blocked"
+  transition_target: RevertToUserTarget
 # Schema-driven path: schemas are written to disk by save_app_schema; go straight to download
 - source_agent: AssemblyAgent
   target_agent: DownloadAgent

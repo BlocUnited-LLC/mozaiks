@@ -165,9 +165,8 @@ const debugFlag = (k) => { try { return ['1','true','on','yes'].includes((localS
       <div className="flex justify-start px-0 message-container">
         <div className="agent-message message thinking-indicator">
           <div className="flex flex-col">
-            <div className="message-header justify-between">
+            <div className="message-header">
               <span className="msg-sender-chip agent">{agentName || 'Agent'}</span>
-              <span className="msg-thinking-badge">processing</span>
             </div>
             <div className="message-body w-full flex items-center gap-2.5 pt-0.5">
               <div className="flex items-center gap-1.5">

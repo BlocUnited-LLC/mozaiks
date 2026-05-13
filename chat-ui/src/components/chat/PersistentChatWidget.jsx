@@ -219,14 +219,14 @@ const PersistentChatWidget = ({
         <button
           type="button"
           onClick={() => { setIsExpanded(true); setUnreadChatCount(0); }}
-          className="group relative w-20 h-20 rounded-2xl bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-secondary)] shadow-[0_8px_32px_rgba(15,23,42,0.6)] border-2 border-[rgba(var(--color-primary-light-rgb),0.5)] hover:shadow-[0_16px_48px_rgba(51,240,250,0.4)] hover:scale-105 transition-all duration-300 flex items-center justify-center"
+          className="group relative flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-[rgba(var(--color-primary-light-rgb),0.5)] bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-secondary)] shadow-[0_8px_32px_rgba(15,23,42,0.6)] transition-all duration-300 hover:scale-105 hover:shadow-[0_16px_48px_rgba(51,240,250,0.4)] sm:h-20 sm:w-20"
           title={workflowName ? `Continue: ${workflowName}` : 'Open chat'}
         >
           <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-[rgba(var(--color-primary-light-rgb),0.2)] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
           <img
             src={brandLogoSrc}
             alt="mozaiksai"
-            className="w-11 h-11 relative z-10 group-hover:scale-110 transition-transform"
+            className="relative z-10 h-7 w-7 transition-transform group-hover:scale-110 sm:h-11 sm:w-11"
             onError={applyBrandImageFallback}
           />
           {/* Unread presence dot */}

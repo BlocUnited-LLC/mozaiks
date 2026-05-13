@@ -16,6 +16,17 @@ models:
         - Badge
         - Skeleton
         - Empty
+        - PageHeader
+        - ResourceTable
+        - SummaryStrip
+        - InlineEmptyState
+        - LoadingState
+        - ErrorState
+        - Panel
+        - SurfaceCard
+        - StatusPill
+        - Metric
+        - SegmentedBar
         - Timeline
         - CodeBlock
         - ProgressTracker
@@ -81,6 +92,25 @@ models:
         - split
         - 'null'
         description: "Preferred layout hint for AppSchemaAgent: grid | sidebar | full-width | split. Null to let AppSchemaAgent decide."
+      shell_mode_hint:
+        type: union
+        variants:
+        - str
+        - 'null'
+        default: null
+        description: >
+          Preferred shell chrome mode for this route: standard, workspace,
+          conversation, focused, immersive, or public. Null to let AppSchemaAgent
+          infer from page purpose.
+      ui_surface:
+        type: literal
+        values:
+        - declarative_page
+        - custom_react_page
+        description: >
+          Persistent app UI surface type. Use declarative_page by default; use
+          custom_react_page only when shipped page primitives cannot express the
+          route.
       sections_hint:
         type: optional_list
         items: PrimitiveSectionHint
@@ -309,6 +339,15 @@ models:
         type: optional_list
         items: str
         description: Optional AI-driven behaviors layered on top of the pack.
+      capability_source:
+        type: optional_str
+        description: >
+          Implementation origin of this capability pack. Use one of:
+          hosted_pack (provided by a hosted platform capability — no module_contract),
+          host_universal (provided universally by the platform host — no scaffold needed),
+          framework_pack (platform framework extension),
+          generated_module (app-owned generated module — generate full module contracts),
+          external_adapter (third-party external service adapter — api_surface only).
   AppBuildTask:
     type: model
     fields:
@@ -325,10 +364,15 @@ models:
         - api_surface
         - page_bundle
         - agent_backend_integration
+        - control_plane_surface
         description: >
           Explicit build-task type used for downstream execution planning. Persistent
           app pages use the declarative AppSchemaAgent path. `page_bundle` means a
           declarative page/schema bundle and must be paired with AppSchemaAgent.
+          `control_plane_surface` is required for surface_kind=control_plane tasks — do
+          NOT use backend_foundation or api_surface for control_plane surfaces.
+          `api_surface` is the only valid task_type for surface_kind=external_integration.
+          `page_bundle` is the only valid task_type for surface_kind=ui_only.
       capability_pack_id:
         type: union
         variants:
@@ -583,6 +627,16 @@ models:
       agent_message:
         type: str
         description: Concise message (<=140 chars) shown in download UI.
+  AppUIQualityReviewRequest:
+    type: model
+    fields:
+      max_revision_attempts:
+        type: int
+        description: Maximum automated AppSchemaAgent revision loops before blocking.
+        default: 2
+      agent_message:
+        type: str
+        description: Concise quality-gate message before review_ui_quality runs.
   ValidationErrorEntry:
     type: model
     fields:
@@ -757,7 +811,7 @@ models:
         description: Visibility hint for discovery and invocation.
       handler:
         type: str
-        description: Canonical Python entrypoint in module-local form backend.handler:ModuleClass.
+        description: "Canonical Python entrypoint in module-local form backend.handler:ModuleClass."
 
   ModulePermission:
     type: model
@@ -949,7 +1003,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Module-local Python entrypoint such as backend.subscriptions:on_account_archived. Use only when kind=handler and mirror it in python_stubs.
+        description: "Module-local Python entrypoint such as backend.subscriptions:on_account_archived. Use only when kind=handler and mirror it in python_stubs."
       capability_id:
         type: union
         variants:
@@ -1111,7 +1165,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Optional module-local Python validation hook such as backend.settings:validate_api_key. Must be mirrored in python_stubs.
+        description: "Optional module-local Python validation hook such as backend.settings:validate_api_key. Must be mirrored in python_stubs."
       on_change:
         type: union
         variants:
@@ -1339,6 +1393,56 @@ models:
   # for full-page React escapes when the shipped primitive system cannot express a route.
   # ===========================================================================
 
+  AppPrimitiveValue:
+    type: union
+    variants:
+    - str
+    - int
+    - float
+    - bool
+    - 'null'
+
+  AppSelectionMode:
+    type: literal
+    values:
+    - none
+    - single
+    - multi
+
+  AppFormLayout:
+    type: literal
+    values:
+    - vertical
+    - horizontal
+    - grid
+
+  AppStatusValue:
+    type: literal
+    values:
+    - done
+    - active
+    - pending
+    - error
+
+  AppAlertVariant:
+    type: literal
+    values:
+    - default
+    - info
+    - success
+    - warning
+    - destructive
+
+  AppPrimitiveKeyValue:
+    type: model
+    fields:
+      key:
+        type: str
+        description: Stable object key.
+      value:
+        type: AppPrimitiveValue
+        description: Deterministic scalar value. Open-ended nested objects are not allowed in strict UI contracts.
+
   AppPageAction:
     type: model
     fields:
@@ -1371,7 +1475,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Route to navigate to (navigate actions only; supports {field} interpolation).
+        description: Route or API/module endpoint. Required for navigate, submit, and delete actions; supports {field} interpolation.
       event_type:
         type: union
         variants:
@@ -1385,23 +1489,17 @@ models:
         - 'null'
         description: Runtime workflow registry id to launch when action_type=workflow. Never use workflow capability ids here.
       context_variables:
-        type: union
-        variants:
-        - dict
-        - 'null'
-        description: Optional deterministic context_variables payload for workflow actions. Values may use interpolation placeholders like {id}.
+        type: optional_list
+        items: AppPrimitiveKeyValue
+        description: Optional deterministic context_variables entries for workflow actions. save_app_schema persists these as an object.
       payload:
-        type: union
-        variants:
-        - dict
-        - 'null'
-        description: Generic payload used by event, submit, or delete actions.
+        type: optional_list
+        items: AppPrimitiveKeyValue
+        description: Generic scalar payload entries used by event, submit, or delete actions. save_app_schema persists these as an object.
       event_payload:
-        type: union
-        variants:
-        - dict
-        - 'null'
-        description: Deprecated alias for payload. Additional payload merged into the event or request body.
+        type: optional_list
+        items: AppPrimitiveKeyValue
+        description: Legacy event payload entries. Prefer payload for new schemas.
       requires_selection:
         type: bool
         description: Whether a row/item must be selected before this action is enabled.
@@ -1410,6 +1508,1120 @@ models:
         type: bool
         description: Whether modal-backed action execution should close the modal automatically.
         default: true
+
+  AppTableColumn:
+    type: model
+    fields:
+      key:
+        type: str
+        description: Data key for the column.
+      label:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Human-facing column label. Null uses the key.
+      sortable:
+        type: bool
+        description: Whether the column can be sorted.
+        default: false
+      type:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional display type such as text, number, date, status, currency, or action.
+      width:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional CSS width hint.
+
+  AppSelectOption:
+    type: model
+    fields:
+      value:
+        type: AppPrimitiveValue
+        description: Option value.
+      label:
+        type: str
+        description: Option label.
+
+  AppFormField:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Field name.
+      label:
+        type: str
+        description: Field label.
+      type:
+        type: literal
+        values:
+        - text
+        - email
+        - password
+        - number
+        - textarea
+        - select
+        - checkbox
+        description: Field input type.
+      required:
+        type: bool
+        description: Whether the field is required.
+        default: false
+      placeholder:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional placeholder.
+      options:
+        type: optional_list
+        items: AppSelectOption
+        description: Select options. Null for non-select fields.
+
+  AppEmptyStateConfig:
+    type: model
+    fields:
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Empty-state title.
+      message:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Empty-state supporting copy.
+      action:
+        type: union
+        variants:
+        - AppPageAction
+        - 'null'
+        description: One optional empty-state action.
+      error_title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional load-error title for data-backed primitives.
+      error_message:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional load-error message for data-backed primitives.
+      retry_label:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional retry action label for data-backed primitives.
+
+  AppTimelineItem:
+    type: model
+    fields:
+      label:
+        type: str
+        description: Timeline item label.
+      status:
+        type: AppStatusValue
+        description: Timeline item status.
+      description:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional detail.
+      timestamp:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional timestamp.
+
+  AppProgressStage:
+    type: model
+    fields:
+      label:
+        type: str
+        description: Stage label.
+      status:
+        type: AppStatusValue
+        description: Stage status.
+      description:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional detail.
+
+  AppFileListItem:
+    type: model
+    fields:
+      name:
+        type: str
+        description: File name.
+      type:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional file type.
+      size:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional display size.
+      url:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional file URL.
+      status:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional status such as ready, generating, or error.
+
+  AppDataTableConfig:
+    type: model
+    fields:
+      columns:
+        type: list
+        items: AppTableColumn
+        description: Table columns. Required for DataTable.
+      api_endpoint:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional API endpoint for row data.
+      data_key:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional response key containing row data.
+      selection:
+        type: union
+        variants:
+        - AppSelectionMode
+        - 'null'
+        description: Optional row selection mode.
+      pagination:
+        type: bool
+        description: Whether pagination is enabled.
+        default: false
+      page_size:
+        type: union
+        variants:
+        - int
+        - 'null'
+        description: Optional page size.
+      search:
+        type: bool
+        description: Whether table-local search is enabled.
+        default: false
+      actions:
+        type: optional_list
+        items: AppPageAction
+        description: Optional row or toolbar actions.
+      empty:
+        type: union
+        variants:
+        - AppEmptyStateConfig
+        - 'null'
+        description: Optional empty-state copy/action.
+
+  AppFormConfig:
+    type: model
+    fields:
+      fields:
+        type: list
+        items: AppFormField
+        description: Form fields. Required for Form.
+      layout:
+        type: union
+        variants:
+        - AppFormLayout
+        - 'null'
+        description: Optional form layout.
+      columns:
+        type: union
+        variants:
+        - int
+        - 'null'
+        description: Optional number of grid columns.
+      submit_label:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional submit label.
+      submit_action:
+        type: union
+        variants:
+        - AppPageAction
+        - 'null'
+        description: Submit action. Prefer module/API routes or workflow actions.
+      cancel_label:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional cancel label.
+      cancel_action:
+        type: union
+        variants:
+        - AppPageAction
+        - 'null'
+        description: Optional cancel action.
+      disabled:
+        type: bool
+        description: Whether the form is disabled.
+        default: false
+
+  AppStatConfig:
+    type: model
+    fields:
+      label:
+        type: str
+        description: Stat label.
+      value:
+        type: AppPrimitiveValue
+        description: Static value. Null when value_key is used.
+      value_key:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Data key for dynamic value.
+      format:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: "Optional format: number, currency, percentage, or compact."
+      trend:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional static trend label.
+      trend_key:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional dynamic trend key.
+      trend_direction:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: "Optional trend direction: up_good, up_bad, or neutral."
+      color:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional semantic color hint.
+
+  AppCardLeafConfig:
+    type: model
+    fields:
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional card title.
+      subtitle:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional card subtitle.
+      actions:
+        type: optional_list
+        items: AppPageAction
+        description: Optional card actions.
+
+  AppButtonConfig:
+    type: model
+    fields:
+      label:
+        type: str
+        description: Button label.
+      variant:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional button variant.
+      size:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional size.
+      action:
+        type: union
+        variants:
+        - AppPageAction
+        - 'null'
+        description: Optional structured action.
+
+  AppModalLeafConfig:
+    type: model
+    fields:
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional modal title.
+      description:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional modal copy.
+      size:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: "Optional size: small, medium, large, or full."
+      actions:
+        type: optional_list
+        items: AppPageAction
+        description: Optional modal actions.
+
+  AppAlertConfig:
+    type: model
+    fields:
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional alert title.
+      message:
+        type: str
+        description: Alert message.
+      variant:
+        type: union
+        variants:
+        - AppAlertVariant
+        - 'null'
+        description: Optional alert variant.
+      dismissible:
+        type: bool
+        description: Whether the alert is dismissible.
+        default: false
+
+  AppBadgeConfig:
+    type: model
+    fields:
+      label:
+        type: str
+        description: Badge label.
+      variant:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional badge variant.
+
+  AppSkeletonConfig:
+    type: model
+    fields:
+      rows:
+        type: union
+        variants:
+        - int
+        - 'null'
+        description: Optional number of rows.
+      height:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional height.
+
+  AppEmptyConfig:
+    type: model
+    fields:
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional empty title.
+      message:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional empty message.
+      action:
+        type: union
+        variants:
+        - AppPageAction
+        - 'null'
+        description: One optional action.
+      icon:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional icon id.
+
+  AppTimelineConfig:
+    type: model
+    fields:
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional timeline title.
+      items:
+        type: list
+        items: AppTimelineItem
+        description: Ordered timeline items.
+
+  AppCodeBlockConfig:
+    type: model
+    fields:
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional code block title.
+      code:
+        type: str
+        description: Code content.
+      language:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional language.
+      filename:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional filename.
+
+  AppProgressTrackerConfig:
+    type: model
+    fields:
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional progress title.
+      stages:
+        type: list
+        items: AppProgressStage
+        description: Ordered stages.
+
+  AppAlertBannerConfig:
+    type: model
+    fields:
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional banner title.
+      message:
+        type: str
+        description: Banner message.
+      variant:
+        type: union
+        variants:
+        - AppAlertVariant
+        - 'null'
+        description: Optional banner variant.
+      dismissible:
+        type: bool
+        description: Whether the banner is dismissible.
+        default: false
+      actions:
+        type: optional_list
+        items: AppPageAction
+        description: Optional banner actions.
+
+  AppActionButtonConfig:
+    type: model
+    fields:
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional action group title.
+      layout:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: "Optional layout: row or column."
+      actions:
+        type: list
+        items: AppPageAction
+        description: Actions in the group.
+
+  AppFileListConfig:
+    type: model
+    fields:
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional file list title.
+      files:
+        type: list
+        items: AppFileListItem
+        description: Files to show.
+
+  AppTableFilter:
+    type: model
+    fields:
+      label:
+        type: str
+        description: User-facing filter label.
+      value:
+        type: str
+        description: Stable filter value.
+      field:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional row field to match.
+      match_values:
+        type: optional_list
+        items: str
+        description: Optional values accepted by this filter.
+
+  AppTableSort:
+    type: model
+    fields:
+      label:
+        type: str
+        description: User-facing sort label.
+      value:
+        type: str
+        description: Stable sort value.
+      key:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional row field used for sorting.
+      direction:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: "Optional sort direction: asc or desc."
+      type:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional sort value type such as date, text, or number.
+
+  AppPageHeaderConfig:
+    type: model
+    fields:
+      title:
+        type: str
+        description: Page title.
+      subtitle:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: One short page subtitle.
+      actions:
+        type: optional_list
+        items: AppPageAction
+        description: Optional header actions. Prefer one primary action and one secondary action at most.
+      title_font:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: "Optional title font hint: body or heading."
+
+  AppResourceTableConfig:
+    type: model
+    fields:
+      columns:
+        type: list
+        items: AppTableColumn
+        description: Resource table columns.
+      api_endpoint:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional API endpoint for row data.
+      data_key:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional response key containing row data.
+      selection:
+        type: union
+        variants:
+        - AppSelectionMode
+        - 'null'
+        description: Optional row selection mode.
+      pagination:
+        type: bool
+        description: Whether pagination is enabled.
+        default: false
+      page_size:
+        type: union
+        variants:
+        - int
+        - 'null'
+        description: Optional page size.
+      search:
+        type: bool
+        description: Whether table-local search is enabled.
+        default: true
+      search_placeholder:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional search input placeholder.
+      search_keys:
+        type: optional_list
+        items: str
+        description: Optional row fields used for search.
+      filters:
+        type: optional_list
+        items: AppTableFilter
+        description: Optional compact filter tabs.
+      default_filter:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional default filter value.
+      sorts:
+        type: optional_list
+        items: AppTableSort
+        description: Optional sort options.
+      default_sort:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional default sort value.
+      actions:
+        type: optional_list
+        items: AppPageAction
+        description: Optional row or toolbar actions.
+      empty:
+        type: union
+        variants:
+        - AppEmptyStateConfig
+        - 'null'
+        description: Optional empty-state copy/action.
+
+  AppSummaryItem:
+    type: model
+    fields:
+      id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional stable summary item id.
+      label:
+        type: str
+        description: Metric label.
+      value:
+        type: AppPrimitiveValue
+        description: Metric value.
+      detail:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional short detail.
+
+  AppSummaryStripConfig:
+    type: model
+    fields:
+      items:
+        type: list
+        items: AppSummaryItem
+        description: Two to four useful summary metrics. Do not generate generic KPI spam.
+
+  AppInlineEmptyStateConfig:
+    type: model
+    fields:
+      title:
+        type: str
+        description: Empty-state title.
+      description:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: One concise empty-state sentence.
+      action:
+        type: union
+        variants:
+        - AppPageAction
+        - 'null'
+        description: One optional action.
+
+  AppLoadingStateConfig:
+    type: model
+    fields:
+      label:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional loading label.
+
+  AppErrorStateConfig:
+    type: model
+    fields:
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional error title.
+      message:
+        type: str
+        description: User-facing error message.
+
+  AppPanelConfig:
+    type: model
+    fields:
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional panel title.
+      eyebrow:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional short context label. Avoid repeating page scope.
+      subtitle:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional concise supporting copy.
+
+  AppSurfaceCardConfig:
+    type: model
+    fields:
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional card title.
+      eyebrow:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional short context label. Avoid repeating page scope.
+      subtitle:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional concise supporting copy.
+      accent:
+        type: bool
+        description: Whether this grouped surface should receive slightly stronger emphasis.
+        default: false
+
+  AppStatusPillConfig:
+    type: model
+    fields:
+      label:
+        type: str
+        description: One compact state label.
+      tone:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: "Optional tone: default, primary, success, warning, or destructive."
+
+  AppMetricConfig:
+    type: model
+    fields:
+      label:
+        type: str
+        description: Metric label.
+      value:
+        type: AppPrimitiveValue
+        description: Metric value.
+      detail:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional short detail.
+
+  AppSegment:
+    type: model
+    fields:
+      id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional stable segment id.
+      label:
+        type: str
+        description: Segment label.
+      value:
+        type: float
+        description: Positive segment value.
+      tone:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: "Optional tone: default, primary, success, warning, or destructive."
+
+  AppSegmentedBarConfig:
+    type: model
+    fields:
+      segments:
+        type: list
+        items: AppSegment
+        description: Real proportional segments. Do not emit decorative fake charts.
+
+  AppPageChildSectionConfig:
+    type: union
+    variants:
+    - AppPageHeaderConfig
+    - AppResourceTableConfig
+    - AppSummaryStripConfig
+    - AppInlineEmptyStateConfig
+    - AppLoadingStateConfig
+    - AppErrorStateConfig
+    - AppPanelConfig
+    - AppSurfaceCardConfig
+    - AppStatusPillConfig
+    - AppMetricConfig
+    - AppSegmentedBarConfig
+    - AppDataTableConfig
+    - AppFormConfig
+    - AppStatConfig
+    - AppCardLeafConfig
+    - AppButtonConfig
+    - AppModalLeafConfig
+    - AppAlertConfig
+    - AppBadgeConfig
+    - AppSkeletonConfig
+    - AppEmptyConfig
+    - AppTimelineConfig
+    - AppCodeBlockConfig
+    - AppProgressTrackerConfig
+    - AppAlertBannerConfig
+    - AppActionButtonConfig
+    - AppFileListConfig
+
+  AppPageChildSection:
+    type: model
+    fields:
+      id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional child section id.
+      primitive:
+        type: literal
+        values:
+        - DataTable
+        - Form
+        - Stat
+        - Card
+        - Button
+        - Modal
+        - Alert
+        - Badge
+        - Skeleton
+        - Empty
+        - PageHeader
+        - ResourceTable
+        - SummaryStrip
+        - InlineEmptyState
+        - LoadingState
+        - ErrorState
+        - Panel
+        - SurfaceCard
+        - StatusPill
+        - Metric
+        - SegmentedBar
+        - Timeline
+        - CodeBlock
+        - ProgressTracker
+        - AlertBanner
+        - ActionButton
+        - FileList
+        description: Nested sections cannot themselves be Grid primitives.
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional child heading.
+      config:
+        type: AppPageChildSectionConfig
+        description: Strict primitive config for the child section.
+      event_triggers:
+        type: optional_list
+        items: str
+        description: Optional event triggers.
+      roles:
+        type: optional_list
+        items: str
+        description: Optional visibility roles.
+
+  AppGridConfig:
+    type: model
+    fields:
+      columns:
+        type: int
+        description: Grid columns, 1 through 6.
+      gap:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional grid gap.
+      children:
+        type: list
+        items: AppPageChildSection
+        description: Child primitive sections. Required for Grid.
+
+  AppCardConfig:
+    type: model
+    fields:
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional card title.
+      subtitle:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional card subtitle.
+      actions:
+        type: optional_list
+        items: AppPageAction
+        description: Optional card actions.
+      children:
+        type: optional_list
+        items: AppPageChildSection
+        description: Optional child sections.
+
+  AppModalConfig:
+    type: model
+    fields:
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional modal title.
+      description:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional modal copy.
+      size:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: "Optional size: small, medium, large, or full."
+      actions:
+        type: optional_list
+        items: AppPageAction
+        description: Optional modal actions.
+      children:
+        type: optional_list
+        items: AppPageChildSection
+        description: Optional child sections.
+
+  AppPageSectionConfig:
+    type: union
+    variants:
+    - AppPageHeaderConfig
+    - AppResourceTableConfig
+    - AppSummaryStripConfig
+    - AppInlineEmptyStateConfig
+    - AppLoadingStateConfig
+    - AppErrorStateConfig
+    - AppPanelConfig
+    - AppSurfaceCardConfig
+    - AppStatusPillConfig
+    - AppMetricConfig
+    - AppSegmentedBarConfig
+    - AppDataTableConfig
+    - AppFormConfig
+    - AppStatConfig
+    - AppGridConfig
+    - AppCardConfig
+    - AppButtonConfig
+    - AppModalConfig
+    - AppAlertConfig
+    - AppBadgeConfig
+    - AppSkeletonConfig
+    - AppEmptyConfig
+    - AppTimelineConfig
+    - AppCodeBlockConfig
+    - AppProgressTrackerConfig
+    - AppAlertBannerConfig
+    - AppActionButtonConfig
+    - AppFileListConfig
 
   AppPageSection:
     type: model
@@ -1431,6 +2643,17 @@ models:
         - Badge
         - Skeleton
         - Empty
+        - PageHeader
+        - ResourceTable
+        - SummaryStrip
+        - InlineEmptyState
+        - LoadingState
+        - ErrorState
+        - Panel
+        - SurfaceCard
+        - StatusPill
+        - Metric
+        - SegmentedBar
         - Timeline
         - CodeBlock
         - ProgressTracker
@@ -1445,27 +2668,10 @@ models:
         - 'null'
         description: Optional section heading displayed above the primitive.
       config:
-        type: dict
+        type: AppPageSectionConfig
         description: >
-          Primitive-specific configuration object. Shape depends on primitive type:
-          DataTable: { columns, api_endpoint?, data?, selection?, pagination?, page_size?, search?, actions?, empty? }
-          Form: { fields, layout?, columns?, submit_label?, submit_action?, cancel_action?, disabled? }
-          Stat: { label, value?|value_key, format?, trend?|trend_key?, trend_direction?, color? }
-          Grid: { columns, gap, children: [{ id?, primitive, config }] }
-          Card: { title?, subtitle?, actions?, children? }
-          Button: { label, variant?, size?, action? }
-          Modal: { title?, description?, size?, actions?, children? } — section.id is the default modal target
-          Alert: { title?, message, variant?, dismissible? }
-          Badge: { label, variant? }
-          Skeleton: { rows?, height? }
-          Empty: { title?, message?, action?, icon? }
-          Timeline: { title?, items: [{ label, status (done|active|pending|error), description?, timestamp? }] }
-          CodeBlock: { title?, code, language?, filename? }
-          ProgressTracker: { title?, stages: [{ label, status (done|active|pending|error), description? }] }
-          AlertBanner: { title?, message, variant? (info|success|warning|destructive), dismissible?, actions? }
-          ActionButton: { title?, layout? (row|column), actions: [{ id?, label, variant?, action? }] }
-          FileList: { title?, files: [{ name, type?, size?, url?, status? (ready|generating|error) }] }
-          Legacy aliases such as toolbar_actions, submit_endpoint, field_type, cols, modal_id, and event_payload are tolerated by the runtime adapter but should not be emitted in new schemas.
+          Strict primitive-specific config. The config model must match the
+          selected primitive. Do not emit open-ended placeholder objects.
       event_triggers:
         type: optional_list
         items: str
@@ -1474,6 +2680,78 @@ models:
         type: optional_list
         items: str
         description: Roles that can see this section. Null means visible to all page roles.
+
+  AppShellNavigationPlacement:
+    type: model
+    fields:
+      desktop:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional desktop placement such as header, sidebar, rail, sheet, profile, visible, or hidden.
+      mobile:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional mobile placement such as bottomBar, sheet, more, profile, visible, or hidden.
+
+  AppShellMode:
+    type: literal
+    values:
+    - standard
+    - workspace
+    - conversation
+    - focused
+    - immersive
+    - public
+
+  AppPageNavigation:
+    type: model
+    fields:
+      id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional stable navigation id. Defaults to the page name or route slug.
+      label:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional navigation label. Defaults to the page title.
+      icon:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional icon id for shell renderers that support icons.
+      scope:
+        type: literal
+        values:
+        - global
+        - local
+        - profile
+        - footer
+        description: Navigation scope. Use global for main app destinations, local for section/workspace nav, profile for account menu, and footer for legal/support links.
+      order:
+        type: union
+        variants:
+        - int
+        - 'null'
+        description: Optional sort order within the resolved navigation scope.
+      visible:
+        type: bool
+        description: Whether this route contributes a navigation item.
+        default: true
+      placement:
+        type: union
+        variants:
+        - AppShellNavigationPlacement
+        - 'null'
+        description: Optional placement override. Omit to let shell navigation policy decide per viewport.
 
   AppPageSchema:
     type: model
@@ -1495,10 +2773,29 @@ models:
         - full-width
         - split
         description: Page layout strategy.
+      shell_mode:
+        type: union
+        variants:
+        - AppShellMode
+        - 'null'
+        default: null
+        description: >
+          Route chrome mode consumed by the shell. Use standard for normal app pages,
+          workspace for dense dashboards/admin/module surfaces, conversation for chat/DM
+          style routes, focused for setup/transition screens, immersive for canvas/media
+          experiences, and public for marketing/legal/public pages.
       roles:
         type: optional_list
         items: str
         description: Roles that can access this page. Null means all authenticated users.
+      navigation:
+        type: union
+        variants:
+        - AppPageNavigation
+        - 'null'
+        description: >
+          Optional route-level navigation contribution consumed by the shell navigation resolver.
+          Prefer this for page-owned global or local nav so config/shell.json stays policy-focused.
       sections:
         type: list
         items: AppPageSection
@@ -1612,12 +2909,47 @@ models:
       meta:
         type: union
         variants:
-        - dict
+        - AppCustomRouteMeta
         - 'null'
         description: Optional route metadata such as title or shell flags.
       purpose:
         type: str
         description: Why this route cannot be represented cleanly as a declarative AppPageSchema.
+
+  AppCustomRouteMeta:
+    type: model
+    fields:
+      title:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional route title.
+      shell:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional shell presentation hint.
+      shellMode:
+        type: union
+        variants:
+        - AppShellMode
+        - 'null'
+        default: null
+        description: Optional route chrome mode for this custom route.
+      nav_group:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional navigation group.
+      icon:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional icon id.
 
   AppCustomPageFile:
     type: model
@@ -1682,11 +3014,11 @@ models:
       pages:
         type: list
         items: str
-        description: List of declarative page names (matching AppPageSchema.name) registered in this manifest.
+        description: Redundant declarative page-name index. save_app_schema canonicalizes this from AppSchemaOutput.pages[*].name before persistence.
       custom_routes:
         type: optional_list
         items: str
-        description: Optional list of custom route ids (matching AppCustomRouteEntry.id) owned by the app.
+        description: Optional redundant custom route id index. save_app_schema canonicalizes this from custom_route_bundle.route_manifest[*].id before persistence.
 
   AppAssetEntry:
     type: model
@@ -1750,6 +3082,536 @@ models:
         items: AppAssetEntry
         description: Canonical list of app assets referenced by page and shell contracts.
 
+  AppThemeBrandingPatch:
+    type: model
+    fields:
+      app_name:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional branded app name.
+      logo_url:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional logo URL.
+      favicon_url:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional favicon URL.
+
+  AppThemeCorePatch:
+    type: model
+    fields:
+      primary:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional primary color token name.
+      variant:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional visual variant.
+      radius:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional radius scale.
+      font:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional body font token.
+      font_heading:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional heading font token.
+      appearance:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional appearance, usually dark, light, or system.
+      density:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional density scale.
+      branding:
+        type: union
+        variants:
+        - AppThemeBrandingPatch
+        - 'null'
+        description: Optional branding patch.
+
+  AppThemeIdentityPatch:
+    type: model
+    fields:
+      name:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional identity name.
+      tagline:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional tagline.
+      app_name:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional app display name.
+
+  AppThemeFontPatch:
+    type: model
+    fields:
+      family:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional font family.
+      fallbacks:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional CSS fallback list.
+      googleFont:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional Google Fonts URL.
+      localFont:
+        type: union
+        variants:
+        - bool
+        - 'null'
+        description: Whether this is a local font.
+      src:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional local font src.
+
+  AppThemeFontsPatch:
+    type: model
+    fields:
+      body:
+        type: union
+        variants:
+        - AppThemeFontPatch
+        - 'null'
+        description: Optional body font patch.
+      heading:
+        type: union
+        variants:
+        - AppThemeFontPatch
+        - 'null'
+        description: Optional heading font patch.
+      logo:
+        type: union
+        variants:
+        - AppThemeFontPatch
+        - 'null'
+        description: Optional logo font patch.
+
+  AppThemeConfigPatch:
+    type: model
+    fields:
+      theme:
+        type: union
+        variants:
+        - AppThemeCorePatch
+        - 'null'
+        description: Optional core theme token patch.
+      identity:
+        type: union
+        variants:
+        - AppThemeIdentityPatch
+        - 'null'
+        description: Optional identity patch.
+      fonts:
+        type: union
+        variants:
+        - AppThemeFontsPatch
+        - 'null'
+        description: Optional font patch.
+
+  AppShellLogoPatch:
+    type: model
+    fields:
+      src:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional logo src.
+      wordmark:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional wordmark src.
+      alt:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional alt text.
+      href:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional logo link.
+
+  AppShellHeaderAction:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable action id.
+      label:
+        type: str
+        description: Action label.
+      path:
+        type: str
+        description: Route path or transition path.
+      variant:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional variant.
+      visible:
+        type: bool
+        description: Whether the action is visible.
+        default: true
+
+  AppShellHeaderPatch:
+    type: model
+    fields:
+      logo:
+        type: union
+        variants:
+        - AppShellLogoPatch
+        - 'null'
+        description: Optional shell logo patch.
+      actions:
+        type: optional_list
+        items: AppShellHeaderAction
+        description: Optional global shell actions. Use sparingly; prefer at most one primary action.
+
+  AppShellShortcutsPatch:
+    type: model
+    fields:
+      header:
+        type: optional_list
+        items: str
+        description: Optional header shortcut ids.
+      profile:
+        type: optional_list
+        items: str
+        description: Optional profile shortcut ids.
+      mobile:
+        type: optional_list
+        items: str
+        description: Optional mobile shortcut ids.
+      footer:
+        type: optional_list
+        items: str
+        description: Optional footer shortcut ids.
+      footerHideOnMobile:
+        type: bool
+        description: Whether footer shortcuts hide on mobile.
+        default: true
+
+  AppShellNavigationViewportPolicy:
+    type: model
+    fields:
+      global:
+        type: str
+        description: >
+          Placement for global app navigation on this viewport. Common values:
+          header, sidebar, rail, bottomBar, sheet, more, hidden.
+      local:
+        type: str
+        description: >
+          Placement for local page/module navigation on this viewport. Common values:
+          sidebar, rail, tabs, sheet, hidden.
+      footer:
+        type: str
+        description: Footer visibility policy for this viewport. Use visible or hidden.
+
+  AppShellNavigationPolicyPatch:
+    type: model
+    fields:
+      desktop:
+        type: union
+        variants:
+        - AppShellNavigationViewportPolicy
+        - 'null'
+        description: Desktop shell navigation placement policy.
+      mobile:
+        type: union
+        variants:
+        - AppShellNavigationViewportPolicy
+        - 'null'
+        description: Mobile shell navigation placement policy.
+      maxMobileItems:
+        type: int
+        description: Maximum mobile bottom bar items. Must be 1-5.
+        default: 5
+      autoFromPages:
+        type: bool
+        description: Whether pages without explicit navigation metadata should become global nav items. Prefer false.
+        default: false
+
+  AppShellNavigationItemPatch:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable item id or shortcut id to merge from the route/shortcut catalog.
+      label:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional custom label.
+      path:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional route path.
+      href:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional link href.
+      icon:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional icon id.
+      scope:
+        type: literal
+        values:
+        - global
+        - local
+        - profile
+        - footer
+        description: Semantic navigation scope.
+      order:
+        type: union
+        variants:
+        - int
+        - 'null'
+        description: Optional sort order.
+      requiresRole:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional role gate.
+      visible:
+        type: bool
+        description: Whether the item is visible.
+        default: true
+      placement:
+        type: union
+        variants:
+        - AppShellNavigationPlacement
+        - 'null'
+        description: Optional per-viewport placement override.
+
+  AppShellNavigationPatch:
+    type: model
+    fields:
+      policy:
+        type: union
+        variants:
+        - AppShellNavigationPolicyPatch
+        - 'null'
+        description: Shell placement policy. Keep this small and app-wide.
+      items:
+        type: optional_list
+        items: AppShellNavigationItemPatch
+        description: >
+          Optional app-level nav contributions for entries not owned by a page schema.
+          Prefer page.navigation for page-owned routes and shortcuts for common chrome.
+
+  AppShellChromeViewportPatch:
+    type: model
+    fields:
+      header:
+        type: union
+        variants:
+        - bool
+        - 'null'
+        default: null
+        description: Whether the shell header/top bar is visible on this viewport.
+      footer:
+        type: union
+        variants:
+        - bool
+        - 'null'
+        default: null
+        description: Whether the shell footer is visible on this viewport.
+      bottomBar:
+        type: union
+        variants:
+        - bool
+        - 'null'
+        default: null
+        description: Whether the mobile-style bottom navigation bar is visible on this viewport.
+      localNav:
+        type: union
+        variants:
+        - bool
+        - str
+        - 'null'
+        default: null
+        description: Local navigation visibility or placement hint such as true, false, sidebar, rail, sheet, or tabs.
+
+  AppShellChromeModePatch:
+    type: model
+    fields:
+      desktop:
+        type: union
+        variants:
+        - AppShellChromeViewportPatch
+        - 'null'
+        default: null
+        description: Desktop chrome visibility for this shell mode.
+      mobile:
+        type: union
+        variants:
+        - AppShellChromeViewportPatch
+        - 'null'
+        default: null
+        description: Mobile chrome visibility for this shell mode.
+
+  AppShellChromeModesPatch:
+    type: model
+    fields:
+      standard:
+        type: union
+        variants:
+        - AppShellChromeModePatch
+        - 'null'
+        default: null
+        description: Optional override for normal app pages.
+      workspace:
+        type: union
+        variants:
+        - AppShellChromeModePatch
+        - 'null'
+        default: null
+        description: Optional override for dense dashboards, module workspaces, admin consoles, or profile workspaces.
+      conversation:
+        type: union
+        variants:
+        - AppShellChromeModePatch
+        - 'null'
+        default: null
+        description: Optional override for chat, DM, inbox, or realtime conversation routes.
+      focused:
+        type: union
+        variants:
+        - AppShellChromeModePatch
+        - 'null'
+        default: null
+        description: Optional override for onboarding, setup, selection, review, and workflow transition routes.
+      immersive:
+        type: union
+        variants:
+        - AppShellChromeModePatch
+        - 'null'
+        default: null
+        description: Optional override for full-canvas, media, map, game, or kiosk experiences.
+      public:
+        type: union
+        variants:
+        - AppShellChromeModePatch
+        - 'null'
+        default: null
+        description: Optional override for public marketing, legal, or unauthenticated routes.
+
+  AppShellChromePatch:
+    type: model
+    fields:
+      defaultMode:
+        type: union
+        variants:
+        - AppShellMode
+        - 'null'
+        default: null
+        description: Default shell chrome mode for routes that do not declare shell_mode.
+      modes:
+        type: union
+        variants:
+        - AppShellChromeModesPatch
+        - 'null'
+        default: null
+        description: Optional per-mode chrome overrides. Omit modes that can use platform defaults.
+
+  AppShellConfigPatch:
+    type: model
+    fields:
+      header:
+        type: union
+        variants:
+        - AppShellHeaderPatch
+        - 'null'
+        description: Optional shell header patch.
+      shortcuts:
+        type: union
+        variants:
+        - AppShellShortcutsPatch
+        - 'null'
+        description: Optional shell shortcut patch.
+      navigation:
+        type: union
+        variants:
+        - AppShellNavigationPatch
+        - 'null'
+        description: >
+          Optional dynamic shell navigation policy/contributions. Use this to choose
+          app-wide placement behavior; use AppPageSchema.navigation for page-owned items.
+      chrome:
+        type: union
+        variants:
+        - AppShellChromePatch
+        - 'null'
+        default: null
+        description: >
+          Optional shell chrome policy. Prefer route-level AppPageSchema.shell_mode
+          and keep this policy compact; override only when the app needs different
+          header/footer/bottom-bar visibility for the standard shell modes.
+
   AppSchemaOutput:
     type: model
     fields:
@@ -1782,7 +3644,7 @@ models:
       theme_config_patch:
         type: union
         variants:
-        - dict
+        - AppThemeConfigPatch
         - 'null'
         description: >
           Partial brand/theme artifact patch merged into brand/theme_config.json by
@@ -1792,12 +3654,18 @@ models:
       shell_config:
         type: union
         variants:
-        - dict
+        - AppShellConfigPatch
         - 'null'
         description: >
           Optional shell content/behavior config persisted as config/shell.json.
-          This owns header/profile/notifications/footer content and visibility, but
-          must not contain raw spacing, padding, or density tokens.
+          Prefer compact shortcuts for common shell intent:
+          shortcuts.header, shortcuts.profile, shortcuts.mobile, and shortcuts.footer
+          arrays of primitive ids such as dashboard, wallet, create, profile,
+          messages, notifications, signout, signin, legal, terms, cookies, and
+          privacy. Use explicit header/profile/notifications/footer/mobile objects
+          only when the app needs custom labels, icons, role rules, or exact
+          placement overrides. This owns shell content and visibility, but must not
+          contain raw spacing, padding, or density tokens.
       asset_manifest:
         type: union
         variants:
@@ -1944,6 +3812,7 @@ registry:
   InterviewAgent: null
   AppPlanAgent: AppBuildPlanOutput
   AppSchemaAgent: AppSchemaOutput
+  AppUIQualityAgent: AppUIQualityReviewRequest
   DatabaseAgent: DatabaseOutput
   ConfigMiddlewareAgent: ConfigMiddlewareOutput
   ModelAgent: ModelOutput

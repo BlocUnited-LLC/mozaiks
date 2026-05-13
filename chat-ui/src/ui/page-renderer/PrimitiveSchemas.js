@@ -26,7 +26,7 @@ export const SHARED_DEFINITIONS = {
       label:              { type: 'string' },
       variant:            { type: 'string', enum: ['primary', 'secondary', 'ghost', 'destructive'] },
       action_type:        { type: 'string', enum: ['navigate', 'event', 'workflow', 'submit', 'delete'] },
-      href:               { type: 'string' },
+      href:               { type: 'string', description: 'Route or API/module endpoint. Required for navigate, submit, and delete actions.' },
       event_type:         { type: 'string' },
       workflow_id:        { type: 'string' },
       context_variables:  { type: 'object' },
@@ -102,10 +102,163 @@ export const SHARED_DEFINITIONS = {
       status: { type: 'string', enum: ['ready', 'generating', 'error'] },
     },
   },
+  tableFilter: {
+    type: 'object',
+    required: ['label', 'value'],
+    properties: {
+      label:        { type: 'string' },
+      value:        { type: 'string' },
+      field:        { type: 'string' },
+      match_values: { type: 'array', items: { type: 'string' } },
+    },
+  },
+  summaryItem: {
+    type: 'object',
+    required: ['label', 'value'],
+    properties: {
+      id:     { type: 'string' },
+      label:  { type: 'string' },
+      value:  {},
+      detail: { type: 'string' },
+    },
+  },
+  segment: {
+    type: 'object',
+    required: ['label', 'value'],
+    properties: {
+      id:    { type: 'string' },
+      label: { type: 'string' },
+      value: { type: 'number' },
+      tone:  { type: 'string', enum: ['default', 'primary', 'success', 'warning', 'destructive'] },
+    },
+  },
 };
 
 /** Per-primitive config schemas. Keys match PrimitiveRegistry names exactly. */
 export const PRIMITIVE_SCHEMAS = {
+  PageHeader: {
+    type: 'object',
+    required: ['title'],
+    properties: {
+      title:      { type: 'string' },
+      subtitle:   { type: 'string' },
+      actions:    { type: 'array', items: SHARED_DEFINITIONS.action },
+      title_font: { type: 'string', enum: ['body', 'heading'] },
+    },
+  },
+
+  ResourceTable: {
+    type: 'object',
+    required: ['columns'],
+    properties: {
+      columns: {
+        type: 'array',
+        minItems: 1,
+        items: { oneOf: [{ type: 'string' }, SHARED_DEFINITIONS.columnObject] },
+      },
+      api_endpoint:       { type: 'string' },
+      data:               { type: 'array' },
+      data_key:           { type: 'string' },
+      selection:          { type: 'string', enum: ['none', 'single', 'multi'], default: 'none' },
+      search:             { type: 'boolean', default: true },
+      search_placeholder: { type: 'string' },
+      filters:            { type: 'array', items: SHARED_DEFINITIONS.tableFilter },
+      default_sort:       { type: 'string' },
+      actions:            { type: 'array', items: SHARED_DEFINITIONS.action },
+      empty: {
+        type: 'object',
+        properties: {
+          title:         { type: 'string' },
+          message:       { type: 'string' },
+          error_title:   { type: 'string' },
+          error_message: { type: 'string' },
+          retry_label:   { type: 'string' },
+          action:        SHARED_DEFINITIONS.action,
+        },
+      },
+    },
+  },
+
+  SummaryStrip: {
+    type: 'object',
+    required: ['items'],
+    properties: {
+      items: { type: 'array', minItems: 1, maxItems: 4, items: SHARED_DEFINITIONS.summaryItem },
+    },
+  },
+
+  InlineEmptyState: {
+    type: 'object',
+    required: ['title'],
+    properties: {
+      title:       { type: 'string' },
+      description: { type: 'string' },
+      action:      SHARED_DEFINITIONS.action,
+    },
+  },
+
+  LoadingState: {
+    type: 'object',
+    properties: {
+      label: { type: 'string' },
+    },
+  },
+
+  ErrorState: {
+    type: 'object',
+    required: ['message'],
+    properties: {
+      title:   { type: 'string' },
+      message: { type: 'string' },
+    },
+  },
+
+  Panel: {
+    type: 'object',
+    properties: {
+      title:    { type: 'string' },
+      eyebrow:  { type: 'string' },
+      subtitle: { type: 'string' },
+    },
+  },
+
+  SurfaceCard: {
+    type: 'object',
+    properties: {
+      title:    { type: 'string' },
+      eyebrow:  { type: 'string' },
+      subtitle: { type: 'string' },
+      accent:   { type: 'boolean' },
+    },
+  },
+
+  StatusPill: {
+    type: 'object',
+    required: ['label'],
+    properties: {
+      label: { type: 'string' },
+      tone:  { type: 'string', enum: ['default', 'primary', 'success', 'warning', 'destructive'] },
+    },
+  },
+
+  Metric: {
+    type: 'object',
+    required: ['label', 'value'],
+    properties: {
+      label:  { type: 'string' },
+      value:  {},
+      detail: { type: 'string' },
+    },
+  },
+
+  SegmentedBar: {
+    type: 'object',
+    required: ['segments'],
+    properties: {
+      segments: { type: 'array', minItems: 1, items: SHARED_DEFINITIONS.segment },
+    },
+  },
+
   DataTable: {
     type: 'object',
     required: ['columns'],

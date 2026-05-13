@@ -87,6 +87,8 @@ Rules:
 - `asset_manifest` is a partial patch for `config/asset_manifest.json`
 - raw spacing, width, density, and sizing tokens belong in `theme_config_patch`, not `shell_config`
 - header/profile/notifications/footer content belongs in `shell_config`, not `theme_config_patch`
+- page-owned shell navigation belongs on `ui/pages/*.yaml -> navigation`; `shell_config.navigation.policy` owns app-wide placement rules
+- page-owned header/footer/bottom-bar intent belongs on `ui/pages/*.yaml -> shell_mode`; `shell_config.chrome` owns only app-wide mode-policy overrides
 - reusable media inventory belongs in `asset_manifest`, not in `theme_config_patch` or `shell_config`
 - custom routes must be owned exclusively by `custom_route_bundle` (`ui/route_manifest.json` + `ui/pages/custom/*.jsx`) and must not duplicate any `ui/pages/*.yaml` route
 - declarative pages may launch workflow sessions through typed page actions (`action_type: workflow`), but workflow-local React still belongs to AgentGenerator and `chat.tool_call`

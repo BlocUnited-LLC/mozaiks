@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Platform composition host layered on top of mozaiksai.hosts.runtime."""
 
+from copy import deepcopy
 from contextlib import asynccontextmanager
 import json
 import os
@@ -278,6 +279,638 @@ def _page_targets_surface(page: dict, *, surface: str) -> bool:
     return surface in normalized_surfaces
 
 
+def _title_from_id(value: str) -> str:
+    return " ".join(part.capitalize() for part in re.split(r"[-_]+", value) if part)
+
+
+_DEFAULT_NAVIGATION_POLICY: dict[str, Any] = {
+    "desktop": {"global": "header", "local": "sidebar", "footer": "visible"},
+    "mobile": {"global": "bottomBar", "local": "sheet", "footer": "hidden"},
+    "maxMobileItems": 5,
+    "autoFromPages": False,
+}
+
+_SHELL_MODE_VALUES = {"standard", "workspace", "conversation", "focused", "immersive", "public"}
+
+_DEFAULT_CHROME_POLICY: dict[str, Any] = {
+    "defaultMode": "standard",
+    "modes": {
+        "standard": {
+            "desktop": {"header": True, "footer": True, "bottomBar": False, "localNav": True},
+            "mobile": {"header": True, "footer": False, "bottomBar": True, "localNav": "sheet"},
+        },
+        "workspace": {
+            "desktop": {"header": True, "footer": False, "bottomBar": False, "localNav": True},
+            "mobile": {"header": True, "footer": False, "bottomBar": True, "localNav": "sheet"},
+        },
+        "conversation": {
+            "desktop": {"header": True, "footer": False, "bottomBar": False, "localNav": False},
+            "mobile": {"header": True, "footer": False, "bottomBar": False, "localNav": False},
+        },
+        "focused": {
+            "desktop": {"header": True, "footer": False, "bottomBar": False, "localNav": False},
+            "mobile": {"header": True, "footer": False, "bottomBar": False, "localNav": False},
+        },
+        "immersive": {
+            "desktop": {"header": False, "footer": False, "bottomBar": False, "localNav": False},
+            "mobile": {"header": False, "footer": False, "bottomBar": False, "localNav": False},
+        },
+        "public": {
+            "desktop": {"header": True, "footer": True, "bottomBar": False, "localNav": False},
+            "mobile": {"header": True, "footer": False, "bottomBar": False, "localNav": False},
+        },
+    },
+}
+
+_NAVIGATION_ITEM_FIELDS = {
+    "id",
+    "label",
+    "action",
+    "path",
+    "href",
+    "icon",
+    "iconLabel",
+    "requiresRole",
+    "visible",
+    "order",
+    "scope",
+    "group",
+    "placement",
+}
+
+
+def _clean_string(value: Any) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _normalize_shell_mode(value: Any) -> str | None:
+    mode = _clean_string(value)
+    if not mode:
+        return None
+    normalized = mode.replace("_", "-").lower()
+    return normalized if normalized in _SHELL_MODE_VALUES else None
+
+
+def _normalize_chrome_viewport_policy(raw: Any, defaults: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return dict(defaults)
+
+    result = dict(defaults)
+    aliases = {
+        "header": ("header", "topBar", "top_bar"),
+        "footer": ("footer",),
+        "bottomBar": ("bottomBar", "bottom_bar"),
+        "localNav": ("localNav", "local_nav"),
+    }
+    for field, names in aliases.items():
+        value = None
+        for name in names:
+            if name in raw:
+                value = raw[name]
+                break
+        if value is None:
+            continue
+        if field == "localNav":
+            if isinstance(value, bool):
+                result[field] = value
+            elif isinstance(value, str) and value.strip():
+                result[field] = value.strip()
+            continue
+        if isinstance(value, bool):
+            result[field] = value
+    return result
+
+
+def _normalize_chrome_mode_policy(raw: Any, defaults: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return deepcopy(defaults)
+
+    desktop_defaults = defaults.get("desktop", {})
+    mobile_defaults = defaults.get("mobile", {})
+    shared = {
+        key: raw[key]
+        for key in ("header", "footer", "bottomBar", "bottom_bar", "localNav", "local_nav", "topBar", "top_bar")
+        if key in raw
+    }
+    desktop_raw = {**shared, **(raw.get("desktop") if isinstance(raw.get("desktop"), dict) else {})}
+    mobile_raw = {**shared, **(raw.get("mobile") if isinstance(raw.get("mobile"), dict) else {})}
+    return {
+        "desktop": _normalize_chrome_viewport_policy(desktop_raw, desktop_defaults),
+        "mobile": _normalize_chrome_viewport_policy(mobile_raw, mobile_defaults),
+    }
+
+
+def _normalize_chrome_policy(chrome: Any) -> dict[str, Any]:
+    policy = deepcopy(_DEFAULT_CHROME_POLICY)
+    if not isinstance(chrome, dict):
+        return policy
+
+    default_mode = _normalize_shell_mode(chrome.get("defaultMode") or chrome.get("default_mode"))
+    if default_mode:
+        policy["defaultMode"] = default_mode
+
+    raw_modes = chrome.get("modes") if isinstance(chrome.get("modes"), dict) else {}
+    for mode, default_mode_policy in list(policy["modes"].items()):
+        raw_mode = raw_modes.get(mode)
+        if raw_mode is None:
+            raw_mode = chrome.get(mode)
+        policy["modes"][mode] = _normalize_chrome_mode_policy(raw_mode, default_mode_policy)
+    return policy
+
+
+def _shell_mode_from_entry(entry: dict[str, Any]) -> str | None:
+    meta = entry.get("meta") if isinstance(entry.get("meta"), dict) else {}
+    return (
+        _normalize_shell_mode(entry.get("shellMode"))
+        or _normalize_shell_mode(entry.get("shell_mode"))
+        or _normalize_shell_mode(meta.get("shellMode"))
+        or _normalize_shell_mode(meta.get("shell_mode"))
+        or _normalize_shell_mode(meta.get("chromeMode"))
+        or _normalize_shell_mode(meta.get("chrome_mode"))
+    )
+
+
+def _route_item_from_page(page: dict) -> dict[str, Any] | None:
+    path = page.get("path")
+    if not isinstance(path, str) or not path.startswith("/"):
+        return None
+    meta = page.get("meta") if isinstance(page.get("meta"), dict) else {}
+    nav = meta.get("navigation") if isinstance(meta.get("navigation"), dict) else {}
+    item_id = (
+        _clean_string(nav.get("id"))
+        or _clean_string(page.get("id"))
+        or _clean_string(page.get("schema"))
+        or path.strip("/").replace("/", "-")
+    )
+    label = _clean_string(nav.get("label")) or _clean_string(page.get("label")) or _title_from_id(item_id)
+    item: dict[str, Any] = {
+        "id": item_id,
+        "label": label,
+        "action": "navigate",
+        "path": path,
+    }
+    if isinstance(page.get("order"), int):
+        item["order"] = page["order"]
+    requires_role = nav.get("requiresRole") or meta.get("requiresRole")
+    if isinstance(requires_role, str) and requires_role.strip():
+        item["requiresRole"] = requires_role.strip()
+    for field in ("icon", "iconLabel", "scope", "group", "visible", "placement"):
+        if field in nav:
+            item[field] = nav[field]
+    return item
+
+
+def _shell_shortcut_catalog(pages: list[dict], shortcuts: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    catalog: dict[str, dict[str, Any]] = {
+        "profile": {"id": "profile", "label": "Profile", "action": "navigate", "path": "/profile"},
+        "settings": {"id": "settings", "label": "Settings", "action": "navigate", "path": "/settings"},
+        "messages": {"id": "messages", "label": "Messages", "action": "navigate", "path": "/messages"},
+        "notifications": {"id": "notifications", "label": "Alerts", "action": "navigate", "path": "/notifications"},
+        "marketplace": {"id": "marketplace", "label": "Marketplace", "action": "navigate", "path": "/marketplace"},
+        "dashboard": {"id": "dashboard", "label": "Dashboard", "action": "navigate", "path": "/dashboard"},
+        "wallet": {"id": "wallet", "label": "Wallet", "action": "navigate", "path": "/wallet"},
+        "create": {"id": "create", "label": "Create", "action": "navigate", "path": "/create"},
+        "admin": {"id": "admin", "label": "Admin", "action": "navigate", "path": "/admin", "requiresRole": "admin"},
+        "support": {"id": "support", "label": "Support", "action": "navigate", "path": "/support"},
+        "signin": {"id": "signin", "label": "Sign In", "action": "signin"},
+        "signout": {"id": "signout", "label": "Sign Out", "action": "signout"},
+        "legal": {"id": "legal", "label": "Legal Notice", "href": "/legal"},
+        "terms": {"id": "terms", "label": "Terms of Service", "href": "/terms"},
+        "cookies": {"id": "cookies", "label": "Cookie Policy", "href": "/cookies"},
+        "privacy": {"id": "privacy", "label": "Privacy Policy", "href": "/privacy"},
+    }
+
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        item = _route_item_from_page(page)
+        if not item:
+            continue
+        catalog[item["id"]] = item
+        path_key = str(item["path"]).strip("/").replace("/", "-")
+        if path_key:
+            catalog.setdefault(path_key, item)
+
+    custom_items = shortcuts.get("items") if isinstance(shortcuts.get("items"), dict) else {}
+    for item_id, item in custom_items.items():
+        if not isinstance(item_id, str) or not item_id.strip() or not isinstance(item, dict):
+            continue
+        base = catalog.get(item_id.strip(), {"id": item_id.strip(), "label": _title_from_id(item_id.strip())})
+        catalog[item_id.strip()] = {**base, **item, "id": item.get("id") or item_id.strip()}
+
+    return catalog
+
+
+def _shortcut_ids(shortcuts: dict[str, Any], *keys: str) -> list[str]:
+    placements = shortcuts.get("placements") if isinstance(shortcuts.get("placements"), dict) else {}
+    for key in keys:
+        value = shortcuts.get(key)
+        if value is None:
+            value = placements.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, str) and item.strip()]
+    return []
+
+
+def _expand_shortcut_items(ids: list[str], catalog: dict[str, dict[str, Any]], *, footer: bool = False) -> list[dict[str, Any]]:
+    expanded: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item_id in ids:
+        item = catalog.get(item_id)
+        if not item:
+            continue
+        output = dict(item)
+        key = str(output.get("href") or output.get("path") or output.get("id") or item_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        if footer:
+            href = output.get("href") or output.get("path")
+            if not isinstance(href, str) or not href:
+                continue
+            expanded.append({"label": output.get("label") or _title_from_id(item_id), "href": href})
+            continue
+        if output.get("href") and not output.get("action"):
+            output["action"] = "navigate"
+        expanded.append(output)
+    return expanded
+
+
+def _normalize_navigation_policy(navigation: Any) -> dict[str, Any]:
+    if not isinstance(navigation, dict):
+        return dict(_DEFAULT_NAVIGATION_POLICY)
+
+    raw_policy = navigation.get("policy") if isinstance(navigation.get("policy"), dict) else navigation
+
+    def viewport_policy(name: str) -> dict[str, str]:
+        defaults = _DEFAULT_NAVIGATION_POLICY[name]
+        raw = raw_policy.get(name) if isinstance(raw_policy.get(name), dict) else {}
+        return {
+            "global": _clean_string(raw.get("global")) or defaults["global"],
+            "local": _clean_string(raw.get("local")) or defaults["local"],
+            "footer": _clean_string(raw.get("footer")) or defaults["footer"],
+        }
+
+    try:
+        max_mobile = int(raw_policy.get("maxMobileItems") or raw_policy.get("max_mobile_items") or _DEFAULT_NAVIGATION_POLICY["maxMobileItems"])
+    except Exception:
+        max_mobile = int(_DEFAULT_NAVIGATION_POLICY["maxMobileItems"])
+
+    return {
+        "desktop": viewport_policy("desktop"),
+        "mobile": viewport_policy("mobile"),
+        "maxMobileItems": max(1, min(max_mobile, 5)),
+        "autoFromPages": bool(raw_policy.get("autoFromPages") or raw_policy.get("auto_from_pages") or False),
+    }
+
+
+def _navigation_config_from_page(page: dict) -> dict[str, Any] | None:
+    if not isinstance(page, dict):
+        return None
+    direct = page.get("navigation")
+    if isinstance(direct, dict):
+        return direct
+    meta = page.get("meta") if isinstance(page.get("meta"), dict) else {}
+    nav = meta.get("navigation")
+    return nav if isinstance(nav, dict) else None
+
+
+def _navigation_item_from_page(page: dict, *, auto_from_pages: bool) -> dict[str, Any] | None:
+    nav = _navigation_config_from_page(page)
+    if nav is None and not auto_from_pages:
+        return None
+    if isinstance(nav, dict) and nav.get("visible") is False:
+        return None
+    if isinstance(nav, dict) and nav.get("include") is False:
+        return None
+
+    meta = page.get("meta") if isinstance(page.get("meta"), dict) else {}
+    if nav is None and (
+        page.get("path") == PROFILE_SHELL_ROUTE["path"]
+        or page.get("component") == "AdminPortal"
+        or meta.get("adminSection")
+    ):
+        return None
+
+    base = _route_item_from_page(page)
+    if not base:
+        return None
+    if isinstance(nav, dict):
+        base.update({key: value for key, value in nav.items() if key in _NAVIGATION_ITEM_FIELDS or key in {"include", "priority"}})
+    base.setdefault("scope", "global")
+    return _sanitize_navigation_item(base)
+
+
+def _navigation_items_from_config(
+    navigation: Any,
+    catalog: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not isinstance(navigation, dict):
+        return []
+    raw_items = navigation.get("items")
+    if isinstance(raw_items, dict):
+        iterable: list[Any] = [{**value, "id": key} for key, value in raw_items.items() if isinstance(value, dict)]
+    elif isinstance(raw_items, list):
+        iterable = raw_items
+    else:
+        iterable = []
+
+    items: list[dict[str, Any]] = []
+    for raw in iterable:
+        if isinstance(raw, str):
+            base = catalog.get(raw)
+            if base:
+                items.append(_sanitize_navigation_item(base))
+            continue
+        if not isinstance(raw, dict):
+            continue
+        reference = _clean_string(raw.get("shortcut")) or _clean_string(raw.get("id"))
+        base = catalog.get(reference) if reference else None
+        item = {**(base or {}), **raw}
+        if reference and not item.get("id"):
+            item["id"] = reference
+        normalized = _sanitize_navigation_item(item)
+        if normalized:
+            items.append(normalized)
+    return items
+
+
+def _shortcut_navigation_items(shortcuts: Any, catalog: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    if not isinstance(shortcuts, dict):
+        return []
+
+    items: list[dict[str, Any]] = []
+    for item in _expand_shortcut_items(_shortcut_ids(shortcuts, "header", "desktopHeader", "header.pages"), catalog):
+        items.append({**item, "scope": item.get("scope", "global"), "placement": {"desktop": "header"}})
+    for item in _expand_shortcut_items(_shortcut_ids(shortcuts, "mobile", "mobileBottomBar", "mobile.bottomBar"), catalog):
+        items.append({**item, "scope": item.get("scope", "global"), "placement": {"mobile": "bottomBar"}})
+    for item in _expand_shortcut_items(_shortcut_ids(shortcuts, "profile", "profileMenu", "profile.menu"), catalog):
+        items.append({**item, "scope": "profile"})
+    for item in _expand_shortcut_items(_shortcut_ids(shortcuts, "footer", "footerLinks", "footer.links"), catalog, footer=True):
+        item_id = str(item.get("href") or item.get("label") or "").strip("/").replace("/", "-")
+        items.append({"id": item_id or "footer-link", **item, "scope": "footer"})
+    return [_sanitize_navigation_item(item) for item in items if _sanitize_navigation_item(item)]
+
+
+def _sanitize_navigation_item(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(item, dict) or item.get("visible") is False:
+        return None
+    item_id = _clean_string(item.get("id"))
+    path = _clean_string(item.get("path"))
+    href = _clean_string(item.get("href"))
+    action = _clean_string(item.get("action"))
+    if not item_id:
+        item_id = (path or href or "").strip("/").replace("/", "-")
+    if not item_id:
+        return None
+
+    label = _clean_string(item.get("label")) or _title_from_id(item_id)
+    scope = _clean_string(item.get("scope")) or "global"
+    if scope not in {"global", "local", "profile", "footer"}:
+        scope = "global"
+
+    output: dict[str, Any] = {
+        "id": item_id,
+        "label": label,
+        "scope": scope,
+    }
+    if action:
+        output["action"] = action
+    elif path:
+        output["action"] = "navigate"
+    if path:
+        output["path"] = path
+    if href:
+        output["href"] = href
+    for key in ("icon", "iconLabel", "requiresRole", "group"):
+        value = _clean_string(item.get(key))
+        if value:
+            output[key] = value
+    if isinstance(item.get("visible"), bool):
+        output["visible"] = item["visible"]
+    if isinstance(item.get("order"), int):
+        output["order"] = item["order"]
+    elif isinstance(item.get("priority"), int):
+        output["order"] = item["priority"]
+    placement = item.get("placement")
+    if isinstance(placement, dict):
+        clean_placement = {
+            key: value.strip()
+            for key, value in placement.items()
+            if key in {"desktop", "mobile"} and isinstance(value, str) and value.strip()
+        }
+        if clean_placement:
+            output["placement"] = clean_placement
+    elif isinstance(placement, str) and placement.strip():
+        output["placement"] = {"desktop": placement.strip(), "mobile": placement.strip()}
+    return output
+
+
+def _dedupe_navigation_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_id: dict[str, dict[str, Any]] = {}
+    for item in items:
+        item_id = _clean_string(item.get("id"))
+        if not item_id:
+            continue
+        current = by_id.get(item_id)
+        if current is None:
+            by_id[item_id] = item
+        else:
+            placement = {}
+            if isinstance(current.get("placement"), dict):
+                placement.update(current["placement"])
+            if isinstance(item.get("placement"), dict):
+                placement.update(item["placement"])
+            merged = {**current, **item}
+            if placement:
+                merged["placement"] = placement
+            by_id[item_id] = merged
+    return sorted(
+        by_id.values(),
+        key=lambda item: (item.get("order", 500), str(item.get("label") or item.get("id") or "")),
+    )
+
+
+def _placement_for_item(item: dict[str, Any], *, viewport: str, policy: dict[str, Any]) -> str:
+    placement = item.get("placement") if isinstance(item.get("placement"), dict) else {}
+    explicit = _clean_string(placement.get(viewport))
+    if explicit:
+        return explicit
+    scope = item.get("scope")
+    if scope == "local":
+        return policy[viewport]["local"]
+    if scope == "footer":
+        return policy[viewport]["footer"]
+    if scope == "profile":
+        return "profile"
+    return policy[viewport]["global"]
+
+
+def _public_nav_item(item: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in item.items() if key in _NAVIGATION_ITEM_FIELDS and key != "scope"}
+
+
+def _footer_link_from_item(item: dict[str, Any]) -> dict[str, Any] | None:
+    href = _clean_string(item.get("href")) or _clean_string(item.get("path"))
+    if not href:
+        return None
+    return {"label": item.get("label") or _title_from_id(str(item.get("id") or "link")), "href": href}
+
+
+def _apply_dynamic_shell_navigation(
+    result: dict,
+    *,
+    pages: list[dict],
+    navigation: Any,
+    shortcuts: Any,
+) -> None:
+    policy = _normalize_navigation_policy(navigation)
+    catalog = _shell_shortcut_catalog(pages, shortcuts if isinstance(shortcuts, dict) else {})
+    all_items = _dedupe_navigation_items([
+        *[
+            item
+            for page in pages
+            for item in [_navigation_item_from_page(page, auto_from_pages=policy["autoFromPages"])]
+            if item
+        ],
+        *_navigation_items_from_config(navigation, catalog),
+        *_shortcut_navigation_items(shortcuts, catalog),
+    ])
+
+    resolved: dict[str, Any] = {
+        "desktop": {"header": [], "sidebar": [], "rail": []},
+        "mobile": {"bottomBar": [], "sheet": [], "more": []},
+        "local": {"desktop": [], "mobile": []},
+        "profile": [],
+        "footer": [],
+    }
+
+    for item in all_items:
+        scope = item.get("scope", "global")
+        desktop_placement = _placement_for_item(item, viewport="desktop", policy=policy)
+        mobile_placement = _placement_for_item(item, viewport="mobile", policy=policy)
+        public_item = _public_nav_item(item)
+
+        if scope == "profile" or desktop_placement == "profile" or mobile_placement == "profile":
+            resolved["profile"].append(public_item)
+        if scope == "footer" or desktop_placement == "visible" or mobile_placement == "visible":
+            footer_link = _footer_link_from_item(item)
+            if footer_link:
+                resolved["footer"].append(footer_link)
+
+        if scope == "local":
+            resolved["local"]["desktop"].append(public_item)
+            resolved["local"]["mobile"].append(public_item)
+        elif desktop_placement in resolved["desktop"]:
+            resolved["desktop"][desktop_placement].append(public_item)
+
+        if mobile_placement == "bottomBar":
+            resolved["mobile"]["bottomBar"].append(public_item)
+        elif mobile_placement in {"sheet", "more"}:
+            resolved["mobile"][mobile_placement].append(public_item)
+
+    max_mobile = policy["maxMobileItems"]
+    resolved["mobile"]["bottomBar"] = resolved["mobile"]["bottomBar"][:max_mobile]
+
+    if resolved["desktop"]["header"]:
+        header = result.get("header") if isinstance(result.get("header"), dict) else {}
+        if not isinstance(header.get("pages"), list) or not header["pages"]:
+            header["pages"] = [
+                {key: value for key, value in item.items() if key in {"id", "label", "path", "icon", "requiresRole", "visible"}}
+                for item in resolved["desktop"]["header"]
+                if item.get("path")
+            ]
+            result["header"] = header
+
+    if resolved["mobile"]["bottomBar"]:
+        mobile = result.get("mobile") if isinstance(result.get("mobile"), dict) else {}
+        bottom_bar = mobile.get("bottomBar") if isinstance(mobile.get("bottomBar"), dict) else {}
+        if not isinstance(bottom_bar.get("items"), list) or not bottom_bar["items"]:
+            bottom_bar["visible"] = bottom_bar.get("visible", "auto")
+            bottom_bar["items"] = resolved["mobile"]["bottomBar"]
+            mobile["bottomBar"] = bottom_bar
+            result["mobile"] = mobile
+
+    if resolved["profile"]:
+        profile = result.get("profile") if isinstance(result.get("profile"), dict) else {}
+        if not isinstance(profile.get("menu"), list) or not profile["menu"]:
+            profile["show"] = profile.get("show", True)
+            profile["menu"] = resolved["profile"]
+            result["profile"] = profile
+
+    if resolved["footer"]:
+        footer = result.get("footer") if isinstance(result.get("footer"), dict) else {}
+        if not isinstance(footer.get("links"), list) or not footer["links"]:
+            footer["visible"] = footer.get("visible", True)
+            footer["links"] = resolved["footer"]
+        if "hideOnMobile" not in footer:
+            footer["hideOnMobile"] = policy["mobile"]["footer"] == "hidden"
+        result["footer"] = footer
+
+    result["navigation"] = {
+        "policy": policy,
+        "items": all_items,
+        "resolved": resolved,
+    }
+
+
+def _apply_shell_shortcuts(result: dict, *, pages: list[dict], shortcuts: Any) -> None:
+    if not isinstance(shortcuts, dict):
+        return
+
+    catalog = _shell_shortcut_catalog(pages, shortcuts)
+
+    header_ids = _shortcut_ids(shortcuts, "header", "desktopHeader", "header.pages")
+    if header_ids:
+        header = result.get("header") if isinstance(result.get("header"), dict) else {}
+        header["pages"] = [
+            {key: value for key, value in item.items() if key in {"id", "label", "path", "requiresRole", "visible"}}
+            for item in _expand_shortcut_items(header_ids, catalog)
+            if item.get("path")
+        ]
+        result["header"] = header
+
+    profile_ids = _shortcut_ids(shortcuts, "profile", "profileMenu", "profile.menu")
+    if profile_ids:
+        profile = result.get("profile") if isinstance(result.get("profile"), dict) else {}
+        profile["show"] = profile.get("show", True)
+        profile["menu"] = _expand_shortcut_items(profile_ids, catalog)
+        result["profile"] = profile
+
+    mobile_ids = _shortcut_ids(shortcuts, "mobile", "mobileBottomBar", "mobile.bottomBar")
+    if mobile_ids:
+        mobile = result.get("mobile") if isinstance(result.get("mobile"), dict) else {}
+        bottom_bar = mobile.get("bottomBar") if isinstance(mobile.get("bottomBar"), dict) else {}
+        bottom_bar["visible"] = bottom_bar.get("visible", "auto")
+        bottom_bar["items"] = _expand_shortcut_items(mobile_ids, catalog)[:5]
+        mobile["bottomBar"] = bottom_bar
+        result["mobile"] = mobile
+
+    footer_ids = _shortcut_ids(shortcuts, "footer", "footerLinks", "footer.links")
+    if footer_ids:
+        footer = result.get("footer") if isinstance(result.get("footer"), dict) else {}
+        footer["visible"] = footer.get("visible", True)
+        footer["links"] = _expand_shortcut_items(footer_ids, catalog, footer=True)
+        result["footer"] = footer
+
+    footer_hide_mobile = shortcuts.get("footerHideOnMobile")
+    if isinstance(footer_hide_mobile, bool):
+        footer = result.get("footer") if isinstance(result.get("footer"), dict) else {}
+        footer["hideOnMobile"] = footer_hide_mobile
+        result["footer"] = footer
+
+    if shortcuts.get("notifications") is True:
+        notifications = result.get("notifications") if isinstance(result.get("notifications"), dict) else {}
+        result["notifications"] = {
+            "show": notifications.get("show", True),
+            "path": notifications.get("path", "/notifications"),
+            "emptyText": notifications.get("emptyText", "No unread notifications"),
+            **{key: value for key, value in notifications.items() if key not in {"show", "path", "emptyText"}},
+        }
+
+
 async def build_shell_config(*, surface: str = "platform") -> dict:
     """Compose app-shell config from platform-owned manifests."""
     app_root = resolve_app_root()
@@ -286,6 +919,9 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
     shell_surface = _normalize_shell_surface(surface)
     result: dict = {"chat_startup_mode": "ask", "landing_spot": "/"}
     app_manifest = _load_app_manifest()
+    shell_shortcuts: dict[str, Any] | None = None
+    shell_navigation: dict[str, Any] | None = None
+    shell_chrome: dict[str, Any] | None = None
 
     try:
         if app_manifest:
@@ -321,10 +957,16 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
         shell_config_path = _resolve_shell_config_path()
         if shell_config_path.exists():
             shell_config = json.loads(shell_config_path.read_text(encoding="utf-8"))
-            for key in ("header", "profile", "notifications", "footer"):
+            for key in ("header", "profile", "notifications", "footer", "mobile"):
                 value = shell_config.get(key)
                 if value is not None:
                     result[key] = value
+            if isinstance(shell_config.get("shortcuts"), dict):
+                shell_shortcuts = shell_config["shortcuts"]
+            if isinstance(shell_config.get("navigation"), dict):
+                shell_navigation = shell_config["navigation"]
+            if isinstance(shell_config.get("chrome"), dict):
+                shell_chrome = shell_config["chrome"]
     except Exception as exc:
         logger.warning("[shell-config] Could not read shell config: %s", exc)
 
@@ -374,9 +1016,19 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
                 "title": route["title"],
                 "appShell": True,
                 "adminSection": route["admin_section"],
+                "shellMode": "workspace",
             },
         })
     result["pages"] = _dedupe_and_sort_pages(pages)
+
+    _apply_dynamic_shell_navigation(
+        result,
+        pages=result["pages"],
+        navigation=shell_navigation,
+        shortcuts=shell_shortcuts,
+    )
+    _apply_shell_shortcuts(result, pages=result["pages"], shortcuts=shell_shortcuts)
+    result["chrome"] = _normalize_chrome_policy(shell_chrome)
 
     return result
 
@@ -480,6 +1132,9 @@ def _normalize_shell_page_entry(entry: dict, *, order_fallback: int) -> Optional
         "order": entry.get("order", order_fallback),
         "meta": {**meta, "requiresAuth": entry.get("requiresAuth", True)},
     }
+    shell_mode = _shell_mode_from_entry(entry)
+    if shell_mode:
+        page["meta"]["shellMode"] = shell_mode
     if isinstance(component, str) and component.strip():
         page["component"] = component.strip()
     if isinstance(transition, str) and transition.strip():
@@ -490,6 +1145,8 @@ def _normalize_shell_page_entry(entry: dict, *, order_fallback: int) -> Optional
         page["sequence"] = entry["sequence"].strip()
     if isinstance(entry.get("schema"), str) and entry["schema"].strip():
         page["schema"] = entry["schema"].strip()
+    if isinstance(entry.get("navigation"), dict):
+        page["meta"]["navigation"] = entry["navigation"]
     return page
 
 
@@ -542,6 +1199,11 @@ def _load_page_schema_routes(app_root: Path) -> List[dict]:
         meta: dict = {"title": title, "appShell": True, "requiresAuth": True}
         if isinstance(roles, list) and roles:
             meta["roles"] = roles
+        if isinstance(raw.get("navigation"), dict):
+            meta["navigation"] = raw["navigation"]
+        shell_mode = _normalize_shell_mode(raw.get("shell_mode")) or _normalize_shell_mode(raw.get("shellMode"))
+        if shell_mode:
+            meta["shellMode"] = shell_mode
         pages.append({
             "path": route,
             "label": title,
@@ -561,9 +1223,23 @@ def _load_workflow_entrypoint_pages(app_root: Path) -> List[dict]:
     if pack is None:
         return []
 
+    transition_shell_modes = {
+        transition.id: transition.ui.shell_mode
+        for transition in getattr(pack, "transitions", [])
+        if getattr(transition, "ui", None) is not None and transition.ui.shell_mode
+    }
     pages: List[dict] = []
     for index, entry in enumerate(list_entrypoints(pack)):
-        page = _normalize_shell_page_entry(entry.model_dump(exclude_none=True), order_fallback=200 + index)
+        raw_entry = entry.model_dump(exclude_none=True)
+        transition_id = raw_entry.get("transition")
+        if (
+            isinstance(transition_id, str)
+            and transition_id in transition_shell_modes
+            and not _shell_mode_from_entry(raw_entry)
+        ):
+            meta = raw_entry.get("meta") if isinstance(raw_entry.get("meta"), dict) else {}
+            raw_entry["meta"] = {**meta, "shellMode": transition_shell_modes[transition_id]}
+        page = _normalize_shell_page_entry(raw_entry, order_fallback=200 + index)
         if page:
             pages.append(page)
     return pages

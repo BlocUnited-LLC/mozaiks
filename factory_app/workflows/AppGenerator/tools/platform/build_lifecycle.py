@@ -5,16 +5,82 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from mozaiksai.core.core_config import get_mongo_client
-from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeCollections
-from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id
-from mozaiksai.core.workflow.pack.config import get_workflow_sequence, load_global_pack_graph, normalize_step_groups
 from logs.logging_config import get_core_logger
 
-from .build_events_client import BuildEventsClient, _utc_iso
-from .build_events_outbox import mark_attempt, upsert_outbox_event
-
 logger = get_core_logger("platform_build_lifecycle")
+
+
+def _utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+async def mark_attempt(**kwargs: Any) -> None:
+    from factory_app.workflows.AppGenerator.tools.platform.build_events_outbox import (
+        mark_attempt as _mark_attempt,
+    )
+
+    await _mark_attempt(**kwargs)
+
+
+async def upsert_outbox_event(**kwargs: Any) -> str:
+    from factory_app.workflows.AppGenerator.tools.platform.build_events_outbox import (
+        upsert_outbox_event as _upsert_outbox_event,
+    )
+
+    return await _upsert_outbox_event(**kwargs)
+
+
+def _build_events_client():
+    from factory_app.workflows.AppGenerator.tools.platform.build_events_client import (
+        BuildEventsClient,
+    )
+
+    return BuildEventsClient()
+
+
+def get_mongo_client():
+    from mozaiksai.core.core_config import get_mongo_client as _get_mongo_client
+
+    return _get_mongo_client()
+
+
+def build_app_scope_filter(app_id: str) -> Dict[str, Any]:
+    from mozaiksai.core.multitenant import build_app_scope_filter as _build_app_scope_filter
+
+    return _build_app_scope_filter(app_id)
+
+
+def coalesce_app_id(*, app_id: Optional[str] = None) -> Optional[str]:
+    from mozaiksai.core.multitenant import coalesce_app_id as _coalesce_app_id
+
+    return _coalesce_app_id(app_id=app_id)
+
+
+def load_global_pack_graph():
+    from mozaiksai.core.workflow.pack.config import load_global_pack_graph as _load_global_pack_graph
+
+    return _load_global_pack_graph()
+
+
+def get_workflow_sequence(pack: Any, journey_id: str):
+    from mozaiksai.core.workflow.pack.config import get_workflow_sequence as _get_workflow_sequence
+
+    return _get_workflow_sequence(pack, journey_id)
+
+
+def normalize_step_groups(steps: Any):
+    from mozaiksai.core.workflow.pack.config import normalize_step_groups as _normalize_step_groups
+
+    return _normalize_step_groups(steps)
+
+
+def _runtime_chat_sessions_collection():
+    from mozaiksai.core.data.persistence.namespaces import (
+        SYSTEM_DATABASE,
+        RuntimeCollections,
+    )
+
+    return SYSTEM_DATABASE, RuntimeCollections.CHAT_SESSIONS
 
 
 def _normalize_text(value: Any) -> Optional[str]:
@@ -70,7 +136,8 @@ async def _get_chat_session_context(*, app_id: str, chat_id: str) -> Dict[str, A
         return {}
 
     client = get_mongo_client()
-    coll = client[SYSTEM_DATABASE][RuntimeCollections.CHAT_SESSIONS]
+    system_database, chat_sessions_collection = _runtime_chat_sessions_collection()
+    coll = client[system_database][chat_sessions_collection]
     doc = await coll.find_one(
         {"_id": str(resolved_chat_id), **build_app_scope_filter(str(resolved_app_id))},
         {
@@ -233,7 +300,7 @@ async def _resolve_build_event_context(
 
 async def _deliver_now(*, outbox_id: str, app_id: str, payload: Dict[str, Any]) -> None:
     try:
-        client = BuildEventsClient()
+        client = _build_events_client()
         result = await client.post_build_event(app_id=app_id, payload=payload)
         await mark_attempt(
             outbox_id=outbox_id,

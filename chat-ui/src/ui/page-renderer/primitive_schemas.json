@@ -1,25 +1,35 @@
 {
-  "_comment": "Auto-derived from PrimitiveSchemas.js. Do not edit manually. Consumed by mozaiksai/core/workflow/ui_primitives.py for agent guidance injection.",
+  "_comment": "Auto-derived from PrimitiveRegistry.js, PrimitiveSchemas.js, and PrimitiveCatalog.js. Do not edit manually. Consumed by mozaiksai/core/workflow/ui_primitives.py for agent guidance injection.",
   "DataTable": {
-    "required": ["columns"],
+    "tier": "specialized",
+    "use": "Use only when ResourceTable is not appropriate for dense operational data.",
+    "avoid": "Do not use as the default collection page primitive; prefer ResourceTable.",
+    "required": [
+      "columns"
+    ],
     "properties": {
-      "columns": "array of string|{key,label?,type?,sortable?,width?} — REQUIRED",
-      "api_endpoint": "string — backend endpoint for rows",
-      "data": "array — static row data (alternative to api_endpoint)",
+      "columns": "array of string|{key,label?,type?,sortable?,width?} — min 1 — Column definitions. Each entry is a string key or a column config object. — REQUIRED",
+      "api_endpoint": "string — Backend endpoint to fetch rows from.",
+      "data": "array of items — Static row data (alternative to api_endpoint).",
       "selection": "string: none|single|multi — default none",
       "pagination": "boolean — default true",
       "page_size": "integer — default 20",
       "search": "boolean — default true",
-      "actions": "array of action objects",
-      "empty": "{title?,message?,action?} — empty-state config"
+      "actions": "array of {id?,label,variant?,action_type,href?,event_type?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}",
+      "empty": "{title?,message?,action?}"
     }
   },
   "Form": {
-    "required": ["fields"],
+    "tier": "default",
+    "use": "Use for real create/edit/settings input surfaces with clear submit and optional cancel actions.",
+    "avoid": "Do not generate forms without a submit path or with placeholder-only fields.",
+    "required": [
+      "fields"
+    ],
     "properties": {
-      "fields": "array of {name,label,type(text|email|password|number|textarea|select|checkbox),required?,placeholder?,default_value?,options?} — REQUIRED",
+      "fields": "array of {name,label,type,required?,placeholder?,default_value?,options?} — min 1 — REQUIRED",
       "layout": "string: vertical|horizontal|grid — default vertical",
-      "columns": "integer — grid columns when layout=grid, default 2",
+      "columns": "integer — default 2",
       "submit_label": "string — default Submit",
       "submit_action": "action object",
       "cancel_action": "action object",
@@ -27,40 +37,59 @@
       "disabled": "boolean — default false"
     }
   },
-  "Stat": {
-    "required": ["label"],
+  "Card": {
+    "tier": "discouraged",
+    "use": "Use only for legacy schemas that already depend on Card.",
+    "avoid": "Prefer Panel or SurfaceCard; Card encourages generic over-boxed layouts.",
+    "required": [],
     "properties": {
-      "label": "string — KPI label — REQUIRED",
-      "value": "any — static metric value (use value OR value_key)",
-      "value_key": "string — key path into api_endpoint response",
+      "title": "string",
+      "subtitle": "string",
+      "actions": "array of {id?,label,variant?,action_type,href?,event_type?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}",
+      "children": "array of {id?,primitive,title?,config?}"
+    }
+  },
+  "Stat": {
+    "tier": "discouraged",
+    "use": "Use only for legacy schemas that already depend on Stat.",
+    "avoid": "Prefer SummaryStrip or Metric; Stat encourages generic dashboard spam.",
+    "required": [
+      "label"
+    ],
+    "properties": {
+      "label": "string — KPI metric label. — REQUIRED",
+      "value": "any — Static metric value.",
+      "value_key": "string — Key path into api_endpoint response for dynamic value.",
       "format": "string: number|currency|percentage|compact",
-      "trend": "any — static trend value",
-      "trend_key": "string — key path into api_endpoint response",
+      "trend": "any — Static trend value (positive = up).",
+      "trend_key": "string — Key path into api_endpoint response for dynamic trend.",
       "trend_direction": "string: up_good|up_bad|neutral — default up_good",
       "color": "string",
       "icon": "string"
     }
   },
   "Grid": {
-    "required": ["columns", "children"],
+    "tier": "specialized",
+    "use": "Use only to arrange a small number of child primitives when layout is essential.",
+    "avoid": "Do not use Grid to manufacture dashboard sections.",
+    "required": [
+      "columns",
+      "children"
+    ],
     "properties": {
-      "columns": "integer 1-6 — REQUIRED",
+      "columns": "integer — Number of grid columns. — REQUIRED",
       "gap": "string: sm|md|lg|1|2|3|4|6|8 — default 4",
-      "api_endpoint": "string — shared data endpoint for child Stat/Card binding",
-      "children": "array of {id?,primitive,title?,config} — REQUIRED"
-    }
-  },
-  "Card": {
-    "required": [],
-    "properties": {
-      "title": "string",
-      "subtitle": "string",
-      "actions": "array of action objects",
-      "children": "array of child sections"
+      "api_endpoint": "string — Optional shared data endpoint for child Stat/Card binding.",
+      "children": "array of {id?,primitive,title?,config?} — min 1 — REQUIRED"
     }
   },
   "Button": {
-    "required": ["label"],
+    "tier": "support",
+    "use": "Use for single actions outside PageHeader, ResourceTable, or Form.",
+    "avoid": "Do not scatter duplicate primary CTAs across the page.",
+    "required": [
+      "label"
+    ],
     "properties": {
       "label": "string — REQUIRED",
       "variant": "string: primary|secondary|ghost|destructive — default primary",
@@ -71,17 +100,25 @@
     }
   },
   "Modal": {
+    "tier": "specialized",
+    "use": "Use for interruptive confirmation or compact create/edit flows.",
+    "avoid": "Do not hide primary page tasks in modals by default.",
     "required": [],
     "properties": {
       "title": "string",
       "description": "string",
       "size": "string: small|medium|large|full — default medium",
-      "actions": "array of action objects",
-      "children": "array of child sections"
+      "actions": "array of {id?,label,variant?,action_type,href?,event_type?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}",
+      "children": "array of {id?,primitive,title?,config?}"
     }
   },
   "Alert": {
-    "required": ["message"],
+    "tier": "support",
+    "use": "Use for important inline contextual messages.",
+    "avoid": "Do not use alerts as explanatory decoration.",
+    "required": [
+      "message"
+    ],
     "properties": {
       "title": "string",
       "message": "string — REQUIRED",
@@ -90,20 +127,31 @@
     }
   },
   "Badge": {
-    "required": ["label"],
+    "tier": "discouraged",
+    "use": "Use only for legacy schemas that already depend on Badge.",
+    "avoid": "Prefer StatusPill; Badge encourages repeated status chips.",
+    "required": [
+      "label"
+    ],
     "properties": {
       "label": "string — REQUIRED",
       "variant": "string"
     }
   },
   "Skeleton": {
+    "tier": "specialized",
+    "use": "Use only for short in-place loading placeholders.",
+    "avoid": "Prefer LoadingState for full-page loading.",
     "required": [],
     "properties": {
-      "rows": "integer — number of skeleton rows",
-      "height": "string — CSS height"
+      "rows": "integer",
+      "height": "string"
     }
   },
   "Empty": {
+    "tier": "default",
+    "use": "Use for simple empty states with one concise message and at most one action.",
+    "avoid": "Do not repeat empty states across every section of the same page.",
     "required": [],
     "properties": {
       "title": "string",
@@ -113,51 +161,221 @@
     }
   },
   "Timeline": {
-    "required": ["items"],
+    "tier": "specialized",
+    "use": "Use for real chronological events such as deployments or approvals.",
+    "avoid": "Do not generate decorative activity feeds.",
+    "required": [
+      "items"
+    ],
     "properties": {
       "title": "string",
-      "items": "array of {label,status(done|active|pending|error),description?,timestamp?} — REQUIRED"
+      "items": "array of {label,status,description?,timestamp?} — min 1 — REQUIRED"
     }
   },
   "CodeBlock": {
-    "required": ["code"],
+    "tier": "specialized",
+    "use": "Use for real code, config, logs, or command output.",
+    "avoid": "Do not show pseudo-code placeholders.",
+    "required": [
+      "code"
+    ],
     "properties": {
       "title": "string",
       "code": "string — REQUIRED",
-      "language": "string — e.g. python, javascript",
+      "language": "string",
       "filename": "string"
     }
   },
   "ProgressTracker": {
-    "required": ["stages"],
+    "tier": "specialized",
+    "use": "Use when the user is moving through a known ordered process.",
+    "avoid": "Do not use for generic lifecycle decoration.",
+    "required": [
+      "stages"
+    ],
     "properties": {
       "title": "string",
-      "stages": "array of {label,status(done|active|pending|error),description?} — REQUIRED"
+      "stages": "array of {label,status,description?} — min 1 — REQUIRED"
     }
   },
   "AlertBanner": {
-    "required": ["message"],
+    "tier": "support",
+    "use": "Use for high-priority page-level alerts that change what the user should do.",
+    "avoid": "Do not use banners for routine status or marketing copy.",
+    "required": [
+      "message"
+    ],
     "properties": {
       "title": "string",
       "message": "string — REQUIRED",
       "variant": "string: info|success|warning|destructive",
       "dismissible": "boolean",
-      "actions": "array of action objects"
+      "actions": "array of {id?,label,variant?,action_type,href?,event_type?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}"
     }
   },
   "ActionButton": {
-    "required": ["actions"],
+    "tier": "specialized",
+    "use": "Use for a compact cluster of related actions when PageHeader actions are not enough.",
+    "avoid": "Do not create multiple competing primary actions.",
+    "required": [
+      "actions"
+    ],
     "properties": {
       "title": "string",
       "layout": "string: row|column — default row",
-      "actions": "array of {id?,label,variant?,action?} — REQUIRED"
+      "actions": "array of {id?,label,variant?,action?} — min 1 — REQUIRED"
     }
   },
   "FileList": {
-    "required": ["files"],
+    "tier": "specialized",
+    "use": "Use when the page has real files or generated artifacts to show.",
+    "avoid": "Do not create placeholder file lists.",
+    "required": [
+      "files"
+    ],
     "properties": {
       "title": "string",
-      "files": "array of {name,type?,size?,url?,status?(ready|generating|error)} — REQUIRED"
+      "files": "array of {name,type?,size?,url?,status?} — min 1 — REQUIRED"
+    }
+  },
+  "PageHeader": {
+    "tier": "default",
+    "use": "Use once at the top of a durable page for title, short subtitle, and primary actions.",
+    "avoid": "Do not repeat page scope with nearby eyebrow labels, duplicate titles, or extra heading sections.",
+    "required": [
+      "title"
+    ],
+    "properties": {
+      "title": "string — REQUIRED",
+      "subtitle": "string",
+      "actions": "array of {id?,label,variant?,action_type,href?,event_type?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}",
+      "title_font": "string: body|heading"
+    }
+  },
+  "ResourceTable": {
+    "tier": "default",
+    "use": "Use for collection/index pages that need search, filters, sorting, status, updated time, and row actions.",
+    "avoid": "Do not wrap ResourceTable in decorative cards or add fake analytics around it.",
+    "required": [
+      "columns"
+    ],
+    "properties": {
+      "columns": "array of string|{key,label?,type?,sortable?,width?} — min 1 — REQUIRED",
+      "api_endpoint": "string",
+      "data": "array of items",
+      "data_key": "string",
+      "selection": "string: none|single|multi — default none",
+      "search": "boolean — default true",
+      "search_placeholder": "string",
+      "filters": "array of {label,value,field?,match_values?}",
+      "default_sort": "string",
+      "actions": "array of {id?,label,variant?,action_type,href?,event_type?,workflow_id?,context_variables?,payload?,requires_selection?,closes_modal?}",
+      "empty": "{title?,message?,error_title?,error_message?,retry_label?,action?}"
+    }
+  },
+  "SummaryStrip": {
+    "tier": "support",
+    "use": "Use for 2-4 genuinely useful portfolio metrics above a collection.",
+    "avoid": "Do not create generic KPI strips or more than four stats.",
+    "required": [
+      "items"
+    ],
+    "properties": {
+      "items": "array of {id?,label,value,detail?} — min 1 — REQUIRED"
+    }
+  },
+  "InlineEmptyState": {
+    "tier": "default",
+    "use": "Use inside a panel/table area when one bounded region has no data.",
+    "avoid": "Do not use as filler copy when the section itself should be omitted.",
+    "required": [
+      "title"
+    ],
+    "properties": {
+      "title": "string — REQUIRED",
+      "description": "string",
+      "action": "action object"
+    }
+  },
+  "LoadingState": {
+    "tier": "default",
+    "use": "Use for full-page or full-region loading while real data is being fetched.",
+    "avoid": "Do not use decorative skeletons when a plain loading state is enough.",
+    "required": [],
+    "properties": {
+      "label": "string"
+    }
+  },
+  "ErrorState": {
+    "tier": "default",
+    "use": "Use when a page or region cannot load actionable data.",
+    "avoid": "Do not expose internal runtime names or stack traces in user-facing errors.",
+    "required": [
+      "message"
+    ],
+    "properties": {
+      "title": "string",
+      "message": "string — REQUIRED"
+    }
+  },
+  "Panel": {
+    "tier": "support",
+    "use": "Use for one purposeful supporting section on a detail page.",
+    "avoid": "Do not nest panels or turn every fact into a panel.",
+    "required": [],
+    "properties": {
+      "title": "string",
+      "eyebrow": "string",
+      "subtitle": "string"
+    }
+  },
+  "SurfaceCard": {
+    "tier": "support",
+    "use": "Use for one prominent grouped surface when a panel needs stronger hierarchy.",
+    "avoid": "Do not use multiple SurfaceCards to create a dashboard wall.",
+    "required": [],
+    "properties": {
+      "title": "string",
+      "eyebrow": "string",
+      "subtitle": "string",
+      "accent": "boolean"
+    }
+  },
+  "StatusPill": {
+    "tier": "support",
+    "use": "Use for one compact state label per object.",
+    "avoid": "Do not show multiple badges for the same status concept.",
+    "required": [
+      "label"
+    ],
+    "properties": {
+      "label": "string — REQUIRED",
+      "tone": "string: default|primary|success|warning|destructive"
+    }
+  },
+  "Metric": {
+    "tier": "support",
+    "use": "Use inside a purposeful summary surface when one metric needs detail text.",
+    "avoid": "Prefer SummaryStrip for page-level metrics; do not build KPI grids by default.",
+    "required": [
+      "label",
+      "value"
+    ],
+    "properties": {
+      "label": "string — REQUIRED",
+      "value": "any — REQUIRED",
+      "detail": "string"
+    }
+  },
+  "SegmentedBar": {
+    "tier": "support",
+    "use": "Use for compact proportional breakdowns with real segment values.",
+    "avoid": "Do not fake charts or show decorative bars without useful data.",
+    "required": [
+      "segments"
+    ],
+    "properties": {
+      "segments": "array of {id?,label,value,tone?} — min 1 — REQUIRED"
     }
   }
 }

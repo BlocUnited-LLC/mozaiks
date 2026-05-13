@@ -6,7 +6,7 @@ import {
   ActionButton,
   ConsoleErrorState,
   ConsoleLoadingState,
-} from './ConsolePrimitives.jsx'
+} from '../../../components/ConsoleShared.jsx'
 
 
 export default function CreateAppRedirectPage() {

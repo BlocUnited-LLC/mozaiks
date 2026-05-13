@@ -275,7 +275,7 @@ Already outputs the correct declarative YAML format (orchestrator.yaml, agents.y
   - Note: implemented as one agent (`AppSchemaAgent`), not two separate agents as originally planned
 - [x] Add `AppPageSection`, `AppPageSchema`, `AppNavItem`, `AppManifest`, `AppSchemaOutput` models to `structured_outputs.yaml`
 - [x] Add `theme_preferences` (raw text) to `AppBuildPlan`; `AppSchemaAgent` infers `theme_config_patch` directly — no intermediate enum
-- [x] Add `ui_layout` + `sections_hint` to `AppBuildPage` for downstream schema hints
+- [x] Add `ui_layout` + `sections_hint` to the workflow-owned build planning payload for downstream schema hints
 - [x] Add `save_app_schema` auto-invoke tool to `tools.yaml` + `tools/save_app_schema.py`
 - [x] Update `handoffs.yaml` — `AppPlanAgent → AppSchemaAgent → AssemblyAgent → DownloadAgent`
 - [x] Update `context_variables.yaml` — `app_manifest`, `app_pages`, `app_theme_config_patch`, `app_shell_config`, `app_asset_manifest`, `app_schema_ready`

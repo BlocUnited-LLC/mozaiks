@@ -27,18 +27,25 @@ export function Skeleton({ rows = 3, height = 'h-4', className }) {
   );
 }
 
-export function Empty({ title = 'Nothing here yet', message, action, icon, className }) {
+export function Empty({ title = 'Nothing here yet', message, action, icon, actionAlign = 'center', className }) {
   return (
     <div className={cn('flex flex-col items-center justify-center py-12 text-center', className)}>
       {icon && <div className="mb-4 text-4xl text-muted-foreground">{icon}</div>}
       <h3 className="text-base font-semibold text-foreground mb-1">{title}</h3>
       {message && <p className="text-sm text-muted-foreground mb-4 max-w-xs">{message}</p>}
       {action && (
-        <Button
-          label={action.label}
-          variant={action.variant ?? 'primary'}
-          onClick={action.onClick}
-        />
+        <div
+          className={cn(
+            'flex w-full',
+            actionAlign === 'start' ? 'justify-start' : actionAlign === 'end' ? 'justify-end' : 'justify-center',
+          )}
+        >
+          <Button
+            label={action.label}
+            variant={action.variant ?? 'primary'}
+            onClick={action.onClick}
+          />
+        </div>
       )}
     </div>
   );

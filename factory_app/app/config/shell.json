@@ -11,23 +11,72 @@
       {
         "id": "create-app",
         "label": "Create App",
-        "path": "/apps/new",
+        "path": "/create",
         "path_by_role": {
-          "admin": "/apps/new",
-          "investor": "/apps/new",
-          "default": "/apps/new"
+          "admin": "/create",
+          "investor": "/create",
+          "default": "/create"
         },
         "variant": "primary",
         "visible": true
       }
     ]
   },
-  "footer": {
-    "links": [
-      { "label": "Legal Notice", "href": "/legal" },
-      { "label": "Terms of Service", "href": "/terms" },
-      { "label": "Cookie Policy", "href": "/cookies" }
-    ],
-    "visible": true
+  "shortcuts": {
+    "profile": ["profile", "admin", "signout"],
+    "mobile": ["create", "profile"],
+    "footer": ["legal", "terms", "cookies"],
+    "footerHideOnMobile": true,
+    "items": {}
+  },
+  "navigation": {
+    "policy": {
+      "desktop": {
+        "global": "header",
+        "local": "sidebar",
+        "footer": "visible"
+      },
+      "mobile": {
+        "global": "bottomBar",
+        "local": "sheet",
+        "footer": "hidden"
+      },
+      "maxMobileItems": 5,
+      "autoFromPages": false
+    }
+  },
+  "chrome": {
+    "defaultMode": "standard",
+    "modes": {
+      "standard": {
+        "desktop": { "header": true, "footer": true, "bottomBar": false, "localNav": true },
+        "mobile": { "header": true, "footer": false, "bottomBar": true, "localNav": "sheet" }
+      },
+      "workspace": {
+        "desktop": { "header": true, "footer": false, "bottomBar": false, "localNav": true },
+        "mobile": { "header": true, "footer": false, "bottomBar": true, "localNav": "sheet" }
+      },
+      "conversation": {
+        "desktop": { "header": true, "footer": false, "bottomBar": false, "localNav": false },
+        "mobile": { "header": true, "footer": false, "bottomBar": false, "localNav": false }
+      },
+      "focused": {
+        "desktop": { "header": true, "footer": false, "bottomBar": false, "localNav": false },
+        "mobile": { "header": true, "footer": false, "bottomBar": false, "localNav": false }
+      },
+      "immersive": {
+        "desktop": { "header": false, "footer": false, "bottomBar": false, "localNav": false },
+        "mobile": { "header": false, "footer": false, "bottomBar": false, "localNav": false }
+      },
+      "public": {
+        "desktop": { "header": true, "footer": true, "bottomBar": false, "localNav": false },
+        "mobile": { "header": true, "footer": false, "bottomBar": false, "localNav": false }
+      }
+    }
+  },
+  "notifications": {
+    "show": true,
+    "path": "/notifications",
+    "emptyText": "No unread notifications"
   }
 }

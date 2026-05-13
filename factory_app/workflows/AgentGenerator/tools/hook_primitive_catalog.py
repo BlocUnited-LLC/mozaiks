@@ -4,8 +4,9 @@ import logging
 from typing import Any, Dict, List
 
 from mozaiksai.core.workflow.ui_primitives import (
-    format_component_ui_primitive_guidance,
+    format_generated_component_ui_primitive_guidance,
 )
+from mozaiksai.core.workflow.ui_surface_taxonomy import format_ui_surface_taxonomy_guidance
 from mozaiksai.core.workflow.transition_ui_catalog import (
     format_transition_ui_catalog_guidance,
 )
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 _HEADER = "[SHIPPED UI PRIMITIVES]"
 _TARGET_AGENTS = {"ToolPlanningAgent", "ToolsManagerAgent", "UIFileGenerator"}
+_SURFACE_HEADER = "[UI SURFACE TAXONOMY]"
 _WORKFLOW_HEADER = "[WORKFLOW UI PRIMITIVE CATALOG]"
 _TRANSITION_HEADER = "[TRANSITION UI PRIMITIVE CATALOG]"
 _TRANSITION_TARGET_AGENTS = {"PackMetadataAgent", "UIFileGenerator"}
@@ -55,7 +57,7 @@ def inject_primitive_catalog(agent: Any, messages: List[Dict[str, Any]]) -> None
 
     try:
         if agent_name in _TARGET_AGENTS:
-            guidance = format_component_ui_primitive_guidance()
+            guidance = format_generated_component_ui_primitive_guidance()
             rules = [
                 "Rules:",
                 "- Use only the shipped primitive names listed here.",
@@ -70,6 +72,7 @@ def inject_primitive_catalog(agent: Any, messages: List[Dict[str, Any]]) -> None
                 rules.append("- If the workflow primitive catalog maps a surface to a shipped shared component, do not generate bespoke React for it unless a thin wrapper is explicitly required.")
 
             body = f"{guidance}\n\n" + "\n".join(rules)
+            _update_section(agent, _SURFACE_HEADER, format_ui_surface_taxonomy_guidance())
             _update_section(agent, _HEADER, body)
             _update_section(agent, _WORKFLOW_HEADER, format_workflow_ui_catalog_guidance())
 

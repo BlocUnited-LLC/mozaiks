@@ -22,7 +22,8 @@
       "requiresAuth": false,
       "order": 2,
       "meta": {
-        "title": "Create App"
+        "title": "Create App",
+        "shellMode": "focused"
       }
     }
   ],
@@ -58,7 +59,8 @@
       "transition_type": "user_choice_context",
       "ui": {
         "component": "AppTypeSelector",
-        "mode": "screen"
+        "mode": "screen",
+        "shell_mode": "focused"
       },
       "options": [
         {
@@ -84,7 +86,8 @@
       "transition_type": "user_choice_context",
       "ui": {
         "component": "CodingJourneySelector",
-        "mode": "screen"
+        "mode": "screen",
+        "shell_mode": "focused"
       },
       "options": [
         {
@@ -110,7 +113,8 @@
       "transition_type": "user_choice_context",
       "ui": {
         "component": "DatabaseSetupSelector",
-        "mode": "screen"
+        "mode": "screen",
+        "shell_mode": "focused"
       },
       "options": [
         {

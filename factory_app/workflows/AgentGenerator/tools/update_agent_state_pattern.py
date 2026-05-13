@@ -2036,10 +2036,7 @@ __all__ = ["{function_name}"]
 """
 
     react_content = f"""import {{ useState }} from 'react'
-import {{ Alert }} from '../../ui/primitives/Alert.jsx'
-import {{ Badge }} from '../../ui/primitives/Badge.jsx'
-import {{ Button }} from '../../ui/primitives/Button.jsx'
-import {{ Card }} from '../../ui/primitives/Card.jsx'
+import {{ Alert, Button, Panel, StatusPill }} from '@mozaiks/chat-ui/ui'
 
 export default function {component_name}({{
   payload = {{}},
@@ -2076,12 +2073,9 @@ export default function {component_name}({{
   }}
 
   return (
-    <Card title={{title}} variant="elevated">
+    <Panel title={{title}} action={{<StatusPill label={{statusLabel}} tone="primary" />}}>
       <div className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <Badge label={{statusLabel}} variant="info" />
-          <span className="text-xs text-muted-foreground">{{workflowName || 'GeneratedWorkflow'}}</span>
-        </div>
+        <span className="text-xs text-muted-foreground">{{workflowName || 'GeneratedWorkflow'}}</span>
         {{payload.error ? <Alert message={{payload.error}} variant="warning" /> : null}}
         <p className="text-sm text-muted-foreground">{{summary}}</p>
         <div className="space-y-2">
@@ -2121,7 +2115,7 @@ export default function {component_name}({{
           ) : null}}
         </div>
       </div>
-    </Card>
+    </Panel>
   )
 }}
 """

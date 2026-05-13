@@ -13,7 +13,7 @@
  *
  * App-business admin panels may come from a connected app backend's
  * /api/admin/config and are embedded by section-level components such as
- * UsersSection and OperationsSection.
+ * UsersSection and UsageSection when the framework mounts those panels.
  */
 
 import { useLocation } from 'react-router-dom'
@@ -31,10 +31,8 @@ import { SettingsSection }     from '../admin/pages/SettingsSection.jsx'
 // ---------------------------------------------------------------------------
 
 function AdminSectionRoute(pathname) {
-  const match = /^\/apps\/[^/]+\/(?:admin|users|usage|operations|settings)\/?$/.exec(pathname)
+  const match = /^\/apps\/[^/]+\/(?:users|usage)\/?$/.exec(pathname)
   if (!match) return 'overview'
-  const adminMatch = /^\/apps\/[^/]+\/admin\/?$/.test(pathname)
-  if (adminMatch) return 'overview'
   const suffixMatch = /^\/apps\/[^/]+\/([^/]+)\/?$/.exec(pathname)
   const raw = suffixMatch?.[1] || 'overview'
   return normalizeSection(raw, 'overview')

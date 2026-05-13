@@ -43,7 +43,7 @@ Transition declaration example:
 {
   "id": "app_type_selector",
   "transition_type": "user_choice_context",
-  "ui": { "component": "AppTypeSelector", "mode": "screen" },
+  "ui": { "component": "AppTypeSelector", "mode": "screen", "shell_mode": "focused" },
   "options": [
     { "id": "greenfield_app", "route_to": "ValueEngine", "context_variables": { "app_type": "greenfield_app" } },
     { "id": "brownfield_app", "route_to": "ExistingAppDiscovery", "context_variables": { "app_type": "brownfield_app" } }
@@ -62,6 +62,7 @@ Rules:
 - Do not use workflow sequence declarations (`workflow_sequences[]`) for entry UI.
 - Use `transitions[]` for choice/confirm/silent routing and deterministic context seeds.
 - Use `ui.component` to bind to a known shell transition screen.
+- Use `ui.shell_mode: focused` and entrypoint `meta.shellMode: focused` for setup, selection, approval, and review transitions unless the route intentionally needs normal product chrome.
 - Keep copy/images/layout in the React transition component file when the UI is
   product-specific.
 - Keep route options semantic (`id`, `route_to`, optional `context_variables`).

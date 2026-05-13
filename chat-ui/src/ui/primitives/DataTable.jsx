@@ -57,6 +57,53 @@ function getRowKey(row, rowIndex) {
   return `row:${rowIndex}`;
 }
 
+function MobileRowCard({
+  columns,
+  row,
+  rowKey,
+  selection,
+  isSelected,
+  onToggle,
+}) {
+  return (
+    <article
+      className={cn(
+        'rounded-[1.5rem] border border-border/70 bg-card/72 shadow-sm space-y-3 p-4 md:hidden',
+        selection !== 'none' && 'cursor-pointer',
+        isSelected && 'ring-2 ring-primary/25',
+      )}
+      onClick={selection !== 'none' ? () => onToggle(rowKey) : undefined}
+    >
+      {selection !== 'none' && (
+        <div className="flex items-center justify-between gap-3 border-b border-border/60 pb-3">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Selection</div>
+            <div className="mt-1 text-sm font-medium text-foreground">{isSelected ? 'Included' : 'Tap to select'}</div>
+          </div>
+          <input
+            type={selection === 'multi' ? 'checkbox' : 'radio'}
+            checked={isSelected}
+            onChange={() => onToggle(rowKey)}
+            onClick={(event) => event.stopPropagation()}
+            className="h-4 w-4"
+          />
+        </div>
+      )}
+
+      {columns.map((col) => (
+        <div key={col.key} className="space-y-1.5">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            {col.label}
+          </div>
+          <div className="text-sm text-foreground">
+            <CellContent column={col} value={row[col.key]} />
+          </div>
+        </div>
+      ))}
+    </article>
+  );
+}
+
 export function DataTable({
   id,
   columns = [],
@@ -184,63 +231,87 @@ export function DataTable({
         <Empty
           title={empty?.title ?? 'No results'}
           message={empty?.message}
+          actionAlign="start"
           action={empty?.action ? { ...empty.action, onClick: () => onAction?.(empty.action.id, []) } : undefined}
         />
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              {selection !== 'none' && <TableHead className="w-10" />}
-              {columns.map((col) => (
-                <TableHead
-                  key={col.key}
-                  style={col.width ? { width: col.width } : undefined}
-                  className={cn(col.sortable && 'cursor-pointer select-none hover:text-foreground')}
-                  onClick={col.sortable ? () => toggleSort(col.key) : undefined}
-                >
-                  {col.label}
-                  {sortKey === col.key && (
-                    <span className="ml-1 text-xs">{sortDir === 'asc' ? '↑' : '↓'}</span>
-                  )}
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+        <>
+          <div className="space-y-3 md:hidden">
             {paged.map((row, rowIdx) => {
               const rowKey = getRowKey(
                 row,
                 pagination ? ((page - 1) * page_size) + rowIdx : rowIdx,
               );
-              const isSelected = selected.has(rowKey);
               return (
-                <TableRow
+                <MobileRowCard
                   key={rowKey}
-                  data-state={isSelected ? 'selected' : undefined}
-                  className={cn(selection !== 'none' && 'cursor-pointer')}
-                  onClick={selection !== 'none' ? () => toggleRow(rowKey) : undefined}
-                >
-                  {selection !== 'none' && (
-                    <TableCell>
-                      <input
-                        type={selection === 'multi' ? 'checkbox' : 'radio'}
-                        checked={isSelected}
-                        onChange={() => toggleRow(rowKey)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="h-4 w-4"
-                      />
-                    </TableCell>
-                  )}
-                  {columns.map((col) => (
-                    <TableCell key={col.key}>
-                      <CellContent column={col} value={row[col.key]} />
-                    </TableCell>
-                  ))}
-                </TableRow>
+                  columns={columns}
+                  row={row}
+                  rowKey={rowKey}
+                  selection={selection}
+                  isSelected={selected.has(rowKey)}
+                  onToggle={toggleRow}
+                />
               );
             })}
-          </TableBody>
-        </Table>
+          </div>
+          <div className="hidden overflow-x-auto md:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  {selection !== 'none' && <TableHead className="w-10" />}
+                  {columns.map((col) => (
+                    <TableHead
+                      key={col.key}
+                      style={col.width ? { width: col.width } : undefined}
+                      className={cn(col.sortable && 'cursor-pointer select-none hover:text-foreground')}
+                      onClick={col.sortable ? () => toggleSort(col.key) : undefined}
+                    >
+                      {col.label}
+                      {sortKey === col.key && (
+                        <span className="ml-1 text-xs">{sortDir === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {paged.map((row, rowIdx) => {
+                  const rowKey = getRowKey(
+                    row,
+                    pagination ? ((page - 1) * page_size) + rowIdx : rowIdx,
+                  );
+                  const isSelected = selected.has(rowKey);
+                  return (
+                    <TableRow
+                      key={rowKey}
+                      data-state={isSelected ? 'selected' : undefined}
+                      className={cn(selection !== 'none' && 'cursor-pointer')}
+                      onClick={selection !== 'none' ? () => toggleRow(rowKey) : undefined}
+                    >
+                      {selection !== 'none' && (
+                        <TableCell>
+                          <input
+                            type={selection === 'multi' ? 'checkbox' : 'radio'}
+                            checked={isSelected}
+                            onChange={() => toggleRow(rowKey)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="h-4 w-4"
+                          />
+                        </TableCell>
+                      )}
+                      {columns.map((col) => (
+                        <TableCell key={col.key}>
+                          <CellContent column={col} value={row[col.key]} />
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </>
       )}
 
       {/* Pagination */}

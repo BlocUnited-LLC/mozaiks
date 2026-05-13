@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
+import { PageHeader, SummaryStrip } from '@mozaiks/chat-ui/ui'
 import { AdminWorkspaceLayout } from '@mozaiks/chat-ui/admin/components/AdminWorkspaceLayout.jsx'
 import {
   ActionButton,
   API_BASE,
+  ConsoleInlineEmptyState,
   StatusPill,
+  Panel,
   SurfaceCard,
   ConsoleSlideOver,
   ConsoleLoadingState,
   ConsoleErrorState,
-} from './ConsolePrimitives.jsx'
+} from '../../../components/ConsoleShared.jsx'
 
 
 const EMPTY_FORM_STATE = {
@@ -88,7 +91,7 @@ function AdapterEditorOverlay({
   const title = isEdit ? 'Edit Integration' : 'Add Integration'
   const description = isEdit
     ? 'Update the integration record and replace its saved credential when needed.'
-    : 'Register an external service for this app. Add a reusable credential later when credential saving is enabled.'
+    : 'Register a new external service for this app.'
   const submitLabel = isEdit ? 'Save integration' : 'Add integration'
   const canSubmit = Boolean(draft.service.trim())
   const credentialPlaceholder = vaultConfigured
@@ -298,6 +301,32 @@ export default function AppIntegrationsPage() {
   const vaultConfigured = Boolean(vaultAdapter?.configured)
   const savedKeysCount = connectors.filter((connector) => Boolean(connector.secret_available)).length
   const editingConnector = connectors.find((connector) => connector.service === activeService) || null
+  const summaryItems = [
+    {
+      id: 'integrations',
+      label: 'Enabled Integrations',
+      value: connectorSummary.total || connectors.length,
+      detail: 'App-level external services',
+    },
+    {
+      id: 'credentials',
+      label: 'Saved Credentials',
+      value: savedKeysCount,
+      detail: vaultConfigured ? 'Vault-backed secrets available' : 'Vault not configured yet',
+    },
+    {
+      id: 'vault',
+      label: 'Credential Vault',
+      value: vaultConfigured ? 'Ready' : 'Pending',
+      detail: vaultConfigured ? 'Reusable app secrets enabled' : 'Credentials cannot be saved yet',
+    },
+    {
+      id: 'workflow',
+      label: 'Workflow Reach',
+      value: connectors.length > 0 ? 'Connected' : 'Pending',
+      detail: 'Expose services to agents and workflows',
+    },
+  ]
 
   function closeOverlay() {
     setOverlayMode(null)
@@ -355,49 +384,66 @@ export default function AppIntegrationsPage() {
 
   return (
     <AdminWorkspaceLayout>
-      <div className="flex flex-col gap-6">
-        <SurfaceCard title="External Integrations" eyebrow="Integrations" accent>
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p className="max-w-3xl text-sm leading-7 text-muted-foreground">
-                Track third-party services connected to this app. Host wiring like models, database, auth, and backend settings live elsewhere so this page stays focused on external integrations.
-              </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <StatusPill tone="primary">{connectorSummary.total || 0} integrations</StatusPill>
-                <StatusPill tone={savedKeysCount > 0 ? 'success' : 'warning'}>{savedKeysCount} saved credentials</StatusPill>
-                <StatusPill tone={vaultConfigured ? 'success' : 'warning'}>
-                  {vaultConfigured ? 'Credential saving ready' : 'Credential saving not set up'}
-                </StatusPill>
-              </div>
-            </div>
-            <ActionButton onClick={openCreateOverlay}>
-              Add Integration
-            </ActionButton>
-          </div>
-        </SurfaceCard>
+      <div className="space-y-6">
+        <PageHeader
+          title="Integrations"
+          subtitle="Keep external services visible at the app boundary so operators know which credentials, dependencies, and workflow touchpoints are in play."
+          actions={[
+            { id: 'add', label: 'Add Integration', variant: 'primary' },
+          ]}
+          onAction={openCreateOverlay}
+        />
 
-        {connectors.length === 0 ? (
-          <SurfaceCard title="No External Integrations Yet" eyebrow="Integrations">
-            <p className="text-sm leading-7 text-muted-foreground">
-              No app-level third-party integrations have been recorded yet. Add one when this app depends on a service like Stripe, HubSpot, Slack, or another external provider.
-            </p>
-            <div className="mt-4">
-              <ActionButton onClick={openCreateOverlay}>
-              Add Integration
-              </ActionButton>
-            </div>
-          </SurfaceCard>
-        ) : (
-          <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
-            {connectors.map((connector) => (
-              <ConnectorCard
-                key={connector.service}
-                connector={connector}
-                onEdit={openEditOverlay}
+        <SummaryStrip items={summaryItems} />
+
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+          <Panel
+            eyebrow="Registry"
+            title="Enabled and disabled integrations"
+            subtitle="Track which services are registered for this app and whether their reusable credentials are already stored."
+          >
+            {connectors.length === 0 ? (
+              <ConsoleInlineEmptyState
+                title="No integrations registered yet"
+                description="Add a service like Stripe, HubSpot, Slack, or another external provider when this app depends on it."
               />
-            ))}
-          </div>
-        )}
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2">
+                {connectors.map((connector) => (
+                  <ConnectorCard
+                    key={connector.service}
+                    connector={connector}
+                    onEdit={openEditOverlay}
+                  />
+                ))}
+              </div>
+            )}
+          </Panel>
+
+          <Panel
+            eyebrow="Consumption"
+            title="Used by agents and workflows"
+            subtitle="Make the operational impact of each integration explicit before deeper build or runtime work begins."
+          >
+            <div className="space-y-3">
+              {connectors.length > 0 ? connectors.map((connector) => (
+                <div key={`${connector.service}:usage`} className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="font-semibold text-foreground">{connector.display_name || humanize(connector.service)}</div>
+                    <SavedSecretPill connector={connector} />
+                  </div>
+                  <div className="mt-2 text-sm leading-7 text-muted-foreground">
+                    Available to app-level workflows, agents, and operator tooling once the connector is registered for this app.
+                  </div>
+                </div>
+              )) : (
+                <div className="rounded-[1.5rem] border border-dashed border-border/70 bg-background/55 px-4 py-6 text-sm text-muted-foreground">
+                  No workflow-linked integrations have been recorded yet.
+                </div>
+              )}
+            </div>
+          </Panel>
+        </div>
 
         <AdapterEditorOverlay
           open={Boolean(overlayMode)}

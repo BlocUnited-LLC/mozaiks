@@ -5,7 +5,8 @@ wrapper. Persistent storage is therefore a first-class runtime contract.
 
 ## Core Rule
 
-- Durable persistence is required for the workspace console/build surfaces,
+- Durable persistence is required for the workspace console and the
+  workflow-owned build sequence,
   `factory_app`, multi-stage build workflows, refinement, and revision history.
 - In-memory execution is only acceptable for smoke tests, demos, or simple
   non-builder workflows that do not need upstream artifacts.
