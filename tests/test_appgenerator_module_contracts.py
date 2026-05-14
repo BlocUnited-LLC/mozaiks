@@ -168,8 +168,8 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
     assert "self-contained FastAPI" in source
     assert "`app/app.json` `admins`" in source
     assert "`platform/config/admin.json`" not in source
-    assert "panels: []" in source  # admin.yaml default is empty panels
-    assert "do not invent admin panels" in source
+    assert "panels: []" in source  # emitted when module has no list actions
+    assert "Derive admin panels from the module" in source
     assert "structured-output-first contract" in source
     assert "app_validation_strategy" in source
     assert "validation_status" in source

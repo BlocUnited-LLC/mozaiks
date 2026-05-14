@@ -30,7 +30,8 @@ def test_admin_portal_embeds_app_admin_panels() -> None:
     assert "AdminWorkspaceLayout" in source
     assert "AdminOverviewPanel" in source
     assert "AdminSectionRoute" in source
-    assert "^\\/apps\\/[^/]+\\/(?:users|usage)\\/?$" in source
+    # Routing now handles all canonical sections, not just users/usage
+    assert "^\\/apps\\/[^/]+\\/([^/]+)\\/?$" in source
     assert "raw === 'activity'" not in source
     assert "raw === 'audit'" not in source
     assert "raw === 'logs'" not in source

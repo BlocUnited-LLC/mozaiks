@@ -161,20 +161,20 @@ def test_admin_workspace_layout_links_console_and_hosting_sections() -> None:
     assert "Hosting" in source
     assert "Usage" in source
     assert "Integrations" in source
-    assert "buildAppPath(appId, item.suffix)" in source
+    # Nav is now API-driven: buildAppNavItems derives items from adminSections
+    assert "buildAppNavItems" in source
+    assert "APP_SECTION_META" in source
+    assert "APP_SECTION_ORDER" in source
+    assert "adminSections[section]" in source
+    # Workspace nav items remain hardcoded
     assert "path: '/apps'" in source
     assert "path: '/usage'" in source
     assert "path: '/health'" in source
     assert "path: '/billing'" in source
     assert "path: '/hosting'" in source
+    # Workspace nav does not include app-level section paths
     assert "path: '/operations'" not in source
     assert "path: '/settings'" not in source
-    assert "suffix: '/users'" in source
-    assert "suffix: '/health'" in source
-    assert "suffix: '/integrations'" in source
-    assert "suffix: '/usage'" in source
-    assert "suffix: '/billing'" in source
-    assert "suffix: '/hosting'" in source
     assert "suffix: '/build'" not in source
     assert "suffix: '/deploy'" not in source
     assert "suffix: '/admin'" not in source
