@@ -89,9 +89,9 @@ nav:
       - Configuration: user-configuration.md
   - Guides:
       - Add a Module: guides/adding-modules/01-overview.md
+      - Add a Page: guides/adding-pages/01-overview.md
       - Add Workflows: guides/adding-workflows/01-overview.md
       - App Shell & Branding: guides/custom-brand-integration/01-overview.md
-      - UI Quality Checklist: guides/ui-and-brand/ui-quality-checklist.md
   - Architecture:
       - Overview: architecture/index.md
       - Foundations:
@@ -179,6 +179,7 @@ nav:
               - Workflow UI Primitive Catalog: architecture/frontend/ui-system/workflow-ui-primitive-catalog.md
               - Transition UI Primitives: architecture/frontend/ui-system/transition-ui-primitives.md
               - UI System Quality Gates: architecture/frontend/ui-system/ui-system-quality-gates.md
+              - UI Quality Checklist: guides/ui-and-brand/ui-quality-checklist.md
       - Other:
           - Keycloak Auth: architecture/keycloak-auth.md
           - Mobile Client Contract: architecture/mobile-client-contract.md
