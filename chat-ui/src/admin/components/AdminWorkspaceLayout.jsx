@@ -2,12 +2,15 @@ import { useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   RiAppsFill,
+  RiCustomerServiceFill,
   RiDashboardFill,
   RiFileList3Fill,
+  RiHistoryFill,
   RiMoneyDollarCircleFill,
   RiPlugLine,
   RiPulseLine,
   RiServerFill,
+  RiSettings3Fill,
   RiUser3Fill,
 } from 'react-icons/ri'
 
@@ -49,57 +52,50 @@ const WORKSPACE_NAV_ITEMS = [
   },
 ]
 
-const APP_NAV_ITEMS = [
-  {
-    id: 'overview',
-    label: 'Overview',
-    suffix: '/overview',
-    icon: RiDashboardFill,
-    exact: true,
-  },
-  {
-    id: 'health',
-    label: 'Health',
-    suffix: '/health',
-    icon: RiPulseLine,
-    exact: true,
-  },
-  {
-    id: 'users',
-    label: 'Users',
-    suffix: '/users',
-    icon: RiUser3Fill,
-    exact: true,
-  },
-  {
-    id: 'integrations',
-    label: 'Integrations',
-    suffix: '/integrations',
-    icon: RiPlugLine,
-    exact: true,
-  },
-  {
-    id: 'usage',
-    label: 'Usage',
-    suffix: '/usage',
-    icon: RiFileList3Fill,
-    exact: true,
-  },
-  {
-    id: 'billing',
-    label: 'Billing',
-    suffix: '/billing',
-    icon: RiMoneyDollarCircleFill,
-    exact: true,
-  },
-  {
-    id: 'hosting',
-    label: 'Hosting',
-    suffix: '/hosting',
-    icon: RiServerFill,
-    exact: true,
-  },
+// Canonical section metadata — mirrors ADMIN_SECTION_ORDER in contract.py
+const APP_SECTION_META = {
+  overview:     { label: 'Overview',     icon: RiDashboardFill },
+  users:        { label: 'Users',        icon: RiUser3Fill },
+  billing:      { label: 'Billing',      icon: RiMoneyDollarCircleFill },
+  usage:        { label: 'Usage',        icon: RiFileList3Fill },
+  activity:     { label: 'Activity',     icon: RiHistoryFill },
+  operations:   { label: 'Operations',   icon: RiServerFill },
+  settings:     { label: 'Settings',     icon: RiSettings3Fill },
+  integrations: { label: 'Integrations', icon: RiPlugLine },
+  support:      { label: 'Support',      icon: RiCustomerServiceFill },
+}
+
+const APP_SECTION_ORDER = [
+  'overview', 'users', 'billing', 'usage', 'activity',
+  'operations', 'settings', 'integrations', 'support',
 ]
+
+function buildAppNavItems(adminSections, appId) {
+  if (!adminSections) {
+    // Minimal fallback before the API responds
+    return ['overview', 'users', 'usage'].map((section) => ({
+      id: section,
+      label: APP_SECTION_META[section].label,
+      path: buildAppPath(appId, `/${section}`),
+      icon: APP_SECTION_META[section].icon,
+      exact: true,
+    }))
+  }
+
+  return APP_SECTION_ORDER
+    .filter((section) => adminSections[section]?.enabled !== false)
+    .map((section) => {
+      const apiMeta = adminSections[section] || {}
+      const defaults = APP_SECTION_META[section] || { label: section, icon: RiDashboardFill }
+      return {
+        id: section,
+        label: apiMeta.label || defaults.label,
+        path: buildAppPath(appId, `/${section}`),
+        icon: defaults.icon,
+        exact: true,
+      }
+    })
+}
 
 function resolveAppId(pathname) {
   const match = /^\/apps\/([^/]+)/.exec(pathname)
@@ -111,25 +107,11 @@ function buildAppPath(appId, suffix) {
   return `/apps/${encodeURIComponent(appId)}${suffix}`
 }
 
-function buildNavGroups(_adminSections = null, appId = null) {
+function buildNavGroups(adminSections = null, appId = null) {
   if (appId) {
-    return [
-      {
-        label: null,
-        items: APP_NAV_ITEMS.map((item) => ({
-          ...item,
-          path: buildAppPath(appId, item.suffix),
-        })),
-      },
-    ]
+    return [{ label: null, items: buildAppNavItems(adminSections, appId) }]
   }
-
-  return [
-    {
-      label: null,
-      items: WORKSPACE_NAV_ITEMS,
-    },
-  ]
+  return [{ label: null, items: WORKSPACE_NAV_ITEMS }]
 }
 
 

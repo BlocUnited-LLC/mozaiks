@@ -156,7 +156,63 @@ result = await backend_request(
 
 ## Admin Panel
 
-Add `contracts/admin.yaml` to surface module data inside the unified `/admin` shell:
+Every generated module automatically receives an `contracts/admin.yaml` with panels
+derived from its declared actions. You can also write or extend it by hand.
+
+**Derivation rules (AppGenerator)**:
+
+| Action pattern | Panel type | Default section |
+|----------------|-----------|-----------------|
+| `list_*`, `search_*` (collection) | `ResourceTable` / `DataTable` | `overview` |
+| `*_stats`, `*_summary`, `*_metrics` | `SummaryStrip` | same as record panel |
+| `approve_*`, `reject_*`, `publish_*` | row action on primary table | `operations` |
+
+Section is inferred from the module's entity domain:
+- billing / subscription / payment → `billing`
+- user / account / member / profile → `users`
+- request / queue / approval / job → `operations`
+- usage / quota / limit / metric → `usage`
+- setting / preference / config → `settings`
+- everything else → `overview`
+
+**Example** — a `hosting_requests` module with `list_requests` and `get_summary` actions
+produces:
+
+```yaml
+schema_version: mozaiks.admin.v2
+panels:
+  - id: hosting_requests.summary
+    label: Hosting Overview
+    section: operations
+    order: 1
+    renderer: schema
+    layout: full-width
+    sections:
+      - id: summary-strip
+        primitive: SummaryStrip
+        config:
+          api_endpoint: /api/modules/hosting_requests/get_summary
+          items:
+            - { label: Pending, value_key: pending_count }
+
+  - id: hosting_requests.requests
+    label: Hosting Requests
+    section: operations
+    order: 2
+    renderer: schema
+    layout: full-width
+    sections:
+      - id: requests-table
+        primitive: ResourceTable
+        config:
+          api_endpoint: /api/modules/hosting_requests/list_requests
+          columns:
+            - { key: app_name, label: App }
+            - { key: status,   label: Status, type: status }
+            - { key: requested_at, label: Requested }
+```
+
+**To add a panel manually** when the generator didn't derive one:
 
 ```yaml
 schema_version: mozaiks.admin.v2
@@ -164,6 +220,7 @@ panels:
   - id: {name}.overview
     label: {Display Name}
     section: overview
+    order: 10
     renderer: schema
     layout: full-width
     sections:
@@ -175,8 +232,11 @@ panels:
             - { key: name, label: Name }
 ```
 
-Valid section values: `overview`, `users`, `billing`, `usage`, `activity`,
+Valid `section` values: `overview`, `users`, `billing`, `usage`, `activity`,
 `operations`, `settings`, `integrations`, `support`.
+
+The admin runtime auto-discovers `contracts/admin.yaml` at startup — no registration
+step needed. Panels appear immediately inside `/admin` under the declared section.
 
 ## Read Next
 

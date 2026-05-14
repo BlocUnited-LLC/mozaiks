@@ -31,11 +31,9 @@ import { SettingsSection }     from '../admin/pages/SettingsSection.jsx'
 // ---------------------------------------------------------------------------
 
 function AdminSectionRoute(pathname) {
-  const match = /^\/apps\/[^/]+\/(?:users|usage)\/?$/.exec(pathname)
-  if (!match) return 'overview'
   const suffixMatch = /^\/apps\/[^/]+\/([^/]+)\/?$/.exec(pathname)
-  const raw = suffixMatch?.[1] || 'overview'
-  return normalizeSection(raw, 'overview')
+  if (!suffixMatch) return 'overview'
+  return normalizeSection(suffixMatch[1], 'overview')
 }
 
 // ---------------------------------------------------------------------------
@@ -43,7 +41,8 @@ function AdminSectionRoute(pathname) {
 // ---------------------------------------------------------------------------
 
 const KNOWN_SECTIONS = new Set([
-  'overview', 'users', 'usage', 'operations', 'settings',
+  'overview', 'users', 'billing', 'usage', 'activity',
+  'operations', 'settings', 'integrations', 'support',
 ])
 
 function normalizeSection(value, fallback) {
@@ -121,6 +120,11 @@ export default function AdminPage() {
   const runtimePanels       = sectionPanels(allRuntimePanels, activeSection)
   const extensionPanels     = sectionPanels(allExtensionPanels, activeSection)
 
+  const SECTION_LABELS = {
+    billing: 'Billing', activity: 'Activity',
+    integrations: 'Integrations', support: 'Support',
+  }
+
   let content
   switch (activeSection) {
     case 'users':
@@ -134,6 +138,19 @@ export default function AdminPage() {
       break
     case 'settings':
       content = <SettingsSection extensionPanels={extensionPanels} />
+      break
+    case 'billing':
+    case 'activity':
+    case 'integrations':
+    case 'support':
+      content = (
+        <div className="space-y-4">
+          <h1 className="text-lg font-semibold text-foreground">
+            {SECTION_LABELS[activeSection]}
+          </h1>
+          <AdminExtensionPanels panels={extensionPanels} />
+        </div>
+      )
       break
     default:
       content = (
