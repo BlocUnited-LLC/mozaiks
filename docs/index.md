@@ -37,17 +37,6 @@ The goal is not to generate a throwaway demo. Mozaiks stages production-shaped
 artifacts, validates them against strict contracts, and keeps runtime concerns
 separate from builder workflows.
 
-## Why It Exists
-
-Most AI app builders optimize for one layer: a fast UI mockup, a chat agent, or
-raw code edits. Mozaiks is designed around the full product loop:
-
-- turn product intent into typed planning artifacts
-- generate deterministic app files instead of ad hoc code dumps
-- use shared UI primitives and brand tokens for consistent frontend output
-- keep generated artifacts staged until they pass validation
-- support refinement without rewriting the whole app from scratch
-
 ---
 
 ## 🎨 See It In Action
