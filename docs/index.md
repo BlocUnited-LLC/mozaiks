@@ -11,28 +11,48 @@
 
 </div>
 
-> **Note**: This is the unified Mozaiks stack. BlocUnited offers a managed platform with app generation tools at [mozaiks.ai](https://mozaiks.ai), but you're welcome to self-host and build everything yourself.
+> **Note**: Mozaiks is open source. BlocUnited offers the managed product at
+> [mozaiks.ai](https://mozaiks.ai), but you can self-host the framework and run
+> the builder locally.
 
-> **Start Here**: New to Mozaiks? Start with the [Getting Started guide](getting-started.md), then use [User Configuration](user-configuration.md) for the exact env/runtime knobs, and [Install Modes](install-modes.md) if you need to choose between the builder path and the lower-level framework path.
+> **Start Here**: Install with `pip install mozaiks`, run
+> `mozaiks quickstart --dir ./my-first-mozaiks-app`, then open the Console at
+> `/apps`. See [Getting Started](getting-started.md).
 
 > **Maintainers**: Use [Releasing](releasing.md) for the tag-driven package publish flow.
 
 ---
 
-## 🎯 What is mozaiksai?
+## What Is Mozaiks?
 
-**mozaiksai Runtime** is a production-ready orchestration engine that transforms AG2 (Microsoft Autogen) into an app-grade platform with:
+Mozaiks is an open-source AI app factory for building, running, and iterating on
+AI-native software products.
 
-- ✅ **Event-Driven Architecture** -> Runtime, app, workflow, UI, and hosted events stay separated by contract
-- ✅ **Real-Time WebSocket Transport** -> Live streaming to React frontends
-- ✅ **Persistent State Management** -> Resume conversations exactly where they left off
-- ✅ **Multi-Tenant Isolation** -> app-scoped data and execution contexts
-- ✅ **Dynamic UI Integration** -> Agents can invoke React components during workflows
-- ✅ **Declarative Workflows** -> JSON manifests, no code changes needed
-- ✅ **Mid-Flight Journeys (MFJ)** -> Workflow-local fork/join with deterministic parent resume beyond base AG2 handoffs
-- ✅ **Comprehensive Observability** -> Built-in metrics, logging, and token tracking
+It combines four pieces that usually live in separate tools:
 
-**mozaiksai = AG2 + Production Infrastructure + Layered Event Contracts**
+- **Mozaiks Console** for creating apps, continuing builds, and managing app
+  workspaces.
+- **AG2 workflow orchestration** for multi-agent planning, tool use, human
+  review, and mid-flight decomposition.
+- **A generated app workspace contract** with modules, pages, workflows,
+  config, and brand assets.
+- **Production-readiness gates** for generated UI, workflow artifacts, package
+  assembly, and runtime validation.
+
+The goal is not to generate a throwaway demo. Mozaiks stages production-shaped
+artifacts, validates them against strict contracts, and keeps runtime concerns
+separate from builder workflows.
+
+## Why It Exists
+
+Most AI app builders optimize for one layer: a fast UI mockup, a chat agent, or
+raw code edits. Mozaiks is designed around the full product loop:
+
+- turn product intent into typed planning artifacts
+- generate deterministic app files instead of ad hoc code dumps
+- use shared UI primitives and brand tokens for consistent frontend output
+- keep generated artifacts staged until they pass validation
+- support refinement without rewriting the whole app from scratch
 
 ---
 
@@ -71,7 +91,7 @@ Choose the path that matches what you need to do.
 
     ---
 
-    Clone the repo, configure the environment, and boot Studio through the builder quickstart path.
+    Install the package, configure one model key and MongoDB, then open the Console.
 
     [:octicons-arrow-right-24: Getting Started](getting-started.md)
 
