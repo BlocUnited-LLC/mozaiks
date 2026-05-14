@@ -209,6 +209,6 @@ export {
   TransitionChoiceCard,
   TransitionChoicePanel,
   useTransitionChoiceMotion,
-} from './transitionPrimitives.js';
+} from './transitionPrimitives.jsx';
 
 export default platform;
