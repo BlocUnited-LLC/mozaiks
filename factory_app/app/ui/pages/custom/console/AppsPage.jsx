@@ -285,7 +285,9 @@ export default function AppsPage() {
   }
 
   function handleHeaderAction(actionId) {
-    if (actionId === 'import') {
+    if (actionId === 'create') {
+      navigate('/create')
+    } else if (actionId === 'import') {
       setImportOpen(true)
     }
   }
@@ -300,6 +302,7 @@ export default function AppsPage() {
           title="Apps"
           subtitle="Manage your apps, continue builds, and open app consoles."
           actions={[
+            { id: 'create', label: 'Create App' },
             { id: 'import', label: 'Import App', variant: 'outline' },
           ]}
           onAction={handleHeaderAction}
