@@ -88,6 +88,7 @@ nav:
       - Quickstart: getting-started.md
       - Configuration: user-configuration.md
   - Guides:
+      - Add a Module: guides/adding-modules/01-overview.md
       - Add Workflows: guides/adding-workflows/01-overview.md
       - App Shell & Branding: guides/custom-brand-integration/01-overview.md
       - UI Quality Checklist: guides/ui-and-brand/ui-quality-checklist.md
