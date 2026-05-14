@@ -1,60 +1,73 @@
 # Add Workflows
 
-This guide is the public starting point for adding a new workflow in the current
-Mozaiks architecture.
+Most users should start in the Console with `Create App`. Add a workflow
+directly only when you are extending Mozaiks or adding an app-owned workflow.
 
-## Choose The Owning Root
+## Workflow Authoring Model
 
-Put the workflow in the root that owns its behavior.
+A Mozaiks workflow is a deterministic state machine around AG2 agents.
 
-### Shared Builder Workflow
+Before writing files, define:
 
-Use `factory_app/workflows/{WorkflowName}/` when the workflow belongs to the
-shared generation/control-plane layer.
+- the outcome the workflow must produce
+- the agents needed to interview, reason, and generate structured output
+- the data contracts that must be persisted or shown to the user
+- the UI artifacts, if any, that should appear in the chat stream
+- whether the workflow is standalone or triggered mid-flight by a parent workflow
 
-Examples:
+## Choose The Owner
 
-- App generation
-- workflow generation
-- shared create/refinement journeys
+Use `factory_app/workflows/{WorkflowName}/` for shared builder workflows such as
+app generation, workflow generation, and refinement journeys.
 
-### App-Owned Workflow
-
-Use `app/workflows/{WorkflowName}/` when the workflow belongs to one app
-workspace.
-
-Examples:
-
-- app-specific copilots
-- product-local review or drafting flows
-- event-triggered follow-up workflows for one app
+Use `app/workflows/{WorkflowName}/` for workflows that belong to one generated
+app workspace.
 
 ## Canonical File Set
 
-Each workflow should include the canonical YAML contract files:
+```text
+workflows/{WorkflowName}/
+├── orchestrator.yaml
+├── context_variables.yaml
+├── agents.yaml
+├── structured_outputs.yaml
+├── tools.yaml
+├── handoffs.yaml
+├── ui_config.yaml
+├── hooks.yaml
+├── extended_orchestration/
+│   └── mfj_extension.json
+├── tools/
+│   ├── __init__.py
+│   └── artifact_tools.py
+└── ui/{WorkflowName}/
+    └── components/
+```
 
-- `orchestrator.yaml`
-- `agents.yaml`
-- `handoffs.yaml`
-- `context_variables.yaml`
-- `structured_outputs.yaml`
-- `tools.yaml`
-- `ui_config.yaml`
-- `hooks.yaml`
+`hooks.yaml`, `extended_orchestration/`, workflow tools, and workflow UI are
+included only when the workflow needs them.
 
-Optional workflow-local files:
+## Authoring Order
 
-- `tools/*.py`
-- `ui/*`
-- `extended_orchestration/mfj_extension.json`
+1. Define `orchestrator.yaml`: entry agent, startup mode, turn limits, and human review.
+2. Define `context_variables.yaml`: shared state and parent-injected values.
+3. Define `structured_outputs.yaml`: strict output models for generator agents.
+4. Define `agents.yaml`: conversational agents gather context; generator agents emit typed output.
+5. Define `tools.yaml`: bind dumb tools and optional UI emission.
+6. Define `handoffs.yaml`: deterministic routing between agents and the user.
+7. Define `ui_config.yaml`: list visual agents that should stream to the UI.
 
-## Core Rules
+## Tool Rule
 
-- Keep tools simple; let agents do the reasoning.
-- Put workflow triggers in `orchestrator.yaml`.
-- Use structured outputs when the workflow needs typed downstream behavior.
-- Keep reusable framework behavior in framework code, not copied into workflow
-  folders.
+Tools stay dumb. Agents reason through prompts and structured outputs. Tool code
+should read structured output, persist or transform it deterministically, and
+emit UI events when needed.
+
+## UI Rule
+
+Use workflow UI components only for artifacts that belong in the chat stream.
+Persistent app pages belong under the generated app workspace, not inside a
+workflow UI folder.
 
 ## Read Next
 

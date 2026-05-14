@@ -83,7 +83,8 @@ raw code edits. Mozaiks is designed around the full product loop:
 
 ## Start Here
 
-Choose the path that matches what you need to do.
+Start with the Console. After install, `Create App` opens the builder workflow
+sequence and walks you through app planning, generation, review, and refinement.
 
 <div class="grid cards" markdown>
 
@@ -91,7 +92,7 @@ Choose the path that matches what you need to do.
 
     ---
 
-    Install the package, configure one model key and MongoDB, then open the Console.
+    Install the package, open the Console, and click `Create App`.
 
     [:octicons-arrow-right-24: Getting Started](getting-started.md)
 
@@ -99,17 +100,17 @@ Choose the path that matches what you need to do.
 
     ---
 
-    See the minimum required env for local building, plus the optional vault and deployment settings.
+    Set one model key and MongoDB. Add vault or deployment settings only when needed.
 
     [:octicons-arrow-right-24: User Configuration](user-configuration.md)
 
--   :material-source-branch: **Choose Your Install Path**
+-   :material-source-branch: **Develop Mozaiks Itself**
 
     ---
 
-    Decide whether you are building an app through Studio or working on the framework internals.
+    Use a source checkout when you need editable framework, workflow, or Console code.
 
-    [:octicons-arrow-right-24: Install Modes](install-modes.md)
+    [:octicons-arrow-right-24: Local Setup](local-setup.md)
 
 -   :material-robot-outline: **Use an AI Coding Agent**
 
@@ -123,7 +124,7 @@ Choose the path that matches what you need to do.
 
     ---
 
-    Add agents, tools, handoffs, UI tools, and testing to a new workflow under `factory_app/workflows/`.
+    Add a deterministic AG2 workflow only when extending Mozaiks or an app workspace.
 
     [:octicons-arrow-right-24: Workflow Guide](guides/adding-workflows/01-overview.md)
 

@@ -86,9 +86,8 @@ nav:
   - Home: index.md
   - Start Here:
       - Getting Started: getting-started.md
-      - Local Setup: local-setup.md
       - User Configuration: user-configuration.md
-      - Install Modes: install-modes.md
+      - Local Setup: local-setup.md
   - Guides:
     - Add Workflows: guides/adding-workflows/01-overview.md
     - App Shell And Branding: guides/custom-brand-integration/01-overview.md
