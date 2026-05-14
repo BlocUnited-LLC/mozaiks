@@ -2,9 +2,11 @@
 
 <div align="center">
 
+<img src="https://raw.githubusercontent.com/BlocUnited-LLC/mozaiks/main/docs/assets/mozaik_icon.png" alt="Mozaiks Icon" width="80"/>
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BlocUnited-LLC/mozaiks/main/docs/assets/mozaik.png">
-  <img src="https://raw.githubusercontent.com/BlocUnited-LLC/mozaiks/main/docs/assets/mozaik-light.png" alt="Mozaiks Logo" width="180"/>
+  <img src="https://raw.githubusercontent.com/BlocUnited-LLC/mozaiks/main/docs/assets/mozaik-light.png" alt="Mozaiks" width="180"/>
 </picture>
 
 [![Release](https://img.shields.io/github/v/release/BlocUnited-LLC/mozaiks)](https://github.com/BlocUnited-LLC/mozaiks/releases)
