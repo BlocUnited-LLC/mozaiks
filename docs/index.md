@@ -11,15 +11,9 @@
 
 </div>
 
-> **Note**: Mozaiks is open source. BlocUnited offers the managed product at
+> **Mozaiks is open source.** BlocUnited offers the managed product at
 > [mozaiks.ai](https://mozaiks.ai), but you can self-host the framework and run
 > the builder locally.
-
-> **Start Here**: Install with `pip install mozaiks`, run
-> `mozaiks quickstart --dir ./mozaiks-workspace`, then open the Console at
-> `/apps`. See [Getting Started](getting-started.md).
-
-> **Maintainers**: Use [Releasing](releasing.md) for the tag-driven package publish flow.
 
 ---
 
@@ -81,75 +75,51 @@ raw code edits. Mozaiks is designed around the full product loop:
 
 ---
 
-## Start Here
+## Where to Start
 
-Start with the Console. After install, `Create App` opens the builder workflow
-sequence and walks you through app planning, generation, review, and refinement.
+Install Mozaiks, open the Console, and click `Create App`. The builder walks you
+through planning, generation, review, and refinement inside the chat experience.
 
 <div class="grid cards" markdown>
 
--   :material-rocket-launch: **Run Mozaiks Locally**
+-   :material-rocket-launch: **Install and Create Your First App**
 
     ---
 
-    Install the package, open the Console, and click `Create App`.
+    Install Mozaiks, open the Console, and build your first app in minutes.
 
-    [:octicons-arrow-right-24: Getting Started](getting-started.md)
+    [:octicons-arrow-right-24: Get Started](getting-started.md)
 
--   :material-tune-variant: **Know What To Configure**
-
-    ---
-
-    Set one model key and MongoDB. Add vault or deployment settings only when needed.
-
-    [:octicons-arrow-right-24: User Configuration](user-configuration.md)
-
--   :material-source-branch: **Develop Mozaiks Itself**
+-   :material-tune-variant: **Configure Your Environment**
 
     ---
 
-    Use a source checkout when you need editable framework, workflow, or Console code.
+    Set one model key and MongoDB. Everything else is optional until you need it.
 
-    [:octicons-arrow-right-24: Local Setup](local-setup.md)
+    [:octicons-arrow-right-24: Configuration](user-configuration.md)
 
--   :material-robot-outline: **Use an AI Coding Agent**
-
-    ---
-
-    Hand setup or feature work to Claude Code, Cursor, or Copilot with the repo-aware bootstrap prompt.
-
-    [:octicons-arrow-right-24: Agent Bootstrap Prompt](agent-bootstrap-prompt.md)
-
--   :material-sitemap: **Build a Workflow**
+-   :material-sitemap: **Add a Workflow to Your App**
 
     ---
 
-    Add a deterministic AG2 workflow only when extending Mozaiks or an app workspace.
+    Extend an app workspace with a custom AG2 workflow.
 
-    [:octicons-arrow-right-24: Workflow Guide](guides/adding-workflows/01-overview.md)
+    [:octicons-arrow-right-24: Add Workflows](guides/adding-workflows/01-overview.md)
 
--   :material-view-dashboard-outline: **Configure the App Shell**
+-   :material-view-dashboard-outline: **Customize Your App Shell**
 
     ---
 
-    Customize branding, layout chrome, auth, and shell behavior without editing core runtime code.
+    Change branding, layout chrome, auth, and shell behavior without touching core runtime code.
 
     [:octicons-arrow-right-24: App Shell & Branding](guides/custom-brand-integration/01-overview.md)
 
--   :material-book-open-page-variant: **Understand the Architecture**
+-   :material-source-branch: **Contributing**
 
     ---
 
-    Learn how the runtime, event bus, workflows, modules, and app bundle fit together.
+    Working on the framework, factory workflows, or Console? Start here.
 
-    [:octicons-arrow-right-24: Architecture Overview](architecture/index.md)
-
--   :material-file-document-multiple-outline: **Open Advanced References**
-
-    ---
-
-    Read deep dives, runtime notes, and lower-level implementation guidance.
-
-    [:octicons-arrow-right-24: Reference](reference/index.md)
+    [:octicons-arrow-right-24: Contributing](contributing/index.md)
 
 </div>

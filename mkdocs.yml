@@ -84,20 +84,20 @@ validation:
 
 nav:
   - Home: index.md
-  - Start Here:
-      - Getting Started: getting-started.md
-      - User Configuration: user-configuration.md
-      - Local Setup: local-setup.md
+  - Get Started:
+      - Quickstart: getting-started.md
+      - Configuration: user-configuration.md
   - Guides:
-    - Add Workflows: guides/adding-workflows/01-overview.md
-    - App Shell And Branding: guides/custom-brand-integration/01-overview.md
-    - Generated UI Quality: architecture/frontend/ui-system/ui-system-quality-gates.md
-    - UI Quality Checklist: guides/ui-and-brand/ui-quality-checklist.md
-  - Architecture:
-      - Overview: architecture/index.md
-      - Core Concepts:
-          - Foundations Overview: architecture/foundations/overview.md
+      - Add Workflows: guides/adding-workflows/01-overview.md
+      - App Shell & Branding: guides/custom-brand-integration/01-overview.md
+      - UI Quality Checklist: guides/ui-and-brand/ui-quality-checklist.md
+  - Contributing:
+      - Overview: contributing/index.md
+      - Local Dev Setup: local-setup.md
+      - Architecture:
+          - Overview: architecture/index.md
           - Foundations:
+              - Overview: architecture/foundations/overview.md
               - Distribution and Workspace Model: architecture/foundations/distribution-and-workspace-model.md
               - Platform Terminology: architecture/foundations/platform-terminology-and-brand-language.md
               - Platform Information Architecture: architecture/foundations/platform-information-architecture.md
@@ -156,39 +156,38 @@ nav:
               - Event Contracts: architecture/foundations/events-and-data/event-contracts.md
               - Persistence and Artifact Storage: architecture/foundations/events-and-data/persistence-and-artifact-storage.md
               - Learning Loop Architecture: architecture/foundations/events-and-data/learning-loop-architecture.md
-      - Builder and Generation:
-          - App Builder Architecture: architecture/builder/app-builder-architecture.md
-          - App Planning Contracts: architecture/builder/app-planning-contracts.md
-          - Builder Execution Model: architecture/builder/builder-execution-model.md
-          - End-to-End Build Lifecycle: architecture/builder/end-to-end-build-lifecycle.md
-          - Console Product Model: architecture/builder/console-product-model.md
-          - Database Intent and Revision: architecture/builder/database-intent-and-revision-contract.md
-          - AppGenerator Output Assembly: architecture/builder/appgenerator-output-assembly-contract.md
-          - AgentGenerator Output Assembly: architecture/builder/agentgenerator-output-assembly-contract.md
-          - App-Backend Admin Contract: architecture/builder/app-backend-admin-contract.md
-      - Keycloak Auth: architecture/keycloak-auth.md
-      - Mobile Client Contract: architecture/mobile-client-contract.md
-      - Orchestration and Decomposition: architecture/orchestration-and-decomposition.md
-      - Frontend UI:
-          - Overview: architecture/frontend/index.md
-          - Chat UI Runtime:
-              - UI Surface Model: architecture/frontend/chat-ui/ui-surface-model.md
-              - Conversation Modes: architecture/frontend/chat-ui/conversation-modes.md
-              - Layout Modes: architecture/frontend/chat-ui/layout-modes.md
-              - Shell System: architecture/frontend/chat-ui/shell-system.md
-              - Tool Event Lifecycle: architecture/frontend/chat-ui/tool-event-lifecycle.md
-              - Admin Observability Contract: architecture/frontend/chat-ui/admin-observability-contract.md
-              - AG-UI Comparison: architecture/frontend/chat-ui/ag-ui-copilotkit-comparison.md
-          - Generated UI System:
-              - Generated Frontend Surface Contract: architecture/frontend/ui-system/generated-frontend-surface-contract.md
-              - Workflow UI Primitive Catalog: architecture/frontend/ui-system/workflow-ui-primitive-catalog.md
-              - Transition UI Primitives: architecture/frontend/ui-system/transition-ui-primitives.md
-              - UI System Quality Gates: architecture/frontend/ui-system/ui-system-quality-gates.md
-  - Reference:
-      - Overview: reference/index.md
+          - Builder and Generation:
+              - App Builder Architecture: architecture/builder/app-builder-architecture.md
+              - App Planning Contracts: architecture/builder/app-planning-contracts.md
+              - Builder Execution Model: architecture/builder/builder-execution-model.md
+              - End-to-End Build Lifecycle: architecture/builder/end-to-end-build-lifecycle.md
+              - Console Product Model: architecture/builder/console-product-model.md
+              - Database Intent and Revision: architecture/builder/database-intent-and-revision-contract.md
+              - AppGenerator Output Assembly: architecture/builder/appgenerator-output-assembly-contract.md
+              - AgentGenerator Output Assembly: architecture/builder/agentgenerator-output-assembly-contract.md
+              - App-Backend Admin Contract: architecture/builder/app-backend-admin-contract.md
+          - Frontend UI:
+              - Overview: architecture/frontend/index.md
+              - Chat UI Runtime:
+                  - UI Surface Model: architecture/frontend/chat-ui/ui-surface-model.md
+                  - Conversation Modes: architecture/frontend/chat-ui/conversation-modes.md
+                  - Layout Modes: architecture/frontend/chat-ui/layout-modes.md
+                  - Shell System: architecture/frontend/chat-ui/shell-system.md
+                  - Tool Event Lifecycle: architecture/frontend/chat-ui/tool-event-lifecycle.md
+                  - Admin Observability Contract: architecture/frontend/chat-ui/admin-observability-contract.md
+                  - AG-UI Comparison: architecture/frontend/chat-ui/ag-ui-copilotkit-comparison.md
+              - Generated UI System:
+                  - Generated Frontend Surface Contract: architecture/frontend/ui-system/generated-frontend-surface-contract.md
+                  - Workflow UI Primitive Catalog: architecture/frontend/ui-system/workflow-ui-primitive-catalog.md
+                  - Transition UI Primitives: architecture/frontend/ui-system/transition-ui-primitives.md
+                  - UI System Quality Gates: architecture/frontend/ui-system/ui-system-quality-gates.md
+          - Other:
+              - Keycloak Auth: architecture/keycloak-auth.md
+              - Mobile Client Contract: architecture/mobile-client-contract.md
+              - Orchestration and Decomposition: architecture/orchestration-and-decomposition.md
       - AI Coding Agents:
           - Agent Bootstrap Prompt: agent-bootstrap-prompt.md
-      - Maintainers:
+      - Release:
           - Releasing: releasing.md
           - Verified Setup Guide: architecture/verified/setup-guide.md
           - Auth Setup: architecture/verified/auth-setup.md
