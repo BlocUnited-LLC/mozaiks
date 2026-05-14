@@ -7,7 +7,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install mozaiks
-mozaiks quickstart --dir .\my-first-mozaiks-app
+mozaiks quickstart --dir .\mozaiks-workspace
 ```
 
 Open the Console:
@@ -28,6 +28,10 @@ The Console is the normal Mozaiks starting point.
 
 Draft and in-progress apps stay visible in `Apps`, so you can return later and
 use `Continue Build`.
+
+The `--dir` value is your local Mozaiks workspace. It is not the app you are
+creating. The actual app is created from the Console after you click
+`Create App`.
 
 ## What The Console Does
 

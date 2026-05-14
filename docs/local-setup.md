@@ -27,7 +27,7 @@ Use this path when you are changing Mozaiks itself:
 ```powershell
 git clone https://github.com/BlocUnited-LLC/mozaiks.git
 cd mozaiks
-.\scripts\bootstrap-builder.ps1 -Workspace .\my-first-mozaiks-app
+.\scripts\bootstrap-builder.ps1 -Workspace .\mozaiks-workspace
 ```
 
 On macOS or Linux:
@@ -35,7 +35,7 @@ On macOS or Linux:
 ```bash
 git clone https://github.com/BlocUnited-LLC/mozaiks.git
 cd mozaiks
-./scripts/bootstrap-builder.sh --workspace ./my-first-mozaiks-app
+./scripts/bootstrap-builder.sh --workspace ./mozaiks-workspace
 ```
 
 The bootstrap script creates `.venv` when needed, installs the local package in
@@ -68,7 +68,7 @@ $env:ANTHROPIC_API_KEY="sk-ant-..."
 Start the local builder:
 
 ```powershell
-mozaiks quickstart --dir .\my-first-mozaiks-app
+mozaiks quickstart --dir .\mozaiks-workspace
 ```
 
 Open:
@@ -80,15 +80,38 @@ http://localhost:3000/apps
 ## Useful Commands
 
 ```powershell
-mozaiks quickstart --dir .\my-first-mozaiks-app
-mozaiks studio --dir .\my-first-mozaiks-app --open
-mozaiks studio --dir .\my-first-mozaiks-app --json
-mozaiks onboard --dir .\my-first-mozaiks-app --full
+mozaiks quickstart --dir .\mozaiks-workspace
+mozaiks studio --dir .\mozaiks-workspace --open
+mozaiks studio --dir .\mozaiks-workspace --json
+mozaiks onboard --dir .\mozaiks-workspace --full
 ```
 
 `quickstart` is the preferred local command. The lower-level `studio` command is
 mainly useful when you need explicit ports, JSON status output, or process
 debugging.
+
+## Repo Dev Scripts
+
+The repo scripts are for framework development from a source checkout. They are
+not the public package install path.
+
+Terminal 1:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+.\scripts\run-backend.ps1 -ForceStop
+```
+
+Terminal 2:
+
+```powershell
+.\scripts\run-frontend.ps1 -ForceStop
+```
+
+These scripts use the repo-local `factory_app/app`, `factory_app/workflows`, and
+`web_shell/` sources. The backend script can start local Docker Compose infra for
+Mongo and Keycloak. Use them when you are changing Mozaiks itself or debugging
+the Console stack.
 
 ## Runtime-Only Path
 
@@ -139,7 +162,7 @@ Set the provider key matching the model/provider you selected:
 Use a different backend/frontend port:
 
 ```powershell
-mozaiks studio --dir .\my-first-mozaiks-app --open --backend-port 8001 --frontend-port 3001
+mozaiks studio --dir .\mozaiks-workspace --open --backend-port 8001 --frontend-port 3001
 ```
 
 Or stop the existing local process before restarting.

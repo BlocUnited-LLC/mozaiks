@@ -52,17 +52,20 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install mozaiks
-mozaiks quickstart --dir .\my-first-mozaiks-app
+mozaiks quickstart --dir .\mozaiks-workspace
 ```
 
 Then open `http://localhost:3000/apps` and click `Create App`.
+
+`.\mozaiks-workspace` is the local workspace Mozaiks uses for Console state and
+generated artifacts. The app itself is created from the Console.
 
 Use an editable repo checkout only when developing Mozaiks itself:
 
 ```powershell
 git clone https://github.com/BlocUnited-LLC/mozaiks.git
 cd mozaiks
-.\scripts\bootstrap-builder.ps1 -Workspace .\my-first-mozaiks-app
+.\scripts\bootstrap-builder.ps1 -Workspace .\mozaiks-workspace
 ```
 
 Framework commands:

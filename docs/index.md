@@ -16,7 +16,7 @@
 > the builder locally.
 
 > **Start Here**: Install with `pip install mozaiks`, run
-> `mozaiks quickstart --dir ./my-first-mozaiks-app`, then open the Console at
+> `mozaiks quickstart --dir ./mozaiks-workspace`, then open the Console at
 > `/apps`. See [Getting Started](getting-started.md).
 
 > **Maintainers**: Use [Releasing](releasing.md) for the tag-driven package publish flow.

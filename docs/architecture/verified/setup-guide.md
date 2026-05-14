@@ -34,10 +34,10 @@ host files:
 
 ```bash
 # Builder path
-mozaiks quickstart --dir ./my-first-mozaiks-app
+mozaiks quickstart --dir ./mozaiks-workspace
 
 # Or launch Studio against an existing workspace
-mozaiks studio --dir ./my-first-mozaiks-app --open
+mozaiks studio --dir ./mozaiks-workspace --open
 ``` 
 
 Use this mode when you want the layered repo architecture as-is.

@@ -12,7 +12,7 @@ PowerShell:
 ```powershell
 $env:OPENAI_API_KEY="sk-..."
 $env:MONGO_URI="mongodb://localhost:27017/mozaiks"
-mozaiks quickstart --dir .\my-first-mozaiks-app
+mozaiks quickstart --dir .\mozaiks-workspace
 ```
 
 macOS or Linux:
@@ -20,7 +20,7 @@ macOS or Linux:
 ```bash
 export OPENAI_API_KEY="sk-..."
 export MONGO_URI="mongodb://localhost:27017/mozaiks"
-mozaiks quickstart --dir ./my-first-mozaiks-app
+mozaiks quickstart --dir ./mozaiks-workspace
 ```
 
 Use `ANTHROPIC_API_KEY` instead of `OPENAI_API_KEY` if that is your provider.
