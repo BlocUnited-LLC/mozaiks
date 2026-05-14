@@ -18,61 +18,44 @@ mode). The routing rules are always relevant and do not change per deployment.
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+import yaml
+
+from factory_app.workflows.AppGenerator.tools._hook_utils import update_agent_section
 
 logger = logging.getLogger(__name__)
 
 _ROUTING_PATH = Path(__file__).parent / "capability_routing.yaml"
 _ROUTING_HEADER = "[CAPABILITY ROUTING CONTEXT]"
+_EXPECTED_VERSION = 1
 
 
+@lru_cache(maxsize=1)
 def _load_routing() -> Optional[Dict[str, Any]]:
+    """Load and cache capability_routing.yaml.  Cache is process-scoped (fine for production).
+    Call ``_load_routing.cache_clear()`` in tests that need a fresh load."""
     try:
-        import yaml  # type: ignore
-
         with open(_ROUTING_PATH, "r", encoding="utf-8") as fh:
-            return yaml.safe_load(fh)
+            data = yaml.safe_load(fh)
+        if not isinstance(data, dict):
+            logger.warning("capability_routing.yaml did not parse as a dict — ignoring")
+            return None
+        version = data.get("version")
+        if version != _EXPECTED_VERSION:
+            logger.warning(
+                "capability_routing.yaml version %s != expected %s — "
+                "injected context may be incomplete",
+                version,
+                _EXPECTED_VERSION,
+            )
+        return data
     except Exception as exc:
         logger.warning("capability_routing.yaml could not be loaded: %s", exc)
         return None
 
-
-def _update_section(agent: Any, header: str, body: str) -> None:
-    try:
-        current: str = (
-            getattr(agent, "system_message", None)
-            or getattr(agent, "_system_message", "")
-            or ""
-        )
-        section = f"{header}\n{body}"
-
-        if header in current:
-            pre, _, rest = current.partition(header)
-            next_section_idx = rest.find("\n\n[")
-            after = rest[next_section_idx:] if next_section_idx > 0 else ""
-            new_message = f"{pre.rstrip()}\n\n{section}{after}"
-        else:
-            new_message = f"{current}\n\n{section}" if current else section
-
-        if new_message == current:
-            return
-
-        updater = getattr(agent, "update_system_message", None)
-        if callable(updater):
-            updater(new_message)
-        elif hasattr(agent, "_system_message"):
-            agent._system_message = new_message
-        else:
-            setattr(agent, "_system_message", new_message)
-
-    except Exception as exc:
-        logger.error(
-            "[%s] Failed to update system message section %s: %s",
-            getattr(agent, "name", "?"),
-            header,
-            exc,
-        )
 
 
 def _format_layer(layer_key: str, layer_data: Dict[str, Any]) -> str:
@@ -98,9 +81,15 @@ def _format_packs(packs: List[Dict[str, Any]]) -> str:
         covers = str(pack.get("covers") or "").strip().split("\n")[0].strip()
         kind = str(pack.get("capability_kind") or "").strip()
         manifest = str(pack.get("manifest") or "").strip()
+        use_when = str(pack.get("use_when") or "").strip().split("\n")[0].strip()
+        avoid_when = str(pack.get("avoid_when") or "").strip().split("\n")[0].strip()
         line = f"  - {pack_id} [{kind}]: {covers}"
         if manifest:
             line += f" (manifest: {manifest})"
+        if use_when:
+            line += f"\n      use_when: {use_when}"
+        if avoid_when:
+            line += f"\n      avoid_when: {avoid_when}"
         lines.append(line)
     return "\n".join(lines)
 
@@ -122,10 +111,15 @@ def _build_routing_body(routing: Dict[str, Any]) -> str:
     if packs_text:
         parts.append(packs_text)
 
-    # Surface the naming note if present
+    # Surface the naming note in full — it's a critical disambiguation block
     naming_note = str(cap_layer.get("naming_note") or "").strip()
     if naming_note:
-        parts.append(f"Naming note: {naming_note.split(chr(10))[0].strip()}")
+        parts.append(f"Naming note:\n{naming_note}")
+
+    # Surface hosted-only pack guidance when present
+    hosted_only_note = str(cap_layer.get("hosted_only_note") or "").strip()
+    if hosted_only_note:
+        parts.append(f"Hosted-only packs:\n{hosted_only_note}")
 
     parts.append(
         "Decision order:\n"
@@ -158,7 +152,7 @@ def inject_capability_routing_context(
             return
 
         body = _build_routing_body(routing)
-        _update_section(agent, _ROUTING_HEADER, body)
+        update_agent_section(agent, _ROUTING_HEADER, body)
 
         layers = routing.get("layers") or {}
         cap_packs = [

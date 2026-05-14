@@ -5,7 +5,6 @@ Repository-level guidance for coding agents working in this repo.
 Read [ARCHITECTURE.md](ARCHITECTURE.md) and [CLAUDE.md](CLAUDE.md) first.
 
 This repo uses layered FastAPI hosts as the canonical server composition:
-
 - `mozaiksai.hosts.runtime`
 - `mozaiksai.hosts.platform`
 - `mozaiksai.hosts.studio`
@@ -24,11 +23,6 @@ mozaiks serve ./my-app                  # platform host (no factory dependency)
 mozaiks serve ./my-app --host studio    # Studio management host (requires factory_app)
 ```
 
-Or directly via uvicorn:
-
-```
-uvicorn mozaiksai.hosts.studio:app --reload
-```
 
 CLI and Studio are **parallel interfaces** over shared system capabilities, not a
 superset chain. Studio is not the CLI's UI. CLI owns developer tooling (filesystem,
@@ -230,6 +224,34 @@ generated/workflows/{app_id}/{build_id}/{workflow_name}/
 ```
 
 Only explicit promotion may copy validated artifacts into an active app root.
+
+## Workflow Contract Rule
+
+When working in or generating workflows:
+
+- Canonical workflow shape:
+  ```
+  workflows/{workflow_name}/
+  ├── orchestrator.yaml           ← required: bootstrap, entry point, constraints
+  ├── agents.yaml                 ← required: agent roster and prompts
+  ├── handoffs.yaml               ← required: agent routing and transitions
+  ├── context_variables.yaml      ← required: initial/default shared state schema
+  ├── structured_outputs.yaml     ← required: output models + agent→model registry
+  ├── tools.yaml                  ← required: tool bindings + UI metadata
+  ├── ui_config.yaml              ← required: `visual_agents` contract for websocket-visible agents
+  ├── hooks.yaml                  ← optional: lifecycle hooks
+  ├── extended_orchestration/
+  │   └── mfj_extension.json      ← optional: Mid-Flight Journey fan-out/fan-in config
+  ├── tools/
+  │   ├── __init__.py
+  │   └── *.py
+  └── ui/{workflow_name}/         ← optional: React UI components for artifacts
+      └── components/
+  ```
+- `ui_config.yaml` must declare `visual_agents`. Only agents listed there have messages and UI-bearing outputs streamed through the websocket to the user-facing UI.
+- `hooks.yaml` and `extended_orchestration/mfj_extension.json` are canonical workflow surfaces even when optional. Do not omit them from workflow documentation patterns.
+- Treat workflow YAMLs as structured-output-first contracts. They should map cleanly to strict models that generators can emit and runtime code can validate deterministically.
+- Tools stay dumb. Reasoning belongs in prompts and structured outputs, not in Python tool code.
 
 ## UI System Rule
 

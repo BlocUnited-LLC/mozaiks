@@ -263,28 +263,18 @@ mozaiks onboard --dir ./my-first-mozaiks-app --full
 
 ### `pip install mozaiks` did not work
 
-That is expected until the first public PyPI release is live.
+`pip install mozaiks` is the package install path. If it fails, first verify
+your Python version, virtual environment, and package index access.
 
-Mozaiks' Console-first builder flow depends on the full repo checkout, including:
-
-- `factory_app/`
-- `web_shell/`
-- the local CLI source
-
-If you ran:
+Run:
 
 ```bash
 pip install mozaiks
-```
-
-and then:
-
-```bash
 mozaiks --version
 ```
 
-that does not currently represent the supported setup path unless you are
-installing from an official published release. Use:
+For source-level framework development or local Studio/factory changes, use a
+repo checkout instead:
 
 ```bash
 git clone https://github.com/BlocUnited-LLC/mozaiks.git

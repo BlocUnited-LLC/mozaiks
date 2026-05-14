@@ -19,11 +19,12 @@ app/modules/{name}/
 ├── module.yaml              ← required: identity, actions, capabilities
 ├── contracts/               ← optional companion manifests
 │   ├── events.yaml          ← domain events this module may publish
-│   ├── subscriptions.yaml   ← event reactions owned by this module
+│   ├── reactions.yaml       ← event reactions owned by this module
 │   ├── notifications.yaml   ← notification rules derived from events
 │   ├── settings.yaml        ← user/app settings schema
-│   └── admin.yaml           ← admin panels (omit if none)
-├── runtime_extensions.yaml  ← optional: api_router / startup_service hooks
+│   ├── admin.yaml           ← admin panels (omit if none)
+│   └── entitlements.yaml    ← optional plan/role/usage gates
+├── runtime_extensions.yaml  ← optional: api_router / startup_service
 └── backend/
     ├── __init__.py
     ├── handler.py        ← required — thin dispatch, one method per action
@@ -38,6 +39,9 @@ under `contracts/` only when the module needs them.
 
 The runtime auto-discovers and registers all modules at startup.
 Module routes are auto-mounted at `/api/modules/{name}/{action_id}`.
+Pages should call those routes without query strings. Put list limits in
+`page_size` and filters or selected-row values in action payloads, form state,
+or the module action input schema.
 
 Modules that need persistent app chrome access should expose a real page route
 and put navigation intent on that page. For example, a communications module
@@ -116,14 +120,15 @@ events:
       required: [record_id, owner_id]
 ```
 
-### 3. Write `contracts/subscriptions.yaml`
+### 3. Write `contracts/reactions.yaml`
 
 Only needed when this module reacts to events from other modules.
 
 ```yaml
-subscriptions: []
+schema_version: mozaiks.reactions.v1
+reactions: []
 # Add entries when this module reacts to events from other modules.
-# Each subscription routes an event to a handler method on this module's handler class.
+# Each reaction routes an event to a handler method on this module's handler class.
 #
 # Example:
 #   - id: {name}.on_other_event
@@ -157,7 +162,50 @@ schema_version: mozaiks.settings.v1
 settings: []
 ```
 
-### 6. Write `backend/schemas.py`
+### 6. Write `contracts/admin.yaml`
+
+Only needed when this module contributes panels to the unified admin shell.
+
+```yaml
+schema_version: mozaiks.admin.v2
+panels:
+  - id: {name}.overview
+    label: {Display Name}
+    section: overview
+    renderer: schema
+    layout: full-width
+    sections:
+      - id: {name}-table
+        primitive: DataTable
+        config:
+          api_endpoint: /api/modules/{name}/list_{name}s
+          columns:
+            - { key: name, label: Name }
+hooks: []
+```
+
+Use one of these section names: `overview`, `users`, `billing`, `usage`,
+`activity`, `operations`, `settings`, `integrations`, or `support`.
+
+### 7. Write `runtime_extensions.yaml`
+
+Only needed when the module must extend the host lifecycle with a raw webhook
+router or a process-lifetime background service. Entrypoints are module-local;
+do not use `modules.*`, `app.modules.*`, or `mozaiksai.*` import paths.
+
+```yaml
+schema_version: mozaiks.runtime_extensions.v1
+extensions:
+  - kind: api_router
+    entrypoint: backend.router:get_router
+    prefix: /webhooks/{name}
+  - kind: startup_service
+    entrypoint: backend.worker:{Name}Worker
+```
+
+Most modules should omit this file.
+
+### 8. Write `backend/schemas.py`
 
 TypedDicts for MongoDB document shapes. Pure helpers. No I/O.
 
@@ -187,7 +235,7 @@ def coerce_limit(value: Any, default: int = 20, maximum: int = 100) -> int:
         return default
 ```
 
-### 7. Write `backend/policy.py`
+### 9. Write `backend/policy.py`
 
 Pure functions that turn `ctx` into scoped MongoDB queries. No DB access.
 
@@ -213,7 +261,7 @@ def scoped_record_query(ctx, *, record_id: str) -> dict[str, Any]:
     return query
 ```
 
-### 8. Write `backend/repo.py`
+### 10. Write `backend/repo.py`
 
 MongoDB access only. No business logic, no event emission, no validation.
 
@@ -256,7 +304,7 @@ class {Name}Repo:
         return int(await col.count_documents(query))
 ```
 
-### 9. Write `backend/service.py`
+### 11. Write `backend/service.py`
 
 All business logic. Validates inputs, calls repo, emits events. Never touches DB directly.
 
@@ -299,7 +347,7 @@ class {Name}Service:
         return {"success": True, "record": dict(record)}
 ```
 
-### 10. Write `backend/handler.py`
+### 12. Write `backend/handler.py`
 
 Thin dispatch only. One method per action. Delegates everything to service.
 
@@ -322,11 +370,11 @@ class {Name}Handler:
         return await self.service.create_{name}(ctx, name=name)
 ```
 
-### 11. Write `backend/__init__.py`
+### 13. Write `backend/__init__.py`
 
 Empty file — makes `backend/` a Python package.
 
-### 12. Restart the backend
+### 14. Restart the backend
 
 ```bash
 mozaiks serve .
@@ -351,16 +399,15 @@ Modules are loaded at startup. No registration step needed.
 ## Event Reactions (module-to-module)
 
 When this module needs to react to an event from another module without starting
-a workflow, declare it in `contracts/subscriptions.yaml` and add the handler method:
+a workflow, declare it in `contracts/reactions.yaml` and add the handler method:
 
 ```yaml
-# contracts/subscriptions.yaml
-subscriptions:
+# contracts/reactions.yaml
+schema_version: mozaiks.reactions.v1
+reactions:
   - id: {name}.on_other_event
-    event_type: domain.other_module.something_happened
-    target:
-      kind: handler
-      handler_method: handle_something
+    event: domain.other_module.something_happened
+    handler_method: handle_something
 ```
 
 Add `handle_something` as a method on `{Name}Handler` (delegate to service):
@@ -389,7 +436,7 @@ sections:
     config:
       columns:
         - { key: name, label: Name }
-    api_endpoint: /api/modules/{name}/list_{name}s
+      api_endpoint: /api/modules/{name}/list_{name}s
 ```
 
 ---

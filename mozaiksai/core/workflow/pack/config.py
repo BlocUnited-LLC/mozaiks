@@ -73,22 +73,77 @@ def _load_json_file(path: Path) -> Optional[Dict[str, Any]]:
         raise ValueError(f"Failed loading pack graph {path}: {exc}") from exc
 
 
-def load_global_pack_graph() -> Optional[GlobalPackGraph]:
-    """Load and validate the canonical global pack graph for the active root."""
-    global _GLOBAL_CACHE
+def _merge_raw_registries(registries: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Merge multiple raw registry dicts into one.
 
-    path = get_global_pack_graph_path()
-    if not path.exists():
+    Registries are provided in priority order — earlier entries win on ID conflicts.
+    This allows a product overlay (mozaiks-app) to take precedence over the base
+    factory registry while still inheriting all factory workflows, sequences, and
+    transitions the overlay doesn't declare.
+
+    List fields deduplicated by 'id'; scalar fields use first non-null value.
+    """
+    if not registries:
         return None
 
-    signature = ((str(path), path.stat().st_mtime),)
+    list_fields = ("workflows", "entrypoints", "transitions", "journeys", "workflow_sequences")
+    merged: Dict[str, Any] = {"version": 3}
+    seen_ids: Dict[str, set] = {f: set() for f in list_fields}
+
+    for registry in registries:
+        if not merged.get("pack_name"):
+            merged["pack_name"] = registry.get("pack_name")
+        if not merged.get("description"):
+            merged["description"] = registry.get("description")
+
+        for field in list_fields:
+            entries = registry.get(field)
+            if not entries:
+                continue
+            existing = merged.setdefault(field, [])
+            for entry in entries:
+                entry_id = entry.get("id") if isinstance(entry, dict) else None
+                if entry_id is not None:
+                    if entry_id in seen_ids[field]:
+                        continue  # primary (earlier) already claimed this id
+                    seen_ids[field].add(entry_id)
+                existing.append(entry)
+
+    return merged
+
+
+def load_global_pack_graph() -> Optional[GlobalPackGraph]:
+    """Load and validate the canonical global pack graph.
+
+    When multiple workflow roots are configured (e.g. a product overlay on top
+    of the factory build pipeline), all extension_registry.json files are merged.
+    Earlier roots (higher-priority) win on ID conflicts; later roots (base/factory)
+    provide the build sequences and transitions the overlay does not declare.
+    """
+    global _GLOBAL_CACHE
+
+    roots = normalize_workflow_roots()
+    reg_paths = [
+        (root / "extended_orchestration" / "extension_registry.json").resolve()
+        for root in roots
+    ]
+    existing_paths = [p for p in reg_paths if p.exists()]
+
+    if not existing_paths:
+        return None
+
+    signature = tuple((str(p), p.stat().st_mtime) for p in existing_paths)
     cached = _GLOBAL_CACHE
     if cached and cached.source == signature:
         payload = cached.payload
         if isinstance(payload, GlobalPackGraph):
             return payload
 
-    raw = _load_json_file(path)
+    registries = [r for p in existing_paths if (r := _load_json_file(p)) is not None]
+    if not registries:
+        return None
+
+    raw = _merge_raw_registries(registries) if len(registries) > 1 else registries[0]
     if raw is None:
         return None
 

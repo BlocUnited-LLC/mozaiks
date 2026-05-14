@@ -23,7 +23,7 @@ Mozaiks has four distinct UI surfaces. Before touching any UI code, identify whi
 | **Renderer** | PageRenderer ← SchemaPage ← /api/pages/{name} | useAppEventBus ← ingestEvent ← WebSocket | `@platform/extensions` → register() → component registry | LauncherScreen / ConfirmScreen / TransitionScreen |
 | **React?** | Never — primitives declared in YAML | Always — generated alongside Python tool | Always — hand-authored full-page routes | Optional — branded transition components |
 
-**Full spec:** [docs/architecture/specs/ui-systems.md](../../docs/architecture/specs/ui-systems.md)
+**Canonical contract:** [docs/architecture/frontend/generated-frontend-surface-contract.md](docs/architecture/frontend/ui-system/generated-frontend-surface-contract.md)
 
 ### App UI quick rules
 - Defined as AppPageSchema YAML in `app/ui/pages/`
@@ -37,7 +37,7 @@ Mozaiks has four distinct UI surfaces. Before touching any UI code, identify whi
 - React component subscribes via `useAppEventBus('ui.tool.<name>', handler)`
 - Always two files generated together: Python tool + React component
 - User actions return via `onAction` prop; agent reads them from next turn context
-- Primitives imported as JSX building blocks (`import { Card } from '../../ui/primitives/Card.jsx'`)
+- Primitives imported as JSX building blocks only from shipped primitives such as `Panel`, `SurfaceCard`, `StatusPill`, `SummaryStrip`, and `Metric`; do not import removed `Card`, `Stat`, or `Badge` primitives.
 
 ### Custom Route UI quick rules
 - Lives inside the active app root at `app/ui/pages/custom/`

@@ -1,11 +1,10 @@
 # Releasing
 
-Mozaiks now has a tag-driven release workflow.
+Mozaiks has a tag-driven release workflow.
 
-For the first public package release, keep the version pre-`1.0.0`. The repo
-contracts, CLI UX, and Console-first builder flow are still settling, so a
-`0.x` release is the honest signal to users that breaking changes can still
-happen.
+Keep versions pre-`1.0.0` until the repo contracts, CLI UX, and Console-first
+builder flow settle. A `0.x` release is the honest signal to users that
+breaking changes can still happen.
 
 The release entrypoint is:
 
@@ -18,10 +17,10 @@ Example:
 ```bash
 git checkout main
 git pull
-# edit mozaiksai/version.py -> __version__ = "0.1.0"
+# edit mozaiksai/version.py -> __version__ = "<version>"
 git add mozaiksai/version.py
-git commit -m "Release 0.1.0"
-git tag v0.1.0
+git commit -m "Release <version>"
+git tag v<version>
 git push origin main --tags
 ```
 
@@ -45,28 +44,16 @@ It:
 
 The workflow is configured for GitHub-to-PyPI trusted publishing.
 
-Before the first public release, configure the `mozaiks` project on PyPI to
-trust this GitHub repository and the `release.yml` workflow.
+The `mozaiks` PyPI project must trust this GitHub repository and the
+`release.yml` workflow.
 
 Until that is configured on the PyPI side, the `publish-pypi` job will fail
 even if the build and GitHub release steps succeed.
 
 ## Documentation Impact
 
-The packaging and release plumbing is now in place, but the public install
-story should only change after the first successful PyPI publish.
-
-Until that happens:
-
-- `README.md`, `docs/getting-started.md`, and `docs/install-modes.md` should
-  keep the repo-first bootstrap path as the default.
-- `pip install mozaiks` should remain documented as a future public path, not
-  the primary first-run path.
-
-After the first successful PyPI release:
-
-- update the first-run docs to promote `pip install mozaiks`
-- keep the repo checkout path as the framework/developer mode
+Public install docs should present `pip install mozaiks` as the package path and
+keep the repo checkout path as the framework/developer mode.
 
 ## Notes
 

@@ -200,7 +200,7 @@ Today this is usually enough:
 That field currently expresses intent, not a full desktop runtime contract.
 
 For the broader manifest model, read
-[App Manifest And Platform Targets](foundations/app-manifest-and-platform-targets.md).
+[App Manifest And Platform Targets](app/app-manifest-and-platform-targets.md).
 
 ## Verification
 

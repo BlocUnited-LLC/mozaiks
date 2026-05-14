@@ -122,16 +122,21 @@ standard shell modes. Do not encode per-route chrome there; the page owns
 
 | Primitive | Use case | Key config |
 |-----------|----------|------------|
-| `DataTable` | Record lists with columns | `columns[]`, `rows[]`, `api_endpoint` |
+| `PageHeader` | Durable page title and primary actions | `title`, `subtitle`, `actions[]` |
+| `ResourceTable` | Primary record/index page table | `columns[]`, `api_endpoint`, `data_key`, `actions[]` |
+| `DataTable` | Dense operational record lists | `columns[]`, `api_endpoint`, `data_key` |
 | `Form` | Data entry | `fields[]`, `onSubmit`, `submitLabel` |
-| `Card` | Grouped content block | `title`, `children`, `variant` |
-| `Stat` | KPI / metric display | `label`, `value`, `delta`, `unit`, `trend` |
-| `Grid` | Card grid layout | `items[]`, `columns` (2\|3\|4) |
+| `SummaryStrip` | 2-4 useful page metrics | `items[]` with `value` or `value_key` |
+| `Metric` | Single supporting metric | `label`, `value` or `value_key`, `detail` |
+| `Panel` / `SurfaceCard` | Purposeful grouped support surface | `title`, `subtitle`, `children` |
+| `Grid` | Small child primitive layout | `children[]`, `columns` (2\|3\|4) |
 | `Button` | Call to action | `label`, `variant`, `onClick` |
 | `Modal` | Overlay dialog | `id`, `title`, `open` |
 | `Alert` | Inline message | `message`, `variant` (info\|success\|warning\|error) |
-| `Badge` | Status label | `label`, `variant` |
+| `StatusPill` | Compact status label | `label`, `tone` |
 | `Skeleton` | Loading / empty state | `rows`, `height` |
+
+Removed primitives: do not use `Card`, `Stat`, or `Badge`. Use `SurfaceCard` or `Panel`, `SummaryStrip` or `Metric`, and `StatusPill`.
 
 ---
 
@@ -144,24 +149,30 @@ layout: grid
 shell_mode: workspace
 
 sections:
-  - id: total_users
-    title: Total Users
-    primitive: Stat
+  - id: dashboard-header
+    primitive: PageHeader
     config:
-      label: Users
-      value: 0
-      trend: up
-    api_endpoint: /api/modules/users/stats
+      title: Dashboard
+      subtitle: Monitor current user and order activity.
+
+  - id: user_summary
+    primitive: SummaryStrip
+    config:
+      api_endpoint: /api/modules/users/stats
+      items:
+        - label: Users
+          value_key: total_users
+          format: number
 
   - id: recent_orders
     title: Recent Orders
-    primitive: DataTable
+    primitive: ResourceTable
     config:
+      api_endpoint: /api/modules/orders/list_orders
       columns:
         - { key: id,     label: Order ID }
         - { key: total,  label: Total }
-        - { key: status, label: Status }
-    api_endpoint: /api/modules/orders/list_orders
+        - { key: status, label: Status, type: status }
 ```
 
 ---
@@ -228,7 +239,7 @@ Use custom routes sparingly. Declarative `app/ui/pages/` is the default.
 
 - **Prefer declarative YAML** — if the primitives don't cover the use case, extend the primitive
 - Pages belong in `app/ui/pages/` — never in a module's backend directory
-- `api_endpoint` paths must be `/api/modules/{name}/{action_id}` routes
+- `api_endpoint` paths must be `/api/modules/{name}/{action_id}` routes with no query strings or fragments. Put limits in `page_size` and filters/selected-row values in action `payload`, form state, or module action input schemas.
 - Page-owned shell access belongs in the page's `navigation` field. Use `app/config/shell.json -> shortcuts` for built-in chrome and `navigation.policy` for app-wide placement behavior.
 - Page-owned chrome intent belongs in `shell_mode`; use `conversation` for DM/chat routes and `workspace` for dense module/profile/admin-like pages.
 

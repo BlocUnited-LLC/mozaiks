@@ -8,7 +8,7 @@
       "columns"
     ],
     "properties": {
-      "columns": "array of string|{key,label?,type?,sortable?,width?} — min 1 — Column definitions. Each entry is a string key or a column config object. — REQUIRED",
+      "columns": "array of string|{key,label?,type?:text|number|date|badge|status|actions,sortable?,width?} — min 1 — Column definitions. Each entry is a string key or a column config object. — REQUIRED",
       "api_endpoint": "string — Backend endpoint to fetch rows from.",
       "data": "array of items — Static row data (alternative to api_endpoint).",
       "selection": "string: none|single|multi — default none",
@@ -217,7 +217,7 @@
       "columns"
     ],
     "properties": {
-      "columns": "array of string|{key,label?,type?,sortable?,width?} — min 1 — REQUIRED",
+      "columns": "array of string|{key,label?,type?:text|number|date|badge|status|actions,sortable?,width?} — min 1 — REQUIRED",
       "api_endpoint": "string",
       "data": "array of items",
       "data_key": "string",
@@ -238,7 +238,7 @@
       "items"
     ],
     "properties": {
-      "items": "array of {id?,label,value,detail?} — min 1 — REQUIRED"
+      "items": "array of {id?,label,value?,value_key?,detail?,detail_key?,trend?,trend_key?,format?,trend_format?,trend_label?} — min 1 — REQUIRED"
     }
   },
   "InlineEmptyState": {
@@ -315,13 +315,20 @@
     "use": "Use inside a purposeful summary surface when one metric needs detail text.",
     "avoid": "Prefer SummaryStrip for page-level metrics; do not build KPI grids by default.",
     "required": [
-      "label",
-      "value"
+      "label"
     ],
     "properties": {
       "label": "string — REQUIRED",
-      "value": "any — REQUIRED",
-      "detail": "string"
+      "value": "any",
+      "value_key": "string — Dot path into section api_endpoint response.",
+      "detail": "string",
+      "detail_key": "string — Dot path into section api_endpoint response.",
+      "trend": "any",
+      "trend_key": "string — Dot path into section api_endpoint response; rendered as detail when detail/detail_key is absent.",
+      "format": "string: number|currency|percent",
+      "detail_format": "string: number|currency|percent",
+      "trend_format": "string: number|currency|percent",
+      "trend_label": "string"
     }
   },
   "SegmentedBar": {

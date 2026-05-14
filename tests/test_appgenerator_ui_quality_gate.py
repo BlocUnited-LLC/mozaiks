@@ -60,7 +60,7 @@ def test_review_ui_quality_passes_without_warnings() -> None:
             "app_ui_quality_warnings": [],
             "app_schema_ready": True,
             "app_manifest": {"app_name": "Support Operations"},
-            "app_pages": [{"name": "Tickets", "route": "/tickets"}],
+            "app_pages": [{"name": "Tickets", "route": "/tickets", "page_type": "record_list", "sections": []}],
         }
     )
 
@@ -129,6 +129,7 @@ def test_review_ui_quality_audits_persisted_page_schemas() -> None:
                     "name": "Operations Dashboard",
                     "route": "/operations",
                     "title": "Operations Dashboard",
+                    "page_type": "analytics_dashboard",
                     "sections": [
                         {
                             "id": "summary-a",
@@ -283,6 +284,7 @@ def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
         tool_entries[("AppUIQualityAgent", "review_ui_quality")]["auto_tool_call"]
         is True
     )
+    assert ("AppUIQualityAgent", "review_ui_acceptance") not in tool_entries
 
     assert any(
         entry["hook_agent"] == "AppUIQualityAgent"
@@ -330,6 +332,7 @@ def test_app_ui_quality_hook_persists_previous_schema_before_handoff(
                             "name": "Tickets",
                             "route": "/tickets",
                             "title": "Tickets",
+                            "page_type": "record_list",
                             "layout": "full-width",
                             "sections": [
                                 {

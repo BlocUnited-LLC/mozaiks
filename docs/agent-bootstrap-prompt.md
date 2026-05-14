@@ -45,5 +45,4 @@ This is the right starting point when the task touches:
 
 ## Related
 
-- [Prompt Packs](instruction-prompts/prompt-packs.md)
 - [Architecture Overview](architecture/index.md)

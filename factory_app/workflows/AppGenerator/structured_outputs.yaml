@@ -108,6 +108,31 @@ models:
           Persistent app UI surface type. Use declarative_page by default; use
           custom_react_page only when shipped page primitives cannot express the
           route.
+      page_type_hint:
+        type: literal
+        values:
+        - record_list
+        - record_detail
+        - analytics_dashboard
+        - workflow_board
+        - activity_feed
+        - gallery
+        - wizard
+        - split_view
+        - settings
+        - landing
+        - 'null'
+        description: >
+          Structural page archetype hint for AppSchemaAgent. Drives which primitives
+          and structural patterns are appropriate. record_list for entity browse/CRUD;
+          record_detail for entity detail/edit; analytics_dashboard for KPI/chart
+          surfaces; workflow_board for kanban/pipeline/board views; activity_feed for
+          chronological event/notification/audit surfaces; gallery for visual grid and
+          marketplace/catalog listings; wizard for multi-step flows (onboarding, checkout,
+          setup); split_view for simultaneous list+detail (inbox, file explorer, chat);
+          settings for categorized settings/preferences; landing for public/marketing pages.
+          Do not default everything to record_list — match the page purpose to the right
+          archetype.
       sections_hint:
         type: optional_list
         items: PrimitiveSectionHint
@@ -643,6 +668,20 @@ models:
       agent_message:
         type: str
         description: Concise quality-gate message before review_ui_quality runs.
+  ModuleContractQualityReviewRequest:
+    type: model
+    fields:
+      max_revision_attempts:
+        type: int
+        description: >
+          Maximum automated revision loops before blocking. Reserved for future
+          loop-back support; currently unused because ConfigMiddlewareAgent runs
+          as a task_run_mode child and cannot be revisited from the main workflow.
+        default: 1
+      agent_message:
+        type: str
+        description: >
+          Concise quality-gate message before review_module_contract_quality runs.
   ValidationErrorEntry:
     type: model
     fields:
@@ -1706,7 +1745,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Optional API endpoint for row data.
+        description: Optional canonical module endpoint for row data. Use /api/modules/{module_id}/{action_id}; do not include query strings or fragments. Put limits in page_size and filters in payload/input config.
       data_key:
         type: union
         variants:
@@ -2107,7 +2146,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Optional API endpoint for row data.
+        description: Optional canonical module endpoint for row data. Use /api/modules/{module_id}/{action_id}; do not include query strings or fragments. Put limits in page_size and filters in payload/input config.
       data_key:
         type: union
         variants:
@@ -2189,13 +2228,49 @@ models:
         description: Metric label.
       value:
         type: AppPrimitiveValue
-        description: Metric value.
+        description: Metric value. Use null when value_key binds to an api_endpoint response.
+      value_key:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Dot-path into the section api_endpoint response, such as metrics.total.value.
       detail:
         type: union
         variants:
         - str
         - 'null'
         description: Optional short detail.
+      detail_key:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Dot-path into the section api_endpoint response for detail text.
+      trend_key:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Dot-path into the section api_endpoint response for trend detail.
+      format:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: "Optional value formatter: number, currency, or percent."
+      trend_format:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: "Optional trend formatter: number, currency, or percent."
+      trend_label:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional suffix appended to trend detail.
 
   AppSummaryStripConfig:
     type: model
@@ -2316,13 +2391,49 @@ models:
         description: Metric label.
       value:
         type: AppPrimitiveValue
-        description: Metric value.
+        description: Metric value. Use null when value_key binds to an api_endpoint response.
+      value_key:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Dot-path into the section api_endpoint response, such as metrics.total.value.
       detail:
         type: union
         variants:
         - str
         - 'null'
         description: Optional short detail.
+      detail_key:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Dot-path into the section api_endpoint response for detail text.
+      trend_key:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Dot-path into the section api_endpoint response for trend detail.
+      format:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: "Optional value formatter: number, currency, or percent."
+      trend_format:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: "Optional trend formatter: number, currency, or percent."
+      trend_label:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional suffix appended to trend detail.
 
   AppSegment:
     type: model
@@ -2513,6 +2624,30 @@ models:
     - AppActionButtonConfig
     - AppFileListConfig
 
+  AppPageSlotExtension:
+    type: model
+    fields:
+      slot:
+        type: literal
+        values:
+        - header
+        - empty_state
+        - hero
+        - sidebar
+        - actions_bar
+        description: >
+          Named UI zone this extension replaces within an otherwise declarative page.
+          header replaces the page header area; empty_state replaces the empty state of
+          the main data section; hero replaces the above-fold hero for gallery/landing
+          pages; sidebar provides custom sidebar content; actions_bar replaces the
+          actions zone above the main content section.
+      component:
+        type: str
+        description: >
+          Component registry key registered in ui/index.js. Must match a custom React
+          component under ui/pages/custom/. Use PascalCase matching the registerComponent
+          call in ui/index.js.
+
   AppPageSection:
     type: model
     fields:
@@ -2652,6 +2787,32 @@ models:
       title:
         type: str
         description: Display title shown in the page header.
+      page_type:
+        type: literal
+        values:
+        - record_list
+        - record_detail
+        - analytics_dashboard
+        - workflow_board
+        - activity_feed
+        - gallery
+        - wizard
+        - split_view
+        - settings
+        - landing
+        description: >
+          Structural page archetype. Carries the intended structural pattern so
+          coding agents implement the right UI without guessing from field names.
+          record_list: entity browse (DataTable/ResourceTable + actions);
+          record_detail: entity detail/edit (Form + panels + related data);
+          analytics_dashboard: KPI/chart surfaces (Metric/Grid/SummaryStrip);
+          workflow_board: kanban/pipeline/board (task mgmt, CRM pipeline);
+          activity_feed: chronological event/audit/notification log (Timeline);
+          gallery: visual grid/marketplace/catalog (Grid of SurfaceCards);
+          wizard: multi-step flow (onboarding, checkout, setup);
+          split_view: simultaneous list+detail (inbox, file explorer, thread list);
+          settings: categorized settings/preferences forms;
+          landing: public/marketing/unauthenticated pages.
       layout:
         type: literal
         values:
@@ -2687,6 +2848,15 @@ models:
         type: list
         items: AppPageSection
         description: Ordered primitive sections composing the page.
+      extensions:
+        type: optional_list
+        items: AppPageSlotExtension
+        description: >
+          Declared custom slot overrides for specific UI zones. Use only when a named
+          zone (header, empty_state, hero, sidebar, actions_bar) cannot be expressed
+          with primitives. Each extension names a bounded slot and the registered custom
+          React component that replaces it. The rest of the page stays declarative.
+          Null for most pages — do not use as a general React escape hatch.
 
   AppBackendAdminPanel:
     type: model
@@ -3702,6 +3872,7 @@ registry:
   AppUIQualityAgent: AppUIQualityReviewRequest
   DatabaseAgent: DatabaseOutput
   ConfigMiddlewareAgent: ConfigMiddlewareOutput
+  ModuleContractQualityAgent: ModuleContractQualityReviewRequest
   ModelAgent: ModelOutput
   ServiceAgent: ServiceOutput
   FrontendStubAgent: FrontendStubOutput

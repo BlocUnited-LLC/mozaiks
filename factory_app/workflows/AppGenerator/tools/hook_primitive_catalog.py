@@ -27,8 +27,10 @@ def _update_section(agent: Any, header: str, body: str) -> None:
     current = getattr(agent, "system_message", None) or getattr(agent, "_system_message", "") or ""
     section = f"{header}\n{body}"
     if header in current:
-        prefix = current.split(header, 1)[0].rstrip()
-        new_message = f"{prefix}\n\n{section}" if prefix else section
+        pre, _, rest = current.partition(header)
+        next_section_idx = rest.find("\n\n[")
+        after = rest[next_section_idx:] if next_section_idx > 0 else ""
+        new_message = f"{pre.rstrip()}\n\n{section}{after}"
     else:
         new_message = f"{current}\n\n{section}" if current else section
 
@@ -56,6 +58,12 @@ def inject_primitive_catalog(agent: Any, messages: List[Dict[str, Any]]) -> None
         logger.info("[%s] Injected shipped page primitive catalog", agent_name)
     except Exception as exc:
         logger.error("[%s] Failed to inject primitive catalog: %s", agent_name, exc)
+        _update_section(
+            agent,
+            _HEADER,
+            "WARNING: Shipped primitive catalog could not be loaded. "
+            "Do NOT emit any primitive names - escalate to the user before generating UI.",
+        )
 
 
 __all__ = ["inject_primitive_catalog"]

@@ -271,10 +271,17 @@ factory_app/workflows/{WorkflowName}/
 ├── structured_outputs.yaml # Typed outputs + registry
 ├── tools.yaml              # Tool bindings + UI metadata
 ├── context_variables.yaml  # Shared workflow state
-├── extended_orchestration/mfj_extension.json # MFJ triggers (optional)
+├── ui_config.yaml          # Frontend exposure metadata (visual_agents)
+├── hooks.yaml              # Lifecycle hooks (optional)
+├── extended_orchestration/ # MFJ triggers and extensions (optional)
+│   └── mfj_extension.json
 ├── tools/                  # Python tool implementations
 └── ui/{WorkflowName}/      # Workflow-specific UI components
 ```
+
+`ui_config.yaml` is the visibility boundary for workflow agents. Only `visual_agents`
+listed there have messages and artifact-bearing outputs forwarded through the websocket
+for user rendering. Agents omitted from that list run as background/silent agents.
 
 ### UI Artifact: Structured Output → Auto-Invoke Tool → UI Artifact
 

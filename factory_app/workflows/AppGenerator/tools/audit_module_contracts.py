@@ -1,0 +1,184 @@
+"""Deterministic module contract auditor.
+
+Scans code_files for module.yaml and companion contract files, checks
+schema_version markers, required fields, and cross-file consistency.
+
+Used by the module contract quality gate tool. Pure function — no side effects.
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import PurePosixPath
+from typing import Any, Dict, List, Optional
+
+import yaml
+
+logger = logging.getLogger(__name__)
+
+_EXPECTED_SCHEMA_VERSIONS: Dict[str, str] = {
+    "module.yaml": "mozaiks.module.v1",
+    "events.yaml": "mozaiks.events.v1",
+    "subscriptions.yaml": "mozaiks.subscriptions.v1",
+    "notifications.yaml": "mozaiks.notifications.v1",
+    "settings.yaml": "mozaiks.settings.v1",
+    "admin.yaml": "mozaiks.admin.v2",
+}
+
+_VALID_MODULE_TYPES = frozenset({"standard", "messaging", "workflow", "transactional"})
+
+
+def _parse_yaml_content(content: str) -> Optional[Dict[str, Any]]:
+    try:
+        parsed = yaml.safe_load(content)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+def _audit_module_yaml(filename: str, data: Dict[str, Any]) -> List[str]:
+    warnings: List[str] = []
+
+    expected_sv = _EXPECTED_SCHEMA_VERSIONS["module.yaml"]
+    sv = data.get("schema_version")
+    if sv != expected_sv:
+        warnings.append(
+            f"{filename}: schema_version is {sv!r}; expected {expected_sv!r}"
+        )
+
+    module_id = data.get("id") or data.get("module_id") or ""
+    if not str(module_id).strip():
+        warnings.append(f"{filename}: missing or empty 'id'")
+
+    handler = str(data.get("handler") or "").strip()
+    if not handler:
+        warnings.append(f"{filename}: missing 'handler'")
+    elif not handler.startswith("backend.handler:"):
+        warnings.append(
+            f"{filename}: handler {handler!r} must start with 'backend.handler:'"
+        )
+
+    module_type = data.get("type")
+    if module_type and str(module_type) not in _VALID_MODULE_TYPES:
+        warnings.append(
+            f"{filename}: type {module_type!r} is not one of {sorted(_VALID_MODULE_TYPES)}"
+        )
+
+    actions = data.get("actions") or []
+    if not isinstance(actions, list):
+        warnings.append(f"{filename}: 'actions' must be a list")
+    else:
+        for i, action in enumerate(actions):
+            if not isinstance(action, dict):
+                warnings.append(f"{filename}: actions[{i}] is not a mapping")
+                continue
+            action_id = action.get("id") or ""
+            if not str(action_id).strip():
+                warnings.append(f"{filename}: actions[{i}] missing 'id'")
+            if not action.get("handler_method"):
+                label = str(action_id) if action_id else str(i)
+                warnings.append(
+                    f"{filename}: action {label!r} missing 'handler_method'"
+                )
+
+    return warnings
+
+
+def _audit_contract_yaml(filename: str, data: Dict[str, Any]) -> List[str]:
+    """Check schema_version for companion contract files (events, subscriptions, etc.)."""
+    warnings: List[str] = []
+    basename = PurePosixPath(filename).name
+    expected_sv = _EXPECTED_SCHEMA_VERSIONS.get(basename)
+    if expected_sv is not None:
+        sv = data.get("schema_version")
+        if sv != expected_sv:
+            warnings.append(
+                f"{filename}: schema_version is {sv!r}; expected {expected_sv!r}"
+            )
+    return warnings
+
+
+def _module_dir_of(filename: str) -> str:
+    """Return the modules/{module_id} prefix for a given contract file path."""
+    parts = PurePosixPath(filename).parts
+    # Expected shapes:
+    #   modules/{id}/module.yaml  → modules/{id}
+    #   modules/{id}/contracts/events.yaml  → modules/{id}
+    for i, part in enumerate(parts):
+        if part == "modules" and i + 1 < len(parts):
+            return "/".join(parts[: i + 2])
+    return str(PurePosixPath(filename).parent)
+
+
+def audit_module_contracts(code_files: List[Dict[str, Any]]) -> List[str]:
+    """Audit module contract YAML files in code_files.
+
+    Args:
+        code_files: List of {filename, content} dicts from agent code output.
+
+    Returns:
+        List of warning strings. Empty list means no issues found.
+    """
+    warnings: List[str] = []
+
+    if not code_files:
+        return warnings
+
+    module_yamls: Dict[str, Dict[str, Any]] = {}   # filename → parsed data
+    events_by_module: Dict[str, str] = {}           # module_dir → filename
+
+    for file_entry in code_files:
+        if not isinstance(file_entry, dict):
+            continue
+        filename = str(file_entry.get("filename") or "").strip()
+        content = file_entry.get("content")
+        if not filename or not isinstance(content, str) or not content.strip():
+            continue
+
+        basename = PurePosixPath(filename).name
+        if basename not in _EXPECTED_SCHEMA_VERSIONS:
+            continue
+
+        data = _parse_yaml_content(content)
+        if data is None:
+            warnings.append(f"{filename}: could not parse as YAML")
+            continue
+
+        mod_dir = _module_dir_of(filename)
+
+        if basename == "module.yaml":
+            module_yamls[filename] = data
+            warnings.extend(_audit_module_yaml(filename, data))
+        elif basename == "events.yaml":
+            events_by_module[mod_dir] = filename
+            warnings.extend(_audit_contract_yaml(filename, data))
+        else:
+            warnings.extend(_audit_contract_yaml(filename, data))
+
+    # Cross-file check: actions that declare emits[] must have a companion events.yaml
+    for mod_path, mod_data in module_yamls.items():
+        mod_dir = _module_dir_of(mod_path)
+        emitting_actions = [
+            a for a in (mod_data.get("actions") or [])
+            if isinstance(a, dict) and a.get("emits")
+        ]
+        if not emitting_actions:
+            continue
+        if mod_dir in events_by_module:
+            continue
+        emitted = [
+            str(e)
+            for a in emitting_actions
+            for e in (a.get("emits") or [])
+            if e
+        ]
+        if emitted:
+            warnings.append(
+                f"{mod_path}: actions declare emits {emitted} "
+                f"but no events.yaml found under {mod_dir}/"
+            )
+
+    return warnings
+
+
+__all__ = ["audit_module_contracts"]

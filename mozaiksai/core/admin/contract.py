@@ -7,12 +7,17 @@ from typing import Any
 ADMIN_SECTION_ORDER = (
     "overview",
     "users",
+    "billing",
     "usage",
+    "activity",
     "operations",
     "settings",
+    "integrations",
+    "support",
 )
 
 APP_ADMIN_ROUTE_SECTIONS = (
+    "overview",
     "users",
     "usage",
 )
@@ -21,13 +26,18 @@ APP_ADMIN_ROUTE_SECTIONS = (
 ADMIN_SECTION_META: dict[str, dict[str, Any]] = {
     "overview": {"label": "Admin", "order": 999, "title": "Admin"},
     "users": {"label": "Users", "order": 1000, "title": "Users"},
-    "usage": {"label": "Usage", "order": 1001, "title": "Usage"},
-    "operations": {"label": "Operations", "order": 1002, "title": "Operations"},
-    "settings": {"label": "Settings", "order": 1003, "title": "Settings"},
+    "billing": {"label": "Billing", "order": 1001, "title": "Billing"},
+    "usage": {"label": "Usage", "order": 1002, "title": "Usage"},
+    "activity": {"label": "Activity", "order": 1003, "title": "Activity"},
+    "operations": {"label": "Operations", "order": 1004, "title": "Operations"},
+    "settings": {"label": "Settings", "order": 1005, "title": "Settings"},
+    "integrations": {"label": "Integrations", "order": 1006, "title": "Integrations"},
+    "support": {"label": "Support", "order": 1007, "title": "Support"},
 }
 
 
 APP_ADMIN_ROUTE_PATHS: dict[str, str] = {
+    "overview": "/admin",
     "users": "/apps/:appId/users",
     "usage": "/apps/:appId/usage",
 }
@@ -39,9 +49,22 @@ DEFAULT_RUNTIME_PANELS: list[dict[str, Any]] = [
     {"id": "sessions", "label": "Recent Sessions", "section": "operations"},
 ]
 
+ADMIN_SECTION_ALIASES: dict[str, str] = {
+    "config": "settings",
+    "configuration": "settings",
+    "preferences": "settings",
+    "audit": "activity",
+    "logs": "activity",
+}
+
+
+def coerce_admin_section_name(value: str) -> str:
+    section = value.strip().lower().replace("_", "-")
+    return ADMIN_SECTION_ALIASES.get(section, section)
+
 
 def normalize_admin_section_name(value: str) -> str:
-    section = value.strip().lower().replace("_", "-")
+    section = coerce_admin_section_name(value)
     return section if section in ADMIN_SECTION_META else "overview"
 
 

@@ -4,7 +4,7 @@ Rate limiting middleware for the Mozaiks runtime.
 Reads configuration from environment variables:
   RATE_LIMIT_ENABLED              — true/false (default: true)
   RATE_LIMIT_REQUESTS_PER_MINUTE  — global default RPM per client (default: 60)
-  RATE_LIMIT_EXCLUDED_PATHS       — comma-separated paths to skip (default: health endpoints)
+  RATE_LIMIT_EXCLUDED_PATHS       — comma-separated paths to skip (default: health + shell/theme/me infrastructure endpoints)
   RATE_LIMIT_PATH_LIMITS          — per-path overrides, format: "path:rpm,path:rpm"
   RATE_LIMIT_CLIENT_HEADER        — header to use for client ID behind a proxy (e.g. X-Forwarded-For)
   REDIS_URL                       — Redis connection URL; falls back to in-memory if unset
@@ -66,7 +66,10 @@ def _excluded_paths() -> set[str]:
         path.strip()
         for path in os.getenv(
             "RATE_LIMIT_EXCLUDED_PATHS",
-            "/api/health,/api/health/live,/api/health/ready",
+            (
+                "/api/health,/api/health/live,/api/health/ready,"
+                "/api/shell-config,/api/theme-config,/api/me,/api/me/preferences"
+            ),
         ).split(",")
         if path.strip()
     }

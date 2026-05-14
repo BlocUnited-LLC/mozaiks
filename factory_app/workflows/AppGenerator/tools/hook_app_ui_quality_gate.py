@@ -5,6 +5,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
+from factory_app.workflows.AppGenerator.tools._hook_utils import update_agent_section
 from factory_app.workflows.AppGenerator.tools.save_app_schema import save_app_schema
 from factory_app.workflows.AppGenerator.tools.ui_quality import review_ui_quality
 
@@ -45,30 +46,6 @@ def _context_set(context_variables: Optional[Any], key: str, value: Any) -> None
         return
     if isinstance(context_variables, dict):
         context_variables[key] = value
-
-
-def _apply_system_message(agent: Any, message: str) -> None:
-    updater = getattr(agent, "update_system_message", None)
-    if callable(updater):
-        updater(message)
-    elif hasattr(agent, "_system_message"):
-        agent._system_message = message
-    else:
-        setattr(agent, "_system_message", message)
-    setattr(agent, "_mozaiks_base_system_message", message)
-
-
-def _update_section(agent: Any, header: str, body: str) -> None:
-    current = getattr(agent, "system_message", None) or getattr(agent, "_system_message", "") or ""
-    section = f"{header}\n{body}"
-    if header in current:
-        prefix = current.split(header, 1)[0].rstrip()
-        new_message = f"{prefix}\n\n{section}" if prefix else section
-    else:
-        new_message = f"{current}\n\n{section}" if current else section
-
-    if new_message != current:
-        _apply_system_message(agent, new_message)
 
 
 def _parse_json_object(content: Any) -> Optional[Dict[str, Any]]:
@@ -175,7 +152,7 @@ def run_app_ui_quality_gate(agent: Any, messages: List[Dict[str, Any]]) -> None:
         f"- warning_count: {len(warnings)}\n"
         "Emit the AppUIQualityReviewRequest JSON only; do not re-review manually."
     )
-    _update_section(agent, _HEADER, body)
+    update_agent_section(agent, _HEADER, body)
 
 
 __all__ = ["run_app_ui_quality_gate"]

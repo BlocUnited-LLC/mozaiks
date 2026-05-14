@@ -651,6 +651,24 @@ definitions:
     source:
       type: computed
       default: null
+  module_contract_quality_status:
+    type: string
+    description: >
+      Quality gate outcome set by review_module_contract_quality. One of
+      passed | blocked. Drives handoff routing after ConfigMiddlewareAgent in
+      the sequential (non-task_run_mode) path.
+    source:
+      type: computed
+      default: null
+  module_contract_quality_warnings:
+    type: array
+    description: >
+      Deterministic warnings from audit_module_contracts. Populated by the
+      hook_module_contract_quality_gate hook before ModuleContractQualityAgent
+      speaks. Empty list when no issues are found.
+    source:
+      type: computed
+      default: []
 agents:
   InterviewAgent:
     variables:
@@ -804,6 +822,10 @@ agents:
     - agent_websocket_url
     - generated_workflow_capability_id
     - generated_workflow_trigger_events
+  ModuleContractQualityAgent:
+    variables:
+    - module_contract_quality_status
+    - module_contract_quality_warnings
   ModelAgent:
     variables:
     - concept_overview

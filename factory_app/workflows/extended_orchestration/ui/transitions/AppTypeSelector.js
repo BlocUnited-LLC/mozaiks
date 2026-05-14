@@ -1,5 +1,5 @@
-import brownfieldImage from '../../../../app/brand/assets/brownfield.png';
-import greenfieldImage from '../../../../app/brand/assets/greenfield.png';
+import brownfieldImage from '../../../../app/brand/assets/brownfield.jpg';
+import greenfieldImage from '../../../../app/brand/assets/greenfield.jpg';
 import {
   TransitionChoiceCard,
   TransitionChoicePanel,

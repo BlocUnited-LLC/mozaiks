@@ -37,9 +37,25 @@ import { Empty } from './Skeleton.jsx';
 import { useAppEvent } from '../hooks/useAppEventBus.js';
 import { cn } from '../lib/cn.js';
 
+function statusTone(value) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (['active', 'approved', 'complete', 'completed', 'connected', 'hosted', 'live', 'paid', 'ready', 'success'].includes(normalized)) {
+    return 'success';
+  }
+  if (['pending', 'requested', 'submitted', 'review', 'in_review', 'queued', 'draft'].includes(normalized)) {
+    return 'warning';
+  }
+  if (['blocked', 'cancelled', 'canceled', 'denied', 'error', 'failed', 'rejected'].includes(normalized)) {
+    return 'destructive';
+  }
+  return 'default';
+}
+
 function CellContent({ column, value }) {
   if (value === null || value === undefined) return <span className="text-muted-foreground">—</span>;
   switch (column.type) {
+    case 'status':
+      return <StatusPill label={String(value)} tone={statusTone(value)} />;
     case 'badge':
       return <StatusPill label={String(value)} tone="default" />;
     case 'date':

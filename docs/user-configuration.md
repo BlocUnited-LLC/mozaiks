@@ -294,5 +294,5 @@ Then add vault/auth/deployment settings only when you actually need them.
 
 - [Getting Started](getting-started.md)
 - [Install Modes](install-modes.md)
-- [Persistence and Artifact Storage](architecture/foundations/persistence-and-artifact-storage.md)
+- [Persistence and Artifact Storage](architecture/foundations/events-and-data/persistence-and-artifact-storage.md)
 - `./.env.example` in the repo root

@@ -19,6 +19,7 @@ Commands:
     mozaiks studio            Print workspace status (terminal diagnostic)
     mozaiks add <feature>     Add feature to existing project
     mozaiks gen <mode>        Convenience shortcut: generate from a prompt
+    mozaiks sync-agent-guidance  Sync app-local coding-agent guidance safely
     mozaiks info              Show current config and available presets
 """
 
@@ -34,6 +35,7 @@ from mozaiks_cli.commands import (
     quickstart_command,
     serve_command,
     studio_command,
+    sync_agent_guidance_command,
 )
 from mozaiksai.version import __version__
 
@@ -386,6 +388,44 @@ def create_parser():
         help="App validation strategy for AppGenerator runs (default: resolved from the current environment)",
     )
 
+    # mozaiks sync-agent-guidance
+    sync_parser = subparsers.add_parser(
+        "sync-agent-guidance",
+        aliases=["sync-guidance"],
+        help="Safely sync app-local coding-agent guidance",
+        description=(
+            "Check or apply the generated AGENTS.md, CLAUDE.md, and .claude guidance "
+            "for an app workspace. By default this only checks. Existing custom files "
+            "are not overwritten unless --force is used."
+        ),
+    )
+    sync_parser.add_argument(
+        "--dir",
+        dest="directory",
+        default=".",
+        help="Workspace root to sync (default: current directory)",
+    )
+    sync_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Check guidance status only (default)",
+    )
+    sync_parser.add_argument(
+        "--write-missing",
+        action="store_true",
+        help="Create missing guidance files without changing existing files",
+    )
+    sync_parser.add_argument(
+        "--update",
+        action="store_true",
+        help="Create missing files and update existing Mozaiks managed blocks only",
+    )
+    sync_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite guidance files with current templates",
+    )
+
     # mozaiks info
     info_parser = subparsers.add_parser(
         "info",
@@ -429,6 +469,10 @@ def main():
                 result = gen_command.run_interactive(args)
             else:
                 result = gen_command.run(args)
+            if result:
+                sys.exit(result)
+        elif args.command in {"sync-agent-guidance", "sync-guidance"}:
+            result = sync_agent_guidance_command.run(args)
             if result:
                 sys.exit(result)
         elif args.command == "info":

@@ -61,6 +61,34 @@ def test_studio_host_uses_external_workspace_root_when_provided(monkeypatch, tmp
     assert workflow_root.parent.name == "factory_app"
 
 
+def test_mozaiks_host_combines_workspace_and_factory_workflow_roots(monkeypatch, tmp_path) -> None:
+    """mozaiks host should expose both product workflows and factory build workflows."""
+    workspace_root = tmp_path / "mozaiks-app"
+    app_root = workspace_root / "app"
+    product_workflows = workspace_root / "workflows"
+    app_root.mkdir(parents=True)
+    product_workflows.mkdir(parents=True)
+    (app_root / "app.json").write_text('{"appName": "Mozaiks App"}', encoding="utf-8")
+
+    monkeypatch.setenv("PLATFORM_PATH", str(app_root))
+    monkeypatch.delenv("MOZAIKS_FACTORY_APP_PATH", raising=False)
+    monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
+    monkeypatch.delenv("MOZAIKS_WORKFLOW_ROOTS", raising=False)
+    monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+
+    configure_repo_host_defaults("mozaiks")
+
+    raw = os.environ.get("MOZAIKS_WORKFLOWS_PATH", "")
+    roots = [Path(p).resolve() for p in raw.split(os.pathsep) if p.strip()]
+
+    # Product workflows come first (app takes precedence on name conflicts)
+    assert product_workflows.resolve() in roots
+    # Factory workflows are also included (for AppGenerator, ValueEngine, etc.)
+    factory_names = {r.name for r in roots}
+    assert "workflows" in factory_names  # factory_app/workflows
+    assert len(roots) >= 2
+
+
 def test_platform_host_uses_workspace_root_workflows_when_present(monkeypatch, tmp_path) -> None:
     workspace_root = tmp_path / "external-workspace"
     app_root = workspace_root / "app"

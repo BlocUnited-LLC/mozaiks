@@ -6,297 +6,193 @@ argument-hint: "[WorkflowName] [description of what it should do]"
 
 Help the user create a new workflow named $ARGUMENTS.
 
-## Before Starting
+When acting on this skill, your job is to transform human intent into a deterministic, state-driven workflow executed by Mozaiks.
 
-Gather from the user:
-1. What should this workflow do?
-2. What agents are needed?
-3. Should any agent output structured data (for UI artifacts)?
-4. Does the workflow need any UI components?
-5. Will this workflow be called as a child of another workflow?
-6. Workflow name (PascalCase like `LeadIntake`)
+## Phase 1: Architectural Discovery & Planning
 
-## Workflow Structure
+Before writing any code, interview the user or analyze their prompt to define the underlying state machine. Answer the following internally or with the user:
+1. **The Objective:** What is the fundamental outcome this workflow must achieve?
+2. **The Agents:** What are the distinct "personas" required? Remember: split conversational reasoning (free-form) from structured generation (JSON).
+3. **The Data Contracts:** What is the exact shape of the data that needs to be generated, persisted, and shown to the user?
+4. **The UI Artifacts:** Which agent outputs require a custom UI Component injected into the chat stream?
+5. **The Lifecycle:** Is this a standalone workflow, or is it triggered mid-flight by a parent workflow (`is_child_workflow`)? What context variables flow into it?
 
-Create under `app/workflows/[WorkflowName]/`:
+## Phase 2: Scaffold the Workflow Directory
+
+A Mozaiks workflow is an independent module. Scaffold the folder structure first:
 
 ```
 app/workflows/[WorkflowName]/
-├── orchestrator.yaml       # Workflow execution bootstrap
-├── agents.yaml             # Agent roster and prompts
-├── handoffs.yaml           # Agent-to-agent routing
-├── context_variables.yaml  # Shared workflow state
-├── structured_outputs.yaml # Typed outputs + registry
-├── tools.yaml              # Tool bindings and UI tool metadata
-├── ui_config.yaml          # Frontend exposure metadata
+├── orchestrator.yaml       # Defines entry point, initial agent, and constraints
+├── context_variables.yaml  # Default/schema for workflow shared state
+├── agents.yaml             # Agent definitions, system prompts, structure rules
+├── structured_outputs.yaml # Pydantic-like models the AI must strictly output
+├── tools.yaml              # Tool bindings, auto_tool triggers, UI rendering metadata
+├── handoffs.yaml           # Deterministic routing logic between agents
+├── ui_config.yaml          # Frontend exposure metadata (visual_agents)
 ├── hooks.yaml              # Lifecycle hooks (optional)
-├── extended_orchestration/mfj_extension.json # MFJ triggers (optional)
-├── tools/                  # Python tool implementations
+├── extended_orchestration/ # Mid-Flight Journey extensions & triggers (Optional)
+│   └── mfj_extension.json
+├── tools/                  # Python implementations for the tools (DUMB tools)
 │   ├── __init__.py
-│   └── my_tool.py
-└── ui/[WorkflowName]/      # Workflow-specific UI (optional)
-    ├── components/
-    │   └── MyComponent.js
-    └── styles/
+│   └── artifact_tools.py
+└── ui/[WorkflowName]/      # React UI components tied to tools (Optional)
+    └── components/
 ```
 
-## Steps
+## Phase 3: Define the Contracts (YAML)
 
-### 1. Configure orchestrator.yaml
+Always define the declarative contracts BEFORE the implementation.
+
+### 1. `orchestrator.yaml`
 ```yaml
-workflow_name: [WorkflowName]  # Must match folder name
+workflow_name: [WorkflowName]
 max_turns: 20
 human_in_the_loop: true
 startup_mode: AgentDriven
 orchestration_pattern: DefaultPattern
 initial_agent: [FirstAgentName]
-initial_message: "[FirstAgentName]: [Initial greeting]"
+initial_message: "[FirstAgentName]: [Initial greeting or prompt]"
 ```
 
-### 2. Configure agents.yaml
+### 2. `context_variables.yaml`
+Define the initial state schema. If variables are injected by a parent, document them here with their default (or empty) state.
 
-**Free-form conversational agent:**
-```yaml
-agents:
-- name: InterviewAgent
-  prompt_sections:
-    - id: role
-      heading: '[ROLE]'
-      content: You are...
-    - id: instructions
-      heading: '[INSTRUCTIONS]'
-      content: |
-        1. Ask questions...
-        2. When done, emit: NEXT
-  max_consecutive_auto_reply: 10
-  structured_outputs_required: false
-```
-
-**Structured output agent (for UI artifacts):**
-```yaml
-- name: OutputAgent
-  prompt_sections:
-    - id: output_format
-      heading: '[OUTPUT FORMAT]'
-      content: |
-        Output ONLY valid MyModel JSON:
-        ```json
-        {"field1": "value", "items": [...]}
-        ```
-  max_consecutive_auto_reply: 10
-  structured_outputs_required: true  # Enforces JSON output
-  # No auto-tool field belongs in agents.yaml; auto-tool execution is derived from tools.yaml.
-```
-
-**Child workflow aware agent:**
-```yaml
-- name: InterviewAgent
-  prompt_sections:
-    - id: instructions
-      content: |
-        1. **IF `is_child_workflow` is true**:
-           - Do NOT greet user
-           - Read context from `concept_overview` or `value_manifest`
-           - Emit ONLY: NEXT
-        2. Otherwise, ask questions...
-```
-
-### 3. Configure structured_outputs.yaml
-
+### 3. `structured_outputs.yaml`
+Define the shape of any data the workflow produces that needs to be parsed by tools or UI.
 ```yaml
 structured_outputs:
   registry:
-    # Conversational agents have null (no structured output)
+    # Conversational agent: null
     InterviewAgent: null
-    # Output agent maps to a model
-    OutputAgent: MyOutputModel
+    # Generator agent: Maps strictly to a model
+    GeneratorAgent: MyOutputModel
 
   models:
     MyOutputModel:
       type: model
-      description: Structured output for UI artifact
+      description: What this model represents
       fields:
-        agent_message:
-          type: str
-          description: User-facing status message
-        field1:
-          type: str
-          description: Main field
-        items:
-          type: optional_list
-          items: str
-          description: List of items
+        title: { type: str, description: "Title of the artifact" }
+        payload: { type: dict, description: "Data to render" }
 ```
 
-### 4. Configure tools.yaml
+### 4. `agents.yaml`
+Separate agents by capability.
+- **Conversational Agents:** `structured_outputs_required: false` (Gathers requirements, asks questions).
+- **Generator Agents:** `structured_outputs_required: true` (Takes requirements from `context_variables` and emits rigid JSON matching the model).
 
-**Auto-invoke tool (triggered after structured output):**
+*Note: Never define tool auto-invocation inside agents.yaml. That belongs in tools.yaml.*
+
+```yaml
+agents:
+- name: GeneratorAgent
+  structured_outputs_required: true
+  prompt_sections:
+    - id: instructions
+      content: You take the user's intent and generate a canonical MyOutputModel.
+```
+
+### 5. `tools.yaml`
+Bind Python functions to agents and declare how they map to UI components.
+
+- **Auto-invoke (The preferred Mozaiks pattern for UI artifacts):** When `structured_outputs_required: true`, set `auto_tool_call: true`. The runtime will force the agent to emit JSON, then instantly pass that JSON to the tool.
+
 ```yaml
 tools:
-- agent: OutputAgent
-  file: my_tool.py
-  function: save_output
-  description: Auto-invoked after OutputAgent outputs. Persists and emits UI artifact.
+- agent: GeneratorAgent
+  file: artifact_tools.py
+  function: save_and_render_artifact
+  description: Persists output and emits the artifact to the UI.
   tool_type: Agent_Tool
-  auto_tool_call: true  # Called automatically after agent speaks
+  auto_tool_call: true
   ui:
-    component: MyComponent  # React component name
-    mode: artifact          # Renders as artifact card
+    component: MyComponent  # Name of your React component
+    mode: artifact          # Renders as a full artifact card
 ```
 
-**Manual tool (agent calls explicitly):**
+### 6. `handoffs.yaml`
+Define deterministic transitions between agents, or from agent back to `user`, based on state.
+
+### 7. `ui_config.yaml`
+Define which agents are `visual_agents`.
+**CRITICAL:** Only agents listed under `visual_agents` will have their messages/outputs piped through the websocket to the UI. If an agent is not listed here, it functions as a "background" or "silent" agent.
+
 ```yaml
-- agent: InterviewAgent
-  file: my_tool.py
-  function: get_data
-  description: Retrieve data from storage.
-  tool_type: Agent_Tool
-  auto_tool_call: false
-  ui:
-    component: null
-    mode: null
+visual_agents:
+- InterviewAgent
+- GeneratorAgent
+- user
 ```
 
-### 5. Add tool implementations
+### 8. `extended_orchestration/mfj_extension.json` (Optional)
+If your workflow is triggered as a Mid-Flight Journey (a child workflow automatically invoked by the system based on a trigger event), you define those triggers here.
 
-**tools/__init__.py:**
+## Phase 4: Implementation (Dumb Tools, Smart System)
+
+**CRITICAL RULE:** Tools are dumb. LLMs reason. Never write heuristics, if-statements, or inference logic inside a tool. The tool's only job is to read from `context_variables.get("structured_output")`, persist it, and emit UI events.
+
+**tools/artifact_tools.py:**
 ```python
-from .my_tool import save_output, get_data
-
-__all__ = ["save_output", "get_data"]
-```
-
-**tools/my_tool.py:**
-```python
-"""
-Workflow tools - tools are dumb, LLMs reason.
-Read from context_variables, persist/emit. No heuristics.
-"""
-
 from typing import Annotated, Any, Dict, Optional
 import logging
 
-logger = logging.getLogger(__name__)
-
-# Import mozaiks runtime
 try:
     from mozaiksai.core.transport.simple_transport import SimpleTransport
     _HAS_TRANSPORT = True
 except ImportError:
     _HAS_TRANSPORT = False
 
+async def save_and_render_artifact(context_variables: Annotated[Optional[Any], "Runtime context"] = None) -> Dict[str, Any]:
+    if not context_variables: return {"success": False}
 
-async def save_output(
-    context_variables: Annotated[Optional[Any], "Runtime context"] = None,
-) -> Dict[str, Any]:
-    """
-    Auto-invoked after OutputAgent outputs structured data.
-    Reads structured_output from context and emits UI artifact.
-    """
-    if not context_variables:
-        return {"success": False, "error": "No context"}
-
-    # Read structured output (runtime injects it)
+    # 1. Grab the reasoned output the LLM already generated
     data = context_variables.get("structured_output")
-    if not data:
-        return {"success": False, "error": "No structured output"}
-
     chat_id = context_variables.get("chat_id")
 
-    # Transform to UI payload format
-    ui_payload = {
-        "title": data.get("field1", "Output"),
-        "items": data.get("items", []),
-    }
+    # 2. Persist it downstream to logic/db
+    context_variables["my_domain_data"] = data
 
-    # Emit UI artifact
+    # 3. Emit the UI Action
     if _HAS_TRANSPORT:
         transport = await SimpleTransport.get_instance()
         await transport.send_ui_tool_event(
-            event_id=f"output_{chat_id}",
+            event_id=f"artifact_{chat_id}",
             chat_id=str(chat_id) if chat_id else None,
-            tool_name="save_output",
-            component_name="MyComponent",
-            display_type="artifact",
-            payload=ui_payload,
-            agent_name="OutputAgent",
+            tool_name="save_and_render_artifact",
+            component_name="MyComponent",     # Must match tools.yaml
+            display_type="artifact",          # Must match tools.yaml
+            payload=data,                     # Pass the exact JSON payload to React
+            agent_name="GeneratorAgent",
         )
-
-    # Store in context for downstream use
-    context_variables["my_output"] = data
-
-    return {"success": True, "message": "Output saved"}
+    return {"success": True, "message": "Artifact rendered"}
 ```
 
-### 6. Configure handoffs.yaml
+## Phase 5: UI Implementation
 
-```yaml
-handoff_rules:
-# InterviewAgent → OutputAgent when interview complete
-- source_agent: InterviewAgent
-  target_agent: OutputAgent
-  handoff_type: condition
-  condition_type: expression
-  condition: ${interview_complete} == True
-  transition_target: AgentTarget
-
-# OutputAgent → user (present result)
-- source_agent: OutputAgent
-  target_agent: user
-  handoff_type: after_work
-  transition_target: RevertToUserTarget
-```
-
-### 7. Add UI components (if needed)
+If your workflow generated a UI artifact component, implement the React file.
+It receives the JSON payload emitted by the tool.
 
 **ui/[WorkflowName]/components/MyComponent.js:**
 ```jsx
-// No default React import — JSX transform handles it.
-// Use named imports only if you need hooks.
-// import { useState } from 'react'
-
-// Use --mz-* semantic tokens via Tailwind. No hardcoded color scales,
-// no --color-* CSS variables, no artifactDesignSystem imports.
+// Use standard React structure. No default React imports required.
+// Do not hardcode colors; rely on tailwind classes and --mz- variables.
 
 const MyComponent = ({ payload = {} }) => {
-  const { title, items = [] } = payload;
-
+  const { title, payload: data } = payload;
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <h3 className="text-lg font-semibold text-foreground">{title}</h3>
-      <ul className="mt-2 space-y-1">
-        {items.map((item, idx) => (
-          <li key={idx} className="text-sm text-muted-foreground">• {item}</li>
-        ))}
-      </ul>
+      {/* Render your data here */}
     </div>
   );
 };
-
 export default MyComponent;
 ```
 
-## Key Principles
-
-1. **Tools are dumb, LLMs reason** - No heuristics in tools. Tools read from `context_variables["structured_output"]` and persist/emit.
-
-2. **Structured outputs drive UI** - Agent outputs JSON → tool auto-invokes → tool emits artifact.
-
-3. **Child workflow awareness** - Check `is_child_workflow` in context to skip interview and use parent context.
-
-4. **Context flows downstream** - Store outputs in `context_variables` for other agents/workflows to read.
-
-## Verification
-
-1. Check `http://localhost:8000/api/workflows` - workflow should appear
-2. Test the workflow flow end-to-end
-3. Verify UI artifacts render correctly
-4. Check MongoDB for persisted data
-
-## Common Issues
-
-- **Workflow not appearing**: Check `workflow_name` matches folder name exactly
-- **Agent not responding**: Check `initial_agent` exists in `agents.yaml`
-- **Tool not executing**: Check `tools.yaml` function name matches Python function
+## Review & Deliver
+1. **Did you separate reasoning?** Verify that logic lives in prompts/outputs, not Python tools.
+2. **Did you bridge the gap?** Check that `structured_outputs.yaml` registry -> `agents.yaml` requirement -> `tools.yaml` binding -> python function -> React component all use the exact same variable names, payload shapes, and component names.
+3. Inform the user they can test it via the Studio at `/api/workflows` or by running a Mozaiks session.
 - **Structured output not captured**: Ensure `structured_outputs_required: true` in agents.yaml
 - **UI not rendering**: Check component export and `tools.yaml` component name match

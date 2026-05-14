@@ -91,6 +91,7 @@ export function PageRenderer({ schema, className, onNavigate }) {
   const { name, title, layout = 'full-width', sections: rawSections = [] } = schema;
 
   const sections = useMemo(() => normalizeSections(rawSections), [rawSections]);
+  const frameTitle = sections[0]?.primitive === 'PageHeader' ? null : title;
 
   const { sectionData, refetch } = usePageData(sections);
 
@@ -103,7 +104,7 @@ export function PageRenderer({ schema, className, onNavigate }) {
   return (
     <PageFrame
       name={name}
-      title={title}
+      title={frameTitle}
       layout={layout}
       className={className}
     >

@@ -51,7 +51,8 @@ def test_platform_shell_registers_admin_section_routes() -> None:
     platform_source = _read("mozaiksai/hosts/platform.py")
     contract_source = _read("mozaiksai/core/admin/contract.py")
 
-    for path in ["/apps/:appId/users", "/apps/:appId/usage"]:
+    # /admin is the top-level overview route; per-app section routes follow
+    for path in ["/admin", "/apps/:appId/users", "/apps/:appId/usage"]:
         assert path in contract_source
 
     for path in ["/apps/:appId/admin", "/apps/:appId/operations", "/apps/:appId/settings"]:

@@ -6,13 +6,37 @@
  *
  * Content paths cover:
  *   - web_shell/    — the shell itself
- *   - chat-ui/src/  — all chat UI + App UI primitives (always present)
+ *   - chat-ui/src/ or mozaiks_chat_ui/src/ — chat UI + App UI primitives
  *   - *-platform/   — product/feature platform directories (mozaiks-platform, etc.)
+ *   - active app and factory app env paths — external app workspaces in dev
  *
  * All dynamic brand values (colors, radius, fonts) are applied via CSS custom
  * properties (--mz-*) at runtime by themeProvider.js. Tailwind classes reference
  * those variables, so no rebuild is needed when the theme changes.
  */
+
+function normalizeContentPath(value) {
+  if (!value || typeof value !== 'string') return null;
+  return value.replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+function workspaceContentPaths(value) {
+  const base = normalizeContentPath(value);
+  if (!base) return [];
+  return [
+    `${base}/ui/**/*.{js,jsx,ts,tsx}`,
+    `${base}/app/ui/**/*.{js,jsx,ts,tsx}`,
+    `${base}/workflows/**/*.{js,jsx,ts,tsx}`,
+  ];
+}
+
+const chatUiEnvPath = normalizeContentPath(process.env.MOZAIKS_CHAT_UI_PATH);
+const envContentPaths = [
+  ...workspaceContentPaths(process.env.PLATFORM_PATH),
+  ...workspaceContentPaths(process.env.MOZAIKS_APP_WORKSPACE_PATH),
+  ...workspaceContentPaths(process.env.MOZAIKS_FACTORY_APP_PATH),
+  ...(chatUiEnvPath ? [`${chatUiEnvPath}/src/**/*.{js,jsx,ts,tsx}`] : []),
+];
 
 /** @type {import('tailwindcss').Config} */
 export default {
@@ -21,9 +45,13 @@ export default {
     './index.html',
     './*.{js,jsx}',
     '../chat-ui/src/**/*.{js,jsx,ts,tsx}',
+    '../mozaiks_chat_ui/src/**/*.{js,jsx,ts,tsx}',
+    '../factory_app/app/ui/**/*.{js,jsx,ts,tsx}',
+    '../factory_app/workflows/**/*.{js,jsx,ts,tsx}',
     // Any product/feature platform layer (*-platform/) — covers mozaiks-platform
     // and any future platform products without requiring config changes.
     '../*-platform/**/*.{js,jsx,ts,tsx}',
+    ...envContentPaths,
   ],
   theme: {
     extend: {

@@ -177,6 +177,14 @@ def load_primitive_schemas() -> Optional[Dict[str, Dict]]:
     return _load_primitive_schemas()
 
 
+def _clear_primitive_caches() -> None:
+    """Clear process-local primitive discovery caches for test isolation."""
+
+    get_component_ui_primitive_exports.cache_clear()
+    get_page_ui_primitive_exports.cache_clear()
+    _load_primitive_schemas.cache_clear()
+
+
 def format_page_ui_primitive_guidance() -> str:
     names = ", ".join(get_page_ui_primitive_names())
     schemas = _load_primitive_schemas()
@@ -214,6 +222,7 @@ __all__ = [
     "get_component_ui_primitive_names",
     "get_page_ui_primitive_exports",
     "get_page_ui_primitive_names",
+    "_clear_primitive_caches",
     "validate_component_ui_primitives",
     "validate_page_ui_primitives",
     "load_primitive_schemas",

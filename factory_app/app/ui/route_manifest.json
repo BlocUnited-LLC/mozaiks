@@ -9,7 +9,10 @@
         "surfaces": ["studio"],
         "requiresRole": "admin",
         "title": "Create App",
-        "appShell": true
+        "appShell": true,
+        "navigation": {
+          "include": false
+        }
       }
     },
     {

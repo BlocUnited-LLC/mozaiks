@@ -41,7 +41,9 @@ from mozaiksai.core.runtime.app.loader import AppLoadError, AppLoader
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
 from mozaiksai.core.runtime.composition.extensions import (
     mount_declared_routers,
+    mount_module_routers,
     start_declared_services,
+    start_module_services,
     stop_services,
 )
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
@@ -74,10 +76,9 @@ _ACCOUNT_PROFILE_COLLECTION = "UserProfiles"
 _ACCOUNT_PREFERENCES_COLLECTION = "UserPreferences"
 
 
-try:
-    mount_declared_routers(app)
-except Exception as exc:  # pragma: no cover
-    logger.debug("RUNTIME_EXTENSIONS_MOUNT_FAILED: %s", exc)
+# Module runtime_extensions.yaml routers are mounted in _platform_startup()
+# after ModuleLoader registers module packages in sys.modules.
+# mount_declared_routers is retained for workspace-level (non-module) extensions.
 
 try:
     from mozaiksai.core.admin.router import router as admin_router
@@ -160,11 +161,6 @@ async def _platform_startup() -> None:
     """Initialize platform/app-shell composition after runtime startup."""
     global _runtime_services
 
-    try:
-        _runtime_services = await start_declared_services()
-    except Exception as exc:
-        logger.debug("RUNTIME_EXTENSIONS_SERVICES_NOT_STARTED: %s", exc)
-
     app_root = resolve_app_root()
     try:
         load_result = await AppLoader.load(str(app_root))
@@ -212,6 +208,22 @@ async def _platform_startup() -> None:
                 )
             executor_registry.register(module_executor)
             logger.info("MODULE_EXECUTOR_READY: %s module(s)", len(load_result.modules))
+
+            # Mount api_router extensions and start startup_service extensions
+            # now that module packages are registered in sys.modules.
+            try:
+                n = mount_module_routers(app, load_result.modules)
+                if n:
+                    logger.info("MODULE_EXTENSIONS_ROUTERS_MOUNTED: %s router(s)", n)
+            except Exception as exc:
+                logger.warning("MODULE_EXTENSIONS_ROUTER_MOUNT_FAILED: %s", exc)
+
+            try:
+                module_services = await start_module_services(load_result.modules)
+                _runtime_services.extend(module_services)
+            except Exception as exc:
+                logger.warning("MODULE_EXTENSIONS_SERVICES_NOT_STARTED: %s", exc)
+
     except AppLoadError:
         logger.debug("APP_LOAD_SKIPPED: app.json not found for platform host")
     except Exception as exc:
@@ -766,6 +778,25 @@ def _footer_link_from_item(item: dict[str, Any]) -> dict[str, Any] | None:
     return {"label": item.get("label") or _title_from_id(str(item.get("id") or "link")), "href": href}
 
 
+def _header_action_targets(header: Any) -> set[str]:
+    if not isinstance(header, dict):
+        return set()
+
+    actions = header.get("actions")
+    if not isinstance(actions, list):
+        return set()
+
+    targets: set[str] = set()
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        for key in ("path", "href"):
+            target = _clean_string(action.get(key))
+            if target:
+                targets.add(target)
+    return targets
+
+
 def _apply_dynamic_shell_navigation(
     result: dict,
     *,
@@ -824,10 +855,11 @@ def _apply_dynamic_shell_navigation(
     if resolved["desktop"]["header"]:
         header = result.get("header") if isinstance(result.get("header"), dict) else {}
         if not isinstance(header.get("pages"), list) or not header["pages"]:
+            header_action_targets = _header_action_targets(header)
             header["pages"] = [
                 {key: value for key, value in item.items() if key in {"id", "label", "path", "icon", "requiresRole", "visible"}}
                 for item in resolved["desktop"]["header"]
-                if item.get("path")
+                if item.get("path") and item.get("path") not in header_action_targets
             ]
             result["header"] = header
 

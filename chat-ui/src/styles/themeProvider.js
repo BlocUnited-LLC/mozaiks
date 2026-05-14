@@ -374,6 +374,38 @@ const CHAT_BUBBLE_RADIUS_BY_SCALE = {
   full: '999px',
 };
 
+const BUILTIN_LOCAL_FONT_PRESETS = [
+  {
+    family: 'Fagrak',
+    src: '/fonts/Fagrak.otf',
+    fallbacks: 'ui-sans-serif, system-ui, sans-serif',
+  },
+  {
+    family: 'Techfont',
+    src: '/fonts/Techfont.woff',
+    fallbacks: 'ui-sans-serif, system-ui, sans-serif',
+  },
+  {
+    family: 'Fueled by Schlitz',
+    src: '/fonts/FBS.otf',
+    fallbacks: 'ui-sans-serif, system-ui, sans-serif',
+  },
+  {
+    family: 'Hyperjump',
+    src: '/fonts/Hyperjump Bold.otf',
+    fallbacks: 'ui-sans-serif, system-ui, sans-serif',
+  },
+  {
+    family: 'Oxanium',
+    src: '/fonts/Oxanium-VariableFont_wght.ttf',
+    fallbacks: "'Rajdhani', ui-sans-serif, system-ui, sans-serif",
+  },
+];
+
+const localFontAvailabilityCache = new Map();
+const localFontRegistrationCache = new Map();
+const localFontMissingNotice = new Set();
+
 function normalizePageMaxWidthKeys(maxWidth) {
   if (!maxWidth || typeof maxWidth !== 'object') return {};
   const normalized = { ...maxWidth };
@@ -1039,7 +1071,12 @@ export function applyTheme(theme) {
     });
     Object.values(fonts).forEach((font) => {
       if (font?.googleFont && !font.localFont) loadGoogleFont(font.googleFont);
-      if (font?.localFont && font?.src) loadLocalFont(font);
+      if (font?.localFont && font?.src) {
+        void ensureLocalFont(font);
+      }
+    });
+    BUILTIN_LOCAL_FONT_PRESETS.forEach((font) => {
+      void ensureLocalFont(font);
     });
 
     const root = document.documentElement;
@@ -1082,6 +1119,41 @@ function loadGoogleFont(fontUrl) {
   link.rel  = 'stylesheet';
   link.href = fontUrl;
   document.head.appendChild(link);
+}
+
+function normalizeFontSource(src) {
+  if (!src || typeof src !== 'string') return null;
+  const trimmed = src.trim();
+  if (!trimmed) return null;
+  if (/^[a-z]+:\/\//i.test(trimmed)) return trimmed;
+  return trimmed.startsWith('/') ? trimmed : `/${trimmed.replace(/^\/+/, '')}`;
+}
+
+async function probeLocalFontSource(src) {
+  const normalizedSrc = normalizeFontSource(src);
+  if (!normalizedSrc) return false;
+  if (localFontAvailabilityCache.has(normalizedSrc)) {
+    return localFontAvailabilityCache.get(normalizedSrc);
+  }
+
+  const probe = (async () => {
+    try {
+      const headResponse = await fetch(normalizedSrc, { method: 'HEAD', cache: 'no-store' });
+      if (headResponse.ok) return true;
+      if (![405, 501].includes(headResponse.status)) return false;
+    } catch (_) {
+    }
+
+    try {
+      const getResponse = await fetch(normalizedSrc, { cache: 'no-store' });
+      return getResponse.ok;
+    } catch (_) {
+      return false;
+    }
+  })();
+
+  localFontAvailabilityCache.set(normalizedSrc, probe);
+  return probe;
 }
 
 function inferFontFormat(src) {
@@ -1207,7 +1279,7 @@ function logThemeRuntimeDiagnostics(root, fonts, theme) {
 
 function loadLocalFont(font) {
   const family = normalizeFontFamily(font?.family);
-  const src = font?.src?.trim();
+  const src = normalizeFontSource(font?.src);
   if (!family || !src) return;
 
   const styleId = `mozaiks-local-font-${src.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`;
@@ -1221,6 +1293,48 @@ function loadLocalFont(font) {
   style.textContent = `@font-face { font-family: ${family}; src: url("${src}") format("${inferFontFormat(src)}"); font-display: swap; }`;
   document.head.appendChild(style);
   console.log('🔤 [THEME] Registered local font-face:', { family: font.family, src, styleId });
+}
+
+async function ensureLocalFont(font) {
+  const src = normalizeFontSource(font?.src);
+  const family = normalizeFontFamily(font?.family);
+  if (!src || !family) return false;
+
+  const styleId = `mozaiks-local-font-${src.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`;
+  if (document.getElementById(styleId)) {
+    return true;
+  }
+
+  if (localFontRegistrationCache.has(styleId)) {
+    return localFontRegistrationCache.get(styleId);
+  }
+
+  const registration = probeLocalFontSource(src)
+    .then((available) => {
+      if (!available) {
+        if (!localFontMissingNotice.has(src)) {
+          localFontMissingNotice.add(src);
+          console.info('🔤 [THEME] Skipping missing local font asset:', { family: font.family, src });
+        }
+        return false;
+      }
+      loadLocalFont({ ...font, src });
+      return true;
+    })
+    .catch((error) => {
+      console.warn('⚠️ [THEME] Failed to verify local font asset:', {
+        family: font?.family || null,
+        src,
+        error: error?.message || error,
+      });
+      return false;
+    })
+    .finally(() => {
+      localFontRegistrationCache.delete(styleId);
+    });
+
+  localFontRegistrationCache.set(styleId, registration);
+  return registration;
 }
 
 function applyFontVariables(root, themeFonts) {
@@ -1237,10 +1351,26 @@ function applyFontVariables(root, themeFonts) {
   if (headingStack) root.style.setProperty('--font-heading', headingStack);
   if (logoStack) root.style.setProperty('--font-logo', logoStack);
 
+  const utilityStacks = {
+    '--font-fagrak': buildFontStack({ family: 'Fagrak' }, bodyStack || 'ui-sans-serif, system-ui, sans-serif'),
+    '--font-tech': buildFontStack({ family: 'Techfont' }, `${bodyStack || 'ui-sans-serif, system-ui, sans-serif'}, monospace`),
+    '--font-fbs': buildFontStack({ family: 'Fueled by Schlitz' }, bodyStack || 'ui-sans-serif, system-ui, sans-serif'),
+    '--font-hyperjump': buildFontStack({ family: 'Hyperjump' }, bodyStack || 'ui-sans-serif, system-ui, sans-serif'),
+    '--font-transmission': buildFontStack(
+      { family: 'Oxanium' },
+      `${headingStack || bodyStack || 'ui-sans-serif, system-ui, sans-serif'}, monospace`
+    ),
+  };
+
+  Object.entries(utilityStacks).forEach(([cssVar, value]) => {
+    if (value) root.style.setProperty(cssVar, value);
+  });
+
   console.log('🔤 [THEME] Applied font CSS variables:', {
     '--font-body': bodyStack,
     '--font-heading': headingStack,
     '--font-logo': logoStack,
+    ...utilityStacks,
   });
 }
 

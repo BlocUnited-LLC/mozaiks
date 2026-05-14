@@ -77,9 +77,12 @@ def normalize_workflow_roots(
             add(value)
         return candidates
 
-    single_root = str(os.getenv("MOZAIKS_WORKFLOWS_PATH") or "").strip()
-    if single_root:
-        add(single_root)
+    raw_roots = str(os.getenv("MOZAIKS_WORKFLOWS_PATH") or "").strip()
+    if raw_roots:
+        for part in raw_roots.split(os.pathsep):
+            part = part.strip()
+            if part:
+                add(part)
         return candidates
 
     # Legacy compatibility: if callers still provide MOZAIKS_WORKFLOW_ROOTS,

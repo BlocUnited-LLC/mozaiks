@@ -17,6 +17,141 @@ logger = get_workflow_logger("runtime_extensions")
 _RUN_LEVEL_TRIGGERS = {"on_start", "on_complete", "on_fail"}
 
 
+# ---------------------------------------------------------------------------
+# Module-local entrypoint resolution
+# ---------------------------------------------------------------------------
+
+def _module_package_root(module_name: str) -> str:
+    """Return the sys.modules package root that ModuleLoader registers for a module.
+
+    ModuleLoader registers loaded module backend code under a synthetic package
+    named ``mozaiks_runtime_module_{safe_name}`` so that module-local imports are
+    isolated.  This function returns that root so extension entrypoints declared as
+    ``backend.router:get_router`` can be resolved as
+    ``mozaiks_runtime_module_task_manager.backend.router:get_router``.
+    """
+    safe = module_name.replace(".", "_").replace("-", "_")
+    return f"mozaiks_runtime_module_{safe}"
+
+
+def _qualify_module_entrypoint(module_name: str, entrypoint: str) -> str:
+    """Qualify a module-local entrypoint with its registered package root.
+
+    ``backend.router:get_router`` →
+    ``mozaiks_runtime_module_task_manager.backend.router:get_router``
+    """
+    if ":" not in entrypoint:
+        raise ValueError(f"Invalid entrypoint (expected module.path:attr): {entrypoint!r}")
+    module_path, _, attr = entrypoint.partition(":")
+    return f"{_module_package_root(module_name)}.{module_path.strip()}:{attr.strip()}"
+
+
+def mount_module_routers(app: FastAPI, loaded_modules: Iterable[Any]) -> int:
+    """Mount ``api_router`` extensions declared in already-loaded module manifests.
+
+    Uses the module's registered ``sys.modules`` package root to resolve
+    module-local entrypoints (e.g. ``backend.router:get_router``).
+
+    This must be called *after* ``ModuleLoader.load_all()`` so that the module
+    packages are registered in ``sys.modules``.
+
+    Returns the number of routers successfully mounted.
+    """
+    mounted = 0
+    for mod in loaded_modules:
+        manifests = getattr(mod, "manifests", None)
+        rt_ext = (
+            getattr(manifests, "runtime_extensions", None)
+            if manifests is not None
+            else None
+        )
+        if rt_ext is None:
+            continue
+        module_name: str = getattr(mod, "name", "")
+        for ext in rt_ext.extensions:
+            if ext.kind != "api_router":
+                continue
+            try:
+                qualified = _qualify_module_entrypoint(module_name, ext.entrypoint)
+                obj = _load_entrypoint(qualified)
+                router = obj() if callable(obj) and not isinstance(obj, APIRouter) else obj
+                if not isinstance(router, APIRouter):
+                    logger.warning(
+                        "MODULE_EXTENSIONS_SKIP_ROUTER: entrypoint did not return APIRouter: "
+                        "%s (module=%s)",
+                        ext.entrypoint,
+                        module_name,
+                    )
+                    continue
+                app.include_router(router, prefix=ext.prefix or "")
+                mounted += 1
+                logger.info(
+                    "MODULE_EXTENSIONS_ROUTER_MOUNTED: %s (module=%s prefix=%r)",
+                    ext.entrypoint,
+                    module_name,
+                    ext.prefix or "",
+                )
+            except Exception as exc:
+                logger.warning(
+                    "MODULE_EXTENSIONS_ROUTER_FAILED: %s (module=%s) error=%s",
+                    ext.entrypoint,
+                    module_name,
+                    exc,
+                )
+    return mounted
+
+
+async def start_module_services(loaded_modules: Iterable[Any]) -> list[Any]:
+    """Start ``startup_service`` extensions declared in already-loaded module manifests.
+
+    Uses the module's registered ``sys.modules`` package root to resolve
+    module-local entrypoints (e.g. ``backend.worker:MyService``).
+
+    This must be called *after* ``ModuleLoader.load_all()`` so that the module
+    packages are registered in ``sys.modules``.
+
+    Returns list of service instances that were started (suitable for passing
+    to ``stop_services`` on shutdown).
+    """
+    started: list[Any] = []
+    for mod in loaded_modules:
+        manifests = getattr(mod, "manifests", None)
+        rt_ext = (
+            getattr(manifests, "runtime_extensions", None)
+            if manifests is not None
+            else None
+        )
+        if rt_ext is None:
+            continue
+        module_name: str = getattr(mod, "name", "")
+        for ext in rt_ext.extensions:
+            if ext.kind != "startup_service":
+                continue
+            try:
+                qualified = _qualify_module_entrypoint(module_name, ext.entrypoint)
+                cls = _load_entrypoint(qualified)
+                svc = cls() if callable(cls) and not inspect.iscoroutinefunction(cls) else cls
+                start_fn = getattr(svc, "start", None)
+                if callable(start_fn):
+                    res = start_fn()
+                    if inspect.isawaitable(res):
+                        await res
+                started.append(svc)
+                logger.info(
+                    "MODULE_EXTENSIONS_SERVICE_STARTED: %s (module=%s)",
+                    ext.entrypoint,
+                    module_name,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "MODULE_EXTENSIONS_SERVICE_FAILED: %s (module=%s) error=%s",
+                    ext.entrypoint,
+                    module_name,
+                    exc,
+                )
+    return started
+
+
 def _load_entrypoint(entrypoint: str) -> Any:
     """Load an entrypoint of form `module.path:attr`."""
 

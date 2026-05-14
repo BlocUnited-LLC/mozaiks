@@ -18,6 +18,13 @@ except Exception:  # pragma: no cover - import failures are surfaced by runtime 
 
 REMOVED_PRIMITIVES = {"Badge", "Card", "Stat"}
 SURFACE_PRIMITIVES = {"Panel", "SurfaceCard"}
+VALID_PAGE_TYPES = frozenset({
+    "record_list", "record_detail", "analytics_dashboard", "workflow_board",
+    "activity_feed", "gallery", "wizard", "split_view", "settings", "landing",
+})
+VALID_EXTENSION_SLOTS = frozenset({
+    "header", "empty_state", "hero", "sidebar", "actions_bar",
+})
 COPY_FLAGS = (
     "placeholder",
     "lorem",
@@ -280,6 +287,34 @@ def audit_page_schemas(
         page_name = str(page.get("name") or page.get("title") or f"page[{page_index}]")
         page_path = f"{source_label} '{page_name}'"
         primitive_counts: Dict[str, int] = {}
+
+        page_type = page.get("page_type")
+        if not page_type:
+            warnings.append(
+                f"{page_path} is missing required 'page_type' field."
+            )
+        elif page_type not in VALID_PAGE_TYPES:
+            warnings.append(
+                f"{page_path} has invalid page_type '{page_type}'; must be one of: {', '.join(sorted(VALID_PAGE_TYPES))}."
+            )
+
+        extensions = page.get("extensions")
+        if extensions is not None:
+            if not isinstance(extensions, list):
+                warnings.append(f"{page_path} extensions must be a list or null.")
+            else:
+                for ext in extensions:
+                    if not isinstance(ext, dict):
+                        continue
+                    slot = ext.get("slot")
+                    if slot not in VALID_EXTENSION_SLOTS:
+                        warnings.append(
+                            f"{page_path} extension uses invalid slot '{slot}'; must be one of: {', '.join(sorted(VALID_EXTENSION_SLOTS))}."
+                        )
+                    if not ext.get("component"):
+                        warnings.append(
+                            f"{page_path} extension slot '{slot}' is missing required 'component' field."
+                        )
 
         title = str(page.get("title") or page.get("name") or "")
         if "dashboard" in title.lower():

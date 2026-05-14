@@ -24,6 +24,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List
 
+from factory_app.workflows.AppGenerator.tools._hook_utils import update_agent_section
+
 logger = logging.getLogger(__name__)
 
 _HOSTED_CAP_HEADER = "[HOSTED CAPABILITIES CONTEXT]"
@@ -90,6 +92,116 @@ def _format_hosted_packs(packs: List[Any]) -> str:
         else:
             lines.append(f"  - {pack}")
     return "\n".join(lines)
+
+
+def _format_pack_surfaces(packs: List[Any]) -> str | None:
+    """
+    Render surface groupings from pack descriptors.
+
+    Returns a formatted string when at least one pack defines surfaces,
+    or None when no surfaces are declared (omits the section entirely).
+    """
+    surface_lines: list[str] = []
+    for pack in packs:
+        if not isinstance(pack, dict):
+            continue
+        surfaces = pack.get("surfaces") or []
+        if not surfaces:
+            continue
+        pack_id = pack.get("id") or pack.get("pack_id") or "?"
+        label = pack.get("display_name") or pack.get("label") or pack_id
+        surface_lines.append(f"{pack_id} ({label}) surfaces:")
+        for surface in surfaces:
+            if not isinstance(surface, dict):
+                continue
+            surface_id = surface.get("surface_id") or "?"
+            surface_label = surface.get("label") or surface_id
+            status = surface.get("status") or "unknown"
+            hint = surface.get("generation_hint") or {}
+            facade_module_id = hint.get("facade_module_id") or ""
+            pages = hint.get("pages") or []
+            line = f"  - {surface_id} ({surface_label}) [{status}]"
+            if facade_module_id:
+                line += f" → facade_module: {facade_module_id}"
+            if pages:
+                line += f" | pages: {', '.join(str(p) for p in pages)}"
+            surface_lines.append(line)
+    if not surface_lines:
+        return None
+    return "Pack surfaces:\n" + "\n".join(surface_lines)
+
+
+def _format_pack_supported_domains(packs: List[Any]) -> str | None:
+    """
+    Render domain fit hints from pack descriptors.
+
+    Returns formatted domain guidance, or None when no pack declares domain hints.
+    """
+    domain_lines: list[str] = []
+    for pack in packs:
+        if not isinstance(pack, dict):
+            continue
+        domains = pack.get("supported_domains") or []
+        if not domains:
+            continue
+        pack_id = pack.get("id") or pack.get("pack_id") or "?"
+        label = pack.get("display_name") or pack.get("label") or pack_id
+        domain_lines.append(f"{pack_id} ({label}) domain fit:")
+        for domain_entry in domains:
+            if not isinstance(domain_entry, dict):
+                continue
+            domain = domain_entry.get("domain") or "?"
+            fit = domain_entry.get("fit") or "?"
+            surfaces = domain_entry.get("surfaces") or []
+            blocked = domain_entry.get("blocked_surfaces") or []
+            line = f"  - {domain}: fit={fit}"
+            if surfaces:
+                line += f" | surfaces: {', '.join(str(s) for s in surfaces)}"
+            if blocked:
+                line += f" | blocked: {', '.join(str(s) for s in blocked)}"
+            domain_lines.append(line)
+    if not domain_lines:
+        return None
+    return "Pack domain fit:\n" + "\n".join(domain_lines)
+
+
+def _format_pack_branding(packs: List[Any]) -> str | None:
+    """
+    Render branding hints from pack descriptors.
+
+    Returns branding guidance, or None when no pack declares branding.
+    """
+    branding_lines: list[str] = []
+    for pack in packs:
+        if not isinstance(pack, dict):
+            continue
+        branding = pack.get("branding") or {}
+        if not branding:
+            continue
+        pack_id = pack.get("id") or pack.get("pack_id") or "?"
+        label = pack.get("display_name") or pack.get("label") or pack_id
+        branding_lines.append(f"{pack_id} ({label}) branding:")
+        attribution = branding.get("attribution") or ""
+        if attribution:
+            branding_lines.append(f"  - attribution: {attribution}")
+        app_branded = branding.get("app_branded_surfaces") or []
+        if app_branded:
+            branding_lines.append(
+                f"  - app-branded surfaces: {', '.join(str(s) for s in app_branded)}"
+            )
+        co_branded = branding.get("co_branded_surfaces") or []
+        if co_branded:
+            branding_lines.append(
+                f"  - co-branded surfaces: {', '.join(str(s) for s in co_branded)}"
+            )
+        redirect_surfaces = branding.get("hosted_redirect_surfaces") or []
+        if redirect_surfaces:
+            branding_lines.append(
+                f"  - hosted redirect surfaces: {', '.join(str(s) for s in redirect_surfaces)}"
+            )
+    if not branding_lines:
+        return None
+    return "Pack branding:\n" + "\n".join(branding_lines)
 
 
 def _format_host_generation_rules(packs: List[Any]) -> str | None:
@@ -185,6 +297,18 @@ def _build_hosted_context_body(
             "5. If a hosted_pack supersedes another pack, do NOT include the superseded pack\n"
             "   in capability_packs. Only include the superseding hosted_pack."
         )
+        surfaces_block = _format_pack_surfaces(available_hosted_packs)
+        if surfaces_block is not None:
+            parts.append(surfaces_block)
+
+        domains_block = _format_pack_supported_domains(available_hosted_packs)
+        if domains_block is not None:
+            parts.append(domains_block)
+
+        branding_block = _format_pack_branding(available_hosted_packs)
+        if branding_block is not None:
+            parts.append(branding_block)
+
         generation_rules_block = _format_host_generation_rules(available_hosted_packs)
         if generation_rules_block is not None:
             parts.append(generation_rules_block)
@@ -195,42 +319,6 @@ def _build_hosted_context_body(
     return "\n\n".join(parts)
 
 
-def _update_section(agent: Any, header: str, body: str) -> None:
-    """Append or replace a named section in the agent system message."""
-    try:
-        current: str = (
-            getattr(agent, "system_message", None)
-            or getattr(agent, "_system_message", "")
-            or ""
-        )
-        section = f"{header}\n{body}"
-
-        if header in current:
-            pre, _, rest = current.partition(header)
-            next_section_idx = rest.find("\n\n[")
-            after = rest[next_section_idx:] if next_section_idx > 0 else ""
-            new_message = f"{pre.rstrip()}\n\n{section}{after}"
-        else:
-            new_message = f"{current}\n\n{section}" if current else section
-
-        if new_message == current:
-            return
-
-        updater = getattr(agent, "update_system_message", None)
-        if callable(updater):
-            updater(new_message)
-        elif hasattr(agent, "_system_message"):
-            agent._system_message = new_message
-        else:
-            setattr(agent, "_system_message", new_message)
-
-    except Exception as exc:
-        logger.error(
-            "[%s] Failed to update system message section %s: %s",
-            getattr(agent, "name", "?"),
-            header,
-            exc,
-        )
 
 
 def inject_hosted_capabilities_context(
@@ -268,7 +356,7 @@ def inject_hosted_capabilities_context(
             available_hosted_packs=available_hosted_packs,
             pack_sources=pack_sources,
         )
-        _update_section(agent, _HOSTED_CAP_HEADER, body)
+        update_agent_section(agent, _HOSTED_CAP_HEADER, body)
 
         hosted_pack_ids = []
         if not _is_empty(available_hosted_packs):

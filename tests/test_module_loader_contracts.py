@@ -541,3 +541,56 @@ hooks: []
 
     with pytest.raises(ModuleLoadError, match="schema admin panels must declare sections"):
         ModuleLoader(str(tmp_path)).load("tasks")
+
+
+def test_module_loader_accepts_canonical_admin_sections_and_aliases(tmp_path: Path) -> None:
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("contracts", "admin.yaml").write_text(
+        """
+schema_version: mozaiks.admin.v2
+panels:
+  - id: tasks.billing
+    label: Billing
+    section: billing
+    renderer: schema
+    sections:
+      - id: billing-table
+        primitive: DataTable
+        config:
+          api_endpoint: /api/modules/tasks/create
+          columns: [{ key: task_id, label: Task }]
+  - id: tasks.config
+    label: Settings
+    section: configuration
+    renderer: schema
+    sections:
+      - id: settings-table
+        primitive: DataTable
+        config:
+          api_endpoint: /api/modules/tasks/create
+          columns: [{ key: task_id, label: Task }]
+hooks: []
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    loaded = ModuleLoader(str(tmp_path)).load("tasks")
+    assert loaded.manifests.admin.panels[0].section == "billing"
+    assert loaded.manifests.admin.panels[1].section == "settings"
+
+
+def test_module_loader_rejects_absolute_runtime_extension_entrypoint(tmp_path: Path) -> None:
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("runtime_extensions.yaml").write_text(
+        """
+schema_version: mozaiks.runtime_extensions.v1
+extensions:
+  - kind: api_router
+    entrypoint: app.modules.tasks.backend.router:get_router
+    prefix: /webhooks/tasks
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ModuleLoadError, match="module-local"):
+        ModuleLoader(str(tmp_path)).load("tasks")

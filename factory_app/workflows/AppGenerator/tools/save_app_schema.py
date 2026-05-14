@@ -5,6 +5,7 @@ import re
 import shutil
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
 import yaml
 from autogen.tools.dependency_injection import Field
@@ -418,6 +419,23 @@ def _validate_optional_string(value: Any, *, field: str) -> None:
         raise ValueError(f"{field} must be a non-empty string or null")
 
 
+def _validate_api_endpoint(value: Any, *, field: str) -> None:
+    _validate_optional_string(value, field=field)
+    if value is None:
+        return
+    endpoint = str(value).strip()
+    parsed = urlsplit(endpoint)
+    if parsed.scheme or parsed.netloc:
+        raise ValueError(f"{field} must be an app-relative API path, not an absolute URL")
+    if parsed.query or parsed.fragment:
+        raise ValueError(
+            f"{field} must not include query strings or fragments; put filters in "
+            "page_size, payload, or form/input config instead"
+        )
+    if not parsed.path.startswith("/"):
+        raise ValueError(f"{field} must start with /")
+
+
 def _validate_shell_mode(value: Any, *, field: str) -> None:
     if value is None:
         return
@@ -589,12 +607,14 @@ def _build_custom_ui_index(custom_route_bundle: Dict[str, Any]) -> str:
 
     imports: List[str] = []
     registrations: List[str] = []
+    registry_keys: List[str] = []
     for entry in page_files:
         file_path = str(entry["path"]).replace("\\", "/")
         rel_path = file_path[len("ui/") :]
         module_path = "./" + rel_path[:-4] if rel_path.endswith(".jsx") else "./" + rel_path[:-3]
         component_name = entry["component_name"]
         registry_key = entry["registry_key"]
+        registry_keys.append(registry_key)
         purpose = str(entry.get("purpose") or "").replace("\\", "\\\\").replace("'", "\\'")
         imports.append(f"import {component_name} from '{module_path}';")
         registrations.append(
@@ -610,6 +630,7 @@ def _build_custom_ui_index(custom_route_bundle: Dict[str, Any]) -> str:
         "",
         "export function register(registerComponent) {",
         "  if (typeof registerComponent !== 'function') return;",
+        f"  console.info('[mozaiks/app-ui] Registering custom route components: {', '.join(registry_keys)}');",
         *registrations,
         "}",
         "",
@@ -769,7 +790,7 @@ def _validate_section_config(primitive: str, config: Any, *, path: str) -> None:
     if not isinstance(config, dict):
         raise ValueError(f"{path} must be an object")
 
-    _validate_optional_string(config.get("api_endpoint"), field=f"{path}.api_endpoint")
+    _validate_api_endpoint(config.get("api_endpoint"), field=f"{path}.api_endpoint")
 
     if primitive == "DataTable":
         columns = config.get("columns")

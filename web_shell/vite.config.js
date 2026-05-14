@@ -192,6 +192,21 @@ export default defineConfig(({ mode }) => {
 
   // Public (static) assets come from the active app bundle: <app>/brand
   const platformBrandDir = resolveBrandDir(platformAppDir, factoryBrandDir);
+  const viteFsAllow = Array.from(new Set([
+    __dirname,
+    projectRoot,
+    platformInputPath,
+    platformAppDir,
+    platformBrandDir,
+    platformWorkflowRoot,
+    factoryAppRoot,
+    factoryBrandDir,
+    factoryWorkflowsRoot,
+    chatUiRoot,
+    chatUiSrcRoot,
+    chatUiNodeModules,
+    path.resolve(__dirname, 'node_modules'),
+  ]));
 
   // App manifest — only user-facing fields (appName, targets, authRequired, admins).
   // apiUrl/wsUrl fall back to env vars or localhost for local dev.
@@ -286,9 +301,60 @@ export default defineConfig(({ mode }) => {
   server: {
     port: 3000,
     strictPort: true,
+    fs: {
+      allow: viteFsAllow,
+    },
     proxy: {
       '/api': { target: apiUrl, changeOrigin: true },
       '/ws':  { target: apiUrl.replace('http', 'ws'), ws: true },
+    },
+  },
+
+  build: {
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+
+          if (
+            id.includes('/node_modules/react/') ||
+            id.includes('/node_modules/react-dom/') ||
+            id.includes('/node_modules/react-router/') ||
+            id.includes('/node_modules/react-router-dom/') ||
+            id.includes('/node_modules/@remix-run/router/')
+          ) {
+            return 'vendor-react';
+          }
+
+          if (
+            id.includes('/node_modules/react-icons/') ||
+            id.includes('/node_modules/lucide-react/')
+          ) {
+            return 'vendor-icons';
+          }
+
+          if (
+            id.includes('/node_modules/marked/') ||
+            id.includes('/node_modules/dompurify/')
+          ) {
+            return 'vendor-content';
+          }
+
+          if (id.includes('/node_modules/keycloak-js/')) {
+            return 'vendor-auth';
+          }
+
+          if (
+            id.includes('/node_modules/@monaco-editor/') ||
+            id.includes('/node_modules/monaco-editor/')
+          ) {
+            return 'vendor-monaco';
+          }
+
+          return undefined;
+        },
+      },
     },
   },
 

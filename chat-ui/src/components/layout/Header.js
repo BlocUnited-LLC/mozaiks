@@ -172,6 +172,21 @@ const resolveActionByRole = (action, roles = []) => {
   return resolved;
 };
 
+const getNavigationTargetKey = (item) => {
+  if (!item || typeof item !== "object") return null;
+
+  const path = typeof item.path === "string" && item.path.trim() ? item.path.trim() : null;
+  if (path) return `path:${path}`;
+
+  const href = typeof item.href === "string" && item.href.trim() ? item.href.trim() : null;
+  if (href) return `href:${href}`;
+
+  const trigger = typeof item.trigger === "string" && item.trigger.trim() ? item.trigger.trim() : null;
+  if (trigger) return `trigger:${trigger}`;
+
+  return null;
+};
+
 const getDefaultProfileMenu = (user) => {
   const authed = isAuthenticatedUser(user);
   const items = [
@@ -317,6 +332,19 @@ const Header = ({
       : []),
     [headerConfig.actions, location.pathname, location.search]
   );
+  const visibleHeaderPages = useMemo(() => {
+    const actionTargets = new Set(
+      headerActions
+        .map((item) => resolveActionByRole(item, userRoles))
+        .map((item) => getNavigationTargetKey(item))
+        .filter(Boolean)
+    );
+
+    return headerPages.filter((item) => {
+      const target = getNavigationTargetKey(item);
+      return !target || !actionTargets.has(target);
+    });
+  }, [headerActions, headerPages, userRoles]);
   const primaryAction = useMemo(
     () => headerActions.find((item) => item?.variant === "gradient") || headerActions[0] || null,
     [headerActions]
@@ -557,9 +585,9 @@ const Header = ({
         <div className="flex min-w-0 items-center" style={headerClusterStyle}>
           <LogoSection />
 
-          {headerPages.length > 0 && (
+          {visibleHeaderPages.length > 0 && (
             <nav className="hidden xl:flex items-center" style={headerNavStyle}>
-              {headerPages.map((item) => {
+              {visibleHeaderPages.map((item) => {
                 const isActive = location.pathname === item.path;
                 return (
                   <button

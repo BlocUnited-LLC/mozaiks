@@ -64,21 +64,16 @@ This path is closer to an AG2-style local development workflow.
 
 ## Public Package Install
 
-If a public `mozaiks` release is not yet available on PyPI, use the repo-first
-builder path.
-
-That means the supported first-time path today is still:
-
-- clone the repo
-- create a virtual environment
-- run `pip install -e .`
-
-After the first successful PyPI publish, this section should flip to:
+Use the public package path when you want the installed CLI/runtime without
+editing the framework source:
 
 ```bash
 pip install mozaiks
 mozaiks quickstart --dir ./my-first-mozaiks-app
 ```
+
+Use the repo-first path when you are changing framework code, factory workflows,
+or Studio/frontend assets.
 
 ## Recommendation
 

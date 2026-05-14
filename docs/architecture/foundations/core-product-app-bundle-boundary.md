@@ -212,6 +212,6 @@ Keep it in AG2 if:
 
 ## Cross References
 
-- [workflow-architecture.md](workflow-architecture.md)
-- [event-system.md](event-system.md)
-- [app-bundle-declaratives.md](app-bundle-declaratives.md)
+- [../workflows/workflow-architecture.md](../workflows/workflow-architecture.md)
+- [events-and-data/event-system.md](events-and-data/event-system.md)
+- [../app/app-bundle-declaratives.md](../app/app-bundle-declaratives.md)

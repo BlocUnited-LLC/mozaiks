@@ -60,12 +60,21 @@ layers:
       - id: messaging
         covers: DM threads, group channels, real-time delivery, read/unread state
         capability_kind: framework_pack
+        use_when: App needs user-to-user or group messaging, threaded conversations, or real-time chat
+        avoid_when: You only need one-way system alerts or push notifications — use the notifications pack instead
+
       - id: files
         covers: file upload, storage, retrieval, media management
         capability_kind: framework_pack
+        use_when: App needs user-generated file upload/download, media storage, or document management
+        avoid_when: You only need to store structured data records — a custom module is simpler
+
       - id: notifications
         covers: multi-channel notification delivery (in-app, email, push, SMS)
         capability_kind: framework_pack
+        use_when: App needs to alert users across channels (email, push, SMS, in-app) when domain events occur
+        avoid_when: You only need in-app state changes with no user-facing delivery outside the app
+
       - id: entitlements
         covers: >
           SaaS plan/tier catalog, user plan assignment, trial lifecycle, feature gates.
@@ -74,13 +83,19 @@ layers:
           features by plan, manage free/paid tiers, or run trials.
         capability_kind: framework_pack
         manifest: factory_app/capability_packs/public/entitlements/manifest.yaml
-      - id: payments
-        covers: payment processing, provider integration, checkout flows
-        capability_kind: hosted_pack
+        use_when: App needs to gate features by plan tier, manage free/paid plans, or run trials
+        avoid_when: You only need role-based access control — use module-level permissions instead
     rule: >
       For these domains declare capability_kind as framework_pack or hosted_pack.
       Generate the app-specific wiring (pages, façade module actions, event flows)
       but never regenerate pack internals.
+
+    hosted_only_note: >
+      Some capability packs (e.g. payments) are hosted_pack entries available only
+      when a deployment overlay provides them via available_hosted_packs. Do NOT
+      add them to capability_packs unless they appear in the [HOSTED CAPABILITIES
+      CONTEXT] block. If payment processing is needed and no hosted pack is available,
+      declare it as a custom_owned external_adapter instead.
 
     naming_note: >
       IMPORTANT — do not confuse these two things:

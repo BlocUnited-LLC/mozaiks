@@ -30,7 +30,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from logs.logging_config import get_workflow_logger
-from mozaiksai.core.admin.contract import ADMIN_SECTION_ORDER
+from mozaiksai.core.admin.contract import ADMIN_SECTION_ORDER, coerce_admin_section_name
 
 logger = get_workflow_logger("module_loader")
 
@@ -314,7 +314,7 @@ class ModuleAdminPanel(ModuleContractModel):
     @field_validator("section", mode="before")
     @classmethod
     def _section(cls, value: Any) -> str:
-        text = str(value or "").strip().lower()
+        text = coerce_admin_section_name(str(value or ""))
         if text not in ADMIN_SECTION_ORDER:
             raise ValueError(
                 f"admin panel section must be one of {list(ADMIN_SECTION_ORDER)}, got {text!r}"
@@ -404,6 +404,39 @@ class ModuleRuntimeExtension(ModuleContractModel):
     kind: Literal["api_router", "startup_service"]
     entrypoint: str
     prefix: Optional[str] = None
+
+    @field_validator("entrypoint", mode="before")
+    @classmethod
+    def _entrypoint(cls, value: Any) -> str:
+        text = _required_text(value, field_name="runtime_extensions.entrypoint")
+        if ":" not in text:
+            raise ValueError("runtime_extensions.entrypoint must use module.path:attribute syntax")
+        module_path, _, attr = text.partition(":")
+        module_path = module_path.strip()
+        attr = attr.strip()
+        if not module_path or not attr:
+            raise ValueError("runtime_extensions.entrypoint must include both module path and attribute")
+        if module_path.startswith(("modules.", "app.modules.", "mozaiksai.")):
+            raise ValueError(
+                "runtime_extensions.entrypoint must be module-local, e.g. "
+                "backend.router:get_router or backend.worker:ServiceClass"
+            )
+        if not module_path.startswith("backend."):
+            raise ValueError("runtime_extensions.entrypoint must point at a module-local backend.* file")
+        rel = PurePosixPath(module_path.replace(".", "/") + ".py")
+        if rel.is_absolute() or any(part in {"", ".", ".."} for part in rel.parts):
+            raise ValueError("runtime_extensions.entrypoint must be a safe module-local path")
+        if not attr.replace("_", "").isalnum():
+            raise ValueError("runtime_extensions.entrypoint attribute must be identifier-like")
+        return f"{module_path}:{attr}"
+
+    @model_validator(mode="after")
+    def _validate_extension_contract(self) -> "ModuleRuntimeExtension":
+        if self.kind == "startup_service" and self.prefix:
+            raise ValueError("startup_service runtime extensions must not declare prefix")
+        if self.kind == "api_router" and self.prefix is not None and not self.prefix.startswith("/"):
+            raise ValueError("api_router runtime extension prefix must start with /")
+        return self
 
 
 class ModuleRuntimeExtensionsManifest(ModuleContractModel):

@@ -23,7 +23,10 @@
       "order": 2,
       "meta": {
         "title": "Create App",
-        "shellMode": "focused"
+        "shellMode": "focused",
+        "navigation": {
+          "include": false
+        }
       }
     }
   ],

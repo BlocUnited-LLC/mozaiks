@@ -10,13 +10,7 @@ docs_dir: docs
 # Internal planning, roadmap, and migration notes stay in the repo but are not
 # published to docs.mozaiks.ai.
 exclude_docs: |
-  architecture/development/**
   architecture/old/**
-  architecture/pipeline-refactor-plan.md
-  architecture/roadmap/**
-  architecture/specs/**
-  architecture/foundations/architecture-overview.md
-  reference/deep-dives/ag2-touchpoints-and-extensions.md
 
 extra:
   generator: false
@@ -92,84 +86,111 @@ nav:
   - Home: index.md
   - Start Here:
       - Getting Started: getting-started.md
+      - Local Setup: local-setup.md
       - User Configuration: user-configuration.md
       - Install Modes: install-modes.md
-      - Releasing: releasing.md
   - Guides:
     - Add Workflows: guides/adding-workflows/01-overview.md
     - App Shell And Branding: guides/custom-brand-integration/01-overview.md
-    - Telemetry:
-      - Overview: guides/telemetry/01-overview.md
-      - Cost Tracking: guides/telemetry/03-cost-tracking.md
-      - Budget Management: guides/telemetry/04-budget-management.md
-    - AI Coding Agents:
-      - Prompt Packs: instruction-prompts/prompt-packs.md
-      - Agent Bootstrap Prompt: agent-bootstrap-prompt.md
+    - Generated UI Quality: architecture/frontend/ui-system/ui-system-quality-gates.md
+    - UI Quality Checklist: guides/ui-and-brand/ui-quality-checklist.md
   - Architecture:
       - Overview: architecture/index.md
-      - Foundations:
-          - Overview: architecture/foundations/overview.md
-          - Framework Capability Classification: architecture/foundations/framework-capability-classification.md
-          - Module System: architecture/foundations/module-system.md
-          - Module Type Taxonomy: architecture/foundations/module-type-taxonomy.md
-          - Capability Pack Model: architecture/foundations/capability-pack-model.md
-          - Distribution and Workspace Model: architecture/foundations/distribution-and-workspace-model.md
-          - App Manifest And Platform Targets: architecture/foundations/app-manifest-and-platform-targets.md
-          - Canonical App Structure: architecture/foundations/canonical-app-structure.md
-          - App Bundle Declaratives: architecture/foundations/app-bundle-declaratives.md
-          - Platform Authoring: architecture/foundations/platform-authoring.md
-          - Account, Admin, and Platform Services: architecture/foundations/account-admin-and-platform-services.md
-          - Admin System: architecture/foundations/admin-system.md
-          - Workflow Architecture: architecture/foundations/workflow-architecture.md
-          - Control-Plane Harness Architecture: architecture/foundations/control-plane-harness-architecture.md
-          - Orchestration Control Loops: architecture/foundations/orchestration-control-loops.md
-          - Declarative AG2 Mapping: architecture/foundations/declarative-ag2-mapping.md
-          - Workflow Authoring Contracts: architecture/foundations/workflow-authoring-contracts.md
-          - UI Surface and Layout: architecture/foundations/ui-surface-and-layout-architecture.md
-          - Surface Model: architecture/foundations/surface-model.md
-          - Core vs Product vs App Bundle: architecture/foundations/core-product-app-bundle-boundary.md
-          - Event System: architecture/foundations/event-system.md
-          - Event Contracts: architecture/foundations/event-contracts.md
-          - Learning Loop Architecture: architecture/foundations/learning-loop-architecture.md
+      - Core Concepts:
+          - Foundations Overview: architecture/foundations/overview.md
+          - Foundations:
+              - Distribution and Workspace Model: architecture/foundations/distribution-and-workspace-model.md
+              - Platform Terminology: architecture/foundations/platform-terminology-and-brand-language.md
+              - Platform Information Architecture: architecture/foundations/platform-information-architecture.md
+              - Core vs Product vs App Bundle: architecture/foundations/core-product-app-bundle-boundary.md
+          - App Architecture:
+              - Overview: architecture/app/index.md
+              - Generated App Lifecycle: architecture/app/generated-app-lifecycle-model.md
+              - Canonical App Structure: architecture/app/canonical-app-structure.md
+              - App Manifest and Platform Targets: architecture/app/app-manifest-and-platform-targets.md
+              - App Bundle Declaratives: architecture/app/app-bundle-declaratives.md
+              - Platform Authoring: architecture/app/platform-authoring.md
+              - Surface Model: architecture/app/surface-model.md
+              - UI Surface and Layout Architecture: architecture/app/ui-surface-and-layout-architecture.md
+              - Admin System: architecture/app/admin-system.md
+              - Account, Admin, and Platform Services: architecture/app/account-admin-and-platform-services.md
+          - Module Systems:
+              - Overview: architecture/modules-systems/index.md
+              - Module System: architecture/modules-systems/module-system.md
+              - Module Authoring Patterns: architecture/modules-systems/module-authoring-patterns.md
+              - Capability Pack Model: architecture/modules-systems/capability-pack-model.md
+              - Framework Capability Classification: architecture/modules-systems/framework-capability-classification.md
+          - Workflows:
+              - Overview: architecture/workflows/index.md
+              - Workflow Architecture: architecture/workflows/workflow-architecture.md
+              - Workflow Authoring Contracts: architecture/workflows/workflow-authoring-contracts.md
+              - Workflow Routing Transitions: architecture/workflows/workflow-routing-transitions.md
+              - Orchestration Control Loops: architecture/workflows/orchestration-control-loops.md
+              - Declarative AG2 Mapping: architecture/workflows/declarative-ag2-mapping.md
+              - Structured Output Extraction: architecture/workflows/structured-output-extraction-contract.md
+              - Refinement Control Plane: architecture/workflows/refinement-control-plane.md
+              - Session Router: architecture/workflows/session-router.md
+              - Control-Plane Harness Architecture: architecture/workflows/control-plane-harness-architecture.md
+          - MozaiksAI Runtime:
+              - Overview: architecture/mozaiksai/index.md
+              - Workflow and Orchestration:
+                  - Mid-Flight Journeys: architecture/mozaiksai/mid-flight-journeys.md
+                  - MFJ Strict Resume Contract: architecture/mozaiksai/mfj-strict-resume-contract.md
+                  - Universal Orchestrator: architecture/mozaiksai/universal-orchestrator.md
+                  - Pack Graph Semantics: architecture/mozaiksai/pack-graph-semantics.md
+                  - Parallel Fan-Out Fan-In: architecture/mozaiksai/parallel-fan-out-fan-in.md
+                  - Handoff Condition Scope: architecture/mozaiksai/handoff-condition-scope.md
+              - UI and Interaction:
+                  - UI Interaction Patterns: architecture/mozaiksai/ui-interaction-patterns.md
+                  - Lifecycle Tools: architecture/mozaiksai/lifecycle-tools.md
+              - Runtime and Transport:
+                  - Transport and Streaming: architecture/mozaiksai/transport-and-streaming.md
+                  - Hook System Deep Dive: architecture/mozaiksai/hook-system-deep-dive.md
+                  - API Reference Notes: architecture/mozaiksai/api-reference.md
+              - Agent and Contracts:
+                  - Context Variables Complete: architecture/mozaiksai/context-variables-complete.md
+                  - Auto Tool Execution: architecture/mozaiksai/auto-tool-execution.md
+              - Tokens and Cost Control:
+                  - Token Management: architecture/mozaiksai/token-management.md
+          - Events and Data:
+              - Event System: architecture/foundations/events-and-data/event-system.md
+              - Event Contracts: architecture/foundations/events-and-data/event-contracts.md
+              - Persistence and Artifact Storage: architecture/foundations/events-and-data/persistence-and-artifact-storage.md
+              - Learning Loop Architecture: architecture/foundations/events-and-data/learning-loop-architecture.md
+      - Builder and Generation:
+          - App Builder Architecture: architecture/builder/app-builder-architecture.md
+          - App Planning Contracts: architecture/builder/app-planning-contracts.md
+          - Builder Execution Model: architecture/builder/builder-execution-model.md
+          - End-to-End Build Lifecycle: architecture/builder/end-to-end-build-lifecycle.md
+          - Console Product Model: architecture/builder/console-product-model.md
+          - Database Intent and Revision: architecture/builder/database-intent-and-revision-contract.md
+          - AppGenerator Output Assembly: architecture/builder/appgenerator-output-assembly-contract.md
+          - AgentGenerator Output Assembly: architecture/builder/agentgenerator-output-assembly-contract.md
+          - App-Backend Admin Contract: architecture/builder/app-backend-admin-contract.md
       - Keycloak Auth: architecture/keycloak-auth.md
       - Mobile Client Contract: architecture/mobile-client-contract.md
       - Orchestration and Decomposition: architecture/orchestration-and-decomposition.md
       - Frontend UI:
           - Overview: architecture/frontend/index.md
-          - UI Surface Model: architecture/frontend/ui-surface-model.md
-          - Conversation Modes: architecture/frontend/conversation-modes.md
-          - Layout Modes: architecture/frontend/layout-modes.md
-          - Generated Frontend Surface Contract: architecture/frontend/generated-frontend-surface-contract.md
-          - Workflow UI Primitive Catalog: architecture/frontend/workflow-ui-primitive-catalog.md
-          - Transition UI Primitives: architecture/frontend/transition-ui-primitives.md
-          - Tool Event Lifecycle: architecture/frontend/tool-event-lifecycle.md
-          - Admin Observability Contract: architecture/frontend/admin-observability-contract.md
-          - AG-UI Comparison: architecture/frontend/ag-ui-copilotkit-comparison.md
-      - Verified Guides:
-          - Setup Guide: architecture/verified/setup-guide.md
-          - Auth Setup: architecture/verified/auth-setup.md
-          - Trigger Mechanisms: architecture/verified/trigger-mechanisms.md
+          - Chat UI Runtime:
+              - UI Surface Model: architecture/frontend/chat-ui/ui-surface-model.md
+              - Conversation Modes: architecture/frontend/chat-ui/conversation-modes.md
+              - Layout Modes: architecture/frontend/chat-ui/layout-modes.md
+              - Shell System: architecture/frontend/chat-ui/shell-system.md
+              - Tool Event Lifecycle: architecture/frontend/chat-ui/tool-event-lifecycle.md
+              - Admin Observability Contract: architecture/frontend/chat-ui/admin-observability-contract.md
+              - AG-UI Comparison: architecture/frontend/chat-ui/ag-ui-copilotkit-comparison.md
+          - Generated UI System:
+              - Generated Frontend Surface Contract: architecture/frontend/ui-system/generated-frontend-surface-contract.md
+              - Workflow UI Primitive Catalog: architecture/frontend/ui-system/workflow-ui-primitive-catalog.md
+              - Transition UI Primitives: architecture/frontend/ui-system/transition-ui-primitives.md
+              - UI System Quality Gates: architecture/frontend/ui-system/ui-system-quality-gates.md
   - Reference:
       - Overview: reference/index.md
-      - Deep Dives:
-          - Overview: reference/deep-dives/index.md
-          - Workflow and Orchestration:
-              - Mid-Flight Journeys: reference/deep-dives/mid-flight-journeys.md
-              - MFJ Strict Resume Contract: reference/deep-dives/mfj-strict-resume-contract.md
-              - Universal Orchestrator: reference/deep-dives/universal-orchestrator.md
-              - Pack Graph Semantics: reference/deep-dives/pack-graph-semantics.md
-              - Parallel Fan-Out Fan-In: reference/deep-dives/parallel-fan-out-fan-in.md
-              - Handoff Condition Scope: reference/deep-dives/handoff-condition-scope.md
-          - UI and Interaction:
-              - UI Interaction Patterns: reference/deep-dives/ui-interaction-patterns.md
-              - Lifecycle Tools: reference/deep-dives/lifecycle-tools.md
-          - Runtime and Transport:
-              - Transport and Streaming: reference/deep-dives/transport-and-streaming.md
-              - Hook System Deep Dive: reference/deep-dives/hook-system-deep-dive.md
-              - API Reference Notes: reference/deep-dives/api-reference.md
-          - Agent and Contracts:
-              - Context Variables Complete: reference/deep-dives/context-variables-complete.md
-              - Auto Tool Execution: reference/deep-dives/auto-tool-execution.md
-          - Tokens and Cost Control:
-              - Token Management: reference/deep-dives/token-management.md
-              - Token Manager Plan: reference/deep-dives/token-manager-plan.md
+      - AI Coding Agents:
+          - Agent Bootstrap Prompt: agent-bootstrap-prompt.md
+      - Maintainers:
+          - Releasing: releasing.md
+          - Verified Setup Guide: architecture/verified/setup-guide.md
+          - Auth Setup: architecture/verified/auth-setup.md
+          - Trigger Mechanisms: architecture/verified/trigger-mechanisms.md

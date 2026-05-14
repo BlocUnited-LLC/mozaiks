@@ -74,16 +74,31 @@ def configure_repo_host_defaults(host: str) -> None:
     app_workflows_root = (app_root / "workflows").resolve() if app_root else None
     factory_workflows_root = resolve_factory_workflows_root()
 
-    selected_root: Path | None = None
     if normalized_host == "studio":
-        selected_root = factory_workflows_root or app_workflows_root
-    elif app_workflows_root is not None and app_workflows_root.is_dir():
-        selected_root = app_workflows_root
+        selected_root: Path | None = factory_workflows_root or app_workflows_root
+        if selected_root is not None:
+            os.environ["MOZAIKS_WORKFLOWS_PATH"] = str(selected_root)
+    elif normalized_host == "mozaiks":
+        # Hosted product host: combine app-specific workflows with factory build workflows
+        # so product features (InvestorMarketplace, etc.) and build flows (AppGenerator, etc.)
+        # are both accessible. App workflows take precedence on name conflicts.
+        #
+        # App workflows may live at either:
+        #   <platform_path>/workflows/           (inside the app bundle)
+        #   <platform_path>/../workflows/        (workspace root, alongside app/)
+        roots: list[str] = []
+        workspace_workflows_root = (app_root.parent / "workflows").resolve() if app_root else None
+        for candidate in (app_workflows_root, workspace_workflows_root):
+            if candidate is not None and candidate.is_dir() and str(candidate) not in roots:
+                roots.append(str(candidate))
+        if factory_workflows_root is not None and str(factory_workflows_root) not in roots:
+            roots.append(str(factory_workflows_root))
+        if roots:
+            os.environ["MOZAIKS_WORKFLOWS_PATH"] = os.pathsep.join(roots)
     else:
-        selected_root = factory_workflows_root
-
-    if selected_root is not None:
-        os.environ["MOZAIKS_WORKFLOWS_PATH"] = str(selected_root)
+        selected_root = app_workflows_root if (app_workflows_root is not None and app_workflows_root.is_dir()) else factory_workflows_root
+        if selected_root is not None:
+            os.environ["MOZAIKS_WORKFLOWS_PATH"] = str(selected_root)
 
 
 __all__ = ["configure_repo_host_defaults"]

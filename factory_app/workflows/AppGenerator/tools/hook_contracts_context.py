@@ -124,7 +124,13 @@ def _app_connector_inventory_summary(agent: Any) -> str:
 
             thread = threading.Thread(target=_runner, daemon=True)
             thread.start()
-            thread.join()
+            thread.join(timeout=5.0)
+            if thread.is_alive():
+                logger.warning(
+                    "[%s] Connector inventory fetch timed out after 5 s — skipping",
+                    getattr(agent, "name", "?"),
+                )
+                return ""
             if "error" in error_holder:
                 raise error_holder["error"]
             inventory = holder.get("inventory")

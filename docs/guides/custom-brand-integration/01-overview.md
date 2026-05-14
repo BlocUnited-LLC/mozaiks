@@ -37,6 +37,6 @@ Common branding tasks include:
 
 ## Read Next
 
-- [Platform Authoring](../../architecture/foundations/platform-authoring.md)
-- [App Manifest And Platform Targets](../../architecture/foundations/app-manifest-and-platform-targets.md)
+- [Platform Authoring](../../architecture/app/platform-authoring.md)
+- [App Manifest And Platform Targets](../../architecture/app/app-manifest-and-platform-targets.md)
 - [Getting Started](../../getting-started.md)

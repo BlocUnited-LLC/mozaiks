@@ -98,6 +98,8 @@ function Set-DevAppSelection {
 
   $configuredPlatformPath = Get-ConfigValue -RepoRoot $RepoRoot -Name "PLATFORM_PATH"
   if (-not [string]::IsNullOrWhiteSpace($configuredPlatformPath)) {
+    $env:PLATFORM_PATH = $configuredPlatformPath
+    Remove-Item Env:MOZAIKS_APP_WORKSPACE_PATH -ErrorAction SilentlyContinue
     return [PSCustomObject]@{
       Kind = "platform"
       Value = $configuredPlatformPath
@@ -107,6 +109,8 @@ function Set-DevAppSelection {
 
   $configuredWorkspacePath = Get-ConfigValue -RepoRoot $RepoRoot -Name "MOZAIKS_APP_WORKSPACE_PATH"
   if (-not [string]::IsNullOrWhiteSpace($configuredWorkspacePath)) {
+    $env:MOZAIKS_APP_WORKSPACE_PATH = $configuredWorkspacePath
+    $env:PLATFORM_PATH = $configuredWorkspacePath
     return [PSCustomObject]@{
       Kind = "workspace"
       Value = $configuredWorkspacePath

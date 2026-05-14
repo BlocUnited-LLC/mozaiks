@@ -193,6 +193,76 @@ function resolveTableData(config, liveData) {
   return [];
 }
 
+function formatDataValue(value, format) {
+  if (value === undefined || value === null || value === '') return '—';
+
+  if (format === 'number') {
+    const number = Number(value);
+    return Number.isFinite(number) ? new Intl.NumberFormat().format(number) : String(value);
+  }
+
+  if (format === 'currency') {
+    const number = Number(value);
+    return Number.isFinite(number)
+      ? new Intl.NumberFormat(undefined, {
+          style: 'currency',
+          currency: 'USD',
+          maximumFractionDigits: number % 1 === 0 ? 0 : 2,
+        }).format(number)
+      : String(value);
+  }
+
+  if (format === 'percent') {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return String(value);
+    const normalized = Math.abs(number) <= 1 ? number * 100 : number;
+    return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(normalized)}%`;
+  }
+
+  return String(value);
+}
+
+function resolveConfigValue(config, liveData, keyName, fallbackKeyName, loading = false) {
+  const key = config?.[keyName];
+  if (typeof key === 'string' && key.trim()) {
+    const resolved = resolvePath(liveData, key.trim());
+    if (resolved !== undefined && resolved !== null && resolved !== '') return resolved;
+    return loading ? '...' : undefined;
+  }
+  return config?.[fallbackKeyName];
+}
+
+function resolveTrendDetail(config, liveData) {
+  const trend = resolveConfigValue(config, liveData, 'trend_key', 'trend');
+  if (trend === undefined || trend === null || trend === '') return config.detail;
+
+  const number = Number(trend);
+  const prefix = Number.isFinite(number) && number > 0 ? '+' : '';
+  const formatted = `${prefix}${formatDataValue(trend, config.trend_format ?? 'percent')}`;
+  return config.trend_label ? `${formatted} ${config.trend_label}` : formatted;
+}
+
+function materializeMetricConfig(config, liveData, loading = false) {
+  const rawValue = resolveConfigValue(config, liveData, 'value_key', 'value', loading);
+  const rawDetail = resolveConfigValue(config, liveData, 'detail_key', 'detail', loading);
+  const detail = rawDetail ?? resolveTrendDetail(config, liveData);
+
+  return {
+    ...config,
+    value: formatDataValue(rawValue, config.format),
+    detail: detail === undefined || detail === null || detail === ''
+      ? undefined
+      : formatDataValue(detail, config.detail_format),
+  };
+}
+
+function materializeSummaryItems(items, liveData, loading = false) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .filter(isRecord)
+    .map((item) => materializeMetricConfig(item, liveData, loading));
+}
+
 /**
  * @param {object} props
  * @param {AppPageSection}   props.section    - Section definition from AppPageSchema
@@ -371,7 +441,7 @@ export function SectionRenderer({
     case 'SummaryStrip':
       primitiveProps = {
         id: componentId,
-        items: Array.isArray(config.items) ? config.items : [],
+        items: materializeSummaryItems(config.items, effectiveData, effectiveLoading),
       };
       break;
     case 'InlineEmptyState': {
@@ -418,9 +488,7 @@ export function SectionRenderer({
     case 'Metric':
       primitiveProps = {
         id: componentId,
-        label: config.label,
-        value: config.value,
-        detail: config.detail,
+        ...materializeMetricConfig(config, effectiveData, effectiveLoading),
       };
       break;
     case 'SegmentedBar':

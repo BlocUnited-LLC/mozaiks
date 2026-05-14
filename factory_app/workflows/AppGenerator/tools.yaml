@@ -19,6 +19,16 @@ tools:
     AppGenerator handoff gate.
   tool_type: Agent_Tool
   auto_tool_call: true
+- agent: ModuleContractQualityAgent
+  file: review_module_contract_quality.py
+  function: review_module_contract_quality
+  description: >
+    Audit module YAML contract files from ConfigMiddlewareAgent for schema
+    compliance and set module_contract_quality_status to passed or blocked for
+    the AppGenerator handoff gate. Called automatically after
+    ModuleContractQualityAgent speaks.
+  tool_type: Agent_Tool
+  auto_tool_call: true
 - agent: AppPlanAgent
   file: app_build_plan.py
   function: app_build_plan
@@ -112,8 +122,9 @@ tools:
   description: >
     Cross-reference every page api_endpoint field against the known module action
     registry (capability_packs + modules/*/module.yaml). Flags orphaned page
-    endpoints (blocking) and unreferenced module actions (advisory). Must be called
-    alongside run_integration_tests before finalizing the build.
+    endpoints, query-string endpoints, and fragment endpoints (blocking), and
+    unreferenced module actions (advisory). Must be called alongside
+    run_integration_tests before finalizing the build.
   tool_type: Agent_Tool
   auto_tool_call: false
 - agent: ConfigMiddlewareAgent

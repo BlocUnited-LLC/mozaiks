@@ -170,3 +170,37 @@ class TestCapabilityRoutingHook:
         assert count == 1, (
             f"Repeated hook call must replace the section, not append. Got {count} occurrences."
         )
+
+    def test_routing_block_includes_use_when_avoid_when_for_packs(self) -> None:
+        agent = _FakeAgent("AppPlanAgent")
+        _run_hook(agent)
+        assert "use_when" in agent.system_message, (
+            "Pack entries must include use_when guidance"
+        )
+        assert "avoid_when" in agent.system_message, (
+            "Pack entries must include avoid_when guidance"
+        )
+
+    def test_routing_block_includes_hosted_only_note(self) -> None:
+        agent = _FakeAgent("AppPlanAgent")
+        _run_hook(agent)
+        assert "Hosted-only packs" in agent.system_message, (
+            "Hosted-only pack guidance must appear in the routing block"
+        )
+
+    def test_routing_block_preserves_trailing_sections(self) -> None:
+        """Replacing the routing section must not drop content that follows it."""
+        agent = _FakeAgent("AppPlanAgent")
+        agent.system_message = "[CAPABILITY ROUTING CONTEXT]\nold body\n\n[OTHER SECTION]\nother content"
+        _run_hook(agent)
+        assert "[OTHER SECTION]" in agent.system_message, (
+            "Replacing [CAPABILITY ROUTING CONTEXT] must preserve subsequent sections"
+        )
+        assert "other content" in agent.system_message
+
+    def test_load_routing_is_cached(self) -> None:
+        from factory_app.workflows.AppGenerator.tools.hook_capability_routing_context import _load_routing
+        _load_routing.cache_clear()
+        result1 = _load_routing()
+        result2 = _load_routing()
+        assert result1 is result2, "_load_routing must return the same object on repeated calls (cached)"

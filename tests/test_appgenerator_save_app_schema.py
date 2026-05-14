@@ -517,6 +517,28 @@ def test_save_app_schema_rejects_submit_action_without_resolvable_href(monkeypat
         )
 
 
+def test_save_app_schema_rejects_api_endpoint_query_strings(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    page = _base_page()
+    page["sections"] = [
+        {
+            "id": "tickets",
+            "primitive": "DataTable",
+            "config": {
+                "columns": [{"key": "title", "label": "Title"}],
+                "api_endpoint": "/api/modules/tickets/list_tickets?limit=12",
+            },
+        }
+    ]
+
+    with pytest.raises(ValueError, match="query strings"):
+        save_app_schema_module.save_app_schema(
+            manifest=_base_manifest(),
+            pages=[page],
+            context_variables=_Context(),
+        )
+
+
 def test_save_app_schema_derives_missing_submit_href_from_build_plan(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     context = _Context(

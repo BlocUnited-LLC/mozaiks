@@ -1,0 +1,47 @@
+# MozaiksAI Runtime
+
+These docs cover the lower-level runtime architecture implemented under
+`mozaiksai/`: orchestration, handoffs, transport, hooks, context variables,
+token controls, and UI interaction mechanics.
+
+Use this section after you understand the high-level architecture and workflow
+model. If you are evaluating Mozaiks runtime differentiators first, start with
+[Mid-Flight Journeys](mid-flight-journeys.md).
+
+## Workflow and Orchestration
+
+- [Mid-Flight Journeys](mid-flight-journeys.md)
+- [MFJ Strict Resume Contract](mfj-strict-resume-contract.md)
+- [Universal Orchestrator](universal-orchestrator.md)
+- [Pack Graph Semantics](pack-graph-semantics.md)
+- [Parallel Fan-Out Fan-In](parallel-fan-out-fan-in.md)
+- [Handoff Condition Scope](handoff-condition-scope.md)
+
+## UI and Interaction
+
+- [UI Interaction Patterns](ui-interaction-patterns.md)
+- [Lifecycle Tools](lifecycle-tools.md)
+
+## Runtime and Transport
+
+- [Transport and Streaming](transport-and-streaming.md)
+- [Hook System Deep Dive](hook-system-deep-dive.md)
+- [API Reference Notes](api-reference.md)
+
+## Agent and Contract Notes
+
+- [Context Variables Complete](context-variables-complete.md)
+- [Auto Tool Execution](auto-tool-execution.md)
+
+## Tokens and Cost Control
+
+- [Token Management](token-management.md)
+
+## Reading Order
+
+Use these docs to answer precise runtime questions after you know the
+high-level model from:
+
+- [Architecture Overview](../index.md)
+- [Architecture Foundations](../foundations/overview.md)
+- [Workflow Architecture](../workflows/workflow-architecture.md)

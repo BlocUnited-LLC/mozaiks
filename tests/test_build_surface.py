@@ -141,7 +141,7 @@ def test_apps_page_fetches_workspace_apps_endpoint() -> None:
     layout_source = _read("chat-ui/src/admin/components/AdminWorkspaceLayout.jsx")
     assert "/api/studio/apps" in hook_source
     assert "Mozaiks Console" in layout_source
-    assert "Create App" in source
+    assert "Import App" in source
     assert "/apps/new" in source
     assert "row.primaryAction?.href" in source
 

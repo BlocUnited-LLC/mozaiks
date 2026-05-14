@@ -20,6 +20,12 @@ Set-Location $RepoRoot
 
 $appSelection = Set-DevAppSelection -RepoRoot $RepoRoot -SurfaceName "frontend" -PlatformPath $PlatformPath -AppWorkspacePath $AppWorkspacePath
 Write-Host $appSelection.Message -ForegroundColor DarkCyan
+if ($appSelection.Kind -eq "default") {
+  Write-Host "[frontend] No active app workspace is selected. @platform/extensions will resolve to factory_app/app/ui." -ForegroundColor Yellow
+  Write-Host "[frontend] If the backend is serving a generated app, restart with -AppWorkspacePath <workspace> to avoid missing route components." -ForegroundColor Yellow
+} else {
+  Write-Host "[frontend] @platform/extensions workspace: $($appSelection.Value)" -ForegroundColor DarkCyan
+}
 
 function Get-ListeningProcessInfo {
   param([int]$LocalPort)

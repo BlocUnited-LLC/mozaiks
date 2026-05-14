@@ -1,0 +1,20 @@
+# App Architecture
+
+App architecture docs define the generated app workspace contract: what lives in
+an app root, how app pages/modules/workflows/config/brand fit together, and how
+app-owned surfaces extend the platform.
+
+Read these docs when changing app workspace structure, page/admin authoring,
+app manifests, app lifecycle, or app-owned service surfaces.
+
+| Doc | Scope |
+| --- | --- |
+| [Generated App Lifecycle](generated-app-lifecycle-model.md) | App lifecycle states and promotion model |
+| [Canonical App Structure](canonical-app-structure.md) | App root shape for config, modules, pages, workflows, and brand |
+| [App Manifest and Platform Targets](app-manifest-and-platform-targets.md) | App manifest fields and platform target semantics |
+| [App Bundle Declaratives](app-bundle-declaratives.md) | Declarative app artifact families |
+| [Platform Authoring](platform-authoring.md) | Rules for app, page, admin, and platform authoring |
+| [Surface Model](surface-model.md) | Page, workflow, and module surface ownership |
+| [UI Surface and Layout Architecture](ui-surface-and-layout-architecture.md) | Shell, pages, workflow UI, and layout boundaries |
+| [Admin System](admin-system.md) | Admin surface ownership and contract |
+| [Account, Admin, and Platform Services](account-admin-and-platform-services.md) | Account/admin/platform service boundaries |

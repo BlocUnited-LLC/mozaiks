@@ -373,6 +373,41 @@ class TestStaticContractChecks:
         assert "admin_config" not in values
         assert "platform_config" not in values
 
+    def test_page_type_enum_aligns_with_quality_gate(self) -> None:
+        """AppPageSchema.page_type values in structured_outputs.yaml must exactly
+        match VALID_PAGE_TYPES enforced by generated_ui_contract.py."""
+        from factory_app.workflows.generated_ui_contract import VALID_PAGE_TYPES
+        so = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
+        schema_values = set(so["models"]["AppPageSchema"]["fields"]["page_type"]["values"])
+        assert schema_values == VALID_PAGE_TYPES, (
+            f"page_type mismatch.\n"
+            f"  Only in structured_outputs.yaml: {schema_values - VALID_PAGE_TYPES}\n"
+            f"  Only in VALID_PAGE_TYPES:         {VALID_PAGE_TYPES - schema_values}"
+        )
+
+    def test_page_type_hint_aligns_with_page_type(self) -> None:
+        """AppBuildPage.page_type_hint must enumerate exactly the valid page types plus null."""
+        from factory_app.workflows.generated_ui_contract import VALID_PAGE_TYPES
+        so = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
+        hint_values = set(so["models"]["AppBuildPage"]["fields"]["page_type_hint"]["values"])
+        # null is allowed as an opt-out sentinel; strip it for comparison
+        hint_types = hint_values - {"null"}
+        assert hint_types == VALID_PAGE_TYPES, (
+            f"page_type_hint mismatch with VALID_PAGE_TYPES.\n"
+            f"  Only in page_type_hint: {hint_types - VALID_PAGE_TYPES}\n"
+            f"  Only in VALID_PAGE_TYPES: {VALID_PAGE_TYPES - hint_types}"
+        )
+
+    def test_appschema_agent_guidance_mentions_all_page_types(self) -> None:
+        """agents.yaml AppSchemaAgent instructions must reference every valid page_type
+        so the agent knows what structural archetype to apply."""
+        from factory_app.workflows.generated_ui_contract import VALID_PAGE_TYPES
+        agents_text = _read("factory_app/workflows/AppGenerator/agents.yaml")
+        missing = [pt for pt in VALID_PAGE_TYPES if pt not in agents_text]
+        assert not missing, (
+            f"AppSchemaAgent guidance in agents.yaml is missing page_type values: {missing}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Level B: AppBuildPlan fixture validation

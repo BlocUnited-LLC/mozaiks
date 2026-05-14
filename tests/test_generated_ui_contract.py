@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
 from factory_app.workflows.generated_ui_contract import (
+    VALID_PAGE_TYPES,
     audit_generated_react_files,
     audit_page_schemas,
 )
@@ -63,6 +66,8 @@ def test_generated_ui_contract_accepts_clean_page_schema() -> None:
                 "name": "Tickets",
                 "route": "/tickets",
                 "title": "Tickets",
+                "page_type": "record_list",
+                "extensions": None,
                 "sections": [
                     {
                         "id": "tickets-header",
@@ -92,6 +97,71 @@ def test_generated_ui_contract_accepts_clean_page_schema() -> None:
     assert warnings == []
 
 
+def test_generated_ui_contract_accepts_extensions_slots() -> None:
+    warnings = audit_page_schemas(
+        [
+            {
+                "name": "Projects",
+                "route": "/projects",
+                "title": "Projects",
+                "page_type": "gallery",
+                "extensions": [
+                    {"slot": "empty_state", "component": "ProjectsEmptyState"},
+                    {"slot": "hero", "component": "ProjectsHero"},
+                ],
+                "sections": [],
+            }
+        ]
+    )
+    assert warnings == []
+
+
+def test_generated_ui_contract_blocks_missing_page_type() -> None:
+    warnings = audit_page_schemas(
+        [{"name": "Items", "route": "/items", "title": "Items", "sections": []}]
+    )
+    assert any("missing required 'page_type'" in warning for warning in warnings)
+
+
+def test_generated_ui_contract_blocks_invalid_page_type() -> None:
+    warnings = audit_page_schemas(
+        [{"name": "Items", "route": "/items", "title": "Items", "page_type": "crud_list", "sections": []}]
+    )
+    assert any("invalid page_type 'crud_list'" in warning for warning in warnings)
+
+
+def test_generated_ui_contract_blocks_invalid_extension_slot() -> None:
+    warnings = audit_page_schemas(
+        [
+            {
+                "name": "Items",
+                "route": "/items",
+                "title": "Items",
+                "page_type": "record_list",
+                "extensions": [{"slot": "footer", "component": "CustomFooter"}],
+                "sections": [],
+            }
+        ]
+    )
+    assert any("invalid slot 'footer'" in warning for warning in warnings)
+
+
+def test_generated_ui_contract_blocks_extension_missing_component() -> None:
+    warnings = audit_page_schemas(
+        [
+            {
+                "name": "Items",
+                "route": "/items",
+                "title": "Items",
+                "page_type": "record_list",
+                "extensions": [{"slot": "header", "component": ""}],
+                "sections": [],
+            }
+        ]
+    )
+    assert any("missing required 'component'" in warning for warning in warnings)
+
+
 def test_generated_ui_contract_blocks_noisy_page_schema() -> None:
     warnings = audit_page_schemas(
         [
@@ -99,6 +169,8 @@ def test_generated_ui_contract_blocks_noisy_page_schema() -> None:
                 "name": "Operations Dashboard",
                 "route": "/operations",
                 "title": "Operations Dashboard",
+                "page_type": "analytics_dashboard",
+                "extensions": None,
                 "sections": [
                     {
                         "id": "summary-a",
@@ -139,3 +211,27 @@ def test_generated_ui_contract_blocks_noisy_page_schema() -> None:
     assert any("uses removed primitive 'Card'" in warning for warning in warnings)
     assert any("nests SurfaceCard inside Panel" in warning for warning in warnings)
     assert any("uses 2 SummaryStrip sections" in warning for warning in warnings)
+
+
+@pytest.mark.parametrize("page_type", sorted(VALID_PAGE_TYPES))
+def test_generated_ui_contract_accepts_minimal_schema_for_each_page_type(
+    page_type: str,
+) -> None:
+    """Every value in VALID_PAGE_TYPES must pass audit_page_schemas with an empty
+    sections list — confirming the quality gate accepts the type, not just that
+    the enum is defined."""
+    warnings = audit_page_schemas(
+        [
+            {
+                "name": "Test",
+                "route": "/test",
+                "title": "Test",
+                "page_type": page_type,
+                "extensions": None,
+                "sections": [],
+            }
+        ]
+    )
+    assert warnings == [], (
+        f"page_type '{page_type}' produced unexpected quality gate warnings: {warnings}"
+    )

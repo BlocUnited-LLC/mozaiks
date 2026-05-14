@@ -1,38 +1,33 @@
 # Reference
 
-This section is for advanced and implementation-oriented material.
+This section is for maintainer references, verified setup notes, and the
+repo-aware agent bootstrap prompt.
 
-Use it when you already understand the main platform model and need:
-
-- deep dives on runtime behavior
-- lower-level workflow notes
-- historical decisions that still matter
-- AI coding-agent prompt packs for guided implementation
+Runtime implementation architecture now lives under
+[MozaiksAI Runtime](../architecture/mozaiksai/index.md).
 
 ## Sections
 
-### Deep Dives
+### Runtime Architecture
 
-Advanced workflow, handoff, transport, and runtime notes live here.
-If you read one deep dive first, start with [Mid-Flight Journeys](deep-dives/mid-flight-journeys.md).
+Use [MozaiksAI Runtime](../architecture/mozaiksai/index.md) when you need
+advanced details on MFJ, handoffs, transport, hooks, context variables, UI
+tools, or token controls.
 
-- [Deep Dives Index](deep-dives/index.md)
+### AI Coding Agents
 
-### Prompt Packs
+When an AI coding agent is involved, use the bootstrap prompt instead of
+improvising repo context from scratch.
 
-When an AI coding agent is involved, start with the prompt packs instead of improvising instructions from scratch.
-
-- [Prompt Packs for AI Coding Agents](../instruction-prompts/prompt-packs.md)
 - [Agent Bootstrap Prompt](../agent-bootstrap-prompt.md)
 
 ## When To Use Reference Docs
 
 Reach for the reference section when:
 
-- the guide docs are too high-level for the task
-- you need exact runtime nuance around handoffs, MFJ, transport, or UI tools
-- you are debugging or extending existing platform behavior
-- you want to hand a task to an AI agent with a stronger prompt contract
+- you want to hand a task to an AI agent with a stronger repo context
+- you need verified maintainer setup or release instructions
+- you need repo-aware implementation prompts
 
 If you are new to Mozaiks, start with:
 

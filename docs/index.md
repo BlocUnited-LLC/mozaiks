@@ -95,9 +95,9 @@ Choose the path that matches what you need to do.
 
     ---
 
-    Hand setup or feature work to Claude Code, Cursor, or Copilot with the provided prompt packs.
+    Hand setup or feature work to Claude Code, Cursor, or Copilot with the repo-aware bootstrap prompt.
 
-    [:octicons-arrow-right-24: Prompt Packs](instruction-prompts/prompt-packs.md)
+    [:octicons-arrow-right-24: Agent Bootstrap Prompt](agent-bootstrap-prompt.md)
 
 -   :material-sitemap: **Build a Workflow**
 

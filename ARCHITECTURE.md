@@ -137,7 +137,7 @@ The visible product model on top of those hosts is:
 - **Universal substrate** — code every downstream app runtime depends on: `mozaiksai/`, `mozaiksai.hosts.runtime`, `mozaiksai.hosts.platform`, core `chat-ui/` primitives.
 - **Framework-owned optional capabilities** — first-class in the distribution but not mandatory for every downstream app at runtime: `factory_app/`, Studio, CLI, control plane.
 
-See [docs/architecture/foundations/framework-capability-classification.md](docs/architecture/foundations/framework-capability-classification.md).
+See [docs/architecture/modules-systems/framework-capability-classification.md](docs/architecture/modules-systems/framework-capability-classification.md).
 
 ### 1. Runtime (AI Substrate)
 
@@ -193,6 +193,20 @@ See [docs/architecture/foundations/framework-capability-classification.md](docs/
 - Control plane declarative pack: checkpoints, classifier prompts, routing policies, context-loading tools
 - Workflow prompts, agent rosters, structured output models, and tool bindings for generation
 - Artifact assembly: module contract generation, page schema generation, workflow bundle generation
+
+**AppGenerator pipeline (sequential code-gen path):**
+
+```
+InterviewAgent → AppPlanAgent → AppSchemaAgent → AppUIQualityAgent → AssemblyAgent
+                                                  ↓ (passed)
+DatabaseAgent → ConfigMiddlewareAgent → ModuleContractQualityAgent → ModelAgent → ServiceAgent
+                                         ↓ (blocked)                → FrontendStubAgent → ControllerAgent
+                                         user                       → AppValidationAgent → DownloadAgent
+```
+
+Quality gates:
+- `AppUIQualityAgent` — validates page schema compliance before assembly (UI path)
+- `ModuleContractQualityAgent` — validates module YAML contract compliance before code generation (code-gen path)
 
 **Must not own:**
 - Management UI — that belongs in Studio
@@ -480,7 +494,7 @@ Registered via the active app root's `app/ui/index.js` extension barrel. Studio 
 - User settings, profiles, and preferences (`/api/me/*`)
 - Deterministic business actions and persistence (module handler → service → repo)
 - REST/action surface for AI agents (declared in `module.yaml`)
-- Notifications, subscriptions, settings, and app policy (module YAML manifests)
+- Notifications, event reactions, settings, and app policy (module contracts)
 - Domain event emission → AI runtime workflow triggers (through runtime ingress)
 
 **Core contract files:**
@@ -524,7 +538,7 @@ Events are **distributed**, not centralized. No separate `automations/` director
 | Who | Declares | In File |
 |-----|----------|---------|
 | Module | Events it **publishes** | `modules/{name}/contracts/events.yaml` |
-| Module | Event reactions/subscriptions | `modules/{name}/contracts/reactions.yaml` |
+| Module | Event reactions | `modules/{name}/contracts/reactions.yaml` |
 | Module | Notification rules | `modules/{name}/contracts/notifications.yaml` |
 | Module | Admin panels | `modules/{name}/contracts/admin.yaml` |
 | Workflow | Events it **emits** | `orchestrator.yaml` → `events.emits` |
@@ -559,11 +573,21 @@ app/
 │   └── {WorkflowName}/
 │       ├── orchestrator.yaml   # Config + triggers + events.emits
 │       ├── agents.yaml         # Agent definitions
-│       ├── tools.yaml          # Tool declarations
+│       ├── context_variables.yaml  # Default/schema for shared state
+│       ├── structured_outputs.yaml # Output models + registry
+│       ├── handoffs.yaml       # Agent-to-agent transitions
+│       ├── tools.yaml          # Tool declarations + UI metadata
+│       ├── ui_config.yaml      # Frontend exposure metadata (visual_agents)
+│       ├── hooks.yaml          # Lifecycle hooks (optional)
+│       ├── extended_orchestration/
+│       │   └── mfj_extension.json   # Optional MFJ fan-out/fan-in config (intra-workflow only)
 │       ├── tools/*.py          # Tool implementations
-│       └── extended_orchestration/
-│           └── mfj_extension.json   # Optional MFJ fan-out/fan-in config (intra-workflow only)
+│       └── ui/{WorkflowName}/  # React UI components (Optional)
 ├── modules/
+
+`ui_config.yaml` defines `visual_agents`, which is the workflow-to-UI visibility contract.
+Only those agents have chat-visible messages and websocket-forwarded outputs rendered to the user.
+
 │   └── {module_name}/
 │       ├── module.yaml              # Required: identity, actions, capabilities
 │       ├── contracts/               # Optional companion manifests
@@ -572,8 +596,7 @@ app/
 │       │   ├── notifications.yaml   # Notification rules per event
 │       │   ├── settings.yaml        # User/app settings schema
 │       │   ├── admin.yaml           # Admin panels mounted into /admin/*
-│       │   └── entitlements.yaml    # Optional capability entitlements
-│       ├── runtime_extensions.yaml  # Optional: api_router / startup_service
+│       │   └── entitlements.yaml    # Optional capability gates
 │       ├── backend/
 │       │   ├── handler.py           # Required: thin dispatch, one method per action
 │       │   ├── service.py           # Recommended: business logic and event emission
@@ -665,7 +688,7 @@ A UI screen. Declarative pages live in `app/ui/pages/*.yaml` and are rendered by
 | Custom Route UI | `app/ui/pages/custom/*.jsx` + `route_manifest.json` | `@platform/extensions` registry |
 | Transition UI | `extension_registry.json` | LauncherScreen / TransitionScreen |
 
-Full spec: [docs/architecture/specs/ui-systems.md](docs/architecture/specs/ui-systems.md)
+Canonical contract: [docs/architecture/frontend/ui-system/generated-frontend-surface-contract.md](docs/architecture/frontend/ui-system/generated-frontend-surface-contract.md)
 
 ### Artifact
 A durable, versioned output produced by a generator workflow. Artifacts are not disposable chat responses — they are addressable state objects that the harness can target for local patch or upstream revision. An artifact knows which workflow produced it, what inputs it depends on, and what downstream artifacts reference it. Examples: generated app bundle, page schema, module contract family, workflow definition, design document.

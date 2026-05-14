@@ -12,6 +12,10 @@ hooks:
   filename: hook_app_ui_quality_gate.py
   function: run_app_ui_quality_gate
 - hook_type: update_agent_state
+  hook_agent: ModuleContractQualityAgent
+  filename: hook_module_contract_quality_gate.py
+  function: run_module_contract_quality_gate
+- hook_type: update_agent_state
   hook_agent: InterviewAgent
   filename: hook_agent_backend_context.py
   function: inject_agent_backend_context

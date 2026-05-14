@@ -31,6 +31,27 @@ function formatPrimaryActionLabel(action) {
   return action.label === 'Open App Console' ? 'Open Console' : action.label
 }
 
+function getPrimaryActionPresentation(action) {
+  if (action?.kind === 'build') {
+    return {
+      variant: 'secondary',
+      className: 'font-semibold',
+    }
+  }
+
+  if (action?.kind === 'overview') {
+    return {
+      variant: 'outline',
+      className: 'border-primary/35 text-primary hover:bg-primary/10 hover:text-primary',
+    }
+  }
+
+  return {
+    variant: 'primary',
+    className: '',
+  }
+}
+
 const FILTER_OPTIONS = [
   { label: 'All', value: 'all' },
   { label: 'Needs input', value: 'needs-input' },
@@ -97,6 +118,8 @@ function AppCell({ row }) {
 }
 
 function AppMobileItem({ row, onOpen }) {
+  const actionPresentation = getPrimaryActionPresentation(row.primaryAction)
+
   return (
     <article className="rounded-[1.15rem] border border-border/45 bg-card/34 p-4 shadow-sm shadow-black/5">
       <div className="flex items-start justify-between gap-3">
@@ -108,7 +131,12 @@ function AppMobileItem({ row, onOpen }) {
         <div>Updated {row.updatedLabel}</div>
       </div>
       <div className="mt-4">
-        <ActionButton onClick={() => onOpen(row)} size="sm">
+        <ActionButton
+          onClick={() => onOpen(row)}
+          size="sm"
+          variant={actionPresentation.variant}
+          className={actionPresentation.className}
+        >
           {formatPrimaryActionLabel(row.primaryAction)}
         </ActionButton>
       </div>
@@ -150,11 +178,20 @@ function AppsTable({ rows, onOpen }) {
       width: '14%',
       headerClassName: 'text-right',
       cellClassName: 'text-right',
-      render: (row) => (
-        <ActionButton onClick={() => onOpen(row)} size="sm">
-          {formatPrimaryActionLabel(row.primaryAction)}
-        </ActionButton>
-      ),
+      render: (row) => {
+        const actionPresentation = getPrimaryActionPresentation(row.primaryAction)
+
+        return (
+          <ActionButton
+            onClick={() => onOpen(row)}
+            size="sm"
+            variant={actionPresentation.variant}
+            className={actionPresentation.className}
+          >
+            {formatPrimaryActionLabel(row.primaryAction)}
+          </ActionButton>
+        )
+      },
     },
   ]
 
@@ -248,10 +285,6 @@ export default function AppsPage() {
   }
 
   function handleHeaderAction(actionId) {
-    if (actionId === 'create') {
-      navigate('/apps/new')
-      return
-    }
     if (actionId === 'import') {
       setImportOpen(true)
     }
@@ -267,7 +300,6 @@ export default function AppsPage() {
           title="Apps"
           subtitle="Manage your apps, continue builds, and open app consoles."
           actions={[
-            { id: 'create', label: 'Create App', variant: 'primary' },
             { id: 'import', label: 'Import App', variant: 'outline' },
           ]}
           onAction={handleHeaderAction}

@@ -165,6 +165,7 @@ def test_app_generator_page_contract_stays_declarative() -> None:
         "AssemblyAgent",
         "DatabaseAgent",
         "ConfigMiddlewareAgent",
+        "ModuleContractQualityAgent",
         "ModelAgent",
         "AppValidationAgent",
         "IntegrationTestAgent",
@@ -196,26 +197,22 @@ def test_app_generator_page_contract_stays_declarative() -> None:
 
 
 def test_ui_docs_define_page_customization_boundary() -> None:
-    ui_system_spec = _read("docs/architecture/specs/UI_SYSTEM_SPEC.md")
-    frontend_strategy = _read("docs/architecture/specs/PLATFORM_FRONTEND_STRATEGY.md")
-    design_system_spec = _read("docs/architecture/specs/DESIGN_SYSTEM_SPEC.md")
+    ui_systems = _read("docs/architecture/specs/ui-systems.md")
+    assembly_contract = _read("docs/architecture/specs/appgenerator-output-assembly-contract.md")
 
-    assert "App Customization Ladder" in ui_system_spec
-    assert "Freeform React belongs to agent UI tools and transition UI" in ui_system_spec
-    assert "Theme And Shell Artifact Boundary" in ui_system_spec
-    assert "Page Customization Boundary" in frontend_strategy
-    assert "generated app pages should not default to raw React files" in frontend_strategy
-    assert "AppGenerator no longer carries a raw frontend page/component generation path" in frontend_strategy
-    assert "theme_config_patch" in frontend_strategy
-    assert "Theme vs Shell Ownership" in design_system_spec
-    assert "config/shell.json" in design_system_spec
+    assert "App Customization Ladder" in ui_systems
+    assert "Freeform React belongs to agent UI tools and transition UI" in ui_systems
+    assert "Theme And Shell Artifact Boundary" in ui_systems
+    assert "Page Customization Boundary" in ui_systems
+    assert "generated app pages should not default to raw React files" in ui_systems
+    assert "theme_config_patch" in ui_systems
+    assert "Theme vs Shell Ownership" in assembly_contract
+    assert "config/shell.json" in assembly_contract
 
 
 def test_architecture_index_references_appgenerator_output_contract() -> None:
-    index = _read("docs/architecture/specs/INDEX.md")
     contract = _read("docs/architecture/specs/appgenerator-output-assembly-contract.md")
 
-    assert "appgenerator-output-assembly-contract.md" in index
     assert "save_app_schema" in contract
     assert "generate_and_download" in contract
     assert "Raw Frontend Path Removed" in contract
@@ -302,12 +299,12 @@ def test_repo_owned_one_way_ui_emitters_use_canonical_surface_helper() -> None:
 
 
 def test_ui_system_spec_documents_interactive_vs_one_way_producer_contracts() -> None:
-    content = _read("docs/architecture/specs/UI_SYSTEM_SPEC.md")
+    content = _read("docs/architecture/specs/ui-systems.md")
 
     assert "Interactive agent UI tools" in content
     assert "One-way artifact/status emitters" in content
-    assert "use_ui_tool(...)" in content
-    assert "emit_ui_surface(...)" in content
+    assert "use_ui_tool(" in content
+    assert "emit_ui_surface(" in content
 
 
 def test_workflow_manifests_use_explicit_ui_surface_types() -> None:

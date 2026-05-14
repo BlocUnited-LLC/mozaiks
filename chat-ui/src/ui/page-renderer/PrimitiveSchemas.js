@@ -41,7 +41,7 @@ export const SHARED_DEFINITIONS = {
     properties: {
       key:      { type: 'string' },
       label:    { type: 'string' },
-      type:     { type: 'string', enum: ['text', 'number', 'date', 'badge', 'actions'] },
+      type:     { type: 'string', enum: ['text', 'number', 'date', 'badge', 'status', 'actions'] },
       sortable: { type: 'boolean' },
       width:    { type: 'string' },
     },
@@ -243,11 +243,19 @@ export const PRIMITIVE_SCHEMAS = {
 
   Metric: {
     type: 'object',
-    required: ['label', 'value'],
+    required: ['label'],
     properties: {
-      label:  { type: 'string' },
-      value:  {},
-      detail: { type: 'string' },
+      label:         { type: 'string' },
+      value:         {},
+      value_key:     { type: 'string' },
+      detail:        { type: 'string' },
+      detail_key:    { type: 'string' },
+      trend:         {},
+      trend_key:     { type: 'string' },
+      format:        { type: 'string', enum: ['number', 'currency', 'percent'] },
+      detail_format: { type: 'string', enum: ['number', 'currency', 'percent'] },
+      trend_format:  { type: 'string', enum: ['number', 'currency', 'percent'] },
+      trend_label:   { type: 'string' },
     },
   },
 

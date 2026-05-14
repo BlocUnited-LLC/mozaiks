@@ -7,7 +7,7 @@
 This document is about graph/config artifacts used by orchestration.
 For the execution ownership model across workflow runs, builder sessions, and
 scoped refinement workers, see
-[Orchestration Control Loops](foundations/orchestration-control-loops.md).
+[Orchestration Control Loops](workflows/orchestration-control-loops.md).
 
 ## Non-Negotiable Rules
 

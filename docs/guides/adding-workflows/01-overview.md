@@ -58,6 +58,6 @@ Optional workflow-local files:
 
 ## Read Next
 
-- [Workflow Architecture](../../architecture/foundations/workflow-architecture.md)
-- [Workflow Authoring Contracts](../../architecture/foundations/workflow-authoring-contracts.md)
-- [Mid-Flight Journeys](../../reference/deep-dives/mid-flight-journeys.md)
+- [Workflow Architecture](../../architecture/workflows/workflow-architecture.md)
+- [Workflow Authoring Contracts](../../architecture/workflows/workflow-authoring-contracts.md)
+- [Mid-Flight Journeys](../../architecture/mozaiksai/mid-flight-journeys.md)

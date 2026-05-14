@@ -106,6 +106,7 @@ task_contracts:
       - backend/integrations/{pack_id}_client.py
     hard_constraints:
       - Default module access is /api/modules/{module_name}/{action_name}.
+      - Page api_endpoint values must use /api/modules/{module_name}/{action_name} without query strings or fragments. Put pagination limits in page_size and filters in payload/input schemas.
       - Emit bespoke REST adapters only when explicitly requested.
       - Delegate behavior to backend/handler.py instead of duplicating business logic.
       - App-backend admin config is a separate contract and must expose only GET /api/admin/config.
@@ -172,7 +173,9 @@ backend_helper_files:
   runtime_extension_entrypoints:
     description: >
       When runtime_extensions.yaml is declared, each extension type requires an explicit backend file
-      that must be declared in python_stubs.
+      that must be declared in python_stubs. Entrypoints are module-local values such as
+      backend.routes_webhooks:get_router or backend.event_subscriber:MessageDeliveryWorker;
+      never use modules.*, app.modules.*, or mozaiksai.* import paths.
     api_router:
       required_stub: backend/{router_file}.py  # e.g. backend/routes_webhooks.py
       factory_function: get_router

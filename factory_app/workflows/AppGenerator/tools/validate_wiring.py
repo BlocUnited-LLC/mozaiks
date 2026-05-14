@@ -23,9 +23,9 @@ capability_packs nor module.yaml files can be found, the check is advisory
 
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -112,6 +112,29 @@ def _extract_endpoint_refs(pages: List[Any]) -> List[Tuple[str, str, str]]:
             section_id = str(section.get("id") or "<no-id>")
             _collect_endpoints_from_config(page_name, section_id, section.get("config"), results)
     return results
+
+
+def _endpoint_to_action_key(endpoint: str) -> tuple[Optional[str], Optional[str]]:
+    """Normalize a page api_endpoint to the module action registry key.
+
+    Canonical app pages call module actions at /api/modules/{module}/{action}.
+    Query strings are intentionally rejected because durable page parameters
+    belong in page_size, payload, form input, or module action input schemas.
+    """
+    parsed = urlsplit(endpoint.strip())
+    if parsed.scheme or parsed.netloc:
+        return None, "api_endpoint must be an app-relative path, not an absolute URL"
+    if parsed.query or parsed.fragment:
+        return None, "api_endpoint must not include query strings or fragments"
+
+    path = parsed.path.strip()
+    if path.startswith("/api/modules/"):
+        parts = path.strip("/").split("/")
+        if len(parts) != 4 or parts[0] != "api" or parts[1] != "modules" or not parts[2] or not parts[3]:
+            return None, "api_endpoint must use /api/modules/{module_id}/{action_id}"
+        return f"{parts[2]}/{parts[3]}", None
+
+    return path.lstrip("/"), None
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +241,25 @@ async def validate_wiring(
 
     # ── 1. Collect endpoint references from pages ─────────────────────────
     endpoint_refs = _extract_endpoint_refs(app_pages)
-    referenced_set: Set[str] = {ep for _, _, ep in endpoint_refs}
+    referenced_set: Set[str] = set()
+    endpoint_keys: Dict[Tuple[str, str, str], Optional[str]] = {}
+    invalid_refs: Set[Tuple[str, str, str]] = set()
+    invalid_endpoints: List[Dict[str, str]] = []
+    for page_name, section_id, endpoint in endpoint_refs:
+        action_key, error = _endpoint_to_action_key(endpoint)
+        endpoint_keys[(page_name, section_id, endpoint)] = action_key
+        if action_key:
+            referenced_set.add(action_key)
+            if "/" in action_key:
+                referenced_set.add(action_key.split("/", 1)[1])
+        if error:
+            invalid_refs.add((page_name, section_id, endpoint))
+            invalid_endpoints.append({
+                "page": page_name,
+                "section": section_id,
+                "endpoint": endpoint,
+                "error": error,
+            })
 
     # ── 2. Build module action registry ──────────────────────────────────
     known_actions: Set[str] = set()
@@ -254,7 +295,10 @@ async def validate_wiring(
     orphaned_pages: List[Dict[str, str]] = []
 
     for page_name, section_id, endpoint in endpoint_refs:
-        if endpoint in known_actions:
+        action_key = endpoint_keys.get((page_name, section_id, endpoint))
+        if (page_name, section_id, endpoint) in invalid_refs:
+            continue
+        if action_key in known_actions:
             wired.append({"page": page_name, "section": section_id, "endpoint": endpoint})
         else:
             orphaned_pages.append({"page": page_name, "section": section_id, "endpoint": endpoint})
@@ -271,13 +315,31 @@ async def validate_wiring(
     no_endpoints = not endpoint_refs
     no_registry = not known_actions
     has_orphaned_pages = bool(orphaned_pages)
+    has_invalid_endpoints = bool(invalid_endpoints)
 
     # Block only when we have a registry to validate against.
-    blocking_pass: bool = not has_orphaned_pages or no_registry
+    blocking_pass: bool = not has_invalid_endpoints and (not has_orphaned_pages or no_registry)
 
     # ── 5. Build human-readable output ───────────────────────────────────
     warnings: List[str] = []
     failed_tests: List[Dict[str, Any]] = []
+
+    for item in invalid_endpoints:
+        failed_tests.append({
+            "test": "wiring_invalid_endpoint",
+            "page": item["page"],
+            "section": item["section"],
+            "endpoint": item["endpoint"],
+            "error": (
+                f"Page '{item['page']}' section '{item['section']}' has invalid "
+                f"api_endpoint '{item['endpoint']}': {item['error']}."
+            ),
+            "fix_suggestion": (
+                "Use the canonical /api/modules/{module_id}/{action_id} path and put "
+                "filters, limits, and selected row data in page_size, payload, form "
+                "state, or the module action input schema."
+            ),
+        })
 
     if has_orphaned_pages and not no_registry:
         for item in orphaned_pages:
@@ -316,7 +378,9 @@ async def validate_wiring(
             "actions — review intent."
         )
 
-    if not blocking_pass:
+    if has_invalid_endpoints:
+        message = f"{len(invalid_endpoints)} page endpoint(s) have invalid api_endpoint syntax."
+    elif not blocking_pass:
         message = (
             f"{len(orphaned_pages)} page endpoint(s) reference unknown module actions."
         )
@@ -335,10 +399,12 @@ async def validate_wiring(
             "blocking": not no_registry,
             "total_endpoints_referenced": len(endpoint_refs),
             "wired_count": len(wired),
+            "invalid_endpoint_count": len(invalid_endpoints),
             "orphaned_page_count": len(orphaned_pages),
             "orphaned_action_count": len(orphaned_actions),
             "module_registry_available": not no_registry,
             "wired": wired,
+            "invalid_endpoints": invalid_endpoints,
             "orphaned_pages": orphaned_pages,
             "orphaned_actions": orphaned_actions,
             **(
@@ -353,6 +419,7 @@ async def validate_wiring(
         "contract_version": "1.0",
         "passed": blocking_pass,
         "wired": wired,
+        "invalid_endpoints": invalid_endpoints,
         "orphaned_pages": orphaned_pages,
         "orphaned_actions": orphaned_actions,
         "checks": [check],

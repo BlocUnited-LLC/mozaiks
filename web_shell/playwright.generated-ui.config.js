@@ -4,6 +4,9 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixtureAppRoot = path.join(__dirname, 'playwright', 'fixtures', 'generated-app', 'app');
+const activeAppRoot = process.env.MOZAIKS_GENERATED_UI_APP_ROOT
+  ? path.resolve(process.env.MOZAIKS_GENERATED_UI_APP_ROOT)
+  : fixtureAppRoot;
 
 export default defineConfig({
   testDir: path.join(__dirname, 'playwright', 'generated-ui'),
@@ -22,8 +25,9 @@ export default defineConfig({
     cwd: __dirname,
     env: {
       ...process.env,
-      PLATFORM_PATH: fixtureAppRoot,
-      MOZAIKS_APP_WORKSPACE_PATH: fixtureAppRoot,
+      PLATFORM_PATH: activeAppRoot,
+      MOZAIKS_APP_WORKSPACE_PATH: activeAppRoot,
+      MOZAIKS_GENERATED_UI_APP_ROOT: activeAppRoot,
     },
     url: 'http://127.0.0.1:4174/tickets',
     reuseExistingServer: !process.env.CI,

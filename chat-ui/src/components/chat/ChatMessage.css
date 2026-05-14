@@ -111,7 +111,7 @@
   max-width: min(820px, 88%);
   overflow-wrap: anywhere;
   word-break: break-word;
-  hyphens: auto;
+  hyphens: manual;
   backdrop-filter: blur(12px);
 }
 
@@ -180,7 +180,19 @@
 /* Loose lists: marked wraps each li in a <p> when items are blank-line separated */
 .message-body li > p { margin: 0; }
 .message-body li > p + p { margin-top: 0.25rem; }
-.message-body strong { color: var(--color-primary-light); }
+.message-body strong {
+  color: var(--color-primary-light);
+  font-family: var(--font-heading, 'Orbitron', 'Rajdhani', ui-sans-serif, system-ui, sans-serif);
+  font-weight: 700;
+}
+.message-body h1,
+.message-body h2,
+.message-body h3,
+.message-body h4 {
+  font-family: var(--font-heading, 'Orbitron', 'Rajdhani', ui-sans-serif, system-ui, sans-serif);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
 .message-body code {
   font-family: var(--font-mono, ui-monospace, 'Cascadia Code', monospace);
   font-size: 0.875em;

@@ -6,6 +6,7 @@ import { expect, test } from '@playwright/test';
 import { parse } from 'yaml';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const usesExternalGeneratedApp = Boolean(process.env.MOZAIKS_GENERATED_UI_APP_ROOT);
 const fixtureRoot = path.resolve(__dirname, '..', 'fixtures', 'generated-app', 'app');
 const pageRoot = path.join(fixtureRoot, 'ui', 'pages');
 const themeConfig = JSON.parse(
@@ -187,6 +188,7 @@ async function mockGeneratedAppApis(page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  test.skip(usesExternalGeneratedApp, 'Fixture-specific assertions are skipped for external generated app roots.');
   await mockGeneratedAppApis(page);
 });
 

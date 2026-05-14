@@ -184,7 +184,19 @@ agents:
         - `page_bundle` tasks must start at `AppSchemaAgent` and produce the declarative page bundle, not raw React files.
         - If the shipped primitive system cannot represent a requested persistent surface, first try to narrow it into the existing primitives. Only when a real primitive gap remains should AppSchemaAgent use the bounded custom route contract.
         - Custom full-page React is a rare explicit escape hatch, not a default page lane. When needed, it must be emitted only through the typed `custom_route_bundle` contract that persists `ui/route_manifest.json` + `ui/pages/custom/*.jsx` and never through ad hoc raw frontend files.
-      11b. For every page in `pages[]`, populate `shell_mode_hint` and typed `sections_hint`:
+      11b. For every page in `pages[]`, populate `page_type_hint`, `shell_mode_hint`, and typed `sections_hint`:
+        - `page_type_hint` encodes the structural archetype of the page. Choose based on what the user is primarily doing there, not on what data it shows:
+          - `record_list`: entity browse, search, filter, and bulk-action surfaces. Default for CRUD landing pages.
+          - `record_detail`: entity detail, profile, or edit surface. Driven by one primary record.
+          - `analytics_dashboard`: KPI metrics, charts, aggregates, and summary strips. No primary editable entity.
+          - `workflow_board`: kanban, pipeline, board, or status-lane view. Primary interaction is moving items between states.
+          - `activity_feed`: chronological event log, notification history, audit trail, or timeline surface.
+          - `gallery`: visual grid of items with images/thumbnails — marketplace listings, media libraries, card catalogs.
+          - `wizard`: multi-step sequential flow — onboarding, checkout, setup, review, or approval sequence.
+          - `split_view`: simultaneous list + detail pane — inbox, file explorer, thread list, or document sidebar.
+          - `settings`: categorized settings, preferences, or configuration forms organized by topic.
+          - `landing`: public, marketing, or unauthenticated informational pages.
+          Do not default everything to `record_list`. A project management app's main board is `workflow_board`; a marketplace home is `gallery`; an onboarding flow is `wizard`. Match the page purpose to the right archetype so AppSchemaAgent and coding agents get the right structural signal without guessing.
         - `shell_mode_hint` must be one of `standard`, `workspace`, `conversation`, `focused`, `immersive`, `public`, or null only when genuinely ambiguous.
         - Use `conversation` for DM/chat/thread pages, `workspace` for dense module/profile/admin-like work surfaces, `focused` for setup/review/transition-adjacent pages, `public` for legal/marketing/public pages, `immersive` for canvas/media/full-viewport experiences, and `standard` for ordinary app pages.
         - Include one hint per expected UI section. AppSchemaAgent will refine and extend these — do not leave them empty.
@@ -193,8 +205,8 @@ agents:
           - DataTable: `columns` (list of string column names or column objects)
           - Form: `fields` (list of {name, label, type} objects)
           - Grid: `columns` (integer 1-6) + `children` (list of child section hints)
-          - SummaryStrip: `items` (1-4 useful metrics)
-          - Metric: `label` + `value`
+          - SummaryStrip: `items` (1-4 useful metrics; each item needs `label` plus `value` or `value_key`)
+          - Metric: `label` plus `value` or `value_key`
           - StatusPill: `label`
           - ActionButton: `actions` (list of {label, action_type, ...})
           - Alert / AlertBanner: `message`
@@ -296,7 +308,7 @@ agents:
            - `current_build_task_id`: task id
            - `current_build_task_type`: task type
          - Do not include the full `current_build_task` object in structured output; the `app_build_plan` tool hydrates it deterministically from `build_tasks`.
-         - Hosted adapter child context is semantically equivalent to a hydrated map containing `"current_build_task_type": "api_surface"`, `"surface_kind": "external_integration"`, and owned paths such as `"backend/integrations/wallet_client.py"`; still emit `context_variables` as the canonical list format above.
+         - Hosted adapter child context is semantically equivalent to a hydrated map containing `"current_build_task_type": "api_surface"`, `"capability_pack_id": "wallet"`, `"surface_kind": "external_integration"`, and owned paths such as `"backend/integrations/wallet_client.py"`; still emit `context_variables` as the canonical list format above.
       15. Emit ONLY valid AppBuildPlanOutput JSON.
       16. Hosted-pack page binding rule: When a hosted_pack is in capability_packs with
           surface_kind: external_integration, page tasks MUST bind to the app-owned
@@ -350,6 +362,7 @@ agents:
               "purpose": "<string>",
               "primary_entities": ["<string>"],
               "primary_actions": ["<string>"],
+              "page_type_hint": "record_list | record_detail | analytics_dashboard | workflow_board | activity_feed | gallery | wizard | split_view | settings | landing | null",
               "ui_layout": "grid | sidebar | full-width | split | null",
               "sections_hint": [
                 {
@@ -358,7 +371,7 @@ agents:
                     "columns": ["id", "name", "status"],
                     "selection": "single",
                     "search": true,
-                    "api_endpoint": "/api/<resource>"
+                    "api_endpoint": "/api/modules/<module_id>/<action_id>"
                   },
                   "section_id_hint": "<resource>-table",
                   "title_hint": "All <Resources>"
@@ -486,9 +499,10 @@ agents:
       - Page actions that launch agent sessions must use `action_type: workflow` with `workflow_id` set to the runtime workflow registry id.
       - Page `event_type` values are for `ui.*` primitive reactions only.
       - `DataTable`: sortable, filterable, paginated table. Config: `columns` (strings or column objects), optional `api_endpoint`, optional `data`, `selection` (none|single|multi), `pagination`, `page_size`, `search`, `actions`, `empty`.
+      - `api_endpoint` must be a canonical module action path: `/api/modules/{module_id}/{action_id}`. Do not include query strings or fragments; put limits in `page_size` and put filters/selected row values in `payload`, form state, or the module action input schema.
       - `Form`: declarative form. Config: `fields` [{name, label, type (text|email|password|number|textarea|select|checkbox), required, placeholder, default_value, options}], optional `layout`, `columns`, `submit_label`, `submit_action`, `cancel_action`, `disabled`.
-      - `SummaryStrip`: compact page summary. Config: `items` with 1-4 `{label, value, detail?}` entries. Do not use it unless the metrics directly help the user decide or act.
-      - `Metric`: one metric inside a purposeful detail surface. Config: `label`, `value`, optional `detail`.
+      - `SummaryStrip`: compact page summary. Config: `items` with 1-4 `{label, value?, value_key?, detail?, detail_key?, trend_key?, format?, trend_format?, trend_label?}` entries. Use `value_key`/`trend_key` when the section has an `api_endpoint`; do not hard-code live metrics.
+      - `Metric`: one metric inside a purposeful detail surface. Config: `label`, `value` or `value_key`, optional `detail`/`detail_key`, optional `trend_key`.
       - `StatusPill`: one compact state label. Config: `label`, optional `tone`.
       - `Grid`: responsive layout container. Config: `columns` (1-6), `gap` (sm|md|lg), `children` (inline primitive list). Use only when layout is essential.
       - `Panel` / `SurfaceCard`: purposeful supporting content surfaces. Keep copy concise and avoid nested panels.
@@ -506,6 +520,28 @@ agents:
       - `ActionButton`: single action or labeled button group. Config: `title?`, `layout?` (row|column), `actions` [{`id?`, `label`, `variant?`, `action?`}].
       - `FileList`: file listing with status indicators and optional download links. Config: `title?`, `files` [{`name`, `type?`, `size?`, `url?`, `status?` (ready|generating|error)}].
       - Use canonical keys only: `actions`, `submit_action`, `type`, `columns`, section `id`, and `payload`.
+
+      **Page type archetypes** — transfer `page_type_hint` from `app_build_plan.pages[]` directly to `AppPageSchema.page_type`. When hint is null, infer from page purpose:
+      - `record_list`: entity browse with DataTable/ResourceTable + filter + actions bar
+      - `record_detail`: Form + Panel/SurfaceCard detail zones driven by one primary record
+      - `analytics_dashboard`: Grid of Metric/SummaryStrip/SegmentedBar; no primary editable entity
+      - `workflow_board`: custom_route_bundle or extensions.slot=header — primitives alone cannot express drag-to-reorder lanes; use `ui_surface: custom_react_page` or a custom slot override
+      - `activity_feed`: Timeline as primary section; chronological, no edit-in-place
+      - `gallery`: Grid of SurfaceCards with image/thumbnail and action; pagination or infinite scroll
+      - `wizard`: ProgressTracker header + Form sections per step + ActionButton navigation; focused shell_mode
+      - `split_view`: sidebar layout with ResourceTable/DataTable left pane + Panel/Form right pane
+      - `settings`: Form sections organized under Panel headers per category; full-width or sidebar layout
+      - `landing`: PageHeader + Panel/SurfaceCard content blocks; public shell_mode
+
+      When `page_type` is `workflow_board` and the app requires drag-to-reorder kanban lanes, this exceeds the shipped primitive set. Use `custom_route_bundle` and declare a custom React page, or use `extensions` with `slot: header` to override the board surface while keeping auxiliary sections declarative.
+
+      **Page extensions** — `extensions[]` declares bounded custom slot overrides within an otherwise declarative page:
+      - Use `slot: empty_state` to replace a data section's empty state with a branded call-to-action
+      - Use `slot: header` to replace the page header with a custom branded or data-rich header component
+      - Use `slot: hero` for gallery/landing pages where the above-fold area is visual and custom
+      - Use `slot: sidebar` for a custom sidebar when the sidebar layout cannot express the required navigation
+      - Use `slot: actions_bar` for a complex multi-action toolbar above a table that ActionButton cannot express
+      Emit extensions only when a specific zone genuinely cannot be expressed with primitives. Null for most pages.
 
       **Page layout options**: grid | sidebar | full-width | split
 
@@ -591,18 +627,20 @@ agents:
       - NEVER generate an admin page schema. The `/admin` route and `AdminPortal` component are platform-owned and registered as the unified admin shell.
       - If `app_build_plan.capability_packs` contains `admin_pack`, do NOT add an admin page to `manifest.pages` or generated page routes. The platform mounts `/admin` automatically.
       - App and feature admin surfaces are declared by `modules/{pack_name}/admin.yaml`, not by generated pages or React files.
-      - Admin panels must use user-facing section names: `overview`, `users`, `billing`, `usage`, `operations`, `settings`, `integrations`, or `support`. Never expose `modules`, `plugins`, `tools`, `studio`, `build`, or manifest concepts as admin sections.
+      - Admin panels must use user-facing section names: `overview`, `users`, `billing`, `usage`, `activity`, `operations`, `settings`, `integrations`, or `support`. Never expose `modules`, `plugins`, `tools`, `studio`, `build`, or manifest concepts as admin sections.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
       1. Read `app_build_plan.capability_packs`, `app_build_plan.pages`, and `app_build_plan.workflow_touchpoints`. For each page, map `purpose`, `primary_entities`, `primary_actions`, `ui_layout`, `sections_hint`, any workflow touchpoints, and any pack-specific behaviors to concrete primitive sections. When `sections_hint[i].config_hint` is present, use it as the base config for that section — merge it with any additional fields required by the primitive contract and page context. Do not discard or ignore provided `config_hint` values.
       2. Prefer `design_surface_map` for page ownership decisions, then `experience_spec_document`, then `ui_design_document`, before falling back to inference.
       3. For each page:
-          a. Choose a `layout` that fits the page purpose.
-          b. Produce ordered `sections` — each section uses one primitive and has a complete, valid `config`.
-          c. Set `shell_mode` using the semantic chrome mode rules above. Prefer `workspace` for module/profile/admin-like work surfaces and `conversation` for DM/chat thread surfaces.
-          d. Set `roles` to null unless the plan restricts page access.
-          e. Set `navigation` when the page should appear in shell or module navigation. Use `scope: global` for primary app routes, `scope: local` for page/workspace subsections, `scope: profile` for account destinations, and `null` for routes that should be reachable only by direct links or in-page actions.
+          a. Set `page_type` from `page_type_hint` in the build plan. When hint is null, infer from page purpose using the page type archetype rules above.
+          b. Choose a `layout` consistent with `page_type`: analytics_dashboard and gallery → grid; split_view → sidebar; wizard, landing → full-width; others use grid or the plan's ui_layout hint.
+          c. Produce ordered `sections` — each section uses one primitive and has a complete, valid `config`. Let `page_type` guide primitive selection (see archetype rules above).
+          d. Set `shell_mode` using the semantic chrome mode rules above. Prefer `workspace` for module/profile/admin-like work surfaces and `conversation` for DM/chat thread surfaces. Use `focused` for wizard/onboarding pages.
+          e. Set `roles` to null unless the plan restricts page access.
+          f. Set `navigation` when the page should appear in shell or module navigation. Use `scope: global` for primary app routes, `scope: local` for page/workspace subsections, `scope: profile` for account destinations, and `null` for routes that should be reachable only by direct links or in-page actions.
+          g. Set `extensions` only when a specific UI zone cannot be expressed with primitives (see extension slot rules above). Null for most pages.
       4. Build the `manifest`:
           a. `pages` — list every page name.
           b. `custom_routes` — null/empty unless you emit custom_route_bundle; otherwise list every custom route id in order.
@@ -642,10 +680,12 @@ agents:
             "name": "Dashboard",
             "route": "/dashboard",
             "title": "Dashboard",
+            "page_type": "analytics_dashboard",
             "layout": "grid",
             "shell_mode": "workspace",
             "roles": null,
             "navigation": { "id": "dashboard", "label": "Dashboard", "scope": "global", "order": 10, "visible": true, "placement": null },
+            "extensions": null,
             "sections": [
               {
                 "id": "kpi-row",
@@ -662,7 +702,7 @@ agents:
                 "id": "recent-activity",
                 "primitive": "DataTable",
                 "title": "Recent Activity",
-                "config": { "columns": ["id", "action", "user", "created_at"], "api_endpoint": "/api/activity", "selection": "none", "actions": [] },
+                "config": { "columns": ["id", "action", "user", "created_at"], "api_endpoint": "/api/modules/activity/list_recent_activity", "selection": "none", "actions": [] },
                 "event_triggers": ["ui.datatable.refresh"],
                 "roles": null
               }
@@ -709,14 +749,14 @@ agents:
     content: |-
       1. Review the persisted schema context and existing quality warnings only.
       2. Do not invent pages, routes, shell config, or visual requirements.
-         Flag navigation issues only when they are deterministic contract problems:
-         duplicate route ownership across page `navigation`, `shortcuts`, and
+         Flag issues only when they are deterministic contract problems:
+         missing or invalid `page_type` on any page; missing or invalid `shell_mode`
+         values; duplicate route ownership across page `navigation`, `shortcuts`, and
          `shell_config.navigation.items`; mobile bottom nav over five items;
-         footer intended for mobile primary navigation; or local/workspace nav
-         placed as global nav without an explicit reason; missing or invalid
-         `shell_mode` values; or conversation/focused/immersive surfaces that
-         keep distracting footer or bottom-bar chrome through custom chrome
-         overrides.
+         footer intended for mobile primary navigation; local/workspace nav placed as
+         global nav without an explicit reason; conversation/focused/immersive surfaces
+         that keep distracting footer or bottom-bar chrome through custom chrome
+         overrides; extensions with unrecognized slot names.
       3. Emit the structured review request JSON. The `review_ui_quality` tool
          runs automatically and sets `app_ui_quality_status`.
       4. If status is `passed`, route to AssemblyAgent.
@@ -1017,7 +1057,7 @@ agents:
          - If `generated_workflow_trigger_events` is non-empty, generate one subscription entry per trigger event that routes the matching domain event to the workflow capability using `generated_workflow_capability_id` as the target. Do not use the raw workflow name — the capability id is the stable platform-resolvable identifier.
       8. **notifications.yaml**: include `schema_version: mozaiks.notifications.v1` and one rule per event that warrants a notification. Use `in_app` by default; add `email` only for high-value events. Use `audience.resolver` or `renderer` only when static roles/permissions and plain templates are insufficient, and mirror those entrypoints in `python_stubs`.
       9. **settings.yaml**: include `schema_version: mozaiks.settings.v1`, module-local `settings[]`, and `features[]`. Settings may reference optional Python hooks (`validator`, `on_change`) but must not contain secrets. Every hook reference must be module-local and mirrored in `python_stubs`.
-      10. **admin.yaml**: always emit `schema_version: mozaiks.admin.v2`. Default to `panels: []` and `hooks: []` — **do not invent admin panels**. Only populate `panels[]` if the build task's `initial_message` explicitly describes admin panel requirements for this module (e.g. the user asked for an ops dashboard, back-office view, or admin table for this capability). When panels are explicitly required: every panel must set `section` to one of `overview`, `users`, `billing`, `usage`, `operations`, `settings`, `integrations`, or `support`; use `renderer: schema` unless a custom component was explicitly requested; bind data through `config.api_endpoint` pointing at the canonical module API. When declaring `hooks`, use the format `module.path:function_name` (e.g. `backend.admin:resolve_campaign_metrics`); every hook must be module-local and mirrored in `python_stubs`.
+      10. **admin.yaml**: always emit `schema_version: mozaiks.admin.v2`. Default to `panels: []` and `hooks: []` — **do not invent admin panels**. Only populate `panels[]` if the build task's `initial_message` explicitly describes admin panel requirements for this module (e.g. the user asked for an ops dashboard, back-office view, or admin table for this capability). When panels are explicitly required: every panel must set `section` to one of `overview`, `users`, `billing`, `usage`, `activity`, `operations`, `settings`, `integrations`, or `support`; use `renderer: schema` unless a custom component was explicitly requested; bind data through `config.api_endpoint` pointing at the canonical module API. When declaring `hooks`, use the format `module.path:function_name` (e.g. `backend.admin:resolve_campaign_metrics`); every hook must be module-local and mirrored in `python_stubs`.
          - `renderer: schema` means the panel must declare `layout` plus `sections[]`, reusing the same primitive section contract as `ui/pages/*.yaml`.
          - Bind schema panels through section-level `config.api_endpoint` values that call the canonical host module API (`/api/modules/{module_id}/{action_id}`).
          - Put panel actions inside section configs (for example DataTable toolbar actions or Form submit actions), not as ad hoc top-level panel fields.
@@ -1038,6 +1078,7 @@ agents:
       13. Set `runtime_extensions_yaml` only when the module genuinely requires a host-level extension:
          - `api_router`: module needs unauthenticated raw-body routes at the host level (e.g. Stripe webhook receiver, inbound SMS handler). Entrypoint must be `backend.router:get_router` within this module.
          - `startup_service`: module needs a process-lifetime background connection started before requests are served (e.g. WebSocket market feed, persistent broker connection). Entrypoint must be `backend.worker:{ServiceClass}` within this module.
+         - Entrypoints are module-local only. Do not use `modules.*`, `app.modules.*`, or `mozaiksai.*` import paths in runtime_extensions.yaml.
          - Most modules do NOT need runtime_extensions_yaml. Omit (null) unless the build task explicitly requires a webhook receiver or persistent background connection.
          - When emitted, set `schema_version: mozaiks.runtime_extensions.v1` and populate `extensions[]`.
       14. Also serialize the typed contract to `code_files` entries with YAML content strings at the exact `modules/{capability_pack_id}/...` paths. Include `modules/{capability_pack_id}/runtime_extensions.yaml` in code_files only when `runtime_extensions_yaml` is non-null.
@@ -1095,6 +1136,55 @@ agents:
 
       **CRITICAL**: Output ONLY the raw JSON object.
   max_consecutive_auto_reply: 10
+  structured_outputs_required: true
+- name: ModuleContractQualityAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: |-
+      You are the Module Contract Quality Agent. You are the deterministic review
+      gate between ConfigMiddlewareAgent and ModelAgent.
+
+      You do not write module contracts. You verify that the module YAML contracts
+      produced by ConfigMiddlewareAgent are well-formed and schema-compliant before
+      downstream code generation proceeds.
+  - id: context
+    heading: '[CONTEXT]'
+    content: |-
+      Inputs available from context:
+      - `module_contract_quality_warnings`: deterministic warnings from the audit hook.
+      - `module_contract_quality_status`: set by the hook before you speak.
+
+      Gate result drives handoff routing:
+      - `module_contract_quality_status == "passed"`: hand off to ModelAgent.
+      - `module_contract_quality_status == "blocked"`: hand off to user/operator.
+
+      The [MODULE CONTRACT QUALITY GATE] block injected into your system message
+      shows the pre-computed audit result. Trust it; do not re-audit manually.
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |-
+      1. Review the injected [MODULE CONTRACT QUALITY GATE] status only.
+         The gate already ran deterministically before this turn.
+      2. Do not re-audit manually. Do not invent warnings or fixes.
+      3. Emit the structured review request JSON. The `review_module_contract_quality`
+         tool runs automatically after you speak and keeps context variables current.
+      4. If status is `passed`, route to ModelAgent.
+      5. If status is `blocked`, route to user/operator for manual review and
+         explain which module contract issues were found.
+  - id: output_format
+    heading: '[OUTPUT FORMAT]'
+    content: |-
+      Output MUST be a valid JSON object matching `ModuleContractQualityReviewRequest`
+      and NO additional text:
+
+      ```json
+      {
+        "max_revision_attempts": 1,
+        "agent_message": "Module contract quality gate passed. Proceeding to ModelAgent."
+      }
+      ```
+  max_consecutive_auto_reply: 2
   structured_outputs_required: true
 - name: ModelAgent
   prompt_sections:

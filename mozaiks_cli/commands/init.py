@@ -1,5 +1,6 @@
 """mozaiks init - Initialize an app workspace from the Dev/CLI layer."""
 
+import ast
 import json
 import re
 import sys
@@ -43,6 +44,10 @@ TIER_PRESETS = {
         "chat_ui": True,
     },
 }
+
+AGENT_GUIDANCE_BLOCK_NAME = "agent-guidance"
+AGENT_GUIDANCE_BEGIN = f"<!-- BEGIN MOZAIKS MANAGED: {AGENT_GUIDANCE_BLOCK_NAME} -->"
+AGENT_GUIDANCE_END = f"<!-- END MOZAIKS MANAGED: {AGENT_GUIDANCE_BLOCK_NAME} -->"
 
 
 def run(args):
@@ -120,12 +125,19 @@ def create_scaffold(
         )
 
     target_dir.mkdir(parents=True, exist_ok=True)
+    scripts_dir = target_dir / "scripts"
     _create_bundle_scaffold(
         target_dir=target_dir,
         preset=preset,
         app_name=app_name,
         admin_email=admin_email,
         starter=starter,
+    )
+    _create_standard_consumer_files(
+        target_dir=target_dir,
+        scripts_dir=scripts_dir,
+        app_name=app_name,
+        preset=preset,
     )
     return target_dir
 
@@ -271,6 +283,940 @@ def _create_bundle_scaffold(
 
     if starter:
         _create_starter_workflow(workflows_dir)
+
+
+def _create_standard_consumer_files(
+    *,
+    target_dir: Path,
+    scripts_dir: Path,
+    app_name: str,
+    preset: str,
+) -> None:
+    """Create root-level files that make a generated app runnable on the PyPI package."""
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+
+    _write_text(target_dir / "requirements.txt", _requirements_txt())
+    _write_text(target_dir / ".env.example", _env_example())
+    _write_text(target_dir / ".gitignore", _generated_app_gitignore())
+    _write_text(target_dir / "README.md", _generated_app_readme(app_name, preset))
+    _write_text(scripts_dir / "run-backend.ps1", _run_backend_ps1())
+    _write_text(scripts_dir / "run-frontend.ps1", _run_frontend_ps1())
+    _write_text(scripts_dir / "run-studio.ps1", _run_studio_ps1())
+    _create_agent_guidance_scaffold(target_dir=target_dir, app_name=app_name, preset=preset)
+
+    print("Created root consumer files: requirements.txt, .env.example, README.md, AGENTS.md, CLAUDE.md, scripts/, .claude/")
+
+
+def _create_agent_guidance_scaffold(*, target_dir: Path, app_name: str, preset: str) -> None:
+    """Create app-local coding-agent guidance without copying framework-internal rules."""
+    for relative_path, content in build_agent_guidance_files(app_name, preset).items():
+        path = target_dir / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write_text(path, content)
+
+
+def build_agent_guidance_files(app_name: str, preset: str) -> dict[Path, str]:
+    """Return the app-local coding-agent guidance files for an app workspace."""
+    raw_files = {
+        Path("AGENTS.md"): _generated_agents_md(app_name, preset),
+        Path("CLAUDE.md"): _generated_claude_md(app_name, preset),
+        Path(".claude/rules/app-bundle.md"): _generated_claude_rule_app_bundle(),
+        Path(".claude/rules/docs.md"): _generated_claude_rule_docs(),
+        Path(".claude/rules/frontend.md"): _generated_claude_rule_frontend(),
+        Path(".claude/rules/modules.md"): _generated_claude_rule_modules(),
+        Path(".claude/rules/workflows.md"): _generated_claude_rule_workflows(),
+        Path(".claude/skills/add-module/SKILL.md"): _generated_skill_add_module(),
+        Path(".claude/skills/add-page/SKILL.md"): _generated_skill_add_page(),
+        Path(".claude/skills/create-workflow/SKILL.md"): _generated_skill_create_workflow(),
+        Path(".claude/skills/docs-maintenance/SKILL.md"): _generated_skill_docs_maintenance(),
+        Path(".claude/skills/setup/SKILL.md"): _generated_skill_setup(),
+    }
+    return {
+        relative_path: _with_agent_guidance_managed_block(content)
+        for relative_path, content in raw_files.items()
+    }
+
+
+def _with_agent_guidance_managed_block(content: str) -> str:
+    """Wrap generated content in a managed block while preserving skill frontmatter."""
+    normalized = content.strip()
+    prefix = ""
+    body = normalized
+    if normalized.startswith("---\n"):
+        closing_index = normalized.find("\n---\n", 4)
+        if closing_index != -1:
+            prefix = normalized[: closing_index + len("\n---\n")].rstrip() + "\n\n"
+            body = normalized[closing_index + len("\n---\n") :].strip()
+    return f"{prefix}{AGENT_GUIDANCE_BEGIN}\n{body}\n{AGENT_GUIDANCE_END}\n"
+
+
+def _requirements_txt() -> str:
+    return f"""mozaiks=={_current_mozaiks_version()}
+"""
+
+
+def _current_mozaiks_version() -> str:
+    version_file = Path(__file__).resolve().parents[2] / "mozaiksai" / "version.py"
+    module = ast.parse(version_file.read_text(encoding="utf-8"))
+    for node in module.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets):
+            continue
+        if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            return node.value.value
+    raise RuntimeError(f"Unable to resolve Mozaiks package version from {version_file}")
+
+
+def _env_example() -> str:
+    return """# Mozaiks runtime
+OPENAI_API_KEY=
+MONGO_URI=mongodb://localhost:27017/mozaiks
+ENV=development
+AUTH_ENABLED=false
+"""
+
+
+def _generated_app_gitignore() -> str:
+    return """.venv/
+.env
+__pycache__/
+*.py[cod]
+node_modules/
+dist/
+build/
+logs/
+generated/
+.pytest_cache/
+"""
+
+
+def _generated_agents_md(app_name: str, preset: str) -> str:
+    return f"""# AGENTS.md
+
+Coding-agent guidance for `{app_name}`.
+
+This is a standalone Mozaiks app workspace created with the `{preset}` preset.
+It consumes the published `mozaiks` framework package from `requirements.txt`.
+Do not assume a sibling checkout of the Mozaiks framework repository exists.
+
+## Local Setup
+
+```powershell
+python -m venv .venv
+.\\.venv\\Scripts\\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+```
+
+Set `OPENAI_API_KEY` and `MONGO_URI` in `.env`.
+
+## Run
+
+```powershell
+.\\scripts\\run-studio.ps1 -ForceStop
+```
+
+Two-terminal mode:
+
+```powershell
+.\\scripts\\run-backend.ps1 -ForceStop
+.\\scripts\\run-frontend.ps1 -ForceStop
+```
+
+## Workspace Boundary
+
+This repo owns app-specific behavior only:
+
+- `app/app.json` - app identity and runtime flags
+- `app/config/` - AI, shell, and app config
+- `app/brand/` - app branding assets and theme config
+- `app/modules/` - deterministic app capabilities
+- `app/workflows/` - app-local AI workflows
+- `app/ui/` - app pages, route manifest, and custom UI registration
+- `generated/` - staged generator output awaiting review/promotion
+- `scripts/` - local launch wrappers around the installed `mozaiks` package
+
+Framework/runtime changes belong in the upstream Mozaiks framework repository,
+not in this app workspace.
+
+## Development Rules
+
+- Keep modules deterministic and contract-declared.
+- Keep `backend/handler.py` thin; put business logic in `service.py` and data access in `repo.py`.
+- Prefer declarative page schemas before custom React.
+- Mount custom React only through `app/ui/route_manifest.json` and `app/ui/index.js`.
+- Keep shell/navigation changes in `app/config/shell.json`.
+- Do not edit generated artifacts in place until they are intentionally promoted into `app/`.
+- Update docs when setup, runtime behavior, module contracts, workflows, or UI surfaces change.
+
+Scoped rules live in `.claude/rules/`. Claude-specific task skills live in
+`.claude/skills/`.
+"""
+
+
+def _generated_claude_md(app_name: str, preset: str) -> str:
+    return f"""# CLAUDE.md
+
+This file guides Claude Code when working in `{app_name}`.
+
+Read `AGENTS.md` first. This is a generated Mozaiks app workspace using the
+`{preset}` preset, not the Mozaiks framework source repository.
+
+## Core Principle
+
+Keep app logic inside the app bundle:
+
+```text
+app/
+  app.json
+  config/
+  brand/
+  modules/
+  workflows/
+  ui/
+```
+
+Use the installed `mozaiks` package for runtime, CLI, Studio host, factory
+bundle, and web shell behavior.
+
+## Where To Put Work
+
+| Work | Location |
+|------|----------|
+| App identity/config | `app/app.json`, `app/config/` |
+| Shell, navigation, footer, mobile chrome | `app/config/shell.json` |
+| Branding/theme assets | `app/brand/` |
+| Deterministic app capabilities | `app/modules/<module_id>/` |
+| AI workflow behavior | `app/workflows/<WorkflowName>/` |
+| Declarative pages | `app/ui/pages/` |
+| Custom React pages/components | `app/ui/pages/custom/`, `app/ui/components/`, `app/ui/index.js` |
+| Staged generated output | `generated/` |
+| Local process wrappers | `scripts/` |
+
+## Do Not
+
+- Do not vendor or edit Mozaiks framework internals in this app repo.
+- Do not hardcode workflow names inside module business logic.
+- Do not bypass module contracts with undeclared routes or side channels.
+- Do not put business logic directly in `backend/handler.py`.
+- Do not use custom React when a declarative page schema is sufficient.
+- Do not mutate generated artifacts without review/promotion.
+
+## Validation
+
+For non-trivial changes, run the narrowest practical checks:
+
+```powershell
+.\\scripts\\run-studio.ps1 -DryRun
+.\\scripts\\run-backend.ps1 -DryRun
+.\\scripts\\run-frontend.ps1 -DryRun
+```
+
+Then run the app or targeted tests relevant to the touched area.
+
+## Rules And Skills
+
+Use `.claude/rules/` for path-scoped guidance and `.claude/skills/` for common
+tasks such as modules, pages, workflows, setup, and docs maintenance.
+"""
+
+
+def _generated_claude_rule_app_bundle() -> str:
+    return """---
+paths:
+  - "app/app.json"
+  - "app/config/**"
+  - "app/brand/**"
+  - "scripts/**"
+---
+
+# App Bundle Rules
+
+This workspace is a standalone Mozaiks app that consumes the installed
+`mozaiks` package.
+
+## Ownership
+
+- app-specific config belongs in `app/`
+- local process wrappers belong in `scripts/`
+- framework/runtime changes belong upstream in Mozaiks, not here
+
+## Shell And Config
+
+- shell, navigation, footer, mobile chrome, shortcuts, and route-level chrome
+  behavior belong in `app/config/shell.json`
+- AI startup behavior belongs in `app/config/ai.json`
+- app identity and auth flags belong in `app/app.json`
+
+Keep config declarative and app-agnostic where possible.
+"""
+
+
+def _generated_claude_rule_docs() -> str:
+    return """---
+paths:
+  - "*.md"
+  - "docs/**/*.md"
+---
+
+# Docs Rules
+
+Use these rules when editing Markdown in this app workspace.
+
+- Keep setup commands aligned with `requirements.txt` and `scripts/`.
+- Document any new required environment variable in `.env.example`.
+- Prefer focused docs updates near the changed behavior.
+- Use lowercase kebab-case for new docs files unless a convention filename is required.
+- Keep framework/internal Mozaiks details out of app docs unless the app developer must know them.
+"""
+
+
+def _generated_claude_rule_frontend() -> str:
+    return """---
+paths:
+  - "app/ui/**"
+  - "app/config/shell.json"
+---
+
+# Frontend Rules
+
+Use declarative UI before custom code.
+
+## Placement
+
+- declarative pages: `app/ui/pages/`
+- custom pages: `app/ui/pages/custom/`
+- reusable custom components: `app/ui/components/`
+- route registration: `app/ui/route_manifest.json`
+- component registration: `app/ui/index.js`
+- shell/navigation/chrome: `app/config/shell.json`
+
+## Constraints
+
+- Do not create custom React for simple forms, lists, tables, dashboards, or detail views when page schemas can express the surface.
+- Keep custom UI mounted through declared routes and registries.
+- Keep mobile and desktop chrome behavior in shell config rather than hardcoded per-page conditionals.
+- Avoid framework-specific imports that assume a local Mozaiks source checkout.
+"""
+
+
+def _generated_claude_rule_modules() -> str:
+    return """---
+paths:
+  - "app/modules/**"
+---
+
+# Module Rules
+
+Modules are deterministic app capabilities.
+
+Canonical module shape:
+
+```text
+app/modules/{module_id}/
+  module.yaml
+  runtime_extensions.yaml        # optional
+  contracts/                     # optional companion manifests
+  backend/
+    handler.py
+    service.py                   # recommended for business logic
+    repo.py                      # recommended for data access
+    policy.py                    # recommended for multi-tenant scoping
+    schemas.py                   # recommended for typed payloads/docs
+```
+
+## Rules
+
+- `module.yaml` declares actions and capabilities.
+- `backend/handler.py` stays thin: validate/dispatch/return only.
+- Business logic belongs in `service.py`.
+- MongoDB/data access belongs in `repo.py`.
+- Tenant/user scoping belongs in `policy.py`.
+- Typed payloads and document shapes belong in `schemas.py`.
+- Publish domain events through declared contracts; do not hardcode workflow starts in module code.
+- Use `runtime_extensions.yaml` for API routers or startup services only when the module needs them.
+"""
+
+
+def _generated_claude_rule_workflows() -> str:
+    return """---
+paths:
+  - "app/workflows/**"
+---
+
+# Workflow Rules
+
+Workflows are app-local AI behavior.
+
+Canonical workflow shape:
+
+```text
+app/workflows/{WorkflowName}/
+  orchestrator.yaml
+  agents.yaml
+  handoffs.yaml
+  context_variables.yaml
+  structured_outputs.yaml
+  tools.yaml
+  hooks.yaml
+  ui_config.yaml
+  tools/
+  ui/
+```
+
+## Rules
+
+- Keep workflow configuration declarative and structured-output-first.
+- Put reasoning in agent prompts and structured outputs.
+- Keep tools deterministic: persist, validate, emit events, or call declared APIs.
+- Do not put classification/inference heuristics in tools.
+- Use declared triggers and handoffs instead of hardcoded runtime assumptions.
+- Keep workflow-specific UI under the workflow `ui/` folder only when the workflow needs an artifact surface.
+"""
+
+
+def _generated_skill_add_module() -> str:
+    return """---
+name: add-module
+description: Add or update a deterministic Mozaiks app module in this generated app workspace.
+argument-hint: "[module goal]"
+disable-model-invocation: true
+---
+
+Complete this module task: $ARGUMENTS
+
+1. Read `AGENTS.md` and `.claude/rules/modules.md`.
+2. Create or update `app/modules/<module_id>/module.yaml`.
+3. Keep `backend/handler.py` thin.
+4. Put business logic in `backend/service.py`.
+5. Put persistence in `backend/repo.py`.
+6. Add `backend/policy.py` and `backend/schemas.py` when the module reads/writes scoped data.
+7. Add `runtime_extensions.yaml` only for declared API routers or startup services.
+8. Update docs and `.env.example` for new setup requirements.
+"""
+
+
+def _generated_skill_add_page() -> str:
+    return """---
+name: add-page
+description: Add or update a Mozaiks app page, preferring declarative page schemas before custom React.
+argument-hint: "[page goal]"
+disable-model-invocation: true
+---
+
+Complete this page task: $ARGUMENTS
+
+1. Read `AGENTS.md` and `.claude/rules/frontend.md`.
+2. Prefer a declarative page under `app/ui/pages/`.
+3. Use custom React under `app/ui/pages/custom/` only when the declarative schema cannot express the surface.
+4. Register routes in `app/ui/route_manifest.json`.
+5. Register custom components in `app/ui/index.js`.
+6. Put shell/navigation/mobile chrome changes in `app/config/shell.json`.
+7. Check desktop and mobile layout behavior before finishing.
+"""
+
+
+def _generated_skill_create_workflow() -> str:
+    return """---
+name: create-workflow
+description: Add or update an app-local Mozaiks workflow in this generated app workspace.
+argument-hint: "[workflow goal]"
+disable-model-invocation: true
+---
+
+Complete this workflow task: $ARGUMENTS
+
+1. Read `AGENTS.md` and `.claude/rules/workflows.md`.
+2. Create or update `app/workflows/<WorkflowName>/`.
+3. Keep workflow YAML structured-output-first and deterministic.
+4. Put reasoning in agent prompts and structured outputs.
+5. Keep tools simple: persist, validate, emit events, or call declared APIs.
+6. Add UI artifact config only when the workflow needs a visual artifact.
+7. Update docs if startup behavior, triggers, or required env vars change.
+"""
+
+
+def _generated_skill_docs_maintenance() -> str:
+    return """---
+name: docs-maintenance
+description: Update app workspace docs safely when setup, modules, workflows, UI, or runtime behavior changes.
+argument-hint: "[docs task]"
+disable-model-invocation: true
+---
+
+Complete this docs task: $ARGUMENTS
+
+1. Keep README setup aligned with `requirements.txt`, `.env.example`, and `scripts/`.
+2. Document new required environment variables in `.env.example`.
+3. Prefer focused docs edits near the changed behavior.
+4. Use lowercase kebab-case for new docs files unless a convention filename is required.
+5. Remove stale instructions that assume a sibling Mozaiks framework checkout.
+"""
+
+
+def _generated_skill_setup() -> str:
+    return """---
+name: setup
+description: Set up and verify this generated Mozaiks app workspace locally.
+argument-hint: "[optional setup issue]"
+disable-model-invocation: true
+---
+
+Help set up this app workspace.
+
+1. Create and activate `.venv`.
+2. Run `python -m pip install -r requirements.txt`.
+3. Copy `.env.example` to `.env`.
+4. Set `OPENAI_API_KEY` and `MONGO_URI`.
+5. Run `.\\scripts\\run-studio.ps1 -DryRun`.
+6. Start with `.\\scripts\\run-studio.ps1 -ForceStop`.
+7. If needed, run backend/frontend separately with `run-backend.ps1` and `run-frontend.ps1`.
+
+Do not require a sibling checkout of the Mozaiks framework repository.
+"""
+
+
+def _generated_app_readme(app_name: str, preset: str) -> str:
+    return f"""# {app_name}
+
+This app was created with Mozaiks using the `{preset}` preset.
+
+## Local Setup
+
+```powershell
+python -m venv .venv
+.\\.venv\\Scripts\\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+```
+
+Set `OPENAI_API_KEY` and `MONGO_URI` in `.env` before running real workflows.
+
+## Run Studio
+
+```powershell
+.\\scripts\\run-studio.ps1 -ForceStop
+```
+
+Equivalent CLI command:
+
+```powershell
+mozaiks studio --dir . --open
+```
+
+## Two-Terminal Mode
+
+```powershell
+# Terminal 1
+.\\scripts\\run-backend.ps1 -ForceStop
+
+# Terminal 2
+.\\scripts\\run-frontend.ps1 -ForceStop
+```
+
+The local scripts run this app against the installed `mozaiks` package. They do
+not require a sibling checkout of the framework repository.
+
+## Coding Agent Guidance
+
+This workspace includes app-local guidance for coding agents:
+
+- `AGENTS.md`
+- `CLAUDE.md`
+- `.claude/rules/`
+- `.claude/skills/`
+
+Those files describe this generated app boundary. They intentionally do not copy
+the full Mozaiks framework repository rules.
+
+To check for newer guidance after upgrading `mozaiks`:
+
+```powershell
+mozaiks sync-agent-guidance --dir . --check
+```
+
+Safe update options:
+
+```powershell
+mozaiks sync-agent-guidance --dir . --write-missing
+mozaiks sync-agent-guidance --dir . --update
+```
+
+`--update` refreshes Mozaiks managed blocks only. Use `--force` only when you
+explicitly want to overwrite app-local guidance files.
+"""
+
+
+def _run_backend_ps1() -> str:
+    return r"""<#
+.SYNOPSIS
+  Start the Mozaiks backend for this app workspace.
+
+.DESCRIPTION
+  Runs the backend from the installed mozaiks package and points it at this
+  workspace.
+#>
+
+param(
+  [int]$Port = 8000,
+  [string]$BindHost = "0.0.0.0",
+  [string]$WorkspacePath = "",
+  [switch]$ForceStop,
+  [switch]$Reload,
+  [switch]$DryRun
+)
+
+$ErrorActionPreference = "Stop"
+
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+if ($WorkspacePath) {
+  $Workspace = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $WorkspacePath))
+} else {
+  $Workspace = $RepoRoot
+}
+
+function Resolve-Python {
+  $venvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
+  if (Test-Path -LiteralPath $venvPython) {
+    return $venvPython
+  }
+  return "python"
+}
+
+function Get-ListeningProcessInfo {
+  param([int]$LocalPort)
+
+  $procIds = @()
+  try {
+    $procIds = Get-NetTCPConnection -State Listen -LocalPort $LocalPort -ErrorAction Stop |
+      Select-Object -ExpandProperty OwningProcess -Unique
+  } catch {
+    $lines = netstat -ano | Select-String ":$LocalPort\s+.*LISTENING"
+    $procIds = $lines | ForEach-Object { ($_ -split '\s+')[-1] } | Sort-Object -Unique
+  }
+
+  $results = @()
+  foreach ($procId in $procIds) {
+    if (-not $procId -or $procId -eq 0) { continue }
+    try {
+      $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $procId"
+      $results += [PSCustomObject]@{
+        ProcessId = [int]$procId
+        Name = $proc.Name
+        CommandLine = $proc.CommandLine
+      }
+    } catch {
+    }
+  }
+  return $results
+}
+
+function Confirm-PortAvailable {
+  param(
+    [int]$LocalPort,
+    [switch]$KillExisting
+  )
+
+  $listeners = Get-ListeningProcessInfo -LocalPort $LocalPort
+  if (-not $listeners -or $listeners.Count -eq 0) {
+    return
+  }
+
+  Write-Host "[backend] Port $LocalPort is already in use by:" -ForegroundColor Yellow
+  $listeners | ForEach-Object {
+    Write-Host ("  PID {0} [{1}] {2}" -f $_.ProcessId, $_.Name, $_.CommandLine) -ForegroundColor DarkYellow
+  }
+
+  if ($KillExisting) {
+    Write-Host "[backend] ForceStop enabled - terminating existing listeners on port $LocalPort..." -ForegroundColor Yellow
+    $listeners | ForEach-Object {
+      Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop
+      Write-Host ("  Stopped PID {0}" -f $_.ProcessId) -ForegroundColor Green
+    }
+    Start-Sleep -Milliseconds 350
+    return
+  }
+
+  throw "Port $LocalPort is busy. Rerun with -ForceStop or choose another -Port."
+}
+
+if (-not (Test-Path -LiteralPath (Join-Path $Workspace "app\app.json"))) {
+  throw "No Mozaiks app bundle found at $Workspace. Expected app\app.json."
+}
+
+$pythonCmd = Resolve-Python
+Set-Location $Workspace
+
+# Keep generated apps on packaged resources by default.
+Remove-Item Env:MOZAIKS_FACTORY_APP_PATH -ErrorAction SilentlyContinue
+Remove-Item Env:MOZAIKS_WEB_SHELL_PATH -ErrorAction SilentlyContinue
+Remove-Item Env:MOZAIKS_CHAT_UI_PATH -ErrorAction SilentlyContinue
+
+$env:MOZAIKS_APP_WORKSPACE_PATH = $Workspace
+$env:PLATFORM_PATH = $Workspace
+$env:MOZAIKS_HOST = "mozaiks"
+$env:MOZAIKS_GENERATED_ARTIFACTS_PATH = (Join-Path $Workspace "generated")
+
+$uvicornArgs = @(
+  "-m",
+  "uvicorn",
+  "mozaiksai.hosts.mozaiks:app",
+  "--host",
+  $BindHost,
+  "--port",
+  [string]$Port
+)
+if ($Reload) {
+  $uvicornArgs += "--reload"
+}
+
+Write-Host "[backend] Workspace: $Workspace" -ForegroundColor DarkCyan
+Write-Host "[backend] Command: $pythonCmd $($uvicornArgs -join ' ')" -ForegroundColor Cyan
+
+if ($DryRun) {
+  return
+}
+
+Confirm-PortAvailable -LocalPort $Port -KillExisting:$ForceStop
+& $pythonCmd @uvicornArgs
+"""
+
+
+def _run_frontend_ps1() -> str:
+    return r"""<#
+.SYNOPSIS
+  Start the packaged Mozaiks web shell for this app workspace.
+
+.DESCRIPTION
+  Resolves web_shell from the installed mozaiks package, then runs the Vite dev
+  server with PLATFORM_PATH pointed at this workspace.
+#>
+
+param(
+  [int]$Port = 3000,
+  [string]$BindHost = "0.0.0.0",
+  [string]$BackendUrl = "http://localhost:8000",
+  [string]$WorkspacePath = "",
+  [switch]$ForceStop,
+  [switch]$DryRun
+)
+
+$ErrorActionPreference = "Stop"
+
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+if ($WorkspacePath) {
+  $Workspace = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $WorkspacePath))
+} else {
+  $Workspace = $RepoRoot
+}
+
+function Resolve-Python {
+  $venvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
+  if (Test-Path -LiteralPath $venvPython) {
+    return $venvPython
+  }
+  return "python"
+}
+
+function Get-ListeningProcessInfo {
+  param([int]$LocalPort)
+
+  $procIds = @()
+  try {
+    $procIds = Get-NetTCPConnection -State Listen -LocalPort $LocalPort -ErrorAction Stop |
+      Select-Object -ExpandProperty OwningProcess -Unique
+  } catch {
+    $lines = netstat -ano | Select-String ":$LocalPort\s+.*LISTENING"
+    $procIds = $lines | ForEach-Object { ($_ -split '\s+')[-1] } | Sort-Object -Unique
+  }
+
+  $results = @()
+  foreach ($procId in $procIds) {
+    if (-not $procId -or $procId -eq 0) { continue }
+    try {
+      $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $procId"
+      $results += [PSCustomObject]@{
+        ProcessId = [int]$procId
+        Name = $proc.Name
+        CommandLine = $proc.CommandLine
+      }
+    } catch {
+    }
+  }
+  return $results
+}
+
+function Confirm-PortAvailable {
+  param(
+    [int]$LocalPort,
+    [switch]$KillExisting
+  )
+
+  $listeners = Get-ListeningProcessInfo -LocalPort $LocalPort
+  if (-not $listeners -or $listeners.Count -eq 0) {
+    return
+  }
+
+  Write-Host "[frontend] Port $LocalPort is already in use by:" -ForegroundColor Yellow
+  $listeners | ForEach-Object {
+    Write-Host ("  PID {0} [{1}] {2}" -f $_.ProcessId, $_.Name, $_.CommandLine) -ForegroundColor DarkYellow
+  }
+
+  if ($KillExisting) {
+    Write-Host "[frontend] ForceStop enabled - terminating existing listeners on port $LocalPort..." -ForegroundColor Yellow
+    $listeners | ForEach-Object {
+      Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop
+      Write-Host ("  Stopped PID {0}" -f $_.ProcessId) -ForegroundColor Green
+    }
+    Start-Sleep -Milliseconds 350
+    return
+  }
+
+  throw "Port $LocalPort is busy. Rerun with -ForceStop or choose another -Port."
+}
+
+if (-not (Test-Path -LiteralPath (Join-Path $Workspace "app\app.json"))) {
+  throw "No Mozaiks app bundle found at $Workspace. Expected app\app.json."
+}
+
+$pythonCmd = Resolve-Python
+
+# Keep generated apps on packaged resources by default.
+Remove-Item Env:MOZAIKS_FACTORY_APP_PATH -ErrorAction SilentlyContinue
+Remove-Item Env:MOZAIKS_WEB_SHELL_PATH -ErrorAction SilentlyContinue
+Remove-Item Env:MOZAIKS_CHAT_UI_PATH -ErrorAction SilentlyContinue
+
+$webShellRoot = & $pythonCmd -c "from mozaiksai.resources import resolve_web_shell_root; p = resolve_web_shell_root(); print(p or '')"
+$webShellRoot = ($webShellRoot | Select-Object -Last 1).Trim()
+if (-not $webShellRoot -or -not (Test-Path -LiteralPath (Join-Path $webShellRoot "package.json"))) {
+  throw "Could not resolve packaged web_shell. Run: python -m pip install -r requirements.txt"
+}
+
+$npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+if (-not $npmCmd) {
+  throw "npm is required to start the frontend."
+}
+
+$env:MOZAIKS_APP_WORKSPACE_PATH = $Workspace
+$env:PLATFORM_PATH = $Workspace
+$env:MOZAIKS_HOST = "mozaiks"
+$env:VITE_API_URL = $BackendUrl
+$env:MOZAIKS_GENERATED_ARTIFACTS_PATH = (Join-Path $Workspace "generated")
+
+Write-Host "[frontend] Workspace: $Workspace" -ForegroundColor DarkCyan
+Write-Host "[frontend] Web shell: $webShellRoot" -ForegroundColor DarkCyan
+Write-Host "[frontend] Backend URL: $BackendUrl" -ForegroundColor DarkCyan
+Write-Host "[frontend] Command: npm --prefix `"$webShellRoot`" run dev -- --host $BindHost --port $Port --strictPort" -ForegroundColor Cyan
+Write-Host "[frontend] Open: http://localhost:$Port" -ForegroundColor Yellow
+
+if ($DryRun) {
+  return
+}
+
+Confirm-PortAvailable -LocalPort $Port -KillExisting:$ForceStop
+
+if (-not (Test-Path -LiteralPath (Join-Path $webShellRoot "node_modules"))) {
+  Write-Host "[frontend] Installing packaged web_shell dependencies..." -ForegroundColor Cyan
+  npm --prefix $webShellRoot install
+}
+
+npm --prefix $webShellRoot run dev -- --host $BindHost --port $Port --strictPort
+"""
+
+
+def _run_studio_ps1() -> str:
+    return r"""<#
+.SYNOPSIS
+  Start the full Mozaiks Studio stack for this app workspace.
+#>
+
+param(
+  [int]$BackendPort = 8000,
+  [int]$FrontendPort = 3000,
+  [string]$WorkspacePath = "",
+  [switch]$ForceStop,
+  [switch]$NoBrowser,
+  [switch]$DryRun
+)
+
+$ErrorActionPreference = "Stop"
+
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+if ($WorkspacePath) {
+  $Workspace = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $WorkspacePath))
+} else {
+  $Workspace = $RepoRoot
+}
+
+function Resolve-Mozaiks {
+  $venvMozaiks = Join-Path $RepoRoot ".venv\Scripts\mozaiks.exe"
+  if (Test-Path -LiteralPath $venvMozaiks) {
+    return $venvMozaiks
+  }
+  return "mozaiks"
+}
+
+function Stop-Listeners {
+  param([int[]]$Ports)
+
+  foreach ($port in $Ports) {
+    $procIds = @()
+    try {
+      $procIds = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction Stop |
+        Select-Object -ExpandProperty OwningProcess -Unique
+    } catch {
+      $lines = netstat -ano | Select-String ":$port\s+.*LISTENING"
+      $procIds = $lines | ForEach-Object { ($_ -split '\s+')[-1] } | Sort-Object -Unique
+    }
+
+    foreach ($procId in $procIds) {
+      if (-not $procId -or $procId -eq 0) { continue }
+      Write-Host "[studio] ForceStop: stopping PID $procId on port $port" -ForegroundColor Yellow
+      Stop-Process -Id ([int]$procId) -Force -ErrorAction Stop
+    }
+  }
+}
+
+if (-not (Test-Path -LiteralPath (Join-Path $Workspace "app\app.json"))) {
+  throw "No Mozaiks app bundle found at $Workspace. Expected app\app.json."
+}
+
+# Keep generated apps on packaged resources by default.
+Remove-Item Env:MOZAIKS_FACTORY_APP_PATH -ErrorAction SilentlyContinue
+Remove-Item Env:MOZAIKS_WEB_SHELL_PATH -ErrorAction SilentlyContinue
+Remove-Item Env:MOZAIKS_CHAT_UI_PATH -ErrorAction SilentlyContinue
+
+$mozaiksCmd = Resolve-Mozaiks
+$argsList = @(
+  "studio",
+  "--dir",
+  $Workspace,
+  "--backend-port",
+  [string]$BackendPort,
+  "--frontend-port",
+  [string]$FrontendPort
+)
+if ($NoBrowser) {
+  $argsList += "--no-browser"
+} else {
+  $argsList += "--open"
+}
+
+Write-Host "[studio] Workspace: $Workspace" -ForegroundColor DarkCyan
+Write-Host "[studio] Command: $mozaiksCmd $($argsList -join ' ')" -ForegroundColor Cyan
+
+if ($DryRun) {
+  return
+}
+
+if ($ForceStop) {
+  Stop-Listeners -Ports @($BackendPort, $FrontendPort)
+}
+
+& $mozaiksCmd @argsList
+"""
 
 
 def _build_ai_config(app_name: str, *, starter: bool) -> dict:
@@ -453,19 +1399,20 @@ artifact_agents: []
 
 def _show_next_steps(target_dir: Path, preset: str, starter: bool) -> None:
     features = TIER_PRESETS[preset]
-    app_root = target_dir / "app"
     print("\nNext Steps:")
     print(f"  1. cd {target_dir}")
-    print("  2. Run onboarding: mozaiks onboard --dir .")
-    print("  3. Set OPENAI_API_KEY and MONGO_URI in your environment (or a .env file)")
-    print("  4. Open Studio: mozaiks studio --dir . --open")
+    print("  2. python -m venv .venv")
+    print("  3. .\\.venv\\Scripts\\Activate.ps1")
+    print("  4. python -m pip install -r requirements.txt")
+    print("  5. Copy-Item .env.example .env, then set OPENAI_API_KEY and MONGO_URI")
+    print("  6. Open Studio: .\\scripts\\run-studio.ps1 -ForceStop")
     if starter:
-        print("  5. Replace app/workflows/HelloWorkflow only after you confirm the real product behavior")
+        print("  7. Replace app/workflows/HelloWorkflow only after you confirm the real product behavior")
     else:
-        print("  5. Use Studio to generate the first real workflows/modules instead of hand-populating the scaffold")
-    print("  6. Optional: use mozaiks gen once you have real product context")
+        print("  7. Use Studio to generate the first real workflows/modules instead of hand-populating the scaffold")
+    print("  8. Optional CLI equivalent: mozaiks studio --dir . --open")
     if features.get("admin"):
-        print("  7. Confirm admin access in app/app.json admins")
+        print("  9. Confirm admin access in app/app.json admins")
 
     print("\nTo add more features later: mozaiks add <feature>")
 

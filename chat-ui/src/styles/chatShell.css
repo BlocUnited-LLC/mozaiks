@@ -1,39 +1,3 @@
-@font-face {
-  font-family: 'Fagrak Inline';
-  src: url('/fonts/Fagrak Inline.otf') format('opentype');
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Fagrak';
-  src: url('/fonts/Fagrak.otf') format('opentype');
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Techfont';
-  src: url('/fonts/Techfont.woff') format('woff');
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Fueled by Schlitz';
-  src: url('/fonts/FBS.otf') format('opentype');
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Hyperjump';
-  src: url('/fonts/Hyperjump Bold.otf') format('opentype');
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Oxanium';
-  src: url('/fonts/Oxanium-VariableFont_wght.ttf') format('truetype');
-  font-display: swap;
-}
-
 :root {
   --chat-divider-color: rgba(148, 163, 184, 0.25);
   --chat-input-bg: rgba(6, 11, 25, 0.85);
@@ -46,7 +10,7 @@ html {
 }
 
 .fagrak {
-  font-family: 'Fagrak', sans-serif;
+  font-family: var(--font-fagrak, var(--font-body, 'Rajdhani', ui-sans-serif, system-ui, sans-serif));
 }
 
 .fagrak-inline,
@@ -55,7 +19,7 @@ html {
 }
 
 .techfont {
-  font-family: 'Techfont', var(--font-body, 'Rajdhani', ui-sans-serif, system-ui, sans-serif), monospace;
+  font-family: var(--font-tech, var(--font-body, 'Rajdhani', ui-sans-serif, system-ui, sans-serif));
 }
 
 .oxanium,
@@ -64,15 +28,15 @@ html {
 }
 
 .fbs {
-  font-family: 'Fueled by Schlitz', sans-serif;
+  font-family: var(--font-fbs, var(--font-body, 'Rajdhani', ui-sans-serif, system-ui, sans-serif));
 }
 
 .hyperjump {
-  font-family: 'Hyperjump', sans-serif;
+  font-family: var(--font-hyperjump, var(--font-body, 'Rajdhani', ui-sans-serif, system-ui, sans-serif));
 }
 
 .transmission-typing-font {
-  font-family: 'Oxanium', var(--font-body, 'Rajdhani', ui-sans-serif, system-ui, sans-serif), monospace;
+  font-family: var(--font-transmission, var(--font-heading, 'Orbitron', 'Rajdhani', ui-sans-serif, system-ui, sans-serif));
   font-weight: 500;
   font-size: 0.95rem;
   line-height: 1.08;

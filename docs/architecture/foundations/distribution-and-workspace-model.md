@@ -235,7 +235,7 @@ These are the decisions the rest of the docs should follow.
 
 ## Cross References
 
-- [canonical-app-structure.md](./canonical-app-structure.md)
-- [workflow-architecture.md](./workflow-architecture.md)
-- [architecture-overview.md](./architecture-overview.md)
+- [../app/canonical-app-structure.md](../app/canonical-app-structure.md)
+- [workflow-architecture.md](../workflows/workflow-architecture.md)
+- [Architecture Overview](../mozaiksai/index.md)
 - repo-root `ARCHITECTURE.md`
