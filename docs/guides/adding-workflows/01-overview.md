@@ -207,8 +207,40 @@ tools:
 lifecycle_tools: []
 ```
 
-Use `Agent_Tool` for backend-only work. Use `UI_Surface` for one-way rendered
-artifacts. Use `UI_Tool` only when the user must interact with the component.
+Choose the smallest tool type that matches the job:
+
+| Tool type | Use when | UI contract |
+|-----------|----------|-------------|
+| `Agent_Tool` | The workflow needs backend-only work such as saving files, calling app APIs, or transforming structured output. | No `ui` block. |
+| `UI_Surface` | The workflow needs to show a one-way artifact in the chat stream. | Requires `ui.component` and `ui.mode`. |
+| `UI_Tool` | The workflow needs a user decision or structured user input from a React component. | Requires `ui.component`, `ui.mode`, and `ui_contract`. |
+
+Use `UI_Tool` sparingly. Most generated artifacts should be `UI_Surface`; most
+backend actions should be `Agent_Tool`.
+
+```yaml
+tools:
+  - agent: ReviewAgent
+    file: request_approval.py
+    function: request_approval
+    description: Ask the user to approve or request changes.
+    tool_type: UI_Tool
+    auto_tool_call: false
+    ui:
+      component: ApprovalCard
+      mode: inline
+    ui_contract:
+      surface_kind: agent_tool
+      actions_schema:
+        - id: approve
+          label: Approve
+          variant: primary
+          approved: true
+        - id: request_changes
+          label: Request Changes
+          variant: secondary
+          approved: false
+```
 
 ### `ui_config.yaml`
 
