@@ -89,6 +89,7 @@ nav:
       - Quickstart: getting-started.md
       - Configuration: user-configuration.md
   - Guides:
+      - Use The Console: guides/console/01-overview.md
       - Add a Module: guides/adding-modules/01-overview.md
       - Add a Page: guides/adding-pages/01-overview.md
       - Add Workflows: guides/adding-workflows/01-overview.md
