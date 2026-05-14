@@ -2,7 +2,10 @@
 
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/BlocUnited-LLC/mozaiks/main/docs/assets/mozaik_icon.png" alt="Mozaiks Icon" width="48" style="vertical-align:middle; margin-right:10px"/><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BlocUnited-LLC/mozaiks/main/docs/assets/mozaik.png"><img src="https://raw.githubusercontent.com/BlocUnited-LLC/mozaiks/main/docs/assets/mozaik-light.png" alt="Mozaiks" width="160" style="vertical-align:middle"/></picture>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/BlocUnited-LLC/mozaiks/main/docs/assets/logo-dark.png">
+  <img src="https://raw.githubusercontent.com/BlocUnited-LLC/mozaiks/main/docs/assets/logo-light.png" alt="Mozaiks" width="260"/>
+</picture>
 
 [![Release](https://img.shields.io/github/v/release/BlocUnited-LLC/mozaiks)](https://github.com/BlocUnited-LLC/mozaiks/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/LICENSE)
