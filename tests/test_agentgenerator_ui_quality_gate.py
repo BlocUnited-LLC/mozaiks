@@ -229,6 +229,7 @@ def test_agentgenerator_workflow_ui_quality_handoffs_and_tools_are_canonical() -
         / "docs"
         / "architecture"
         / "frontend"
+        / "ui-system"
         / "generated-frontend-surface-contract.md"
     ).read_text(encoding="utf-8")
 

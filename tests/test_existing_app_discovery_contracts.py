@@ -372,28 +372,28 @@ def test_existing_app_artifact_saver_persists_canonical_fields() -> None:
 
 
 def test_existing_app_strategy_docs_are_indexed() -> None:
-    index_text = _read_text("docs/architecture/specs/INDEX.md")
-    strategy_text = _read_text("docs/architecture/specs/agentic-app-generation-strategy.md")
-    augmentation_text = _read_text("docs/architecture/specs/existing-app-augmentation-strategy.md")
-    checklist_text = _read_text("docs/architecture/specs/agentic-app-generation-checklist.md")
+    index_text = _read_text("docs/architecture/index.md")
+    discovery_agents = _read_text("factory_app/workflows/ExistingAppDiscovery/agents.yaml")
+    discovery_context = _read_text("factory_app/workflows/ExistingAppDiscovery/context_variables.yaml")
+    session_router = _read_text("docs/architecture/workflows/session-router.md")
 
-    assert "existing-app-augmentation-strategy.md" in index_text
-    assert "Existing-app augmentation first" in strategy_text
-    assert "augment first" in augmentation_text
-    assert "Embed" in augmentation_text
-    assert "Native Migration" in augmentation_text
-    assert "guided product walkthrough" in augmentation_text
-    assert "workspace_app" in augmentation_text
-    assert "guided plain-language onboarding first" in strategy_text
-    assert "Existing-app augmentation doc is canonical" in checklist_text
-    assert "workspace-app preset" in checklist_text
+    assert "Builder and Generation" in index_text
+    assert "ExistingAppDiscovery" in session_router
+    assert "Embed" in discovery_agents
+    assert "Native Migration" in discovery_agents
+    assert "host_app_source = \"workspace_app\"" in discovery_agents
+    assert "guided" in discovery_context
+    assert "workspace_app" in discovery_context
+    assert "ExistingProductSpec" in discovery_agents
+    assert "AgentAugmentationPlan" in discovery_agents
 
 
 def test_existing_app_docs_describe_workspace_app_preset() -> None:
-    augmentation_text = _read_text("docs/architecture/specs/existing-app-augmentation-strategy.md")
+    discovery_agents = _read_text("factory_app/workflows/ExistingAppDiscovery/agents.yaml")
+    discovery_context = _read_text("factory_app/workflows/ExistingAppDiscovery/context_variables.yaml")
+    preload_tool = _read_text("factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py")
 
-    assert "workspace-app preset" in augmentation_text
-    assert "host_app_source = \"workspace_app\"" in augmentation_text
-    assert "mozaiks-app" in augmentation_text
-    assert "ThemeCapture" in augmentation_text
-
+    assert "host_app_source = \"workspace_app\"" in discovery_agents
+    assert "`workspace_app` means preload the current workspace's known local app repo" in discovery_context
+    assert "mozaiks-app" in preload_tool
+    assert "ThemeCapture" in preload_tool

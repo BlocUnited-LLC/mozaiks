@@ -653,18 +653,19 @@ def test_valueengine_save_build_plan_preserves_capability_packs_and_concept_blue
 
 
 def test_app_generation_strategy_docs_are_indexed_and_examples_are_grounded() -> None:
-    index_text = _read_text("docs/architecture/specs/INDEX.md")
-    strategy_text = _read_text("docs/architecture/specs/agentic-app-generation-strategy.md")
-    checklist_text = _read_text("docs/architecture/specs/agentic-app-generation-checklist.md")
+    index_text = _read_text("docs/architecture/index.md")
     decomposition_text = _read_text("docs/architecture/orchestration-and-decomposition.md")
-    existing_app_text = _read_text("docs/architecture/specs/existing-app-augmentation-strategy.md")
+    boundary_text = _read_text("docs/architecture/foundations/core-product-app-bundle-boundary.md")
+    builder_text = _read_text("docs/architecture/builder/app-builder-architecture.md")
 
-    assert "agentic-app-generation-strategy.md" in index_text
-    assert "agentic-app-generation-checklist.md" in index_text
-    assert "ProductSpec" in strategy_text
-    assert "ExperienceSpec" in strategy_text
-    assert "AgentAugmentationPlan" in strategy_text
-    assert "Phase 0: Strategy Alignment" in checklist_text
+    assert "Builder and Generation" in index_text
+    assert "Module Systems" in index_text
+    assert "ProductSpec" in decomposition_text
+    assert "ExperienceSpec" in decomposition_text
+    assert "AgentAugmentationPlan" in decomposition_text
+    assert "ProductSpec" in boundary_text
+    assert "ExperienceSpec" in boundary_text
+    assert "AgentAugmentationPlan" in boundary_text
     assert "Decompose into product artifacts first" in decomposition_text
-    assert "augmentation first" in existing_app_text
+    assert "typed builder contracts" in builder_text
 

@@ -197,21 +197,21 @@ def test_app_generator_page_contract_stays_declarative() -> None:
 
 
 def test_ui_docs_define_page_customization_boundary() -> None:
-    ui_systems = _read("docs/architecture/specs/ui-systems.md")
-    assembly_contract = _read("docs/architecture/specs/appgenerator-output-assembly-contract.md")
+    surface_contract = _read("docs/architecture/frontend/ui-system/generated-frontend-surface-contract.md")
+    assembly_contract = _read("docs/architecture/builder/appgenerator-output-assembly-contract.md")
 
-    assert "App Customization Ladder" in ui_systems
-    assert "Freeform React belongs to agent UI tools and transition UI" in ui_systems
-    assert "Theme And Shell Artifact Boundary" in ui_systems
-    assert "Page Customization Boundary" in ui_systems
-    assert "generated app pages should not default to raw React files" in ui_systems
-    assert "theme_config_patch" in ui_systems
+    assert "Persistent app UI" in surface_contract
+    assert "Bounded custom UI" in surface_contract
+    assert "default to declarative page schemas" in surface_contract
+    assert "custom_route_bundle" in surface_contract
+    assert "workflow UI, transition UI, and bounded custom UI" in surface_contract
+    assert "theme_config_patch" in assembly_contract
     assert "Theme vs Shell Ownership" in assembly_contract
     assert "config/shell.json" in assembly_contract
 
 
 def test_architecture_index_references_appgenerator_output_contract() -> None:
-    contract = _read("docs/architecture/specs/appgenerator-output-assembly-contract.md")
+    contract = _read("docs/architecture/builder/appgenerator-output-assembly-contract.md")
 
     assert "save_app_schema" in contract
     assert "generate_and_download" in contract
@@ -299,10 +299,10 @@ def test_repo_owned_one_way_ui_emitters_use_canonical_surface_helper() -> None:
 
 
 def test_ui_system_spec_documents_interactive_vs_one_way_producer_contracts() -> None:
-    content = _read("docs/architecture/specs/ui-systems.md")
+    content = _read("docs/architecture/frontend/ui-system/generated-frontend-surface-contract.md")
 
-    assert "Interactive agent UI tools" in content
-    assert "One-way artifact/status emitters" in content
+    assert "response-bearing workflow UI uses" in content
+    assert "fire-and-forget workflow UI uses" in content
     assert "use_ui_tool(" in content
     assert "emit_ui_surface(" in content
 

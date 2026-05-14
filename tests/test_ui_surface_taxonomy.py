@@ -93,7 +93,7 @@ def test_generator_hooks_inject_surface_taxonomy() -> None:
 
 
 def test_frontend_surface_docs_reference_taxonomy() -> None:
-    doc = _read("docs/architecture/frontend/generated-frontend-surface-contract.md")
+    doc = _read("docs/architecture/frontend/ui-system/generated-frontend-surface-contract.md")
 
     assert "Finite surface IDs" in doc
     assert "mozaiksai/core/workflow/ui_surface_taxonomy.py" in doc
