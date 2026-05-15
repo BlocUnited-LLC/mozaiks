@@ -94,24 +94,9 @@ export function WorkspaceConsoleHero({
   onAction = null,
   summaryItems = [],
   children,
-  accent = true,
-  shellTitle = 'Mozaiks Console',
-  shellSubtitle = 'Manage your apps, operating signals, and release posture from one workspace view.',
 }) {
   return (
     <div className="space-y-4">
-      <SurfaceCard
-        title={shellTitle}
-        subtitle={shellSubtitle}
-        accent={accent}
-      >
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="font-medium text-foreground/90">Workspace Console</span>
-          <span className="text-muted-foreground/70">/</span>
-          <span className="text-muted-foreground">{title}</span>
-        </div>
-      </SurfaceCard>
-
       <PageHeader
         title={title}
         subtitle={subtitle}

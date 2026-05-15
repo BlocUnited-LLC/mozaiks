@@ -26,20 +26,20 @@ _ALLOWED_TASK_TYPES = {
     "api_surface",
     "page_bundle",
     "agent_backend_integration",
-    "control_plane_surface",
+    "control_plane_pack",
     "pack_overlay",
 }
 _CANONICAL_INITIAL_AGENTS = {
     "backend_foundation": "ConfigMiddlewareAgent",
     "module_contract": "ConfigMiddlewareAgent",
-    "control_plane_surface": "ConfigMiddlewareAgent",
+    "control_plane_pack": "ControlPlaneAgent",
     "pack_overlay": "ConfigMiddlewareAgent",
     "api_surface": "ControllerAgent",
     "page_bundle": "AppSchemaAgent",
 }
 _SURFACE_KIND_ALLOWED_TASK_TYPES: dict[str, frozenset[str]] = {
     "external_integration": frozenset({"api_surface"}),
-    "control_plane": frozenset({"control_plane_surface"}),
+    "control_plane": frozenset({"control_plane_pack"}),
     "ui_only": frozenset({"page_bundle"}),
     "framework_pack": frozenset({"pack_overlay"}),
 }
@@ -245,6 +245,51 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: fr
                 f"'{task_id}' uses task_type 'pack_overlay' but capability_pack_id is null. "
                 "pack_overlay tasks must identify the framework_pack via capability_pack_id."
             )
+
+        if task_type == "control_plane_pack":
+            allowed_config_paths = {
+                "control_plane/config/control_plane.yaml",
+                "control_plane/config/tools.yaml",
+                "control_plane/config/policies.yaml",
+            }
+            if normalized_capability_pack_id:
+                raise ValueError(
+                    "Build task "
+                    f"'{task_id}' uses task_type 'control_plane_pack' but capability_pack_id is not null. "
+                    "Control-plane packs are app-level harness artifacts, not capability-pack modules."
+                )
+            if surface_kind_raw != "control_plane":
+                raise ValueError(
+                    "Build task "
+                    f"'{task_id}' uses task_type 'control_plane_pack' but surface_kind is "
+                    f"'{surface_kind_raw}'. Use surface_kind='control_plane'."
+                )
+            invalid = [
+                path
+                for path in owned_paths
+                if path not in allowed_config_paths
+                and not (
+                    path.startswith("control_plane/prompts/")
+                    and PurePosixPath(path).suffix == ".yaml"
+                )
+            ]
+            if invalid:
+                raise ValueError(
+                    "Build task "
+                    f"'{task_id}' owns invalid control-plane pack paths: {invalid}. "
+                    "Control-plane pack tasks may only own control_plane/config/* and "
+                    "control_plane/prompts/*.yaml."
+                )
+            required = {
+                "control_plane/config/control_plane.yaml",
+                "control_plane/config/tools.yaml",
+            }
+            missing = sorted(required.difference(owned_paths))
+            if missing:
+                raise ValueError(
+                    "Build task "
+                    f"'{task_id}' is missing required control-plane pack paths: {missing}."
+                )
 
         if task_type not in _ALLOWED_TASK_TYPES:
             allowed = ", ".join(sorted(_ALLOWED_TASK_TYPES))

@@ -13,6 +13,19 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+## 0.1.2 - 2026-05-14
+
+### Changed
+
+- Consolidated first-party console ownership under `factory_app/app/admin/pages/` and `factory_app/app/admin/index.js`, removing the legacy duplicate console surface path.
+- Updated workspace console navigation to derive from route-manifest metadata (`meta.navigation.group`, `meta.navigation.icon`) instead of hardcoded sidebar arrays in `WorkspaceLayout`.
+- Aligned route manifest contracts so workspace and app console routes declare explicit navigation inclusion/grouping semantics.
+
+### Fixed
+
+- Fixed active admin console page imports to resolve shared `ConsoleShared` primitives from the canonical `factory_app/app/ui/components/` location.
+- Regenerated packaging manifest metadata (`mozaiks.egg-info/SOURCES.txt`) to remove stale references to deleted legacy console paths.
+
 ## 0.1.1 - 2026-05-14
 
 ### Added

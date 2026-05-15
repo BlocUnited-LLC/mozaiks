@@ -39,13 +39,13 @@ async def test_platform_app_exposes_console_routes_only_on_studio_surface(monkey
     assert "/usage" in console_pages
     assert "/health" in console_pages
     assert "/billing" in console_pages
-    assert "/hosting" in console_pages
+    assert "/hosting" not in console_pages
     assert "/operations" not in console_pages
     assert "/settings" not in console_pages
     assert "/apps/:appId/overview" in console_pages
     assert "/apps/:appId/health" in console_pages
     assert "/apps/:appId/billing" in console_pages
-    assert "/apps/:appId/hosting" in console_pages
+    assert "/apps/:appId/hosting" not in console_pages
     assert "/apps/:appId/build" not in console_pages
     assert "/apps/:appId/deploy" not in console_pages
     assert "/apps/:appId/admin" not in console_pages

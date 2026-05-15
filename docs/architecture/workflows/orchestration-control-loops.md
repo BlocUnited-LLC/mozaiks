@@ -82,6 +82,7 @@ This loop owns:
 - current workflow sequence position
 - coarse workflow sequencing from `factory_app/workflows/extended_orchestration/extension_registry.json`
 - control-plane re-entry sequence selection from `control_plane.yaml`
+- artifact-family impact derived from selected workflow sequence metadata
 - build-time validation gates
 - preview readiness
 - promotion readiness
@@ -183,7 +184,7 @@ thing as the control loops above.
 
 | Artifact | Scope | Owned by |
 |---|---|---|
-| `workflow_sequences[]` in `extension_registry.json` | coarse workflow sequencing across workflows | builder session loop |
+| `workflow_sequences[]` in `extension_registry.json` | coarse workflow sequencing and sequence-level artifact impact across workflows | builder session loop |
 | `mid_flight_journeys[]` in `mfj_extension.json` | workflow-local fan-out and fan-in | workflow execution loop |
 | `BuildGraph` | bounded authoring work inside one build | builder session loop |
 

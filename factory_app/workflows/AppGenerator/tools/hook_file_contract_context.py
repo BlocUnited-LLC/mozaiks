@@ -19,12 +19,14 @@ _PLANNING_CONTRACT_ORDER = (
     "page_bundle",
     "module_contract",
     "backend_foundation",
+    "control_plane_pack",
     "api_surface",
     "agent_backend_integration",
 )
 
 _AGENT_DEFAULT_CONTRACTS = {
     "AppSchemaAgent": ["page_bundle"],
+    "ControlPlaneAgent": ["control_plane_pack"],
     "ServiceAgent": ["module_contract"],
     "FrontendStubAgent": ["module_contract"],
     "ControllerAgent": ["api_surface"],
@@ -155,10 +157,12 @@ def _build_file_contracts_body(agent: Any, file_contracts: Dict[str, Any]) -> st
     task_type = _current_task_type(agent)
 
     if agent_name == "ConfigMiddlewareAgent":
-        if task_type in {"module_contract", "backend_foundation", "control_plane_surface"}:
+        if task_type in {"module_contract", "backend_foundation"}:
             target_contract_names = [task_type]
         else:
             target_contract_names = ["module_contract", "backend_foundation"]
+    elif agent_name == "ControlPlaneAgent":
+        target_contract_names = ["control_plane_pack"]
     elif agent_name == "ControllerAgent" and task_type == "module_contract":
         target_contract_names = ["api_surface", "module_contract"]
 
@@ -248,6 +252,7 @@ def inject_cookie_cutter_contracts_context(agent: Any, messages: List[Dict[str, 
     if agent_name not in {
         "AppPlanAgent",
         "AppSchemaAgent",
+        "ControlPlaneAgent",
         "ConfigMiddlewareAgent",
         "ServiceAgent",
         "FrontendStubAgent",

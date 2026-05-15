@@ -6094,12 +6094,10 @@ useEffect(() => {
         </div>
       )}
       {pendingTransitionId && (
-        <div className="fixed inset-0 z-[70] bg-background">
-          <TransitionScreen
-            transitionId={pendingTransitionId}
-            onNavigate={handlePendingTransitionNavigate}
-          />
-        </div>
+        <TransitionScreen
+          transitionId={pendingTransitionId}
+          onNavigate={handlePendingTransitionNavigate}
+        />
       )}
       <img
         src={chatBackgroundSrc}

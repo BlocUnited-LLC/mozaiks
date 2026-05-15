@@ -122,7 +122,7 @@ Rule:
 | core `chat-ui/` primitives | Universal substrate | reusable shell/UI substrate |
 | `factory_app/` | Framework-owned optional capability | first-party factory workspace |
 | `mozaiksai/hosts/studio.py` | Framework-owned optional capability | control-plane host |
-| `factory_app/app/ui/pages/custom/console/` | Framework-owned optional capability | Workspace console UI |
+| `factory_app/app/admin/pages/` | Framework-owned optional capability | Workspace console UI |
 | `chat-ui/src/admin/` | Framework-owned optional capability | platform-management UI owned by Studio |
 | `mozaiks_cli/` | Framework-owned optional capability | developer interface |
 | `mozaiksai/hosts/mozaiks.py` | Product-specific consumer | hosted product layer on top of Studio |

@@ -28,9 +28,17 @@ from mozaiksai.control_plane.schema import LoadedControlPlanePack
 from factory_app.workflows.AppGenerator.tools.app_validation import validate_app_build
 
 _ELIGIBLE_CHANGE_CLASSES = {"patch"}
-_ELIGIBLE_ARTIFACT_KINDS = {"app_bundle", "workflow_bundle"}
+_ELIGIBLE_ARTIFACT_KINDS = {"app_bundle", "workflow_bundle", "theme_config"}
 _VALIDATION_STRATEGIES = {"skip", "local", "e2b"}
 _CHECKPOINT_EVENT = "coding_requested"
+
+# theme_config files live inside the app_bundle workspace. We alias the artifact
+# kind so the coding worker can locate and patch these files without requiring a
+# separate theme_config artifact store entry. Workspace scope tools fall back to
+# the app_bundle artifact when a theme_config entry does not yet exist.
+_ARTIFACT_KIND_ALIASES: dict[str, str] = {
+    "theme_config": "app_bundle",
+}
 
 
 class ScopedRefinementCodingWorker:
@@ -119,9 +127,13 @@ class ScopedRefinementCodingWorker:
         merged_files = dict(request.files)
         merged_files.update(applied_files)
 
+        # Resolve aliased artifact kinds so validation and persistence use the
+        # backing store kind (e.g. theme_config → app_bundle).
+        resolved_artifact_kind = _ARTIFACT_KIND_ALIASES.get(request.artifact_kind, request.artifact_kind)
+
         validation_result = None
         status = "planned"
-        if request.artifact_kind == "app_bundle" and merged_files:
+        if resolved_artifact_kind == "app_bundle" and merged_files:
             validation_result = await self._validation_runner(
                 files=merged_files,
                 commands=list(resolved_plan.validation_commands or []),
@@ -152,6 +164,7 @@ class ScopedRefinementCodingWorker:
                 metadata.update(
                     await self._persist_validated_artifact(
                         request=request,
+                        resolved_artifact_kind=resolved_artifact_kind,
                         applied_files=applied_files,
                         merged_files=merged_files,
                         plan=resolved_plan,
@@ -363,14 +376,17 @@ class ScopedRefinementCodingWorker:
         self,
         *,
         request: CodingWorkerRequest,
+        resolved_artifact_kind: str,
         applied_files: dict[str, str],
         merged_files: dict[str, str],
         plan: CodingWorkerPlan,
         validation_result: dict[str, Any],
     ) -> dict[str, Any]:
-        artifact_key = str(request.artifact_key or request.artifact_kind or "artifact").strip() or "artifact"
+        artifact_key = str(request.artifact_key or resolved_artifact_kind or "artifact").strip() or "artifact"
         bundle_token = uuid.uuid4().hex[:12]
-        bundle_root = self._output_root / request.app_id / request.artifact_kind / artifact_key / bundle_token
+        # Use the resolved (aliased) kind for file system layout so theme patches
+        # land alongside app_bundle artifacts, not in a separate tree.
+        bundle_root = self._output_root / request.app_id / resolved_artifact_kind / artifact_key / bundle_token
         workspace_dir = bundle_root / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
 
@@ -396,7 +412,7 @@ class ScopedRefinementCodingWorker:
         validation_status = self._artifact_validation_status(validation_result)
         artifact_version = await artifact_store.create_artifact_version(
             app_id=request.app_id,
-            artifact_kind=request.artifact_kind,
+            artifact_kind=resolved_artifact_kind,
             artifact_key=artifact_key,
             parent_version_id=request.artifact_version_id,
             source_workflow=request.requested_workflow_id or "control_plane_coding",

@@ -305,7 +305,6 @@ export default function AppsPage() {
           ]}
           onAction={handleHeaderAction}
           summaryItems={summaryItems}
-          shellSubtitle="Manage your app portfolio, resume builds, and route directly into each app console."
         />
 
         <section className="space-y-4">

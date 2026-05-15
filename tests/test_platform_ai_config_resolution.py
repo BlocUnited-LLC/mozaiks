@@ -141,6 +141,9 @@ def test_mozaiks_platform_shell_config_owns_shell_ui() -> None:
     assert data["shortcuts"]["footer"] == ["legal", "terms", "cookies"]
     assert data["shortcuts"]["footerHideOnMobile"] is True
     assert header_actions["create-app"]["path"] == "/create"
+    assert "route_overrides" not in header_actions["create-app"]
+    assert header_actions["create-app"]["intent"] == "create_app"
+    assert header_actions["create-app"]["variants"][0]["when"]["surface"] == "workflow_session"
 
 
 def test_mozaiks_platform_theme_config_keeps_chat_ui_only() -> None:

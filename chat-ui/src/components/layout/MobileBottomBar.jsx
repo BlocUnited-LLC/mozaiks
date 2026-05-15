@@ -2,12 +2,13 @@ import React, { useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useNavigation } from "../../providers/NavigationProvider";
 import { useNavigationActions } from "../../navigation/useNavigationActions";
+import { deriveShellActionContext, resolveShellActions } from "../../navigation/shellActions";
 import { useChatUI } from "../../context/ChatUIContext";
 import "./header-styles.css";
 
 const isVisible = (item) => item && item.visible !== false;
 
-const buildAutoItems = ({ headerPages, header, notifications, profile }) => {
+const buildAutoItems = ({ headerPages, header, notifications, profile, actionContext }) => {
   const items = [];
 
   if (Array.isArray(headerPages)) {
@@ -24,15 +25,18 @@ const buildAutoItems = ({ headerPages, header, notifications, profile }) => {
     }
   }
 
-  const primaryAction = Array.isArray(header?.actions)
-    ? header.actions.find((item) => isVisible(item) && item.path)
-    : null;
+  const resolvedActions = Array.isArray(header?.actions)
+    ? resolveShellActions(header.actions, actionContext)
+    : [];
+  const primaryAction = resolvedActions.find((item) => isVisible(item) && (item.path || item.href || item.trigger));
   if (primaryAction) {
     items.push({
-      id: primaryAction.id || primaryAction.path,
+      id: primaryAction.id || primaryAction.path || primaryAction.href,
       label: primaryAction.label || "Action",
       action: "navigate",
       path: primaryAction.path,
+      href: primaryAction.href,
+      trigger: primaryAction.trigger,
     });
   }
 
@@ -66,12 +70,16 @@ const buildAutoItems = ({ headerPages, header, notifications, profile }) => {
   }).slice(0, 5);
 };
 
-const MobileBottomBar = () => {
+const MobileBottomBar = ({ route = null, shellMode = null }) => {
   const location = useLocation();
   const handleNavigationItem = useNavigationActions();
-  const { login, logout } = useChatUI();
+  const { login, logout, user } = useChatUI();
   const { mobile, headerPages, header, notifications, profile } = useNavigation();
   const [notificationCount, setNotificationCount] = useState(0);
+  const actionContext = useMemo(
+    () => deriveShellActionContext({ location, route, shellMode, user }),
+    [location.pathname, location.search, route, shellMode, user]
+  );
 
   React.useEffect(() => {
     if (notifications?.show === false) return undefined;
@@ -103,8 +111,8 @@ const MobileBottomBar = () => {
   const items = useMemo(
     () => configuredItems.length > 0
       ? configuredItems.slice(0, 5)
-      : buildAutoItems({ headerPages, header, notifications, profile }),
-    [configuredItems, header, headerPages, notifications, profile]
+      : buildAutoItems({ headerPages, header, notifications, profile, actionContext }),
+    [actionContext, configuredItems, header, headerPages, notifications, profile]
   );
 
   if (bottomBar.visible === false || items.length === 0) return null;

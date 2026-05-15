@@ -78,22 +78,28 @@ task_contracts:
       - Emit integration glue only.
       - Do not generate a standalone platform or alternate host.
 
-  control_plane_surface:
-    owner_agent: ConfigMiddlewareAgent
+  control_plane_pack:
+    owner_agent: ControlPlaneAgent
     summary: >
-      App-side coordination glue for a control-plane surface. Control-plane surfaces
-      manage build, session, or lifecycle state within the app — they are not runtime
-      modules and do not follow the module_contract file pattern.
-    required_outputs: []
+      Optional app-local declarative control-plane harness pack. Use only when
+      the app needs checkpoint/routing/refinement behavior beyond ordinary
+      extension_registry.json transitions and workflow_sequences.
+    required_outputs:
+      - control_plane/config/control_plane.yaml
+      - control_plane/config/tools.yaml
     optional_outputs:
-      - backend/control_plane/{surface_id}.py
-      - backend/control_plane/__init__.py
+      - control_plane/config/policies.yaml
+      - control_plane/prompts/*.yaml
     hard_constraints:
-      - Do NOT generate module.yaml, handler.py, service.py, repo.py, or other module_contract files.
+      - Generate this task only when the product explicitly needs a harnessed app lifecycle/refinement/session loop; most apps should omit it.
+      - Do NOT generate module.yaml, handler.py, service.py, repo.py, backend/control_plane/*.py, or other module/runtime files.
       - Do NOT register this surface as a runtime module under app/modules/.
       - Stay within current_build_task.owned_paths.
-      - Control-plane artifacts coordinate app-level lifecycle state only — no business domain logic.
-      - Do not duplicate platform control-plane logic already provided by the host.
+      - control_plane.yaml routes declare workflow_sequence only; do not declare route_to, affected_workflows, affected_declarative_families, requires_replanning, requires_rebuild, or scope_summary.
+      - Every workflow_sequence referenced by control_plane.yaml must exist in workflows/extended_orchestration/extension_registry.json and declare affected_declarative_families there.
+      - Use shipped mozaiksai.control_plane implementations and tool entrypoints unless a future custom-harness Python contract is explicitly introduced.
+      - Control-plane artifacts coordinate app-level lifecycle, refinement, or session state only — no business domain logic.
+      - Do not duplicate host-universal control-plane behavior already provided by the platform.
 
   api_surface:
     owner_agent: ControllerAgent

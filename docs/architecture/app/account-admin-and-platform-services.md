@@ -32,8 +32,9 @@ things to scaffold as product-specific packs.
 Mozaiks ships the visible shell surfaces for account and admin flows.
 
 - `/profile` is rendered by the core `ProfilePage` component.
-- `/admin` and its section routes are rendered by the core `AdminPortal`
-  component.
+- Generated app admin routes are rendered by the core `AdminPortal` component.
+- Studio's first-party Admin Portal entry routes to `/apps`, not a standalone
+  `/admin` page.
 - These surfaces are first-class shell components, not app-authored page
   bundles.
 
@@ -52,7 +53,7 @@ backend may extend them with app-business admin data.
   module admin panel discovery.
 - `GET {app_backend_url}/api/admin/config` and related
   `app_backend_url/api/admin/*` endpoints optionally own app-business admin
-  panels that are embedded inside the unified `/admin` shell.
+  panels that are embedded inside the unified generated-app admin shell.
 
 The shell can render these surfaces only because deterministic backend
 contracts exist. The shell is not the source of truth.
@@ -70,7 +71,7 @@ Modules can extend these deterministic systems through explicit contracts.
 - `modules/{module}/contracts/notifications.yaml` declares notification intents
   per event.
 - `modules/{module}/contracts/admin.yaml` declares feature-owned admin panels
-  rendered inside the unified `/admin` shell.
+  rendered inside the unified generated-app admin shell.
 - contract-declared custom admin components are materialized as frontend stubs
   and registered through the active app root's `ui/index.js` extension barrel.
 
@@ -86,7 +87,7 @@ Use the canonical `handler.py`, `service.py`, `repo.py`, `policy.py`, and
 | Preferences | `/profile` preferences section | `GET/PUT /api/me/preferences` | `modules/{module}/contracts/settings.yaml` when settings runtime support exists | workflow prompts |
 | Notifications | shell notification surfaces and backend delivery rules | app backend plus module notification policy | `modules/{module}/contracts/notifications.yaml` | workflows as source of truth |
 | Subscriptions and entitlements | profile badges, billing/admin views, and gated capability behavior | app backend entitlement state | billing/subscription modules plus `modules/{module}/contracts/entitlements.yaml` | capability-pack generation |
-| Admin | `/admin` route family via `AdminPortal` | framework admin shell plus same-host admin APIs, `app/app.json` `admins`, and optional app-backend admin APIs | `modules/{module}/contracts/admin.yaml` | custom admin page generation |
+| Admin | generated-app admin route family via `AdminPortal`; Studio Admin Portal uses `/apps` | framework admin shell plus same-host admin APIs, `app/app.json` `admins`, and optional app-backend admin APIs | `modules/{module}/contracts/admin.yaml` | custom admin page generation |
 
 ## Profile
 
@@ -128,9 +129,11 @@ canonical backend service/helper code when runtime support exists.
 
 ### Shell Configuration
 
-Shell behavior and shell content belong in `app/config/shell.json`.
-Examples include header actions, profile menu items, notification text, and
-footer links.
+Compact shell behavior belongs in `app/config/shell.json`.
+Examples include the logo, sparse header actions, canonical shortcuts,
+navigation placement policy, and chrome modes. Profile menus, notification
+summaries, and footer links are derived from shortcuts and platform defaults
+unless a first-party host explicitly owns a manual shell configuration.
 
 Do not collapse these three settings layers into one contract.
 
@@ -163,8 +166,9 @@ the thing that makes the notification system exist.
 
 ## Admin
 
-Mozaiks has one visible admin route family. The framework injects `/admin` and
-its section routes through the `AdminPortal` shell surface.
+Generated app hosts have one visible admin route family rendered through the
+`AdminPortal` shell surface. Studio does not expose a standalone `/admin` page;
+its Admin Portal entry is the Apps console at `/apps`.
 
 Authority is separated by panel source:
 

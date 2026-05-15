@@ -20,12 +20,12 @@ async def test_studio_shell_config_injects_studio_routes():
     assert "/apps" in page_paths
     assert "/apps/:appId/overview" in page_paths
     assert "/apps/:appId/billing" in page_paths
-    assert "/apps/:appId/hosting" in page_paths
+    assert "/apps/:appId/hosting" not in page_paths
     assert "/apps/:appId/integrations" in page_paths
     assert "/apps/:appId/users" in page_paths
     assert "/apps/:appId/usage" in page_paths
     assert "/billing" in page_paths
-    assert "/hosting" in page_paths
+    assert "/hosting" not in page_paths
     assert "/apps/:appId/build" not in page_paths
     assert "/apps/:appId/deploy" not in page_paths
     assert "/apps/:appId/admin" not in page_paths
@@ -34,12 +34,10 @@ async def test_studio_shell_config_injects_studio_routes():
     assert "/apps/:appId/operations" in page_paths
     assert "/apps/:appId/settings" in page_paths
     assert "/apps" not in header_paths
-    assert "/apps/:appId/hosting" not in header_paths
     assert "/profile" not in header_paths
 
     studio_pages = {page.get("path"): page for page in shell_config.get("pages", [])}
     assert studio_pages["/apps"]["meta"]["requiresRole"] == "admin"
-    assert studio_pages["/apps/:appId/hosting"]["meta"]["requiresRole"] == "admin"
 
 
 def test_mozaiks_app_composes_studio_host():

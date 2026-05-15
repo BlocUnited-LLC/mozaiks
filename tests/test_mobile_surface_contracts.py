@@ -59,7 +59,7 @@ def test_dialog_and_overlay_primitives_use_mobile_sheet_layout() -> None:
     assert 'rounded-t-[1.75rem] border-b-0' in dialog_source
     assert 'sm:left-[50%] sm:top-[50%]' in dialog_source
 
-    assert 'fixed inset-x-0 bottom-0 z-50 w-full' in transition_source
+    assert 'fixed inset-x-0 bottom-0 z-[90] w-full' in transition_source
     assert 'sm:left-1/2 sm:top-1/2' in transition_source
 
     assert 'items-end justify-center' in surface_source
@@ -92,7 +92,7 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert "workspace usage route stays responsive across desktop and mobile widths" in smoke_source
     assert "workspace health route stays responsive across desktop and mobile widths" in smoke_source
     assert "workspace billing route stays responsive across desktop and mobile widths" in smoke_source
-    assert "workspace hosting route stays responsive across desktop and mobile widths" in smoke_source
+    assert "workspace hosting route stays responsive across desktop and mobile widths" not in smoke_source
     assert "app console root redirects to overview" in smoke_source
     assert "app overview route stays responsive across desktop and mobile widths" in smoke_source
     assert "app health route stays responsive across desktop and mobile widths" in smoke_source
@@ -100,7 +100,7 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert "app usage route stays responsive across desktop and mobile widths" in smoke_source
     assert "app billing route stays responsive across desktop and mobile widths" in smoke_source
     assert "app users route stays responsive across desktop and mobile widths" in smoke_source
-    assert "app hosting route stays responsive across desktop and mobile widths" in smoke_source
+    assert "app hosting route stays responsive across desktop and mobile widths" not in smoke_source
     assert "mobile app console navigation keeps route transitions stable" in smoke_source
     assert "mobile workspace console navigation keeps route transitions stable" in smoke_source
     assert "/api/studio/overview" in smoke_source
@@ -121,14 +121,12 @@ def test_factory_app_console_routes_are_all_covered_by_smoke() -> None:
         "WorkspaceUsagePage": "workspace usage route stays responsive across desktop and mobile widths",
         "WorkspaceHealthPage": "workspace health route stays responsive across desktop and mobile widths",
         "WorkspaceBillingPage": "workspace billing route stays responsive across desktop and mobile widths",
-        "WorkspaceHostingPage": "workspace hosting route stays responsive across desktop and mobile widths",
         "ConsolePage": "app console root redirects to overview",
         "AppOverviewPage": "app overview route stays responsive across desktop and mobile widths",
         "AppHealthPage": "app health route stays responsive across desktop and mobile widths",
         "AppUsersPage": "app users route stays responsive across desktop and mobile widths",
         "AppUsagePage": "app usage route stays responsive across desktop and mobile widths",
         "AppBillingPage": "app billing route stays responsive across desktop and mobile widths",
-        "AppHostingPage": "app hosting route stays responsive across desktop and mobile widths",
         "AppIntegrationsPage": "app integrations route stays responsive across desktop and mobile widths",
     }
     route_components = {

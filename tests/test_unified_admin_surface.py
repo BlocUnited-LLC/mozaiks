@@ -58,10 +58,13 @@ def test_platform_shell_registers_admin_section_routes() -> None:
     registry_source = _read("factory_app/app/admin/admin_registry.yaml")
 
     # Admin portal pages are now declared in admin_registry.yaml, not hardcoded in contract.py
-    for path in ["/admin", "/apps/:appId/users", "/apps/:appId/usage"]:
+    for path in ["/apps/:appId/overview", "/apps/:appId/users", "/apps/:appId/usage"]:
         assert path in registry_source
 
-    # /apps/:appId/admin is not a valid path — overview uses /admin
+    # The first-party console does not expose a standalone /admin page.
+    assert "path: /admin" not in registry_source
+    assert "surfaces: [studio]" in registry_source
+    # /apps/:appId/admin is not a valid path — overview uses the app console route.
     assert "/apps/:appId/admin" not in registry_source
 
     assert '"component": "AdminPortal"' in platform_source
@@ -89,6 +92,7 @@ def test_profile_menu_uses_framework_defaults() -> None:
 
     assert "getDefaultProfileMenu" in source
     assert '"profile"' in source
+    assert 'href: "/admin"' not in source
     assert '"admin-portal"' not in source
     assert '"signin"' in source
     assert '"signout"' in source

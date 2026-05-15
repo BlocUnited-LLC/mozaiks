@@ -10,6 +10,7 @@
     "actions": [
       {
         "id": "create-app",
+        "intent": "create_app",
         "label": "Create App",
         "path": "/create",
         "path_by_role": {
@@ -17,19 +18,13 @@
           "investor": "/create",
           "default": "/create"
         },
-        "route_overrides": [
+        "variants": [
           {
-            "when": { "pathPrefix": "/chat" },
-            "label": "Console",
+            "when": { "surface": "workflow_session" },
+            "label": "Open Console",
             "icon": "settings.svg",
-            "path": "/apps",
-            "variant": "secondary"
-          },
-          {
-            "when": { "path": "/", "queryParam": "workflow" },
-            "label": "Console",
-            "icon": "settings.svg",
-            "path": "/apps",
+            "pathTemplate": "/apps/{appId}",
+            "fallbackPath": "/apps",
             "variant": "secondary"
           }
         ],
@@ -39,11 +34,10 @@
     ]
   },
   "shortcuts": {
-    "profile": ["profile", "admin", "signout"],
+    "profile": ["profile", "admin_portal", "signout"],
     "mobile": ["create", "profile"],
     "footer": ["legal", "terms", "cookies"],
-    "footerHideOnMobile": true,
-    "items": {}
+    "footerHideOnMobile": true
   },
   "navigation": {
     "policy": {

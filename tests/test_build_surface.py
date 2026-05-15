@@ -39,7 +39,7 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     assert '"path": "/usage"' in manifest_source
     assert '"path": "/health"' in manifest_source
     assert '"path": "/billing"' in manifest_source
-    assert '"path": "/hosting"' in manifest_source
+    assert '"path": "/hosting"' not in manifest_source
     assert '"path": "/operations"' not in manifest_source
     assert '"path": "/settings"' not in manifest_source
     assert '"path": "/apps"' in manifest_source
@@ -48,7 +48,7 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     assert '"path": "/apps/:appId/usage"' in manifest_source
     assert '"path": "/apps/:appId/health"' in manifest_source
     assert '"path": "/apps/:appId/billing"' in manifest_source
-    assert '"path": "/apps/:appId/hosting"' in manifest_source
+    assert '"path": "/apps/:appId/hosting"' not in manifest_source
     assert '"path": "/apps/:appId/build"' not in manifest_source
     assert '"path": "/apps/:appId/deploy"' not in manifest_source
     assert '"path": "/apps/:appId/operations"' not in manifest_source
@@ -61,7 +61,7 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     assert '"icon": "dashboard"' in manifest_source
 
 
-def test_factory_app_ui_barrel_registers_hosting_pages_and_omits_removed_pages() -> None:
+def test_factory_app_ui_barrel_registers_admin_pages_and_omits_removed_pages() -> None:
     source = _read("factory_app/app/ui/index.js")
     admin_source = _read("factory_app/app/admin/index.js")
     assert "registerAdminComponents" in source
@@ -70,13 +70,14 @@ def test_factory_app_ui_barrel_registers_hosting_pages_and_omits_removed_pages()
     assert "registerComponent('AppsPage'" not in source
     assert "registerComponent('WorkspaceHealthPage'" not in source
     assert "registerComponent('AppHostingPage'" not in source
+    assert "registerComponent('WorkspaceHostingPage'" not in source
     assert "registerComponent('AppsPage'" in admin_source
     assert "registerComponent('WorkspaceHealthPage'" in admin_source
-    assert "registerComponent('WorkspaceHostingPage'" in admin_source
+    assert "registerComponent('WorkspaceHostingPage'" not in admin_source
     assert "registerComponent('AppHealthPage'" in admin_source
-    assert "registerComponent('AppHostingPage'" in admin_source
+    assert "registerComponent('AppHostingPage'" not in admin_source
     assert "./pages/AppHealthPage.jsx" in admin_source
-    assert "./pages/AppHostingPage.jsx" in admin_source
+    assert "./pages/AppHostingPage.jsx" not in admin_source
     assert "AppBuildPage" not in source
     assert "AppDeployPage" not in source
     assert "AppOperationsPage" not in source
@@ -108,10 +109,11 @@ def test_removed_console_pages_are_deleted_from_factory_app() -> None:
     assert not (workspace / "factory_app/app/ui/pages/custom/console").exists()
 
     # Active pages live under admin/pages/
-    assert (workspace / "factory_app/app/admin/pages/AppHostingPage.jsx").exists()
     assert (workspace / "factory_app/app/admin/pages/AppHealthPage.jsx").exists()
-    assert (workspace / "factory_app/app/admin/pages/WorkspaceHostingPage.jsx").exists()
     assert (workspace / "factory_app/app/admin/pages/WorkspaceHealthPage.jsx").exists()
+    # Hosting pages moved to mozaiks-app (hosted-only capability)
+    assert not (workspace / "factory_app/app/admin/pages/AppHostingPage.jsx").exists()
+    assert not (workspace / "factory_app/app/admin/pages/WorkspaceHostingPage.jsx").exists()
 
 
 def test_refinement_ui_moves_into_factory_app() -> None:
@@ -170,7 +172,7 @@ def test_workspace_layout_links_console_and_hosting_sections() -> None:
     assert '"label": "Users"' in manifest_source
     assert '"label": "Billing"' in manifest_source
     assert '"label": "Health"' in manifest_source
-    assert '"label": "Hosting"' in manifest_source
+    assert '"label": "Hosting"' not in manifest_source
     assert '"label": "Usage"' in manifest_source
     assert '"label": "Integrations"' in manifest_source
     # Nav is route-manifest-owned and derived from registered shell pages.

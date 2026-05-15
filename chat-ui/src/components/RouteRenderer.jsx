@@ -301,7 +301,7 @@ function ShellChromeLayout({ children, route }) {
       />
       {(showHeaderDesktop || showHeaderMobile) && (
         <div className={headerClassName}>
-          <Header user={user} chatTheme={chatTheme} themeLoading={themeLoading} />
+          <Header user={user} chatTheme={chatTheme} themeLoading={themeLoading} route={route} shellMode={shellMode} />
         </div>
       )}
       <div className={frameClassName}>
@@ -314,7 +314,7 @@ function ShellChromeLayout({ children, route }) {
       </div>
       {showBottomBarMobile && (
         <div className="md:hidden">
-          <MobileBottomBar />
+          <MobileBottomBar route={route} shellMode={shellMode} />
         </div>
       )}
     </div>

@@ -4,7 +4,9 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
+from pydantic import ValidationError
 
+from mozaiksai.core.workflow.pack.config import get_workflow_sequence, load_global_pack_graph
 from .config import load_control_plane_config
 from .schema import (
     ControlPlanePromptDefinition,
@@ -64,7 +66,12 @@ def load_control_plane_pack(
     factory_root: Optional[Path] = None,
 ) -> LoadedControlPlanePack:
     pack_path = resolve_control_plane_pack_path(app_root=app_root, factory_root=factory_root)
-    manifest = ControlPlaneManifest.model_validate(_load_yaml_file(pack_path / "config" / "control_plane.yaml"))
+    try:
+        manifest = ControlPlaneManifest.model_validate(_load_yaml_file(pack_path / "config" / "control_plane.yaml"))
+    except ValidationError as exc:
+        raise ControlPlanePackLoadError(
+            f"Invalid control-plane manifest {pack_path / 'config' / 'control_plane.yaml'}: {exc}"
+        ) from exc
     prompts = _load_prompt_manifest(pack_path / "prompts")
     tools = ControlPlaneToolsManifest.model_validate(_load_yaml_file(pack_path / "config" / "tools.yaml"))
     policies = ControlPlanePoliciesManifest.model_validate(
@@ -139,3 +146,43 @@ def _validate_pack(
                 raise ControlPlanePackLoadError(
                     f"Tool '{tool_id}' is not available to '{checkpoint.event}' in {pack_path / 'config' / 'tools.yaml'}"
                 )
+
+    _validate_route_sequences(manifest=manifest, pack_path=pack_path)
+
+
+def _validate_route_sequences(*, manifest: ControlPlaneManifest, pack_path: Path) -> None:
+    route_refs: list[tuple[str, str, str]] = []
+    for artifact in manifest.routing.artifacts:
+        for change_class in ("patch", "design", "feature", "core"):
+            route = getattr(artifact.routes, change_class)
+            route_refs.append((artifact.artifact_kind, change_class, route.workflow_sequence))
+
+    if not route_refs:
+        return
+
+    pack_graph = load_global_pack_graph()
+    if pack_graph is None:
+        raise ControlPlanePackLoadError(
+            "control_plane.yaml declares routing workflow_sequence values, but no "
+            "extension_registry.json workflow graph is loaded."
+        )
+
+    for artifact_kind, change_class, sequence_id in route_refs:
+        sequence = get_workflow_sequence(pack_graph, sequence_id)
+        if sequence is None:
+            raise ControlPlanePackLoadError(
+                "control_plane.yaml route "
+                f"{artifact_kind}.{change_class} references unknown workflow_sequence "
+                f"'{sequence_id}' in {pack_path / 'config' / 'control_plane.yaml'}"
+            )
+        families = [
+            str(item).strip()
+            for item in getattr(sequence, "affected_declarative_families", [])
+            if str(item).strip()
+        ]
+        if not families:
+            raise ControlPlanePackLoadError(
+                "workflow_sequence "
+                f"'{sequence_id}' used by control_plane.yaml route {artifact_kind}.{change_class} "
+                "must declare affected_declarative_families in extension_registry.json"
+            )

@@ -29,14 +29,6 @@ Use for:
 - preference-backed records
 - simple admin-managed datasets
 
-### Communications pattern
-
-Use for:
-
-- direct messages
-- threads
-- announcements
-- inbox or conversation surfaces
 
 The page surface still lives under `app/ui/pages/`.
 The workflow layer remains separate.

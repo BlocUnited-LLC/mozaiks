@@ -379,6 +379,7 @@ class GlobalJourney(BaseModel):
 
     id: str
     description: Optional[str] = None
+    affected_declarative_families: List[str] = Field(default_factory=list)
     steps: List[JourneyStepGroup] = Field(default_factory=list)
 
     @field_validator("id")
@@ -395,6 +396,18 @@ class GlobalJourney(BaseModel):
         if not isinstance(value, list) or not value:
             raise ValueError("journey steps must be a non-empty list")
         return value
+
+    @field_validator("affected_declarative_families")
+    @classmethod
+    def _validate_affected_declarative_families(cls, value: List[str]) -> List[str]:
+        if not isinstance(value, list):
+            raise ValueError("journey affected_declarative_families must be a list")
+        normalized: List[str] = []
+        for item in value:
+            family = str(item or "").strip()
+            if family:
+                normalized.append(family)
+        return normalized
 
 
 class GlobalPackGraph(BaseModel):

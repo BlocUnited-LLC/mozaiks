@@ -162,24 +162,9 @@ workflow sessions without module code importing workflow internals.
 
 ### Studio And Mozaiks Product
 
-`mozaiksai/hosts/studio.py` and `mozaiksai/hosts/mozaiks.py` own product-layer events:
+`mozaiksai/hosts/studio.py` and `mozaiksai/hosts/mozaiks.py` may own product-layer events for hosted-only concerns such as build lifecycle, marketplace, collaboration, and billing.
 
-- build lifecycle
-- app project lifecycle
-- hosted collaboration
-- marketplace
-- hosted billing and revenue-share capabilities
-
-These are product facts, not universal runtime assumptions.
-
-Hosted product modules currently center on examples such as:
-
-- `investor_marketplace`, which publishes `hosted.marketplace.*`
-- `communications`, which publishes `hosted.communication.*`
-
-Those events can drive Studio, admin, marketplace, notification, and hosted
-collaboration behavior. They must not be treated as generic generated-app
-events.
+These are product facts, not universal runtime assumptions. Product-layer modules publish `hosted.*` events and stay out of generated app bundles unless the hosted product explicitly includes them.
 
 ### Modules
 

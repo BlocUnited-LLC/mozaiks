@@ -347,27 +347,6 @@ test('import app overlay stays within the viewport and suppresses the floating w
   expect(dialogBox.y + dialogBox.height).toBeLessThanOrEqual(viewport.height + 1);
 });
 
-test('workspace hosting route stays responsive across desktop and mobile widths', async ({ page }) => {
-  await page.goto('/hosting');
-  const main = page.locator('main');
-
-  await expect(main.getByRole('heading', { name: 'Hosting', exact: true })).toBeVisible();
-  await expect(main.getByPlaceholder('Search hosting...')).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Domains' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Environment readiness' })).toBeVisible();
-  await expect(main.getByText('No domains assigned yet').first()).toBeVisible();
-  await expectNoHorizontalOverflow(page);
-
-  const viewport = page.viewportSize();
-  expect(viewport).not.toBeNull();
-
-  if (viewport.width < 768) {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeVisible();
-  } else {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeHidden();
-  }
-});
-
 test('workspace usage route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.goto('/usage');
   const main = page.locator('main');
@@ -472,27 +451,6 @@ test('app integrations route stays responsive across desktop and mobile widths',
   await main.getByRole('button', { name: 'Add Integration' }).click();
   await expect(page.getByText('Register a new external service for this app.')).toBeVisible();
   await expect(page.locator('input[placeholder="stripe"]').first()).toBeVisible();
-  await expectNoHorizontalOverflow(page);
-
-  const viewport = page.viewportSize();
-  expect(viewport).not.toBeNull();
-
-  if (viewport.width < 768) {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeVisible();
-  } else {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeHidden();
-  }
-});
-
-test('app hosting route stays responsive across desktop and mobile widths', async ({ page }) => {
-  await page.goto(`/apps/${APP_ID}/hosting`);
-  const main = page.locator('main');
-
-  await expect(main.getByRole('heading', { name: 'Hosting', exact: true })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Hosting control center' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Hosting readiness' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Provider resources' })).toBeVisible();
-  await expect(main.getByText('No domains assigned yet').first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -617,11 +575,6 @@ test('mobile app console navigation keeps route transitions stable', async ({ pa
       heading: 'Users',
       detail: async () => expect(main.getByRole('heading', { name: 'People using this app' })).toBeVisible(),
     },
-    {
-      href: `/apps/${APP_ID}/hosting`,
-      heading: 'Hosting',
-      detail: async () => expect(main.getByRole('heading', { name: 'Provider resources' })).toBeVisible(),
-    },
   ];
 
   for (const routeCheck of routeChecks) {
@@ -653,11 +606,6 @@ test('mobile workspace console navigation keeps route transitions stable', async
       href: '/health',
       heading: 'Health',
       detail: async () => expect(main.getByRole('heading', { name: 'Health by app' })).toBeVisible(),
-    },
-    {
-      href: '/hosting',
-      heading: 'Hosting',
-      detail: async () => expect(main.getByRole('heading', { name: 'Environment readiness' })).toBeVisible(),
     },
     {
       href: '/billing',

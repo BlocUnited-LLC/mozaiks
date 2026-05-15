@@ -37,6 +37,14 @@ hooks:
   function: inject_domain_catalog_context
 - hook_type: update_agent_state
   hook_agent: AppPlanAgent
+  filename: hook_shell_preset_context.py
+  function: inject_shell_preset_context
+- hook_type: update_agent_state
+  hook_agent: AppSchemaAgent
+  filename: hook_shell_preset_context.py
+  function: inject_shell_preset_context
+- hook_type: update_agent_state
+  hook_agent: AppPlanAgent
   filename: hook_file_contract_context.py
   function: inject_cookie_cutter_contracts_context
 - hook_type: update_agent_state
@@ -49,6 +57,10 @@ hooks:
   function: inject_hosted_capabilities_context
 - hook_type: update_agent_state
   hook_agent: AppSchemaAgent
+  filename: hook_file_contract_context.py
+  function: inject_cookie_cutter_contracts_context
+- hook_type: update_agent_state
+  hook_agent: ControlPlaneAgent
   filename: hook_file_contract_context.py
   function: inject_cookie_cutter_contracts_context
 - hook_type: update_agent_state

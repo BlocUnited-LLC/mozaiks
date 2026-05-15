@@ -45,13 +45,13 @@ export function TransitionOverlayFrame({
   return (
     <Dialog open onOpenChange={handleOpenChange}>
       <DialogPortal>
-        <DialogOverlay className="!z-40 bg-background/78 backdrop-blur-md supports-[backdrop-filter]:bg-background/62 motion-reduce:backdrop-blur-0" />
+        <DialogOverlay className="!z-[80] bg-background/68 backdrop-blur-lg supports-[backdrop-filter]:bg-background/52 motion-reduce:backdrop-blur-0" />
         <DialogPrimitive.Content
           onEscapeKeyDown={preventDismiss}
           onInteractOutside={preventDismiss}
           onPointerDownOutside={preventDismiss}
           className={[
-            'fixed inset-x-0 bottom-0 z-50 w-full flex max-h-[calc(100dvh-env(safe-area-inset-top,0px)-1rem)] flex-col overflow-hidden rounded-t-[2rem] border border-border/80 border-b-0 bg-background/88 shadow-2xl shadow-black/40 outline-none backdrop-blur-xl',
+            'fixed inset-x-0 bottom-0 z-[90] w-full flex max-h-[calc(100dvh-env(safe-area-inset-top,0px)-1rem)] flex-col overflow-hidden rounded-t-[2rem] border border-border/80 border-b-0 bg-background/86 shadow-2xl shadow-black/40 outline-none backdrop-blur-xl',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
             'data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom',

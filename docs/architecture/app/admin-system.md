@@ -1,7 +1,8 @@
 # Admin System
 
-Mozaiks does not currently expose a customer-facing app-admin route family in
-the production console.
+Mozaiks Studio does not expose a separate customer-facing `/admin` page in the
+first-party console. The Admin Portal entry for Studio routes to `/apps`, which
+is the workspace app-management surface.
 
 The production app console keeps these pages visible instead:
 
@@ -85,9 +86,9 @@ Example:
 }
 ```
 
-The platform may still mount framework-owned admin panels through
+Generated app hosts may still mount framework-owned admin panels through
 `AdminPortal`, but generators must not create a separate app-admin page, route
-family, page schema, or admin React shell for the production console.
+family, page schema, or admin React shell for the Studio console.
 
 ## Built-In Section Registry
 
@@ -116,6 +117,10 @@ Implementation rule:
   metadata or from a payload resolved from it
 - Console navigation stays deterministic and product-scoped; admin panels do
   not add, rename, or reorder Console nav items
+
+First-party Studio admin registry entries must declare `surfaces: [studio]` so
+they do not leak into the generic platform shell. Generated app admin registries
+normally omit `surfaces` and are mounted by the platform host.
 
 ## Feature Admin Contract
 
@@ -158,7 +163,7 @@ hooks: []
 
 Use `renderer: schema` for the normal path. Schema panels reuse the same
 primitive section system as `ui/pages/*.yaml`, but they render inside the
-host-owned `/admin` shell rather than becoming standalone routes.
+host-owned generated-app admin shell rather than becoming standalone routes.
 
 Use `renderer: custom_component` only when the shipped primitive system cannot
 express the panel cleanly. In that case:
@@ -174,8 +179,8 @@ Optional Python support for complex panel data belongs in
 ## Custom Admin UI vs Custom Admin Routes
 
 Mozaiks must allow agent-generated custom admin UI, but the default path is to
-generate panels inside the host-owned `/admin` shell, not to generate a second
-admin shell.
+generate panels inside the host-owned generated-app admin shell, not to generate
+a second admin shell.
 
 Use this order of preference:
 
@@ -203,7 +208,7 @@ be a new contract with explicit ownership, registration, and validation rules.
   frontend escape hatch
 
 It does not mean that agents may emit arbitrary admin React pages or bypass the
-host-owned `/admin` shell by default.
+host-owned generated-app admin shell by default.
 
 ## App-Backend Panels
 
@@ -233,7 +238,7 @@ surfaces.
 
 The detailed connected app-backend panel contract remains repo-internal
 planning material for now. Keep the public contract anchored on this page plus
-the host-owned `/admin` shell behavior described here.
+the host-owned generated-app admin shell behavior described here.
 
 ## Generator Rules
 

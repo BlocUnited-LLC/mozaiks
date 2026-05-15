@@ -10,24 +10,18 @@ import {
   RiServerFill,
   RiUser3Fill,
 } from 'react-icons/ri'
+import { useNavigation } from '../providers/NavigationProvider.jsx'
 
-const WORKSPACE_NAV_ITEMS = [
-  { id: 'apps', label: 'Apps', path: '/apps', icon: RiAppsFill, exact: true },
-  { id: 'usage', label: 'Usage', path: '/usage', icon: RiFileList3Fill, exact: true },
-  { id: 'health', label: 'Health', path: '/health', icon: RiPulseLine, exact: true },
-  { id: 'billing', label: 'Billing', path: '/billing', icon: RiMoneyDollarCircleFill, exact: true },
-  { id: 'hosting', label: 'Hosting', path: '/hosting', icon: RiServerFill, exact: true },
-]
-
-const APP_NAV_ITEMS = [
-  { id: 'overview', label: 'Overview', suffix: '/overview', icon: RiDashboardFill },
-  { id: 'health', label: 'Health', suffix: '/health', icon: RiPulseLine },
-  { id: 'users', label: 'Users', suffix: '/users', icon: RiUser3Fill },
-  { id: 'integrations', label: 'Integrations', suffix: '/integrations', icon: RiPlugLine },
-  { id: 'usage', label: 'Usage', suffix: '/usage', icon: RiFileList3Fill },
-  { id: 'billing', label: 'Billing', suffix: '/billing', icon: RiMoneyDollarCircleFill },
-  { id: 'hosting', label: 'Hosting', suffix: '/hosting', icon: RiServerFill },
-]
+const ICON_MAP = {
+  apps: RiAppsFill,
+  dashboard: RiDashboardFill,
+  chart: RiFileList3Fill,
+  billing: RiMoneyDollarCircleFill,
+  plug: RiPlugLine,
+  pulse: RiPulseLine,
+  server: RiServerFill,
+  users: RiUser3Fill,
+}
 
 function resolveAppId(pathname) {
   const match = /^\/apps\/([^/]+)/.exec(pathname)
@@ -35,23 +29,51 @@ function resolveAppId(pathname) {
   return appId && appId !== 'new' ? appId : null
 }
 
-function buildAppPath(appId, suffix) {
-  return `/apps/${encodeURIComponent(appId)}${suffix}`
+function resolvePageNavigation(page) {
+  return page?.meta?.navigation && typeof page.meta.navigation === 'object'
+    ? page.meta.navigation
+    : {}
 }
 
-function buildAppNavItems(appId) {
-  return APP_NAV_ITEMS.map((item) => ({
-    ...item,
-    path: buildAppPath(appId, item.suffix),
-    exact: true,
-  }))
+function buildPathForPage(path, appId) {
+  if (typeof path !== 'string' || !path.startsWith('/')) return null
+  if (!appId) return path
+  return path.replace(':appId', encodeURIComponent(appId))
 }
 
-function buildNavGroups(appId = null) {
-  if (appId) {
-    return [{ label: null, items: buildAppNavItems(appId) }]
-  }
-  return [{ label: null, items: WORKSPACE_NAV_ITEMS }]
+function routeIdFromPath(path) {
+  return path.replace(/^\//, '').replace(/[:/]+/g, '-').replace(/-+/g, '-') || 'console'
+}
+
+function resolveIcon(iconHint) {
+  return ICON_MAP[iconHint] || RiDashboardFill
+}
+
+function buildNavGroupsFromPages(pages, appId = null) {
+  const group = appId ? 'app-console' : 'workspace-console'
+  const items = (Array.isArray(pages) ? pages : [])
+    .filter((page) => page && page.meta?.appShell)
+    .filter((page) => resolvePageNavigation(page).group === group)
+    .filter((page) => resolvePageNavigation(page).include !== false)
+    .map((page) => {
+      const navigation = resolvePageNavigation(page)
+      const path = buildPathForPage(page.path, appId)
+      if (!path) return null
+      return {
+        id: navigation.id || page.id || page.component || routeIdFromPath(page.path),
+        label: navigation.label || page.label || 'Console',
+        path,
+        icon: resolveIcon(navigation.icon),
+        exact: true,
+        order: Number.isFinite(page.order) ? page.order : 500,
+      }
+    })
+    .filter(Boolean)
+    .sort((left, right) => (
+      left.order - right.order || left.label.localeCompare(right.label)
+    ))
+
+  return [{ label: null, items }]
 }
 
 function MenuGlyph() {
@@ -95,11 +117,8 @@ function getActiveNavItem(navGroups, location) {
   return { group: navGroups[0] || null, item: navGroups[0]?.items?.[0] || null }
 }
 
-function WorkspaceSidebar({ onNavigate = null, navGroups: providedNavGroups = null, surface = 'sidebar' }) {
+function WorkspaceSidebar({ appId = null, navGroups, onNavigate = null, surface = 'sidebar' }) {
   const location = useLocation()
-  const appId = resolveAppId(location.pathname)
-  const derivedNavGroups = useMemo(() => buildNavGroups(appId), [appId])
-  const navGroups = providedNavGroups || derivedNavGroups
   const navigationLabel = appId ? 'App Console navigation' : 'Workspace navigation'
   const surfaceClass =
     surface === 'sheet'
@@ -189,12 +208,12 @@ function WorkspaceMobileNavTrigger({ onOpenMenu, activeLabel = 'Console' }) {
   )
 }
 
-export function WorkspaceLayout({ children, navGroups: providedNavGroups = null }) {
+export function WorkspaceLayout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
+  const { pages } = useNavigation()
   const appId = resolveAppId(location.pathname)
-  const derivedNavGroups = useMemo(() => buildNavGroups(appId), [appId])
-  const navGroups = providedNavGroups || derivedNavGroups
+  const navGroups = useMemo(() => buildNavGroupsFromPages(pages, appId), [pages, appId])
   const activeNav = useMemo(() => getActiveNavItem(navGroups, location), [navGroups, location])
   const activeLabel = activeNav.item?.label || activeNav.group?.label || 'Console'
 
@@ -203,7 +222,7 @@ export function WorkspaceLayout({ children, navGroups: providedNavGroups = null 
       <div className="mx-auto flex w-full max-w-[96rem] gap-6 px-4 py-7 md:px-6 lg:px-8">
         <div className="hidden w-72 shrink-0 lg:block">
           <div className="sticky top-24">
-            <WorkspaceSidebar navGroups={navGroups} />
+            <WorkspaceSidebar appId={appId} navGroups={navGroups} />
           </div>
         </div>
 
@@ -244,6 +263,7 @@ export function WorkspaceLayout({ children, navGroups: providedNavGroups = null 
                 </button>
               </div>
               <WorkspaceSidebar
+                appId={appId}
                 navGroups={navGroups}
                 onNavigate={() => setMobileOpen(false)}
                 surface="sheet"

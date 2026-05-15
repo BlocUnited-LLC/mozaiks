@@ -16,7 +16,7 @@ The harness exists for requests that are not well modeled as:
 - normal runtime chat
 - workflow-local handoffs
 - MFJ decomposition
-- static `route_to` transitions
+- workflow transition routing
 
 Examples:
 
@@ -168,6 +168,54 @@ point to Python implementation files.
 The declarative pack lives under `factory_app/control_plane/` or an app-local
 override at `<workspace>/control_plane/`.
 
+## Generated App Authoring
+
+Most generated apps do not need an app-local control plane. They should use
+ordinary workflow launches, module actions, and `extension_registry.json`
+workflow sequences first.
+
+AppGenerator may emit an app-local harness only when the product explicitly
+needs checkpointed lifecycle, refinement, session, or coding-control behavior
+that cannot be expressed as normal workflow transitions.
+
+The canonical AppGenerator build task is:
+
+```yaml
+task_type: control_plane_pack
+surface_kind: control_plane
+capability_pack_id: null
+initial_agent: ControlPlaneAgent
+owned_paths:
+  - control_plane/config/control_plane.yaml
+  - control_plane/config/tools.yaml
+```
+
+Optional owned paths:
+
+```yaml
+- control_plane/config/policies.yaml
+- control_plane/prompts/*.yaml
+```
+
+Generated control-plane packs are declarative only:
+
+- no `module.yaml`
+- no `app/modules/*`
+- no `backend/control_plane/*.py`
+- no custom harness Python
+- no business-domain logic
+
+The generated pack uses shipped `mozaiksai.control_plane` implementations and
+declared tool entrypoints. Custom harness Python is not a v1 generator contract.
+
+Route rules remain strict:
+
+- `control_plane.yaml` routes declare `workflow_sequence` only.
+- each `workflow_sequence` must exist in
+  `workflows/extended_orchestration/extension_registry.json`
+- sequence impact metadata, including `affected_declarative_families`, lives on
+  the sequence in `extension_registry.json`, not in `control_plane.yaml`
+
 ## Declarative Files
 
 ### `config/control_plane.yaml`
@@ -201,18 +249,12 @@ routing:
       routes:
         patch:
           workflow_sequence: app_revision
-          affected_declarative_families: [app_bundle]
-          requires_replanning: false
-          requires_rebuild: true
         design:
           workflow_sequence: app_surface_revision
-          affected_declarative_families: [design_docs, app_bundle]
         feature:
           workflow_sequence: app_revision
-          affected_declarative_families: [app_bundle]
         core:
           workflow_sequence: full_rebuild
-          affected_declarative_families: [concept, design_docs, workflow_bundle, app_bundle]
 checkpoints:
   - id: request_intake
     event: request_submitted
@@ -235,10 +277,16 @@ Route rules:
 
 - `workflow_sequence` is the canonical route target.
 - The sequence is resolved from `extension_registry.json`.
-- `route_to` is optional and only needed when the route must start at a
-  workflow other than the first workflow in the sequence.
-- `affected_workflows` is normally derived from the sequence and should not be
-  duplicated in the control-plane pack.
+- If a route must start at a different workflow, define a dedicated sequence
+  with that workflow first.
+- Do not declare `affected_workflows` in `control_plane.yaml`; it is derived
+  from the selected sequence.
+- Do not declare `affected_declarative_families` in `control_plane.yaml`; it is
+  declared once on the selected sequence in `extension_registry.json`.
+- Do not declare `requires_replanning`; it is derived from the typed change
+  class: `patch=false`, `design|feature|core=true`.
+- Do not declare `requires_rebuild`; control-plane rebuild decisions are
+  runtime decision outputs, not route manifest inputs.
 
 ### `config/tools.yaml`
 

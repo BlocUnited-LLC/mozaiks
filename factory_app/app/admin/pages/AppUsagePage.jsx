@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
@@ -8,148 +8,55 @@ import {
   ConsoleInlineEmptyState,
   ConsoleLoadingState,
   Panel,
-  SegmentedControl,
+  StatusPill,
 } from '../../ui/components/ConsoleShared.jsx'
 import { AppConsoleHero, formatCompactNumber, formatCurrencyValue } from './AppConsoleChrome.jsx'
-import { getAppConsoleSnapshot, groupBy, sumBy } from './appConsoleDataHelpers.js'
+import { getAppConsoleSnapshot, sumBy } from './appConsoleDataHelpers.js'
 import { useAppConsoleData } from './useAppConsoleData.js'
 
-const BREAKDOWN_OPTIONS = [
-  { value: 'workflow', label: 'By Workflow' },
-  { value: 'user', label: 'By User' },
-  { value: 'model', label: 'By Model' },
-  { value: 'tool', label: 'By Tool' },
-  { value: 'agent', label: 'By Agent' },
-]
-
-function buildBreakdownRows(snapshot, mode) {
-  if (mode === 'workflow') {
-    return groupBy(
-      snapshot.runs,
-      (run) => run.workflow_name,
-      (run) => ({
-        label: run.workflow_name,
-        runs: 1,
-        inputTokens: Number(run.prompt_tokens || 0),
-        outputTokens: Number(run.completion_tokens || 0),
-        cost: Number(run.cost || 0),
-        errors: Number(run.errors || 0),
-        detail: 'Workflow activity',
-      }),
-      (current, run) => ({
-        ...current,
-        runs: current.runs + 1,
-        inputTokens: current.inputTokens + Number(run.prompt_tokens || 0),
-        outputTokens: current.outputTokens + Number(run.completion_tokens || 0),
-        cost: current.cost + Number(run.cost || 0),
-        errors: current.errors + Number(run.errors || 0),
-      }),
-    )
-      .map((row) => ({
-        ...row,
-        totalTokens: row.inputTokens + row.outputTokens,
-        avgTokens: row.runs > 0 ? (row.inputTokens + row.outputTokens) / row.runs : 0,
-        avgCost: row.runs > 0 ? row.cost / row.runs : 0,
-      }))
-      .sort((left, right) => right.totalTokens - left.totalTokens)
-  }
-
-  if (mode === 'user') {
-    return groupBy(
-      snapshot.runs,
-      (run) => run.user_id,
-      (run) => ({
-        label: run.user_id,
-        runs: 1,
-        inputTokens: Number(run.prompt_tokens || 0),
-        outputTokens: Number(run.completion_tokens || 0),
-        cost: Number(run.cost || 0),
-        errors: Number(run.errors || 0),
-        detail: 'User-triggered usage',
-      }),
-      (current, run) => ({
-        ...current,
-        runs: current.runs + 1,
-        inputTokens: current.inputTokens + Number(run.prompt_tokens || 0),
-        outputTokens: current.outputTokens + Number(run.completion_tokens || 0),
-        cost: current.cost + Number(run.cost || 0),
-        errors: current.errors + Number(run.errors || 0),
-      }),
-    )
-      .map((row) => ({
-        ...row,
-        totalTokens: row.inputTokens + row.outputTokens,
-        avgTokens: row.runs > 0 ? (row.inputTokens + row.outputTokens) / row.runs : 0,
-        avgCost: row.runs > 0 ? row.cost / row.runs : 0,
-      }))
-      .sort((left, right) => right.cost - left.cost)
-  }
-
-  if (mode === 'model' && snapshot.summary?.ai?.model) {
-    return [{
-      label: snapshot.summary.ai.model,
-      runs: snapshot.stats.tracked_chats || snapshot.runs.length,
-      inputTokens: Number(snapshot.stats.total_prompt_tokens || 0),
-      outputTokens: Number(snapshot.stats.total_completion_tokens || 0),
-      cost: Number(snapshot.stats.total_cost || 0),
-      totalTokens: Number(snapshot.stats.total_prompt_tokens || 0) + Number(snapshot.stats.total_completion_tokens || 0),
-      avgTokens: (snapshot.stats.tracked_chats || snapshot.runs.length || 0) > 0
-        ? (Number(snapshot.stats.total_prompt_tokens || 0) + Number(snapshot.stats.total_completion_tokens || 0)) / (snapshot.stats.tracked_chats || snapshot.runs.length)
-        : 0,
-      avgCost: (snapshot.stats.tracked_chats || snapshot.runs.length || 0) > 0
-        ? Number(snapshot.stats.total_cost || 0) / (snapshot.stats.tracked_chats || snapshot.runs.length)
-        : 0,
-      errors: Number(snapshot.stats.total_errors || 0),
-      detail: 'Single-model footprint visible from the current app summary.',
-    }]
-  }
-
-  if (mode === 'tool' && Number(snapshot.stats.total_tool_calls || 0) > 0) {
-    return [{
-      label: 'All tool activity',
-      runs: snapshot.stats.tracked_chats || snapshot.runs.length,
-      inputTokens: Number(snapshot.stats.total_prompt_tokens || 0),
-      outputTokens: Number(snapshot.stats.total_completion_tokens || 0),
-      cost: Number(snapshot.stats.total_cost || 0),
-      totalTokens: Number(snapshot.stats.total_prompt_tokens || 0) + Number(snapshot.stats.total_completion_tokens || 0),
-      avgTokens: (snapshot.stats.tracked_chats || snapshot.runs.length || 0) > 0
-        ? (Number(snapshot.stats.total_prompt_tokens || 0) + Number(snapshot.stats.total_completion_tokens || 0)) / (snapshot.stats.tracked_chats || snapshot.runs.length)
-        : 0,
-      avgCost: (snapshot.stats.tracked_chats || snapshot.runs.length || 0) > 0
-        ? Number(snapshot.stats.total_cost || 0) / (snapshot.stats.tracked_chats || snapshot.runs.length)
-        : 0,
-      errors: Number(snapshot.stats.total_errors || 0),
-      detail: 'Per-tool telemetry has not landed yet, so the app view stays at aggregate tool-call volume.',
-    }]
-  }
-
-  if (mode === 'agent' && Number(snapshot.stats.total_agent_turns || 0) > 0) {
-    return [{
-      label: 'App orchestration',
-      runs: snapshot.stats.tracked_chats || snapshot.runs.length,
-      inputTokens: Number(snapshot.stats.total_prompt_tokens || 0),
-      outputTokens: Number(snapshot.stats.total_completion_tokens || 0),
-      cost: Number(snapshot.stats.total_cost || 0),
-      totalTokens: Number(snapshot.stats.total_prompt_tokens || 0) + Number(snapshot.stats.total_completion_tokens || 0),
-      avgTokens: (snapshot.stats.tracked_chats || snapshot.runs.length || 0) > 0
-        ? (Number(snapshot.stats.total_prompt_tokens || 0) + Number(snapshot.stats.total_completion_tokens || 0)) / (snapshot.stats.tracked_chats || snapshot.runs.length)
-        : 0,
-      avgCost: (snapshot.stats.tracked_chats || snapshot.runs.length || 0) > 0
-        ? Number(snapshot.stats.total_cost || 0) / (snapshot.stats.tracked_chats || snapshot.runs.length)
-        : 0,
-      errors: Number(snapshot.stats.total_errors || 0),
-      detail: 'Agent detail is still aggregated at the app level in this surface.',
-    }]
-  }
-
-  return []
+function formatShortDate(iso) {
+  if (!iso) return '—'
+  try {
+    return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(iso))
+  } catch { return iso }
 }
 
-function exportBreakdownCsv(appId, rows) {
-  const headers = ['label', 'runs', 'inputTokens', 'outputTokens', 'totalTokens', 'cost', 'avgTokens', 'avgCost', 'errors', 'detail']
+function buildWorkflowGroups(runs) {
+  const groups = new Map()
+  for (const run of Array.isArray(runs) ? runs : []) {
+    const key = run.workflow_name || 'Unknown workflow'
+    if (!groups.has(key)) groups.set(key, { workflow: key, sessions: [] })
+    groups.get(key).sessions.push(run)
+  }
+  return Array.from(groups.values()).map((g) => {
+    const inputTokens = g.sessions.reduce((s, r) => s + Number(r.prompt_tokens || 0), 0)
+    const outputTokens = g.sessions.reduce((s, r) => s + Number(r.completion_tokens || 0), 0)
+    const cost = g.sessions.reduce((s, r) => s + Number(r.cost || 0), 0)
+    const errors = g.sessions.reduce((s, r) => s + Number(r.errors || 0), 0)
+    const count = g.sessions.length
+    const totalTokens = inputTokens + outputTokens
+    return {
+      ...g,
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      cost,
+      errors,
+      count,
+      avgTokens: count > 0 ? totalTokens / count : 0,
+      avgCost: count > 0 ? cost / count : 0,
+    }
+  }).sort((a, b) => b.totalTokens - a.totalTokens)
+}
+
+function exportBreakdownCsv(appId, groups) {
+  const headers = ['workflow', 'sessions', 'input_tokens', 'output_tokens', 'total_tokens', 'avg_tokens', 'cost', 'avg_cost', 'errors']
   const lines = [
     headers.join(','),
-    ...rows.map((row) => headers.map((header) => JSON.stringify(String(row?.[header] ?? ''))).join(',')),
+    ...groups.map((g) => [
+      JSON.stringify(g.workflow), g.count, g.inputTokens, g.outputTokens,
+      g.totalTokens, Math.round(g.avgTokens), g.cost.toFixed(4), g.avgCost.toFixed(4), g.errors,
+    ].join(',')),
   ]
   const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
@@ -162,10 +69,73 @@ function exportBreakdownCsv(appId, rows) {
   URL.revokeObjectURL(url)
 }
 
+const COL_HEADER = 'px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground'
+const COL_CELL = 'px-4 py-3 text-sm text-muted-foreground tabular-nums'
+
+function WorkflowGroupRow({ group, expanded, onToggle }) {
+  return (
+    <>
+      <tr
+        onClick={onToggle}
+        className="border-b border-border cursor-pointer hover:bg-muted/25 transition-colors"
+      >
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-2">
+            <span className={`text-[10px] text-muted-foreground transition-transform duration-150 select-none ${expanded ? 'rotate-90' : ''}`}>▶</span>
+            <span className="font-semibold text-foreground text-sm">{group.workflow}</span>
+            <span className="text-xs text-muted-foreground ml-1">{group.count} session{group.count !== 1 ? 's' : ''}</span>
+          </div>
+        </td>
+        <td className={COL_CELL}>{formatCompactNumber(group.inputTokens, '0')}</td>
+        <td className={COL_CELL}>{formatCompactNumber(group.outputTokens, '0')}</td>
+        <td className={COL_CELL}>{formatCompactNumber(group.totalTokens, '0')}</td>
+        <td className={COL_CELL}>{formatCompactNumber(Math.round(group.avgTokens), '0')}</td>
+        <td className={COL_CELL}>{formatCurrencyValue(group.cost, '$0.00')}</td>
+        <td className={COL_CELL}>{formatCurrencyValue(group.avgCost, '$0.0000')}</td>
+        <td className="px-4 py-3">
+          <StatusPill tone={group.errors > 0 ? 'warning' : 'success'}>{formatCompactNumber(group.errors, '0')}</StatusPill>
+        </td>
+      </tr>
+
+      {expanded && group.sessions.map((session) => (
+        <tr key={session.chat_id} className="border-b border-border/50 bg-muted/15 hover:bg-muted/25 transition-colors">
+          <td className="pl-10 pr-4 py-2.5">
+            <div className="text-xs font-mono text-muted-foreground/80">{String(session.chat_id || '').slice(-10) || '—'}</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {session.user_id || 'system'} · {formatShortDate(session.started_at)}
+              {session.runtime_sec ? ` · ${Math.round(session.runtime_sec)}s` : ''}
+            </div>
+          </td>
+          <td className={COL_CELL}>{formatCompactNumber(session.prompt_tokens, '0')}</td>
+          <td className={COL_CELL}>{formatCompactNumber(session.completion_tokens, '0')}</td>
+          <td className={COL_CELL}>{formatCompactNumber((session.prompt_tokens || 0) + (session.completion_tokens || 0), '0')}</td>
+          <td className={COL_CELL}>—</td>
+          <td className={COL_CELL}>{formatCurrencyValue(session.cost, '$0.00')}</td>
+          <td className={COL_CELL}>—</td>
+          <td className="px-4 py-2.5">
+            {Number(session.errors || 0) > 0
+              ? <StatusPill tone="warning">{session.errors}</StatusPill>
+              : <span className="text-xs text-muted-foreground">—</span>
+            }
+          </td>
+        </tr>
+      ))}
+    </>
+  )
+}
+
 export default function AppUsagePage() {
   const { appId = 'workspace-app' } = useParams()
   const { data, loading, error, dataMode } = useAppConsoleData(appId)
-  const [breakdownMode, setBreakdownMode] = useState('workflow')
+  const [expandedWorkflows, setExpandedWorkflows] = useState(new Set())
+
+  const toggleExpand = (workflowName) => {
+    setExpandedWorkflows((prev) => {
+      const next = new Set(prev)
+      next.has(workflowName) ? next.delete(workflowName) : next.add(workflowName)
+      return next
+    })
+  }
 
   if (loading) return <ConsoleLoadingState label="Loading app usage…" />
   if (error || !data) return <ConsoleErrorState title="Usage Unavailable" message={error || 'No usage data returned.'} />
@@ -175,7 +145,7 @@ export default function AppUsagePage() {
   const totalOutputTokens = Number(snapshot.stats.total_completion_tokens || 0)
   const totalTokens = Number(snapshot.usageRecord?.tokens_used || 0) || totalInputTokens + totalOutputTokens
   const totalRuns = snapshot.runs.length || snapshot.stats.tracked_chats || 0
-  const breakdownRows = buildBreakdownRows(snapshot, breakdownMode)
+  const workflowGroups = useMemo(() => buildWorkflowGroups(snapshot.runs), [snapshot.runs])
   const costDrivers = snapshot.runs
     .slice()
     .sort((left, right) => Number(right.cost || 0) - Number(left.cost || 0))
@@ -206,55 +176,42 @@ export default function AppUsagePage() {
         />
 
         <Panel
-          title="Workflow token breakdown"
-          subtitle="Switch views to see what is driving usage."
+          title="Workflow breakdown"
+          subtitle="Expand a workflow to see individual sessions."
           action={(
-            <div className="flex flex-wrap gap-2">
-              <ActionButton
-                variant="secondary"
-                size="sm"
-                disabled={breakdownRows.length === 0}
-                onClick={() => exportBreakdownCsv(appId, breakdownRows)}
-              >
-                Export CSV
-              </ActionButton>
-            </div>
+            <ActionButton
+              variant="secondary"
+              size="sm"
+              disabled={workflowGroups.length === 0}
+              onClick={() => exportBreakdownCsv(appId, workflowGroups)}
+            >
+              Export CSV
+            </ActionButton>
           )}
         >
-          <div className="mb-4">
-            <SegmentedControl options={BREAKDOWN_OPTIONS} value={breakdownMode} onChange={setBreakdownMode} />
-          </div>
-
-          {breakdownRows.length > 0 ? (
+          {workflowGroups.length > 0 ? (
             <div className="overflow-hidden rounded-2xl border border-border/42">
-              <table className="min-w-full divide-y divide-border/32 text-sm">
-                <thead className="bg-background/34 text-left text-xs text-muted-foreground/84">
+              <table className="min-w-full text-sm">
+                <thead className="bg-background/34 border-b border-border/42">
                   <tr>
-                    <th className="px-4 py-3 font-semibold">Breakdown</th>
-                    <th className="px-4 py-3 font-semibold">Runs</th>
-                    <th className="px-4 py-3 font-semibold">Input</th>
-                    <th className="px-4 py-3 font-semibold">Output</th>
-                    <th className="px-4 py-3 font-semibold">Total</th>
-                    <th className="px-4 py-3 font-semibold">Avg / Run</th>
-                    <th className="px-4 py-3 font-semibold">Cost</th>
-                    <th className="px-4 py-3 font-semibold">Errors</th>
+                    <th className={COL_HEADER}>Workflow</th>
+                    <th className={COL_HEADER}>Input</th>
+                    <th className={COL_HEADER}>Output</th>
+                    <th className={COL_HEADER}>Total</th>
+                    <th className={COL_HEADER}>Avg / session</th>
+                    <th className={COL_HEADER}>Cost</th>
+                    <th className={COL_HEADER}>Avg cost</th>
+                    <th className={COL_HEADER}>Errors</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border/28 bg-card/24">
-                  {breakdownRows.map((row) => (
-                    <tr key={row.label}>
-                      <td className="px-4 py-3">
-                        <div className="font-semibold text-foreground">{row.label}</div>
-                        <div className="mt-1 text-xs text-muted-foreground">{row.detail}</div>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">{formatCompactNumber(row.runs, '0')}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{formatCompactNumber(row.inputTokens, '0')}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{formatCompactNumber(row.outputTokens, '0')}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{formatCompactNumber(row.totalTokens, '0')}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{formatCompactNumber(row.avgTokens, '0')}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{formatCurrencyValue(row.cost, '$0.00')}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{formatCompactNumber(row.errors, '0')}</td>
-                    </tr>
+                <tbody className="bg-card/24">
+                  {workflowGroups.map((group) => (
+                    <WorkflowGroupRow
+                      key={group.workflow}
+                      group={group}
+                      expanded={expandedWorkflows.has(group.workflow)}
+                      onToggle={() => toggleExpand(group.workflow)}
+                    />
                   ))}
                 </tbody>
               </table>

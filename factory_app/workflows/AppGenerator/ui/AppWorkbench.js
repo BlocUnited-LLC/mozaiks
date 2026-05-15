@@ -6,14 +6,24 @@
 import React, { useMemo, useState } from 'react';
 import { Code, LayoutGrid, Monitor } from 'lucide-react';
 import { useWorkflowStart } from '@mozaiks/chat-ui/hooks/useWorkflowStart.js';
+import { useChatUI } from '@mozaiks/chat-ui/context/ChatUIContext.jsx';
 import { components as designComponents, typography as designTypography } from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
 import { useAppValidationWorkbench } from './useAppValidationWorkbench';
+import { useSandbox } from './useSandbox';
 import BuildStatusArtifact from './BuildStatusArtifact';
 import CodeEditorArtifact from './CodeEditorArtifact';
 import E2BPreviewArtifact from './E2BPreviewArtifact';
 import ExportActions from './ExportActions';
 import FileTreeArtifact from './FileTreeArtifact';
 import HarnessDecisionCard from '../../../app/ui/components/HarnessDecisionCard.jsx';
+
+// Known locations where AppGenerator may write the theme config file.
+const _THEME_FILE_CANDIDATES = [
+  'theme_config.json',
+  'src/theme_config.json',
+  'app/theme_config.json',
+  'public/theme_config.json',
+];
 
 const AppWorkbench = ({
   payload = {},
@@ -48,9 +58,23 @@ const AppWorkbench = ({
   const [artifactReviewBusy, setArtifactReviewBusy] = useState(false);
   const [artifactReviewError, setArtifactReviewError] = useState(null);
   const { startWorkflow, starting: refinementStarting, error: workflowStartError } = useWorkflowStart();
+  const { user } = useChatUI();
   const [activeArtifactVersionId, setActiveArtifactVersionId] = useState(
     payload?.artifact_version_id || payload?.artifactVersionId || null
   );
+
+  // Derive artifact identity first — useSandbox depends on these values.
+  const artifactVersionId = activeArtifactVersionId;
+  const artifactKind = payload?.artifact_kind || payload?.artifactKind || 'app_bundle';
+  const artifactKey = payload?.artifact_key || payload?.artifactKey || artifactKind;
+
+  // Build a stable, app-scoped sandbox key so sandboxes are never shared
+  // across different users' apps. Sanitised to match the backend id regex.
+  const sandboxArtifactId = useMemo(() => {
+    const appId = payload?.app_id || user?.app_id || user?.id || '';
+    const raw = appId ? `${appId}_${artifactKey}` : artifactKey;
+    return raw.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 64);
+  }, [payload?.app_id, user?.app_id, user?.id, artifactKey]);
 
   const {
     filesMap,
@@ -66,9 +90,14 @@ const AppWorkbench = ({
     integrationTestResult,
     integrationPassed,
   } = useAppValidationWorkbench(payload, config);
-  const artifactVersionId = activeArtifactVersionId;
-  const artifactKind = payload?.artifact_kind || payload?.artifactKind || 'app_bundle';
-  const artifactKey = payload?.artifact_key || payload?.artifactKey || artifactKind;
+
+  const {
+    sandboxStatus,
+    livePreviewUrl,
+    sandboxError: sandboxSyncError,
+    syncing: sandboxSyncing,
+    syncAndRestart,
+  } = useSandbox(sandboxArtifactId);
 
   React.useEffect(() => {
     setActiveArtifactVersionId(payload?.artifact_version_id || payload?.artifactVersionId || null);
@@ -152,26 +181,82 @@ const AppWorkbench = ({
     return () => { cancelled = true; };
   }, [artifactVersionId]);
 
-  const buildRefinementTriggerPayload = (harnessAction = null) => {
-    const payload = {
+  const buildRefinementTriggerPayload = (harnessAction = null, overrideArtifactKind = null) => {
+    const resolvedArtifactKind = overrideArtifactKind || artifactKind;
+    const isThemeRefinement = overrideArtifactKind === 'theme_config';
+    const triggerPayload = {
       refinement_request: {
-        artifact_kind: artifactKind,
+        artifact_kind: resolvedArtifactKind,
         artifact_key: artifactKey,
         artifact_version_id: artifactVersionId,
         raw_user_request: refinementRequest.trim(),
         source_surface: 'app_workbench',
       },
     };
-    if (selectedPath && scopeFiles[selectedPath] != null) {
-      payload.coding_request = {
+
+    if (isThemeRefinement) {
+      // Carry the current theme config so ThemeCapture can use it as
+      // parent_theme_config. Must live inside refinement_request.extra because
+      // RefinementRequest uses extra="forbid" — top-level unknown fields fail
+      // Pydantic validation on the server.
+      if (config && typeof config === 'object' && Object.keys(config).length > 0) {
+        triggerPayload.refinement_request.extra = {
+          ...(triggerPayload.refinement_request.extra || {}),
+          parent_theme_config: config,
+        };
+      }
+      // Scope the coding request explicitly to theme files so the scope
+      // proposer is bypassed. Without this it would try to load a
+      // theme_config artifact from the store, which may not exist yet.
+      const themeFilePath = _THEME_FILE_CANDIDATES.find(
+        (p) => filesMap?.[p] != null
+      );
+      if (themeFilePath) {
+        triggerPayload.coding_request = {
+          files: { [themeFilePath]: filesMap[themeFilePath] },
+          validation_strategy: validationStrategy || 'skip',
+        };
+      }
+    } else if (selectedPath && scopeFiles[selectedPath] != null) {
+      triggerPayload.coding_request = {
         files: scopeFiles,
         validation_strategy: validationStrategy || 'skip',
       };
     }
+
     if (harnessAction && typeof harnessAction === 'object') {
-      payload.harness_action = harnessAction;
+      triggerPayload.harness_action = harnessAction;
     }
-    return payload;
+    return triggerPayload;
+  };
+
+  // Shared handler for any refinement response. Handles coding_worker patches
+  // (updates filesMap, syncs sandbox, advances artifact version) and
+  // harness_decision responses (routes user to a confirmation action).
+  const handleRefinementResponse = (response) => {
+    if (!response) {
+      if (workflowStartError) setRefinementError(workflowStartError);
+      return;
+    }
+    if (response.execution_mode === 'coding_worker') {
+      const appliedFiles = response?.coding_worker?.applied_files || {};
+      if (typeof appliedFiles === 'object' && Object.keys(appliedFiles).length > 0) {
+        const mergedFilesMap = { ...(filesMap || {}), ...appliedFiles };
+        setFilesMap(mergedFilesMap);
+        // Sync to the e2b sandbox whenever one is active (either from the
+        // initial build or from a previous refinement sync).
+        if (previewUrl || livePreviewUrl) {
+          syncAndRestart(mergedFilesMap);
+        }
+      }
+      const nextVersionId = response?.coding_worker?.metadata?.artifact_version_id || null;
+      if (nextVersionId) setActiveArtifactVersionId(nextVersionId);
+      setRefinementResult(response);
+      return;
+    }
+    if (response.execution_mode === 'harness_decision') {
+      setRefinementResult(response);
+    }
   };
 
   const handleApplyScopedRefinement = async () => {
@@ -188,33 +273,28 @@ const AppWorkbench = ({
     const response = await startWorkflow(
       null,
       {},
-      {
-        trigger_source: 'refinement',
-        trigger_payload: buildRefinementTriggerPayload(),
-      }
+      { trigger_source: 'refinement', trigger_payload: buildRefinementTriggerPayload() }
     );
+    handleRefinementResponse(response);
+  };
 
-    if (response?.execution_mode === 'coding_worker') {
-      const appliedFiles = response?.coding_worker?.applied_files || {};
-      if (appliedFiles && typeof appliedFiles === 'object' && Object.keys(appliedFiles).length > 0) {
-        setFilesMap((prev) => ({ ...(prev || {}), ...appliedFiles }));
-      }
-      const nextArtifactVersionId = response?.coding_worker?.metadata?.artifact_version_id || null;
-      if (nextArtifactVersionId) {
-        setActiveArtifactVersionId(nextArtifactVersionId);
-      }
-      setRefinementResult(response);
+  const handleThemeRefinement = async () => {
+    setRefinementError(null);
+    setRefinementResult(null);
+    if (!artifactVersionId) {
+      setRefinementError('No artifact version available for theme refinement.');
       return;
     }
-
-    if (response?.execution_mode === 'harness_decision') {
-      setRefinementResult(response);
+    if (!refinementRequest.trim()) {
+      setRefinementError('Describe the theme change you want applied.');
       return;
     }
-
-    if (!response && workflowStartError) {
-      setRefinementError(workflowStartError);
-    }
+    const response = await startWorkflow(
+      null,
+      {},
+      { trigger_source: 'refinement', trigger_payload: buildRefinementTriggerPayload(null, 'theme_config') }
+    );
+    handleRefinementResponse(response);
   };
 
   const handleHarnessDecisionAction = async (action) => {
@@ -223,14 +303,9 @@ const AppWorkbench = ({
     const response = await startWorkflow(
       null,
       {},
-      {
-        trigger_source: 'refinement',
-        trigger_payload: buildRefinementTriggerPayload({ action_id: action.action_id }),
-      }
+      { trigger_source: 'refinement', trigger_payload: buildRefinementTriggerPayload({ action_id: action.action_id }) }
     );
-    if (response?.execution_mode === 'coding_worker' || response?.execution_mode === 'harness_decision') {
-      setRefinementResult(response);
-    }
+    handleRefinementResponse(response);
   };
 
   const handleArtifactReviewAction = async (action) => {
@@ -423,8 +498,18 @@ const AppWorkbench = ({
             >
               {refinementStarting ? 'Applying...' : 'Apply scoped refinement'}
             </button>
+            <button
+              type="button"
+              className={toolbarBtn(canApplyScopedRefinement && !refinementStarting)}
+              disabled={!canApplyScopedRefinement || refinementStarting}
+              onClick={handleThemeRefinement}
+              title="Routes through ThemeCapture for design-level changes; uses the coding worker for small patches."
+            >
+              {refinementStarting ? 'Applying...' : 'Redesign theme'}
+            </button>
             <div className="text-xs text-[var(--color-text-muted)]">
-              If a file is selected, it is sent as explicit coding scope. Otherwise the control-plane harness proposes scope from the artifact workspace.
+              Use <span className="font-medium text-white/70">Apply scoped refinement</span> for code or layout changes.
+              Use <span className="font-medium text-white/70">Redesign theme</span> for colors, fonts, or full visual identity.
             </div>
           </div>
 
@@ -482,14 +567,20 @@ const AppWorkbench = ({
                 onChange={(val) => updateFileContent(selectedPath, val)}
               />
               <div className="text-[10px] text-[var(--color-text-muted)] mt-2">
-                Editor changes are local to your browser session (not yet synced back to the runtime).
+                Editor changes are local to your browser session. Use scoped refinement to apply and sync a patch.
               </div>
             </div>
           )}
 
           {(showSplit || showPreview) && (
             <div className={showSplit ? 'col-span-4' : 'col-span-12'}>
-              <E2BPreviewArtifact previewUrl={previewUrl} config={config} />
+              <E2BPreviewArtifact
+                previewUrl={livePreviewUrl || previewUrl}
+                sandboxStatus={sandboxStatus}
+                sandboxSyncing={sandboxSyncing}
+                sandboxError={sandboxSyncError}
+                config={config}
+              />
             </div>
           )}
         </div>

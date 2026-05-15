@@ -273,6 +273,8 @@ export default defineConfig(({ mode }) => {
     alias: {
       // ── Core aliases (always present) ───────────────────────────────────
       '@mozaiks/chat-ui': chatUiSrcRoot,
+      '@mozaiks/factory-app-ui': path.resolve(factoryAppRoot, 'app/ui/index.js'),
+      '@mozaiks/factory-admin': path.resolve(factoryAppRoot, 'app/admin/index.js'),
       '@chat-workflows-root': platformWorkflowRoot,
       'react-native':     'react-native-web',
       // Ensure files imported from sibling product/workflow folders resolve to

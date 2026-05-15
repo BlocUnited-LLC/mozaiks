@@ -129,6 +129,7 @@ tabs, or transition options by default.
 {
   "id": "build",
   "description": "Full build pipeline.",
+  "affected_declarative_families": ["concept", "brand", "design_docs", "workflow_bundle", "app_bundle"],
   "steps": [
     { "transition": "app_type_selector" },
     { "workflows": ["ValueEngine"] },
@@ -148,6 +149,8 @@ Rules:
 - Use `{ "transition": "<id>" }` when a completed workflow should pause on a surfaced checkpoint before the next workflow starts.
 - Use `entrypoints[].sequence` to declare the default journey entered by a route.
 - Use `transitions[].options[].sequence` when a user choice must switch from the route's default journey into a different authored sequence.
+- Use `affected_declarative_families` on sequences when the builder control
+  plane needs to derive artifact invalidation impact from the selected route.
 - Do not place a workflow in the same or earlier step as one of its required dependencies.
 - If `B` depends on `A`, author the sequence as `A` in an earlier step and `B` in a later step.
 - Do not list the same workflow more than once in a sequence.
@@ -171,17 +174,26 @@ The app shell enters a transition directly:
 }
 ```
 
-Optional header pills are declared separately in `shell.json`:
+Optional shell CTAs are declared separately in `shell.json`:
 
 ```json
 {
   "header": {
-    "pages": [
-      { "path": "/create", "label": "Create App" }
+    "actions": [
+      {
+        "id": "create-app",
+        "intent": "create_app",
+        "label": "Create App",
+        "path": "/create"
+      }
     ]
   }
 }
 ```
+
+If the CTA needs to change during an active workflow session, use semantic shell
+action variants in `shell.json`; do not put route override logic in the
+workflow registry.
 
 `RouteRenderer` mounts `TransitionScreen`, and transition resolution calls
 `/api/transitions/resolve`. If the result is another transition, the shell mounts

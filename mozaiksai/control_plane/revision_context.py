@@ -131,7 +131,6 @@ def _routing_summary(pack: LoadedControlPlanePack, artifact_kind: Optional[str])
         def route_summary(route: Any) -> dict[str, Any]:
             return {
                 "workflow_sequence": route.workflow_sequence,
-                "route_to": route.route_to,
             }
 
         current_routes = {

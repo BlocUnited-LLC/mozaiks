@@ -303,13 +303,6 @@ source:
   module_id: investor_marketplace
 ```
 
-```yaml
-type: hosted.communication.message.sent
-source:
-  layer: hosted
-  module_id: communications
-```
-
 ## Module Event Files
 
 ### `events.yaml`

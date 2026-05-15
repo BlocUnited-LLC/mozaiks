@@ -31,9 +31,8 @@ Common branding tasks include:
 
 - updating logos and icons
 - adjusting theme tokens
-- changing header actions or footer links
 - changing the startup route
-- configuring auth-facing shell chrome
+- choosing shell chrome modes and app-wide placement policy
 
 ## Read Next
 

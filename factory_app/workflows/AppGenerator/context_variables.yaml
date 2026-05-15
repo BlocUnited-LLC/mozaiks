@@ -651,6 +651,16 @@ definitions:
     source:
       type: computed
       default: null
+  admin_registry:
+    type: object
+    description: >
+      AdminRegistry dict persisted by save_admin_registry after AdminRegistryAgent runs.
+      Contains schema_version and pages[] (id, label, path, icon, order, enabled, scope).
+      Used by the module contract quality gate to validate that every admin.yaml panel
+      `page` field references a declared page id. Null until AdminRegistryAgent completes.
+    source:
+      type: computed
+      default: null
   module_contract_quality_status:
     type: string
     description: >
@@ -822,8 +832,14 @@ agents:
     - agent_websocket_url
     - generated_workflow_capability_id
     - generated_workflow_trigger_events
+  AdminRegistryAgent:
+    variables:
+    - app_build_plan
+    - available_hosted_packs
+    - admin_registry
   ModuleContractQualityAgent:
     variables:
+    - admin_registry
     - module_contract_quality_status
     - module_contract_quality_warnings
   ModelAgent:

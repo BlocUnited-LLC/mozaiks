@@ -6,7 +6,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { ExternalLink, RefreshCw } from 'lucide-react';
 
-const E2BPreviewArtifact = ({ previewUrl, config = {} }) => {
+const E2BPreviewArtifact = ({ previewUrl, sandboxStatus, sandboxSyncing, sandboxError, config = {} }) => {
   const previewCfg = config?.artifacts?.['e2b-preview'] || {};
   const [iframeKey, setIframeKey] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -24,13 +24,27 @@ const E2BPreviewArtifact = ({ previewUrl, config = {} }) => {
     setIframeKey((k) => k + 1);
   }, []);
 
+  const isRestarting = sandboxSyncing || sandboxStatus === 'starting';
+
   if (!url) {
     return (
       <div className="rounded-xl border border-white/10 bg-black/30 p-4">
-        <div className="text-sm text-[var(--color-text-muted)]">No preview URL available.</div>
-        <div className="text-xs text-[var(--color-text-muted)] mt-1">
-          Preview URLs are typically available for <span className="font-mono">e2b</span> validation runs with <span className="font-mono">start_dev_server=true</span>.
-        </div>
+        {isRestarting ? (
+          <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+            <div className="h-4 w-4 border-2 border-[var(--color-primary-light)] border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            Restarting preview...
+          </div>
+        ) : (
+          <>
+            <div className="text-sm text-[var(--color-text-muted)]">No preview URL available.</div>
+            <div className="text-xs text-[var(--color-text-muted)] mt-1">
+              Preview URLs are typically available for <span className="font-mono">e2b</span> validation runs with <span className="font-mono">start_dev_server=true</span>.
+            </div>
+          </>
+        )}
+        {sandboxError && (
+          <div className="mt-2 text-xs text-red-300">{sandboxError}</div>
+        )}
       </div>
     );
   }
@@ -64,6 +78,17 @@ const E2BPreviewArtifact = ({ previewUrl, config = {} }) => {
       </div>
 
       <div className="relative h-[520px] bg-white">
+        {isRestarting && (
+          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-black/70">
+            <div className="h-7 w-7 border-2 border-[var(--color-primary-light)] border-t-transparent rounded-full animate-spin" />
+            <div className="text-xs text-[var(--color-text-muted)]">Applying patch and restarting preview...</div>
+          </div>
+        )}
+        {sandboxError && !isRestarting && (
+          <div className="absolute top-2 left-2 right-2 z-20 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+            {sandboxError}
+          </div>
+        )}
         {error && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-black/60 p-6 text-center">
             <div className="text-sm font-semibold text-[var(--color-error)]">Preview failed to load</div>

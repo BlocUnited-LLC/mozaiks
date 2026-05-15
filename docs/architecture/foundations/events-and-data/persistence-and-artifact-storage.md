@@ -84,7 +84,6 @@ App-owned product data managed by generated or hosted modules:
 - campaigns
 - investors
 - payouts
-- communications
 - other module-owned collections
 
 This data is not builder metadata. It belongs to app module boundaries and must

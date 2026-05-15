@@ -178,7 +178,7 @@ class TestShellConfig:
 
     def test_has_compact_shell_shortcuts(self, shell):
         shortcuts = shell["shortcuts"]
-        assert "profile" in shortcuts
+        assert shortcuts["profile"] == ["profile", "admin_portal", "signout"]
         assert "mobile" in shortcuts
         assert shortcuts["footer"] == ["legal", "terms", "cookies"]
         assert shortcuts["footerHideOnMobile"] is True

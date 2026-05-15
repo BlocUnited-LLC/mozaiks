@@ -173,20 +173,20 @@ def _revision_pack() -> LoadedControlPlanePack:
                         artifact_kind="business_plan_bundle",
                         label="business plan bundle",
                         routes=ControlPlaneArtifactChangeRoutesManifest(
-                            patch=ControlPlaneChangeRouteManifest(route_to="FinalMemoAssembly"),
-                            design=ControlPlaneChangeRouteManifest(route_to="ExecutiveSummary"),
-                            feature=ControlPlaneChangeRouteManifest(route_to="BusinessModel"),
-                            core=ControlPlaneChangeRouteManifest(route_to="MarketResearch"),
+                            patch=ControlPlaneChangeRouteManifest(workflow_sequence="business_plan_patch"),
+                            design=ControlPlaneChangeRouteManifest(workflow_sequence="business_plan_design"),
+                            feature=ControlPlaneChangeRouteManifest(workflow_sequence="business_plan_feature"),
+                            core=ControlPlaneChangeRouteManifest(workflow_sequence="business_plan_core"),
                         ),
                     ),
                     ControlPlaneArtifactRoutingManifest(
                         artifact_kind="executive_summary",
                         label="executive summary",
                         routes=ControlPlaneArtifactChangeRoutesManifest(
-                            patch=ControlPlaneChangeRouteManifest(route_to="ExecutiveSummary"),
-                            design=ControlPlaneChangeRouteManifest(route_to="ExecutiveSummary"),
-                            feature=ControlPlaneChangeRouteManifest(route_to="ExecutiveSummary"),
-                            core=ControlPlaneChangeRouteManifest(route_to="MarketResearch"),
+                            patch=ControlPlaneChangeRouteManifest(workflow_sequence="executive_summary_patch"),
+                            design=ControlPlaneChangeRouteManifest(workflow_sequence="business_plan_design"),
+                            feature=ControlPlaneChangeRouteManifest(workflow_sequence="business_plan_design"),
+                            core=ControlPlaneChangeRouteManifest(workflow_sequence="business_plan_core"),
                         ),
                     ),
                 ],
@@ -355,7 +355,7 @@ async def test_revision_context_tool_assembles_runtime_session_and_artifact_stat
     )
 
     assert revision_context["present"] is True
-    assert revision_context["routing"]["current_artifact"]["routes"]["core"]["route_to"] == "MarketResearch"
+    assert revision_context["routing"]["current_artifact"]["routes"]["core"]["workflow_sequence"] == "business_plan_core"
     assert revision_context["session"]["sequence_status"] == "revising"
     assert revision_context["session"]["active_change_request_id"] == "cr_1"
     assert revision_context["current_artifact"]["artifact_version_id"] == "av_bp_2"

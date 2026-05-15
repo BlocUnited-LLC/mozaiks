@@ -165,6 +165,7 @@ def test_app_generator_page_contract_stays_declarative() -> None:
         "AdminRegistryAgent",
         "AssemblyAgent",
         "DatabaseAgent",
+        "ControlPlaneAgent",
         "ConfigMiddlewareAgent",
         "ModuleContractQualityAgent",
         "ModelAgent",
@@ -174,6 +175,7 @@ def test_app_generator_page_contract_stays_declarative() -> None:
         "ServiceAgent",
         "FrontendStubAgent",
         "ControllerAgent",
+        "ControlPlaneAgent",
     }
     connected_agents = {
         rule[side]
@@ -238,6 +240,8 @@ def test_generated_workflow_ui_contract_is_co_located_with_workflow_pack() -> No
     assert "mozaiks-platform/app/workflows" not in registry
     assert "const namespacedComponentName = `${workflowName}:${componentName}`;" in registry
     assert "'@chat-workflows-root': platformWorkflowRoot" in app_vite
+    assert "'@mozaiks/factory-app-ui': path.resolve(factoryAppRoot, 'app/ui/index.js')" in app_vite
+    assert "'@mozaiks/factory-admin': path.resolve(factoryAppRoot, 'app/admin/index.js')" in app_vite
     assert "@chat-workflows-root-secondary" not in app_vite
     assert "'@chat-workflows-root': fileURLToPath(new URL('./src/workflows_stub', import.meta.url))" in embed_vite
     assert "../mozaiks-platform/" not in tailwind
@@ -281,7 +285,6 @@ def test_repo_owned_workflow_ui_barrels_register_top_level_surfaces() -> None:
     assert "ConceptBlueprint" in value_index
 
     assert "import { useAppValidationWorkbench } from './useAppValidationWorkbench';" in app_workbench
-    assert "theme_config.json" not in app_workbench
     assert "@mozaiks/chat-ui/core/ui/DownloadCenter.js" in export_actions
 
 
@@ -512,7 +515,7 @@ def test_frontend_prompts_enforce_theme_shell_ownership_boundaries() -> None:
     agent_generator = _read("factory_app/workflows/AgentGenerator/agents.yaml")
 
     assert "theme_config_patch` owns visual tokens only" in app_generator
-    assert "shell_config` owns shell content/behavior only" in app_generator
+    assert "shell_config` owns only app-wide shell behavior" in app_generator
     assert "asset_manifest` owns reusable media inventory metadata" in app_generator
     assert "custom_route_bundle" in app_generator
     assert "use `PageFrame` from `@mozaiks/chat-ui`" in app_generator

@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import pytest
+import yaml
+
 from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
+from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+    extract_code_file_map_from_payload as extract_appgenerator_code_file_map,
+)
 from mozaiksai.core.workflow.generator_support.code_files import (
     extract_code_file_entries_from_payload,
     extract_code_file_map_from_payload,
@@ -154,6 +160,113 @@ def test_extract_code_file_entries_sorts_typed_materialized_files() -> None:
     filenames = [entry["filename"] for entry in entries]
 
     assert filenames == sorted(filenames)
+
+
+def test_appgenerator_extract_code_file_map_materializes_typed_control_plane_pack() -> None:
+    payload = {
+        "control_plane_pack": {
+            "control_plane_yaml": {
+                "schema_version": "mozaiks.control_plane",
+                "profile": {
+                    "id": "app_refinement_harness",
+                    "display_name": "App Refinement Harness",
+                    "description": "App-local refinement harness.",
+                },
+                "harness": {
+                    "implementation": "mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness",
+                    "supported_trigger_sources": ["refinement"],
+                },
+                "routing": {
+                    "default_artifact_kind": "app_bundle",
+                    "artifacts": [
+                        {
+                            "artifact_kind": "app_bundle",
+                            "label": "app bundle",
+                            "routes": {
+                                "patch": {
+                                    "workflow_sequence": "app_revision",
+                                }
+                            },
+                        }
+                    ],
+                },
+                "checkpoints": [],
+            },
+            "tools_yaml": {
+                "schema_version": "mozaiks.control_plane.tools",
+                "tools": [],
+            },
+            "policies_yaml": {
+                "scope": {
+                    "max_files": 12,
+                }
+            },
+            "prompt_files": [
+                {
+                    "id": "change classifier system",
+                    "filename": "",
+                    "content": "Classify the refinement request.",
+                }
+            ],
+        },
+        "code_files": [
+            {
+                "filename": "control_plane/config/control_plane.yaml",
+                "content": "BROKEN",
+            }
+        ],
+    }
+
+    file_map = extract_appgenerator_code_file_map(payload)
+
+    assert set(file_map) == {
+        "control_plane/config/control_plane.yaml",
+        "control_plane/config/tools.yaml",
+        "control_plane/config/policies.yaml",
+        "control_plane/prompts/change_classifier_system.yaml",
+    }
+    assert yaml.safe_load(file_map["control_plane/config/control_plane.yaml"])["routing"]["artifacts"][0]["routes"]["patch"] == {
+        "workflow_sequence": "app_revision",
+    }
+    assert yaml.safe_load(file_map["control_plane/config/tools.yaml"]) == {
+        "schema_version": "mozaiks.control_plane.tools",
+        "tools": [],
+    }
+    assert yaml.safe_load(file_map["control_plane/prompts/change_classifier_system.yaml"]) == {
+        "id": "change classifier system",
+        "content": "Classify the refinement request.",
+    }
+
+
+def test_appgenerator_control_plane_pack_rejects_prompt_paths_outside_pack() -> None:
+    payload = {
+        "control_plane_pack": {
+            "control_plane_yaml": {
+                "schema_version": "mozaiks.control_plane",
+                "profile": {"id": "demo", "display_name": "Demo", "description": "Demo"},
+                "harness": {
+                    "implementation": "mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness",
+                    "supported_trigger_sources": ["refinement"],
+                },
+                "routing": {"default_artifact_kind": "app_bundle", "artifacts": []},
+                "checkpoints": [],
+            },
+            "tools_yaml": {
+                "schema_version": "mozaiks.control_plane.tools",
+                "tools": [],
+            },
+            "prompt_files": [
+                {
+                    "id": "unsafe_prompt",
+                    "filename": "prompts/unsafe_prompt.yaml",
+                    "content": "No.",
+                }
+            ],
+        }
+    }
+
+    with pytest.raises(ValueError, match="control-plane prompt files"):
+        extract_appgenerator_code_file_map(payload)
 
 
 def test_assembly_phase_merges_typed_service_and_frontend_outputs() -> None:

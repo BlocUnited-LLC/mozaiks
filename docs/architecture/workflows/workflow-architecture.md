@@ -106,17 +106,22 @@ generation-core workflows, and the directory should stay absent until the
 factory app actually owns a workflow that is not part of the shared builder
 layer.
 
-Workflow resolution is single-root.
+Workflow resolution is single-root by default.
 
 - Studio binds to `factory_app/workflows/` as the shared builder root
 - app/product hosts bind to the active app root's `workflows/` directory when
   the app owns workflows there
 - `MOZAIKS_WORKFLOWS_PATH` may override the selected root explicitly
 
-The runtime does not auto-merge app and factory workflow roots. That is the
-composition contract between an active app workspace and `factory_app`: a given
-host/session executes one selected workflow root, and `factory_app/workflows/`
-remains the shared builder layer for Studio/builder execution.
+The runtime does not auto-merge app and factory workflow roots in normal
+platform/studio execution. That is the composition contract between an active
+app workspace and `factory_app`: a given host/session executes one selected
+workflow root, and `factory_app/workflows/` remains the shared builder layer
+for Studio/builder execution.
+
+Hosted product exception:
+
+- the `mozaiks` host may compose hosted app workflow roots with `factory_app/workflows/` so hosted product workflows and shared builder workflows are both available.
 
 Builder workflows may generate new workflow bundles, but generated output is
 staged under `MOZAIKS_GENERATED_ARTIFACTS_PATH` and is not runtime-loaded until

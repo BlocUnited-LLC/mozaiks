@@ -16,17 +16,19 @@ import { useWorkspaceConsoleData } from './useWorkspaceConsoleData.js'
 
 
 function exportUsageCsv(rows) {
-  const headers = ['workflow', 'apps', 'runs', 'input_tokens', 'output_tokens', 'total_tokens', 'cost', 'errors']
+  const headers = ['app', 'workflows', 'runs', 'input_tokens', 'output_tokens', 'total_tokens', 'avg_tokens_per_run', 'cost', 'avg_cost_per_run', 'errors']
   const lines = [
     headers.join(','),
     ...rows.map((row) => [
       JSON.stringify(row.label),
-      JSON.stringify(row.appsLabel),
+      JSON.stringify(row.workflowLabel),
       JSON.stringify(row.runs),
       JSON.stringify(row.inputTokens),
       JSON.stringify(row.outputTokens),
       JSON.stringify(row.totalTokens),
+      JSON.stringify(Math.round(row.avgTokens)),
       JSON.stringify(row.cost),
+      JSON.stringify(row.avgCost),
       JSON.stringify(row.errors),
     ].join(',')),
   ]
@@ -41,57 +43,71 @@ function exportUsageCsv(rows) {
   URL.revokeObjectURL(url)
 }
 
-function buildWorkflowRows(runs) {
+function buildAppRows(runs, appNameMap) {
   const groups = new Map()
 
   for (const run of Array.isArray(runs) ? runs : []) {
-    const key = run?.workflow_name || 'Unknown workflow'
-    if (!groups.has(key)) {
-      groups.set(key, {
-        label: key,
-        apps: new Set(),
+    const appId = run?.app_id || 'unknown'
+    const appName = appNameMap[appId] || appId || 'Unknown app'
+    if (!groups.has(appId)) {
+      groups.set(appId, {
+        id: appId,
+        label: appName,
         runs: 0,
         inputTokens: 0,
         outputTokens: 0,
         cost: 0,
         errors: 0,
+        workflows: new Set(),
       })
     }
 
-    const current = groups.get(key)
+    const current = groups.get(appId)
     current.runs += 1
     current.inputTokens += Number(run?.prompt_tokens || 0)
     current.outputTokens += Number(run?.completion_tokens || 0)
     current.cost += Number(run?.cost || 0)
     current.errors += Number(run?.errors || 0)
-    if (run?.app_name || run?.app_id) current.apps.add(run.app_name || run.app_id)
+    if (run?.workflow_name) current.workflows.add(run.workflow_name)
   }
 
   return Array.from(groups.values())
     .map((row) => {
       const totalTokens = row.inputTokens + row.outputTokens
-      const appNames = Array.from(row.apps)
+      const workflows = Array.from(row.workflows)
       return {
         ...row,
-        id: row.label,
         totalTokens,
-        appsLabel: appNames.length > 1 ? `${appNames.length} apps` : appNames[0] || 'Workspace',
-        searchText: `${row.label} ${appNames.join(' ')}`.toLowerCase(),
+        avgTokens: row.runs > 0 ? totalTokens / row.runs : 0,
+        avgCost: row.runs > 0 ? row.cost / row.runs : 0,
+        workflowCount: workflows.length,
+        workflowLabel: workflows.length === 1 ? workflows[0] : `${workflows.length} workflows`,
+        searchText: `${row.label} ${workflows.join(' ')}`.toLowerCase(),
       }
     })
     .sort((left, right) => right.totalTokens - left.totalTokens || right.cost - left.cost)
 }
 
 export default function WorkspaceUsagePage() {
-  const { workspaceStats, workspaceRuns, loading, error, dataMode } = useWorkspaceConsoleData('Workspace usage could not be loaded.')
+  const { apps, workspaceStats, workspaceRuns, loading, error, dataMode } = useWorkspaceConsoleData('Workspace usage could not be loaded.')
   const [searchValue, setSearchValue] = useState('')
 
-  const workflowRows = useMemo(() => buildWorkflowRows(workspaceRuns), [workspaceRuns])
+  const appNameMap = useMemo(() => {
+    const map = {}
+    for (const app of Array.isArray(apps) ? apps : []) {
+      const id = app.app_id || app.app?.app_id || app.id
+      const name = app.name || app.app?.name || id
+      if (id) map[id] = name
+    }
+    return map
+  }, [apps])
+
+  const appRows = useMemo(() => buildAppRows(workspaceRuns, appNameMap), [workspaceRuns, appNameMap])
   const visibleRows = useMemo(() => {
     const search = searchValue.trim().toLowerCase()
-    if (!search) return workflowRows
-    return workflowRows.filter((row) => row.searchText.includes(search))
-  }, [workflowRows, searchValue])
+    if (!search) return appRows
+    return appRows.filter((row) => row.searchText.includes(search))
+  }, [appRows, searchValue])
   const totalInputTokens = Number(workspaceStats.total_prompt_tokens || 0)
   const totalOutputTokens = Number(workspaceStats.total_completion_tokens || 0)
   const totalTokens = totalInputTokens + totalOutputTokens
@@ -105,50 +121,50 @@ export default function WorkspaceUsagePage() {
   ]
   const columns = [
     {
-      id: 'workflow',
-      header: 'Workflow',
-      width: '24%',
+      id: 'app',
+      header: 'App',
+      width: '22%',
       render: (row) => (
         <div>
           <div className="font-semibold text-foreground">{row.label}</div>
-          <div className="mt-1 text-sm text-muted-foreground/88">{row.appsLabel}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{row.workflowLabel}</div>
         </div>
       ),
     },
     {
       id: 'runs',
       header: 'Runs',
-      width: '10%',
+      width: '8%',
       cellClassName: 'text-muted-foreground tabular-nums',
       render: (row) => formatCompactNumber(row.runs, '0'),
     },
     {
       id: 'input',
-      header: 'Input',
-      width: '12%',
+      header: 'Input tok.',
+      width: '11%',
       cellClassName: 'text-muted-foreground tabular-nums',
       render: (row) => formatCompactNumber(row.inputTokens, '0'),
     },
     {
       id: 'output',
-      header: 'Output',
-      width: '12%',
+      header: 'Output tok.',
+      width: '11%',
       cellClassName: 'text-muted-foreground tabular-nums',
       render: (row) => formatCompactNumber(row.outputTokens, '0'),
     },
     {
       id: 'total',
-      header: 'Total',
-      width: '12%',
+      header: 'Total tok.',
+      width: '11%',
       cellClassName: 'text-muted-foreground tabular-nums',
       render: (row) => formatCompactNumber(row.totalTokens, '0'),
     },
     {
-      id: 'average',
-      header: 'Avg / Run',
-      width: '12%',
+      id: 'avg_tokens',
+      header: 'Avg tok./run',
+      width: '11%',
       cellClassName: 'text-muted-foreground tabular-nums',
-      render: (row) => formatCompactNumber(row.runs > 0 ? row.totalTokens / row.runs : 0, '0'),
+      render: (row) => formatCompactNumber(Math.round(row.avgTokens), '0'),
     },
     {
       id: 'cost',
@@ -158,9 +174,16 @@ export default function WorkspaceUsagePage() {
       render: (row) => formatCurrencyValue(row.cost, '$0.00'),
     },
     {
+      id: 'avg_cost',
+      header: 'Avg cost/run',
+      width: '10%',
+      cellClassName: 'text-muted-foreground tabular-nums',
+      render: (row) => formatCurrencyValue(row.avgCost, '$0.00'),
+    },
+    {
       id: 'errors',
       header: 'Errors',
-      width: '8%',
+      width: '6%',
       render: (row) => <StatusPill tone={row.errors > 0 ? 'warning' : 'success'}>{formatCompactNumber(row.errors, '0')}</StatusPill>,
     },
   ]

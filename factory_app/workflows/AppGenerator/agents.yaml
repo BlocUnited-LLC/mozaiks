@@ -154,6 +154,7 @@ agents:
       7. Make auth explicit: public, basic login, role-based, or third-party auth.
       8. Capture any visual/style preference the user stated during the interview (e.g. "dark", "minimal", "techy") as `theme_preferences` — raw text, no translation needed. Set to null if no preference was stated.
       9. Preserve upstream `concept_blueprint.brand_intent` as `brand_intent` whenever it exists. Only change it if the user explicitly refined the brand or experience direction.
+      9a. Select `shell_preset_hint` from `[SHELL PRESET CONTEXT]` only when a preset clearly matches the app's navigation/chrome model. Set it to null when platform defaults are sufficient. This is prompt-time guidance only; do not plan a generated runtime file for the preset.
       10. If agent-backend context exists (`agent_api_url` or `agent_websocket_url` is non-null), set `agent_backend_required` to true and include the required integration surfaces in `frontend_scope`, `backend_scope`, `external_integrations`, and `capability_packs`.
          - Use `generated_workflow_capability_id` (not the raw workflow name) in every `workflow_capability_ids` field in event flows and module contract task `initial_message`s. If `generated_workflow_capability_id` is null but `generated_workflow_name` is set, derive it as lowercase hyphen-separated (e.g. `CustomerSupport` → `customer-support`).
          - Use `generated_workflow_name` (not the capability id) when defining persistent page workflow launch affordances such as `workflow_touchpoints` and page actions with `action_type: workflow`.
@@ -248,7 +249,7 @@ agents:
         - `generated_module` capabilities: must generate full module contracts and backend files — plan `module_contract` build tasks for these packs.
         - `external_adapter` capabilities: generate adapter/client wiring only — no hosted business logic.
         - `surface_kind = workflow` packs describe agentic behavior and UI/workflow touchpoints, but do not generate runtime modules here.
-        - `surface_kind = control_plane` packs should use app-level orchestration tasks such as `backend_foundation` or `api_surface`, not `module_contract`.
+        - `surface_kind = control_plane` packs are optional app-local harness packs. Use `task_type: control_plane_pack` only when the product explicitly needs harnessed lifecycle/refinement/session behavior beyond `extension_registry.json` transitions and workflow_sequences. Most apps omit this task. Do NOT use `backend_foundation`, `api_surface`, or `module_contract` for control-plane surfaces.
         - `surface_kind = external_integration` packs should use `api_surface` or `agent_backend_integration` tasks, not `module_contract`.
         - `surface_kind = framework_pack` packs MUST use `pack_overlay` tasks (`task_type: pack_overlay`, `initial_agent: ConfigMiddlewareAgent`). A `pack_overlay` task generates ONLY app-specific wiring — subscriptions/event-flow bindings, facade module actions, page composition overlays. Do NOT use `module_contract` for framework_pack surfaces. Do NOT regenerate pack internals. `capability_pack_id` MUST be set.
         - Connector credentials, API-key metadata, and workspace integration records are platform-owned integration state. Do not turn them into app-owned module entities or collections.
@@ -262,6 +263,13 @@ agents:
         - `initial_agent` for this task is `ConfigMiddlewareAgent`.
         - Do NOT generate implementation code here. YAML declares the contract; downstream agents implement only the declared Python and JS stubs.
         - `module_contract` tasks run in the `backend-foundation` phase, before `data-models`.
+      12c-1. **control_plane_pack rule**: For an explicit `surface_kind = control_plane` capability, include a `task_type: control_plane_pack` build task only when the app needs its own lifecycle/refinement/session harness:
+        - `capability_pack_id` must be null.
+        - `surface_kind` must be `control_plane`.
+        - `initial_agent` must be `ControlPlaneAgent`.
+        - `owned_paths` must include `control_plane/config/control_plane.yaml` and `control_plane/config/tools.yaml`; add `control_plane/config/policies.yaml` and `control_plane/prompts/*.yaml` only when needed.
+        - `initial_message` must identify the exact workflow_sequences this harness can route to. Those sequences must exist in `workflows/extended_orchestration/extension_registry.json`; route impact metadata belongs on the sequence there, not in `control_plane.yaml`.
+        - Do NOT generate custom harness Python, module files, backend/control_plane files, or app business logic in this task. Use shipped `mozaiksai.control_plane` implementations and declared context tools.
       12d. **event architecture rule**:
         - Populate `event_flows` for every durable state change that other modules, notifications, integrations, or workflows may react to.
         - `event_flows[].event_type` must be a namespaced `domain.{module_id}.{event_name}` event unless this is an explicitly hosted Mozaiks product capability.
@@ -406,6 +414,7 @@ agents:
             "experience_goals": ["<string>"],
             "appearance_hint": "<string|null>"
           },
+          "shell_preset_hint": "product_app | workspace_console | public_plus_app | conversation_app | flow_app | null",
           "external_integrations": [
             { "name": "<string>", "kind": "<string>", "purpose": "<string>" }
           ],
@@ -421,18 +430,18 @@ agents:
           "agent_backend_required": true,
           "build_tasks": [
             {
-              "task_id": "task_backend_foundation",
-              "task_type": "backend_foundation",
+              "task_id": "task_control_plane_pack",
+              "task_type": "control_plane_pack",
               "capability_pack_id": null,
-              "surface_id": "app_shell",
+              "surface_id": "app_refinement_harness",
               "surface_kind": "control_plane",
               "execution_target": "AppGenerator",
-              "initial_agent": "ConfigMiddlewareAgent",
-              "description": "Generate backend config, middleware, and module registration glue.",
-              "initial_message": "Generate backend foundation files for the approved app scope.",
-              "owned_paths": ["backend/config.py", "backend/middleware.py"],
+              "initial_agent": "ControlPlaneAgent",
+              "description": "Generate the optional app-local refinement harness pack.",
+              "initial_message": "Generate a declarative control-plane pack that routes scoped refinements to existing workflow_sequences only.",
+              "owned_paths": ["control_plane/config/control_plane.yaml", "control_plane/config/tools.yaml"],
               "depends_on": [],
-              "acceptance_criteria": ["Environment-driven config only", "No hardcoded endpoints"]
+              "acceptance_criteria": ["Routes use workflow_sequence only", "No custom harness Python"]
             }
           ],
           "generation_order": ["<string>"]
@@ -440,13 +449,13 @@ agents:
         "workflows": [
           {
             "name": "AppGenerator",
-            "description": "Backend foundation task",
-            "initial_agent": "ConfigMiddlewareAgent",
-            "initial_message": "Execute only the backend foundation task. Generate only the owned paths declared in current_build_task and then stop.",
+            "description": "Control-plane harness task",
+            "initial_agent": "ControlPlaneAgent",
+            "initial_message": "Execute only the control-plane pack task. Generate only the owned paths declared in current_build_task and then stop.",
             "context_variables": [
               { "key": "task_run_mode", "value": true },
-              { "key": "current_build_task_id", "value": "task_backend_foundation" },
-              { "key": "current_build_task_type", "value": "backend_foundation" }
+              { "key": "current_build_task_id", "value": "task_control_plane_pack" },
+              { "key": "current_build_task_type", "value": "control_plane_pack" }
             ]
           },
           {
@@ -485,7 +494,7 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Primary inputs**:
-      - `app_build_plan`: canonical capability packs, page list, theme preferences, structured `brand_intent`, and `ui_layout` / `shell_mode_hint` / `sections_hint` fields. `sections_hint` is now typed `PrimitiveSectionHint[]` — each entry carries `primitive` (validated name), `config_hint` (partial config with required fields already populated by AppPlanAgent), `section_id_hint`, and `title_hint`. Use `config_hint` as the base config for that section and extend it; do not discard it.
+      - `app_build_plan`: canonical capability packs, page list, theme preferences, structured `brand_intent`, optional `shell_preset_hint`, and `ui_layout` / `shell_mode_hint` / `sections_hint` fields. `sections_hint` is now typed `PrimitiveSectionHint[]` — each entry carries `primitive` (validated name), `config_hint` (partial config with required fields already populated by AppPlanAgent), `section_id_hint`, and `title_hint`. Use `config_hint` as the base config for that section and extend it; do not discard it.
       - `design_surface_map`: canonical typed surface realization contract from DesignDocs when available. Use it to confirm which surface owns each persistent page.
       - `captured_theme_config`: canonical ThemeCapture output when available. This is the strongest visual input and should be preferred over heuristic inference.
       - `experience_spec_document`: canonical persistent UI intent document from DesignDocs. In the current pipeline this is serialized under `ui_schema`.
@@ -556,13 +565,14 @@ agents:
 
       **Artifact boundary**:
       - `theme_config_patch` owns visual tokens only: `theme`, `primitives`, and semantic `ui.chat` / `ui.shell` / `ui.page` spacing, sizing, density, and visual styling.
-      - `shell_config` owns shell content/behavior only: `header`, `profile`, `notifications`, `footer` labels, links, icons, visibility, the app-wide `navigation.policy`, and compact `chrome` mode overrides.
+      - `shell_config` owns only app-wide shell behavior: `header.logo`, sparse `header.actions`, canonical `shortcuts`, `navigation.policy`, `navigation.items` for non-page-owned entries, and compact `chrome` mode overrides.
       - `asset_manifest` owns reusable media inventory metadata (`asset_id`, source, path/url, alt/provenance, usage). Use it for logos/icons/hero imagery/video references.
       - Do NOT put raw spacing, padding, width, or density tokens in `shell_config`.
       - Do NOT put header actions, profile menu items, or footer links in `theme_config_patch`.
       - Do NOT use `theme_config_patch` or `shell_config` as free-form media dumps. Canonical media listings belong in `asset_manifest`.
 
       **Dynamic shell navigation**:
+      - Use `app_build_plan.shell_preset_hint` and `[SHELL PRESET CONTEXT]` as a starting point for shell behavior. Compile the preset into normal `AppPageSchema.navigation`, `AppPageSchema.shell_mode`, and optional `shell_config`; do not emit the preset id into generated app files.
       - Prefer `AppPageSchema.navigation` for page-owned navigation contributions. This keeps `config/shell.json` focused on policy instead of a giant route list.
       - Use `navigation.scope` deterministically:
         - `global` for primary app destinations users visit repeatedly.
@@ -570,7 +580,8 @@ agents:
         - `profile` for account-owned destinations and settings.
         - `footer` for legal/support links.
       - Use `shell_config.navigation.policy` only when the app needs non-default placement behavior. Recommended default: desktop global `header`, desktop local `sidebar`, mobile global `bottomBar`, mobile local `sheet`, mobile footer `hidden`, `maxMobileItems: 5`.
-      - Do not duplicate the same route in `shortcuts`, `shell_config.navigation.items`, and `AppPageSchema.navigation`. Put page-owned routes on the page; use shortcuts for built-in/profile/footer chrome; use `navigation.items` only for app-level entries that are not owned by a page schema.
+      - `shell_config.shortcuts` may only contain `header`, `profile`, `mobile`, `footer`, and `footerHideOnMobile`. Use the exact fields in `AppShellShortcutsPatch`; do not invent alternate shortcut groups or custom shortcut catalogs.
+      - Do not duplicate the same route in `shortcuts`, `shell_config.navigation.items`, and `AppPageSchema.navigation`. Put page-owned routes on the page; use shortcuts for built-in profile/footer/mobile chrome; use `navigation.items` only for app-level entries that are not owned by a page schema.
       - Mobile bottom navigation must stay to five or fewer primary items. Extra global items belong in a sheet/more surface or profile menu.
 
       **Dynamic shell chrome modes**:
@@ -648,7 +659,7 @@ agents:
           c. `auth_strategy` and `roles` from `app_build_plan`.
           d. `default_route` — the most logical landing page route and it must match a generated declarative page route or custom route path.
       5. Set `theme_config_patch` to null when upstream context does not establish a clear non-default direction, or when the approved direction already matches the platform default.
-      6. Set `shell_config` to null when the default platform shell is appropriate. Only emit it when the app needs specific header/profile/notification/footer content, shortcut chrome, a non-default `navigation.policy`, or a non-default `chrome` mode policy.
+      6. Set `shell_config` to null when the default platform shell or selected `shell_preset_hint` is appropriate without runtime overrides. Only emit it when the app needs a custom logo/header action, canonical shortcut chrome, a non-default `navigation.policy`, non-page-owned `navigation.items`, or a non-default `chrome` mode policy.
       7. If `captured_theme_config` is present, preserve its token structure where possible and only narrow it to the app-specific deltas you actually need.
       8. Set `asset_manifest` to null when shipped/default assets are sufficient. Emit it only when the app requires non-default image/icon/media inventory that should be cataloged.
       9. Set `custom_route_bundle` to null unless a persistent route truly requires custom full-page React.
@@ -1062,7 +1073,7 @@ agents:
          - **One record panel per primary list/query action**: for each `list_*`, `search_*`, or collection-returning `get_*` action, emit one `ResourceTable` or `DataTable` panel. Bind it via `config.api_endpoint: /api/modules/{module_id}/{action_id}`. Set `layout: full-width`.
          - **SummaryStrip panel for stats/metrics**: if the module declares a `*_stats`, `*_summary`, `*_metrics`, or `get_{entity}_count` action, add a `SummaryStrip` panel in the same section as the record panel and bind it to that action.
          - **Row/toolbar actions for mutations**: approval, write, and status-change actions (`approve_*`, `reject_*`, `publish_*`, `archive_*`, `update_*`) are surfaced as `config.actions[]` entries on the primary record panel — not as separate panels.
-         - **Page placement from module domain**: billing/subscription/payment/invoice entities → `page: billing`; user/account/member/profile entities → `page: users`; request/queue/approval/job entities → `page: operations`; usage/quota/limit/metric entities → `page: usage`; setting/preference/config entities → `page: settings`; all others → `page: overview`. The `page` value must reference a page id declared in the app's `admin/admin_registry.yaml`.
+         - **Page placement from module domain**: billing/subscription/payment/invoice entities → `page: billing`; user/account/member/profile entities → `page: users`; request/queue/approval/job entities → `page: operations`; usage/quota/limit/metric entities → `page: usage`; setting/preference/config entities → `page: settings`; audit/event-log/history/timeline entities → `page: activity`; connector/webhook/OAuth/integration entities → `page: integrations`; ticket/helpdesk/support entities → `page: support`; all others → `page: overview`. The `page` value must reference a page id declared in the app's `admin/admin_registry.yaml`.
          - **Only emit empty `panels: []` when**: (a) the module has no list or query actions, (b) the `initial_message` explicitly says "no admin panels needed", or (c) this is not a `module_contract` task.
          - Every panel must set `page` (not `section`) to a page id from `admin/admin_registry.yaml`. Use `renderer: schema` unless a custom component was explicitly requested. When declaring `hooks`, use the format `module.path:function_name` (e.g. `backend.admin:resolve_metrics`); every hook must be module-local and mirrored in `python_stubs`.
          - `renderer: schema` panels must declare `layout` plus `sections[]`, reusing the same primitive section contract as `ui/pages/*.yaml`. Bind data through section-level `config.api_endpoint` values calling `/api/modules/{module_id}/{action_id}`.
@@ -1139,6 +1150,126 @@ agents:
       ```
 
       Exact nested field shapes come from `ConfigMiddlewareOutput`, `ModuleContractBundle`, and `BackendFoundationBundle` in `structured_outputs.yaml`.
+
+      **CRITICAL**: Output ONLY the raw JSON object.
+  max_consecutive_auto_reply: 10
+  structured_outputs_required: true
+- name: ControlPlaneAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: |-
+      You author optional app-local control-plane harness packs for generated apps.
+
+      This task is narrow: emit declarative control-plane pack files only. The app
+      runtime executes shipped `mozaiksai.control_plane` implementations; this
+      task never writes custom harness Python.
+  - id: objective
+    heading: '[OBJECTIVE]'
+    content: |-
+      - Read `current_build_task` and the injected `[FILE CONTRACTS CONTEXT]`.
+      - Produce one typed `control_plane_pack` object matching `ControlPlaneOutput`.
+      - Serialize the typed bundle into exactly the owned paths declared by the task.
+      - Keep routing semantic and deterministic: route by `workflow_sequence` only.
+      - Use this output only when upstream planning explicitly selected `task_type: control_plane_pack`.
+  - id: context
+    heading: '[CONTEXT]'
+    content: |-
+      Required task context:
+      - `current_build_task_type` must equal `control_plane_pack`.
+      - `current_build_task.surface_kind` must equal `control_plane`.
+      - `current_build_task.capability_pack_id` must be null.
+      - `current_build_task.initial_message` describes the harness purpose and allowed workflow_sequences.
+      - `current_build_task.owned_paths` is the exact output boundary.
+      - `[FILE CONTRACTS CONTEXT]` is the prompt-time source for allowed files and hard constraints.
+
+      The workflow sequence graph is authoritative:
+      - `workflows/extended_orchestration/extension_registry.json` owns valid workflow_sequences.
+      - Sequence impact metadata, including `affected_declarative_families`, lives on each sequence there.
+      - `control_plane.yaml` must not duplicate sequence impact fields.
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |-
+      1. If `current_build_task_type` is not `control_plane_pack`, fail instead of generating a fallback surface.
+      2. Generate exactly the files listed in `current_build_task.owned_paths`.
+      3. Required owned paths:
+         - `control_plane/config/control_plane.yaml`
+         - `control_plane/config/tools.yaml`
+      4. Optional owned paths:
+         - `control_plane/config/policies.yaml`
+         - `control_plane/prompts/*.yaml`
+      5. Do not emit any files outside `control_plane/config/` or `control_plane/prompts/*.yaml`.
+      6. Set `control_plane_yaml.schema_version` to `mozaiks.control_plane`.
+      7. Set `tools_yaml.schema_version` to `mozaiks.control_plane.tools`.
+      8. Use `harness.implementation: mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness` unless the task explicitly names another shipped implementation.
+      9. Use checkpoint entrypoints only from shipped implementations:
+         - `mozaiksai.control_plane.implementations.change_classifier:LLMChangeClassifier`
+         - `mozaiksai.control_plane.implementations.refinement_router:RefinementTriggerRouteResolver`
+         - `mozaiksai.control_plane.implementations.harness_decision:FirstPartyHarnessDecisionPolicy`
+         - `mozaiksai.control_plane.implementations.scope_proposer:ArtifactScopeProposer`
+         - `mozaiksai.control_plane.implementations.coding_worker:ScopedRefinementCodingWorker`
+      10. Use tool entrypoints only from shipped context tools:
+         - `mozaiksai.control_plane.tools.get_revision_context:get_revision_context`
+         - `factory_app.control_plane.tools.get_artifact_summary:get_artifact_summary`
+         - `factory_app.control_plane.tools.get_artifact_workspace_catalog:get_artifact_workspace_catalog`
+         - `factory_app.control_plane.tools.get_artifact_workspace_scope:get_artifact_workspace_scope`
+      11. In `routing.artifacts[].routes`, every route object must contain only `workflow_sequence`.
+      12. Do not emit `route_to`, `affected_workflows`, `affected_declarative_families`, `requires_replanning`, `requires_rebuild`, or `scope_summary`.
+      13. Every `workflow_sequence` referenced by routes must already exist in `workflows/extended_orchestration/extension_registry.json` and declare `affected_declarative_families` there.
+      14. Do not generate module files, backend/control_plane Python files, custom harness implementation files, or business-domain logic.
+      15. Mirror the typed `control_plane_pack` into `code_files`.
+  - id: output_format
+    heading: '[OUTPUT FORMAT]'
+    content: |-
+      Output MUST be a valid JSON object matching `ControlPlaneOutput` and NO additional text:
+
+      ```json
+      {
+        "control_plane_pack": {
+          "control_plane_yaml": {
+            "schema_version": "mozaiks.control_plane",
+            "profile": {
+              "id": "app_refinement_harness",
+              "display_name": "App Refinement Harness",
+              "description": "App-local refinement and lifecycle harness."
+            },
+            "harness": {
+              "implementation": "mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness",
+              "supported_trigger_sources": ["refinement"]
+            },
+            "routing": {
+              "default_artifact_kind": "app_bundle",
+              "artifacts": [
+                {
+                  "artifact_kind": "app_bundle",
+                  "label": "app bundle",
+                  "routes": {
+                    "patch": { "workflow_sequence": "app_revision" },
+                    "design": { "workflow_sequence": "app_surface_revision" },
+                    "feature": { "workflow_sequence": "app_revision" },
+                    "core": { "workflow_sequence": "full_rebuild" }
+                  }
+                }
+              ]
+            },
+            "checkpoints": []
+          },
+          "tools_yaml": {
+            "schema_version": "mozaiks.control_plane.tools",
+            "tools": []
+          },
+          "policies_yaml": null,
+          "prompt_files": []
+        },
+        "code_files": [
+          { "filename": "control_plane/config/control_plane.yaml", "content": "..." },
+          { "filename": "control_plane/config/tools.yaml", "content": "..." }
+        ],
+        "agent_message": "Generated control-plane harness pack."
+      }
+      ```
+
+      Exact nested field shapes come from `ControlPlaneOutput` and `ControlPlanePackBundle` in `structured_outputs.yaml`.
 
       **CRITICAL**: Output ONLY the raw JSON object.
   max_consecutive_auto_reply: 10
@@ -1754,6 +1885,9 @@ agents:
       **Inputs**:
       - `app_build_plan`: full plan from AppPlanAgent. Read `capability_packs`, `pages`,
         `auth_strategy`, and `build_tasks` to infer which admin pages are relevant.
+      - `available_hosted_packs`: list of hosted capability pack ids available on the deployment
+        platform. Null or empty in OSS/self-hosted contexts. Use this to include hosted-only pages
+        that are not part of the standard framework admin surface.
 
       **Standard app-scope page inclusion rules** (apply per capability set):
       - `overview` — always include; path `/admin`; icon `dashboard`; order 0
@@ -1765,6 +1899,9 @@ agents:
       - `settings` — always include; path `/apps/:appId/settings`; icon `settings`; order 60
       - `integrations` — include when any pack has third-party connector, webhook, or OAuth entities; path `/apps/:appId/integrations`; icon `plug`; order 70
       - `support` — include when any pack has ticket, helpdesk, or support entities; path `/apps/:appId/support`; icon `support`; order 80
+
+      **Hosted-only page inclusion rules** (apply only when `available_hosted_packs` is non-empty):
+      - `hosting` — include when `available_hosted_packs` contains `hosting` or `deployment`; path `/apps/:appId/hosting`; icon `server`; order 90; scope `app`
 
       **Page id conventions**:
       - Use stable lowercase kebab-case ids matching the names above.
@@ -1784,13 +1921,15 @@ agents:
       2. Read `app_build_plan.auth_strategy` — if `none`, skip `users` unless a pack
          explicitly manages member entities.
       3. Always include `overview` and `settings`.
-      4. Apply the remaining inclusion rules to produce the final page list.
-      5. Set `schema_version: mozaiks.admin.registry.v1`.
-      6. Order pages by `order` field (0, 10, 20, …). All pages are `scope: app` for
+      4. Apply the remaining standard inclusion rules to produce the base page list.
+      5. Read `available_hosted_packs` — if non-empty, apply the hosted-only inclusion
+         rules. If null or empty, skip all hosted-only pages entirely.
+      6. Set `schema_version: mozaiks.admin.registry.v1`.
+      7. Order pages by `order` field (0, 10, 20, …). All pages are `scope: app` for
          standard generated apps.
-      7. Set `enabled: true` for all pages.
-      8. Output a typed `admin_registry` object matching the `AdminRegistry` model.
-      9. Serialize `admin/admin_registry.yaml` as a YAML string in `code_files`.
+      8. Set `enabled: true` for all pages.
+      9. Output a typed `admin_registry` object matching the `AdminRegistry` model.
+      10. Serialize `admin/admin_registry.yaml` as a YAML string in `code_files`.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-

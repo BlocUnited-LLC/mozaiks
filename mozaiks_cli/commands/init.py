@@ -956,13 +956,13 @@ Remove-Item Env:MOZAIKS_CHAT_UI_PATH -ErrorAction SilentlyContinue
 
 $env:MOZAIKS_APP_WORKSPACE_PATH = $Workspace
 $env:PLATFORM_PATH = $Workspace
-$env:MOZAIKS_HOST = "mozaiks"
+$env:MOZAIKS_HOST = "platform"
 $env:MOZAIKS_GENERATED_ARTIFACTS_PATH = (Join-Path $Workspace "generated")
 
 $uvicornArgs = @(
   "-m",
   "uvicorn",
-  "mozaiksai.hosts.mozaiks:app",
+  "mozaiksai.hosts.platform:app",
   "--host",
   $BindHost,
   "--port",
@@ -1101,7 +1101,7 @@ if (-not $npmCmd) {
 
 $env:MOZAIKS_APP_WORKSPACE_PATH = $Workspace
 $env:PLATFORM_PATH = $Workspace
-$env:MOZAIKS_HOST = "mozaiks"
+$env:MOZAIKS_HOST = "platform"
 $env:VITE_API_URL = $BackendUrl
 $env:MOZAIKS_GENERATED_ARTIFACTS_PATH = (Join-Path $Workspace "generated")
 

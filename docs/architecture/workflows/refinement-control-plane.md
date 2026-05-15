@@ -212,14 +212,11 @@ ownership:
   - `artifact_kind`
   - optional `label`
   - `routes.patch|design|feature|core.workflow_sequence`
-  - optional `routes.*.route_to` only when the sequence entry workflow needs an
-    explicit override
-  - affected declarative families / replanning flags
 
-The control plane derives affected workflows from the referenced
-`workflow_sequence` in `extension_registry.json`. Do not duplicate downstream
-workflow lists in `control_plane.yaml` unless a non-sequence route truly needs
-an explicit override.
+The control plane derives affected workflows and artifact-family impact from
+the referenced `workflow_sequence` in `extension_registry.json`. Do not
+duplicate downstream workflow lists or artifact-family lists in
+`control_plane.yaml`.
 
 This keeps the runtime generic:
 
@@ -537,6 +534,8 @@ The router should choose the smallest valid re-entry point.
 Important:
 
 - workflow sequence metadata does **not** classify the request
+- selected workflow sequence metadata supplies declared execution and artifact
+  impact after classification
 - transitions do **not** decide rebuild scope
 - AG2 handoffs do **not** own control-plane routing
 
@@ -851,9 +850,9 @@ The re-entry policy is declared by artifact kind in the selected
 
 Each route chooses a `workflow_sequence` from
 `extended_orchestration/extension_registry.json`. The sequence is the source of
-truth for downstream workflow order. The route may optionally declare
-`route_to` when it must start at a workflow other than the first workflow in the
-sequence.
+truth for downstream workflow order and artifact-family impact. If a route must
+start at a different workflow, define a dedicated sequence with that workflow
+first.
 
 Example:
 
@@ -866,35 +865,25 @@ routing:
       routes:
         patch:
           workflow_sequence: app_revision
-          affected_declarative_families: [app_bundle]
-          requires_replanning: false
-          requires_rebuild: true
         design:
           workflow_sequence: app_surface_revision
-          affected_declarative_families: [design_docs, app_bundle]
-          requires_replanning: true
-          requires_rebuild: true
         feature:
           workflow_sequence: app_revision
-          affected_declarative_families: [app_bundle]
-          requires_replanning: true
-          requires_rebuild: true
         core:
           workflow_sequence: full_rebuild
-          affected_declarative_families: [concept, design_docs, workflow_bundle, app_bundle]
-          requires_replanning: true
-          requires_rebuild: true
 ```
 
 Rules:
 
 - `workflow_sequence` is canonical for control-plane routes.
-- `affected_workflows` is derived from the sequence and should not be repeated
-  in normal first-party routes.
-- `route_to` is optional and exists only for exceptional explicit entry
-  workflow overrides.
-- `affected_declarative_families` remains in the control-plane route because it
-  describes artifact invalidation, not workflow ordering.
+- Do not declare `affected_workflows` in `control_plane.yaml`; it is derived
+  from the selected sequence.
+- Do not declare `affected_declarative_families` in `control_plane.yaml`; it is
+  declared once on the selected sequence in `extension_registry.json`.
+- Do not declare `requires_replanning`; it is derived from the typed change
+  class: `patch=false`, `design|feature|core=true`.
+- Do not declare `requires_rebuild`; control-plane rebuild decisions are
+  runtime decision outputs, not route manifest inputs.
 
 ### Backend Intake
 

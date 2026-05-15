@@ -23,6 +23,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     registry = config["registry"]
 
     assert registry["ConfigMiddlewareAgent"] == "ConfigMiddlewareOutput"
+    assert registry["ControlPlaneAgent"] == "ControlPlaneOutput"
     assert registry["DatabaseAgent"] == "DatabaseOutput"
     assert registry["ModelAgent"] == "ModelOutput"
     assert registry["ServiceAgent"] == "ServiceOutput"
@@ -46,6 +47,19 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "DatabaseOutput",
         "BackendFoundationFile",
         "BackendFoundationBundle",
+        "ControlPlaneRouteRef",
+        "ControlPlaneArtifactChangeRoutes",
+        "ControlPlaneArtifactRouting",
+        "ControlPlaneRoutingManifest",
+        "ControlPlaneProfileManifest",
+        "ControlPlaneHarnessManifestOutput",
+        "ControlPlaneCheckpointManifestOutput",
+        "ControlPlaneManifestOutput",
+        "ControlPlaneToolDefinition",
+        "ControlPlaneToolsManifestOutput",
+        "ControlPlanePromptFile",
+        "ControlPlanePackBundle",
+        "ControlPlaneOutput",
         "ModelFile",
         "ModelOutput",
         "AppBackendAdminPanel",
@@ -82,6 +96,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "BackendFoundationBundle",
         "null",
     ]
+    assert models["ControlPlaneOutput"]["fields"]["control_plane_pack"]["type"] == "ControlPlanePackBundle"
     assert models["ModuleJsStub"]["fields"]["surface"]["values"] == ["admin_component"]
     assert models["AppSchemaOutput"]["fields"]["custom_route_bundle"]["variants"] == ["AppCustomRouteBundle", "null"]
     assert models["AppManifest"]["fields"]["custom_routes"]["items"] == "str"
@@ -90,6 +105,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert models["AppPageSchema"]["fields"]["navigation"]["variants"] == ["AppPageNavigation", "null"]
     assert models["AppPageSchema"]["fields"]["shell_mode"]["variants"] == ["AppShellMode", "null"]
     assert models["AppBuildPage"]["fields"]["shell_mode_hint"]["variants"] == ["str", "null"]
+    assert models["AppBuildPlan"]["fields"]["shell_preset_hint"]["variants"] == ["str", "null"]
     assert models["AppShellMode"]["values"] == [
         "standard",
         "workspace",
@@ -102,6 +118,16 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert models["AppShellConfigPatch"]["fields"]["navigation"]["variants"] == ["AppShellNavigationPatch", "null"]
     assert models["AppShellConfigPatch"]["fields"]["chrome"]["variants"] == ["AppShellChromePatch", "null"]
     assert models["AppShellChromePatch"]["fields"]["defaultMode"]["variants"] == ["AppShellMode", "null"]
+    assert models["AppShellHeaderAction"]["fields"]["intent"]["variants"] == ["AppShellActionIntent", "null"]
+    assert models["AppShellHeaderAction"]["fields"]["variants"]["items"] == "AppShellHeaderActionVariant"
+    assert models["AppShellActionSurface"]["values"] == [
+        "console",
+        "app_console",
+        "workflow_session",
+        "transition",
+        "public",
+        "page",
+    ]
     assert models["AppShellNavigationItemPatch"]["fields"]["scope"]["values"] == ["global", "local", "profile", "footer"]
     assert models["ModuleManifest"]["fields"]["module"]["type"] == "ModuleIdentity"
     assert models["ModuleAdminManifest"]["fields"]["schema_version"]["description"] == "Must be mozaiks.admin.v2."
@@ -134,6 +160,14 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
     module_archetypes = _read_yaml("factory_app/workflows/AppGenerator/tools/module_archetypes.yaml")
 
     assert "task_type: module_contract" in source
+    assert "task_type: control_plane_pack" in source
+    assert "shell_preset_hint" in source
+    assert "[SHELL PRESET CONTEXT]" in source
+    assert "initial_agent` must be `ControlPlaneAgent`" in source
+    assert "Output MUST be a valid JSON object matching `ControlPlaneOutput`" in source
+    assert "`current_build_task_type` must equal `control_plane_pack`" in source
+    assert "ControlPlanePackBundle" in source
+    assert "Routes use workflow_sequence only" in source
     assert "backend_foundation_bundle" in source
     assert "Do NOT include an `admin_config` build task." in source
     assert "Fail the task rather than guessing a fallback mode." in source
@@ -221,6 +255,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
     assert "Use one of these exact top-level shapes:" in source
     assert "Use one of these exact bounded shapes:" in source
     assert "Exact nested field shapes come from `ConfigMiddlewareOutput`, `ModuleContractBundle`, and `BackendFoundationBundle` in `structured_outputs.yaml`." in source
+    assert "Exact nested field shapes come from `ControlPlaneOutput` and `ControlPlanePackBundle` in `structured_outputs.yaml`." in source
     assert "Exact nested field shapes come from `ControllerOutput` and `AppBackendAdminConfig` in `structured_outputs.yaml`." in source
 
 
@@ -246,6 +281,7 @@ def test_appgenerator_prompt_time_contract_artifacts_align_with_structured_outpu
     assert file_contracts["task_contracts"]["page_bundle"]["owner_agent"] == "AppSchemaAgent"
     assert file_contracts["task_contracts"]["module_contract"]["owner_agent"] == "ConfigMiddlewareAgent"
     assert file_contracts["task_contracts"]["backend_foundation"]["owner_agent"] == "ConfigMiddlewareAgent"
+    assert file_contracts["task_contracts"]["control_plane_pack"]["owner_agent"] == "ControlPlaneAgent"
     assert file_contracts["task_contracts"]["api_surface"]["owner_agent"] == "ControllerAgent"
 
     assert set(module_archetypes["archetypes"].keys()) == set(module_type_values)

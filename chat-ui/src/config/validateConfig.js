@@ -14,26 +14,110 @@
 const ICON_FILE_RE = /\.(svg|png|jpe?g|gif|webp|ico)$/i;
 const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const URL_RE = /^(https?:\/\/|\/)/;
+const SHELL_ACTION_SURFACES = new Set(['console', 'app_console', 'workflow_session', 'transition', 'public', 'page']);
+const SHELL_MODES = new Set(['standard', 'workspace', 'conversation', 'focused', 'immersive', 'public']);
+const SHELL_ACTION_WHEN_FIELDS = new Set([
+  'surface',
+  'surfaces',
+  'shellMode',
+  'shell_mode',
+  'routeGroup',
+  'route_group',
+  'workflow',
+  'workflow_id',
+  'workflowSequence',
+  'workflow_sequence',
+  'sequence',
+  'transition',
+  'transition_id',
+  'appLifecycle',
+  'app_lifecycle',
+  'hasActiveApp',
+  'has_active_app',
+]);
 
-function validateRouteOverrides(overrides, issues, file, prefix) {
-  if (overrides === undefined) return;
-  if (!Array.isArray(overrides)) {
-    issues.push({ level: 'error', file, message: `${prefix}.route_overrides must be an array.` });
+function isStringOrStringList(value) {
+  return (
+    typeof value === 'string' ||
+    (Array.isArray(value) && value.every((item) => typeof item === 'string' && item.trim()))
+  );
+}
+
+function validatePath(value, issues, file, field) {
+  if (value !== undefined && (typeof value !== 'string' || !value.startsWith('/'))) {
+    issues.push({ level: 'error', file, message: `${field} must be a route path starting with "/".` });
+  }
+}
+
+function validateShellActionWhen(when, issues, file, prefix) {
+  if (!when || typeof when !== 'object' || Array.isArray(when)) {
+    issues.push({ level: 'error', file, message: `${prefix}.when must be an object with semantic match fields.` });
     return;
   }
-  overrides.forEach((entry, i) => {
-    const entryPrefix = `${prefix}.route_overrides[${i}]`;
+
+  Object.keys(when).forEach((field) => {
+    if (!SHELL_ACTION_WHEN_FIELDS.has(field)) {
+      issues.push({ level: 'error', file, message: `${prefix}.when.${field} is not supported.` });
+    }
+  });
+  const hasCondition = Object.values(when).some((value) => (
+    value !== undefined &&
+    value !== null &&
+    (!Array.isArray(value) || value.length > 0)
+  ));
+  if (!hasCondition) {
+    issues.push({ level: 'error', file, message: `${prefix}.when must include at least one semantic match field.` });
+  }
+
+  const surface = when.surface ?? when.surfaces;
+  if (surface !== undefined) {
+    const surfaces = Array.isArray(surface) ? surface : [surface];
+    surfaces.forEach((item) => {
+      if (!SHELL_ACTION_SURFACES.has(item)) {
+        issues.push({ level: 'error', file, message: `${prefix}.when.surface must use one of ${Array.from(SHELL_ACTION_SURFACES).join(', ')}.` });
+      }
+    });
+  }
+
+  const shellMode = when.shellMode ?? when.shell_mode;
+  if (shellMode !== undefined) {
+    const modes = Array.isArray(shellMode) ? shellMode : [shellMode];
+    modes.forEach((item) => {
+      if (!SHELL_MODES.has(item)) {
+        issues.push({ level: 'error', file, message: `${prefix}.when.shellMode must use one of ${Array.from(SHELL_MODES).join(', ')}.` });
+      }
+    });
+  }
+
+  ['routeGroup', 'route_group', 'workflow', 'workflow_id', 'workflowSequence', 'workflow_sequence', 'sequence', 'transition', 'transition_id', 'appLifecycle', 'app_lifecycle'].forEach((field) => {
+    if (when[field] !== undefined && !isStringOrStringList(when[field])) {
+      issues.push({ level: 'error', file, message: `${prefix}.when.${field} must be a string or list of strings.` });
+    }
+  });
+
+  ['hasActiveApp', 'has_active_app'].forEach((field) => {
+    if (when[field] !== undefined && typeof when[field] !== 'boolean') {
+      issues.push({ level: 'error', file, message: `${prefix}.when.${field} must be true or false.` });
+    }
+  });
+}
+
+function validateShellActionVariants(variants, issues, file, prefix) {
+  if (variants === undefined) return;
+  if (!Array.isArray(variants)) {
+    issues.push({ level: 'error', file, message: `${prefix}.variants must be an array.` });
+    return;
+  }
+  variants.forEach((entry, i) => {
+    const entryPrefix = `${prefix}.variants[${i}]`;
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
       issues.push({ level: 'error', file, message: `${entryPrefix} must be an object.` });
       return;
     }
-    const when = entry.when || entry.match || entry.route;
-    if (!when || typeof when !== 'object' || Array.isArray(when)) {
-      issues.push({ level: 'error', file, message: `${entryPrefix}.when must describe a route match.` });
-    }
-    if (entry.path !== undefined && (typeof entry.path !== 'string' || !entry.path.startsWith('/'))) {
-      issues.push({ level: 'error', file, message: `${entryPrefix}.path must be a route path starting with "/".` });
-    }
+    validateShellActionWhen(entry.when, issues, file, entryPrefix);
+    validatePath(entry.path, issues, file, `${entryPrefix}.path`);
+    validatePath(entry.fallbackPath ?? entry.fallback_path, issues, file, `${entryPrefix}.fallbackPath`);
+    validatePath(entry.pathTemplate ?? entry.path_template, issues, file, `${entryPrefix}.pathTemplate`);
     if (entry.href !== undefined && (typeof entry.href !== 'string' || entry.href.length === 0)) {
       issues.push({ level: 'error', file, message: `${entryPrefix}.href must be a non-empty string.` });
     }
@@ -140,7 +224,15 @@ function validateShellConfig(config) {
         if (action.icon && !ICON_FILE_RE.test(action.icon) && !URL_RE.test(action.icon)) {
           issues.push({ level: 'error', file, message: `header.actions[${i}].icon="${action.icon}" is not a valid asset filename. Use "sparkle.svg" not "sparkle".` });
         }
-        validateRouteOverrides(action.route_overrides || action.routeOverrides, issues, file, `header.actions[${i}]`);
+        ['route_overrides', 'routeOverrides', 'route_variants', 'routeVariants'].forEach((field) => {
+          if (action[field] !== undefined) {
+            issues.push({ level: 'error', file, message: `header.actions[${i}].${field} is not supported. Use variants[].when with semantic shell context.` });
+          }
+        });
+        validateShellActionVariants(action.variants, issues, file, `header.actions[${i}]`);
+        validatePath(action.path, issues, file, `header.actions[${i}].path`);
+        validatePath(action.fallbackPath ?? action.fallback_path, issues, file, `header.actions[${i}].fallbackPath`);
+        validatePath(action.pathTemplate ?? action.path_template, issues, file, `header.actions[${i}].pathTemplate`);
         if (action.path_by_role !== undefined) {
           if (!action.path_by_role || typeof action.path_by_role !== 'object' || Array.isArray(action.path_by_role)) {
             issues.push({ level: 'error', file, message: `header.actions[${i}].path_by_role must be an object mapping role names to route paths.` });
@@ -164,12 +256,6 @@ function validateShellConfig(config) {
           }
         }
       });
-    }
-  }
-
-  if (config.landing_spot !== undefined) {
-    if (typeof config.landing_spot !== 'string' || !config.landing_spot.startsWith('/')) {
-      issues.push({ level: 'error', file, message: 'landing_spot must be a route path like "/dashboard".' });
     }
   }
 
@@ -247,19 +333,68 @@ function validateShellConfig(config) {
     if (!shortcuts || typeof shortcuts !== 'object' || Array.isArray(shortcuts)) {
       issues.push({ level: 'error', file, message: 'shortcuts must be an object.' });
     } else {
-      ['header', 'desktopHeader', 'profile', 'profileMenu', 'mobile', 'mobileBottomBar', 'footer', 'footerLinks'].forEach((key) => {
+      const allowedShortcutKeys = new Set(['header', 'profile', 'mobile', 'footer', 'footerHideOnMobile']);
+      Object.keys(shortcuts).forEach((key) => {
+        if (!allowedShortcutKeys.has(key)) {
+          issues.push({ level: 'error', file, message: `shortcuts.${key} is not supported. Use header, profile, mobile, footer, or footerHideOnMobile.` });
+        }
+      });
+      ['header', 'profile', 'mobile', 'footer'].forEach((key) => {
         if (shortcuts[key] !== undefined && (!Array.isArray(shortcuts[key]) || shortcuts[key].some((item) => typeof item !== 'string'))) {
           issues.push({ level: 'error', file, message: `shortcuts.${key} must be an array of shell primitive ids.` });
         }
       });
-      if (shortcuts.placements !== undefined && (!shortcuts.placements || typeof shortcuts.placements !== 'object' || Array.isArray(shortcuts.placements))) {
-        issues.push({ level: 'error', file, message: 'shortcuts.placements must be an object mapping shell slots to primitive id arrays.' });
-      }
-      if (shortcuts.items !== undefined && (!shortcuts.items || typeof shortcuts.items !== 'object' || Array.isArray(shortcuts.items))) {
-        issues.push({ level: 'error', file, message: 'shortcuts.items must be an object keyed by primitive id.' });
-      }
       if (shortcuts.footerHideOnMobile !== undefined && typeof shortcuts.footerHideOnMobile !== 'boolean') {
         issues.push({ level: 'error', file, message: 'shortcuts.footerHideOnMobile must be true or false.' });
+      }
+    }
+  }
+
+  const policy = config.navigation?.policy || config.navigation;
+  if (policy && typeof policy === 'object' && !Array.isArray(policy)) {
+    if (policy.max_mobile_items !== undefined) {
+      issues.push({ level: 'error', file, message: 'navigation.max_mobile_items is not supported. Use navigation.policy.maxMobileItems.' });
+    }
+    if (policy.auto_from_pages !== undefined) {
+      issues.push({ level: 'error', file, message: 'navigation.auto_from_pages is not supported. Use navigation.policy.autoFromPages.' });
+    }
+    if (policy.maxMobileItems !== undefined && (!Number.isInteger(policy.maxMobileItems) || policy.maxMobileItems < 1 || policy.maxMobileItems > 5)) {
+      issues.push({ level: 'error', file, message: 'navigation.policy.maxMobileItems must be an integer from 1 to 5.' });
+    }
+    if (policy.autoFromPages !== undefined && typeof policy.autoFromPages !== 'boolean') {
+      issues.push({ level: 'error', file, message: 'navigation.policy.autoFromPages must be true or false.' });
+    }
+  }
+
+  const chrome = config.chrome;
+  if (chrome !== undefined) {
+    if (!chrome || typeof chrome !== 'object' || Array.isArray(chrome)) {
+      issues.push({ level: 'error', file, message: 'chrome must be an object.' });
+    } else {
+      if (chrome.default_mode !== undefined) {
+        issues.push({ level: 'error', file, message: 'chrome.default_mode is not supported. Use chrome.defaultMode.' });
+      }
+      const modes = chrome.modes;
+      if (modes !== undefined && (!modes || typeof modes !== 'object' || Array.isArray(modes))) {
+        issues.push({ level: 'error', file, message: 'chrome.modes must be an object keyed by shell mode.' });
+      } else if (modes) {
+        Object.entries(modes).forEach(([mode, modePolicy]) => {
+          if (!modePolicy || typeof modePolicy !== 'object' || Array.isArray(modePolicy)) return;
+          ['topBar', 'top_bar', 'bottom_bar', 'local_nav'].forEach((field) => {
+            if (modePolicy[field] !== undefined) {
+              issues.push({ level: 'error', file, message: `chrome.modes.${mode}.${field} is not supported. Use header, bottomBar, or localNav.` });
+            }
+          });
+          ['desktop', 'mobile'].forEach((viewport) => {
+            const viewportPolicy = modePolicy[viewport];
+            if (!viewportPolicy || typeof viewportPolicy !== 'object' || Array.isArray(viewportPolicy)) return;
+            ['topBar', 'top_bar', 'bottom_bar', 'local_nav'].forEach((field) => {
+              if (viewportPolicy[field] !== undefined) {
+                issues.push({ level: 'error', file, message: `chrome.modes.${mode}.${viewport}.${field} is not supported. Use header, bottomBar, or localNav.` });
+              }
+            });
+          });
+        });
       }
     }
   }

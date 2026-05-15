@@ -626,7 +626,25 @@ def test_save_app_schema_writes_shell_and_deep_merges_theme_patch(monkeypatch, t
             "ui": {"page": {"sectionGap": "2.5rem"}, "shell": {"header": {"height": "4.5rem"}}},
         },
         shell_config={
-            "header": {"actions": [{"id": "launch", "label": "Launch", "variant": "gradient"}]},
+            "header": {
+                "actions": [
+                    {
+                        "id": "launch",
+                        "intent": "custom",
+                        "label": "Launch",
+                        "path": "/launch",
+                        "variant": "gradient",
+                        "variants": [
+                            {
+                                "when": {"surface": "workflow_session"},
+                                "label": "Open App",
+                                "pathTemplate": "/apps/{appId}",
+                                "fallbackPath": "/apps",
+                            }
+                        ],
+                    }
+                ]
+            },
             "footer": {"visible": False},
             "navigation": {
                 "policy": {
@@ -660,6 +678,7 @@ def test_save_app_schema_writes_shell_and_deep_merges_theme_patch(monkeypatch, t
 
     assert merged_shell["header"]["logo"]["src"] == "logo.svg"
     assert merged_shell["header"]["actions"][0]["label"] == "Launch"
+    assert merged_shell["header"]["actions"][0]["variants"][0]["when"]["surface"] == "workflow_session"
     assert merged_shell["footer"]["visible"] is False
     assert merged_shell["footer"]["links"][0]["label"] == "Docs"
     assert merged_shell["navigation"]["policy"]["mobile"]["local"] == "sheet"
@@ -683,6 +702,90 @@ def test_save_app_schema_rejects_invalid_shell_mode(monkeypatch, tmp_path: Path)
         save_app_schema_module.save_app_schema(
             manifest=_base_manifest(),
             pages=[page],
+            context_variables=_Context(),
+        )
+
+
+def test_save_app_schema_rejects_non_contract_shell_shortcut_fields(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+
+    with pytest.raises(ValueError, match="desktopHeader"):
+        save_app_schema_module.save_app_schema(
+            manifest=_base_manifest(),
+            pages=[_base_page()],
+            shell_config={"shortcuts": {"desktopHeader": ["dashboard"]}},
+            context_variables=_Context(),
+        )
+
+
+def test_save_app_schema_rejects_non_contract_shell_policy_fields(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+
+    with pytest.raises(ValueError, match="max_mobile_items"):
+        save_app_schema_module.save_app_schema(
+            manifest=_base_manifest(),
+            pages=[_base_page()],
+            shell_config={"navigation": {"policy": {"max_mobile_items": 4}}},
+            context_variables=_Context(),
+        )
+
+
+def test_save_app_schema_rejects_non_contract_chrome_fields(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+
+    with pytest.raises(ValueError, match="default_mode"):
+        save_app_schema_module.save_app_schema(
+            manifest=_base_manifest(),
+            pages=[_base_page()],
+            shell_config={"chrome": {"default_mode": "standard"}},
+            context_variables=_Context(),
+        )
+
+
+def test_save_app_schema_rejects_route_override_shell_actions(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+
+    with pytest.raises(ValueError, match="route_overrides"):
+        save_app_schema_module.save_app_schema(
+            manifest=_base_manifest(),
+            pages=[_base_page()],
+            shell_config={
+                "header": {
+                    "actions": [
+                        {
+                            "id": "create",
+                            "label": "Create",
+                            "path": "/create",
+                            "route_overrides": [{"when": {"pathPrefix": "/chat"}, "path": "/apps"}],
+                        }
+                    ]
+                }
+            },
+            context_variables=_Context(),
+        )
+
+
+def test_save_app_schema_rejects_path_based_shell_action_variant(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+
+    with pytest.raises(ValueError, match="when.path"):
+        save_app_schema_module.save_app_schema(
+            manifest=_base_manifest(),
+            pages=[_base_page()],
+            shell_config={
+                "header": {
+                    "actions": [
+                        {
+                            "id": "create",
+                            "label": "Create",
+                            "path": "/create",
+                            "variants": [
+                                {"when": {"path": "/chat"}, "label": "Open", "path": "/apps"}
+                            ],
+                        }
+                    ]
+                }
+            },
             context_variables=_Context(),
         )
 

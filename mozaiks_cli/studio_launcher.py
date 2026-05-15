@@ -13,7 +13,6 @@ from urllib.request import urlopen
 
 from mozaiksai.resources import (
     resolve_chat_ui_root,
-    resolve_factory_app_root,
     resolve_web_shell_root,
 )
 
@@ -98,10 +97,10 @@ def _spawn_process(
 
 
 def _resolve_backend_app_module(preferred_host: str) -> str:
-    if preferred_host in {"studio", "platform", "runtime"}:
+    if preferred_host in {"studio", "platform", "runtime", "mozaiks"}:
         return f"mozaiksai.hosts.{preferred_host}:app"
     if resolve_factory_app_root() is not None:
-        return "mozaiksai.hosts.mozaiks:app"
+        return "mozaiksai.hosts.studio:app"
     return "mozaiksai.hosts.studio:app"
 
 
@@ -114,9 +113,8 @@ def launch_studio(
     open_browser: bool = True,
     preferred_host: str = "auto",
 ) -> Dict[str, Any]:
-    factory_app_root = resolve_factory_app_root()
     web_shell_root = resolve_web_shell_root()
-    host_name = "mozaiks" if preferred_host == "auto" and factory_app_root is not None else preferred_host
+    host_name = "studio" if preferred_host == "auto" else preferred_host
     app_module = _resolve_backend_app_module(host_name)
     env = _workspace_env(workspace_root, host=host_name)
 

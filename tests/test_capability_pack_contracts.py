@@ -29,6 +29,26 @@ def _load_module(relative_path: str, module_name: str):
     return module
 
 
+def _minimal_app_build_plan(build_task: dict) -> dict:
+    return {
+        "agent_message": "Planned the product.",
+        "app_kind": "marketplace",
+        "pages": [{"name": "Home", "route": "/", "purpose": "Land on the product"}],
+        "entities": [],
+        "roles": ["admin"],
+        "auth_strategy": "role-based",
+        "backend_scope": ["app harness"],
+        "frontend_scope": ["home ui"],
+        "theme_preferences": None,
+        "brand_intent": None,
+        "capability_packs": [],
+        "external_integrations": [],
+        "agent_backend_required": False,
+        "build_tasks": [build_task],
+        "generation_order": ["control-plane"],
+    }
+
+
 class _Context:
     def __init__(self, **data) -> None:
         self.data = dict(data)
@@ -525,6 +545,197 @@ def test_app_build_plan_tool_rejects_backend_foundation_with_wrong_initial_agent
                 ],
                 "generation_order": ["backend-foundation"],
             },
+            context_variables=_Context(),
+        )
+
+
+def test_app_build_plan_tool_accepts_control_plane_pack_task() -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_tool_control_plane_pack_accept",
+    )
+    context = _Context()
+
+    result = module.app_build_plan(
+        AppBuildPlan=_minimal_app_build_plan(
+            {
+                "task_id": "task_control_plane_pack",
+                "task_type": "control_plane_pack",
+                "capability_pack_id": None,
+                "surface_id": "app_refinement_harness",
+                "surface_kind": "control_plane",
+                "execution_target": "AppGenerator",
+                "initial_agent": "ControlPlaneAgent",
+                "description": "Generate app-local refinement harness pack.",
+                "initial_message": "Route scoped refinements to app_revision.",
+                "owned_paths": [
+                    "control_plane/config/control_plane.yaml",
+                    "control_plane/config/tools.yaml",
+                    "control_plane/prompts/change_classifier_system.yaml",
+                ],
+                "depends_on": [],
+                "acceptance_criteria": ["Routes use workflow_sequence only"],
+            }
+        ),
+        context_variables=context,
+    )
+
+    assert "Build tasks: 1" in result
+    assert context.data["app_build_plan"]["build_tasks"][0]["task_type"] == "control_plane_pack"
+
+
+def test_app_build_plan_tool_rejects_control_plane_pack_with_capability_pack_id() -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_tool_control_plane_pack_pack_id_guard",
+    )
+
+    with pytest.raises(ValueError, match="capability_pack_id is not null"):
+        module.app_build_plan(
+            AppBuildPlan=_minimal_app_build_plan(
+                {
+                    "task_id": "task_control_plane_pack",
+                    "task_type": "control_plane_pack",
+                    "capability_pack_id": "refinement_harness",
+                    "surface_id": "app_refinement_harness",
+                    "surface_kind": "control_plane",
+                    "execution_target": "AppGenerator",
+                    "initial_agent": "ControlPlaneAgent",
+                    "description": "Generate app-local refinement harness pack.",
+                    "initial_message": "Route scoped refinements to app_revision.",
+                    "owned_paths": [
+                        "control_plane/config/control_plane.yaml",
+                        "control_plane/config/tools.yaml",
+                    ],
+                    "depends_on": [],
+                    "acceptance_criteria": ["Routes use workflow_sequence only"],
+                }
+            ),
+            context_variables=_Context(),
+        )
+
+
+def test_app_build_plan_tool_rejects_control_plane_pack_wrong_initial_agent() -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_tool_control_plane_pack_owner_guard",
+    )
+
+    with pytest.raises(ValueError, match="`control_plane_pack` must start at ControlPlaneAgent"):
+        module.app_build_plan(
+            AppBuildPlan=_minimal_app_build_plan(
+                {
+                    "task_id": "task_control_plane_pack",
+                    "task_type": "control_plane_pack",
+                    "capability_pack_id": None,
+                    "surface_id": "app_refinement_harness",
+                    "surface_kind": "control_plane",
+                    "execution_target": "AppGenerator",
+                    "initial_agent": "ConfigMiddlewareAgent",
+                    "description": "Generate app-local refinement harness pack.",
+                    "initial_message": "Route scoped refinements to app_revision.",
+                    "owned_paths": [
+                        "control_plane/config/control_plane.yaml",
+                        "control_plane/config/tools.yaml",
+                    ],
+                    "depends_on": [],
+                    "acceptance_criteria": ["Routes use workflow_sequence only"],
+                }
+            ),
+            context_variables=_Context(),
+        )
+
+
+def test_app_build_plan_tool_rejects_control_plane_pack_invalid_owned_path() -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_tool_control_plane_pack_path_guard",
+    )
+
+    with pytest.raises(ValueError, match="invalid control-plane pack paths"):
+        module.app_build_plan(
+            AppBuildPlan=_minimal_app_build_plan(
+                {
+                    "task_id": "task_control_plane_pack",
+                    "task_type": "control_plane_pack",
+                    "capability_pack_id": None,
+                    "surface_id": "app_refinement_harness",
+                    "surface_kind": "control_plane",
+                    "execution_target": "AppGenerator",
+                    "initial_agent": "ControlPlaneAgent",
+                    "description": "Generate app-local refinement harness pack.",
+                    "initial_message": "Route scoped refinements to app_revision.",
+                    "owned_paths": [
+                        "control_plane/config/control_plane.yaml",
+                        "control_plane/config/tools.yaml",
+                        "backend/control_plane/custom.py",
+                    ],
+                    "depends_on": [],
+                    "acceptance_criteria": ["Routes use workflow_sequence only"],
+                }
+            ),
+            context_variables=_Context(),
+        )
+
+
+def test_app_build_plan_tool_rejects_control_plane_pack_missing_required_file() -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_tool_control_plane_pack_required_guard",
+    )
+
+    with pytest.raises(ValueError, match="missing required control-plane pack paths"):
+        module.app_build_plan(
+            AppBuildPlan=_minimal_app_build_plan(
+                {
+                    "task_id": "task_control_plane_pack",
+                    "task_type": "control_plane_pack",
+                    "capability_pack_id": None,
+                    "surface_id": "app_refinement_harness",
+                    "surface_kind": "control_plane",
+                    "execution_target": "AppGenerator",
+                    "initial_agent": "ControlPlaneAgent",
+                    "description": "Generate app-local refinement harness pack.",
+                    "initial_message": "Route scoped refinements to app_revision.",
+                    "owned_paths": [
+                        "control_plane/config/control_plane.yaml",
+                    ],
+                    "depends_on": [],
+                    "acceptance_criteria": ["Routes use workflow_sequence only"],
+                }
+            ),
+            context_variables=_Context(),
+        )
+
+
+def test_app_build_plan_tool_rejects_control_plane_pack_non_yaml_prompt() -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_tool_control_plane_pack_prompt_suffix_guard",
+    )
+
+    with pytest.raises(ValueError, match="invalid control-plane pack paths"):
+        module.app_build_plan(
+            AppBuildPlan=_minimal_app_build_plan(
+                {
+                    "task_id": "task_control_plane_pack",
+                    "task_type": "control_plane_pack",
+                    "capability_pack_id": None,
+                    "surface_id": "app_refinement_harness",
+                    "surface_kind": "control_plane",
+                    "execution_target": "AppGenerator",
+                    "initial_agent": "ControlPlaneAgent",
+                    "description": "Generate app-local refinement harness pack.",
+                    "initial_message": "Route scoped refinements to app_revision.",
+                    "owned_paths": [
+                        "control_plane/config/control_plane.yaml",
+                        "control_plane/config/tools.yaml",
+                        "control_plane/prompts/change_classifier_system.txt",
+                    ],
+                    "depends_on": [],
+                    "acceptance_criteria": ["Routes use workflow_sequence only"],
+                }
+            ),
             context_variables=_Context(),
         )
 

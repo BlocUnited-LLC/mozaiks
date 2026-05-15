@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -34,6 +35,81 @@ class _FakeChangeClassifier:
         return self._result
 
 
+def _write_business_plan_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workflows_root = tmp_path / "workflows"
+    registry_root = workflows_root / "extended_orchestration"
+    registry_root.mkdir(parents=True)
+    workflows = [
+        "MarketResearch",
+        "CustomerPersona",
+        "BusinessModel",
+        "FinancialModel",
+        "RiskAnalysis",
+        "ExecutiveSummary",
+        "FinalMemoAssembly",
+    ]
+    sequences = [
+        {
+            "id": "business_plan_patch",
+            "affected_declarative_families": ["business_plan_bundle"],
+            "steps": [{"workflows": ["FinalMemoAssembly"]}],
+        },
+        {
+            "id": "business_plan_design",
+            "affected_declarative_families": ["executive_summary", "business_plan_bundle"],
+            "steps": [{"workflows": ["ExecutiveSummary"]}, {"workflows": ["FinalMemoAssembly"]}],
+        },
+        {
+            "id": "business_plan_feature",
+            "affected_declarative_families": ["business_model", "financial_model", "business_plan_bundle"],
+            "steps": [
+                {"workflows": ["BusinessModel"]},
+                {"workflows": ["FinancialModel"]},
+                {"workflows": ["ExecutiveSummary"]},
+                {"workflows": ["FinalMemoAssembly"]},
+            ],
+        },
+        {
+            "id": "business_plan_core",
+            "affected_declarative_families": [
+                "market_research",
+                "customer_persona",
+                "business_model",
+                "financial_model",
+                "executive_summary",
+                "business_plan_bundle",
+            ],
+            "steps": [
+                {"workflows": ["MarketResearch"]},
+                {"workflows": ["CustomerPersona"]},
+                {"workflows": ["BusinessModel"]},
+                {"workflows": ["FinancialModel"]},
+                {"workflows": ["RiskAnalysis"]},
+                {"workflows": ["ExecutiveSummary"]},
+                {"workflows": ["FinalMemoAssembly"]},
+            ],
+        },
+        {
+            "id": "executive_summary_patch",
+            "affected_declarative_families": ["executive_summary"],
+            "steps": [{"workflows": ["ExecutiveSummary"]}],
+        },
+    ]
+    (registry_root / "extension_registry.json").write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "workflows": [{"id": workflow} for workflow in workflows],
+                "entrypoints": [],
+                "workflow_sequences": sequences,
+                "transitions": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(workflows_root))
+
+
 def _pack() -> LoadedControlPlanePack:
     return LoadedControlPlanePack(
         path=Path("custom/control_plane"),
@@ -55,47 +131,16 @@ def _pack() -> LoadedControlPlanePack:
                         label="business plan bundle",
                         routes=ControlPlaneArtifactChangeRoutesManifest(
                             patch=ControlPlaneChangeRouteManifest(
-                                route_to="FinalMemoAssembly",
-                                affected_workflows=["FinalMemoAssembly"],
-                                affected_declarative_families=["business_plan_bundle"],
-                                requires_replanning=False,
-                                requires_rebuild=True,
+                                workflow_sequence="business_plan_patch",
                             ),
                             design=ControlPlaneChangeRouteManifest(
-                                route_to="ExecutiveSummary",
-                                affected_workflows=["ExecutiveSummary", "FinalMemoAssembly"],
-                                affected_declarative_families=["executive_summary", "business_plan_bundle"],
-                                requires_replanning=True,
-                                requires_rebuild=True,
+                                workflow_sequence="business_plan_design",
                             ),
                             feature=ControlPlaneChangeRouteManifest(
-                                route_to="BusinessModel",
-                                affected_workflows=["BusinessModel", "FinancialModel", "ExecutiveSummary", "FinalMemoAssembly"],
-                                affected_declarative_families=["business_model", "financial_model", "business_plan_bundle"],
-                                requires_replanning=True,
-                                requires_rebuild=True,
+                                workflow_sequence="business_plan_feature",
                             ),
                             core=ControlPlaneChangeRouteManifest(
-                                route_to="MarketResearch",
-                                affected_workflows=[
-                                    "MarketResearch",
-                                    "CustomerPersona",
-                                    "BusinessModel",
-                                    "FinancialModel",
-                                    "RiskAnalysis",
-                                    "ExecutiveSummary",
-                                    "FinalMemoAssembly",
-                                ],
-                                affected_declarative_families=[
-                                    "market_research",
-                                    "customer_persona",
-                                    "business_model",
-                                    "financial_model",
-                                    "executive_summary",
-                                    "business_plan_bundle",
-                                ],
-                                requires_replanning=True,
-                                requires_rebuild=True,
+                                workflow_sequence="business_plan_core",
                             ),
                         ),
                     ),
@@ -104,47 +149,16 @@ def _pack() -> LoadedControlPlanePack:
                         label="executive summary",
                         routes=ControlPlaneArtifactChangeRoutesManifest(
                             patch=ControlPlaneChangeRouteManifest(
-                                route_to="ExecutiveSummary",
-                                affected_workflows=["ExecutiveSummary"],
-                                affected_declarative_families=["executive_summary"],
-                                requires_replanning=False,
-                                requires_rebuild=True,
+                                workflow_sequence="executive_summary_patch",
                             ),
                             design=ControlPlaneChangeRouteManifest(
-                                route_to="ExecutiveSummary",
-                                affected_workflows=["ExecutiveSummary", "FinalMemoAssembly"],
-                                affected_declarative_families=["executive_summary", "business_plan_bundle"],
-                                requires_replanning=True,
-                                requires_rebuild=True,
+                                workflow_sequence="business_plan_design",
                             ),
                             feature=ControlPlaneChangeRouteManifest(
-                                route_to="ExecutiveSummary",
-                                affected_workflows=["ExecutiveSummary", "FinalMemoAssembly"],
-                                affected_declarative_families=["executive_summary", "business_plan_bundle"],
-                                requires_replanning=True,
-                                requires_rebuild=True,
+                                workflow_sequence="business_plan_design",
                             ),
                             core=ControlPlaneChangeRouteManifest(
-                                route_to="MarketResearch",
-                                affected_workflows=[
-                                    "MarketResearch",
-                                    "CustomerPersona",
-                                    "BusinessModel",
-                                    "FinancialModel",
-                                    "RiskAnalysis",
-                                    "ExecutiveSummary",
-                                    "FinalMemoAssembly",
-                                ],
-                                affected_declarative_families=[
-                                    "market_research",
-                                    "customer_persona",
-                                    "business_model",
-                                    "financial_model",
-                                    "executive_summary",
-                                    "business_plan_bundle",
-                                ],
-                                requires_replanning=True,
-                                requires_rebuild=True,
+                                workflow_sequence="business_plan_core",
                             ),
                         ),
                     ),
@@ -164,7 +178,8 @@ def _pack() -> LoadedControlPlanePack:
 
 
 @pytest.mark.asyncio
-async def test_refinement_router_uses_pack_default_artifact_kind_for_core_reentry() -> None:
+async def test_refinement_router_uses_pack_default_artifact_kind_for_core_reentry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_business_plan_registry(tmp_path, monkeypatch)
     resolver = RefinementTriggerRouteResolver(
         classifier=_FakeChangeClassifier(
             change_class="core",
@@ -196,7 +211,8 @@ async def test_refinement_router_uses_pack_default_artifact_kind_for_core_reentr
 
 
 @pytest.mark.asyncio
-async def test_refinement_router_keeps_local_patch_in_declared_owner_workflow() -> None:
+async def test_refinement_router_keeps_local_patch_in_declared_owner_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_business_plan_registry(tmp_path, monkeypatch)
     resolver = RefinementTriggerRouteResolver(
         classifier=_FakeChangeClassifier(
             change_class="patch",

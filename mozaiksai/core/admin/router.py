@@ -84,9 +84,12 @@ def _compute_session_runtime_sec(doc: dict[str, Any], *, now: datetime) -> float
     return stored_duration
 
 
-async def _build_persisted_admin_stats() -> dict[str, Any]:
+async def _build_persisted_admin_stats(*, app_id: Optional[str] = None) -> dict[str, Any]:
     coll = _get_chat_sessions_collection()
-    pipeline = [
+    pipeline: list[dict[str, Any]] = []
+    if app_id:
+        pipeline.append({"$match": {"app_id": app_id}})
+    pipeline += [
         {
             "$project": {
                 "status": 1,
@@ -235,11 +238,12 @@ async def _require_admin(
 
 @router.get("/stats")
 async def get_admin_stats(
+    app_id: Optional[str] = Query(None, description="Filter stats to a specific app"),
     user: UserPrincipal = Depends(_require_admin),
 ):
-    """Aggregate runtime stats: active chats, token usage, errors."""
+    """Aggregate runtime stats: active chats, token usage, errors. Scoped to app_id when provided."""
     try:
-        return await _build_persisted_admin_stats()
+        return await _build_persisted_admin_stats(app_id=app_id)
     except Exception as e:
         logger.warning(f"[admin] stats query failed, falling back to live runtime state: {e}")
         pm = await get_performance_manager()

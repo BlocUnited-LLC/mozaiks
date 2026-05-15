@@ -3,6 +3,13 @@ import { useLocation } from "react-router-dom";
 import { DEFAULT_HEADER_CONFIG } from "../../styles/themeProvider";
 import { useNavigation } from "../../providers/NavigationProvider";
 import { useNavigationActions } from "../../navigation/useNavigationActions";
+import {
+  deriveShellActionContext,
+  getNavigationTargetKey,
+  getUserRoles,
+  resolveShellAction,
+  resolveShellActions,
+} from "../../navigation/shellActions";
 import { useChatUI } from "../../context/ChatUIContext";
 import "./header-styles.css";
 
@@ -16,14 +23,6 @@ const resolveAssetSource = (value) => {
 };
 
 const isInternalHref = (value) => typeof value === "string" && value.startsWith("/");
-
-const getUserRoles = (user) => {
-  if (!user) return [];
-  if (Array.isArray(user.roles)) return user.roles;
-  if (Array.isArray(user.role)) return user.role;
-  if (typeof user.role === "string") return [user.role];
-  return [];
-};
 
 const getUserLabel = (user, fallback) => {
   if (!user) return fallback;
@@ -46,147 +45,6 @@ const isAuthenticatedUser = (user) => {
   return Boolean(user) && id !== "anonymous" && id !== "guest";
 };
 
-const resolveRoleScopedRoute = (mapping, roles = []) => {
-  if (!mapping || typeof mapping !== "object" || Array.isArray(mapping)) return null;
-
-  for (const role of roles) {
-    const candidate = mapping[role];
-    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
-  }
-
-  const fallback = mapping.default ?? mapping["*"];
-  if (typeof fallback === "string" && fallback.trim()) return fallback.trim();
-  return null;
-};
-
-const wildcardToRegExp = (pattern) => {
-  const escaped = pattern.replace(/[|\\{}()[\]^$+?.]/g, "\\$&").replace(/\*/g, ".*");
-  return new RegExp(`^${escaped}$`);
-};
-
-const normalizeRouteList = (value) => {
-  if (Array.isArray(value)) return value.filter((item) => typeof item === "string" && item.trim());
-  if (typeof value === "string" && value.trim()) return [value.trim()];
-  return [];
-};
-
-const queryParamMatches = (params, condition) => {
-  if (!condition) return true;
-  if (typeof condition === "string") return params.has(condition);
-  if (!condition || typeof condition !== "object" || Array.isArray(condition)) return false;
-
-  const name = condition.name || condition.key || condition.param;
-  if (typeof name !== "string" || !name.trim() || !params.has(name)) return false;
-
-  const current = params.get(name);
-  if (condition.value !== undefined) return current === String(condition.value);
-  if (Array.isArray(condition.values)) {
-    return condition.values.map((value) => String(value)).includes(current);
-  }
-  return true;
-};
-
-const routeConditionMatches = (condition, location) => {
-  if (!condition || typeof condition !== "object" || Array.isArray(condition)) return false;
-
-  const pathname = location?.pathname || "/";
-  const searchParams = new URLSearchParams(location?.search || "");
-  const exactPaths = normalizeRouteList(condition.path ?? condition.paths);
-  const prefixes = normalizeRouteList(
-    condition.pathPrefix ?? condition.path_prefix ?? condition.startsWith ?? condition.starts_with,
-  );
-  const patterns = normalizeRouteList(condition.pathPattern ?? condition.path_pattern ?? condition.pattern);
-
-  if (exactPaths.length > 0 && !exactPaths.includes(pathname)) return false;
-  if (prefixes.length > 0 && !prefixes.some((prefix) => pathname === prefix || pathname.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`))) {
-    return false;
-  }
-  if (patterns.length > 0 && !patterns.some((pattern) => wildcardToRegExp(pattern).test(pathname))) {
-    return false;
-  }
-
-  const queryParam = condition.queryParam ?? condition.query_param ?? condition.searchParam ?? condition.search_param;
-  if (queryParam !== undefined && !queryParamMatches(searchParams, queryParam)) return false;
-
-  const query = condition.query ?? condition.search;
-  if (query && typeof query === "object" && !Array.isArray(query)) {
-    for (const [key, expected] of Object.entries(query)) {
-      if (!searchParams.has(key)) return false;
-      if (expected !== true && expected !== undefined && expected !== null && searchParams.get(key) !== String(expected)) {
-        return false;
-      }
-    }
-  }
-
-  return true;
-};
-
-const resolveActionForRoute = (action, location) => {
-  if (!action || typeof action !== "object") return action;
-  const overrides = action.route_overrides || action.routeOverrides || action.route_variants || action.routeVariants;
-  if (!Array.isArray(overrides)) return action;
-
-  for (const entry of overrides) {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
-    const condition = entry.when || entry.match || entry.route || {};
-    if (!routeConditionMatches(condition, location)) continue;
-
-    const rawOverride = entry.action || entry.override || entry.set || entry;
-    const override = { ...rawOverride };
-    delete override.when;
-    delete override.match;
-    delete override.route;
-    delete override.action;
-    delete override.override;
-    delete override.set;
-
-    const resolved = { ...action, ...override, id: override.id || action.id };
-    if (override.path || override.href || override.trigger) {
-      delete resolved.path_by_role;
-      delete resolved.paths_by_role;
-      delete resolved.href_by_role;
-    }
-    return resolved;
-  }
-
-  return action;
-};
-
-const resolveActionByRole = (action, roles = []) => {
-  if (!action || typeof action !== "object") return action;
-
-  const resolved = { ...action };
-  const routeOverride = resolveRoleScopedRoute(action.path_by_role || action.paths_by_role, roles);
-  const hrefOverride = resolveRoleScopedRoute(action.href_by_role, roles);
-  const chosen = routeOverride || hrefOverride;
-
-  if (!chosen) return resolved;
-  if (chosen.startsWith("/")) {
-    resolved.path = chosen;
-    delete resolved.href;
-    return resolved;
-  }
-
-  resolved.href = chosen;
-  delete resolved.path;
-  return resolved;
-};
-
-const getNavigationTargetKey = (item) => {
-  if (!item || typeof item !== "object") return null;
-
-  const path = typeof item.path === "string" && item.path.trim() ? item.path.trim() : null;
-  if (path) return `path:${path}`;
-
-  const href = typeof item.href === "string" && item.href.trim() ? item.href.trim() : null;
-  if (href) return `href:${href}`;
-
-  const trigger = typeof item.trigger === "string" && item.trigger.trim() ? item.trigger.trim() : null;
-  if (trigger) return `trigger:${trigger}`;
-
-  return null;
-};
-
 const getDefaultProfileMenu = (user) => {
   const authed = isAuthenticatedUser(user);
   const items = [
@@ -200,13 +58,6 @@ const getDefaultProfileMenu = (user) => {
   ];
 
   if (authed) {
-    items.push({
-      id: "admin",
-      label: "Admin",
-      icon: "settings.svg",
-      action: "navigate",
-      href: "/admin",
-    });
     items.push({
       id: "signout",
       label: "Sign Out",
@@ -300,6 +151,8 @@ const ActionIcon = ({ icon, className = "h-4 w-4" }) => {
 const Header = ({
   user = null,
   chatTheme = null,
+  route = null,
+  shellMode = null,
   onAction = () => {},
   onNotificationClick = null,
 }) => {
@@ -324,18 +177,19 @@ const Header = ({
 
   const currentUser = user || { id: "anonymous", firstName: "Guest", userPhoto: null };
   const userRoles = useMemo(() => getUserRoles(currentUser), [currentUser]);
+  const shellActionContext = useMemo(
+    () => deriveShellActionContext({ location, route, shellMode, user: currentUser, roles: userRoles }),
+    [currentUser, location.pathname, location.search, route, shellMode, userRoles]
+  );
   const headerActions = useMemo(
     () => (Array.isArray(headerConfig.actions)
-      ? headerConfig.actions
-        .map((item) => resolveActionForRoute(item, location))
-        .filter((item) => item?.visible !== false)
+      ? resolveShellActions(headerConfig.actions, shellActionContext)
       : []),
-    [headerConfig.actions, location.pathname, location.search]
+    [headerConfig.actions, shellActionContext]
   );
   const visibleHeaderPages = useMemo(() => {
     const actionTargets = new Set(
       headerActions
-        .map((item) => resolveActionByRole(item, userRoles))
         .map((item) => getNavigationTargetKey(item))
         .filter(Boolean)
     );
@@ -430,8 +284,7 @@ const Header = ({
 
   const executeAction = async (action) => {
     if (!action) return;
-    const contextualAction = resolveActionForRoute(action, location);
-    const resolvedAction = resolveActionByRole(contextualAction, userRoles);
+    const resolvedAction = resolveShellAction(action, shellActionContext);
 
     if (resolvedAction.action === "signout" || resolvedAction.id === "signout") {
       await logout?.();

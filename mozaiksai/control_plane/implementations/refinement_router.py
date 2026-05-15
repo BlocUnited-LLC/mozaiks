@@ -157,10 +157,8 @@ class RefinementTriggerRouteResolver:
             core=policy.routes.core,
         )
 
-    @staticmethod
-    def _families_for_route(route: ControlPlaneChangeRouteManifest, artifact_kind: str) -> list[str]:
-        families = [str(item).strip() for item in route.affected_declarative_families if str(item).strip()]
-        return families or [artifact_kind]
+    def _families_for_route(self, route: ControlPlaneChangeRouteManifest, artifact_kind: str) -> list[str]:
+        return self._sequence_families(route.workflow_sequence) or [artifact_kind]
 
     @staticmethod
     def _sequence_workflows(sequence_id: Optional[str]) -> list[str]:
@@ -184,22 +182,30 @@ class RefinementTriggerRouteResolver:
             raise RuntimeError(f"Control-plane workflow_sequence '{sid}' does not contain workflow steps.")
         return workflows
 
+    @staticmethod
+    def _sequence_families(sequence_id: Optional[str]) -> list[str]:
+        sid = str(sequence_id or "").strip()
+        if not sid:
+            return []
+        pack = load_global_pack_graph()
+        if pack is None:
+            raise RuntimeError(
+                f"Control-plane route references workflow_sequence '{sid}', but no extension registry is loaded."
+            )
+        sequence = get_workflow_sequence(pack, sid)
+        if sequence is None:
+            raise RuntimeError(f"Control-plane route references unknown workflow_sequence '{sid}'.")
+        return [
+            str(item).strip()
+            for item in getattr(sequence, "affected_declarative_families", [])
+            if str(item).strip()
+        ]
+
     def _route_workflow_id(self, route: ControlPlaneChangeRouteManifest) -> str:
-        explicit = str(route.route_to or "").strip()
         sequence_workflows = self._sequence_workflows(route.workflow_sequence)
-        if explicit:
-            if sequence_workflows and explicit not in sequence_workflows:
-                raise RuntimeError(
-                    "Control-plane route_to "
-                    f"'{explicit}' is not part of workflow_sequence '{route.workflow_sequence}'."
-                )
-            return explicit
         return sequence_workflows[0]
 
     def _affected_workflows_for_route(self, route: ControlPlaneChangeRouteManifest) -> list[str]:
-        explicit = [str(item).strip() for item in route.affected_workflows if str(item).strip()]
-        if explicit:
-            return explicit
         return self._sequence_workflows(route.workflow_sequence) or [self._route_workflow_id(route)]
 
     async def _derive_change_intent(self, request: RefinementRequest) -> ChangeIntent:
@@ -277,27 +283,19 @@ class RefinementTriggerRouteResolver:
         workflow_id = self._route_workflow_id(route)
         affected_workflows = self._affected_workflows_for_route(route)
         if intent.change_class == ChangeClass.CORE:
-            scope_summary = route.scope_summary or (
-                f"Restart from {workflow_id} and invalidate downstream outputs that depend on the {label}."
-            )
+            scope_summary = f"Restart from {workflow_id} and invalidate downstream outputs that depend on the {label}."
         elif intent.change_class == ChangeClass.DESIGN:
-            scope_summary = route.scope_summary or (
-                f"Reopen structured planning surfaces for the {label} and rebuild the affected downstream outputs."
-            )
+            scope_summary = f"Reopen structured planning surfaces for the {label} and rebuild the affected downstream outputs."
         elif intent.change_class == ChangeClass.FEATURE:
-            scope_summary = route.scope_summary or (
-                f"Extend the existing {label} within the approved concept using {workflow_id}."
-            )
+            scope_summary = f"Extend the existing {label} within the approved concept using {workflow_id}."
         else:
-            scope_summary = route.scope_summary or (
-                f"Apply a local patch to the current {label} without widening upstream scope."
-            )
+            scope_summary = f"Apply a local patch to the current {label} without widening upstream scope."
         return ImpactSet(
             workflow_sequence=route.workflow_sequence,
             affected_workflows=affected_workflows,
             affected_declarative_families=families,
-            requires_replanning=route.requires_replanning,
-            requires_rebuild=route.requires_rebuild,
+            requires_replanning=intent.change_class != ChangeClass.PATCH,
+            requires_rebuild=True,
             restart_from=workflow_id,
             scope_summary=scope_summary,
         )
@@ -385,6 +383,12 @@ class RefinementTriggerRouteResolver:
         revision_id = request.extra.get("revision_id")
         if isinstance(revision_id, str) and revision_id.strip():
             context_seed["revision_id"] = revision_id.strip()
+        # Inject the parent theme config so ThemeCapture can use it as a
+        # starting point on design/feature routes instead of generating from
+        # scratch. Sent by the workbench inside refinement_request.extra.
+        parent_theme_config = request.extra.get("parent_theme_config")
+        if isinstance(parent_theme_config, dict) and parent_theme_config:
+            context_seed["parent_theme_config"] = parent_theme_config
         return context_seed
 
     async def route(self, request: RefinementRequest) -> RefinementRoutingDecision:

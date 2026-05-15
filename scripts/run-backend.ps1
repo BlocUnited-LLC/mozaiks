@@ -133,11 +133,11 @@ $venvPython = Join-Path $RepoRoot ".venv/Scripts/python.exe"
 $pythonCmd = if (Test-Path $venvPython) { $venvPython } else { "python" }
 
 Write-Host "[backend] Starting uvicorn on port $Port..." -ForegroundColor Cyan
-Write-Host "[backend] Command: $pythonCmd -m uvicorn mozaiksai.hosts.mozaiks:app --host 0.0.0.0 --port $Port" -ForegroundColor DarkGray
+Write-Host "[backend] Command: $pythonCmd -m uvicorn mozaiksai.hosts.studio:app --host 0.0.0.0 --port $Port" -ForegroundColor DarkGray
 
 $backendExitCode = 0
 try {
-  & $pythonCmd -m uvicorn mozaiksai.hosts.mozaiks:app --host 0.0.0.0 --port $Port
+  & $pythonCmd -m uvicorn mozaiksai.hosts.studio:app --host 0.0.0.0 --port $Port
   $backendExitCode = $LASTEXITCODE
 }
 finally {

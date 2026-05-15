@@ -13,150 +13,45 @@ routing:
       routes:
         patch:
           workflow_sequence: concept_patch
-          affected_declarative_families:
-            - concept
-          requires_replanning: false
-          requires_rebuild: true
-          scope_summary: Apply a local concept patch within ValueEngine.
         design:
           workflow_sequence: full_rebuild
-          affected_declarative_families:
-            - concept
-            - design_docs
-            - workflow_bundle
-            - app_bundle
-          requires_replanning: true
-          requires_rebuild: true
-          scope_summary: Reopen ValueEngine for concept-level revision and refresh downstream generated outputs.
         feature:
           workflow_sequence: full_rebuild
-          affected_declarative_families:
-            - concept
-            - design_docs
-            - workflow_bundle
-            - app_bundle
-          requires_replanning: true
-          requires_rebuild: true
-          scope_summary: Extend the concept in ValueEngine and rebuild downstream outputs that depend on it.
         core:
           workflow_sequence: full_rebuild
-          affected_declarative_families:
-            - concept
-            - design_docs
-            - workflow_bundle
-            - app_bundle
-          requires_replanning: true
-          requires_rebuild: true
-          scope_summary: Restart from ValueEngine and invalidate downstream concept, design, workflow, and app artifacts.
     - artifact_kind: design_docs
       label: design docs
       routes:
         patch:
           workflow_sequence: design_patch
-          affected_declarative_families:
-            - design_docs
-          requires_replanning: false
-          requires_rebuild: true
-          scope_summary: Apply a local patch within DesignDocs.
         design:
           workflow_sequence: design_revision
-          affected_declarative_families:
-            - design_docs
-            - workflow_bundle
-            - app_bundle
-          requires_replanning: true
-          requires_rebuild: true
-          scope_summary: Reopen DesignDocs and refresh downstream generators that depend on the revised design intent.
         feature:
           workflow_sequence: design_revision
-          affected_declarative_families:
-            - design_docs
-            - workflow_bundle
-            - app_bundle
-          requires_replanning: true
-          requires_rebuild: true
-          scope_summary: Extend design-owned capability planning in DesignDocs and rebuild downstream generators.
         core:
           workflow_sequence: full_rebuild
-          affected_declarative_families:
-            - concept
-            - design_docs
-            - workflow_bundle
-            - app_bundle
-          requires_replanning: true
-          requires_rebuild: true
-          scope_summary: Restart from ValueEngine and invalidate downstream concept, design, workflow, and app artifacts.
     - artifact_kind: workflow_bundle
       label: workflow bundle
       routes:
         patch:
           workflow_sequence: workflow_patch
-          affected_declarative_families:
-            - workflow_bundle
-          requires_replanning: false
-          requires_rebuild: true
-          scope_summary: Apply a local patch within AgentGenerator.
         design:
           workflow_sequence: workflow_revision
-          affected_declarative_families:
-            - workflow_bundle
-            - app_bundle
-          requires_replanning: true
-          requires_rebuild: true
-          scope_summary: Reopen AgentGenerator for workflow-bundle revision within the approved concept.
         feature:
           workflow_sequence: workflow_revision
-          affected_declarative_families:
-            - workflow_bundle
-            - app_bundle
-          requires_replanning: true
-          requires_rebuild: true
-          scope_summary: Extend workflow-bundle behavior in AgentGenerator within the approved concept.
         core:
           workflow_sequence: full_rebuild
-          affected_declarative_families:
-            - concept
-            - design_docs
-            - workflow_bundle
-            - app_bundle
-          requires_replanning: true
-          requires_rebuild: true
-          scope_summary: Restart from ValueEngine and invalidate downstream concept, design, workflow, and app artifacts.
     - artifact_kind: app_bundle
       label: app bundle
       routes:
         patch:
           workflow_sequence: app_revision
-          affected_declarative_families:
-            - app_bundle
-          requires_replanning: false
-          requires_rebuild: true
-          scope_summary: Apply a local patch within AppGenerator.
         design:
           workflow_sequence: app_surface_revision
-          affected_declarative_families:
-            - design_docs
-            - app_bundle
-          requires_replanning: true
-          requires_rebuild: true
-          scope_summary: Reopen DesignDocs for app-surface revision and rebuild the affected app bundle output.
         feature:
           workflow_sequence: app_revision
-          affected_declarative_families:
-            - app_bundle
-          requires_replanning: true
-          requires_rebuild: true
-          scope_summary: Extend the app bundle in AppGenerator within the approved concept.
         core:
           workflow_sequence: full_rebuild
-          affected_declarative_families:
-            - concept
-            - design_docs
-            - workflow_bundle
-            - app_bundle
-          requires_replanning: true
-          requires_rebuild: true
-          scope_summary: Restart from ValueEngine and invalidate downstream concept, design, workflow, and app artifacts.
 checkpoints:
   - id: request_intake
     event: request_submitted

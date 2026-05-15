@@ -386,14 +386,16 @@ models:
         - api_surface
         - page_bundle
         - agent_backend_integration
-        - control_plane_surface
+        - control_plane_pack
         - pack_overlay
         description: >
           Explicit build-task type used for downstream execution planning. Persistent
           app pages use the declarative AppSchemaAgent path. `page_bundle` means a
           declarative page/schema bundle and must be paired with AppSchemaAgent.
-          `control_plane_surface` is required for surface_kind=control_plane tasks — do
-          NOT use backend_foundation or api_surface for control_plane surfaces.
+          `control_plane_pack` is required for surface_kind=control_plane tasks and
+          emits an optional app-local control_plane/ harness pack. It must start
+          at ControlPlaneAgent — do NOT use backend_foundation, api_surface, or
+          module_contract for control_plane surfaces.
           `api_surface` is the only valid task_type for surface_kind=external_integration.
           `page_bundle` is the only valid task_type for surface_kind=ui_only.
           `pack_overlay` generates ONLY the app-specific wiring for a selected framework_pack
@@ -503,6 +505,16 @@ models:
           Structured brand and experience direction preserved from upstream planning.
           This is the durable design context AppSchemaAgent should consult before
           defaulting to platform styling.
+      shell_preset_hint:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: >
+          Optional prompt-time shell preset id from shell_presets.yaml. This is
+          not a runtime artifact. AppSchemaAgent uses it to choose normal
+          AppPageSchema.navigation, AppPageSchema.shell_mode, and optional
+          shell_config defaults. Null when platform defaults are sufficient.
       surface_map:
         type: union
         variants:
@@ -940,8 +952,11 @@ models:
         type: str
         description: URL path for this admin page. Use :appId as a placeholder for the app context (e.g. /apps/:appId/orders).
       icon:
-        type: str
-        description: Icon hint string matched to the frontend icon map (e.g. dashboard, users, billing, chart, server, settings, plug, history, support).
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Icon hint string matched to the frontend icon map (e.g. dashboard, users, billing, chart, server, settings, plug, history, support). Null only when no icon applies.
       order:
         type: int
         description: Sort position within the nav for this scope.
@@ -1430,6 +1445,210 @@ models:
         - 'null'
         description: Optional runtime_extensions.yaml contract. Emit only when the module needs an api_router (webhook receiver) or startup_service (persistent background connection). Null for most modules.
 
+  ControlPlaneRouteRef:
+    type: model
+    fields:
+      workflow_sequence:
+        type: str
+        description: >
+          Required workflow_sequence id from workflows/extended_orchestration/extension_registry.json.
+          This is the only route target allowed in generated control_plane.yaml routes.
+
+  ControlPlaneArtifactChangeRoutes:
+    type: model
+    fields:
+      patch:
+        type: ControlPlaneRouteRef
+        description: Sequence selected for local patch requests.
+      design:
+        type: ControlPlaneRouteRef
+        description: Sequence selected for design/schema-level requests.
+      feature:
+        type: ControlPlaneRouteRef
+        description: Sequence selected for additive feature requests.
+      core:
+        type: ControlPlaneRouteRef
+        description: Sequence selected for core product-direction changes.
+
+  ControlPlaneArtifactRouting:
+    type: model
+    fields:
+      artifact_kind:
+        type: str
+        description: Stable artifact kind this routing policy applies to, such as app_bundle or workflow_bundle.
+      label:
+        type: str
+        description: Human-readable artifact label.
+      routes:
+        type: ControlPlaneArtifactChangeRoutes
+        description: Change-class route map. Each route contains workflow_sequence only.
+
+  ControlPlaneRoutingManifest:
+    type: model
+    fields:
+      default_artifact_kind:
+        type: str
+        description: Default artifact kind when a refinement request does not specify one.
+      artifacts:
+        type: list
+        items: ControlPlaneArtifactRouting
+        description: Artifact routing policies for the harness.
+
+  ControlPlaneProfileManifest:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable harness profile id.
+      display_name:
+        type: str
+        description: Human-facing harness profile name.
+      description:
+        type: str
+        description: Short description of why this app needs a harness pack.
+
+  ControlPlaneHarnessManifestOutput:
+    type: model
+    fields:
+      implementation:
+        type: str
+        description: >
+          Shipped harness implementation entrypoint. Use
+          mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness
+          unless a runtime-provided harness entrypoint is explicitly supplied.
+      supported_trigger_sources:
+        type: optional_list
+        items: str
+        description: Optional trigger sources handled by this harness, such as refinement.
+
+  ControlPlaneCheckpointManifestOutput:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable checkpoint id.
+      event:
+        type: str
+        description: Control-plane checkpoint event name.
+      entrypoint:
+        type: str
+        description: Shipped checkpoint implementation entrypoint.
+      prompt_id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional prompt id declared in control_plane/prompts/*.yaml.
+      tool_ids:
+        type: optional_list
+        items: str
+        description: Tool ids from control_plane/config/tools.yaml available to this checkpoint.
+
+  ControlPlaneManifestOutput:
+    type: model
+    fields:
+      schema_version:
+        type: literal
+        values:
+        - mozaiks.control_plane
+        description: Control-plane manifest schema version.
+      profile:
+        type: ControlPlaneProfileManifest
+        description: Harness profile metadata.
+      harness:
+        type: ControlPlaneHarnessManifestOutput
+        description: Shipped harness binding.
+      routing:
+        type: ControlPlaneRoutingManifest
+        description: Artifact routing policy. Routes may contain workflow_sequence only.
+      checkpoints:
+        type: list
+        items: ControlPlaneCheckpointManifestOutput
+        description: Checkpoint handlers used by the harness.
+
+  ControlPlaneToolDefinition:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable tool id.
+      kind:
+        type: str
+        description: Tool kind, such as context_tool.
+      description:
+        type: str
+        description: Human-readable tool purpose.
+      entrypoint:
+        type: str
+        description: Shipped tool entrypoint. Generated apps must not invent undeclared Python tools.
+      available_to:
+        type: optional_list
+        items: str
+        description: Checkpoint events where this tool is available.
+
+  ControlPlaneToolsManifestOutput:
+    type: model
+    fields:
+      schema_version:
+        type: literal
+        values:
+        - mozaiks.control_plane.tools
+        description: Control-plane tools manifest schema version.
+      tools:
+        type: list
+        items: ControlPlaneToolDefinition
+        description: Tool bindings available to checkpoints.
+
+  ControlPlanePromptFile:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Prompt id referenced by checkpoints.
+      filename:
+        type: str
+        description: Prompt file path under control_plane/prompts/, e.g. control_plane/prompts/change_classifier_system.yaml.
+      content:
+        type: str
+        description: Prompt content.
+
+  ControlPlanePackBundle:
+    type: model
+    fields:
+      control_plane_yaml:
+        type: ControlPlaneManifestOutput
+        description: Serialized to control_plane/config/control_plane.yaml.
+      tools_yaml:
+        type: ControlPlaneToolsManifestOutput
+        description: Serialized to control_plane/config/tools.yaml.
+      policies_yaml:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: Optional policies manifest serialized to control_plane/config/policies.yaml.
+      prompt_files:
+        type: optional_list
+        items: ControlPlanePromptFile
+        description: Prompt files serialized under control_plane/prompts/.
+
+  ControlPlaneOutput:
+    type: model
+    fields:
+      control_plane_pack:
+        type: ControlPlanePackBundle
+        description: Required typed app-local control-plane harness pack.
+      code_files:
+        type: list
+        items: CodeFileEntry
+        description: Serialized file mirror. The typed control_plane_pack is the source of truth.
+      agent_message:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional concise summary.
+
   ConfigMiddlewareOutput:
     type: model
     fields:
@@ -1444,17 +1663,17 @@ models:
         variants:
         - ModuleContractBundle
         - 'null'
-        description: Required in module_contract mode; null for backend_foundation mode.
+        description: Required in module_contract_bundle mode; null for backend_foundation mode.
       backend_foundation_bundle:
         type: union
         variants:
         - BackendFoundationBundle
         - 'null'
-        description: Required in backend_foundation mode; null for module_contract mode.
+        description: Required in backend_foundation mode; null for module_contract_bundle mode.
       code_files:
         type: list
         items: CodeFileEntry
-        description: Serialized files. In module_contract mode, these are the YAML files generated from module_contract.
+        description: Serialized files. In typed modes, these mirror module_contract or backend_foundation_bundle.
       agent_message:
         type: union
         variants:
@@ -3371,24 +3590,152 @@ models:
         - 'null'
         description: Optional logo link.
 
+  AppShellActionIntent:
+    type: literal
+    values:
+    - create_app
+    - open_console
+    - open_notifications
+    - open_settings
+    - open_profile
+    - custom
+
+  AppShellActionSurface:
+    type: literal
+    values:
+    - console
+    - app_console
+    - workflow_session
+    - transition
+    - public
+    - page
+
+  AppShellActionVariantWhen:
+    type: model
+    fields:
+      surface:
+        type: union
+        variants:
+        - AppShellActionSurface
+        - 'null'
+        description: Optional semantic surface match for this shell action variant.
+      shellMode:
+        type: union
+        variants:
+        - AppShellMode
+        - 'null'
+        description: Optional shell mode match.
+      workflow_sequence:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional workflow sequence id such as build.
+      transition:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional transition id.
+      has_active_app:
+        type: union
+        variants:
+        - bool
+        - 'null'
+        description: Optional active-app context requirement.
+
+  AppShellHeaderActionVariant:
+    type: model
+    fields:
+      when:
+        type: AppShellActionVariantWhen
+        description: Semantic shell context that activates this action variant.
+      label:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional replacement label.
+      path:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional replacement route path.
+      pathTemplate:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional dynamic route template using {appId}; fallbackPath is used when variables are unavailable.
+      fallbackPath:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional fallback route path for pathTemplate.
+      variant:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional visual variant.
+      icon:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional replacement icon asset filename.
+
   AppShellHeaderAction:
     type: model
     fields:
       id:
         type: str
         description: Stable action id.
+      intent:
+        type: union
+        variants:
+        - AppShellActionIntent
+        - 'null'
+        description: Optional semantic intent. Prefer finite intents over product-specific ids.
       label:
         type: str
         description: Action label.
       path:
-        type: str
+        type: union
+        variants:
+        - str
+        - 'null'
         description: Route path or transition path.
+      pathTemplate:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional dynamic route template using {appId}.
+      fallbackPath:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional fallback route path for pathTemplate.
+      href:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional external URL.
+      variants:
+        type: optional_list
+        items: AppShellHeaderActionVariant
+        description: Optional semantic variants. Use for stateful label/target changes; do not encode raw route override rules.
       variant:
         type: union
         variants:
         - str
         - 'null'
-        description: Optional variant.
+        description: Optional visual variant.
       visible:
         type: bool
         description: Whether the action is visible.
@@ -3422,7 +3769,7 @@ models:
       mobile:
         type: optional_list
         items: str
-        description: Optional mobile shortcut ids.
+        description: Optional mobile bottom-bar shortcut ids.
       footer:
         type: optional_list
         items: str
@@ -3673,13 +4020,13 @@ models:
         variants:
         - AppShellHeaderPatch
         - 'null'
-        description: Optional shell header patch.
+        description: Optional shell header patch for logo and sparse global actions.
       shortcuts:
         type: union
         variants:
         - AppShellShortcutsPatch
         - 'null'
-        description: Optional shell shortcut patch.
+        description: Optional canonical shell shortcuts. Allowed keys are header, profile, mobile, footer, and footerHideOnMobile only.
       navigation:
         type: union
         variants:
@@ -3744,15 +4091,13 @@ models:
         - AppShellConfigPatch
         - 'null'
         description: >
-          Optional shell content/behavior config persisted as config/shell.json.
-          Prefer compact shortcuts for common shell intent:
-          shortcuts.header, shortcuts.profile, shortcuts.mobile, and shortcuts.footer
-          arrays of primitive ids such as dashboard, wallet, create, profile,
-          messages, notifications, signout, signin, legal, terms, cookies, and
-          privacy. Use explicit header/profile/notifications/footer/mobile objects
-          only when the app needs custom labels, icons, role rules, or exact
-          placement overrides. This owns shell content and visibility, but must not
-          contain raw spacing, padding, or density tokens.
+          Optional compact shell behavior config persisted as config/shell.json.
+          Prefer null when platform defaults are enough. When needed, use
+          header.logo/actions, canonical shortcuts, navigation.policy,
+          non-page-owned navigation.items, and chrome mode overrides only.
+          shortcuts may only contain header, profile, mobile, footer, and
+          footerHideOnMobile. This must not contain raw spacing, padding, density
+          tokens or custom shortcut catalogs.
       asset_manifest:
         type: union
         variants:
@@ -3919,6 +4264,7 @@ registry:
   AppUIQualityAgent: AppUIQualityReviewRequest
   AdminRegistryAgent: AdminRegistryOutput
   DatabaseAgent: DatabaseOutput
+  ControlPlaneAgent: ControlPlaneOutput
   ConfigMiddlewareAgent: ConfigMiddlewareOutput
   ModuleContractQualityAgent: ModuleContractQualityReviewRequest
   ModelAgent: ModelOutput

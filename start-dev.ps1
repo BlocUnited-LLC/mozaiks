@@ -293,7 +293,7 @@ if (-not $pythonExe) {
     exit 1
 }
 Write-Host "Starting local backend on http://localhost:$AppPort (AUTH_ENABLED=$($env:AUTH_ENABLED))" -ForegroundColor Yellow
-& $pythonExe -m uvicorn mozaiksai.hosts.mozaiks:app --host 0.0.0.0 --port $AppPort
+& $pythonExe -m uvicorn mozaiksai.hosts.studio:app --host 0.0.0.0 --port $AppPort
 
 if ($StartFrontend) {
     Write-Host "Starting frontend (app) in a new process..." -ForegroundColor Green

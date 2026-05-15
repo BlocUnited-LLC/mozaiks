@@ -219,12 +219,17 @@ def test_parse_global_pack_graph_accepts_workflow_sequences() -> None:
             "workflows": [{"id": "A"}, {"id": "B"}],
             "transitions": [],
             "workflow_sequences": [
-                {"id": "build", "steps": [{"workflows": ["A"]}, {"workflows": ["B"]}]}
+                {
+                    "id": "build",
+                    "affected_declarative_families": ["concept", "", "app_bundle"],
+                    "steps": [{"workflows": ["A"]}, {"workflows": ["B"]}],
+                }
             ],
         }
     )
     assert isinstance(graph, GlobalPackGraph)
     assert graph.journeys[0].id == "build"
+    assert graph.journeys[0].affected_declarative_families == ["concept", "app_bundle"]
 
 
 def test_parse_global_pack_graph_rejects_legacy_journeys_key() -> None:

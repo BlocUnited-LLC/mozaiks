@@ -110,6 +110,55 @@ def _module_dir_of(filename: str) -> str:
     return str(PurePosixPath(filename).parent)
 
 
+def audit_admin_panel_page_refs(
+    code_files: List[Dict[str, Any]],
+    valid_page_ids: set,
+) -> List[str]:
+    """Check that every admin.yaml panel ``page`` field references a declared registry id.
+
+    Args:
+        code_files: List of {filename, content} dicts.
+        valid_page_ids: Page ids from admin/admin_registry.yaml. Empty set skips validation.
+
+    Returns:
+        List of warning strings. Empty list means no issues.
+    """
+    if not valid_page_ids or not code_files:
+        return []
+
+    warnings: List[str] = []
+    for file_entry in code_files:
+        if not isinstance(file_entry, dict):
+            continue
+        filename = str(file_entry.get("filename") or "").strip()
+        if PurePosixPath(filename).name != "admin.yaml":
+            continue
+        content = file_entry.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        data = _parse_yaml_content(content)
+        if data is None:
+            continue
+        panels = data.get("panels") or []
+        if not isinstance(panels, list):
+            continue
+        for panel in panels:
+            if not isinstance(panel, dict):
+                continue
+            page_ref = panel.get("page")
+            panel_id = str(panel.get("id") or "<unknown>")
+            if not page_ref:
+                warnings.append(
+                    f"{filename}: panel {panel_id!r} missing required 'page' field"
+                )
+            elif str(page_ref) not in valid_page_ids:
+                warnings.append(
+                    f"{filename}: panel {panel_id!r} unresolved admin page ref "
+                    f"{page_ref!r} (valid ids: {sorted(valid_page_ids)})"
+                )
+    return warnings
+
+
 def audit_module_contracts(code_files: List[Dict[str, Any]]) -> List[str]:
     """Audit module contract YAML files in code_files.
 
@@ -181,4 +230,4 @@ def audit_module_contracts(code_files: List[Dict[str, Any]]) -> List[str]:
     return warnings
 
 
-__all__ = ["audit_module_contracts"]
+__all__ = ["audit_module_contracts", "audit_admin_panel_page_refs"]

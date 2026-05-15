@@ -15,6 +15,7 @@ pages:
     path: /apps
     icon: apps
     scope: workspace
+    surfaces: [studio]
     order: 0
     enabled: true
 
@@ -23,6 +24,7 @@ pages:
     path: /usage
     icon: chart
     scope: workspace
+    surfaces: [studio]
     order: 10
     enabled: true
 
@@ -31,7 +33,17 @@ pages:
     path: /health
     icon: pulse
     scope: workspace
+    surfaces: [studio]
     order: 20
+    enabled: true
+
+  - id: workspace-integrations
+    label: Integrations
+    path: /integrations
+    icon: plug
+    scope: workspace
+    surfaces: [studio]
+    order: 25
     enabled: true
 
   - id: workspace-billing
@@ -39,23 +51,17 @@ pages:
     path: /billing
     icon: billing
     scope: workspace
+    surfaces: [studio]
     order: 30
-    enabled: true
-
-  - id: hosting
-    label: Hosting
-    path: /hosting
-    icon: server
-    scope: workspace
-    order: 40
     enabled: true
 
   # ── App-level (per-app admin portal) ──────────────────────────────────────
   - id: overview
     label: Overview
-    path: /admin
+    path: /apps/:appId/overview
     icon: dashboard
     scope: app
+    surfaces: [studio]
     order: 0
     enabled: true
 
@@ -64,6 +70,7 @@ pages:
     path: /apps/:appId/users
     icon: users
     scope: app
+    surfaces: [studio]
     order: 10
     enabled: true
 
@@ -72,6 +79,7 @@ pages:
     path: /apps/:appId/usage
     icon: chart
     scope: app
+    surfaces: [studio]
     order: 20
     enabled: true
 
@@ -80,6 +88,7 @@ pages:
     path: /apps/:appId/billing
     icon: billing
     scope: app
+    surfaces: [studio]
     order: 30
     enabled: true
 
@@ -88,6 +97,7 @@ pages:
     path: /apps/:appId/activity
     icon: history
     scope: app
+    surfaces: [studio]
     order: 40
     enabled: true
 
@@ -96,6 +106,7 @@ pages:
     path: /apps/:appId/operations
     icon: server
     scope: app
+    surfaces: [studio]
     order: 50
     enabled: true
 
@@ -104,6 +115,7 @@ pages:
     path: /apps/:appId/settings
     icon: settings
     scope: app
+    surfaces: [studio]
     order: 60
     enabled: true
 
@@ -112,6 +124,7 @@ pages:
     path: /apps/:appId/integrations
     icon: plug
     scope: app
+    surfaces: [studio]
     order: 70
     enabled: true
 
@@ -120,5 +133,6 @@ pages:
     path: /apps/:appId/support
     icon: support
     scope: app
+    surfaces: [studio]
     order: 80
     enabled: true

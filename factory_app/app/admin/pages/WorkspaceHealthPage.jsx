@@ -82,13 +82,13 @@ export default function WorkspaceHealthPage() {
           </div>
 
           {visibleRows.length > 0 ? (
-            <div className="space-y-3">
+            <div className="space-y-4">
               {visibleRows.map((row) => (
-                <div key={row.id} className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4">
+                <div key={row.id} className="rounded-2xl border border-border bg-background px-5 py-5 shadow-sm">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <div className="font-semibold text-foreground">{row.name}</div>
-                      <div className="mt-1 text-sm text-muted-foreground">{row.description}</div>
+                      <div className="mt-0.5 text-sm text-muted-foreground">{row.description}</div>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <StatusPill tone={row.health.tone}>{row.health.label}</StatusPill>
@@ -97,29 +97,29 @@ export default function WorkspaceHealthPage() {
                   </div>
 
                   <div className="mt-4 grid gap-3 text-sm sm:grid-cols-4">
-                    <div className="rounded-2xl border border-border/70 bg-background/60 px-4 py-3">
+                    <div className="rounded-xl border border-border bg-card px-4 py-3">
                       <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Health score</div>
                       <div className="mt-2 text-2xl font-semibold text-foreground">{row.health.score}/100</div>
                     </div>
-                    <div className="rounded-2xl border border-border/70 bg-background/60 px-4 py-3">
+                    <div className="rounded-xl border border-border bg-card px-4 py-3">
                       <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">State</div>
                       <div className="mt-2 font-semibold text-foreground">{row.stateLabel}</div>
                     </div>
-                    <div className="rounded-2xl border border-border/70 bg-background/60 px-4 py-3">
+                    <div className="rounded-xl border border-border bg-card px-4 py-3">
                       <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Uptime</div>
                       <div className="mt-2 font-semibold text-foreground">{formatPercentValue(row.deploymentRecord?.uptime_percent)}</div>
                     </div>
-                    <div className="rounded-2xl border border-border/70 bg-background/60 px-4 py-3">
+                    <div className="rounded-xl border border-border bg-card px-4 py-3">
                       <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Errors</div>
                       <div className="mt-2 font-semibold text-foreground">{formatCompactNumber(row.usageRecord?.errors, '0')}</div>
                     </div>
                   </div>
 
-                  <div className="mt-4 space-y-2 text-sm text-muted-foreground">
+                  <div className="mt-3 space-y-2 text-sm text-muted-foreground">
                     {row.health.issues.length > 0 ? row.health.issues.map((issue) => (
-                      <div key={issue} className="rounded-2xl border border-border/70 bg-background/60 px-4 py-3">{issue}</div>
+                      <div key={issue} className="rounded-xl border border-border bg-card px-4 py-3">{issue}</div>
                     )) : (
-                      <div className="rounded-2xl border border-border/70 bg-background/60 px-4 py-3">No active health risks are currently highlighted for this app.</div>
+                      <div className="rounded-xl border border-border bg-card px-4 py-3">No workflows configured</div>
                     )}
                   </div>
                 </div>

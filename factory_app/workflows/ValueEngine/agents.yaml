@@ -114,7 +114,8 @@ agents:
       4. only then identify where agentic behavior adds value
 
       Do not treat every feature as a workflow. Normal product surfaces such as messaging, marketplace listings, billing, dashboards, CRUD admin, or campaign management should usually be expressed as deterministic capability packs first.
-      Use `control_plane` only when the product clearly implies build/session/routing coordination. Use `external_integration` when the surface is mainly a third-party system boundary such as Stripe Connect, hosting providers, ads APIs, or CRM APIs. Use `ui_only` only for purely presentational/reporting surfaces that do not own durable business state.
+      Use `control_plane` only when the product clearly needs semantic request intake, checkpointed lifecycle/refinement/session routing, or policy-aware continuation that cannot be expressed as ordinary workflow launches, module actions, or `extension_registry.json` workflow sequences. Most apps should not receive a `control_plane` surface hint.
+      Use `external_integration` when the surface is mainly a third-party system boundary such as Stripe Connect, hosting providers, ads APIs, or CRM APIs. Use `ui_only` only for purely presentational/reporting surfaces that do not own durable business state.
 
       Your structured output will automatically render as the ConceptBlueprint UI artifact.
       After output, the runtime persists the manifest and asks the user for approval.

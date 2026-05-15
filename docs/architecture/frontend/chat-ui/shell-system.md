@@ -1,7 +1,7 @@
 # Shell System
 
 This is the canonical frontend shell contract for generated apps and the
-first-party Mozaiks Console. It replaces the older split shell specs.
+first-party Mozaiks Console.
 
 ## Ownership
 
@@ -17,6 +17,78 @@ Shell behavior is split by owner:
 
 Do not duplicate a route in page `navigation`, shell `shortcuts`, and
 `navigation.items`. Each route should have one navigation owner.
+
+## Canonical `shell.json` Shape
+
+Generated apps author only this compact shell surface:
+
+```json
+{
+  "header": {
+    "logo": { "src": "logo.svg", "alt": "App logo", "href": "/" },
+    "actions": [
+      {
+        "id": "create-app",
+        "intent": "create_app",
+        "label": "Create App",
+        "path": "/create",
+        "variant": "primary",
+        "variants": [
+          {
+            "when": { "surface": "workflow_session" },
+            "label": "Open Console",
+            "pathTemplate": "/apps/{appId}",
+            "fallbackPath": "/apps",
+            "variant": "secondary"
+          }
+        ]
+      }
+    ]
+  },
+  "shortcuts": {
+    "profile": ["profile", "signout"],
+    "mobile": ["dashboard", "notifications", "profile"],
+    "footer": ["legal", "terms", "cookies"],
+    "footerHideOnMobile": true
+  },
+  "navigation": {
+    "policy": {
+      "desktop": { "global": "header", "local": "sidebar", "footer": "visible" },
+      "mobile": { "global": "bottomBar", "local": "sheet", "footer": "hidden" },
+      "maxMobileItems": 5,
+      "autoFromPages": false
+    }
+  },
+  "chrome": {
+    "defaultMode": "standard",
+    "modes": {}
+  }
+}
+```
+
+The shell contract is intentionally small. It describes app chrome, navigation
+placement, and route chrome modes. It does not define reusable UI building
+blocks; those belong to the shared `chat-ui` primitive catalog and are consumed
+by page schemas or bounded custom React.
+
+## Shell Presets
+
+`factory_app/workflows/AppGenerator/tools/shell_presets.yaml` is prompt-time
+guidance for generated apps. It is not loaded by the runtime and is not copied
+into app bundles.
+
+AppGenerator may select an `AppBuildPlan.shell_preset_hint` such as
+`product_app`, `workspace_console`, `public_plus_app`, `conversation_app`, or
+`flow_app`. AppSchemaAgent then compiles that hint into the normal runtime
+artifacts:
+
+- `ui/pages/*.yaml -> navigation`
+- `ui/pages/*.yaml -> shell_mode`
+- `config/shell.json` only when app-wide defaults need a real override
+
+The preset id itself must not appear in generated app files. Presets keep shell
+authoring consistent; they do not create extra header actions or replace the
+page primitive system.
 
 ## Chrome Modes
 
@@ -80,8 +152,8 @@ Default placement policy:
 ## Shortcuts
 
 `shortcuts` are the compact authoring layer for common shell chrome. The backend
-expands them into concrete `header`, `profile`, `notifications`, `footer`, and
-`mobile` objects for `/api/shell-config`.
+expands them into concrete `header`, `profile`, `footer`, and `mobile`
+objects for `/api/shell-config`.
 
 ```json
 {
@@ -96,11 +168,16 @@ expands them into concrete `header`, `profile`, `notifications`, `footer`, and
 ```
 
 Common ids include `dashboard`, `create`, `profile`, `messages`,
-`notifications`, `settings`, `admin`, `support`, `signout`, `signin`, `legal`,
-`terms`, `cookies`, and `privacy`.
+`notifications`, `settings`, `admin`, `admin_portal`, `support`, `signout`,
+`signin`, `legal`, `terms`, `cookies`, and `privacy`.
 
-Use explicit shell arrays only when a shortcut needs custom labels, icons, role
-gates, or paths.
+`admin` targets a generated app's framework admin shell. `admin_portal` is
+reserved for the first-party Studio shell and targets the Apps console at
+`/apps`; generated apps should not emit it.
+
+Use page `navigation` for page-owned routes. Use `navigation.items` only for
+app-level entries that are not owned by a page schema. Do not define custom
+shortcut catalogs inside `shortcuts`.
 
 ## Shell Actions
 
@@ -108,10 +185,10 @@ gates, or paths.
 one primary action is preferred, and two visible actions is the normal upper
 bound.
 
-Each action chooses exactly one launch family:
+Each action chooses exactly one default launch family:
 
-- route navigation: `path` or `path_by_role`
-- external navigation: `href` or `href_by_role`
+- route navigation: `path`
+- external navigation: `href`
 - direct workflow launch: `trigger` with `type: workflow`
 
 Prefer a durable route `path` when the action enters a workflow sequence or
@@ -120,6 +197,42 @@ owned by `extension_registry.json`.
 
 Use `trigger.type = workflow` only for a direct single-workflow launch that has
 no transition or sequence entrypoint.
+
+Actions can declare semantic variants for context-aware labels and targets.
+Variants are resolved by the shared shell action resolver used by both desktop
+header and mobile shell chrome.
+
+Supported variant context:
+
+- `surface`: `console`, `app_console`, `workflow_session`, `transition`, `public`, or `page`
+- `shellMode`: `standard`, `workspace`, `conversation`, `focused`, `immersive`, or `public`
+- `workflow_sequence`: a workflow sequence id such as `build`
+- `transition`: a transition id
+- `has_active_app`: `true` or `false`
+
+Use variants for semantic shell behavior, not path patches. For example, the
+factory `Create App` shell action becomes `Open Console` while the user is in a
+workflow session:
+
+```json
+{
+  "id": "create-app",
+  "intent": "create_app",
+  "label": "Create App",
+  "path": "/create",
+  "variants": [
+    {
+      "when": { "surface": "workflow_session" },
+      "label": "Open Console",
+      "pathTemplate": "/apps/{appId}",
+      "fallbackPath": "/apps"
+    }
+  ]
+}
+```
+
+`pathTemplate` supports `{appId}` for app-scoped console targets. When the
+active app id is unavailable, `fallbackPath` is used.
 
 ## Generation Rules
 
@@ -131,10 +244,13 @@ no transition or sequence entrypoint.
 - Do not use chrome mode to solve navigation placement.
 - Do not use page action keys like `action_type`, `workflow_id`, `event_type`,
   or `payload` in `config/shell.json`.
+- Do not encode path-prefix or query-param override rules in shell actions.
+  Use semantic `variants[].when` context instead.
 - Do not create page proxies just to start workflows from shell chrome.
-- The notification bell owns only a compact shell summary. Its full route
-  belongs in `notifications.path`.
-- The profile dropdown owns account/menu routes through `profile.menu`.
+- The notification bell owns only a compact shell summary. Its full route is
+  configured by the first-party shell when notification support exists.
+- The profile dropdown is generated from profile shortcuts and host defaults.
+  Do not hardcode admin routes inside the React header.
 - If a first-party page repeats a shell CTA such as `Create App`, resolve that
   CTA by shell action id and reuse the action record instead of cloning paths.
 

@@ -377,18 +377,8 @@ def _normalize_chrome_viewport_policy(raw: Any, defaults: dict[str, Any]) -> dic
         return dict(defaults)
 
     result = dict(defaults)
-    aliases = {
-        "header": ("header", "topBar", "top_bar"),
-        "footer": ("footer",),
-        "bottomBar": ("bottomBar", "bottom_bar"),
-        "localNav": ("localNav", "local_nav"),
-    }
-    for field, names in aliases.items():
-        value = None
-        for name in names:
-            if name in raw:
-                value = raw[name]
-                break
+    for field in ("header", "footer", "bottomBar", "localNav"):
+        value = raw.get(field)
         if value is None:
             continue
         if field == "localNav":
@@ -410,7 +400,7 @@ def _normalize_chrome_mode_policy(raw: Any, defaults: dict[str, Any]) -> dict[st
     mobile_defaults = defaults.get("mobile", {})
     shared = {
         key: raw[key]
-        for key in ("header", "footer", "bottomBar", "bottom_bar", "localNav", "local_nav", "topBar", "top_bar")
+        for key in ("header", "footer", "bottomBar", "localNav")
         if key in raw
     }
     desktop_raw = {**shared, **(raw.get("desktop") if isinstance(raw.get("desktop"), dict) else {})}
@@ -426,7 +416,7 @@ def _normalize_chrome_policy(chrome: Any) -> dict[str, Any]:
     if not isinstance(chrome, dict):
         return policy
 
-    default_mode = _normalize_shell_mode(chrome.get("defaultMode") or chrome.get("default_mode"))
+    default_mode = _normalize_shell_mode(chrome.get("defaultMode"))
     if default_mode:
         policy["defaultMode"] = default_mode
 
@@ -446,8 +436,6 @@ def _shell_mode_from_entry(entry: dict[str, Any]) -> str | None:
         or _normalize_shell_mode(entry.get("shell_mode"))
         or _normalize_shell_mode(meta.get("shellMode"))
         or _normalize_shell_mode(meta.get("shell_mode"))
-        or _normalize_shell_mode(meta.get("chromeMode"))
-        or _normalize_shell_mode(meta.get("chrome_mode"))
     )
 
 
@@ -492,6 +480,12 @@ def _shell_shortcut_catalog(pages: list[dict], shortcuts: dict[str, Any]) -> dic
         "wallet": {"id": "wallet", "label": "Wallet", "action": "navigate", "path": "/wallet"},
         "create": {"id": "create", "label": "Create", "action": "navigate", "path": "/create"},
         "admin": {"id": "admin", "label": "Admin", "action": "navigate", "path": "/admin", "requiresRole": "admin"},
+        "admin_portal": {
+            "id": "admin-portal",
+            "label": "Admin Portal",
+            "action": "navigate",
+            "path": "/apps",
+        },
         "support": {"id": "support", "label": "Support", "action": "navigate", "path": "/support"},
         "signin": {"id": "signin", "label": "Sign In", "action": "signin"},
         "signout": {"id": "signout", "label": "Sign Out", "action": "signout"},
@@ -512,24 +506,13 @@ def _shell_shortcut_catalog(pages: list[dict], shortcuts: dict[str, Any]) -> dic
         if path_key:
             catalog.setdefault(path_key, item)
 
-    custom_items = shortcuts.get("items") if isinstance(shortcuts.get("items"), dict) else {}
-    for item_id, item in custom_items.items():
-        if not isinstance(item_id, str) or not item_id.strip() or not isinstance(item, dict):
-            continue
-        base = catalog.get(item_id.strip(), {"id": item_id.strip(), "label": _title_from_id(item_id.strip())})
-        catalog[item_id.strip()] = {**base, **item, "id": item.get("id") or item_id.strip()}
-
     return catalog
 
 
-def _shortcut_ids(shortcuts: dict[str, Any], *keys: str) -> list[str]:
-    placements = shortcuts.get("placements") if isinstance(shortcuts.get("placements"), dict) else {}
-    for key in keys:
-        value = shortcuts.get(key)
-        if value is None:
-            value = placements.get(key)
-        if isinstance(value, list):
-            return [item for item in value if isinstance(item, str) and item.strip()]
+def _shortcut_ids(shortcuts: dict[str, Any], key: str) -> list[str]:
+    value = shortcuts.get(key)
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str) and item.strip()]
     return []
 
 
@@ -573,7 +556,7 @@ def _normalize_navigation_policy(navigation: Any) -> dict[str, Any]:
         }
 
     try:
-        max_mobile = int(raw_policy.get("maxMobileItems") or raw_policy.get("max_mobile_items") or _DEFAULT_NAVIGATION_POLICY["maxMobileItems"])
+        max_mobile = int(raw_policy.get("maxMobileItems") or _DEFAULT_NAVIGATION_POLICY["maxMobileItems"])
     except Exception:
         max_mobile = int(_DEFAULT_NAVIGATION_POLICY["maxMobileItems"])
 
@@ -581,7 +564,7 @@ def _normalize_navigation_policy(navigation: Any) -> dict[str, Any]:
         "desktop": viewport_policy("desktop"),
         "mobile": viewport_policy("mobile"),
         "maxMobileItems": max(1, min(max_mobile, 5)),
-        "autoFromPages": bool(raw_policy.get("autoFromPages") or raw_policy.get("auto_from_pages") or False),
+        "autoFromPages": bool(raw_policy.get("autoFromPages") or False),
     }
 
 
@@ -661,15 +644,15 @@ def _shortcut_navigation_items(shortcuts: Any, catalog: dict[str, dict[str, Any]
         return []
 
     items: list[dict[str, Any]] = []
-    for item in _expand_shortcut_items(_shortcut_ids(shortcuts, "header", "desktopHeader", "header.pages"), catalog):
-        items.append({**item, "scope": item.get("scope", "global"), "placement": {"desktop": "header"}})
-    for item in _expand_shortcut_items(_shortcut_ids(shortcuts, "mobile", "mobileBottomBar", "mobile.bottomBar"), catalog):
-        items.append({**item, "scope": item.get("scope", "global"), "placement": {"mobile": "bottomBar"}})
-    for item in _expand_shortcut_items(_shortcut_ids(shortcuts, "profile", "profileMenu", "profile.menu"), catalog):
-        items.append({**item, "scope": "profile"})
-    for item in _expand_shortcut_items(_shortcut_ids(shortcuts, "footer", "footerLinks", "footer.links"), catalog, footer=True):
+    for index, item in enumerate(_expand_shortcut_items(_shortcut_ids(shortcuts, "header"), catalog)):
+        items.append({**item, "order": index, "scope": item.get("scope", "global"), "placement": {"desktop": "header", "mobile": "hidden"}})
+    for index, item in enumerate(_expand_shortcut_items(_shortcut_ids(shortcuts, "mobile"), catalog)):
+        items.append({**item, "order": index, "scope": item.get("scope", "global"), "placement": {"desktop": "hidden", "mobile": "bottomBar"}})
+    for index, item in enumerate(_expand_shortcut_items(_shortcut_ids(shortcuts, "profile"), catalog)):
+        items.append({**item, "order": index, "scope": "profile"})
+    for index, item in enumerate(_expand_shortcut_items(_shortcut_ids(shortcuts, "footer"), catalog, footer=True)):
         item_id = str(item.get("href") or item.get("label") or "").strip("/").replace("/", "-")
-        items.append({"id": item_id or "footer-link", **item, "scope": "footer"})
+        items.append({"id": item_id or "footer-link", **item, "order": index, "scope": "footer"})
     return [_sanitize_navigation_item(item) for item in items if _sanitize_navigation_item(item)]
 
 
@@ -733,19 +716,22 @@ def _dedupe_navigation_items(items: list[dict[str, Any]]) -> list[dict[str, Any]
         item_id = _clean_string(item.get("id"))
         if not item_id:
             continue
-        current = by_id.get(item_id)
+        placement = item.get("placement")
+        placement_key = json.dumps(placement, sort_keys=True) if isinstance(placement, dict) else str(placement or "")
+        key = f"{item_id}:{item.get('scope', 'global')}:{placement_key}"
+        current = by_id.get(key)
         if current is None:
-            by_id[item_id] = item
+            by_id[key] = item
         else:
-            placement = {}
+            merged_placement = {}
             if isinstance(current.get("placement"), dict):
-                placement.update(current["placement"])
+                merged_placement.update(current["placement"])
             if isinstance(item.get("placement"), dict):
-                placement.update(item["placement"])
+                merged_placement.update(item["placement"])
             merged = {**current, **item}
-            if placement:
-                merged["placement"] = placement
-            by_id[item_id] = merged
+            if merged_placement:
+                merged["placement"] = merged_placement
+            by_id[key] = merged
     return sorted(
         by_id.values(),
         key=lambda item: (item.get("order", 500), str(item.get("label") or item.get("id") or "")),
@@ -888,66 +874,16 @@ def _apply_dynamic_shell_navigation(
             footer["hideOnMobile"] = policy["mobile"]["footer"] == "hidden"
         result["footer"] = footer
 
+    if isinstance(shortcuts, dict) and isinstance(shortcuts.get("footerHideOnMobile"), bool):
+        footer = result.get("footer") if isinstance(result.get("footer"), dict) else {}
+        footer["hideOnMobile"] = shortcuts["footerHideOnMobile"]
+        result["footer"] = footer
+
     result["navigation"] = {
         "policy": policy,
         "items": all_items,
         "resolved": resolved,
     }
-
-
-def _apply_shell_shortcuts(result: dict, *, pages: list[dict], shortcuts: Any) -> None:
-    if not isinstance(shortcuts, dict):
-        return
-
-    catalog = _shell_shortcut_catalog(pages, shortcuts)
-
-    header_ids = _shortcut_ids(shortcuts, "header", "desktopHeader", "header.pages")
-    if header_ids:
-        header = result.get("header") if isinstance(result.get("header"), dict) else {}
-        header["pages"] = [
-            {key: value for key, value in item.items() if key in {"id", "label", "path", "requiresRole", "visible"}}
-            for item in _expand_shortcut_items(header_ids, catalog)
-            if item.get("path")
-        ]
-        result["header"] = header
-
-    profile_ids = _shortcut_ids(shortcuts, "profile", "profileMenu", "profile.menu")
-    if profile_ids:
-        profile = result.get("profile") if isinstance(result.get("profile"), dict) else {}
-        profile["show"] = profile.get("show", True)
-        profile["menu"] = _expand_shortcut_items(profile_ids, catalog)
-        result["profile"] = profile
-
-    mobile_ids = _shortcut_ids(shortcuts, "mobile", "mobileBottomBar", "mobile.bottomBar")
-    if mobile_ids:
-        mobile = result.get("mobile") if isinstance(result.get("mobile"), dict) else {}
-        bottom_bar = mobile.get("bottomBar") if isinstance(mobile.get("bottomBar"), dict) else {}
-        bottom_bar["visible"] = bottom_bar.get("visible", "auto")
-        bottom_bar["items"] = _expand_shortcut_items(mobile_ids, catalog)[:5]
-        mobile["bottomBar"] = bottom_bar
-        result["mobile"] = mobile
-
-    footer_ids = _shortcut_ids(shortcuts, "footer", "footerLinks", "footer.links")
-    if footer_ids:
-        footer = result.get("footer") if isinstance(result.get("footer"), dict) else {}
-        footer["visible"] = footer.get("visible", True)
-        footer["links"] = _expand_shortcut_items(footer_ids, catalog, footer=True)
-        result["footer"] = footer
-
-    footer_hide_mobile = shortcuts.get("footerHideOnMobile")
-    if isinstance(footer_hide_mobile, bool):
-        footer = result.get("footer") if isinstance(result.get("footer"), dict) else {}
-        footer["hideOnMobile"] = footer_hide_mobile
-        result["footer"] = footer
-
-    if shortcuts.get("notifications") is True:
-        notifications = result.get("notifications") if isinstance(result.get("notifications"), dict) else {}
-        result["notifications"] = {
-            "show": notifications.get("show", True),
-            "path": notifications.get("path", "/notifications"),
-            "emptyText": notifications.get("emptyText", "No unread notifications"),
-            **{key: value for key, value in notifications.items() if key not in {"show", "path", "emptyText"}},
-        }
 
 
 async def build_shell_config(*, surface: str = "platform") -> dict:
@@ -1045,6 +981,9 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
     pages = result.get("pages", [])
     _admin_registry = load_admin_registry(resolve_active_app_root())
     for route in build_admin_shell_routes(_admin_registry):
+        route_surfaces = route.get("surfaces")
+        if isinstance(route_surfaces, list) and shell_surface not in route_surfaces:
+            continue
         _append_page_once(pages, {
             "path": route["path"],
             "component": "AdminPortal",
@@ -1057,6 +996,7 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
                 "appShell": True,
                 "adminPage": route["admin_page"],
                 "shellMode": "workspace",
+                **({"surfaces": route_surfaces} if isinstance(route_surfaces, list) else {}),
             },
         })
     result["pages"] = _dedupe_and_sort_pages(pages)
@@ -1067,7 +1007,6 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
         navigation=shell_navigation,
         shortcuts=shell_shortcuts,
     )
-    _apply_shell_shortcuts(result, pages=result["pages"], shortcuts=shell_shortcuts)
     result["chrome"] = _normalize_chrome_policy(shell_chrome)
 
     return result

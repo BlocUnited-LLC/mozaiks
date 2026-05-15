@@ -2,7 +2,8 @@
 AppGenerator code file utilities.
 
 Wraps mozaiksai.core.workflow.generator_support.code_files with
-AppGenerator-specific payload expansion: app_backend_admin_config.
+AppGenerator-specific payload expansion: app_backend_admin_config and
+control_plane_pack.
 
 Import from here (not the runtime module) in any AppGenerator tool that
 needs full payload materialization including admin surface codegen.
@@ -19,15 +20,17 @@ from mozaiksai.core.workflow.generator_support.code_files import (
 from factory_app.workflows.AppGenerator.tools.app_backend_admin_codegen import (
     build_app_backend_admin_code_files,
 )
+from factory_app.workflows.AppGenerator.tools.control_plane_pack_codegen import (
+    build_control_plane_pack_code_files,
+)
 
 
 def extract_code_file_map_from_payload(payload: Any) -> Dict[str, str]:
     """Materialize all code files from an AppGenerator structured output payload.
 
     Calls the runtime's generic extraction, then layers in AppGenerator-specific
-    typed surfaces. Currently: app_backend_admin_config → backend/admin_config.py
-    + backend/routes/admin.py. The typed config wins over any conflicting raw
-    code_files entries for those canonical paths.
+    typed surfaces. Typed configs win over conflicting raw code_files entries
+    for their canonical paths.
     """
     file_map = _base_extract(payload)
 
@@ -37,6 +40,15 @@ def extract_code_file_map_from_payload(payload: Any) -> Dict[str, str]:
     raw_admin = payload.get("app_backend_admin_config")
     if raw_admin is not None:
         for item in build_app_backend_admin_code_files(raw_admin):
+            safe = safe_relpath(str(item.get("filename") or ""))
+            content = item.get("content")
+            if not safe or content is None:
+                continue
+            file_map[safe] = str(content)
+
+    raw_control_plane = payload.get("control_plane_pack")
+    if raw_control_plane is not None:
+        for item in build_control_plane_pack_code_files(raw_control_plane):
             safe = safe_relpath(str(item.get("filename") or ""))
             content = item.get("content")
             if not safe or content is None:

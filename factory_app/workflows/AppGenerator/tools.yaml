@@ -37,6 +37,15 @@ tools:
     theme preferences, and generation order.
   tool_type: Agent_Tool
   auto_tool_call: true
+- agent: AdminRegistryAgent
+  file: save_admin_registry.py
+  function: save_admin_registry
+  description: >
+    Persist AdminRegistryOutput to context. Saves admin_registry for downstream
+    page-ref validation and merges code_files (including admin/admin_registry.yaml)
+    into the accumulated bundle. Called automatically after AdminRegistryAgent speaks.
+  tool_type: Agent_Tool
+  auto_tool_call: true
 - agent: AssemblyAgent
   file: assemble_app_tasks.py
   function: assemble_app_tasks

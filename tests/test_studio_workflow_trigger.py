@@ -248,7 +248,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
             "metadata": {
                 "change_class": "feature",
                 "workflow_sequence": "app_revision",
-                "scope_summary": "Extend the app bundle in AppGenerator within the approved concept.",
+                    "scope_summary": "Extend the existing app bundle within the approved concept using AppGenerator.",
             },
         },
     }
@@ -324,7 +324,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
                 "requires_replanning": True,
                 "requires_rebuild": True,
                 "restart_from": "AppGenerator",
-                "scope_summary": "Extend the app bundle in AppGenerator within the approved concept.",
+                "scope_summary": "Extend the existing app bundle within the approved concept using AppGenerator.",
             },
             "router_decision": {
                 "workflow_id": "AppGenerator",
@@ -355,7 +355,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
                     "metadata": {
                         "change_class": "feature",
                         "workflow_sequence": "app_revision",
-                        "scope_summary": "Extend the app bundle in AppGenerator within the approved concept.",
+                        "scope_summary": "Extend the existing app bundle within the approved concept using AppGenerator.",
                     },
                 },
             },
@@ -403,7 +403,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
                     "metadata": {
                         "change_class": "feature",
                         "workflow_sequence": "app_revision",
-                        "scope_summary": "Extend the app bundle in AppGenerator within the approved concept.",
+                        "scope_summary": "Extend the existing app bundle within the approved concept using AppGenerator.",
                     },
                 },
             },
@@ -1052,7 +1052,7 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
             "metadata": {
                 "change_class": "core",
                 "workflow_sequence": "full_rebuild",
-                "scope_summary": "Restart from ValueEngine and invalidate downstream concept, design, workflow, and app artifacts.",
+                    "scope_summary": "Restart from ValueEngine and invalidate downstream outputs that depend on the app bundle.",
             },
         },
     }

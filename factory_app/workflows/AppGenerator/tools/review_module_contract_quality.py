@@ -24,6 +24,7 @@ from typing import Annotated, Any, Dict, List, Optional
 from autogen.tools.dependency_injection import Field
 
 from factory_app.workflows.AppGenerator.tools.audit_module_contracts import (
+    audit_admin_panel_page_refs,
     audit_module_contracts,
 )
 
@@ -35,6 +36,7 @@ _BLOCKING_KEYWORDS = (
     "missing 'handler'",
     "missing or empty 'id'",
     "could not parse as YAML",
+    "unresolved admin page ref",
 )
 
 
@@ -137,7 +139,16 @@ def review_module_contract_quality(
 
     audit_warnings = audit_module_contracts(code_files)
 
-    all_warnings = _dedupe(prior_warnings + audit_warnings)
+    admin_registry = _context_get(context_variables, "admin_registry") or {}
+    registry_pages = admin_registry.get("pages") or [] if isinstance(admin_registry, dict) else []
+    valid_page_ids = {
+        str(p["id"])
+        for p in registry_pages
+        if isinstance(p, dict) and p.get("id") and p.get("enabled", True)
+    }
+    page_ref_warnings = audit_admin_panel_page_refs(code_files, valid_page_ids)
+
+    all_warnings = _dedupe(prior_warnings + audit_warnings + page_ref_warnings)
 
     module_contract_count = sum(
         1

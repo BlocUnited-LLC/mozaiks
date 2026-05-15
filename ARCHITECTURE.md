@@ -270,16 +270,17 @@ Note: `factory_app/` as a directory co-locates the Factory layer (`workflows/`, 
 
 **Generator and workflow root rules:**
 
-Shared factory workflows live in `factory_app/workflows/`. A running host resolves one workflow root — it does not merge app and factory roots at runtime. `MOZAIKS_WORKFLOWS_PATH` may override explicitly.
+Shared factory workflows live in `factory_app/workflows/`. A running host resolves one workflow root by default. `MOZAIKS_WORKFLOWS_PATH` may override explicitly.
 
 - Studio uses `factory_app/workflows/` as the shared builder workflow root
 - Product/app hosts use `<active app root>/workflows/` when present
+- Hosted product (`mozaiks`) may compose hosted app workflows with shared factory build workflows so hosted product and builder workflows are both available
 
 `AppGenerator` and `AgentGenerator` write all output into `MOZAIKS_GENERATED_ARTIFACTS_PATH` (defaults to `generated/`). Promotion is the only path from `generated/` into an active app root.
 
 **Hosted product module direction:**
 
-Hosted product modules are the deterministic business layer of the Mozaiks product — not generic app-project bookkeeping. Examples: `app_registry`, `hosting`, `communications`, `investor_marketplace`, `payouts`. They must not be copied into generated OSS app bundles unless explicitly selected as hosted capability packs.
+Hosted product modules are the deterministic business layer of the Mozaiks product — not generic app-project bookkeeping. Examples: `investor_marketplace`, `payouts`. They must not be copied into generated OSS app bundles unless explicitly selected as hosted capability packs.
 
 ### 6. CLI / Developer Interface Layer
 

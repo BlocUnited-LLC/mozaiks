@@ -171,7 +171,7 @@ The same boundary applies to `factory_app/app/workflows/`: it is an app-local
 overlay surface that should only exist once the factory app owns a workflow
 that is not part of the shared builder layer.
 
-Runtime workflow loading is single-root. A running host selects one active
+Runtime workflow loading is single-root by default. A running host selects one active
 workflow root:
 
 1. Studio defaults to `factory_app/workflows/`
@@ -179,7 +179,12 @@ workflow root:
   present
 3. `MOZAIKS_WORKFLOWS_PATH` may override the selected root explicitly
 
-The runtime does not auto-merge app and factory workflow roots.
+The runtime does not auto-merge app and factory workflow roots in normal
+platform/studio execution.
+
+Hosted product exception:
+
+- the `mozaiks` host may compose hosted app workflow roots with `factory_app/workflows/` so hosted product workflows and shared builder workflows are both available.
 
 For generated OSS-style bundles, bounded frontend customization lives inside the
 active app root at `app/ui/index.js`. That file is the app-owned extension
@@ -192,7 +197,6 @@ app/modules/
 ├── app_registry/               # build records, staged artifact history
 ├── hosting/                    # hosted deployment intake + lifecycle
 ├── investor_marketplace/       # listings, investor profiles, investment interest
-└── communications/             # conversations, messages, announcements
 ```
 
 Those modules publish `hosted.*` product events. Generated customer apps should

@@ -18,15 +18,12 @@ const ConsolePage        = lazy(() => import('./pages/ConsolePage.jsx'))
 const AppsPage           = lazy(() => import('./pages/AppsPage.jsx'))
 const WorkspaceUsagePage = lazy(() => import('./pages/WorkspaceUsagePage.jsx'))
 const WorkspaceHealthPage  = lazy(() => import('./pages/WorkspaceHealthPage.jsx'))
-const WorkspaceBillingPage = lazy(() => import('./pages/WorkspaceBillingPage.jsx'))
-const WorkspaceHostingPage = lazy(() => import('./pages/WorkspaceHostingPage.jsx'))
+const WorkspaceIntegrationsPage = lazy(() => import('./pages/WorkspaceIntegrationsPage.jsx'))
 const AppOverviewPage    = lazy(() => import('./pages/AppOverviewPage.jsx'))
 const AppHealthPage      = lazy(() => import('./pages/AppHealthPage.jsx'))
 const AppUsersPage       = lazy(() => import('./pages/AppUsersPage.jsx'))
 const AppUsagePage       = lazy(() => import('./pages/AppUsagePage.jsx'))
-const AppBillingPage     = lazy(() => import('./pages/AppBillingPage.jsx'))
 const AppIntegrationsPage = lazy(() => import('./pages/AppIntegrationsPage.jsx'))
-const AppHostingPage     = lazy(() => import('./pages/AppHostingPage.jsx'))
 
 export function registerAdminComponents(registerComponent) {
   if (typeof registerComponent !== 'function') return
@@ -51,12 +48,8 @@ export function registerAdminComponents(registerComponent) {
     description: 'Workspace health surface — cross-app runtime, workflow, and hosting health in one portfolio view.',
   })
 
-  registerComponent('WorkspaceBillingPage', WorkspaceBillingPage, {
-    description: 'Workspace billing surface — billing ownership, revenue posture, and commercial readiness for all apps.',
-  })
-
-  registerComponent('WorkspaceHostingPage', WorkspaceHostingPage, {
-    description: 'Workspace hosting surface — managed hosting posture, release readiness, and production attention across all apps.',
+  registerComponent('WorkspaceIntegrationsPage', WorkspaceIntegrationsPage, {
+    description: 'Workspace integrations — connect external services once and assign them across apps.',
   })
 
   registerComponent('AppOverviewPage', AppOverviewPage, {
@@ -75,15 +68,7 @@ export function registerAdminComponents(registerComponent) {
     description: 'App usage surface — app-scoped usage, adoption, and metering visibility.',
   })
 
-  registerComponent('AppBillingPage', AppBillingPage, {
-    description: 'App billing surface — app-level billing, customer value, and commercial controls.',
-  })
-
   registerComponent('AppIntegrationsPage', AppIntegrationsPage, {
     description: 'Integrations surface — focused third-party connector inventory and CRUD controls for app-scoped integrations.',
-  })
-
-  registerComponent('AppHostingPage', AppHostingPage, {
-    description: 'App hosting surface — managed hosting readiness, domains, and production posture for a single app.',
   })
 }

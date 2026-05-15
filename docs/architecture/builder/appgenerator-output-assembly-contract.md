@@ -22,7 +22,7 @@ The ownership split is strict:
 - `admin/admin_registry.yaml` declares all admin portal pages for the app's operator console. Module panels reference these page ids via the `page` field in `modules/{module}/contracts/admin.yaml`.
 - `ui/pages/*.yaml` define persistent page structure and route ownership.
 - `brand/theme_config.json` defines visual tokens, shared primitives, and semantic `ui.chat` / `ui.shell` / `ui.page` styling.
-- `config/shell.json` defines shell content and behavior such as header actions, profile controls, notifications, and footer links.
+- `config/shell.json` defines compact app-wide shell behavior: header logo/actions, canonical shortcuts, navigation policy, non-page-owned navigation items, and chrome mode defaults.
 - `config/asset_manifest.json` defines reusable media inventory metadata for non-token assets (icons/images/video), including source/provenance and usage hints.
 
 AppGenerator does not own agent workflows, agent UI tools, or workflow transition surfaces. Those belong to AgentGenerator and the workflow UI contracts.
@@ -38,7 +38,7 @@ AppGenerator should compile these inputs in priority order:
    - strongest visual source when present
 
 2. `app_build_plan`
-   - carries `theme_preferences`, `brand_intent`, pages, entities, capability packs, auth, and integrations
+   - carries `theme_preferences`, `brand_intent`, optional `shell_preset_hint`, pages, entities, capability packs, auth, and integrations
 
 3. `experience_spec_document` / `ui_design_document`
    - persistent page intent and layout guidance
@@ -85,10 +85,16 @@ It does **not** emit shell content such as header actions, profile menu items, n
 Two artifacts handle visual and behavioral customization:
 
 - `theme_config_patch` → visual tokens only: colors, typography, spacing scale, shadows, density, `ui.chat` / `ui.shell` / `ui.page` semantic styling
-- `shell_config` → shell content and behavior only: header actions, profile menu, notification copy, footer links, `navigation.policy`, `chrome` mode overrides
+- `shell_config` → shell behavior only: header logo/actions, canonical `shortcuts`, `navigation.policy`, non-page-owned `navigation.items`, and `chrome` mode overrides
+
+`shell_preset_hint` is not an artifact. It is prompt-time AppGenerator guidance
+from `factory_app/workflows/AppGenerator/tools/shell_presets.yaml`. AppSchemaAgent
+uses it to choose page `navigation`, page `shell_mode`, and whether a compact
+`shell_config` override is necessary. The preset id is never written into the
+generated app bundle.
 
 Do not mix them. Raw spacing/width/density tokens belong in `theme_config_patch`.
-Header actions, nav labels, and footer links belong in `shell_config`.
+Header action labels and app-wide shell placement rules belong in `shell_config`.
 
 Rules:
 
@@ -98,7 +104,9 @@ Rules:
 - `shell_config` is a partial patch for `config/shell.json`
 - `asset_manifest` is a partial patch for `config/asset_manifest.json`
 - raw spacing, width, density, and sizing tokens belong in `theme_config_patch`, not `shell_config`
-- header/profile/notifications/footer content belongs in `shell_config`, not `theme_config_patch`
+- generated `shell_config.shortcuts` may only contain `header`, `profile`, `mobile`, `footer`, and `footerHideOnMobile`
+- do not emit custom shortcut catalogs or shell fields outside `AppShellConfigPatch`
+- shell actions may use semantic `variants[].when` for context-aware label/target changes; do not emit path-prefix, wildcard, or query-param override rules
 - page-owned shell navigation belongs on `ui/pages/*.yaml -> navigation`; `shell_config.navigation.policy` owns app-wide placement rules
 - page-owned header/footer/bottom-bar intent belongs on `ui/pages/*.yaml -> shell_mode`; `shell_config.chrome` owns only app-wide mode-policy overrides
 - reusable media inventory belongs in `asset_manifest`, not in `theme_config_patch` or `shell_config`
@@ -117,9 +125,20 @@ It produces `AdminRegistryOutput` with two payloads:
 Rules:
 
 - Always emits `overview` and `settings` app-scope pages
-- Includes additional pages (`users`, `billing`, `usage`, `activity`, `operations`, `integrations`, `support`) based on `app_build_plan.capability_packs` entity domains
-- Uses `scope: app` for all standard generated app pages; workspace-scope pages only for hosted operator contexts
+- Includes additional **standard** pages (`users`, `billing`, `usage`, `activity`, `operations`, `integrations`, `support`) based on `app_build_plan.capability_packs` entity domains and `auth_strategy`
+- Includes **hosted-only** pages (e.g. `hosting`) only when `available_hosted_packs` is non-empty and contains the relevant pack id — never in OSS or self-hosted contexts
+- Uses `scope: app` for all generated app pages; workspace-scope pages only for hosted operator contexts
+- Hosted global operator registries belong to hosted product workspaces and must not be emitted into standard generated app bundles
 - Page ids must cover every entity domain that `ConfigMiddlewareAgent` assigns module admin panels to
+- The module contract quality gate validates at generation time that every `admin.yaml` panel `page` field resolves to a declared page id
+
+**Hosted-only pages:**
+
+| Page id | Inclusion condition | Path |
+|---|---|---|
+| `hosting` | `available_hosted_packs` contains `hosting` or `deployment` | `/apps/:appId/hosting` |
+
+Add new hosted-only pages here when a hosted capability pack introduces a new operator surface. Do not add them to the standard inclusion rules.
 
 `AssemblyAgent` must include `admin/admin_registry.yaml` in the final bundle output.
 

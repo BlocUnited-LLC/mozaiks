@@ -396,6 +396,27 @@ VALID_SELECTION_MODES = {"none", "single", "multi"}
 VALID_ASSET_SOURCES = {"local", "remote", "uploaded", "generated", "stock"}
 VALID_CUSTOM_PAGE_EXTENSIONS = {".js", ".jsx"}
 VALID_SHELL_MODES = {"standard", "workspace", "conversation", "focused", "immersive", "public"}
+VALID_SHELL_ACTION_SURFACES = {"console", "app_console", "workflow_session", "transition", "public", "page"}
+VALID_SHELL_ACTION_WHEN_FIELDS = {
+    "surface",
+    "surfaces",
+    "shellMode",
+    "shell_mode",
+    "routeGroup",
+    "route_group",
+    "workflow",
+    "workflow_id",
+    "workflowSequence",
+    "workflow_sequence",
+    "sequence",
+    "transition",
+    "transition_id",
+    "appLifecycle",
+    "app_lifecycle",
+    "hasActiveApp",
+    "has_active_app",
+}
+NON_CONTRACT_SHELL_ACTION_FIELDS = {"route_overrides", "routeOverrides", "route_variants", "routeVariants"}
 
 
 def _is_non_empty_string(value: Any) -> bool:
@@ -441,6 +462,23 @@ def _validate_shell_mode(value: Any, *, field: str) -> None:
         return
     if value not in VALID_SHELL_MODES:
         raise ValueError(f"{field} must be one of {sorted(VALID_SHELL_MODES)}")
+
+
+def _validate_shell_path(value: Any, *, field: str) -> None:
+    if value is None:
+        return
+    if not _is_non_empty_string(value) or not str(value).startswith("/"):
+        raise ValueError(f"{field} must be a route path starting with /")
+
+
+def _validate_shell_string_or_list(value: Any, *, field: str) -> None:
+    if value is None:
+        return
+    if _is_non_empty_string(value):
+        return
+    if isinstance(value, list) and all(_is_non_empty_string(item) for item in value):
+        return
+    raise ValueError(f"{field} must be a non-empty string or list of non-empty strings")
 
 
 def _validate_asset_manifest(asset_manifest: Any) -> None:
@@ -1011,6 +1049,104 @@ def _canonicalize_manifest_routes(
     manifest_dict["custom_routes"] = [route["id"] for route in custom_route_entries]
 
 
+def _validate_shell_action_when(when: Any, *, field: str) -> None:
+    if not isinstance(when, dict):
+        raise ValueError(f"{field}.when must be an object with semantic shell context")
+
+    for key in when:
+        if key not in VALID_SHELL_ACTION_WHEN_FIELDS:
+            raise ValueError(f"{field}.when.{key} is not supported")
+
+    has_condition = any(
+        value is not None and (not isinstance(value, list) or len(value) > 0)
+        for value in when.values()
+    )
+    if not has_condition:
+        raise ValueError(f"{field}.when must include at least one semantic match field")
+
+    surface = when.get("surface", when.get("surfaces"))
+    if surface is not None:
+        surfaces = surface if isinstance(surface, list) else [surface]
+        for item in surfaces:
+            if item not in VALID_SHELL_ACTION_SURFACES:
+                raise ValueError(f"{field}.when.surface must be one of {sorted(VALID_SHELL_ACTION_SURFACES)}")
+
+    shell_mode = when.get("shellMode", when.get("shell_mode"))
+    if shell_mode is not None:
+        modes = shell_mode if isinstance(shell_mode, list) else [shell_mode]
+        for item in modes:
+            _validate_shell_mode(item, field=f"{field}.when.shellMode")
+
+    for key in (
+        "routeGroup",
+        "route_group",
+        "workflow",
+        "workflow_id",
+        "workflowSequence",
+        "workflow_sequence",
+        "sequence",
+        "transition",
+        "transition_id",
+        "appLifecycle",
+        "app_lifecycle",
+    ):
+        _validate_shell_string_or_list(when.get(key), field=f"{field}.when.{key}")
+
+    for key in ("hasActiveApp", "has_active_app"):
+        value = when.get(key)
+        if value is not None and not isinstance(value, bool):
+            raise ValueError(f"{field}.when.{key} must be a boolean")
+
+
+def _validate_shell_action_variant(variant: Any, *, field: str) -> None:
+    if not isinstance(variant, dict):
+        raise ValueError(f"{field} must be an object")
+    _validate_shell_action_when(variant.get("when"), field=field)
+    _validate_shell_path(variant.get("path"), field=f"{field}.path")
+    _validate_shell_path(variant.get("pathTemplate", variant.get("path_template")), field=f"{field}.pathTemplate")
+    _validate_shell_path(variant.get("fallbackPath", variant.get("fallback_path")), field=f"{field}.fallbackPath")
+    if variant.get("href") is not None and not _is_non_empty_string(variant.get("href")):
+        raise ValueError(f"{field}.href must be a non-empty string")
+
+
+def _validate_shell_header_actions(shell_config: Optional[Dict[str, Any]]) -> None:
+    if not shell_config:
+        return
+    if not isinstance(shell_config, dict):
+        raise ValueError("shell_config must be an object")
+
+    header = shell_config.get("header")
+    if header is None:
+        return
+    if not isinstance(header, dict):
+        raise ValueError("shell_config.header must be an object")
+
+    actions = header.get("actions")
+    if actions is None:
+        return
+    if not isinstance(actions, list):
+        raise ValueError("shell_config.header.actions must be a list")
+
+    for index, action in enumerate(actions):
+        field = f"shell_config.header.actions[{index}]"
+        if not isinstance(action, dict):
+            raise ValueError(f"{field} must be an object")
+        for key in NON_CONTRACT_SHELL_ACTION_FIELDS:
+            if key in action:
+                raise ValueError(f"{field}.{key} is not supported; use variants[].when")
+        _validate_shell_path(action.get("path"), field=f"{field}.path")
+        _validate_shell_path(action.get("pathTemplate", action.get("path_template")), field=f"{field}.pathTemplate")
+        _validate_shell_path(action.get("fallbackPath", action.get("fallback_path")), field=f"{field}.fallbackPath")
+        if action.get("href") is not None and not _is_non_empty_string(action.get("href")):
+            raise ValueError(f"{field}.href must be a non-empty string")
+        variants = action.get("variants")
+        if variants is not None:
+            if not isinstance(variants, list):
+                raise ValueError(f"{field}.variants must be a list")
+            for variant_index, variant in enumerate(variants):
+                _validate_shell_action_variant(variant, field=f"{field}.variants[{variant_index}]")
+
+
 def _validate_shell_shortcuts(shell_config: Optional[Dict[str, Any]]) -> None:
     if not shell_config:
         return
@@ -1023,16 +1159,7 @@ def _validate_shell_shortcuts(shell_config: Optional[Dict[str, Any]]) -> None:
     if not isinstance(shortcuts, dict):
         raise ValueError("shell_config.shortcuts must be an object")
 
-    shortcut_list_fields = {
-        "header",
-        "desktopHeader",
-        "profile",
-        "profileMenu",
-        "mobile",
-        "mobileBottomBar",
-        "footer",
-        "footerLinks",
-    }
+    shortcut_list_fields = {"header", "profile", "mobile", "footer"}
     for field in shortcut_list_fields:
         value = shortcuts.get(field)
         if value is None:
@@ -1040,25 +1167,13 @@ def _validate_shell_shortcuts(shell_config: Optional[Dict[str, Any]]) -> None:
         if not isinstance(value, list) or any(not _is_non_empty_string(item) for item in value):
             raise ValueError(f"shell_config.shortcuts.{field} must be a list of primitive ids")
 
-    placements = shortcuts.get("placements")
-    if placements is not None:
-        if not isinstance(placements, dict):
-            raise ValueError("shell_config.shortcuts.placements must be an object")
-        for key, value in placements.items():
-            if not _is_non_empty_string(key):
-                raise ValueError("shell_config.shortcuts.placements keys must be non-empty strings")
-            if not isinstance(value, list) or any(not _is_non_empty_string(item) for item in value):
-                raise ValueError(f"shell_config.shortcuts.placements.{key} must be a list of primitive ids")
-
-    items = shortcuts.get("items")
-    if items is not None:
-        if not isinstance(items, dict):
-            raise ValueError("shell_config.shortcuts.items must be an object")
-        for key, value in items.items():
-            if not _is_non_empty_string(key):
-                raise ValueError("shell_config.shortcuts.items keys must be non-empty strings")
-            if not isinstance(value, dict):
-                raise ValueError(f"shell_config.shortcuts.items.{key} must be an object")
+    allowed_fields = shortcut_list_fields | {"footerHideOnMobile"}
+    for field in shortcuts:
+        if field not in allowed_fields:
+            raise ValueError(
+                f"shell_config.shortcuts.{field} is not supported; use only "
+                "header, profile, mobile, footer, and footerHideOnMobile"
+            )
 
     footer_hide = shortcuts.get("footerHideOnMobile")
     if footer_hide is not None and not isinstance(footer_hide, bool):
@@ -1088,13 +1203,17 @@ def _validate_shell_navigation(shell_config: Optional[Dict[str, Any]]) -> None:
             if value.get(field) is not None and not _is_non_empty_string(value.get(field)):
                 raise ValueError(f"shell_config.navigation.{viewport}.{field} must be a non-empty string")
 
-    max_mobile = policy.get("maxMobileItems", policy.get("max_mobile_items"))
+    max_mobile = policy.get("maxMobileItems")
     if max_mobile is not None and (not isinstance(max_mobile, int) or max_mobile < 1 or max_mobile > 5):
         raise ValueError("shell_config.navigation.maxMobileItems must be an integer from 1 to 5")
+    if "max_mobile_items" in policy:
+        raise ValueError("shell_config.navigation.max_mobile_items is not supported; use maxMobileItems")
 
-    auto_from_pages = policy.get("autoFromPages", policy.get("auto_from_pages"))
+    auto_from_pages = policy.get("autoFromPages")
     if auto_from_pages is not None and not isinstance(auto_from_pages, bool):
         raise ValueError("shell_config.navigation.autoFromPages must be a boolean")
+    if "auto_from_pages" in policy:
+        raise ValueError("shell_config.navigation.auto_from_pages is not supported; use autoFromPages")
 
     items = navigation.get("items")
     if items is None:
@@ -1132,7 +1251,9 @@ def _validate_shell_chrome(shell_config: Optional[Dict[str, Any]]) -> None:
     if not isinstance(chrome, dict):
         raise ValueError("shell_config.chrome must be an object")
 
-    _validate_shell_mode(chrome.get("defaultMode", chrome.get("default_mode")), field="shell_config.chrome.defaultMode")
+    if "default_mode" in chrome:
+        raise ValueError("shell_config.chrome.default_mode is not supported; use defaultMode")
+    _validate_shell_mode(chrome.get("defaultMode"), field="shell_config.chrome.defaultMode")
 
     modes = chrome.get("modes")
     if modes is None:
@@ -1146,12 +1267,24 @@ def _validate_shell_chrome(shell_config: Optional[Dict[str, Any]]) -> None:
             continue
         if not isinstance(mode_policy, dict):
             raise ValueError(f"shell_config.chrome.modes.{mode} must be an object")
+        for field in ("topBar", "top_bar", "bottom_bar", "local_nav"):
+            if field in mode_policy:
+                raise ValueError(
+                    f"shell_config.chrome.modes.{mode}.{field} is not supported; "
+                    "use header, bottomBar, or localNav"
+                )
         for viewport in ("desktop", "mobile"):
             viewport_policy = mode_policy.get(viewport)
             if viewport_policy is None:
                 continue
             if not isinstance(viewport_policy, dict):
                 raise ValueError(f"shell_config.chrome.modes.{mode}.{viewport} must be an object")
+            for field in ("topBar", "top_bar", "bottom_bar", "local_nav"):
+                if field in viewport_policy:
+                    raise ValueError(
+                        f"shell_config.chrome.modes.{mode}.{viewport}.{field} is not supported; "
+                        "use header, bottomBar, or localNav"
+                    )
             for field in ("header", "footer", "bottomBar"):
                 value = viewport_policy.get(field)
                 if value is not None and not isinstance(value, bool):
@@ -1428,6 +1561,7 @@ def save_app_schema(
     _validate_custom_route_bundle(custom_route_bundle)
     _canonicalize_manifest_routes(manifest_dict, page_list, custom_route_bundle)
     _validate_manifest_against_pages(manifest_dict, page_list, custom_route_bundle)
+    _validate_shell_header_actions(shell_config)
     _validate_shell_shortcuts(shell_config)
     _validate_shell_navigation(shell_config)
     _validate_shell_chrome(shell_config)

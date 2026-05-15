@@ -31,6 +31,7 @@ class AdminRegistryPage(BaseModel):
     order: int = 0
     enabled: bool = True
     scope: Literal["workspace", "app"] = "app"
+    surfaces: Optional[List[Literal["platform", "studio"]]] = None
 
     @field_validator("id", "label", "path", mode="before")
     @classmethod
@@ -46,6 +47,23 @@ class AdminRegistryPage(BaseModel):
         if val not in ("workspace", "app"):
             raise ValueError("scope must be 'workspace' or 'app'")
         return val
+
+    @field_validator("surfaces", mode="before")
+    @classmethod
+    def _surfaces(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        values = [v] if isinstance(v, str) else v
+        if not isinstance(values, list):
+            raise ValueError("surfaces must be a list of 'platform' or 'studio'")
+        normalized: list[str] = []
+        for item in values:
+            value = str(item or "").lower().strip()
+            if value not in {"platform", "studio"}:
+                raise ValueError("surfaces must contain only 'platform' or 'studio'")
+            if value not in normalized:
+                normalized.append(value)
+        return normalized or None
 
 
 class AdminRegistry(BaseModel):
@@ -97,6 +115,7 @@ def build_admin_shell_routes(registry: AdminRegistry) -> list[dict[str, Any]]:
                 "title": page.label,
                 "admin_page": page.id,
                 "scope": page.scope,
+                "surfaces": page.surfaces,
             }
         )
     return routes

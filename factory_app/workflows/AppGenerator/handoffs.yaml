@@ -92,6 +92,20 @@ handoff_rules:
   condition_scope: null
   condition: null
   transition_target: AgentTarget
+- source_agent: ControlPlaneAgent
+  target_agent: terminate
+  handoff_type: condition
+  condition_type: expression
+  condition_scope: null
+  condition: ${task_run_mode} == True
+  transition_target: TerminateTarget
+- source_agent: ControlPlaneAgent
+  target_agent: AppValidationAgent
+  handoff_type: after_work
+  condition_type: null
+  condition_scope: null
+  condition: null
+  transition_target: AgentTarget
 - source_agent: ConfigMiddlewareAgent
   target_agent: ModuleContractQualityAgent
   handoff_type: after_work
