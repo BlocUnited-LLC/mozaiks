@@ -1,6 +1,6 @@
 import { Link, useParams } from 'react-router-dom'
 
-import { AdminWorkspaceLayout } from '@mozaiks/chat-ui/admin/components/AdminWorkspaceLayout.jsx'
+import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ConsoleErrorState,
   ConsoleInlineEmptyState,
@@ -50,7 +50,7 @@ export default function AppBillingPage() {
   ]
 
   return (
-    <AdminWorkspaceLayout>
+    <WorkspaceLayout>
       <div className="space-y-6">
         <AppConsoleHero
           appId={appId}
@@ -149,6 +149,6 @@ export default function AppBillingPage() {
           </div>
         </div>
       </div>
-    </AdminWorkspaceLayout>
+    </WorkspaceLayout>
   )
 }

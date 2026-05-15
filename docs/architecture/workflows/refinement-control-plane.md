@@ -180,7 +180,7 @@ Runtime note:
   harness to compose checkpoint handlers deterministically
 - refinement re-entry routing is no longer hardcoded to builder workflows in
   Python; the selected control-plane pack declares app-owned artifact kinds and
-  `route_to` targets per change class inside `control_plane.yaml`
+  `workflow_sequence` targets per change class inside `control_plane.yaml`
 - that keeps the harness runtime-owned while letting future apps declare their
   own artifact/output topology without becoming `factory_app` clones
 
@@ -211,8 +211,15 @@ ownership:
 - `artifacts[]`
   - `artifact_kind`
   - optional `label`
-  - `routes.patch|design|feature|core.route_to`
-  - affected workflows / declarative families / replanning flags
+  - `routes.patch|design|feature|core.workflow_sequence`
+  - optional `routes.*.route_to` only when the sequence entry workflow needs an
+    explicit override
+  - affected declarative families / replanning flags
+
+The control plane derives affected workflows from the referenced
+`workflow_sequence` in `extension_registry.json`. Do not duplicate downstream
+workflow lists in `control_plane.yaml` unless a non-sequence route truly needs
+an explicit override.
 
 This keeps the runtime generic:
 
@@ -403,6 +410,7 @@ Target workflow revision context contract:
   - `change_request_id`
   - `artifact_kind`
   - `artifact_version_id`
+  - `workflow_sequence`
   - `refinement_request`
   - `refinement_request_meta`
   - `screen`
@@ -811,53 +819,82 @@ decision = await resolver.route(RefinementRequest(
 | Field | Type | Notes |
 |---|---|---|
 | `workflow_id` | `str` | Workflow to invoke |
+| `workflow_sequence` | `str \| null` | Workflow sequence to bind this revision run to |
 | `context_seed` | `dict` | Merged into `context_variables` for the new session |
 | `explanation` | `str` | Human-readable reason for the routing choice |
 | `is_full_restart` | `bool` | True for `core` changes — restarts from ValueEngine |
 
 ### Default Routing Table
 
-The built-in defaults cover all four change classes × four artifact kinds:
+The built-in factory pack covers all four change classes x four artifact kinds:
 
-| Change class | Artifact kind | Re-entry workflow | Full restart |
-|---|---|---|---|
-| `patch` | `app_bundle` | `AppGenerator` | No |
-| `design` | `app_bundle` | `DesignDocs` | No |
-| `feature` | `app_bundle` | `AppGenerator` | No |
-| `core` | `app_bundle` | `ValueEngine` | Yes |
-| `patch` | `workflow_bundle` | `AgentGenerator` | No |
-| `design` | `workflow_bundle` | `AgentGenerator` | No |
-| `feature` | `workflow_bundle` | `AgentGenerator` | No |
-| `core` | `workflow_bundle` | `ValueEngine` | Yes |
-| `patch/design/feature` | `design_docs` | `DesignDocs` | No |
-| `core` | `design_docs` | `ValueEngine` | Yes |
-| `patch/design/feature` | `concept` | `ValueEngine` | No |
-| `core` | `concept` | `ValueEngine` | Yes |
+| Change class | Artifact kind | Workflow sequence | Entry workflow | Full restart |
+|---|---|---|---|---|
+| `patch` | `app_bundle` | `app_revision` | `AppGenerator` | No |
+| `design` | `app_bundle` | `app_surface_revision` | `DesignDocs` | No |
+| `feature` | `app_bundle` | `app_revision` | `AppGenerator` | No |
+| `core` | `app_bundle` | `full_rebuild` | `ValueEngine` | Yes |
+| `patch` | `workflow_bundle` | `workflow_patch` | `AgentGenerator` | No |
+| `design` | `workflow_bundle` | `workflow_revision` | `AgentGenerator` | No |
+| `feature` | `workflow_bundle` | `workflow_revision` | `AgentGenerator` | No |
+| `core` | `workflow_bundle` | `full_rebuild` | `ValueEngine` | Yes |
+| `patch` | `design_docs` | `design_patch` | `DesignDocs` | No |
+| `design/feature` | `design_docs` | `design_revision` | `DesignDocs` | No |
+| `core` | `design_docs` | `full_rebuild` | `ValueEngine` | Yes |
+| `patch` | `concept` | `concept_patch` | `ValueEngine` | No |
+| `design/feature/core` | `concept` | `full_rebuild` | `ValueEngine` | `core` only |
 
 ### Declaration Model
 
-The re-entry policy is declared in code, not in a separate YAML routing file.
+The re-entry policy is declared by artifact kind in the selected
+`control_plane.yaml` pack.
 
-The only thing declared explicitly is **artifact ownership**:
+Each route chooses a `workflow_sequence` from
+`extended_orchestration/extension_registry.json`. The sequence is the source of
+truth for downstream workflow order. The route may optionally declare
+`route_to` when it must start at a workflow other than the first workflow in the
+sequence.
 
-| Artifact kind | Owner workflow | Design owner | Root owner |
-|---|---|---|---|
-| `app_bundle` | `AppGenerator` | `DesignDocs` | `ValueEngine` |
-| `workflow_bundle` | `AgentGenerator` | `AgentGenerator` | `ValueEngine` |
-| `design_docs` | `DesignDocs` | `DesignDocs` | `ValueEngine` |
-| `concept` | `ValueEngine` | `ValueEngine` | `ValueEngine` |
+Example:
 
-The shared generation-core resolver derives routes generically and hands the
-result back to SessionRouter:
+```yaml
+routing:
+  default_artifact_kind: app_bundle
+  artifacts:
+    - artifact_kind: app_bundle
+      label: app bundle
+      routes:
+        patch:
+          workflow_sequence: app_revision
+          affected_declarative_families: [app_bundle]
+          requires_replanning: false
+          requires_rebuild: true
+        design:
+          workflow_sequence: app_surface_revision
+          affected_declarative_families: [design_docs, app_bundle]
+          requires_replanning: true
+          requires_rebuild: true
+        feature:
+          workflow_sequence: app_revision
+          affected_declarative_families: [app_bundle]
+          requires_replanning: true
+          requires_rebuild: true
+        core:
+          workflow_sequence: full_rebuild
+          affected_declarative_families: [concept, design_docs, workflow_bundle, app_bundle]
+          requires_replanning: true
+          requires_rebuild: true
+```
 
-- `patch` -> owner workflow
-- `feature` -> owner workflow
-- `design` -> design owner
-- `core` -> root owner with full restart
+Rules:
 
-That keeps the model simpler than a separate 16-entry routing table and avoids
-turning refinement routing into another config system beside workflow sequences,
-transitions, and MFJ.
+- `workflow_sequence` is canonical for control-plane routes.
+- `affected_workflows` is derived from the sequence and should not be repeated
+  in normal first-party routes.
+- `route_to` is optional and exists only for exceptional explicit entry
+  workflow overrides.
+- `affected_declarative_families` remains in the control-plane route because it
+  describes artifact invalidation, not workflow ordering.
 
 ### Backend Intake
 

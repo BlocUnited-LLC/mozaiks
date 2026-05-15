@@ -287,7 +287,7 @@ function validateAuth(auth, app = {}) {
       issues.push({ level: 'info', file, message: 'roles.admin not set. The admin role name defaults to "admin".' });
     }
     if ((!Array.isArray(auth.roles.adminEmails) || auth.roles.adminEmails.length === 0) && topLevelAdmins.length === 0) {
-      issues.push({ level: 'info', file, message: 'No admin users declared. Add app.json → admins to make the Admin Portal easier to bootstrap.' });
+      issues.push({ level: 'info', file, message: 'No admin users declared. Add app.json -> admins to make admin bootstrap easier.' });
     }
   }
 

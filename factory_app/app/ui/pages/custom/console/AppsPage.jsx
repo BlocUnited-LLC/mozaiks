@@ -13,7 +13,7 @@ import {
   ResourceList,
   SummaryStrip,
 } from '@mozaiks/chat-ui/ui'
-import { AdminWorkspaceLayout } from '@mozaiks/chat-ui/admin/components/AdminWorkspaceLayout.jsx'
+import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ActionButton,
   ConsoleErrorState,
@@ -296,7 +296,7 @@ export default function AppsPage() {
   if (error) return <ConsoleErrorState title="Could not load apps" message={error} />
 
   return (
-    <AdminWorkspaceLayout>
+    <WorkspaceLayout>
       <div className="space-y-6">
         <PageHeader
           title="Apps"
@@ -347,6 +347,6 @@ export default function AppsPage() {
           }}
         />
       </div>
-    </AdminWorkspaceLayout>
+    </WorkspaceLayout>
   )
 }

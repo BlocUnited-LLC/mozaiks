@@ -1,49 +1,33 @@
-/**
- * AdminWorkspaceLayout — sidebar shell for the admin portal.
- *
- * Nav is fully API-driven: pages come from GET /api/admin/config `pages` array,
- * which is loaded from app/admin/admin_registry.yaml at runtime.
- *
- * Workspace-scope pages (scope: workspace) build the top-level console nav.
- * App-scope pages (scope: app) build the per-app nav when appId is present.
- *
- * No hardcoded nav items or section taxonomies.
- */
 import { useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   RiAppsFill,
-  RiCustomerServiceFill,
   RiDashboardFill,
   RiFileList3Fill,
-  RiHistoryFill,
   RiMoneyDollarCircleFill,
   RiPlugLine,
   RiPulseLine,
   RiServerFill,
-  RiSettings3Fill,
   RiUser3Fill,
 } from 'react-icons/ri'
 
-// Icon map — matches icon hint strings from admin_registry.yaml
-const ICON_MAP = {
-  apps:       RiAppsFill,
-  chart:      RiFileList3Fill,
-  pulse:      RiPulseLine,
-  billing:    RiMoneyDollarCircleFill,
-  server:     RiServerFill,
-  dashboard:  RiDashboardFill,
-  users:      RiUser3Fill,
-  operations: RiServerFill,
-  settings:   RiSettings3Fill,
-  plug:       RiPlugLine,
-  history:    RiHistoryFill,
-  support:    RiCustomerServiceFill,
-}
+const WORKSPACE_NAV_ITEMS = [
+  { id: 'apps', label: 'Apps', path: '/apps', icon: RiAppsFill, exact: true },
+  { id: 'usage', label: 'Usage', path: '/usage', icon: RiFileList3Fill, exact: true },
+  { id: 'health', label: 'Health', path: '/health', icon: RiPulseLine, exact: true },
+  { id: 'billing', label: 'Billing', path: '/billing', icon: RiMoneyDollarCircleFill, exact: true },
+  { id: 'hosting', label: 'Hosting', path: '/hosting', icon: RiServerFill, exact: true },
+]
 
-function resolveIcon(iconHint) {
-  return ICON_MAP[iconHint] || RiDashboardFill
-}
+const APP_NAV_ITEMS = [
+  { id: 'overview', label: 'Overview', suffix: '/overview', icon: RiDashboardFill },
+  { id: 'health', label: 'Health', suffix: '/health', icon: RiPulseLine },
+  { id: 'users', label: 'Users', suffix: '/users', icon: RiUser3Fill },
+  { id: 'integrations', label: 'Integrations', suffix: '/integrations', icon: RiPlugLine },
+  { id: 'usage', label: 'Usage', suffix: '/usage', icon: RiFileList3Fill },
+  { id: 'billing', label: 'Billing', suffix: '/billing', icon: RiMoneyDollarCircleFill },
+  { id: 'hosting', label: 'Hosting', suffix: '/hosting', icon: RiServerFill },
+]
 
 function resolveAppId(pathname) {
   const match = /^\/apps\/([^/]+)/.exec(pathname)
@@ -51,66 +35,23 @@ function resolveAppId(pathname) {
   return appId && appId !== 'new' ? appId : null
 }
 
-function buildAppPath(appId, templatePath) {
-  return templatePath.replace(':appId', encodeURIComponent(appId))
+function buildAppPath(appId, suffix) {
+  return `/apps/${encodeURIComponent(appId)}${suffix}`
 }
 
-/**
- * Build nav groups from the registry pages array.
- * When appId is present, show app-scope pages with appId substituted into paths.
- * Otherwise, show workspace-scope pages as the top-level console nav.
- */
-function buildNavGroups(adminPages, appId) {
-  if (!adminPages?.length) {
-    // Fallback before API responds — show minimal workspace nav
-    return [
-      {
-        label: null,
-        items: [
-          { id: 'apps', label: 'Apps', path: '/apps', icon: RiAppsFill, exact: true },
-        ],
-      },
-    ]
-  }
+function buildAppNavItems(appId) {
+  return APP_NAV_ITEMS.map((item) => ({
+    ...item,
+    path: buildAppPath(appId, item.suffix),
+    exact: true,
+  }))
+}
 
+function buildNavGroups(appId = null) {
   if (appId) {
-    const appPages = adminPages
-      .filter((p) => p.scope === 'app' && p.enabled !== false)
-      .sort((a, b) => a.order - b.order)
-      .map((p) => ({
-        id: p.id,
-        label: p.label,
-        path: buildAppPath(appId, p.path),
-        icon: resolveIcon(p.icon),
-        exact: true,
-      }))
-    return [{ label: null, items: appPages }]
+    return [{ label: null, items: buildAppNavItems(appId) }]
   }
-
-  const workspacePages = adminPages
-    .filter((p) => p.scope === 'workspace' && p.enabled !== false)
-    .sort((a, b) => a.order - b.order)
-    .map((p) => ({
-      id: p.id,
-      label: p.label,
-      path: p.path,
-      icon: resolveIcon(p.icon),
-      exact: true,
-    }))
-  return [{ label: null, items: workspacePages }]
-}
-
-function isItemActive(item, location) {
-  if (item.exact) return location.pathname === item.path
-  return location.pathname === item.path || location.pathname.startsWith(`${item.path}/`)
-}
-
-function getActiveNavItem(navGroups, location) {
-  for (const group of navGroups) {
-    const item = group.items.find((c) => isItemActive(c, location))
-    if (item) return { group, item }
-  }
-  return { group: navGroups[0] || null, item: navGroups[0]?.items?.[0] || null }
+  return [{ label: null, items: WORKSPACE_NAV_ITEMS }]
 }
 
 function MenuGlyph() {
@@ -132,10 +73,32 @@ function CloseGlyph() {
   )
 }
 
-function AdminSidebar({ adminPages = null, onNavigate = null, navGroups: providedNavGroups = null, surface = 'sidebar' }) {
+function itemHref(item) {
+  return item.path
+}
+
+function isItemActive(item, location) {
+  if (item.exact) {
+    return location.pathname === item.path
+  }
+  return location.pathname === item.path || location.pathname.startsWith(`${item.path}/`)
+}
+
+function getActiveNavItem(navGroups, location) {
+  for (const group of navGroups) {
+    const item = group.items.find((candidate) => isItemActive(candidate, location))
+    if (item) {
+      return { group, item }
+    }
+  }
+
+  return { group: navGroups[0] || null, item: navGroups[0]?.items?.[0] || null }
+}
+
+function WorkspaceSidebar({ onNavigate = null, navGroups: providedNavGroups = null, surface = 'sidebar' }) {
   const location = useLocation()
   const appId = resolveAppId(location.pathname)
-  const derivedNavGroups = useMemo(() => buildNavGroups(adminPages, appId), [adminPages, appId])
+  const derivedNavGroups = useMemo(() => buildNavGroups(appId), [appId])
   const navGroups = providedNavGroups || derivedNavGroups
   const navigationLabel = appId ? 'App Console navigation' : 'Workspace navigation'
   const surfaceClass =
@@ -185,7 +148,7 @@ function AdminSidebar({ adminPages = null, onNavigate = null, navGroups: provide
                 return (
                   <Link
                     key={item.id}
-                    to={item.path}
+                    to={itemHref(item)}
                     aria-current={active ? 'page' : undefined}
                     onClick={onNavigate || undefined}
                     className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
@@ -207,7 +170,7 @@ function AdminSidebar({ adminPages = null, onNavigate = null, navGroups: provide
   )
 }
 
-function AdminMobileNavTrigger({ onOpenMenu, activeLabel = 'Console' }) {
+function WorkspaceMobileNavTrigger({ onOpenMenu, activeLabel = 'Console' }) {
   return (
     <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)] left-4 z-[56] lg:hidden">
       <button
@@ -226,11 +189,12 @@ function AdminMobileNavTrigger({ onOpenMenu, activeLabel = 'Console' }) {
   )
 }
 
-export function AdminWorkspaceLayout({ children, adminPages = null }) {
+export function WorkspaceLayout({ children, navGroups: providedNavGroups = null }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
   const appId = resolveAppId(location.pathname)
-  const navGroups = useMemo(() => buildNavGroups(adminPages, appId), [adminPages, appId])
+  const derivedNavGroups = useMemo(() => buildNavGroups(appId), [appId])
+  const navGroups = providedNavGroups || derivedNavGroups
   const activeNav = useMemo(() => getActiveNavItem(navGroups, location), [navGroups, location])
   const activeLabel = activeNav.item?.label || activeNav.group?.label || 'Console'
 
@@ -239,7 +203,7 @@ export function AdminWorkspaceLayout({ children, adminPages = null }) {
       <div className="mx-auto flex w-full max-w-[96rem] gap-6 px-4 py-7 md:px-6 lg:px-8">
         <div className="hidden w-72 shrink-0 lg:block">
           <div className="sticky top-24">
-            <AdminSidebar adminPages={adminPages} navGroups={navGroups} />
+            <WorkspaceSidebar navGroups={navGroups} />
           </div>
         </div>
 
@@ -279,8 +243,7 @@ export function AdminWorkspaceLayout({ children, adminPages = null }) {
                   <CloseGlyph />
                 </button>
               </div>
-              <AdminSidebar
-                adminPages={adminPages}
+              <WorkspaceSidebar
                 navGroups={navGroups}
                 onNavigate={() => setMobileOpen(false)}
                 surface="sheet"
@@ -292,10 +255,10 @@ export function AdminWorkspaceLayout({ children, adminPages = null }) {
         <div className="min-w-0 flex-1 space-y-5 pb-24 md:pb-10 lg:pb-0">
           {children}
         </div>
-        <AdminMobileNavTrigger onOpenMenu={() => setMobileOpen(true)} activeLabel={activeLabel} />
+        <WorkspaceMobileNavTrigger onOpenMenu={() => setMobileOpen(true)} activeLabel={activeLabel} />
       </div>
     </div>
   )
 }
 
-export default AdminWorkspaceLayout
+export default WorkspaceLayout

@@ -190,7 +190,7 @@ barrel.
 
 Use this contract for app-business panels owned by the connected app backend.
 
-Use `modules/{module}/admin.yaml` for feature-owned panels that live with a
+Use `modules/{module}/contracts/admin.yaml` for feature-owned panels that live with a
 Mozaiks module contract.
 
 Do not duplicate the same surface in both places.
@@ -201,5 +201,5 @@ This contract does not:
 
 - define the `/admin` shell
 - replace `app/app.json` `admins`
-- replace `modules/{module}/admin.yaml`
+- replace `modules/{module}/contracts/admin.yaml`
 - allow app backends to generate standalone admin routes or React shells

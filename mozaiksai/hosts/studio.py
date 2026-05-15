@@ -1137,6 +1137,7 @@ async def trigger_workflow(
                 impact_set=refinement_decision.impact_set.model_dump(mode="python"),
                 router_decision={
                     "workflow_id": refinement_decision.workflow_id,
+                    "workflow_sequence": refinement_decision.workflow_sequence,
                     "requested_workflow_id": body.workflow_id,
                     "explanation": refinement_decision.explanation,
                     "is_full_restart": refinement_decision.is_full_restart,
@@ -1206,6 +1207,9 @@ async def trigger_workflow(
     if should_return_harness_decision:
         try:
             pending_workflow_id = harness_decision.recommended_workflow_id or refinement_decision.workflow_id
+            pending_journey_id = (
+                refinement_decision.workflow_sequence if refinement_decision is not None else body.journey_id
+            )
             pending_revision_id = (
                 persisted_revision_id
                 or str((refinement_decision.context_seed or {}).get("revision_id") or "").strip()
@@ -1215,6 +1219,7 @@ async def trigger_workflow(
             pending_decision = RoutingDecision(
                 workflow_id=pending_workflow_id,
                 requested_workflow_id=body.workflow_id or pending_workflow_id,
+                journey_id=pending_journey_id,
                 context_seed=dict(refinement_decision.context_seed or {}),
                 explanation=refinement_decision.explanation if refinement_decision is not None else "",
                 is_full_restart=bool(refinement_decision.is_full_restart),
@@ -1246,7 +1251,7 @@ async def trigger_workflow(
                 requires_confirmation=bool(harness_decision.requires_confirmation),
                 trigger_source=body.trigger_source,
                 requested_workflow_id=body.workflow_id,
-                journey_id=body.journey_id,
+                journey_id=pending_journey_id,
                 context_variables=dict(body.context_variables or {}),
                 trigger_payload=dict(trigger_payload or {}),
                 actions=[
@@ -1267,7 +1272,7 @@ async def trigger_workflow(
                     user_id=user_id,
                     trigger_source=body.trigger_source,
                     workflow_id=body.workflow_id,
-                    journey_id=body.journey_id,
+                    journey_id=pending_journey_id,
                     context_variables=body.context_variables or {},
                     trigger_payload=trigger_payload,
                 ),
@@ -1335,7 +1340,7 @@ async def trigger_workflow(
             app_id=app_id,
             user_id=user_id,
             trigger_source=body.trigger_source,
-            journey_id=body.journey_id,
+            journey_id=(refinement_decision.workflow_sequence if refinement_decision is not None else body.journey_id),
             context_variables=body.context_variables or {},
             trigger_payload=trigger_payload,
             extra_trigger_meta={
@@ -1343,6 +1348,7 @@ async def trigger_workflow(
                 "change_class": resolved_change_class,
                 "artifact_version_id": resolved_artifact_version_id,
                 "artifact_kind": resolved_artifact_kind,
+                "workflow_sequence": refinement_decision.workflow_sequence if refinement_decision is not None else None,
             },
         )
     except ValueError as route_err:
@@ -1361,6 +1367,7 @@ async def trigger_workflow(
                 change_request_id=persisted_change_request_id,
                 router_decision={
                     "workflow_id": resolved_workflow_id,
+                    "workflow_sequence": refinement_decision.workflow_sequence if refinement_decision is not None else None,
                     "requested_workflow_id": routing_decision.requested_workflow_id,
                     "explanation": routing_decision.explanation,
                     "is_full_restart": routing_decision.is_full_restart,

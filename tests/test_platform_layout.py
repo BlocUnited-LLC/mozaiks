@@ -33,7 +33,7 @@ def test_factory_app_runtime_families_exist() -> None:
     assert (FACTORY_APP_ROOT / "config").is_dir()
     assert (FACTORY_APP_ROOT / "config" / "ai.json").exists()
     assert (FACTORY_APP_ROOT / "config" / "shell.json").exists()
-    assert (FACTORY_APP_ROOT / "config" / "admin.json").exists()
+    assert not (FACTORY_APP_ROOT / "config" / "admin.json").exists()
     assert (FACTORY_APP_ROOT / "modules").is_dir()
     assert (FACTORY_APP_ROOT / "ui" / "index.js").exists()
     assert (FACTORY_APP_ROOT / "ui" / "route_manifest.json").exists()

@@ -17,6 +17,7 @@ from mozaiksai.control_plane import (
     ControlPlaneToolsManifest,
     LoadedControlPlanePack,
     RefinementTriggerRouteResolver,
+    load_control_plane_pack,
 )
 
 
@@ -223,3 +224,36 @@ async def test_refinement_router_keeps_local_patch_in_declared_owner_workflow() 
     assert decision.impact_set.affected_workflows == ["ExecutiveSummary"]
     assert decision.impact_set.requires_replanning is False
     assert decision.context_seed["artifact_kind"] == "executive_summary"
+
+
+@pytest.mark.asyncio
+async def test_refinement_router_derives_route_from_workflow_sequence() -> None:
+    app_root = Path(__file__).resolve().parents[1] / "factory_app" / "app"
+    resolver = RefinementTriggerRouteResolver(
+        classifier=_FakeChangeClassifier(
+            change_class="design",
+            rationale="The dashboard IA should be revised without changing the product concept.",
+        ),
+        pack_loader=lambda: load_control_plane_pack(app_root=app_root),
+    )
+
+    request = resolver.request_from_payload(
+        payload={
+            "refinement_request": {
+                "artifact_kind": "app_bundle",
+                "artifact_version_id": "av_app_1",
+                "raw_user_request": "Restructure the app dashboard layout.",
+            }
+        },
+        app_id="app_1",
+        requested_workflow_id="AppGenerator",
+    )
+
+    assert request is not None
+    decision = await resolver.route(request)
+
+    assert decision.workflow_id == "DesignDocs"
+    assert decision.workflow_sequence == "app_surface_revision"
+    assert decision.impact_set.workflow_sequence == "app_surface_revision"
+    assert decision.impact_set.affected_workflows == ["DesignDocs", "AppGenerator"]
+    assert decision.context_seed["workflow_sequence"] == "app_surface_revision"

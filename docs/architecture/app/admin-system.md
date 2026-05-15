@@ -31,7 +31,7 @@ Terminology note:
 | Source | Owner | Declared In | Data/API |
 |---|---|---|---|
 | Runtime/operator panels | platform host | framework admin contract plus `app/app.json` `admins` for access | same-host `/api/admin/*` |
-| Feature panels | module contract | `modules/{module}/admin.yaml` | module actions and optional `backend/admin.py` hooks |
+| Feature panels | module contract | `modules/{module}/contracts/admin.yaml` | module actions and optional `backend/admin.py` hooks |
 | App-business panels | optional connected app backend | `app_backend_url/api/admin/config` | `app_backend_url/api/admin/*` |
 
 The platform host owns the shell and access model. Modules own feature admin
@@ -46,14 +46,14 @@ The admin system has four distinct layers. Keep them separate:
 2. The built-in admin section registry is framework-owned and defines the
   semantic section ids, default labels, route paths, and default ordering for
   the app admin route family.
-3. `modules/{module}/admin.yaml` contributes feature-owned panels into those
+3. `modules/{module}/contracts/admin.yaml` contributes feature-owned panels into those
   semantic sections.
 4. An optional connected app backend may contribute app-business panels through
   `GET {app_backend_url}/api/admin/config`.
 
-The shell should render a resolved navigation model from those contracts. It
-should not invent a second private set of section ids, paths, or drawer items
-inside the frontend.
+AdminPortal should resolve section rendering from those contracts. Console
+workspace/app navigation is a separate `WorkspaceLayout` concern and must not
+be mutated by module admin panels.
 
 ## Admin Bootstrap
 
@@ -64,7 +64,9 @@ auth role model.
 
 Runtime/operator panels are framework-owned defaults surfaced by same-host
 `/api/admin/*` endpoints. Feature panels and app-business panels use their own
-contracts described above.
+contracts described above. The same-host `/api/admin/*` endpoints are internal
+framework APIs; Console pages may consume their data, but customer-facing copy
+should not expose "Admin" as a product section.
 
 That means:
 
@@ -110,14 +112,14 @@ than reintroducing `app/config/admin.json`.
 Implementation rule:
 
 - runtime/platform code owns the canonical section metadata
-- frontend admin shells must derive navigation and section routing from that
-  canonical metadata or from a payload resolved from it
-- do not maintain separate hardcoded copies of section ids, paths, labels, and
-  order in multiple frontend files
+- frontend admin rendering must derive section routing from that canonical
+  metadata or from a payload resolved from it
+- Console navigation stays deterministic and product-scoped; admin panels do
+  not add, rename, or reorder Console nav items
 
 ## Feature Admin Contract
 
-Feature-owned admin UI lives in `modules/{module}/admin.yaml`.
+Feature-owned admin UI lives in `modules/{module}/contracts/admin.yaml`.
 
 Each panel must declare one semantic section:
 
@@ -184,7 +186,7 @@ Use this order of preference:
 3. only introduce standalone generated admin route families through a future,
    explicit contract if the product truly needs them
 
-Do not overload `app/app.json`, `modules/{module}/admin.yaml`, or any other
+Do not overload `app/app.json`, `modules/{module}/contracts/admin.yaml`, or any other
 existing contract into a general admin-page generator.
 If Mozaiks later supports agent-generated standalone admin subroutes, that must
 be a new contract with explicit ownership, registration, and validation rules.
@@ -236,7 +238,7 @@ the host-owned `/admin` shell behavior described here.
 ## Generator Rules
 
 - Populate `app/app.json` `admins` for admin bootstrap access.
-- Generate `modules/{module}/admin.yaml` for feature-owned admin panels.
+- Generate `modules/{module}/contracts/admin.yaml` only when the module needs feature-owned admin panels.
 - Every generated admin panel must set `section` to one of the semantic admin
   sections listed above.
 - Prefer `renderer: schema` with `layout + sections[]`.

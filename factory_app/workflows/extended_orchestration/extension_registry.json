@@ -53,6 +53,70 @@
         { "transition": "app_type_selector" },
         { "workflows": ["ExistingAppDiscovery"] }
       ]
+    },
+    {
+      "id": "full_rebuild",
+      "description": "Revision pipeline for concept-level changes that need the full build stack refreshed without onboarding transitions.",
+      "steps": [
+        { "workflows": ["ValueEngine"] },
+        { "workflows": ["ThemeCapture"] },
+        { "workflows": ["DesignDocs"] },
+        { "workflows": ["AgentGenerator"] },
+        { "workflows": ["AppGenerator"] }
+      ]
+    },
+    {
+      "id": "concept_patch",
+      "description": "Scoped concept revision owned by ValueEngine.",
+      "steps": [
+        { "workflows": ["ValueEngine"] }
+      ]
+    },
+    {
+      "id": "design_patch",
+      "description": "Scoped design-document revision owned by DesignDocs.",
+      "steps": [
+        { "workflows": ["DesignDocs"] }
+      ]
+    },
+    {
+      "id": "design_revision",
+      "description": "Design-intent revision that refreshes downstream workflow and app artifacts.",
+      "steps": [
+        { "workflows": ["DesignDocs"] },
+        { "workflows": ["AgentGenerator"] },
+        { "workflows": ["AppGenerator"] }
+      ]
+    },
+    {
+      "id": "app_surface_revision",
+      "description": "App-surface revision that reopens DesignDocs and regenerates app artifacts.",
+      "steps": [
+        { "workflows": ["DesignDocs"] },
+        { "workflows": ["AppGenerator"] }
+      ]
+    },
+    {
+      "id": "workflow_patch",
+      "description": "Scoped workflow-bundle revision owned by AgentGenerator.",
+      "steps": [
+        { "workflows": ["AgentGenerator"] }
+      ]
+    },
+    {
+      "id": "workflow_revision",
+      "description": "Workflow-bundle revision that refreshes generated app wiring.",
+      "steps": [
+        { "workflows": ["AgentGenerator"] },
+        { "workflows": ["AppGenerator"] }
+      ]
+    },
+    {
+      "id": "app_revision",
+      "description": "Scoped app-bundle revision owned by AppGenerator.",
+      "steps": [
+        { "workflows": ["AppGenerator"] }
+      ]
     }
   ],
 

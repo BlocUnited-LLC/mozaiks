@@ -30,7 +30,7 @@ def test_summary_strip_compacts_on_mobile() -> None:
 
 def test_shell_header_and_widget_stay_mobile_tolerant() -> None:
     header_source = _read("chat-ui/src/components/layout/Header.js")
-    layout_source = _read("chat-ui/src/admin/components/AdminWorkspaceLayout.jsx")
+    layout_source = _read("chat-ui/src/workspace/WorkspaceLayout.jsx")
     widget_source = _read("chat-ui/src/components/chat/PersistentChatWidget.jsx")
 
     assert 'hidden md:flex items-center gap-2' in header_source
@@ -38,7 +38,7 @@ def test_shell_header_and_widget_stay_mobile_tolerant() -> None:
     assert 'h-6 max-w-[10.5rem] object-contain opacity-90 sm:h-7 sm:max-w-[12rem]' in header_source
 
     assert 'pb-24 md:pb-10 lg:pb-0' in layout_source
-    assert "function AdminMobileNavTrigger" in layout_source
+    assert "function WorkspaceMobileNavTrigger" in layout_source
     assert "<AdminTopbar" not in layout_source
     assert "Open console navigation" in layout_source
     assert "Console navigation" in layout_source

@@ -9,6 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mozaiksai.core.session.model import SessionLifecycle, TriggerInput
 from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
+from mozaiksai.core.workflow.pack.config import (
+    get_workflow_sequence,
+    load_global_pack_graph,
+    normalize_step_groups,
+)
 from ..loader import load_selected_control_plane_pack
 from ..schema import (
     ControlPlaneArtifactRoutingManifest,
@@ -81,6 +86,7 @@ class ChangeIntent(BaseModel):
 class ImpactSet(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    workflow_sequence: Optional[str] = None
     affected_workflows: list[str] = Field(default_factory=list)
     affected_bundle_paths: list[str] = Field(default_factory=list)
     affected_declarative_families: list[str] = Field(default_factory=list)
@@ -94,6 +100,7 @@ class RefinementRoutingDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     workflow_id: str
+    workflow_sequence: Optional[str] = None
     refinement_request: RefinementRequest
     change_intent: ChangeIntent
     impact_set: ImpactSet
@@ -154,6 +161,46 @@ class RefinementTriggerRouteResolver:
     def _families_for_route(route: ControlPlaneChangeRouteManifest, artifact_kind: str) -> list[str]:
         families = [str(item).strip() for item in route.affected_declarative_families if str(item).strip()]
         return families or [artifact_kind]
+
+    @staticmethod
+    def _sequence_workflows(sequence_id: Optional[str]) -> list[str]:
+        sid = str(sequence_id or "").strip()
+        if not sid:
+            return []
+        pack = load_global_pack_graph()
+        if pack is None:
+            raise RuntimeError(
+                f"Control-plane route references workflow_sequence '{sid}', but no extension registry is loaded."
+            )
+        sequence = get_workflow_sequence(pack, sid)
+        if sequence is None:
+            raise RuntimeError(f"Control-plane route references unknown workflow_sequence '{sid}'.")
+        workflows: list[str] = []
+        for group in normalize_step_groups(sequence.steps):
+            for workflow_id in group:
+                if workflow_id not in workflows:
+                    workflows.append(workflow_id)
+        if not workflows:
+            raise RuntimeError(f"Control-plane workflow_sequence '{sid}' does not contain workflow steps.")
+        return workflows
+
+    def _route_workflow_id(self, route: ControlPlaneChangeRouteManifest) -> str:
+        explicit = str(route.route_to or "").strip()
+        sequence_workflows = self._sequence_workflows(route.workflow_sequence)
+        if explicit:
+            if sequence_workflows and explicit not in sequence_workflows:
+                raise RuntimeError(
+                    "Control-plane route_to "
+                    f"'{explicit}' is not part of workflow_sequence '{route.workflow_sequence}'."
+                )
+            return explicit
+        return sequence_workflows[0]
+
+    def _affected_workflows_for_route(self, route: ControlPlaneChangeRouteManifest) -> list[str]:
+        explicit = [str(item).strip() for item in route.affected_workflows if str(item).strip()]
+        if explicit:
+            return explicit
+        return self._sequence_workflows(route.workflow_sequence) or [self._route_workflow_id(route)]
 
     async def _derive_change_intent(self, request: RefinementRequest) -> ChangeIntent:
         classification = await self._classifier.classify(
@@ -227,10 +274,11 @@ class RefinementTriggerRouteResolver:
         route = policy.route_for(intent.change_class)
         families = self._families_for_route(route, request.artifact_kind)
         label = self._artifact_label(request.artifact_kind, policy)
-        affected_workflows = [str(item).strip() for item in route.affected_workflows if str(item).strip()] or [route.route_to]
+        workflow_id = self._route_workflow_id(route)
+        affected_workflows = self._affected_workflows_for_route(route)
         if intent.change_class == ChangeClass.CORE:
             scope_summary = route.scope_summary or (
-                f"Restart from {route.route_to} and invalidate downstream outputs that depend on the {label}."
+                f"Restart from {workflow_id} and invalidate downstream outputs that depend on the {label}."
             )
         elif intent.change_class == ChangeClass.DESIGN:
             scope_summary = route.scope_summary or (
@@ -238,18 +286,19 @@ class RefinementTriggerRouteResolver:
             )
         elif intent.change_class == ChangeClass.FEATURE:
             scope_summary = route.scope_summary or (
-                f"Extend the existing {label} within the approved concept using {route.route_to}."
+                f"Extend the existing {label} within the approved concept using {workflow_id}."
             )
         else:
             scope_summary = route.scope_summary or (
                 f"Apply a local patch to the current {label} without widening upstream scope."
             )
         return ImpactSet(
+            workflow_sequence=route.workflow_sequence,
             affected_workflows=affected_workflows,
             affected_declarative_families=families,
             requires_replanning=route.requires_replanning,
             requires_rebuild=route.requires_rebuild,
-            restart_from=route.route_to,
+            restart_from=workflow_id,
             scope_summary=scope_summary,
         )
 
@@ -263,43 +312,48 @@ class RefinementTriggerRouteResolver:
         policy = self._policy_for(request.artifact_kind)
         route = policy.route_for(change_intent.change_class)
         label = self._artifact_label(request.artifact_kind, policy)
+        workflow_id = self._route_workflow_id(route)
 
         if change_intent.change_class == ChangeClass.CORE:
             return RefinementRoutingDecision(
-                workflow_id=route.route_to,
+                workflow_id=workflow_id,
+                workflow_sequence=route.workflow_sequence,
                 refinement_request=request,
                 change_intent=change_intent,
                 impact_set=impact_set,
-                explanation=f"Core concept change detected for {label}; restarting from {route.route_to}.",
+                explanation=f"Core concept change detected for {label}; restarting from {workflow_id}.",
                 is_full_restart=True,
             )
 
         if change_intent.change_class == ChangeClass.DESIGN:
             return RefinementRoutingDecision(
-                workflow_id=route.route_to,
+                workflow_id=workflow_id,
+                workflow_sequence=route.workflow_sequence,
                 refinement_request=request,
                 change_intent=change_intent,
                 impact_set=impact_set,
-                explanation=f"Re-entering {route.route_to} to revise design-owned aspects of the {label}.",
+                explanation=f"Re-entering {workflow_id} to revise design-owned aspects of the {label}.",
                 is_full_restart=False,
             )
 
         if change_intent.change_class == ChangeClass.FEATURE:
             return RefinementRoutingDecision(
-                workflow_id=route.route_to,
+                workflow_id=workflow_id,
+                workflow_sequence=route.workflow_sequence,
                 refinement_request=request,
                 change_intent=change_intent,
                 impact_set=impact_set,
-                explanation=f"Re-entering {route.route_to} to extend the {label} within the current concept.",
+                explanation=f"Re-entering {workflow_id} to extend the {label} within the current concept.",
                 is_full_restart=False,
             )
 
         return RefinementRoutingDecision(
-            workflow_id=route.route_to,
+            workflow_id=workflow_id,
+            workflow_sequence=route.workflow_sequence,
             refinement_request=request,
             change_intent=change_intent,
             impact_set=impact_set,
-            explanation=f"Re-entering {route.route_to} to apply a scoped patch to the {label}.",
+            explanation=f"Re-entering {workflow_id} to apply a scoped patch to the {label}.",
             is_full_restart=False,
         )
 
@@ -323,6 +377,8 @@ class RefinementTriggerRouteResolver:
         }
         if request.artifact_version_id:
             context_seed["artifact_version_id"] = request.artifact_version_id
+        if impact_set.workflow_sequence:
+            context_seed["workflow_sequence"] = impact_set.workflow_sequence
         change_request_id = request.extra.get("change_request_id")
         if isinstance(change_request_id, str) and change_request_id.strip():
             context_seed["change_request_id"] = change_request_id.strip()
@@ -418,6 +474,7 @@ class RefinementTriggerRouteResolver:
         decision = await self.route(request)
         return TriggerRoutingContribution(
             workflow_id=decision.workflow_id,
+            journey_id=decision.workflow_sequence,
             context_seed=decision.context_seed,
             explanation=decision.explanation,
             is_full_restart=decision.is_full_restart,

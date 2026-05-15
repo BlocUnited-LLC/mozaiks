@@ -12,45 +12,34 @@ routing:
       label: concept
       routes:
         patch:
-          route_to: ValueEngine
-          affected_workflows:
-            - ValueEngine
+          workflow_sequence: concept_patch
           affected_declarative_families:
             - concept
           requires_replanning: false
           requires_rebuild: true
           scope_summary: Apply a local concept patch within ValueEngine.
         design:
-          route_to: ValueEngine
-          affected_workflows:
-            - ValueEngine
-            - DesignDocs
-            - AgentGenerator
-            - AppGenerator
+          workflow_sequence: full_rebuild
           affected_declarative_families:
             - concept
+            - design_docs
+            - workflow_bundle
+            - app_bundle
           requires_replanning: true
           requires_rebuild: true
           scope_summary: Reopen ValueEngine for concept-level revision and refresh downstream generated outputs.
         feature:
-          route_to: ValueEngine
-          affected_workflows:
-            - ValueEngine
-            - DesignDocs
-            - AgentGenerator
-            - AppGenerator
+          workflow_sequence: full_rebuild
           affected_declarative_families:
             - concept
+            - design_docs
+            - workflow_bundle
+            - app_bundle
           requires_replanning: true
           requires_rebuild: true
           scope_summary: Extend the concept in ValueEngine and rebuild downstream outputs that depend on it.
         core:
-          route_to: ValueEngine
-          affected_workflows:
-            - ValueEngine
-            - DesignDocs
-            - AgentGenerator
-            - AppGenerator
+          workflow_sequence: full_rebuild
           affected_declarative_families:
             - concept
             - design_docs
@@ -63,43 +52,32 @@ routing:
       label: design docs
       routes:
         patch:
-          route_to: DesignDocs
-          affected_workflows:
-            - DesignDocs
+          workflow_sequence: design_patch
           affected_declarative_families:
             - design_docs
           requires_replanning: false
           requires_rebuild: true
           scope_summary: Apply a local patch within DesignDocs.
         design:
-          route_to: DesignDocs
-          affected_workflows:
-            - DesignDocs
-            - AgentGenerator
-            - AppGenerator
+          workflow_sequence: design_revision
           affected_declarative_families:
             - design_docs
+            - workflow_bundle
+            - app_bundle
           requires_replanning: true
           requires_rebuild: true
           scope_summary: Reopen DesignDocs and refresh downstream generators that depend on the revised design intent.
         feature:
-          route_to: DesignDocs
-          affected_workflows:
-            - DesignDocs
-            - AgentGenerator
-            - AppGenerator
+          workflow_sequence: design_revision
           affected_declarative_families:
             - design_docs
+            - workflow_bundle
+            - app_bundle
           requires_replanning: true
           requires_rebuild: true
           scope_summary: Extend design-owned capability planning in DesignDocs and rebuild downstream generators.
         core:
-          route_to: ValueEngine
-          affected_workflows:
-            - ValueEngine
-            - DesignDocs
-            - AgentGenerator
-            - AppGenerator
+          workflow_sequence: full_rebuild
           affected_declarative_families:
             - concept
             - design_docs
@@ -112,39 +90,30 @@ routing:
       label: workflow bundle
       routes:
         patch:
-          route_to: AgentGenerator
-          affected_workflows:
-            - AgentGenerator
+          workflow_sequence: workflow_patch
           affected_declarative_families:
             - workflow_bundle
           requires_replanning: false
           requires_rebuild: true
           scope_summary: Apply a local patch within AgentGenerator.
         design:
-          route_to: AgentGenerator
-          affected_workflows:
-            - AgentGenerator
+          workflow_sequence: workflow_revision
           affected_declarative_families:
             - workflow_bundle
+            - app_bundle
           requires_replanning: true
           requires_rebuild: true
           scope_summary: Reopen AgentGenerator for workflow-bundle revision within the approved concept.
         feature:
-          route_to: AgentGenerator
-          affected_workflows:
-            - AgentGenerator
+          workflow_sequence: workflow_revision
           affected_declarative_families:
             - workflow_bundle
+            - app_bundle
           requires_replanning: true
           requires_rebuild: true
           scope_summary: Extend workflow-bundle behavior in AgentGenerator within the approved concept.
         core:
-          route_to: ValueEngine
-          affected_workflows:
-            - ValueEngine
-            - DesignDocs
-            - AgentGenerator
-            - AppGenerator
+          workflow_sequence: full_rebuild
           affected_declarative_families:
             - concept
             - design_docs
@@ -157,19 +126,14 @@ routing:
       label: app bundle
       routes:
         patch:
-          route_to: AppGenerator
-          affected_workflows:
-            - AppGenerator
+          workflow_sequence: app_revision
           affected_declarative_families:
             - app_bundle
           requires_replanning: false
           requires_rebuild: true
           scope_summary: Apply a local patch within AppGenerator.
         design:
-          route_to: DesignDocs
-          affected_workflows:
-            - DesignDocs
-            - AppGenerator
+          workflow_sequence: app_surface_revision
           affected_declarative_families:
             - design_docs
             - app_bundle
@@ -177,21 +141,14 @@ routing:
           requires_rebuild: true
           scope_summary: Reopen DesignDocs for app-surface revision and rebuild the affected app bundle output.
         feature:
-          route_to: AppGenerator
-          affected_workflows:
-            - AppGenerator
+          workflow_sequence: app_revision
           affected_declarative_families:
             - app_bundle
           requires_replanning: true
           requires_rebuild: true
           scope_summary: Extend the app bundle in AppGenerator within the approved concept.
         core:
-          route_to: ValueEngine
-          affected_workflows:
-            - ValueEngine
-            - DesignDocs
-            - AgentGenerator
-            - AppGenerator
+          workflow_sequence: full_rebuild
           affected_declarative_families:
             - concept
             - design_docs

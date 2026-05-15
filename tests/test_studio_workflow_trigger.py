@@ -247,11 +247,13 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
             ],
             "metadata": {
                 "change_class": "feature",
-                    "scope_summary": "Extend the app bundle in AppGenerator within the approved concept.",
+                "workflow_sequence": "app_revision",
+                "scope_summary": "Extend the app bundle in AppGenerator within the approved concept.",
             },
         },
     }
     assert captured_prepare["workflow_id"] is None
+    assert captured_prepare["journey_id"] == "app_revision"
     assert captured_prepare["trigger_source"] == "refinement"
     assert captured_prepare["context_variables"] == {"screen": "studio-create"}
     assert captured_prepare["trigger_payload"] == {
@@ -279,6 +281,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
         "change_class": "feature",
         "artifact_version_id": "av_123",
         "artifact_kind": "app_bundle",
+        "workflow_sequence": "app_revision",
     }
     assert persisted_changes == [
         {
@@ -314,6 +317,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
                 "touches_concept": False,
             },
             "impact_set": {
+                "workflow_sequence": "app_revision",
                 "affected_workflows": ["AppGenerator"],
                 "affected_bundle_paths": [],
                 "affected_declarative_families": ["app_bundle"],
@@ -324,6 +328,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
             },
             "router_decision": {
                 "workflow_id": "AppGenerator",
+                "workflow_sequence": "app_revision",
                 "requested_workflow_id": None,
                 "explanation": "Re-entering AppGenerator to extend the app bundle within the current concept.",
                 "is_full_restart": False,
@@ -349,6 +354,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
                     ],
                     "metadata": {
                         "change_class": "feature",
+                        "workflow_sequence": "app_revision",
                         "scope_summary": "Extend the app bundle in AppGenerator within the approved concept.",
                     },
                 },
@@ -370,6 +376,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
             "change_request_id": "cr_123",
             "router_decision": {
                 "workflow_id": "AppGenerator",
+                "workflow_sequence": "app_revision",
                 "requested_workflow_id": None,
                 "explanation": "refinement reroute",
                 "is_full_restart": False,
@@ -395,6 +402,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
                     ],
                     "metadata": {
                         "change_class": "feature",
+                        "workflow_sequence": "app_revision",
                         "scope_summary": "Extend the app bundle in AppGenerator within the approved concept.",
                     },
                 },
@@ -1043,6 +1051,7 @@ def test_studio_trigger_endpoint_returns_core_harness_decision_before_launch(mon
             ],
             "metadata": {
                 "change_class": "core",
+                "workflow_sequence": "full_rebuild",
                 "scope_summary": "Restart from ValueEngine and invalidate downstream concept, design, workflow, and app artifacts.",
             },
         },
@@ -1193,7 +1202,7 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
     assert persisted_state["active_revision_id"]
     assert captured_pending_harness_decision["trigger_source"] == "refinement"
     assert captured_pending_harness_decision["requested_workflow_id"] is None
-    assert captured_pending_harness_decision["journey_id"] is None
+    assert captured_pending_harness_decision["journey_id"] == "full_rebuild"
     assert captured_pending_harness_decision["context_variables"] == {}
     assert captured_pending_harness_decision["trigger_payload"]["change_request_id"] == "cr_core_1"
     assert captured_pending_harness_decision["trigger_payload"]["revision_id"] == persisted_state["active_revision_id"]
@@ -1222,6 +1231,7 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
     assert second.status_code == 200
     assert second.json()["execution_mode"] == "workflow"
     assert len(create_calls) == 1
+    assert captured_prepare["journey_id"] == "full_rebuild"
     assert captured_prepare["trigger_payload"]["change_request_id"] == "cr_core_1"
     assert captured_prepare["trigger_payload"]["revision_id"] == persisted_state["active_revision_id"]
 

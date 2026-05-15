@@ -1,19 +1,18 @@
 /**
  * AdminPage — unified admin shell.
  *
- * Owns: role guard, config fetch, panel normalization, section routing.
- * Each section delegates rendering to its own component in src/admin/pages/.
+ * Owns: role guard, config fetch, page routing, panel rendering.
+ * Each built-in page delegates to its own component in src/admin/pages/.
+ * Extension pages (declared only in admin_registry.yaml) render AdminExtensionPanels.
  *
- * Access is gated by the "admin" role (client-side guard here; backend enforces
+ * Access is gated by the "admin" role (client-side guard; backend enforces
  * independently on all /api/admin/* routes).
  *
- * Framework-owned sections and runtime panels are driven by the built-in admin shell contract via
- * GET /api/admin/config:
- *   { "sections": { ... }, "runtime_panels": [...], "module_panels": [...] }
+ * Config comes from GET /api/admin/config:
+ *   { "pages": [...], "runtime_panels": [...], "module_panels": [...] }
  *
- * App-business admin panels may come from a connected app backend's
- * /api/admin/config and are embedded by section-level components such as
- * UsersSection and UsageSection when the framework mounts those panels.
+ * Pages are declared in app/admin/admin_registry.yaml.
+ * Module panels reference a page id via the `page` field in admin.yaml.
  */
 
 import { useLocation } from 'react-router-dom'
@@ -27,69 +26,51 @@ import { OperationsSection }   from '../admin/pages/ActivitySection.jsx'
 import { SettingsSection }     from '../admin/pages/SettingsSection.jsx'
 
 // ---------------------------------------------------------------------------
-// Section routing
+// Page routing — extract active page id from the URL suffix
 // ---------------------------------------------------------------------------
 
 function AdminSectionRoute(pathname) {
   const suffixMatch = /^\/apps\/[^/]+\/([^/]+)\/?$/.exec(pathname)
   if (!suffixMatch) return 'overview'
-  return normalizeSection(suffixMatch[1], 'overview')
+  return suffixMatch[1].toLowerCase()
 }
 
 // ---------------------------------------------------------------------------
-// Panel normalization
+// Built-in page components — pages with dedicated section implementations
 // ---------------------------------------------------------------------------
 
-const KNOWN_SECTIONS = new Set([
-  'overview', 'users', 'billing', 'usage', 'activity',
-  'operations', 'settings', 'integrations', 'support',
-])
-
-function normalizeSection(value, fallback) {
-  const raw = String(value || '').trim().toLowerCase().replace(/_/g, '-')
-  if (!raw) return fallback
-  if (KNOWN_SECTIONS.has(raw)) return raw
-  return fallback
+const BUILTIN_PAGES = {
+  users:      (props) => <UsersSection {...props} />,
+  usage:      (props) => <UsageSection title="Usage" {...props} />,
+  operations: (props) => <OperationsSection {...props} />,
+  settings:   (props) => <SettingsSection {...props} />,
 }
 
-function inferSection(panel) {
-  const text = [panel?.section, panel?.category, panel?.group, panel?.id, panel?.label, panel?.description]
-    .filter(Boolean).join(' ').toLowerCase()
-  if (/(user|role|permission|auth|account|member)/.test(text)) return 'users'
-  if (/(billing|subscription|invoice|payment|stripe|revenue|plan)/.test(text)) return 'overview'
-  if (/(run|session|workflow|cost|token|usage)/.test(text)) return 'usage'
-  if (/(operations|activity|audit|log|event|history|incident|alert|health|error|performance)/.test(text)) return 'operations'
-  if (/(setting|config|domain|brand|theme|environment)/.test(text)) return 'settings'
-  if (/(support|ticket|notification|alert)/.test(text)) return 'operations'
-  return 'overview'
-}
-
-function getPanelId(panelConfig) {
-  return typeof panelConfig === 'string' ? panelConfig : panelConfig?.id
-}
+// ---------------------------------------------------------------------------
+// Panel utilities
+// ---------------------------------------------------------------------------
 
 function normalizeRuntimePanels(runtimePanels) {
-  const normalize = (p) => {
-    const id = getPanelId(p)
-    if (!id) return null
-    const fallback = id === 'sessions' ? 'operations' : 'usage'
-    if (typeof p === 'string') return { id: p, section: fallback }
-    return { ...p, section: normalizeSection(p?.section || p?.category || p?.group, fallback) }
-  }
-  const panels = Array.isArray(runtimePanels) ? runtimePanels : ['stats', 'runs', 'sessions']
-  return panels.map(normalize).filter(Boolean)
+  const panels = Array.isArray(runtimePanels) ? runtimePanels : [
+    { id: 'stats', page: 'usage' },
+    { id: 'runs', page: 'usage' },
+    { id: 'sessions', page: 'operations' },
+  ]
+  return panels.map((p) => ({
+    ...p,
+    id: typeof p === 'string' ? p : p?.id,
+    page: typeof p === 'string' ? (p === 'sessions' ? 'operations' : 'usage') : (p?.page || 'usage'),
+    source: 'runtime',
+  })).filter((p) => p.id)
 }
 
 function normalizeModulePanels(modulePanels) {
   if (!Array.isArray(modulePanels)) return []
-  return modulePanels.map((p) => ({
-    ...p,
-    section: normalizeSection(p?.section || p?.category || p?.group, inferSection(p)),
-  }))
+  return modulePanels.map((p) => ({ ...p, page: p?.page || 'overview' }))
 }
 
-function sectionPanels(panels, section) {
-  return panels.filter((p) => p.section === section)
+function pagePanels(panels, pageId) {
+  return panels.filter((p) => p.page === pageId)
 }
 
 // ---------------------------------------------------------------------------
@@ -114,55 +95,37 @@ export default function AdminPage() {
     )
   }
 
-  const activeSection       = AdminSectionRoute(location.pathname)
-  const allRuntimePanels    = normalizeRuntimePanels(config?.runtime_panels)
-  const allExtensionPanels  = normalizeModulePanels(config?.module_panels)
-  const runtimePanels       = sectionPanels(allRuntimePanels, activeSection)
-  const extensionPanels     = sectionPanels(allExtensionPanels, activeSection)
-
-  const SECTION_LABELS = {
-    billing: 'Billing', activity: 'Activity',
-    integrations: 'Integrations', support: 'Support',
-  }
+  const activePage        = AdminSectionRoute(location.pathname)
+  const allPages          = config?.pages ?? []
+  const allRuntimePanels  = normalizeRuntimePanels(config?.runtime_panels)
+  const allModulePanels   = normalizeModulePanels(config?.module_panels)
+  const runtimePanels     = pagePanels(allRuntimePanels, activePage)
+  const extensionPanels   = pagePanels(allModulePanels, activePage)
 
   let content
-  switch (activeSection) {
-    case 'users':
-      content = <UsersSection section="users" extensionPanels={extensionPanels} />
-      break
-    case 'usage':
-      content = <UsageSection title="Usage" runtimePanels={runtimePanels} extensionPanels={extensionPanels} />
-      break
-    case 'operations':
-      content = <OperationsSection runtimePanels={runtimePanels} extensionPanels={extensionPanels} />
-      break
-    case 'settings':
-      content = <SettingsSection extensionPanels={extensionPanels} />
-      break
-    case 'billing':
-    case 'activity':
-    case 'integrations':
-    case 'support':
-      content = (
-        <div className="space-y-4">
-          <h1 className="text-lg font-semibold text-foreground">
-            {SECTION_LABELS[activeSection]}
-          </h1>
-          <AdminExtensionPanels panels={extensionPanels} />
-        </div>
-      )
-      break
-    default:
-      content = (
-        <AdminOverviewPanel
-          runtimePanels={allRuntimePanels}
-          extensionPanels={allExtensionPanels}
-        />
-      )
+  const BuiltinPage = BUILTIN_PAGES[activePage]
+  if (activePage === 'overview') {
+    content = (
+      <AdminOverviewPanel
+        runtimePanels={allRuntimePanels}
+        extensionPanels={allModulePanels}
+      />
+    )
+  } else if (BuiltinPage) {
+    content = <BuiltinPage runtimePanels={runtimePanels} extensionPanels={extensionPanels} />
+  } else {
+    // Extension-only page — declared in admin_registry.yaml, panels from admin.yaml
+    const pageLabel = allPages.find((p) => p.id === activePage)?.label || activePage
+    content = (
+      <div className="space-y-4">
+        <h1 className="text-lg font-semibold text-foreground capitalize">{pageLabel}</h1>
+        <AdminExtensionPanels panels={extensionPanels} />
+      </div>
+    )
   }
 
   return (
-    <AdminWorkspaceLayout adminSections={config?.sections}>
+    <AdminWorkspaceLayout adminPages={allPages}>
       <div className="space-y-6">{content}</div>
     </AdminWorkspaceLayout>
   )

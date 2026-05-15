@@ -7,7 +7,7 @@ import {
   ResourceList,
   SummaryStrip,
 } from '@mozaiks/chat-ui/ui'
-import { AdminWorkspaceLayout } from '@mozaiks/chat-ui/admin/components/AdminWorkspaceLayout.jsx'
+import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ConsoleErrorState,
   ConsoleLoadingState,
@@ -171,7 +171,7 @@ export default function WorkspaceUsagePage() {
   if (error) return <ConsoleErrorState title="Workspace Usage Unavailable" message={error} />
 
   return (
-    <AdminWorkspaceLayout>
+    <WorkspaceLayout>
       <div className="space-y-6">
         <PageHeader
           title="Usage"
@@ -204,6 +204,6 @@ export default function WorkspaceUsagePage() {
           </div>
         </section>
       </div>
-    </AdminWorkspaceLayout>
+    </WorkspaceLayout>
   )
 }

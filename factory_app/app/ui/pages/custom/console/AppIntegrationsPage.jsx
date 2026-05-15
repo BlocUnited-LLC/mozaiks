@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
 import { PageHeader, SummaryStrip } from '@mozaiks/chat-ui/ui'
-import { AdminWorkspaceLayout } from '@mozaiks/chat-ui/admin/components/AdminWorkspaceLayout.jsx'
+import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ActionButton,
   API_BASE,
@@ -384,7 +384,7 @@ export default function AppIntegrationsPage() {
   }
 
   return (
-    <AdminWorkspaceLayout>
+    <WorkspaceLayout>
       <div className="space-y-6">
         <PageHeader
           title="Integrations"
@@ -459,6 +459,6 @@ export default function AppIntegrationsPage() {
           onDelete={handleOverlayDelete}
         />
       </div>
-    </AdminWorkspaceLayout>
+    </WorkspaceLayout>
   )
 }

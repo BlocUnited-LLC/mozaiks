@@ -20,7 +20,7 @@
  *
  * ## Adding a custom panel
  *
- * Backend/module: declare in modules/{module}/admin.yaml
+ * Backend/module: declare in modules/{module}/contracts/admin.yaml
  *   panels:
  *     - id: my_module.stats
  *       label: My Module Stats

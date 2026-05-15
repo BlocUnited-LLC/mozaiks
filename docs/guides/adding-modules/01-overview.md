@@ -28,7 +28,7 @@ app/modules/{name}/
 │   ├── reactions.yaml       ← events from other modules this module handles
 │   ├── notifications.yaml   ← notification rules per event
 │   ├── settings.yaml        ← user-configurable settings schema
-│   ├── admin.yaml           ← admin panels in the unified /admin shell
+│   ├── admin.yaml           ← optional feature panels for the framework admin shell
 │   └── entitlements.yaml    ← capability gates per plan or role
 ├── runtime_extensions.yaml  ← only for raw webhook routers or background workers
 └── backend/
@@ -156,8 +156,9 @@ result = await backend_request(
 
 ## Admin Panel
 
-Every generated module automatically receives an `contracts/admin.yaml` with panels
-derived from its declared actions. You can also write or extend it by hand.
+A module may include `contracts/admin.yaml` when it needs feature-owned panels
+inside the framework admin shell. AppGenerator can derive these panels from
+declared actions, or you can write the contract by hand.
 
 **Derivation rules (AppGenerator)**:
 
@@ -236,7 +237,8 @@ Valid `section` values: `overview`, `users`, `billing`, `usage`, `activity`,
 `operations`, `settings`, `integrations`, `support`.
 
 The admin runtime auto-discovers `contracts/admin.yaml` at startup — no registration
-step needed. Panels appear immediately inside `/admin` under the declared section.
+step needed. Panels appear inside the framework-owned admin surface under the
+declared section. They are not Console app portfolio pages.
 
 ## Read Next
 

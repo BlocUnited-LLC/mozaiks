@@ -355,7 +355,7 @@ async def test_revision_context_tool_assembles_runtime_session_and_artifact_stat
     )
 
     assert revision_context["present"] is True
-    assert revision_context["routing"]["current_artifact"]["routes"]["core"] == "MarketResearch"
+    assert revision_context["routing"]["current_artifact"]["routes"]["core"]["route_to"] == "MarketResearch"
     assert revision_context["session"]["sequence_status"] == "revising"
     assert revision_context["session"]["active_change_request_id"] == "cr_1"
     assert revision_context["current_artifact"]["artifact_version_id"] == "av_bp_2"

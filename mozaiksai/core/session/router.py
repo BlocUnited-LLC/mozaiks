@@ -72,6 +72,7 @@ class SessionRouter:
             explanation = route_contribution.explanation
             is_full_restart = bool(route_contribution.is_full_restart)
             requested_workflow_id = requested_workflow_id or route_contribution.workflow_id
+            explicit_journey_id = explicit_journey_id or route_contribution.journey_id
             lifecycle_state = route_contribution.lifecycle_state
 
         if not requested_workflow_id:
@@ -99,6 +100,12 @@ class SessionRouter:
             if unmet_dependency is not None:
                 resolved_workflow_id = unmet_dependency.workflow_id
                 rerouted_by_dependency = True
+                if explicit_journey_id and not self._journey_contains_workflow(
+                    pack,
+                    journey_id=explicit_journey_id,
+                    workflow_id=resolved_workflow_id,
+                ):
+                    explicit_journey_id = None
                 if not explanation:
                     explanation = (
                         f"Rerouted to unmet dependency '{unmet_dependency.workflow_id}' "
@@ -846,6 +853,16 @@ class SessionRouter:
             if workflow_id in group:
                 return index
         return None
+
+    @staticmethod
+    def _journey_contains_workflow(pack: Any, *, journey_id: str, workflow_id: str) -> bool:
+        journey = get_workflow_sequence(pack, journey_id)
+        if journey is None:
+            return False
+        for group in normalize_step_groups(journey.steps):
+            if workflow_id in group:
+                return True
+        return False
 
     @staticmethod
     def _resolve_step_index_for_transition(

@@ -170,9 +170,9 @@ internals.
 
 Mozaiks should behave like one backend for the app author.
 
-## Admin Portal
+## Admin Bootstrap
 
-The admin portal should feel permanent at the framework level.
+Admin access is a framework-level concern.
 
 The right author-facing question is not:
 
@@ -182,8 +182,8 @@ It is:
 
 - who should count as an admin for this app
 
-That is why `admins` belongs in `app/app.json`, while the portal itself
-is a framework-owned first-class surface (like chat-ui).
+That is why `admins` belongs in `app/app.json`, while framework admin panels
+and APIs stay host-owned.
 
 ## Cross References
 

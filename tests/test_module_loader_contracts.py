@@ -532,7 +532,7 @@ schema_version: mozaiks.admin.v2
 panels:
   - id: tasks.overview
     label: Tasks
-    section: overview
+    page: overview
     renderer: schema
 hooks: []
 """.lstrip(),
@@ -543,7 +543,7 @@ hooks: []
         ModuleLoader(str(tmp_path)).load("tasks")
 
 
-def test_module_loader_accepts_canonical_admin_sections_and_aliases(tmp_path: Path) -> None:
+def test_module_loader_accepts_canonical_admin_page_references(tmp_path: Path) -> None:
     module_dir = _write_canonical_module(tmp_path)
     module_dir.joinpath("contracts", "admin.yaml").write_text(
         """
@@ -551,7 +551,7 @@ schema_version: mozaiks.admin.v2
 panels:
   - id: tasks.billing
     label: Billing
-    section: billing
+    page: billing
     renderer: schema
     sections:
       - id: billing-table
@@ -561,7 +561,7 @@ panels:
           columns: [{ key: task_id, label: Task }]
   - id: tasks.config
     label: Settings
-    section: configuration
+    page: settings
     renderer: schema
     sections:
       - id: settings-table
@@ -575,8 +575,8 @@ hooks: []
     )
 
     loaded = ModuleLoader(str(tmp_path)).load("tasks")
-    assert loaded.manifests.admin.panels[0].section == "billing"
-    assert loaded.manifests.admin.panels[1].section == "settings"
+    assert loaded.manifests.admin.panels[0].page == "billing"
+    assert loaded.manifests.admin.panels[1].page == "settings"
 
 
 def test_module_loader_rejects_absolute_runtime_extension_entrypoint(tmp_path: Path) -> None:

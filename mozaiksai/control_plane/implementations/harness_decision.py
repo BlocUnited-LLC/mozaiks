@@ -44,6 +44,7 @@ class FirstPartyHarnessDecisionPolicy:
                 ],
                 metadata={
                     "change_class": change_class.value,
+                    "workflow_sequence": routing_decision.workflow_sequence,
                     "scope_summary": routing_decision.impact_set.scope_summary,
                 },
             )
@@ -66,6 +67,7 @@ class FirstPartyHarnessDecisionPolicy:
                 ],
                 metadata={
                     "change_class": change_class.value,
+                    "workflow_sequence": routing_decision.workflow_sequence,
                     "scope_summary": routing_decision.impact_set.scope_summary,
                 },
             )
@@ -87,6 +89,7 @@ class FirstPartyHarnessDecisionPolicy:
             ],
             metadata={
                 "change_class": change_class.value,
+                "workflow_sequence": routing_decision.workflow_sequence,
                 "scope_summary": routing_decision.impact_set.scope_summary,
             },
         )

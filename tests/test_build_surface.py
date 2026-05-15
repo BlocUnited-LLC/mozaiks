@@ -138,7 +138,7 @@ def test_app_overview_does_not_link_to_removed_routes() -> None:
 def test_apps_page_fetches_workspace_apps_endpoint() -> None:
     source = _read("factory_app/app/ui/pages/custom/console/AppsPage.jsx")
     hook_source = _read("factory_app/app/ui/pages/custom/console/useWorkspaceApps.js")
-    layout_source = _read("chat-ui/src/admin/components/AdminWorkspaceLayout.jsx")
+    layout_source = _read("chat-ui/src/workspace/WorkspaceLayout.jsx")
     assert "/api/studio/apps" in hook_source
     assert "Mozaiks Console" in layout_source
     assert "Import App" in source
@@ -146,8 +146,8 @@ def test_apps_page_fetches_workspace_apps_endpoint() -> None:
     assert "row.primaryAction?.href" in source
 
 
-def test_admin_workspace_layout_links_console_and_hosting_sections() -> None:
-    source = _read("chat-ui/src/admin/components/AdminWorkspaceLayout.jsx")
+def test_workspace_layout_links_console_and_hosting_sections() -> None:
+    source = _read("chat-ui/src/workspace/WorkspaceLayout.jsx")
     assert "Admin Dashboard" not in source
     assert "Mozaiks Console" in source
     assert "Developer" not in source
@@ -161,11 +161,12 @@ def test_admin_workspace_layout_links_console_and_hosting_sections() -> None:
     assert "Hosting" in source
     assert "Usage" in source
     assert "Integrations" in source
-    # Nav is now API-driven: buildAppNavItems derives items from adminSections
+    # Nav is framework-owned and deterministic; feature admin panels do not
+    # mutate Console navigation.
     assert "buildAppNavItems" in source
-    assert "APP_SECTION_META" in source
-    assert "APP_SECTION_ORDER" in source
-    assert "adminSections[section]" in source
+    assert "APP_NAV_ITEMS" in source
+    assert "WORKSPACE_NAV_ITEMS" in source
+    assert "adminSections" not in source
     # Workspace nav items remain hardcoded
     assert "path: '/apps'" in source
     assert "path: '/usage'" in source
@@ -180,7 +181,7 @@ def test_admin_workspace_layout_links_console_and_hosting_sections() -> None:
     assert "suffix: '/admin'" not in source
     assert "suffix: '/operations'" not in source
     assert "suffix: '/settings'" not in source
-    assert "AdminWorkspaceLayout" in source
+    assert "WorkspaceLayout" in source
     assert "Open console navigation" in source
     assert "Console navigation" in source
     assert "lg:hidden" in source

@@ -48,9 +48,10 @@ async def test_platform_app_exposes_console_routes_only_on_studio_surface(monkey
     assert "/apps/:appId/hosting" in console_pages
     assert "/apps/:appId/build" not in console_pages
     assert "/apps/:appId/deploy" not in console_pages
-    assert "/apps/:appId/operations" not in console_pages
-    assert "/apps/:appId/settings" not in console_pages
     assert "/apps/:appId/admin" not in console_pages
+    # admin_registry.yaml declares operations and settings as app-scope admin pages
+    assert "/apps/:appId/operations" in console_pages
+    assert "/apps/:appId/settings" in console_pages
     assert console_pages["/health"]["component"] == "WorkspaceHealthPage"
     assert console_pages["/apps/:appId/overview"]["component"] == "AppOverviewPage"
     assert console_pages["/apps/:appId/health"]["component"] == "AppHealthPage"
@@ -84,4 +85,4 @@ def test_app_overview_page_fetches_summary_endpoint() -> None:
     assert "/api/studio/overview" in hook_source
     assert "App Overview" in source
     assert "next_step" in source
-    assert "AdminWorkspaceLayout" in source
+    assert "WorkspaceLayout" in source

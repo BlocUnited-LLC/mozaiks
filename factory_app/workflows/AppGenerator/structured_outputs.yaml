@@ -927,6 +927,45 @@ models:
         - 'null'
         description: Optional input schema for workflow/hosted/page capability invocation.
 
+  AdminRegistryPage:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable page id. Referenced by module admin panels via the `page` field in admin.yaml.
+      label:
+        type: str
+        description: Human-facing page label shown in the admin portal nav.
+      path:
+        type: str
+        description: URL path for this admin page. Use :appId as a placeholder for the app context (e.g. /apps/:appId/orders).
+      icon:
+        type: str
+        description: Icon hint string matched to the frontend icon map (e.g. dashboard, users, billing, chart, server, settings, plug, history, support).
+      order:
+        type: int
+        description: Sort position within the nav for this scope.
+      enabled:
+        type: bool
+        description: Whether this page appears in the nav. Defaults to true.
+      scope:
+        type: literal
+        values:
+        - workspace
+        - app
+        description: workspace pages appear in the global console nav; app pages appear in the per-app admin portal nav.
+
+  AdminRegistry:
+    type: model
+    fields:
+      schema_version:
+        type: str
+        description: Must be mozaiks.admin.registry.v1.
+      pages:
+        type: list
+        items: AdminRegistryPage
+        description: All admin pages for this app's admin portal, ordered by scope then order field.
+
   ModuleAdminPanel:
     type: model
     fields:
@@ -935,25 +974,16 @@ models:
         description: Stable panel id. Use module-scoped ids such as campaigns.overview.
       label:
         type: str
-        description: Human-facing panel label shown inside the unified /admin shell.
+        description: Human-facing panel label shown inside the admin portal page.
       description:
         type: str
         description: What an app owner can manage or inspect in this panel.
-      section:
-        type: literal
-        values:
-        - overview
-        - users
-        - billing
-        - usage
-        - operations
-        - settings
-        - integrations
-        - support
-        description: User-facing admin section where this panel appears. Do not use modules/plugins/tools as section names.
+      page:
+        type: str
+        description: Id of the admin page (from admin_registry.yaml) where this panel mounts. Must match a page id declared in the app's admin/admin_registry.yaml.
       order:
         type: int
-        description: Sort order within the selected admin section.
+        description: Sort order within the target admin page.
       renderer:
         type: literal
         values:
@@ -1267,7 +1297,7 @@ models:
       panels:
         type: list
         items: ModuleAdminPanel
-        description: Module-owned panels mounted into the unified /admin shell.
+        description: Module-owned panels. Each panel declares a `page` id referencing a page in the app's admin/admin_registry.yaml.
       hooks:
         type: optional_list
         items: str

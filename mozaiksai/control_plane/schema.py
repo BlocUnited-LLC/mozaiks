@@ -37,20 +37,27 @@ class ControlPlaneCheckpointManifest(BaseModel):
 class ControlPlaneChangeRouteManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    route_to: str = Field(min_length=1)
+    workflow_sequence: Optional[str] = None
+    route_to: Optional[str] = None
     affected_workflows: list[str] = Field(default_factory=list)
     affected_declarative_families: list[str] = Field(default_factory=list)
     requires_replanning: bool = True
     requires_rebuild: bool = True
     scope_summary: Optional[str] = None
 
-    @field_validator("route_to")
+    @field_validator("workflow_sequence", "route_to")
     @classmethod
-    def _normalize_route_to(cls, value: str) -> str:
+    def _normalize_optional_id(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
         normalized = str(value or "").strip()
-        if not normalized:
-            raise ValueError("route_to must be non-empty")
-        return normalized
+        return normalized or None
+
+    @model_validator(mode="after")
+    def _requires_route_or_sequence(self) -> "ControlPlaneChangeRouteManifest":
+        if not self.workflow_sequence and not self.route_to:
+            raise ValueError("control-plane routes require workflow_sequence or route_to")
+        return self
 
 
 class ControlPlaneArtifactChangeRoutesManifest(BaseModel):

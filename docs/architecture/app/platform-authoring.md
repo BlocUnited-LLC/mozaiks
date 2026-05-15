@@ -311,7 +311,7 @@ may also contain:
 
 This file is the deterministic registration barrel loaded by `@platform/extensions`.
 Generators may create it only to register contract-declared UI stubs such as
-custom admin components declared through `modules/{module}/admin.yaml` and
+custom admin components declared through `modules/{module}/contracts/admin.yaml` and
 materialized from `module_contract.js_stubs`.
 
 Do not treat `ui/index.js` as a second page system. It is only a bounded

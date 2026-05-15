@@ -122,16 +122,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert models["AppValidation"]["fields"]["validation_strategy"]["values"] == ["e2b", "local", "skip"]
     assert models["AppValidation"]["fields"]["validation_status"]["values"] == ["passed", "failed", "skipped"]
     admin_panel_fields = models["ModuleAdminPanel"]["fields"]
-    assert admin_panel_fields["section"]["values"] == [
-        "overview",
-        "users",
-        "billing",
-        "usage",
-        "operations",
-        "settings",
-        "integrations",
-        "support",
-    ]
+    assert admin_panel_fields["page"]["type"] == "str"
     assert admin_panel_fields["layout"]["variants"] == ["str", "null"]
     assert admin_panel_fields["sections"]["items"] == "AppPageSection"
 

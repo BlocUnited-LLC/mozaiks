@@ -202,7 +202,7 @@ const getDefaultProfileMenu = (user) => {
   if (authed) {
     items.push({
       id: "admin",
-      label: "Admin Portal",
+      label: "Admin",
       icon: "settings.svg",
       action: "navigate",
       href: "/admin",

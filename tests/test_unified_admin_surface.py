@@ -27,7 +27,7 @@ def test_admin_portal_embeds_app_admin_panels() -> None:
     source = _read("chat-ui/src/pages/AdminPage.jsx")
     users_source = _read("chat-ui/src/admin/pages/UsersSection.jsx")
 
-    assert "AdminWorkspaceLayout" in source
+    assert "WorkspaceLayout" in source
     assert "AdminOverviewPanel" in source
     assert "AdminSectionRoute" in source
     # Routing now handles all canonical sections, not just users/usage
@@ -38,7 +38,8 @@ def test_admin_portal_embeds_app_admin_panels() -> None:
     assert "AdminSectionRoute" in source
     assert "useLocation" in source
     assert 'title="Usage"' in source
-    assert 'section="users"' in source
+    # page-based routing: sections reference page ids, not section= attributes
+    assert "pagePanels" in source
     assert "BillingSection" not in source
     assert "IntegrationsSection" not in source
     assert "SupportSection" not in source
@@ -50,23 +51,23 @@ def test_admin_portal_embeds_app_admin_panels() -> None:
 
 def test_platform_shell_registers_admin_section_routes() -> None:
     platform_source = _read("mozaiksai/hosts/platform.py")
-    contract_source = _read("mozaiksai/core/admin/contract.py")
+    registry_source = _read("factory_app/app/admin/admin_registry.yaml")
 
-    # /admin is the top-level overview route; per-app section routes follow
+    # Admin portal pages are now declared in admin_registry.yaml, not hardcoded in contract.py
     for path in ["/admin", "/apps/:appId/users", "/apps/:appId/usage"]:
-        assert path in contract_source
+        assert path in registry_source
 
-    for path in ["/apps/:appId/admin", "/apps/:appId/operations", "/apps/:appId/settings"]:
-        assert path not in contract_source
+    # /apps/:appId/admin is not a valid path — overview uses /admin
+    assert "/apps/:appId/admin" not in registry_source
 
     assert '"component": "AdminPortal"' in platform_source
     assert "build_admin_shell_routes" in platform_source
+    assert "load_admin_registry" in platform_source
+    # Admin portal routes are separate from custom app routes in route_manifest.json
     assert "/apps/:appId/users" in _read("factory_app/app/ui/route_manifest.json")
     assert "/apps/:appId/usage" in _read("factory_app/app/ui/route_manifest.json")
     assert "/apps/:appId/operations" not in _read("factory_app/app/ui/route_manifest.json")
     assert "/apps/:appId/settings" not in _read("factory_app/app/ui/route_manifest.json")
-    assert '"payments": "billing"' not in contract_source
-    assert '"usage-health": "operations"' not in contract_source
 
 
 def test_platform_host_mounts_admin_api_routes() -> None:
@@ -102,12 +103,14 @@ def test_app_admin_dashboard_is_panel_group_not_registered_route() -> None:
 def test_runtime_admin_config_uses_flat_panel_collections() -> None:
     source = _read("mozaiksai/core/admin/router.py")
 
-    assert "DEFAULT_ADMIN_SHELL_CONFIG" in source
     assert "_load_module_admin_panels" in source
     assert '"runtime_panels"' in source
     assert '"module_panels"' in source
-    assert '"sections"' in source
-    assert "_infer_admin_panel_section" in source
+    assert '"pages"' in source
+    assert "load_admin_registry" in source
+    # Legacy constants and helpers are gone
+    assert "DEFAULT_ADMIN_SHELL_CONFIG" not in source
+    assert "_infer_admin_panel_section" not in source
 
 
 def test_runtime_admin_config_discovers_module_admin_yaml(tmp_path) -> None:
@@ -126,7 +129,7 @@ def test_runtime_admin_config_discovers_module_admin_yaml(tmp_path) -> None:
                     {
                         "id": "crm.contacts",
                         "label": "Contacts",
-                        "section": "settings",
+                        "page": "settings",
                         "renderer": "schema",
                         "layout": "full-width",
                         "sections": [
@@ -147,18 +150,14 @@ def test_runtime_admin_config_discovers_module_admin_yaml(tmp_path) -> None:
     )
 
     admin_router = importlib.import_module("mozaiksai.core.admin.router")
-    config = admin_router._merge_module_admin_panels(
-        {"enabled": True, "sections": {}, "runtime_panels": [], "module_panels": []},
-        app_root,
-    )
+    panels = admin_router._load_module_admin_panels(app_root)
 
-    panels = config["module_panels"]
     assert panels == [
         {
             "id": "crm.contacts",
             "label": "Contacts",
             "description": None,
-            "section": "settings",
+            "page": "settings",
             "order": 0,
             "renderer": "schema",
             "layout": "full-width",

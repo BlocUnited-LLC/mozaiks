@@ -25,8 +25,7 @@ app/
 ├── app.json
 ├── config/
 │   ├── ai.json
-│   ├── shell.json
-│   └── admin.json
+│   └── shell.json
 ├── ui/
 │   ├── index.js                # registers contract-declared custom components
 │   ├── route_manifest.json     # custom full-page React route declarations, including surface-gated routes
@@ -61,7 +60,7 @@ app/
 │       │   ├── reactions.yaml       # event reactions owned by this module
 │       │   ├── notifications.yaml   # notification rules per event
 │       │   ├── settings.yaml        # user/app settings schema
-│       │   ├── admin.yaml           # admin panels mounted under /admin/*
+│       │   ├── admin.yaml           # optional feature panels for the framework admin shell
 │       │   └── entitlements.yaml    # optional capability entitlements
 │       ├── runtime_extensions.yaml  # optional — api_router / startup_service
 │       ├── backend/
@@ -123,7 +122,7 @@ would not own:
 - shared builder workflows under `factory_app/workflows/`
 - framework-owned Studio management routes declared through `factory_app/app/ui/route_manifest.json` and `factory_app/app/ui/index.js`
 - factory control-plane modules such as `factory_app/app/modules/factory_control_plane/`
-- framework-owned admin shell composition through `AdminPortal`
+- framework-owned admin APIs and panel rendering through `AdminPortal`
 
 That means `factory_app/app/workflows/` should be read as an optional overlay
 root for the dogfood app workspace, not as the home of shared factory builder
@@ -238,8 +237,8 @@ Examples:
 
 Pages are where most CRUD-style app experience should live.
 
-Admin is not generated as an app page. The platform shell owns the
-`/admin` route family and renders the framework-owned `AdminPortal`.
+Admin is not generated as an app page. The platform owns the internal
+`/admin` route family and renders framework-owned panels through `AdminPortal`.
 
 Admin remains a framework-owned management surface. In the current architecture,
 `AdminPortal` is registered through the Studio composition layer rather than a
@@ -308,6 +307,10 @@ and derives platform reactions such as `notification.created`.
 Runtime-facing generated or platform-owned config.
 
 This folder should not be the primary authoring target.
+
+There is no `config/admin.json` contract. Admin bootstrap lives in
+`app/app.json` `admins`; optional module feature panels live in
+`modules/{module}/contracts/admin.yaml`.
 
 ## Practical Authoring Order
 

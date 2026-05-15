@@ -170,7 +170,7 @@ Authority is separated by panel source:
 
 - app-business panels may come from `app_backend_url/api/admin/config` and
   related `app_backend_url/api/admin/*` endpoints
-- feature-owned admin panels come from `modules/{module}/admin.yaml`
+- feature-owned admin panels come from `modules/{module}/contracts/admin.yaml`
 - runtime/operator panels come from same-host admin APIs and the framework
   admin shell contract
 

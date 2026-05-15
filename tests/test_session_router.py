@@ -94,7 +94,32 @@ def _make_pack():
                 {"id": "AppGenerator", "dependencies": ["DesignDocs", "AgentGenerator"]},
             ],
             "transitions": [],
-            "workflow_sequences": [],
+            "workflow_sequences": [
+                {
+                    "id": "build",
+                    "steps": [
+                        {"workflows": ["ValueEngine"]},
+                        {"workflows": ["DesignDocs"]},
+                        {"workflows": ["AgentGenerator"]},
+                        {"workflows": ["AppGenerator"]},
+                    ],
+                },
+                {
+                    "id": "full_rebuild",
+                    "steps": [
+                        {"workflows": ["ValueEngine"]},
+                        {"workflows": ["DesignDocs"]},
+                        {"workflows": ["AgentGenerator"]},
+                        {"workflows": ["AppGenerator"]},
+                    ],
+                },
+                {"id": "workflow_patch", "steps": [{"workflows": ["AgentGenerator"]}]},
+                {"id": "app_revision", "steps": [{"workflows": ["AppGenerator"]}]},
+                {
+                    "id": "app_surface_revision",
+                    "steps": [{"workflows": ["DesignDocs"]}, {"workflows": ["AppGenerator"]}],
+                },
+            ],
         }
     )
 

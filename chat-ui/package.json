@@ -10,6 +10,7 @@
     ".": "./src/index.js",
     "./core": "./src/core/index.js",
     "./platform": "./src/platform/index.js",
+    "./workspace": "./src/workspace/index.js",
     "./ui": "./src/ui/index.js",
     "./embed": "./src/embed/index.js",
     "./coreBridge": "./src/coreBridge.js",

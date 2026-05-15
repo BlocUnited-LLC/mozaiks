@@ -444,8 +444,9 @@ the outer workflow's run_complete event.
 ```
 1. trigger_source == "refinement" arrives at /api/workflows/trigger
 2. SessionRouter loads Session for (app_id, user_id) plus accepted artifact refs
-3. derives the re-entry workflow from change class + app-declared control-plane routing
-4. receives RoutingDecision(workflow_id, context_seed, is_full_restart)
+3. derives the re-entry workflow and `workflow_sequence` from change class +
+   app-declared control-plane routing
+4. receives RoutingDecision(workflow_id, journey_id, context_seed, is_full_restart)
 5. control plane persists artifact-level stale status for affected
    artifact_version_refs using the new `change_request_id`
 6. if the harness defers launch and returns a decision UI first:
@@ -464,7 +465,8 @@ the outer workflow's run_complete event.
 8. else:
      - allocate active_revision_id and active_change_request_id
      - set Session.sequence_status = REVISING
-     - spawn re-entry workflow with context_seed merged into context_variables
+     - spawn re-entry workflow bound to the selected workflow_sequence with
+       context_seed merged into context_variables
      - append RevisionEntry to Session.revision_history
 9. emit session.revision_requested
 10. emit session.reentry_selected
@@ -472,7 +474,9 @@ the outer workflow's run_complete event.
 ```
 
 Refinement re-entry creates a **new workflow run** against the same Session.
-The Session retains its journey_position — refinement is not a journey step.
+The selected control-plane `workflow_sequence` becomes the run's journey binding
+when one is declared. The original build sequence is not reused unless the
+control-plane route explicitly selects it.
 On completion, Session transitions back to ACTIVE or COMPLETED depending on prior state.
 
 Rules:

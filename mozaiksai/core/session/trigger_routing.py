@@ -9,6 +9,7 @@ from .model import SessionLifecycle, TriggerInput
 @dataclass(slots=True)
 class TriggerRoutingContribution:
     workflow_id: Optional[str] = None
+    journey_id: Optional[str] = None
     context_seed: dict[str, Any] = field(default_factory=dict)
     explanation: str = ""
     is_full_restart: bool = False

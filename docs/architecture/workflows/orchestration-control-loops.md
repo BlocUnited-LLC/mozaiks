@@ -81,6 +81,7 @@ This loop owns:
 - active build id and artifact lineage
 - current workflow sequence position
 - coarse workflow sequencing from `factory_app/workflows/extended_orchestration/extension_registry.json`
+- control-plane re-entry sequence selection from `control_plane.yaml`
 - build-time validation gates
 - preview readiness
 - promotion readiness
@@ -124,6 +125,9 @@ Important:
 - ordinary workflow chat stays in the workflow execution loop
 - the harness can now return `execution_mode="harness_decision"` when the
   correct next step is confirmation, clarification, or workflow fallback
+- refinement routes bind to named `workflow_sequences[]`; the control-plane
+  pack should not duplicate downstream workflow lists already declared in the
+  sequence graph
 
 ### 3. Refinement worker loop
 

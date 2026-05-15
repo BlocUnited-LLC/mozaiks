@@ -3,7 +3,7 @@ panels:
   - id: communications.overview
     label: Communications
     description: Monitor thread volume, unread state, and recent announcements.
-    section: operations
+    page: operations
     order: 250
     renderer: schema
     layout: grid

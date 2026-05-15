@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 
 import { PageHeader, SummaryStrip } from '@mozaiks/chat-ui/ui'
-import { AdminWorkspaceLayout } from '@mozaiks/chat-ui/admin/components/AdminWorkspaceLayout.jsx'
+import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ConsoleErrorState,
   ConsoleInlineEmptyState,
@@ -63,7 +63,7 @@ export default function WorkspaceHealthPage() {
   if (error) return <ConsoleErrorState title="Workspace Health Unavailable" message={error} />
 
   return (
-    <AdminWorkspaceLayout>
+    <WorkspaceLayout>
       <div className="space-y-6">
         <PageHeader
           title="Health"
@@ -135,6 +135,6 @@ export default function WorkspaceHealthPage() {
           )}
         </Panel>
       </div>
-    </AdminWorkspaceLayout>
+    </WorkspaceLayout>
   )
 }

@@ -21,8 +21,9 @@ def test_load_default_factory_control_plane_pack() -> None:
     assert pack.manifest.routing.default_artifact_kind == "app_bundle"
     app_bundle = pack.routing_for_artifact("app_bundle")
     assert app_bundle is not None
-    assert app_bundle.routes.core.route_to == "ValueEngine"
-    assert app_bundle.routes.patch.route_to == "AppGenerator"
+    assert app_bundle.routes.core.workflow_sequence == "full_rebuild"
+    assert app_bundle.routes.patch.workflow_sequence == "app_revision"
+    assert app_bundle.routes.core.route_to is None
     request_intake = pack.checkpoint_by_event("request_submitted")
     assert request_intake is not None
     assert request_intake.prompt_id == "change_classifier_system"

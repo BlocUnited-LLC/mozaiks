@@ -128,14 +128,20 @@ def _routing_summary(pack: LoadedControlPlanePack, artifact_kind: Optional[str])
     artifact = pack.routing_for_artifact(str(artifact_kind or "").strip().lower())
     current_routes: dict[str, Any] | None = None
     if artifact is not None:
+        def route_summary(route: Any) -> dict[str, Any]:
+            return {
+                "workflow_sequence": route.workflow_sequence,
+                "route_to": route.route_to,
+            }
+
         current_routes = {
             "artifact_kind": artifact.artifact_kind,
             "label": artifact.label or artifact.artifact_kind,
             "routes": {
-                "patch": artifact.routes.patch.route_to,
-                "design": artifact.routes.design.route_to,
-                "feature": artifact.routes.feature.route_to,
-                "core": artifact.routes.core.route_to,
+                "patch": route_summary(artifact.routes.patch),
+                "design": route_summary(artifact.routes.design),
+                "feature": route_summary(artifact.routes.feature),
+                "core": route_summary(artifact.routes.core),
             },
         }
     return {

@@ -100,6 +100,7 @@ class ChangeIntentDoc(BaseModel):
 class ImpactSetDoc(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    workflow_sequence: Optional[str] = None
     affected_workflows: List[str] = Field(default_factory=list)
     affected_bundle_paths: List[str] = Field(default_factory=list)
     affected_declarative_families: List[str] = Field(default_factory=list)

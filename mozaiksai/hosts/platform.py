@@ -52,7 +52,7 @@ from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 from mozaiksai.core.session.launcher import create_routed_chat_session, launch_transition, validate_context_for_workflow
 from mozaiksai.core.workflow.paths import resolve_active_app_root
 from mozaiksai.resources import resolve_factory_brand_root
-from mozaiksai.core.admin.contract import build_admin_shell_routes
+from mozaiksai.core.admin.registry import load_admin_registry, build_admin_shell_routes
 
 
 app = runtime_app.app
@@ -1043,7 +1043,8 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
     result["pages"] = _dedupe_and_sort_pages(pages)
 
     pages = result.get("pages", [])
-    for route in build_admin_shell_routes():
+    _admin_registry = load_admin_registry(resolve_active_app_root())
+    for route in build_admin_shell_routes(_admin_registry):
         _append_page_once(pages, {
             "path": route["path"],
             "component": "AdminPortal",
@@ -1054,7 +1055,7 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
                 "requiresRole": "admin",
                 "title": route["title"],
                 "appShell": True,
-                "adminSection": route["admin_section"],
+                "adminPage": route["admin_page"],
                 "shellMode": "workspace",
             },
         })

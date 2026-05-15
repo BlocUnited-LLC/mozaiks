@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 
-import { AdminWorkspaceLayout } from '@mozaiks/chat-ui/admin/components/AdminWorkspaceLayout.jsx'
+import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ConsoleErrorState,
   ConsoleInlineEmptyState,
@@ -92,7 +92,7 @@ export default function AppHostingPage() {
   ]
 
   return (
-    <AdminWorkspaceLayout>
+    <WorkspaceLayout>
       <div className="space-y-6">
         <AppConsoleHero
           appId={appId}
@@ -176,6 +176,6 @@ export default function AppHostingPage() {
           </div>
         </Panel>
       </div>
-    </AdminWorkspaceLayout>
+    </WorkspaceLayout>
   )
 }

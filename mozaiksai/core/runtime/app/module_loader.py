@@ -30,7 +30,6 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from logs.logging_config import get_workflow_logger
-from mozaiksai.core.admin.contract import ADMIN_SECTION_ORDER, coerce_admin_section_name
 
 logger = get_workflow_logger("module_loader")
 
@@ -298,7 +297,7 @@ class ModuleAdminPanel(ModuleContractModel):
     id: str
     label: str
     description: Optional[str] = None
-    section: str  # validated against ADMIN_SECTION_ORDER at runtime
+    page: str  # references a page id declared in app/admin/admin_registry.yaml
     order: int = 0
     renderer: Literal["schema", "custom_component"] = "schema"
     layout: Optional[Literal["grid", "sidebar", "full-width", "split"]] = None
@@ -311,14 +310,12 @@ class ModuleAdminPanel(ModuleContractModel):
     def _required(cls, value: Any, info):  # type: ignore[no-untyped-def]
         return _required_text(value, field_name=info.field_name)
 
-    @field_validator("section", mode="before")
+    @field_validator("page", mode="before")
     @classmethod
-    def _section(cls, value: Any) -> str:
-        text = coerce_admin_section_name(str(value or ""))
-        if text not in ADMIN_SECTION_ORDER:
-            raise ValueError(
-                f"admin panel section must be one of {list(ADMIN_SECTION_ORDER)}, got {text!r}"
-            )
+    def _page(cls, value: Any) -> str:
+        text = str(value or "").strip().lower().replace("_", "-")
+        if not text:
+            raise ValueError("admin panel 'page' must reference a non-empty page id")
         return text
 
     @field_validator("description", "component", mode="before")

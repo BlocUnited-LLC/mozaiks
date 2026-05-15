@@ -175,6 +175,7 @@ override at `<workspace>/control_plane/`.
 Declares:
 
 - harness entrypoint
+- artifact routing
 - checkpoint events
 - handler entrypoints
 - prompt ids
@@ -192,6 +193,26 @@ harness:
   implementation: mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness
   supported_trigger_sources:
     - refinement
+routing:
+  default_artifact_kind: app_bundle
+  artifacts:
+    - artifact_kind: app_bundle
+      label: app bundle
+      routes:
+        patch:
+          workflow_sequence: app_revision
+          affected_declarative_families: [app_bundle]
+          requires_replanning: false
+          requires_rebuild: true
+        design:
+          workflow_sequence: app_surface_revision
+          affected_declarative_families: [design_docs, app_bundle]
+        feature:
+          workflow_sequence: app_revision
+          affected_declarative_families: [app_bundle]
+        core:
+          workflow_sequence: full_rebuild
+          affected_declarative_families: [concept, design_docs, workflow_bundle, app_bundle]
 checkpoints:
   - id: request_intake
     event: request_submitted
@@ -209,6 +230,15 @@ checkpoints:
     event: decision_requested
     entrypoint: mozaiksai.control_plane.implementations.harness_decision:FirstPartyHarnessDecisionPolicy
 ```
+
+Route rules:
+
+- `workflow_sequence` is the canonical route target.
+- The sequence is resolved from `extension_registry.json`.
+- `route_to` is optional and only needed when the route must start at a
+  workflow other than the first workflow in the sequence.
+- `affected_workflows` is normally derived from the sequence and should not be
+  duplicated in the control-plane pack.
 
 ### `config/tools.yaml`
 

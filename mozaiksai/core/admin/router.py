@@ -5,7 +5,6 @@
 # ==============================================================================
 from __future__ import annotations
 
-from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -16,11 +15,10 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse
 
 from mozaiksai.core.admin.contract import (
-    build_default_admin_shell_config,
-    build_default_runtime_panels,
-    normalize_admin_section_name,
-    normalize_admin_shell_sections,
+    DEFAULT_RUNTIME_PANELS,
+    build_default_admin_config,
 )
+from mozaiksai.core.admin.registry import load_admin_registry
 from mozaiksai.core.auth.dependencies import require_user, UserPrincipal
 from mozaiksai.core.admin.paths import resolve_admin_app_root as resolve_admin_app_root_path
 from mozaiksai.core.auth.adapters.registry import is_auth_enabled
@@ -37,7 +35,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 _bearer = HTTPBearer(auto_error=False)
 
 
-DEFAULT_ADMIN_SHELL_CONFIG = build_default_admin_shell_config()
+DEFAULT_ADMIN_CONFIG = build_default_admin_config()
 
 
 def _utc_now() -> datetime:
@@ -342,9 +340,15 @@ async def get_admin_sessions(
 async def get_admin_config(
     user: UserPrincipal = Depends(_require_admin),
 ):
-    """Return the active admin shell config, including feature admin panel manifests."""
+    """Return the active admin shell config: registry pages + runtime + module panels."""
     app_root = _resolve_admin_app_root()
-    return _merge_module_admin_panels(deepcopy(DEFAULT_ADMIN_SHELL_CONFIG), app_root)
+    registry = load_admin_registry(app_root)
+    config = {
+        "pages": [p.model_dump() for p in registry.enabled_pages()],
+        "runtime_panels": list(DEFAULT_RUNTIME_PANELS),
+        "module_panels": _load_module_admin_panels(app_root),
+    }
+    return config
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +372,7 @@ def _resolve_admin_app_root() -> Path:
 
 
 def _load_module_admin_panels(app_root: Path) -> list[dict]:
-    """Load feature-owned admin panels declared by modules/{module}/contracts/admin.yaml."""
+    """Discover module panels from modules/{module}/contracts/admin.yaml."""
     from mozaiksai.core.runtime.app.module_loader import ModuleAdminManifest
 
     modules_dir = app_root / "modules"
@@ -376,7 +380,7 @@ def _load_module_admin_panels(app_root: Path) -> list[dict]:
         return []
 
     panels: list[dict] = []
-    for module_dir in sorted(modules_dir.iterdir(), key=lambda item: item.name.lower()):
+    for module_dir in sorted(modules_dir.iterdir(), key=lambda d: d.name.lower()):
         if not module_dir.is_dir():
             continue
         admin_path = module_dir / "contracts" / "admin.yaml"
@@ -393,114 +397,7 @@ def _load_module_admin_panels(app_root: Path) -> list[dict]:
             panel_id = panel.get("id")
             if not isinstance(panel_id, str) or not panel_id.strip():
                 continue
-            normalized = _normalize_module_admin_panel(panel, module_id=module_dir.name)
-            panels.append(normalized)
+            panel["module_id"] = module_dir.name
+            panel["source"] = "module"
+            panels.append(panel)
     return panels
-
-
-def _infer_admin_panel_section(panel: dict) -> str:
-    explicit = panel.get("section") or panel.get("category") or panel.get("group")
-    if isinstance(explicit, str) and explicit.strip():
-        return normalize_admin_section_name(explicit)
-
-    text = " ".join(
-        str(panel.get(key) or "")
-        for key in ("id", "label", "description")
-    ).lower()
-    if any(token in text for token in ("user", "role", "permission", "auth", "account", "member")):
-        return "users"
-    if any(token in text for token in ("billing", "bill", "subscription", "invoice", "payment", "stripe", "revenue", "plan")):
-        return "overview"
-    if any(token in text for token in ("run", "session", "workflow", "usage", "cost", "token", "telemetry")):
-        return "usage"
-    if any(token in text for token in ("operations", "activity", "audit", "log", "event", "history", "incident", "alert", "health", "error", "performance")):
-        return "operations"
-    if any(token in text for token in ("setting", "config", "domain", "brand", "theme", "environment")):
-        return "settings"
-    if any(token in text for token in ("support", "ticket", "notification", "alert", "message")):
-        return "operations"
-    return "overview"
-
-
-def _normalize_module_admin_panel(panel: dict, *, module_id: str) -> dict:
-    normalized = dict(panel)
-    normalized["id"] = str(panel.get("id")).strip()
-    normalized["module_id"] = module_id
-    normalized["label"] = normalized.get("label") or normalized["id"]
-    normalized["source"] = "module"
-    normalized["section"] = _infer_admin_panel_section(normalized)
-
-    renderer = normalized.get("renderer")
-    normalized["renderer"] = renderer if renderer in {"schema", "custom_component"} else "schema"
-
-    if normalized["renderer"] == "custom_component":
-        component = normalized.get("component")
-        normalized["component"] = component if isinstance(component, str) and component.strip() else normalized["id"]
-        normalized["layout"] = None
-        normalized["sections"] = []
-    else:
-        layout = normalized.get("layout")
-        normalized["layout"] = layout if layout in {"grid", "sidebar", "full-width", "split"} else "full-width"
-        normalized["component"] = None
-        normalized["sections"] = normalized.get("sections") if isinstance(normalized.get("sections"), list) else []
-
-    permissions = normalized.get("permissions")
-    normalized["permissions"] = permissions if isinstance(permissions, list) else []
-    return normalized
-
-
-def _normalize_runtime_panel(panel: dict) -> dict | None:
-    panel_id = panel.get("id")
-    if not isinstance(panel_id, str) or not panel_id.strip():
-        return None
-
-    normalized = dict(panel)
-    normalized["id"] = panel_id.strip()
-    normalized["label"] = normalized.get("label") or normalized["id"]
-    section = normalized.get("section")
-    normalized["section"] = (
-        normalize_admin_section_name(section)
-        if isinstance(section, str) and section.strip()
-        else "usage"
-    )
-    normalized["source"] = "runtime"
-    return normalized
-
-
-def _normalize_admin_shell_config(config: dict) -> dict:
-    normalized = build_default_admin_shell_config()
-    normalized["sections"] = normalize_admin_shell_sections(config.get("sections"))
-
-    runtime_panels = config.get("runtime_panels")
-    if isinstance(runtime_panels, list):
-        normalized_panels = []
-        for panel in runtime_panels:
-            if not isinstance(panel, dict):
-                continue
-            parsed = _normalize_runtime_panel(panel)
-            if parsed:
-                normalized_panels.append(parsed)
-        normalized["runtime_panels"] = normalized_panels or build_default_runtime_panels()
-
-    module_panels = config.get("module_panels")
-    normalized["module_panels"] = module_panels if isinstance(module_panels, list) else []
-    return normalized
-
-
-def _merge_module_admin_panels(config: dict, app_root: Path) -> dict:
-    config = _normalize_admin_shell_config(config)
-    module_panels = _load_module_admin_panels(app_root)
-    if not module_panels:
-        return config
-
-    existing = config["module_panels"]
-    seen = {
-        panel.get("id")
-        for panel in existing
-        if isinstance(panel, dict) and isinstance(panel.get("id"), str)
-    }
-    for panel in module_panels:
-        if panel["id"] not in seen:
-            existing.append(panel)
-            seen.add(panel["id"])
-    return config

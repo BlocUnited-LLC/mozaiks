@@ -567,8 +567,7 @@ app/
 ├── app.json                    # App identity + startup intent + admins bootstrap
 ├── config/
 │   ├── ai.json                 # LLM provider, model, temperature, optional control_plane key
-│   ├── shell.json              # Header/footer/profile/notification chrome
-│   └── admin.json              # Admin access + management settings
+│   └── shell.json              # Header/footer/profile/notification chrome
 ├── workflows/
 │   └── {WorkflowName}/
 │       ├── orchestrator.yaml   # Config + triggers + events.emits
