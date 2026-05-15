@@ -3,17 +3,15 @@ import { useMemo, useState } from 'react'
 import {
   CollectionToolbar,
   InlineEmptyState,
-  PageHeader,
   ResourceList,
-  SummaryStrip,
 } from '@mozaiks/chat-ui/ui'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ConsoleErrorState,
   ConsoleLoadingState,
   StatusPill,
-} from '../../../components/ConsoleShared.jsx'
-import { formatCompactNumber, formatCurrencyValue } from './AppConsoleChrome.jsx'
+} from '../../ui/components/ConsoleShared.jsx'
+import { WorkspaceConsoleHero, formatCompactNumber, formatCurrencyValue } from './AppConsoleChrome.jsx'
 import { useWorkspaceConsoleData } from './useWorkspaceConsoleData.js'
 
 
@@ -173,16 +171,15 @@ export default function WorkspaceUsagePage() {
   return (
     <WorkspaceLayout>
       <div className="space-y-6">
-        <PageHeader
+        <WorkspaceConsoleHero
           title="Usage"
           subtitle="Track workspace metering, model spend, and workflow activity."
           actions={[
             { id: 'export', label: 'Export CSV', variant: 'outline' },
           ]}
           onAction={() => exportUsageCsv(visibleRows)}
+          summaryItems={summaryItems}
         />
-
-        <SummaryStrip items={summaryItems} />
 
         <section className="space-y-4">
           <div className="space-y-4">

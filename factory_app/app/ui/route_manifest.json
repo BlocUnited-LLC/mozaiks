@@ -11,6 +11,7 @@
         "title": "Create App",
         "appShell": true,
         "navigation": {
+          "group": "workspace-console",
           "include": false
         }
       }
@@ -24,7 +25,12 @@
         "surfaces": ["studio"],
         "requiresRole": "admin",
         "title": "Apps",
-        "appShell": true
+        "appShell": true,
+        "navigation": {
+          "group": "workspace-console",
+          "scope": "local",
+          "icon": "apps"
+        }
       }
     },
     {
@@ -36,7 +42,12 @@
         "surfaces": ["studio"],
         "requiresRole": "admin",
         "title": "Usage",
-        "appShell": true
+        "appShell": true,
+        "navigation": {
+          "group": "workspace-console",
+          "scope": "local",
+          "icon": "chart"
+        }
       }
     },
     {
@@ -48,7 +59,12 @@
         "surfaces": ["studio"],
         "requiresRole": "admin",
         "title": "Health",
-        "appShell": true
+        "appShell": true,
+        "navigation": {
+          "group": "workspace-console",
+          "scope": "local",
+          "icon": "pulse"
+        }
       }
     },
     {
@@ -60,7 +76,12 @@
         "surfaces": ["studio"],
         "requiresRole": "admin",
         "title": "Billing",
-        "appShell": true
+        "appShell": true,
+        "navigation": {
+          "group": "workspace-console",
+          "scope": "local",
+          "icon": "billing"
+        }
       }
     },
     {
@@ -72,7 +93,12 @@
         "surfaces": ["studio"],
         "requiresRole": "admin",
         "title": "Hosting",
-        "appShell": true
+        "appShell": true,
+        "navigation": {
+          "group": "workspace-console",
+          "scope": "local",
+          "icon": "server"
+        }
       }
     },
     {
@@ -84,7 +110,11 @@
         "surfaces": ["studio"],
         "requiresRole": "admin",
         "title": "App Console",
-        "appShell": true
+        "appShell": true,
+        "navigation": {
+          "group": "app-console",
+          "include": false
+        }
       }
     },
     {
@@ -96,7 +126,12 @@
         "surfaces": ["studio"],
         "requiresRole": "admin",
         "title": "App Overview",
-        "appShell": true
+        "appShell": true,
+        "navigation": {
+          "group": "app-console",
+          "scope": "local",
+          "icon": "dashboard"
+        }
       }
     },
     {
@@ -108,7 +143,12 @@
         "surfaces": ["studio"],
         "requiresRole": "admin",
         "title": "App Health",
-        "appShell": true
+        "appShell": true,
+        "navigation": {
+          "group": "app-console",
+          "scope": "local",
+          "icon": "pulse"
+        }
       }
     },
     {
@@ -120,7 +160,12 @@
         "surfaces": ["studio"],
         "requiresRole": "admin",
         "title": "Users",
-        "appShell": true
+        "appShell": true,
+        "navigation": {
+          "group": "app-console",
+          "scope": "local",
+          "icon": "users"
+        }
       }
     },
     {
@@ -132,7 +177,12 @@
         "surfaces": ["studio"],
         "requiresRole": "admin",
         "title": "Integrations",
-        "appShell": true
+        "appShell": true,
+        "navigation": {
+          "group": "app-console",
+          "scope": "local",
+          "icon": "plug"
+        }
       }
     },
     {
@@ -144,7 +194,12 @@
         "surfaces": ["studio"],
         "requiresRole": "admin",
         "title": "Usage",
-        "appShell": true
+        "appShell": true,
+        "navigation": {
+          "group": "app-console",
+          "scope": "local",
+          "icon": "chart"
+        }
       }
     },
     {
@@ -156,7 +211,12 @@
         "surfaces": ["studio"],
         "requiresRole": "admin",
         "title": "Billing",
-        "appShell": true
+        "appShell": true,
+        "navigation": {
+          "group": "app-console",
+          "scope": "local",
+          "icon": "billing"
+        }
       }
     },
     {
@@ -168,7 +228,12 @@
         "surfaces": ["studio"],
         "requiresRole": "admin",
         "title": "Hosting",
-        "appShell": true
+        "appShell": true,
+        "navigation": {
+          "group": "app-console",
+          "scope": "local",
+          "icon": "server"
+        }
       }
     }
   ]

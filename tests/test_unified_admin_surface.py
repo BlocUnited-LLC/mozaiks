@@ -15,12 +15,16 @@ def _read(relative_path: str) -> str:
 
 def test_admin_portal_is_the_only_registered_admin_page() -> None:
     core_source = _read("chat-ui/src/registry/coreComponents.js")
-    studio_source = _read("factory_app/app/ui/index.js")
+    # ui/index.js delegates to admin/index.js; AdminPortal registration lives in the admin barrel
+    ui_source = _read("factory_app/app/ui/index.js")
+    admin_source = _read("factory_app/app/admin/index.js")
 
     assert "registerComponent('AdminPortal'" not in core_source
-    assert "registerComponent('AdminPortal'" in studio_source
+    assert "registerAdminComponents" in ui_source
+    assert "registerComponent('AdminPortal'" in admin_source
     assert "AppAdminDashboard" not in core_source
-    assert "AppAdminDashboard" not in studio_source
+    assert "AppAdminDashboard" not in ui_source
+    assert "AppAdminDashboard" not in admin_source
 
 
 def test_admin_portal_embeds_app_admin_panels() -> None:

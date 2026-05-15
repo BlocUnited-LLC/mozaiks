@@ -2,7 +2,7 @@ import {
   ActionButton,
   IconButton,
   StatusPill,
-} from '../../../components/ConsoleShared.jsx'
+} from '../../ui/components/ConsoleShared.jsx'
 import {
   getRefinementRequestPlaceholder,
   REFINEMENT_CHANGE_CLASSES,

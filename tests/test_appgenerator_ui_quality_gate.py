@@ -272,9 +272,10 @@ def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
     assert handoff_pairs[("AppUIQualityAgent", "AppSchemaAgent")]["condition"] == (
         '${app_ui_quality_status} == "needs_revision"'
     )
-    assert handoff_pairs[("AppUIQualityAgent", "AssemblyAgent")]["condition"] == (
+    assert handoff_pairs[("AppUIQualityAgent", "AdminRegistryAgent")]["condition"] == (
         '${app_ui_quality_status} == "passed"'
     )
+    assert ("AdminRegistryAgent", "AssemblyAgent") in handoff_pairs
     assert handoff_pairs[("AppUIQualityAgent", "user")]["condition"] == (
         '${app_ui_quality_status} == "blocked"'
     )

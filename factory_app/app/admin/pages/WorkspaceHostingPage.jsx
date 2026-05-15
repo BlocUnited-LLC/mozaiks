@@ -3,9 +3,7 @@ import { useMemo, useState } from 'react'
 import {
   CollectionToolbar,
   InlineEmptyState,
-  PageHeader,
   ResourceList,
-  SummaryStrip,
 } from '@mozaiks/chat-ui/ui'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
@@ -14,8 +12,8 @@ import {
   ConsoleLoadingState,
   Panel,
   StatusPill,
-} from '../../../components/ConsoleShared.jsx'
-import { formatCompactNumber } from './AppConsoleChrome.jsx'
+} from '../../ui/components/ConsoleShared.jsx'
+import { WorkspaceConsoleHero, formatCompactNumber } from './AppConsoleChrome.jsx'
 import { getConsoleDemoDeploymentRecord } from './consoleDemoData.js'
 import { buildHostingSections, formatResourceValue } from './hostingConsoleModel.js'
 import buildWorkspacePortfolio from './workspaceConsoleModel.js'
@@ -104,12 +102,11 @@ export default function WorkspaceHostingPage() {
   return (
     <WorkspaceLayout>
       <div className="space-y-6">
-        <PageHeader
+        <WorkspaceConsoleHero
           title="Hosting"
           subtitle="Monitor deployments, domains, environments, and hosting readiness."
+          summaryItems={summaryItems}
         />
-
-        <SummaryStrip items={summaryItems} />
 
         <section className="space-y-4">
           <CollectionToolbar

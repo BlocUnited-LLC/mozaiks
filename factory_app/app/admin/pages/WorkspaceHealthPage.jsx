@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react'
 
-import { PageHeader, SummaryStrip } from '@mozaiks/chat-ui/ui'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ConsoleErrorState,
@@ -8,8 +7,8 @@ import {
   ConsoleLoadingState,
   Panel,
   StatusPill,
-} from '../../../components/ConsoleShared.jsx'
-import { formatCompactNumber } from './AppConsoleChrome.jsx'
+} from '../../ui/components/ConsoleShared.jsx'
+import { WorkspaceConsoleHero, formatCompactNumber } from './AppConsoleChrome.jsx'
 import { buildHealthState, formatPercentValue } from './consoleHealthModel.js'
 import { getConsoleDemoDeploymentRecord, getConsoleDemoUsageRecord } from './consoleDemoData.js'
 import buildWorkspacePortfolio from './workspaceConsoleModel.js'
@@ -65,12 +64,11 @@ export default function WorkspaceHealthPage() {
   return (
     <WorkspaceLayout>
       <div className="space-y-6">
-        <PageHeader
+        <WorkspaceConsoleHero
           title="Health"
           subtitle="See which apps are healthy, which ones are drifting, and where the next app-level intervention should happen."
+          summaryItems={summaryItems}
         />
-
-        <SummaryStrip items={summaryItems} />
 
         <Panel eyebrow="Portfolio health" title="Health by app" subtitle="Search the current portfolio and keep the overall health of each app visible without opening each console.">
           <div className="mb-4">

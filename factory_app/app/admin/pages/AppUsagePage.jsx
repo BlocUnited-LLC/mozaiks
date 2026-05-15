@@ -9,7 +9,7 @@ import {
   ConsoleLoadingState,
   Panel,
   SegmentedControl,
-} from '../../../components/ConsoleShared.jsx'
+} from '../../ui/components/ConsoleShared.jsx'
 import { AppConsoleHero, formatCompactNumber, formatCurrencyValue } from './AppConsoleChrome.jsx'
 import { getAppConsoleSnapshot, groupBy, sumBy } from './appConsoleDataHelpers.js'
 import { useAppConsoleData } from './useAppConsoleData.js'

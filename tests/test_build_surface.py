@@ -55,22 +55,28 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     assert '"path": "/apps/:appId/settings"' not in manifest_source
     assert '"surfaces": ["studio"]' in manifest_source
     assert '"requiresRole": "admin"' in manifest_source
+    assert '"group": "workspace-console"' in manifest_source
+    assert '"group": "app-console"' in manifest_source
+    assert '"icon": "apps"' in manifest_source
+    assert '"icon": "dashboard"' in manifest_source
 
 
 def test_factory_app_ui_barrel_registers_hosting_pages_and_omits_removed_pages() -> None:
     source = _read("factory_app/app/ui/index.js")
-    assert "AppsPage" in source
-    assert "registerComponent('AppsPage'" in source
-    assert "WorkspaceHealthPage" in source
-    assert "registerComponent('WorkspaceHealthPage'" in source
-    assert "WorkspaceHostingPage" in source
-    assert "registerComponent('WorkspaceHostingPage'" in source
-    assert "AppHealthPage" in source
-    assert "registerComponent('AppHealthPage'" in source
-    assert "AppHostingPage" in source
-    assert "registerComponent('AppHostingPage'" in source
-    assert "./pages/custom/console/AppHealthPage.jsx" in source
-    assert "./pages/custom/console/AppHostingPage.jsx" in source
+    admin_source = _read("factory_app/app/admin/index.js")
+    assert "registerAdminComponents" in source
+    assert "../admin/index.js" in source
+    assert "registerAdminComponents(registerComponent)" in source
+    assert "registerComponent('AppsPage'" not in source
+    assert "registerComponent('WorkspaceHealthPage'" not in source
+    assert "registerComponent('AppHostingPage'" not in source
+    assert "registerComponent('AppsPage'" in admin_source
+    assert "registerComponent('WorkspaceHealthPage'" in admin_source
+    assert "registerComponent('WorkspaceHostingPage'" in admin_source
+    assert "registerComponent('AppHealthPage'" in admin_source
+    assert "registerComponent('AppHostingPage'" in admin_source
+    assert "./pages/AppHealthPage.jsx" in admin_source
+    assert "./pages/AppHostingPage.jsx" in admin_source
     assert "AppBuildPage" not in source
     assert "AppDeployPage" not in source
     assert "AppOperationsPage" not in source
@@ -87,6 +93,7 @@ def test_core_components_do_not_register_build_page() -> None:
 def test_removed_console_pages_are_deleted_from_factory_app() -> None:
     workspace = _workspace()
 
+    # Old stale pages must not exist anywhere
     for relative_path in (
         "factory_app/app/ui/pages/custom/console/AppBuildPage.jsx",
         "factory_app/app/ui/pages/custom/console/AppDeployPage.jsx",
@@ -97,27 +104,31 @@ def test_removed_console_pages_are_deleted_from_factory_app() -> None:
     ):
         assert not (workspace / relative_path).exists()
 
-    assert (workspace / "factory_app/app/ui/pages/custom/console/AppHostingPage.jsx").exists()
-    assert (workspace / "factory_app/app/ui/pages/custom/console/AppHealthPage.jsx").exists()
-    assert (workspace / "factory_app/app/ui/pages/custom/console/WorkspaceHostingPage.jsx").exists()
-    assert (workspace / "factory_app/app/ui/pages/custom/console/WorkspaceHealthPage.jsx").exists()
+    # Entire old console directory has been replaced by admin/pages/
+    assert not (workspace / "factory_app/app/ui/pages/custom/console").exists()
+
+    # Active pages live under admin/pages/
+    assert (workspace / "factory_app/app/admin/pages/AppHostingPage.jsx").exists()
+    assert (workspace / "factory_app/app/admin/pages/AppHealthPage.jsx").exists()
+    assert (workspace / "factory_app/app/admin/pages/WorkspaceHostingPage.jsx").exists()
+    assert (workspace / "factory_app/app/admin/pages/WorkspaceHealthPage.jsx").exists()
 
 
 def test_refinement_ui_moves_into_factory_app() -> None:
     workspace = _workspace()
     assert not (workspace / "chat-ui/src/components/chat/RefinementControls.jsx").exists()
-    assert (workspace / "factory_app/app/ui/pages/custom/console/RefinementControls.jsx").exists()
+    assert (workspace / "factory_app/app/admin/pages/RefinementControls.jsx").exists()
 
 
 def test_factory_app_owns_refinement_trigger_payload_helper() -> None:
-    source = _read("factory_app/app/ui/pages/custom/console/refinement.js")
+    source = _read("factory_app/app/admin/pages/refinement.js")
     assert "buildRefinementTriggerPayload" in source
     assert "getRefinementRequestPlaceholder" in source
     assert "REFINEMENT_CHANGE_CLASSES" in source
 
 
 def test_factory_app_refinement_controls_are_live_and_controlled() -> None:
-    source = _read("factory_app/app/ui/pages/custom/console/RefinementControls.jsx")
+    source = _read("factory_app/app/admin/pages/RefinementControls.jsx")
     assert "modes = REFINEMENT_CHANGE_CLASSES" in source
     assert "selectedClass" in source
     assert "onSelectClass" in source
@@ -128,7 +139,7 @@ def test_factory_app_refinement_controls_are_live_and_controlled() -> None:
 
 
 def test_app_overview_does_not_link_to_removed_routes() -> None:
-    source = _read("factory_app/app/ui/pages/custom/console/AppOverviewPage.jsx")
+    source = _read("factory_app/app/admin/pages/AppOverviewPage.jsx")
     assert 'to={`/apps/${appId}/build`}' not in source
     assert 'to={`/apps/${appId}/deploy`}' not in source
     assert 'to={`/apps/${appId}/operations`}' not in source
@@ -136,8 +147,8 @@ def test_app_overview_does_not_link_to_removed_routes() -> None:
 
 
 def test_apps_page_fetches_workspace_apps_endpoint() -> None:
-    source = _read("factory_app/app/ui/pages/custom/console/AppsPage.jsx")
-    hook_source = _read("factory_app/app/ui/pages/custom/console/useWorkspaceApps.js")
+    source = _read("factory_app/app/admin/pages/AppsPage.jsx")
+    hook_source = _read("factory_app/app/admin/pages/useWorkspaceApps.js")
     layout_source = _read("chat-ui/src/workspace/WorkspaceLayout.jsx")
     assert "/api/studio/apps" in hook_source
     assert "Mozaiks Console" in layout_source
@@ -148,6 +159,7 @@ def test_apps_page_fetches_workspace_apps_endpoint() -> None:
 
 def test_workspace_layout_links_console_and_hosting_sections() -> None:
     source = _read("chat-ui/src/workspace/WorkspaceLayout.jsx")
+    manifest_source = _read("factory_app/app/ui/route_manifest.json")
     assert "Admin Dashboard" not in source
     assert "Mozaiks Console" in source
     assert "Developer" not in source
@@ -155,32 +167,30 @@ def test_workspace_layout_links_console_and_hosting_sections() -> None:
     assert "Browse sections" not in source
     assert "Mozaiks Console" in source
     assert "App Console" in source
-    assert "Users" in source
-    assert "Billing" in source
-    assert "Health" in source
-    assert "Hosting" in source
-    assert "Usage" in source
-    assert "Integrations" in source
-    # Nav is framework-owned and deterministic; feature admin panels do not
-    # mutate Console navigation.
-    assert "buildAppNavItems" in source
-    assert "APP_NAV_ITEMS" in source
-    assert "WORKSPACE_NAV_ITEMS" in source
+    assert '"label": "Users"' in manifest_source
+    assert '"label": "Billing"' in manifest_source
+    assert '"label": "Health"' in manifest_source
+    assert '"label": "Hosting"' in manifest_source
+    assert '"label": "Usage"' in manifest_source
+    assert '"label": "Integrations"' in manifest_source
+    # Nav is route-manifest-owned and derived from registered shell pages.
+    assert "useNavigation" in source
+    assert "buildNavGroupsFromPages" in source
+    assert "ICON_MAP" in source
     assert "adminSections" not in source
-    # Workspace nav items remain hardcoded
-    assert "path: '/apps'" in source
-    assert "path: '/usage'" in source
-    assert "path: '/health'" in source
-    assert "path: '/billing'" in source
-    assert "path: '/hosting'" in source
-    # Workspace nav does not include app-level section paths
-    assert "path: '/operations'" not in source
-    assert "path: '/settings'" not in source
-    assert "suffix: '/build'" not in source
-    assert "suffix: '/deploy'" not in source
-    assert "suffix: '/admin'" not in source
-    assert "suffix: '/operations'" not in source
-    assert "suffix: '/settings'" not in source
+    assert "APP_NAV_ITEMS" not in source
+    assert "WORKSPACE_NAV_ITEMS" not in source
+    assert "buildAppNavItems" not in source
+    assert "resolvePageNavigation(page).group" in source
+    assert "buildPathForPage(page.path, appId)" in source
+    # Workspace nav does not include removed app-level sections.
+    assert '"path": "/operations"' not in manifest_source
+    assert '"path": "/settings"' not in manifest_source
+    assert '"path": "/apps/:appId/build"' not in manifest_source
+    assert '"path": "/apps/:appId/deploy"' not in manifest_source
+    assert '"path": "/apps/:appId/admin"' not in manifest_source
+    assert '"path": "/apps/:appId/operations"' not in manifest_source
+    assert '"path": "/apps/:appId/settings"' not in manifest_source
     assert "WorkspaceLayout" in source
     assert "Open console navigation" in source
     assert "Console navigation" in source
@@ -190,13 +200,13 @@ def test_workspace_layout_links_console_and_hosting_sections() -> None:
 
 
 def test_integrations_page_uses_integrations_eyebrow() -> None:
-    source = _read("factory_app/app/ui/pages/custom/console/AppIntegrationsPage.jsx")
+    source = _read("factory_app/app/admin/pages/AppIntegrationsPage.jsx")
     assert "Integrations" in source
     assert 'eyebrow="Studio"' not in source
 
 
 def test_integrations_page_focuses_on_external_integrations() -> None:
-    source = _read("factory_app/app/ui/pages/custom/console/AppIntegrationsPage.jsx")
+    source = _read("factory_app/app/admin/pages/AppIntegrationsPage.jsx")
     assert 'External Integrations' in source
     assert 'Add Integration' in source
     assert 'Connector Secret Backend' not in source

@@ -26,17 +26,20 @@ app/
 ├── config/
 │   ├── ai.json
 │   └── shell.json
+├── admin/                      # admin portal — pages, registry, and custom admin UI
+│   ├── admin_registry.yaml     # declares admin portal pages (page ids, paths, scope)
+│   ├── index.js                # registers admin page components
+│   └── pages/                  # custom React components for admin portal pages
+│       └── *.{js,jsx}          # one file per admin page (e.g. OrdersAdminPage.jsx)
 ├── ui/
-│   ├── index.js                # registers contract-declared custom components
-│   ├── route_manifest.json     # custom full-page React route declarations, including surface-gated routes
-│   ├── pages/                  # declarative page schemas
+│   ├── index.js                # registers user-facing custom components; imports admin/index.js
+│   ├── route_manifest.json     # user-facing full-page React route declarations
+│   ├── pages/                  # declarative user-facing page schemas
 │   │   ├── {page_name}.yaml
 │   │   └── {page_name}/
 │   │       └── page.yaml
-│   │   └── custom/
-│   │       └── *.{js,jsx}      # optional custom full-page React routes (escape hatch)
-│   └── admin/
-│       └── *.{js,jsx}          # optional admin custom components
+│   └── pages/custom/
+│       └── *.{js,jsx}          # optional custom full-page React routes (escape hatch for ui only)
 ├── workflows/
 │   └── {workflow_name}/
 │       ├── orchestrator.yaml   # includes triggers (no separate automations/)

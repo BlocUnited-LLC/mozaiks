@@ -3,9 +3,7 @@ import { useMemo, useState } from 'react'
 import {
   CollectionToolbar,
   InlineEmptyState,
-  PageHeader,
   ResourceList,
-  SummaryStrip,
 } from '@mozaiks/chat-ui/ui'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
@@ -13,8 +11,8 @@ import {
   ConsoleLoadingState,
   Panel,
   StatusPill,
-} from '../../../components/ConsoleShared.jsx'
-import { formatCompactNumber, formatCurrencyValue } from './AppConsoleChrome.jsx'
+} from '../../ui/components/ConsoleShared.jsx'
+import { WorkspaceConsoleHero, formatCompactNumber, formatCurrencyValue } from './AppConsoleChrome.jsx'
 import { getConsoleDemoBillingRecord } from './consoleDemoData.js'
 import { useWorkspaceApps } from './useWorkspaceApps.js'
 import buildWorkspacePortfolio from './workspaceConsoleModel.js'
@@ -105,12 +103,11 @@ export default function WorkspaceBillingPage() {
   return (
     <WorkspaceLayout>
       <div className="space-y-6">
-        <PageHeader
+        <WorkspaceConsoleHero
           title="Billing"
           subtitle="Track revenue, customers, and billing follow-up by app."
+          summaryItems={summaryItems}
         />
-
-        <SummaryStrip items={summaryItems} />
 
         <Panel
           title="Billing reporting pending"

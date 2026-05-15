@@ -9,7 +9,7 @@ import {
   ConsoleLoadingState,
   Panel,
   StatusPill,
-} from '../../../components/ConsoleShared.jsx'
+} from '../../ui/components/ConsoleShared.jsx'
 import { AppConsoleHero, formatCompactNumber } from './AppConsoleChrome.jsx'
 import { buildSubscriptionMix, getAppConsoleSnapshot, toArray } from './appConsoleDataHelpers.js'
 import { useAppConsoleData } from './useAppConsoleData.js'

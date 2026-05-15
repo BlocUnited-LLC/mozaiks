@@ -125,8 +125,8 @@ def test_global_primitives_own_reusable_console_patterns() -> None:
     assert "export function StatusPill" not in console_shared
     assert "export function SurfaceCard" not in console_shared
     assert "export function Metric" not in console_shared
-    assert not (_workspace() / "factory_app/app/ui/pages/custom/console/ConsoleShared.jsx").exists()
-    assert not (_workspace() / "factory_app/app/ui/pages/custom/console/ConsolePrimitives.jsx").exists()
+    assert not (_workspace() / "factory_app/app/admin/pages/ConsoleShared.jsx").exists()
+    assert not (_workspace() / "factory_app/app/admin/pages/ConsolePrimitives.jsx").exists()
 
 
 def test_component_primitive_guidance_uses_public_ui_import() -> None:

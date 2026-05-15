@@ -625,9 +625,10 @@ agents:
 
       **Admin portal rule (hard constraint)**:
       - NEVER generate an admin page schema. The `/admin` route and `AdminPortal` component are platform-owned and registered as the unified admin shell.
-      - If `app_build_plan.capability_packs` contains `admin_pack`, do NOT add an admin page to `manifest.pages` or generated page routes. The platform mounts `/admin` automatically.
-      - App and feature admin surfaces are declared by `modules/{pack_name}/admin.yaml`, not by generated pages or React files.
-      - Admin panels must use user-facing section names: `overview`, `users`, `billing`, `usage`, `activity`, `operations`, `settings`, `integrations`, or `support`. Never expose `modules`, `plugins`, `tools`, `studio`, `build`, or manifest concepts as admin sections.
+      - Do NOT add an admin page to `manifest.pages` or generated page routes. The platform mounts `/admin` automatically based on `admin/admin_registry.yaml` produced by AdminRegistryAgent.
+      - App and feature admin surfaces are declared by `modules/{pack_name}/contracts/admin.yaml`. Module panels reference page ids from `admin/admin_registry.yaml` via the `page` field — ConfigMiddlewareAgent handles this.
+      - If a custom admin React component is genuinely needed (renderer: custom_component), its stub path belongs in `admin/pages/` — NOT in `ui/pages/custom/`. Emit it only through `custom_route_bundle.page_files` when the module's admin.yaml declares `renderer: custom_component`. This is the only AppSchemaAgent-owned admin-side file.
+      - Never model admin surfaces as user-facing pages, declarative page schemas, or `manifest.pages` entries.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
@@ -1725,4 +1726,96 @@ agents:
 
       **CRITICAL**: Output ONLY the raw JSON object.
   max_consecutive_auto_reply: 10
+  structured_outputs_required: true
+- name: AdminRegistryAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: |-
+      You are the Admin Registry Agent. Your sole responsibility is to generate
+      `admin/admin_registry.yaml` for a generated app bundle.
+
+      The admin registry declares all admin portal pages — both workspace-scope pages
+      (visible from the operator console) and app-scope pages (visible in the per-app
+      admin portal). Module admin panels reference these page ids via the `page` field
+      in `modules/{module}/contracts/admin.yaml`.
+  - id: objective
+    heading: '[OBJECTIVE]'
+    content: |-
+      Read `app_build_plan` and produce a complete `admin/admin_registry.yaml` that:
+      1. Declares the standard app-scope admin pages appropriate for this app's capability set.
+      2. Omits workspace-scope pages for standard generated apps (include only when the app
+         explicitly targets a hosted operator/platform context).
+      3. Covers all entity domains that ConfigMiddlewareAgent will assign module panels to,
+         so every `page` reference in every `admin.yaml` resolves to a declared page id.
+  - id: context
+    heading: '[CONTEXT]'
+    content: |-
+      **Inputs**:
+      - `app_build_plan`: full plan from AppPlanAgent. Read `capability_packs`, `pages`,
+        `auth_strategy`, and `build_tasks` to infer which admin pages are relevant.
+
+      **Standard app-scope page inclusion rules** (apply per capability set):
+      - `overview` — always include; path `/admin`; icon `dashboard`; order 0
+      - `users` — include when auth_strategy is not `none` or any pack manages user/account/member entities; path `/apps/:appId/users`; icon `users`; order 10
+      - `usage` — include when any pack has quota, metering, analytics, or reporting entities; path `/apps/:appId/usage`; icon `chart`; order 20
+      - `billing` — include when any pack manages billing, subscription, payment, or invoice entities; path `/apps/:appId/billing`; icon `billing`; order 30
+      - `activity` — include when any pack has audit trail, event log, history, or timeline entities; path `/apps/:appId/activity`; icon `history`; order 40
+      - `operations` — include when any pack manages queue, job, request, approval, or workflow entities; path `/apps/:appId/operations`; icon `server`; order 50
+      - `settings` — always include; path `/apps/:appId/settings`; icon `settings`; order 60
+      - `integrations` — include when any pack has third-party connector, webhook, or OAuth entities; path `/apps/:appId/integrations`; icon `plug`; order 70
+      - `support` — include when any pack has ticket, helpdesk, or support entities; path `/apps/:appId/support`; icon `support`; order 80
+
+      **Page id conventions**:
+      - Use stable lowercase kebab-case ids matching the names above.
+      - Every id emitted here must be referenced correctly by ConfigMiddlewareAgent module panels.
+      - Do not invent custom page ids beyond the standard set above unless the build plan
+        explicitly calls for a unique operator surface with no standard analog.
+
+      **Coverage requirement**: ConfigMiddlewareAgent derives panel page placement from entity
+      domain (billing/subscription → `billing`; user/member → `users`; job/queue → `operations`;
+      usage/metric → `usage`; setting/preference → `settings`; all others → `overview`). Ensure
+      every domain your modules cover has a matching page id in this registry.
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |-
+      1. Read `app_build_plan.capability_packs` — map each pack's entity domains to the
+         standard page inclusion rules above.
+      2. Read `app_build_plan.auth_strategy` — if `none`, skip `users` unless a pack
+         explicitly manages member entities.
+      3. Always include `overview` and `settings`.
+      4. Apply the remaining inclusion rules to produce the final page list.
+      5. Set `schema_version: mozaiks.admin.registry.v1`.
+      6. Order pages by `order` field (0, 10, 20, …). All pages are `scope: app` for
+         standard generated apps.
+      7. Set `enabled: true` for all pages.
+      8. Output a typed `admin_registry` object matching the `AdminRegistry` model.
+      9. Serialize `admin/admin_registry.yaml` as a YAML string in `code_files`.
+  - id: output_format
+    heading: '[OUTPUT FORMAT]'
+    content: |-
+      Output MUST be a valid JSON object matching AdminRegistryOutput and NO additional text:
+
+      ```json
+      {
+        "admin_registry": {
+          "schema_version": "mozaiks.admin.registry.v1",
+          "pages": [
+            { "id": "overview", "label": "Overview", "path": "/admin", "icon": "dashboard", "order": 0, "enabled": true, "scope": "app" },
+            { "id": "users", "label": "Users", "path": "/apps/:appId/users", "icon": "users", "order": 10, "enabled": true, "scope": "app" },
+            { "id": "settings", "label": "Settings", "path": "/apps/:appId/settings", "icon": "settings", "order": 60, "enabled": true, "scope": "app" }
+          ]
+        },
+        "code_files": [
+          {
+            "filename": "admin/admin_registry.yaml",
+            "content": "schema_version: mozaiks.admin.registry.v1\npages:\n  - id: overview\n    label: Overview\n    path: /admin\n    icon: dashboard\n    order: 0\n    enabled: true\n    scope: app\n"
+          }
+        ],
+        "agent_message": "Generated admin registry with 3 app-scope pages."
+      }
+      ```
+
+      **CRITICAL**: Output ONLY the raw JSON object.
+  max_consecutive_auto_reply: 5
   structured_outputs_required: true

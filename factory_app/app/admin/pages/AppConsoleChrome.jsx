@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 
 import { PageHeader, SummaryStrip } from '@mozaiks/chat-ui/ui'
-import { StatusPill, SurfaceCard } from '../../../components/ConsoleShared.jsx'
+import { StatusPill, SurfaceCard } from '../../ui/components/ConsoleShared.jsx'
 import {
   getAppDisplayDescription,
   getAppDisplayName,
@@ -80,6 +80,45 @@ export function AppConsoleHero({
       </SurfaceCard>
 
       <PageHeader title={title} subtitle={subtitle} className="px-1" />
+
+      {summaryItems.length > 0 ? <SummaryStrip items={summaryItems} /> : null}
+      {children ? <div>{children}</div> : null}
+    </div>
+  )
+}
+
+export function WorkspaceConsoleHero({
+  title,
+  subtitle,
+  actions = null,
+  onAction = null,
+  summaryItems = [],
+  children,
+  accent = true,
+  shellTitle = 'Mozaiks Console',
+  shellSubtitle = 'Manage your apps, operating signals, and release posture from one workspace view.',
+}) {
+  return (
+    <div className="space-y-4">
+      <SurfaceCard
+        title={shellTitle}
+        subtitle={shellSubtitle}
+        accent={accent}
+      >
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="font-medium text-foreground/90">Workspace Console</span>
+          <span className="text-muted-foreground/70">/</span>
+          <span className="text-muted-foreground">{title}</span>
+        </div>
+      </SurfaceCard>
+
+      <PageHeader
+        title={title}
+        subtitle={subtitle}
+        actions={actions}
+        onAction={onAction}
+        className="px-1"
+      />
 
       {summaryItems.length > 0 ? <SummaryStrip items={summaryItems} /> : null}
       {children ? <div>{children}</div> : null}

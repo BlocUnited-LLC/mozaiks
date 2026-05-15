@@ -9,9 +9,7 @@ import {
   CollectionToolbar,
   Form,
   InlineEmptyState,
-  PageHeader,
   ResourceList,
-  SummaryStrip,
 } from '@mozaiks/chat-ui/ui'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
@@ -20,8 +18,8 @@ import {
   ConsoleLoadingState,
   ConsoleSlideOver,
   StatusPill,
-} from '../../../components/ConsoleShared.jsx'
-import { formatCompactNumber } from './AppConsoleChrome.jsx'
+} from '../../ui/components/ConsoleShared.jsx'
+import { WorkspaceConsoleHero, formatCompactNumber } from './AppConsoleChrome.jsx'
 import buildWorkspacePortfolio from './workspaceConsoleModel.js'
 import { useWorkspaceApps } from './useWorkspaceApps.js'
 
@@ -298,7 +296,7 @@ export default function AppsPage() {
   return (
     <WorkspaceLayout>
       <div className="space-y-6">
-        <PageHeader
+        <WorkspaceConsoleHero
           title="Apps"
           subtitle="Manage your apps, continue builds, and open app consoles."
           actions={[
@@ -306,9 +304,9 @@ export default function AppsPage() {
             { id: 'import', label: 'Import App', variant: 'outline' },
           ]}
           onAction={handleHeaderAction}
+          summaryItems={summaryItems}
+          shellSubtitle="Manage your app portfolio, resume builds, and route directly into each app console."
         />
-
-        <SummaryStrip items={summaryItems} />
 
         <section className="space-y-4">
           <CollectionToolbar

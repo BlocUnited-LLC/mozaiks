@@ -6,7 +6,7 @@ import {
   ActionButton,
   ConsoleErrorState,
   ConsoleLoadingState,
-} from '../../../components/ConsoleShared.jsx'
+} from '../../ui/components/ConsoleShared.jsx'
 
 
 export default function CreateAppRedirectPage() {

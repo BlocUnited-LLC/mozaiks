@@ -10,6 +10,7 @@
 AppGenerator owns the deterministic product bundle artifacts for persistent app UI:
 
 - `app.json`
+- `admin/admin_registry.yaml`
 - `ui/pages/*.yaml`
 - `brand/theme_config.json`
 - `config/shell.json`
@@ -18,6 +19,7 @@ AppGenerator owns the deterministic product bundle artifacts for persistent app 
 The ownership split is strict:
 
 - `app.json` defines app identity, targets, auth intent, and startup behavior such as `startup.landing_spot`.
+- `admin/admin_registry.yaml` declares all admin portal pages for the app's operator console. Module panels reference these page ids via the `page` field in `modules/{module}/contracts/admin.yaml`.
 - `ui/pages/*.yaml` define persistent page structure and route ownership.
 - `brand/theme_config.json` defines visual tokens, shared primitives, and semantic `ui.chat` / `ui.shell` / `ui.page` styling.
 - `config/shell.json` defines shell content and behavior such as header actions, profile controls, notifications, and footer links.
@@ -103,6 +105,24 @@ Rules:
 - custom routes must be owned exclusively by `custom_route_bundle` (`ui/route_manifest.json` + `ui/pages/custom/*.jsx`) and must not duplicate any `ui/pages/*.yaml` route
 - declarative pages may launch workflow sessions through typed page actions (`action_type: workflow`), but workflow-local React still belongs to AgentGenerator and `chat.tool_call`
 
+### 2b. AdminRegistryAgent
+
+`AdminRegistryAgent` runs after `AppUIQualityAgent` passes and before `AssemblyAgent`.
+
+It produces `AdminRegistryOutput` with two payloads:
+
+- `admin_registry` — typed `AdminRegistry` object (page list with ids, labels, paths, icons, scope, order)
+- `code_files` — serialized `admin/admin_registry.yaml`
+
+Rules:
+
+- Always emits `overview` and `settings` app-scope pages
+- Includes additional pages (`users`, `billing`, `usage`, `activity`, `operations`, `integrations`, `support`) based on `app_build_plan.capability_packs` entity domains
+- Uses `scope: app` for all standard generated app pages; workspace-scope pages only for hosted operator contexts
+- Page ids must cover every entity domain that `ConfigMiddlewareAgent` assigns module admin panels to
+
+`AssemblyAgent` must include `admin/admin_registry.yaml` in the final bundle output.
+
 ### 3. save_app_schema
 
 `save_app_schema` is the persistence tool for schema-driven app bundles.
@@ -132,6 +152,7 @@ When `app_schema_ready == true`, `AssemblyAgent` must emit those artifacts back 
 Required schema-driven outputs:
 
 - `app.json`
+- `admin/admin_registry.yaml`
 - `ui/pages/{name}.yaml`
 - `ui/route_manifest.json` when `app_custom_route_bundle` exists
 - `ui/pages/custom/*.jsx` when `app_custom_route_bundle` exists

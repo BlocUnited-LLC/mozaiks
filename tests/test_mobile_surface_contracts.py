@@ -113,7 +113,7 @@ def test_factory_app_console_routes_are_all_covered_by_smoke() -> None:
     smoke_source = _read("web_shell/playwright/apps.responsive.smoke.spec.js")
     console_components = {
         path.stem
-        for path in (_workspace() / "factory_app" / "app" / "ui" / "pages" / "custom" / "console").glob("*.jsx")
+        for path in (_workspace() / "factory_app" / "app" / "admin" / "pages").glob("*.jsx")
     }
 
     smoke_titles_by_component = {
@@ -151,14 +151,14 @@ def test_factory_app_react_files_are_classified() -> None:
         for path in (_workspace() / "factory_app").rglob("*.jsx")
     }
     route_backed_files = {
-        f"factory_app/app/ui/pages/custom/console/{page['component']}.jsx"
+        f"factory_app/app/admin/pages/{page['component']}.jsx"
         for page in manifest["pages"]
         if page.get("component") and page["component"] != "AdminPortal"
     }
     support_files = {
-        "factory_app/app/ui/pages/custom/console/AppConsoleChrome.jsx",
-        "factory_app/app/ui/pages/custom/console/CreateAppRedirectPage.jsx",
-        "factory_app/app/ui/pages/custom/console/RefinementControls.jsx",
+        "factory_app/app/admin/pages/AppConsoleChrome.jsx",
+        "factory_app/app/admin/pages/CreateAppRedirectPage.jsx",
+        "factory_app/app/admin/pages/RefinementControls.jsx",
         "factory_app/app/ui/components/ConsoleShared.jsx",
         "factory_app/app/ui/components/HarnessDecisionCard.jsx",
         "factory_app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",

@@ -13,7 +13,7 @@ import {
   ConsoleSlideOver,
   ConsoleLoadingState,
   ConsoleErrorState,
-} from '../../../components/ConsoleShared.jsx'
+} from '../../ui/components/ConsoleShared.jsx'
 
 
 const EMPTY_FORM_STATE = {

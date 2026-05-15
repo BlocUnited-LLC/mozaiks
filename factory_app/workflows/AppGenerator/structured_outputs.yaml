@@ -3895,11 +3895,29 @@ models:
         - 'null'
         description: Optional summary message.
 
+  AdminRegistryOutput:
+    type: model
+    fields:
+      admin_registry:
+        type: AdminRegistry
+        description: The admin portal page registry for this generated app. Serialized to admin/admin_registry.yaml.
+      code_files:
+        type: list
+        items: CodeFileEntry
+        description: Serialized file mirror — always includes admin/admin_registry.yaml.
+      agent_message:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional summary message.
+
 registry:
   InterviewAgent: null
   AppPlanAgent: AppBuildPlanOutput
   AppSchemaAgent: AppSchemaOutput
   AppUIQualityAgent: AppUIQualityReviewRequest
+  AdminRegistryAgent: AdminRegistryOutput
   DatabaseAgent: DatabaseOutput
   ConfigMiddlewareAgent: ConfigMiddlewareOutput
   ModuleContractQualityAgent: ModuleContractQualityReviewRequest

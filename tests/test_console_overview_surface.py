@@ -62,9 +62,12 @@ async def test_platform_app_exposes_console_routes_only_on_studio_surface(monkey
 
 
 def test_factory_app_ui_barrel_registers_app_overview_page() -> None:
-    source = _read("factory_app/app/ui/index.js")
-    assert "AppOverviewPage" in source
-    assert "registerComponent('AppOverviewPage'" in source
+    # ui/index.js delegates to admin/index.js; component registration lives in the admin barrel
+    ui_source = _read("factory_app/app/ui/index.js")
+    assert "registerAdminComponents" in ui_source
+    admin_source = _read("factory_app/app/admin/index.js")
+    assert "AppOverviewPage" in admin_source
+    assert "registerComponent('AppOverviewPage'" in admin_source
 
 
 def test_core_components_do_not_register_app_overview_page() -> None:
@@ -80,8 +83,8 @@ def test_app_shell_uses_single_app_ui_registration_barrel() -> None:
 
 
 def test_app_overview_page_fetches_summary_endpoint() -> None:
-    source = _read("factory_app/app/ui/pages/custom/console/AppOverviewPage.jsx")
-    hook_source = _read("factory_app/app/ui/pages/custom/console/useAppConsoleData.js")
+    source = _read("factory_app/app/admin/pages/AppOverviewPage.jsx")
+    hook_source = _read("factory_app/app/admin/pages/useAppConsoleData.js")
     assert "/api/studio/overview" in hook_source
     assert "App Overview" in source
     assert "next_step" in source

@@ -162,6 +162,7 @@ def test_app_generator_page_contract_stays_declarative() -> None:
         "AppPlanAgent",
         "AppSchemaAgent",
         "AppUIQualityAgent",
+        "AdminRegistryAgent",
         "AssemblyAgent",
         "DatabaseAgent",
         "ConfigMiddlewareAgent",

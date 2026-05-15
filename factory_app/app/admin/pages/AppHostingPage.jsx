@@ -8,7 +8,7 @@ import {
   ConsoleLoadingState,
   Panel,
   StatusPill,
-} from '../../../components/ConsoleShared.jsx'
+} from '../../ui/components/ConsoleShared.jsx'
 import AppConsoleHero, { formatCompactNumber } from './AppConsoleChrome.jsx'
 import { getAppConsoleSnapshot } from './appConsoleDataHelpers.js'
 import { formatPercentValue } from './consoleHealthModel.js'
