@@ -102,7 +102,7 @@ Customer-facing terminology follows a different layer:
 
 1. **Framework/platform mode** — `mozaiksai.hosts.runtime`, `mozaiksai.hosts.platform`, `mozaiksai/`, `chat-ui/`, `web_shell/`, repo-local infrastructure/packaging
 2. **Factory mode** — `factory_app/workflows/`, `factory_app/control_plane/` — the builder/generator workflows, agent configs, structured outputs, and control plane pack
-3. **Studio mode** — `mozaiksai.hosts.studio`, `factory_app/app/ui/pages/custom/studio/`, `factory_app/app/modules/factory_control_plane/`, `chat-ui/src/admin/` — the management interface that surfaces Factory capabilities
+3. **Studio mode** — `mozaiksai.hosts.studio`, `factory_app/app/ui/pages/custom/studio/`, `factory_app/app/admin/`, `factory_app/app/modules/factory_control_plane/`, `chat-ui/src/admin/` — the management interface that surfaces Factory capabilities
 4. **Mozaiks App / product mode** — `mozaiksai.hosts.mozaiks` and contracts that external hosted product workspaces consume
 
 ---
@@ -197,7 +197,7 @@ See [docs/architecture/modules-systems/framework-capability-classification.md](d
 **AppGenerator pipeline (sequential code-gen path):**
 
 ```
-InterviewAgent → AppPlanAgent → AppSchemaAgent → AppUIQualityAgent → AssemblyAgent
+InterviewAgent → AppPlanAgent → AppSchemaAgent → AppUIQualityAgent → AdminRegistryAgent → AssemblyAgent
                                                   ↓ (passed)
 DatabaseAgent → ConfigMiddlewareAgent → ModuleContractQualityAgent → ModelAgent → ServiceAgent
                                          ↓ (blocked)                → FrontendStubAgent → ControllerAgent
@@ -206,6 +206,7 @@ DatabaseAgent → ConfigMiddlewareAgent → ModuleContractQualityAgent → Model
 
 Quality gates:
 - `AppUIQualityAgent` — validates page schema compliance before assembly (UI path)
+- `AdminRegistryAgent` — generates `admin/admin_registry.yaml` (page registry for the admin portal); runs after UI quality passes
 - `ModuleContractQualityAgent` — validates module YAML contract compliance before code generation (code-gen path)
 
 **Must not own:**
@@ -447,12 +448,12 @@ Registered in `chat-ui/src/registry/coreComponents.js` — every app gets them a
 
 ### Platform-Management Surfaces
 
-The admin portal and Studio pages are **not** core `chat-ui` primitives. They are platform-management surfaces registered by Studio and inherited by Mozaiks App. Registered through `factory_app/app/ui/index.js` and the Studio route manifest:
+The admin portal and console pages are **not** core `chat-ui` primitives. They are platform-management surfaces registered by Studio and inherited by Mozaiks App. Components are registered through `factory_app/app/admin/index.js` (imported by `factory_app/app/ui/index.js`) and declared in the Studio route manifest and `admin/admin_registry.yaml`:
 
 | Component | Route | Purpose |
 |-----------|-------|---------|
-| `AdminPortal` | `/admin` | Unified admin shell — app-business panels, module panels, runtime/operator panels |
-| `StudioPage` | `/apps/*` | First-party workspace console and Build surfaces — app directory, overview, build, and integrations |
+| `AdminPortal` | `/admin` and `/apps/:appId/*` | Unified admin shell — app-business panels, module panels, runtime/operator panels |
+| Console pages (`ConsolePage`, `AppsPage`, etc.) | `/apps/*` | First-party workspace and per-app console surfaces in `factory_app/app/admin/pages/` |
 
 `AdminPortal` separates authority internally:
 - **App-business admin panels** — from `app_backend_url/api/admin/*` using `mozaiks.admin.app_backend.v1`

@@ -110,6 +110,7 @@ Canonical ownership:
 | `factory_app/control_plane/` | Factory layer — declarative builder harness pack: checkpoints, classifier prompts, routing policies, context tools |
 | `factory_app/app/` | Studio first-party app bundle — pages, modules, brand, config loaded by the Studio host; not a synonym for the Factory layer |
 | `factory_app/app/ui/pages/custom/studio/` | Studio management UI components |
+| `factory_app/app/admin/` | Admin portal layer — `admin_registry.yaml` declares pages, `admin/index.js` registers components, `admin/pages/` holds custom admin page React files |
 | `factory_app/app/modules/factory_control_plane/` | Studio identity stub only — no backend, no actions |
 | `chat-ui/src/admin/` | Platform-management surfaces — registered by Studio, inherited by Mozaiks App |
 | `platform/` | Repo-local infrastructure assets only — not an app workspace |

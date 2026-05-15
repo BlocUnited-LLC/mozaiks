@@ -64,7 +64,7 @@ Current examples:
 
 - `factory_app/`
 - `mozaiksai/hosts/studio.py`
-- `factory_app/app/ui/pages/custom/console/`
+- `factory_app/app/admin/pages/` and `factory_app/app/admin/index.js`
 - `chat-ui/src/admin/`
 - `mozaiks_cli/`
 
