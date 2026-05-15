@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
@@ -145,7 +145,7 @@ export default function AppUsagePage() {
   const totalOutputTokens = Number(snapshot.stats.total_completion_tokens || 0)
   const totalTokens = Number(snapshot.usageRecord?.tokens_used || 0) || totalInputTokens + totalOutputTokens
   const totalRuns = snapshot.runs.length || snapshot.stats.tracked_chats || 0
-  const workflowGroups = useMemo(() => buildWorkflowGroups(snapshot.runs), [snapshot.runs])
+  const workflowGroups = buildWorkflowGroups(snapshot.runs)
   const costDrivers = snapshot.runs
     .slice()
     .sort((left, right) => Number(right.cost || 0) - Number(left.cost || 0))
