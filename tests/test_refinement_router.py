@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -273,3 +274,114 @@ async def test_refinement_router_derives_route_from_workflow_sequence() -> None:
     assert decision.impact_set.workflow_sequence == "app_surface_revision"
     assert decision.impact_set.affected_workflows == ["DesignDocs", "AppGenerator"]
     assert decision.context_seed["workflow_sequence"] == "app_surface_revision"
+
+
+class _CountingClassifier:
+    """Classifier that tracks call count — used to verify the LLM is not called on stale routes."""
+
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    async def classify(self, **kwargs):  # noqa: ANN003
+        self.call_count += 1
+        return SimpleNamespace(change_class="patch", rationale="patch", confidence=0.9, signals=[])
+
+
+def _factory_resolver(classifier=None) -> RefinementTriggerRouteResolver:
+    app_root = Path(__file__).resolve().parents[1] / "factory_app" / "app"
+    return RefinementTriggerRouteResolver(
+        classifier=classifier or _CountingClassifier(),
+        pack_loader=lambda: load_control_plane_pack(app_root=app_root),
+    )
+
+
+@pytest.mark.asyncio
+async def test_stale_route_bypasses_llm_and_routes_to_earliest_stale_workflow(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When design_docs is stale, route deterministically to DesignDocs via design_revision."""
+    monkeypatch.setattr("mozaiksai.core.artifacts.store.ArtifactStore.__init__", lambda self: None)
+    monkeypatch.setattr(
+        "mozaiksai.core.artifacts.store.ArtifactStore.get_stale_artifact_families",
+        AsyncMock(return_value=["design_docs"]),
+    )
+
+    classifier = _CountingClassifier()
+    resolver = _factory_resolver(classifier)
+    request = resolver.request_from_payload(
+        payload={"refinement_request": {"artifact_kind": "app_bundle", "raw_user_request": "Add a dark mode toggle."}},
+        app_id="app_1",
+    )
+
+    assert request is not None
+    decision = await resolver.route(request)
+
+    # LLM must NOT be called — stale routing is deterministic
+    assert classifier.call_count == 0
+    assert decision.workflow_id == "DesignDocs"
+    assert decision.workflow_sequence == "design_revision"
+    assert decision.change_intent.source == "stale_upstream"
+    assert "design_docs" in decision.change_intent.signals
+    assert decision.is_full_restart is False
+    assert decision.impact_set.restart_from == "DesignDocs"
+    assert "DesignDocs" in decision.impact_set.affected_workflows
+
+
+@pytest.mark.asyncio
+async def test_stale_route_prioritizes_concept_over_downstream_families(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When both concept and app_bundle are stale, route to full_rebuild (concept has highest priority)."""
+    monkeypatch.setattr("mozaiksai.core.artifacts.store.ArtifactStore.__init__", lambda self: None)
+    monkeypatch.setattr(
+        "mozaiksai.core.artifacts.store.ArtifactStore.get_stale_artifact_families",
+        AsyncMock(return_value=["app_bundle", "concept"]),
+    )
+
+    classifier = _CountingClassifier()
+    resolver = _factory_resolver(classifier)
+    request = resolver.request_from_payload(
+        payload={"refinement_request": {"artifact_kind": "app_bundle", "raw_user_request": "Revamp the whole thing."}},
+        app_id="app_1",
+    )
+
+    assert request is not None
+    decision = await resolver.route(request)
+
+    assert classifier.call_count == 0
+    assert decision.workflow_sequence == "full_rebuild"
+    assert decision.workflow_id == "ValueEngine"
+    assert decision.is_full_restart is True
+    assert decision.change_intent.requires_concept_revision is True
+
+
+@pytest.mark.asyncio
+async def test_stale_route_falls_through_to_llm_when_no_stale_families(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When no stale families exist, the router falls through to normal LLM classification."""
+    monkeypatch.setattr("mozaiksai.core.artifacts.store.ArtifactStore.__init__", lambda self: None)
+    monkeypatch.setattr(
+        "mozaiksai.core.artifacts.store.ArtifactStore.get_stale_artifact_families",
+        AsyncMock(return_value=[]),
+    )
+
+    classifier = _CountingClassifier()
+    # Override classifier to return a real result so route() completes
+    classifier.call_count = 0
+
+    class _PatchClassifier:
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        async def classify(self, **kwargs):  # noqa: ANN003
+            self.call_count += 1
+            return SimpleNamespace(change_class="patch", rationale="scoped patch", confidence=0.9, signals=[])
+
+    patch_classifier = _PatchClassifier()
+    resolver = _factory_resolver(patch_classifier)
+    request = resolver.request_from_payload(
+        payload={"refinement_request": {"artifact_kind": "app_bundle", "raw_user_request": "Fix a typo."}},
+        app_id="app_1",
+    )
+
+    assert request is not None
+    decision = await resolver.route(request)
+
+    # LLM must be called since no stale families were found
+    assert patch_classifier.call_count == 1
+    assert decision.change_intent.source == "llm"

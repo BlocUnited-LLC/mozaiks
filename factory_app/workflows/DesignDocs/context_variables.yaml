@@ -134,6 +134,25 @@ definitions:
       fields:
       - Blueprint
       default: null
+  captured_theme_config:
+    type: object
+    description: >
+      Canonical theme_config captured by ThemeCapture for this app. Contains the
+      fully resolved visual identity: theme.primary (color token), theme.variant
+      (modern/classic/brutalist), theme.appearance (dark/light/system),
+      theme.density (compact/comfortable/spacious), identity (name, tagline),
+      fonts (body, heading, logo), and colors (full semantic palette). DesignDocs
+      uses this to anchor experience_spec.brand_direction to the committed visual
+      posture rather than re-deriving it from prose.
+    source:
+      type: data_reference
+      database_name: mozaiksai
+      collection: ThemeCaptures
+      query_template:
+        app_id: '{{runtime.app_id}}'
+      fields:
+      - theme_config
+      default: null
   monetization_enabled:
     type: boolean
     description: Flag indicating if monetization features are enabled.
@@ -187,6 +206,7 @@ agents:
     - impact_set
     - concept_overview
     - concept_blueprint
+    - captured_theme_config
     - monetization_enabled
     - coding_participation
     - design_docs_hitl

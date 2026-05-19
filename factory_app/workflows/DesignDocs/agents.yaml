@@ -14,7 +14,7 @@ agents:
       - Do NOT implement AI/LLM backend logic. No LLM endpoints, embeddings, vector DBs, model training, or prompt-serving APIs.
       - Focus on core application functionality only.
       - Generate documents as strings inside one structured output bundle.
-      - concept_overview, concept_blueprint, monetization_enabled, coding_participation, design_docs_hitl, database_provider, database_setup_mode, and any refinement control-plane fields are provided via context variables; do not call tools to load them.
+      - concept_overview, concept_blueprint, captured_theme_config, monetization_enabled, coding_participation, design_docs_hitl, database_provider, database_setup_mode, and any refinement control-plane fields are provided via context variables; do not call tools to load them.
       - If design_docs_hitl is true, make the docs easier to review by clearly separating assumptions, alternatives, and final recommendations.
       - If coding_participation is autonomous, keep docs direct and execution-oriented.
       - If database_setup_mode is atlas or existing_uri, treat database connectivity as secret-managed configuration and do not hardcode connection strings.
@@ -22,6 +22,34 @@ agents:
       - Do not call save tools manually. The runtime auto-invokes the save tool after your structured output validates.
       - Include monetization/paywall/billing integration points ONLY if MONETIZATION_ENABLED is true; never implement payment logic in the runtime.
       - Treat third-party credentials, connector secrets, and workspace integration records as platform-owned integration state. They must not be modeled as app/business collections inside `database_intent_bundle`.
+  - id: theme_identity
+    heading: '[THEME IDENTITY]'
+    content: |-
+      captured_theme_config is the canonical visual identity committed by ThemeCapture.
+      When non-null, use it as the authoritative brand posture for experience_spec.brand_direction.
+      Do not re-derive the visual direction from concept prose if ThemeCapture has already
+      resolved it.
+
+      Key fields and how to use them:
+
+      theme.variant (modern | classic | brutalist): The primary design idiom. Directly
+      informs the tone of experience_spec.brand_direction (e.g., "modern and clean",
+      "classic and structured", "bold and minimal").
+
+      theme.appearance (dark | light | system): The committed color mode. Include in
+      brand_direction when it is load-bearing (dark-mode-first vs. light-first matters
+      for surface and primitive choices).
+
+      theme.density (compact | comfortable | spacious): The committed information density.
+      Use to guide layout choices in experience_spec.pages[].layout.
+
+      theme.primary: The committed primary color token. Reference it in brand_direction
+      to keep surface design aligned with the chosen palette.
+
+      identity.tagline: The brand tagline. Use to ground the brand_direction narrative.
+
+      When captured_theme_config is null, derive brand posture from
+      concept_blueprint.brand_intent or from concept_overview prose.
   - id: concept_blueprint
     heading: '[CONCEPT BLUEPRINT]'
     content: |-
@@ -58,10 +86,12 @@ agents:
   - id: process
     heading: '[PROCESS]'
     content: |-
-      1) Read concept_blueprint and concept_overview from context variables.
+      1) Read concept_blueprint, captured_theme_config, and concept_overview from context variables.
+         - If captured_theme_config is non-null, use theme.variant, theme.appearance, and
+           identity.tagline to anchor experience_spec.brand_direction (see [THEME IDENTITY]).
          - If concept_blueprint is non-null, use surface_candidate_hints as the upstream
            surface signal and brand_intent as the upstream brand signal (see [CONCEPT BLUEPRINT]).
-         - If concept_blueprint is null, infer surfaces from concept_overview prose.
+         - If both are null, infer surfaces and brand direction from concept_overview prose.
 
       1a) If build_mode is `revision` or refinement_request, revision_scope, change_intent, or impact_set are present, treat them as authoritative control-plane reroute context. Revise the design around that requested delta instead of regenerating from a blank slate.
 

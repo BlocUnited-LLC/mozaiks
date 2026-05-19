@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -14,6 +14,7 @@ from mozaiksai.core.workflow.pack.config import (
     load_global_pack_graph,
     normalize_step_groups,
 )
+
 from ..loader import load_selected_control_plane_pack
 from ..schema import (
     ControlPlaneArtifactRoutingManifest,
@@ -23,6 +24,18 @@ from ..schema import (
 from .change_classifier import get_change_classifier
 
 _logger = logging.getLogger("mozaiksai.control_plane.implementations.refinement_router")
+
+# Topological order for stale-family priority: earliest dependency restarts first.
+_STALE_PRIORITY: list[str] = ["concept", "brand", "design_docs", "workflow_bundle", "app_bundle"]
+
+# Maps a stale artifact family to the canonical sequence that rebuilds it and its dependents.
+_STALE_SEQUENCE_MAP: dict[str, str] = {
+    "concept": "full_rebuild",
+    "brand": "theme_revision",
+    "design_docs": "design_revision",
+    "workflow_bundle": "workflow_revision",
+    "app_bundle": "app_revision",
+}
 
 
 class ChangeClass(str, Enum):
@@ -43,15 +56,15 @@ class RefinementRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     request_kind: str = "refinement"
-    declared_change_class: Optional[ChangeClass] = None
+    declared_change_class: ChangeClass | None = None
     artifact_kind: str
-    artifact_key: Optional[str] = None
-    artifact_version_id: Optional[str] = None
+    artifact_key: str | None = None
+    artifact_version_id: str | None = None
     raw_user_request: str = ""
-    source_surface: Optional[str] = None
-    app_id: Optional[str] = None
-    user_id: Optional[str] = None
-    requested_workflow_id: Optional[str] = None
+    source_surface: str | None = None
+    app_id: str | None = None
+    user_id: str | None = None
+    requested_workflow_id: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("artifact_kind")
@@ -86,13 +99,13 @@ class ChangeIntent(BaseModel):
 class ImpactSet(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    workflow_sequence: Optional[str] = None
+    workflow_sequence: str | None = None
     affected_workflows: list[str] = Field(default_factory=list)
     affected_bundle_paths: list[str] = Field(default_factory=list)
     affected_declarative_families: list[str] = Field(default_factory=list)
     requires_replanning: bool = False
     requires_rebuild: bool = True
-    restart_from: Optional[str] = None
+    restart_from: str | None = None
     scope_summary: str = ""
 
 
@@ -100,7 +113,7 @@ class RefinementRoutingDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     workflow_id: str
-    workflow_sequence: Optional[str] = None
+    workflow_sequence: str | None = None
     refinement_request: RefinementRequest
     change_intent: ChangeIntent
     impact_set: ImpactSet
@@ -127,7 +140,7 @@ class RefinementTriggerRouteResolver:
         self._pack_loader = pack_loader
 
     @staticmethod
-    def _artifact_label(artifact_kind: str, policy: Optional[ArtifactRoutePolicy] = None) -> str:
+    def _artifact_label(artifact_kind: str, policy: ArtifactRoutePolicy | None = None) -> str:
         return str(policy.label if policy is not None else artifact_kind).replace("_", " ")
 
     def _load_pack(self) -> LoadedControlPlanePack:
@@ -161,7 +174,7 @@ class RefinementTriggerRouteResolver:
         return self._sequence_families(route.workflow_sequence) or [artifact_kind]
 
     @staticmethod
-    def _sequence_workflows(sequence_id: Optional[str]) -> list[str]:
+    def _sequence_workflows(sequence_id: str | None) -> list[str]:
         sid = str(sequence_id or "").strip()
         if not sid:
             return []
@@ -183,7 +196,7 @@ class RefinementTriggerRouteResolver:
         return workflows
 
     @staticmethod
-    def _sequence_families(sequence_id: Optional[str]) -> list[str]:
+    def _sequence_families(sequence_id: str | None) -> list[str]:
         sid = str(sequence_id or "").strip()
         if not sid:
             return []
@@ -207,6 +220,79 @@ class RefinementTriggerRouteResolver:
 
     def _affected_workflows_for_route(self, route: ControlPlaneChangeRouteManifest) -> list[str]:
         return self._sequence_workflows(route.workflow_sequence) or [self._route_workflow_id(route)]
+
+    async def _stale_route(self, request: RefinementRequest) -> RefinementRoutingDecision | None:
+        """Return a deterministic restart decision if upstream artifacts are stale.
+
+        Bypasses the LLM classifier entirely when stale families are detected —
+        there is no point classifying the user's change request if the upstream
+        artifacts it depends on are already out of date.
+        """
+        if not request.app_id:
+            return None
+        try:
+            from mozaiksai.core.artifacts.store import (
+                ArtifactStore,  # local import avoids circular dep
+            )
+            store = ArtifactStore()
+            stale = await store.get_stale_artifact_families(app_id=request.app_id)
+        except Exception:
+            return None
+        if not stale:
+            return None
+
+        stale_set = set(stale)
+        restart_family = next((f for f in _STALE_PRIORITY if f in stale_set), None)
+        if not restart_family:
+            return None
+
+        sequence_id = _STALE_SEQUENCE_MAP.get(restart_family)
+        if not sequence_id:
+            return None
+
+        affected_workflows = self._sequence_workflows(sequence_id)
+        families = self._sequence_families(sequence_id)
+        workflow_id = affected_workflows[0] if affected_workflows else restart_family
+
+        intent = ChangeIntent(
+            change_class=ChangeClass.DESIGN,
+            source="stale_upstream",
+            signals=sorted(stale_set),
+            rationale=(
+                f"Upstream artifact family '{restart_family}' is stale; "
+                f"rebuilding from {workflow_id} before processing the change request."
+            ),
+            confidence=1.0,
+            requires_concept_revision=(restart_family == "concept"),
+            touches_app_bundle="app_bundle" in families,
+            touches_workflow_bundle="workflow_bundle" in families,
+            touches_design_docs="design_docs" in families,
+            touches_concept="concept" in families,
+        )
+        impact = ImpactSet(
+            workflow_sequence=sequence_id,
+            affected_workflows=affected_workflows,
+            affected_declarative_families=families,
+            requires_replanning=True,
+            requires_rebuild=True,
+            restart_from=workflow_id,
+            scope_summary=(
+                f"Stale upstream detected: rebuilding from '{restart_family}' "
+                f"before applying the requested change."
+            ),
+        )
+        return RefinementRoutingDecision(
+            workflow_id=workflow_id,
+            workflow_sequence=sequence_id,
+            refinement_request=request,
+            change_intent=intent,
+            impact_set=impact,
+            explanation=(
+                f"Stale upstream '{restart_family}' detected for app '{request.app_id}'; "
+                f"routing to {workflow_id} to rebuild before processing the change."
+            ),
+            is_full_restart=(restart_family == "concept"),
+        )
 
     async def _derive_change_intent(self, request: RefinementRequest) -> ChangeIntent:
         classification = await self._classifier.classify(
@@ -392,6 +478,22 @@ class RefinementTriggerRouteResolver:
         return context_seed
 
     async def route(self, request: RefinementRequest) -> RefinementRoutingDecision:
+        # Stale-upstream check: bypass LLM if upstream artifacts need rebuilding first.
+        stale_decision = await self._stale_route(request)
+        if stale_decision is not None:
+            stale_decision.context_seed = self._build_context_seed(
+                request=request,
+                change_intent=stale_decision.change_intent,
+                impact_set=stale_decision.impact_set,
+            )
+            _logger.info(
+                "Stale-upstream routing: families=%s -> workflow=%s sequence=%s",
+                stale_decision.change_intent.signals,
+                stale_decision.workflow_id,
+                stale_decision.workflow_sequence,
+            )
+            return stale_decision
+
         change_intent = await self._derive_change_intent(request)
         impact_set = self._derive_impact_set(request, change_intent)
         decision = self._derive_route(
@@ -404,7 +506,6 @@ class RefinementTriggerRouteResolver:
             change_intent=change_intent,
             impact_set=impact_set,
         )
-
         _logger.info(
             "Routing decision: change_class=%s artifact_kind=%s -> workflow=%s restart=%s",
             change_intent.change_class,
@@ -418,11 +519,11 @@ class RefinementTriggerRouteResolver:
         self,
         *,
         payload: dict[str, Any],
-        app_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        requested_workflow_id: Optional[str] = None,
-        default_source_surface: Optional[str] = None,
-    ) -> Optional[RefinementRequest]:
+        app_id: str | None = None,
+        user_id: str | None = None,
+        requested_workflow_id: str | None = None,
+        default_source_surface: str | None = None,
+    ) -> RefinementRequest | None:
         nested_request = payload.get("refinement_request")
         if not isinstance(nested_request, dict):
             return None
@@ -454,7 +555,7 @@ class RefinementTriggerRouteResolver:
             request_payload["source_surface"] = default_source_surface
         return RefinementRequest.model_validate(request_payload)
 
-    def request_from_trigger(self, trigger: TriggerInput) -> Optional[RefinementRequest]:
+    def request_from_trigger(self, trigger: TriggerInput) -> RefinementRequest | None:
         trigger_source = str(trigger.trigger_source or "").strip().lower()
         if trigger_source != "refinement":
             return None
@@ -470,7 +571,7 @@ class RefinementTriggerRouteResolver:
             default_source_surface=default_source_surface,
         )
 
-    async def resolve(self, trigger: TriggerInput) -> Optional[TriggerRoutingContribution]:
+    async def resolve(self, trigger: TriggerInput) -> TriggerRoutingContribution | None:
         request = self.request_from_trigger(trigger)
         if request is None:
             return None
@@ -494,7 +595,7 @@ class RefinementTriggerRouteResolver:
         return sorted(change_class.value for change_class in ChangeClass)
 
 
-_resolver: Optional[RefinementTriggerRouteResolver] = None
+_resolver: RefinementTriggerRouteResolver | None = None
 
 
 def get_refinement_trigger_route_resolver() -> RefinementTriggerRouteResolver:

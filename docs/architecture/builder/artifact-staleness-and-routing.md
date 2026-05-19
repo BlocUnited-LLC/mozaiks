@@ -14,6 +14,32 @@ Related documents:
 
 ---
 
+## Typed Artifact Chain
+
+Each build stage outputs a typed artifact that the next stage consumes as an
+authoritative input — not a suggestion to reinterpret from prose:
+
+```
+ValueEngine → ConceptBlueprint (typed)
+    ↓  surface_candidate_hints[]  → DesignDocs surface_map (authoritative)
+    ↓  brand_intent               → experience_spec.brand_direction
+ThemeCapture → CapturedThemeConfig (typed)
+    ↓  theme.variant / appearance → experience_spec.brand_direction
+    ↓  identity.tagline           → brand posture
+DesignDocs → ExperienceSpec + surface_map + database_intent_bundle (typed)
+    ↓  experience_spec.pages[]   → AppPlanAgent page list (authoritative)
+    ↓  surface_map               → AppGenerator module generation
+AgentGenerator → workflow_bundle
+AppGenerator → app_bundle (DRAFT → reviewed → CURRENT)
+```
+
+This chain is only as strong as its weakest typed handoff. Every typed artifact
+variable in a downstream workflow's `context_variables.yaml` must declare a
+`data_reference` source pointing at the upstream collection and the specific
+typed field — not at a prose string.
+
+---
+
 ## Artifact Families and Their Dependencies
 
 The build pipeline produces five artifact families. Each family depends on
@@ -86,39 +112,47 @@ rebuilt correctly will not show as stale on the next request.
 
 ---
 
-## How the Classifier Uses Staleness
+## Two-Tier Staleness Routing
 
-At the `request_submitted` checkpoint, the `LLMChangeClassifier` has access to
-the `get_stale_artifact_families` tool. It returns:
+Staleness is handled in two tiers, applied in order:
+
+### Tier 1 — Deterministic Pre-Check (RefinementTriggerRouteResolver)
+
+Before the LLM classifier is invoked, `RefinementTriggerRouteResolver._stale_route()`
+calls `get_stale_artifact_families()` for the request's `app_id`. If stale
+families are found, the router returns a deterministic decision immediately —
+**the LLM is not called at all**.
+
+Priority order (earliest dependency wins):
+
+| Priority | Stale family | Sequence used | Entry workflow |
+|----------|-------------|---------------|----------------|
+| 1 | `concept` | `full_rebuild` | ValueEngine |
+| 2 | `brand` | `theme_revision` | ThemeCapture |
+| 3 | `design_docs` | `design_revision` | DesignDocs |
+| 4 | `workflow_bundle` | `workflow_revision` | AgentGenerator |
+| 5 | `app_bundle` | `app_revision` | AppGenerator |
+
+The `ChangeIntent` produced by the pre-check has `source="stale_upstream"` and
+`confidence=1.0`. The `signals` list carries the full set of detected stale
+families so the context seed is accurate for the restart workflow.
+
+### Tier 2 — LLM Classifier Advisory (LLMChangeClassifier)
+
+When no stale families are detected, the flow proceeds to the LLM classifier at
+the `request_submitted` checkpoint. The classifier has access to the
+`get_stale_artifact_families` tool, which returns:
 
 ```json
 {
-  "stale_families": ["design_docs", "workflow_bundle"],
-  "all_current": false
+  "stale_families": [],
+  "all_current": true
 }
 ```
 
-The classifier applies these routing rules before finalizing its
-`patch | design | feature | core` decision:
-
-1. **Upstream stale, target is downstream** — upgrade the classification to
-   cover the stale upstream. Examples:
-   - User requests an `app_bundle` patch, but `design_docs` is stale → classify
-     as `design` so the route runs `DesignDocs` before `AppGenerator`
-   - User requests an `app_bundle` patch, but `concept` is stale → classify as
-     `core` so the route restarts from `ValueEngine`
-
-2. **Only the target family itself is stale** — the staleness is consistent
-   with the user's intent; do not upgrade the classification.
-
-3. **`all_current: true`** — route purely from the request text; no adjustment.
-
-4. **A downstream family is stale** — no upgrade needed; the selected route
-   will refresh it as a side effect.
-
-The staleness signal is advisory to the classifier, not a hard override. The
-classifier is expected to reason about it along with the request text and
-produce a classification that covers the minimum necessary upstream work.
+The classifier uses the result as an advisory signal alongside the user's
+request text to produce a `patch | design | feature | core` classification.
+The LLM tier only runs when Tier 1 finds nothing to act on.
 
 ---
 
@@ -152,7 +186,9 @@ It must stay in sync with the actual workflow sequence ownership declared in
 | Dependency graph data | `factory_app/workflows/extended_orchestration/extension_registry.json` |
 | BFS propagation + direct invalidation | `mozaiksai/control_plane/invalidation.py` — `ArtifactInvalidationService` |
 | Stale families query | `mozaiksai/core/artifacts/store.py` — `get_stale_artifact_families()` |
-| Control plane tool | `factory_app/control_plane/tools/get_stale_artifact_families.py` |
+| Deterministic pre-check (Tier 1) | `mozaiksai/control_plane/implementations/refinement_router.py` — `_stale_route()` |
+| Stale priority + sequence map | `mozaiksai/control_plane/implementations/refinement_router.py` — `_STALE_PRIORITY`, `_STALE_SEQUENCE_MAP` |
+| Control plane tool (Tier 2) | `factory_app/control_plane/tools/get_stale_artifact_families.py` |
 | Tool registration | `factory_app/control_plane/config/tools.yaml` |
 | Classifier prompt rules | `factory_app/control_plane/prompts/change_classifier_system.yaml` |
 | Lifecycle status enum | `mozaiksai/core/artifacts/models.py` — `ArtifactLifecycleStatus` |
@@ -163,10 +199,14 @@ It must stay in sync with the actual workflow sequence ownership declared in
 
 - `affected_declarative_families` on each workflow sequence must be accurate.
   It drives both direct invalidation and the BFS starting set.
-- Do not add staleness routing logic to `control_plane.yaml`. The classifier
-  prompt and `ArtifactInvalidationService` own that responsibility.
-- Do not add staleness logic to tools. Tools return data; the LLM reasons.
 - When adding a new artifact family, update `artifact_dependency_graph` in
-  `extension_registry.json` and add the field to `GlobalPackGraph` if needed.
+  `extension_registry.json`, add the family to `_STALE_PRIORITY` and
+  `_STALE_SEQUENCE_MAP` in `refinement_router.py`, and update
+  `GlobalPackGraph` in `schema.py` if needed.
+- Do not add staleness routing logic to `control_plane.yaml`. The deterministic
+  pre-check in `refinement_router.py` and `ArtifactInvalidationService` own
+  that responsibility.
+- Do not add staleness logic to tools. Tools return data; the router and LLM reason.
 - Tests for BFS propagation: `tests/test_control_plane_invalidation.py`
 - Tests for staleness query: `tests/test_artifact_store.py`
+- Tests for deterministic stale routing: `tests/test_refinement_router.py`

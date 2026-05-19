@@ -116,6 +116,31 @@ def test_app_plan_agent_prompt_requires_capability_first_planning() -> None:
     assert '\n        "workflows": [' in content
 
 
+def test_designdocs_context_exposes_captured_theme_config_as_typed_object() -> None:
+    context_vars = _read_yaml("factory_app/workflows/DesignDocs/context_variables.yaml")
+    definitions = context_vars["definitions"]
+    agents = context_vars["agents"]
+
+    # Typed CapturedThemeConfig for DesignDocsAgent — loads from ThemeCaptures.theme_config
+    assert "captured_theme_config" in definitions
+    tc_def = definitions["captured_theme_config"]
+    assert tc_def["source"]["collection"] == "ThemeCaptures"
+    assert tc_def["source"]["fields"] == ["theme_config"]
+    assert "captured_theme_config" in agents["DesignDocsAgent"]["variables"]
+
+
+def test_designdocs_prompt_uses_theme_identity_for_brand_direction() -> None:
+    source = _read_text("factory_app/workflows/DesignDocs/agents.yaml")
+
+    assert "[THEME IDENTITY]" in source
+    assert "captured_theme_config" in source
+    assert "theme.variant" in source
+    assert "theme.appearance" in source
+    assert "experience_spec.brand_direction" in source
+    # Fallback rule when theme is absent
+    assert "captured_theme_config is null" in source
+
+
 def test_designdocs_context_exposes_concept_blueprint_as_typed_object() -> None:
     context_vars = _read_yaml("factory_app/workflows/DesignDocs/context_variables.yaml")
     definitions = context_vars["definitions"]
