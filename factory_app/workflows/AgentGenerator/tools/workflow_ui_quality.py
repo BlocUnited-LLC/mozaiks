@@ -12,7 +12,7 @@ from pathlib import PurePosixPath
 from typing import Annotated, Any, Dict, List, Optional
 
 from autogen.tools.dependency_injection import Field
-from factory_app.workflows.generated_ui_contract import (
+from factory_app.workflows._shared.generated_ui_contract import (
     audit_generated_react_files,
     dedupe,
 )

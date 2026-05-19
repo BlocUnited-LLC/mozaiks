@@ -46,11 +46,17 @@ For builder/system workflows, the same contract applies under the shared
 generation-core workflow root. The file shape is canonical; the owning root
 depends on whether the workflow is app-owned or generation-core-owned.
 
-There is no canonical `workflows/_shared` folder. Generated tools are owned by
-one workflow and live under that workflow's `tools/` directory. If multiple
-workflows need the same capability, either generate explicit workflow-local
-tools for each workflow or promote the reusable behavior into a framework-owned
-`mozaiksai.core.*` API with a documented contract.
+There is no canonical generated-workflow `workflows/_shared` folder. Generated
+tools are owned by one workflow and live under that workflow's `tools/`
+directory. If multiple generated workflows need the same capability, either
+generate explicit workflow-local tools for each workflow or promote the
+reusable behavior into a framework-owned `mozaiksai.core.*` API with a
+documented contract.
+
+Factory-owned builder infrastructure is different: shared builder-only Python
+modules may live under `factory_app/workflows/_shared/` when multiple factory
+workflows consume them. That path is for the factory repo itself, not for
+generated workflow bundle output.
 
 ## Generation vs Refinement
 
@@ -395,5 +401,8 @@ Rules:
 - Author YAML files directly; do not use `.json` declarative files for workflows.
 - Keep tool implementations in `tools/*.py`; declaratives only reference them.
 - Do not create or reference global shared workflow tool folders such as
-  `workflows/_shared` or `app.workflows._shared`.
+  `workflows/_shared` or `app.workflows._shared` in generated workflow bundles.
+- Factory-owned shared builder infrastructure may live under
+  `factory_app/workflows/_shared/`, but generated workflow packs must not emit
+  or depend on that path.
 - Keep app-backend CRUD policy outside workflow declaratives.

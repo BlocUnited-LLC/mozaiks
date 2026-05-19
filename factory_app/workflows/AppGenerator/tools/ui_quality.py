@@ -8,7 +8,8 @@ state so AG2 handoffs can send noisy UI back to AppSchemaAgent before assembly.
 from typing import Annotated, Any, Dict, List, Optional
 
 from autogen.tools.dependency_injection import Field
-from factory_app.workflows.generated_ui_contract import (
+from factory_app.workflows._shared.generated_ui_contract import (
+    audit_custom_route_bundle_integrity,
     audit_generated_react_files,
     audit_page_schemas,
     custom_route_bundle_page_files,
@@ -122,6 +123,12 @@ def review_ui_quality(
     if has_declarative_pages:
         warnings.extend(audit_page_schemas(app_pages))
     if has_custom_routes:
+        warnings.extend(
+            audit_custom_route_bundle_integrity(
+                custom_route_bundle,
+                app_manifest=app_manifest if isinstance(app_manifest, dict) else None,
+            )
+        )
         warnings.extend(
             audit_generated_react_files(
                 custom_route_bundle_page_files(custom_route_bundle),

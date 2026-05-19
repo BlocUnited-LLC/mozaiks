@@ -12,10 +12,13 @@ Persists AdminRegistryOutput to context_variables:
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Annotated, Any, Dict, List, Optional
 
 from autogen.tools.dependency_injection import Field
+
+from factory_app.workflows._shared.generated_ui_contract import audit_app_ui_bundle_integrity
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +91,27 @@ def save_admin_registry(
     """
     registry = admin_registry or {}
     new_files = code_files or []
+    validation_files = list(new_files)
+    if registry and not any(
+        isinstance(item, dict)
+        and str(item.get("filename") or item.get("path") or "") == "admin/admin_registry.yaml"
+        for item in validation_files
+    ):
+        validation_files.append(
+            {
+                "filename": "admin/admin_registry.yaml",
+                "content": json.dumps(registry),
+            }
+        )
+    registry_warnings = audit_app_ui_bundle_integrity(
+        validation_files,
+        source_label="admin registry output",
+    )
+    if registry_warnings:
+        raise ValueError(
+            "Admin registry output failed route/component boundary validation:\n- "
+            + "\n- ".join(registry_warnings)
+        )
 
     _context_set(context_variables, "admin_registry", registry)
 

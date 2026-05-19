@@ -114,9 +114,10 @@ The notifications page proves the intended primitive pattern:
 
 ## Generator Validation
 
-`factory_app/workflows/generated_ui_contract.py` is the shared hard gate for
-generated UI. It audits both declarative page schemas and generated/custom React
-so AppGenerator and AgentGenerator cannot drift into separate UI standards.
+`factory_app/workflows/_shared/generated_ui_contract.py` is the shared hard gate
+for generated UI. It is factory-owned workflow infrastructure, not generated
+workflow output. It audits both declarative page schemas and generated/custom
+React so AppGenerator and AgentGenerator cannot drift into separate UI standards.
 
 `save_app_schema` records `app_ui_quality_warnings` in workflow context for
 generated page bundles, including `ui/pages/*.yaml` and optional

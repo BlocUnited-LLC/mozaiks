@@ -9,7 +9,10 @@ from urllib.parse import urlsplit
 
 import yaml
 from autogen.tools.dependency_injection import Field
-from factory_app.workflows.generated_ui_contract import (
+
+from factory_app.workflows._shared.generated_ui_contract import (
+    audit_app_ui_bundle_integrity,
+    audit_custom_route_bundle_integrity,
     audit_generated_react_files,
     audit_page_schemas,
     custom_route_bundle_page_files,
@@ -394,7 +397,7 @@ VALID_GRID_GAPS = {"sm", "md", "lg", "1", "2", "3", "4", "6", "8", "10", "12"}
 VALID_MODAL_SIZES = {"small", "medium", "large", "full"}
 VALID_SELECTION_MODES = {"none", "single", "multi"}
 VALID_ASSET_SOURCES = {"local", "remote", "uploaded", "generated", "stock"}
-VALID_CUSTOM_PAGE_EXTENSIONS = {".js", ".jsx"}
+VALID_CUSTOM_PAGE_EXTENSIONS = {".jsx"}
 VALID_SHELL_MODES = {"standard", "workspace", "conversation", "focused", "immersive", "public"}
 VALID_SHELL_ACTION_SURFACES = {"console", "app_console", "workflow_session", "transition", "public", "page"}
 VALID_SHELL_ACTION_WHEN_FIELDS = {
@@ -608,7 +611,11 @@ def _validate_custom_route_bundle(custom_route_bundle: Any) -> None:
             raise ValueError(f"{path} must be an object")
         route_id = entry.get("route_id")
         if route_id not in route_by_id:
-            raise ValueError(f"{path}.route_id must reference custom_route_bundle.route_manifest[*].id")
+            raise ValueError(
+                f"{path}.route_id '{route_id}' must reference a declared "
+                "custom_route_bundle.route_manifest[*].id so the route path, component key, "
+                "custom page file, and ui/index.js registration can be generated together"
+            )
         file_path = entry.get("path")
         if not _is_non_empty_string(file_path):
             raise ValueError(f"{path}.path is required")
@@ -624,8 +631,16 @@ def _validate_custom_route_bundle(custom_route_bundle: Any) -> None:
         registry_key = entry.get("registry_key")
         if not _is_non_empty_string(registry_key):
             raise ValueError(f"{path}.registry_key is required")
-        if registry_key != route_by_id[route_id].get("component"):
-            raise ValueError(f"{path}.registry_key must match the owning route component")
+        owning_route = route_by_id[route_id]
+        owning_component = owning_route.get("component")
+        owning_path = owning_route.get("path")
+        if registry_key != owning_component:
+            raise ValueError(
+                f"{path}.registry_key '{registry_key}' must match route_manifest component "
+                f"'{owning_component}' for route path '{owning_path}'. Expected fix: make "
+                "route_manifest[*].component, page_files[*].registry_key, and the generated "
+                "ui/index.js registerComponent key identical."
+            )
         if not _is_non_empty_string(entry.get("purpose")):
             raise ValueError(f"{path}.purpose is required")
         _validate_string_list(entry.get("contract_refs"), field=f"{path}.contract_refs")
@@ -674,6 +689,35 @@ def _build_custom_ui_index(custom_route_bundle: Dict[str, Any]) -> str:
         "",
     ]
     return "\n".join(lines)
+
+
+def _custom_route_bundle_code_files(custom_route_bundle: Any) -> List[Dict[str, str]]:
+    if not isinstance(custom_route_bundle, dict):
+        return []
+    files: List[Dict[str, str]] = [
+        {
+            "filename": "ui/route_manifest.json",
+            "content": json.dumps(
+                _build_custom_route_manifest_json(custom_route_bundle),
+                indent=2,
+                ensure_ascii=False,
+            ),
+        },
+        {
+            "filename": "ui/index.js",
+            "content": _build_custom_ui_index(custom_route_bundle),
+        },
+    ]
+    for entry in custom_route_bundle.get("page_files") or []:
+        if not isinstance(entry, dict):
+            continue
+        files.append(
+            {
+                "filename": str(entry.get("path") or "").replace("\\", "/"),
+                "content": str(entry.get("content") or ""),
+            }
+        )
+    return files
 
 
 def _validate_action(action: Any, *, path: str) -> None:
@@ -1572,11 +1616,19 @@ def save_app_schema(
     _validate_database_intent_bundle(resolved_database_intent_bundle)
     app_ui_quality_warnings = dedupe(
         audit_page_schemas(page_list)
+        + audit_custom_route_bundle_integrity(
+            custom_route_bundle,
+            app_manifest=manifest_dict,
+        )
         + audit_generated_react_files(
             custom_route_bundle_page_files(custom_route_bundle),
             source_label="custom route React",
             require_jsx=False,
             include_ui_index=False,
+        )
+        + audit_app_ui_bundle_integrity(
+            _custom_route_bundle_code_files(custom_route_bundle),
+            source_label="custom_route_bundle",
         )
     )
 

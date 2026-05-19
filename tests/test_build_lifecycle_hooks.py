@@ -6,7 +6,7 @@ from tests.import_utils import import_module_directly
 
 _schema = import_module_directly("mozaiksai.core.workflow.pack.schema")
 _build_lifecycle = import_module_directly(
-    "factory_app.workflows.AppGenerator.tools.platform.build_lifecycle"
+    "factory_app.workflows._shared.platform.build_lifecycle"
 )
 
 parse_global_pack_graph = _schema.parse_global_pack_graph

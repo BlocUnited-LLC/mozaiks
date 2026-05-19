@@ -183,6 +183,164 @@ def test_review_ui_quality_audits_custom_route_react() -> None:
     assert any("placeholder/internal copy" in warning for warning in result["warnings"])
 
 
+def test_review_ui_quality_blocks_custom_route_theme_contract_violations() -> None:
+    context = _Context(
+        {
+            "app_ui_quality_warnings": [],
+            "app_schema_ready": True,
+            "app_manifest": {
+                "app_name": "Operations Console",
+                "default_route": "/operations",
+                "pages": [],
+                "custom_routes": ["operations"],
+            },
+            "app_pages": [],
+            "app_custom_route_bundle": {
+                "route_manifest": [
+                    {
+                        "id": "operations",
+                        "label": "Operations",
+                        "path": "/operations",
+                        "component": "OperationsPage",
+                        "requiresAuth": True,
+                        "meta": {"title": "Operations"},
+                        "purpose": "Interactive operations page.",
+                    }
+                ],
+                "page_files": [
+                    {
+                        "route_id": "operations",
+                        "path": "ui/pages/custom/OperationsPage.jsx",
+                        "component_name": "OperationsPage",
+                        "registry_key": "OperationsPage",
+                        "purpose": "Interactive operations page.",
+                        "content": (
+                            "const palette = { primary: '#28c7ff' };\n"
+                            "function StatusPill({ status }){ return <span>{status}</span>; }\n"
+                            "export default function OperationsPage(){\n"
+                            "  return <main style={{ color: 'hsl(191, 100%, 58%)', fontFamily: 'Inter' }}>\n"
+                            "    <button className=\"rounded-xl bg-primary px-4 py-2\">Run</button>\n"
+                            "  </main>;\n"
+                            "}\n"
+                        ),
+                    },
+                    {
+                        "route_id": "operations",
+                        "path": "public/fonts/Brand.woff2",
+                        "component_name": "OperationsFont",
+                        "registry_key": "OperationsFont",
+                        "purpose": "Invalid font artifact.",
+                        "content": "<binary>",
+                    },
+                ],
+            },
+        }
+    )
+
+    result = ui_quality_module.review_ui_quality(context_variables=context)
+
+    assert result["status"] == "needs_revision"
+    assert any("page-local palette/theme object" in warning for warning in result["warnings"])
+    assert any("hardcodes color values" in warning for warning in result["warnings"])
+    assert any("hardcodes font-family styling" in warning for warning in result["warnings"])
+    assert any("defines local visual primitive clones" in warning for warning in result["warnings"])
+    assert any("raw primary-styled <button>" in warning for warning in result["warnings"])
+    assert any("local font outside brand/fonts" in warning for warning in result["warnings"])
+
+
+def test_review_ui_quality_requires_custom_route_component_registration() -> None:
+    context = _Context(
+        {
+            "app_ui_quality_warnings": [],
+            "app_schema_ready": True,
+            "app_manifest": {
+                "app_name": "Deal Room",
+                "default_route": "/deal-room",
+                "pages": [],
+                "custom_routes": ["deal-room"],
+            },
+            "app_pages": [],
+            "app_custom_route_bundle": {
+                "route_manifest": [
+                    {
+                        "id": "deal-room",
+                        "label": "Deal Room",
+                        "path": "/deal-room",
+                        "component": "InvestorDealRoomPage",
+                        "requiresAuth": True,
+                        "meta": {"title": "Deal Room"},
+                        "purpose": "Live collaboration view that cannot be represented with page primitives.",
+                    }
+                ],
+                "page_files": [
+                    {
+                        "route_id": "deal-room",
+                        "path": "ui/pages/custom/InvestorDealRoom.jsx",
+                        "component_name": "InvestorDealRoom",
+                        "registry_key": "InvestorDealRoom",
+                        "purpose": "Custom deal-room page.",
+                        "content": "export default function InvestorDealRoom(){ return <main>Deal Room</main>; }\n",
+                    }
+                ],
+            },
+        }
+    )
+
+    result = ui_quality_module.review_ui_quality(context_variables=context)
+
+    assert result["status"] == "needs_revision"
+    assert any(
+        "registry_key 'InvestorDealRoom' must match route_manifest component 'InvestorDealRoomPage'"
+        in warning
+        for warning in result["warnings"]
+    )
+    assert any(
+        "declares component 'InvestorDealRoomPage' but no page_files entry registers that key"
+        in warning
+        for warning in result["warnings"]
+    )
+
+
+def test_review_ui_quality_requires_page_file_for_each_custom_route() -> None:
+    context = _Context(
+        {
+            "app_ui_quality_warnings": [],
+            "app_schema_ready": True,
+            "app_manifest": {
+                "app_name": "Deal Room",
+                "default_route": "/deal-room",
+                "pages": [],
+                "custom_routes": ["deal-room"],
+            },
+            "app_pages": [],
+            "app_custom_route_bundle": {
+                "route_manifest": [
+                    {
+                        "id": "deal-room",
+                        "label": "Deal Room",
+                        "path": "/deal-room",
+                        "component": "InvestorDealRoomPage",
+                        "requiresAuth": True,
+                        "meta": {"title": "Deal Room"},
+                        "purpose": "Live collaboration view that cannot be represented with page primitives.",
+                    }
+                ],
+                "page_files": [],
+            },
+        }
+    )
+
+    result = ui_quality_module.review_ui_quality(context_variables=context)
+
+    assert result["status"] == "needs_revision"
+    assert any("page_files must be a non-empty list" in warning for warning in result["warnings"])
+    assert any(
+        "declares component 'InvestorDealRoomPage' but no page_files entry registers that key"
+        in warning
+        for warning in result["warnings"]
+    )
+
+
 def test_review_ui_quality_blocks_after_revision_budget() -> None:
     context = _Context(
         {
@@ -276,6 +434,9 @@ def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
         '${app_ui_quality_status} == "passed"'
     )
     assert ("AdminRegistryAgent", "AssemblyAgent") in handoff_pairs
+    assert ("AssemblyAgent", "IntegrationReadinessAgent") in handoff_pairs
+    assert ("IntegrationReadinessAgent", "DownloadAgent") in handoff_pairs
+    assert ("IntegrationReadinessAgent", "AppValidationAgent") in handoff_pairs
     assert handoff_pairs[("AppUIQualityAgent", "user")]["condition"] == (
         '${app_ui_quality_status} == "blocked"'
     )
@@ -296,6 +457,13 @@ def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
     assert "- name: AppUIQualityAgent" in agents
     assert "app_ui_quality_revision_request" in agents
     assert "app_ui_quality_status == \"passed\"" in agents
+    assert "import shared UI primitives from `@mozaiks/chat-ui/ui`" in agents
+    assert "never define local visual clones" in agents
+    assert "semantic variants" in agents
+    assert "app/brand/theme_config.json" in agents
+    assert "app/config/shell.json" in agents
+    assert "page-local brand palettes" in agents
+    assert "raw primary-styled `<button" in agents
 
 
 def test_app_ui_quality_hook_persists_previous_schema_before_handoff(

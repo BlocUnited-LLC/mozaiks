@@ -171,6 +171,10 @@ folders, or root-level shared tool paths. Reusable framework-owned support code
 belongs under `mozaiksai.core.*`; workflow-specific helpers stay beside the
 workflow tools that call them.
 
+Factory-owned builder infrastructure is separate from generated bundle output.
+Builder-only shared helpers may live under `factory_app/workflows/_shared/`,
+but generated workflow bundles must still emit workflow-local files only.
+
 Frontend React components (if any UI tools):
 ```
 {WorkflowName}/ui/

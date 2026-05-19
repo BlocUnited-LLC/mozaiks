@@ -91,12 +91,19 @@ If something is mostly support logic, make it a module.
 
 If something is mostly optional operator tooling, make it an adapter.
 
+Generated workflow bundles must keep their helpers workflow-local. Do not emit
+or depend on `workflows/_shared` or `app.workflows._shared` inside generated
+workflow output. Shared factory builder infrastructure belongs under
+`factory_app/workflows/_shared/` and is consumed by the factory workflows
+themselves, not by generated bundles.
+
 ## Workflow Files
 
 Workflow files live under:
 
 - `app/workflows/*` — workflows owned by one app workspace
 - `factory_app/workflows/*` — shared factory workflows owned by the builder system, not by individual app workspaces
+- `factory_app/workflows/_shared/*.py` — factory-owned shared Python infrastructure consumed by multiple factory workflows; not part of generated workflow bundles
 - `factory_app/workflows/extended_orchestration/` — shared build launcher, journeys, and transition UI
 - `<active app root>/workflows/extended_orchestration/extension_registry.json` — optional product/app overlay on top of that shared routing layer
 

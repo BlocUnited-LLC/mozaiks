@@ -375,8 +375,8 @@ class TestStaticContractChecks:
 
     def test_page_type_enum_aligns_with_quality_gate(self) -> None:
         """AppPageSchema.page_type values in structured_outputs.yaml must exactly
-        match VALID_PAGE_TYPES enforced by generated_ui_contract.py."""
-        from factory_app.workflows.generated_ui_contract import VALID_PAGE_TYPES
+        match VALID_PAGE_TYPES enforced by the shared generated_ui_contract module."""
+        from factory_app.workflows._shared.generated_ui_contract import VALID_PAGE_TYPES
         so = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
         schema_values = set(so["models"]["AppPageSchema"]["fields"]["page_type"]["values"])
         assert schema_values == VALID_PAGE_TYPES, (
@@ -387,7 +387,7 @@ class TestStaticContractChecks:
 
     def test_page_type_hint_aligns_with_page_type(self) -> None:
         """AppBuildPage.page_type_hint must enumerate exactly the valid page types plus null."""
-        from factory_app.workflows.generated_ui_contract import VALID_PAGE_TYPES
+        from factory_app.workflows._shared.generated_ui_contract import VALID_PAGE_TYPES
         so = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
         hint_values = set(so["models"]["AppBuildPage"]["fields"]["page_type_hint"]["values"])
         # null is allowed as an opt-out sentinel; strip it for comparison
@@ -401,7 +401,7 @@ class TestStaticContractChecks:
     def test_appschema_agent_guidance_mentions_all_page_types(self) -> None:
         """agents.yaml AppSchemaAgent instructions must reference every valid page_type
         so the agent knows what structural archetype to apply."""
-        from factory_app.workflows.generated_ui_contract import VALID_PAGE_TYPES
+        from factory_app.workflows._shared.generated_ui_contract import VALID_PAGE_TYPES
         agents_text = _read("factory_app/workflows/AppGenerator/agents.yaml")
         missing = [pt for pt in VALID_PAGE_TYPES if pt not in agents_text]
         assert not missing, (
