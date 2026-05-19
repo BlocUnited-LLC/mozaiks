@@ -893,13 +893,18 @@ def _inject_admin_portal(result: dict) -> None:
         return
 
     signout_idx = next(
-        (i for i, item in enumerate(menu) if isinstance(item, dict) and item.get("action") == "signout"),
+        (
+            i
+            for i, item in enumerate(menu)
+            if isinstance(item, dict)
+            and (item.get("id") == "signout" or item.get("action") == "signout")
+        ),
         None,
     )
     if signout_idx is not None:
-        menu.insert(signout_idx, _ADMIN_PORTAL_MENU_ITEM)
+        menu.insert(signout_idx, dict(_ADMIN_PORTAL_MENU_ITEM))
     else:
-        menu.append(_ADMIN_PORTAL_MENU_ITEM)
+        menu.append(dict(_ADMIN_PORTAL_MENU_ITEM))
 
 
 def _apply_dynamic_shell_navigation(
