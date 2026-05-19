@@ -14,6 +14,7 @@ MOZAIKS_APP_WORKSPACE_PATH is not set.
 """
 
 import json
+
 import pytest
 
 from tests.import_utils import active_app_root
@@ -172,16 +173,30 @@ class TestShellConfig:
         assert shell["header"]["logo"]["src"] == "mozaik_logo.svg"
         assert len(shell["header"]["actions"]) >= 1
 
-    def test_first_class_shell_controls_are_not_app_config(self, shell):
+    def test_runtime_owned_shell_controls_are_not_app_config(self, shell):
         assert "profile" not in shell
-        assert "notifications" not in shell
+
+    def test_notifications_are_shell_owned_config(self, shell):
+        notifications = shell["notifications"]
+        assert notifications["show"] is True
+        assert notifications["path"] == "/notifications"
+        assert "emptyText" in notifications
 
     def test_has_compact_shell_shortcuts(self, shell):
         shortcuts = shell["shortcuts"]
-        assert shortcuts["profile"] == ["profile", "admin_portal", "signout"]
+        assert shortcuts["profile"] == ["profile", "signout"]
+        assert "admin_portal" not in shortcuts["profile"]
         assert "mobile" in shortcuts
         assert shortcuts["footer"] == ["legal", "terms", "cookies"]
         assert shortcuts["footerHideOnMobile"] is True
+
+    def test_admin_portal_is_runtime_injected_not_authored(self, shell):
+        from mozaiksai.hosts.platform import _inject_admin_portal
+
+        result = {"profile": {"show": True, "menu": [{"id": item} for item in shell["shortcuts"]["profile"]]}}
+        _inject_admin_portal(result)
+        ids = [item["id"] for item in result["profile"]["menu"]]
+        assert ids == ["profile", "admin-portal", "signout"]
 
 
 # ── Framework-only tests (no app workspace needed) ──────────────────────────
