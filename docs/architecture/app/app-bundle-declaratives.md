@@ -41,6 +41,16 @@ not app-owned bundle content.
 Deterministic CRUD or action surfaces that support workflows and app pages.
 Modules are not AI workflows.
 
+Canonical module companion manifests live under
+`app/modules/{module}/contracts/`, not at the flat module root.
+
+- `contracts/events.yaml` declares module-emitted event types.
+- `contracts/reactions.yaml` is the canonical event-reaction contract.
+- `contracts/notifications.yaml` declares notification rules derived from
+  events.
+- New app bundles should not author deprecated `contracts/subscriptions.yaml`.
+- Persistent module backends use `backend/schemas.py`, not `backend/models.py`.
+
 ### `app/brand/`
 
 Brand assets, fonts, and theme inputs used by the shell.

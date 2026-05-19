@@ -14,8 +14,28 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from .namespaces import SYSTEM_DATABASE, PlatformCollections
 from .persistence_manager import AG2PersistenceManager
 
-
 IndexSpec = Tuple[Sequence[Tuple[str, int]], Dict[str, Any]]
+SECRET_METADATA_KEYS = {"secret_value", "secret", "api_key", "apikey", "token", "password"}
+
+
+def _redact_public_config(value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if value is None:
+        return None
+    redacted: Dict[str, Any] = {}
+    for key, item in dict(value).items():
+        key_text = str(key)
+        if key_text.strip().lower() in SECRET_METADATA_KEYS:
+            continue
+        if isinstance(item, dict):
+            redacted[key_text] = _redact_public_config(item)
+        elif isinstance(item, list):
+            redacted[key_text] = [
+                _redact_public_config(child) if isinstance(child, dict) else child
+                for child in item
+            ]
+        else:
+            redacted[key_text] = item
+    return redacted
 
 
 class AppConnectorStore:
@@ -68,6 +88,8 @@ class AppConnectorStore:
         key_length: Optional[int] = None,
         expires_at: Optional[str] = None,
         notes: Optional[str] = None,
+        public_config: Optional[Dict[str, Any]] = None,
+        required_fields: Optional[List[Dict[str, Any]]] = None,
         source: Optional[Dict[str, Any]] = None,
         status_reason: Optional[str] = None,
         extra_fields: Optional[Dict[str, Any]] = None,
@@ -96,6 +118,10 @@ class AppConnectorStore:
             set_fields["expires_at"] = expires_at
         if notes is not None:
             set_fields["notes"] = notes
+        if public_config is not None:
+            set_fields["public_config"] = _redact_public_config(public_config) or {}
+        if required_fields is not None:
+            set_fields["required_fields"] = [dict(field) for field in required_fields if isinstance(field, dict)]
         if source:
             set_fields["source"] = dict(source)
             set_fields["last_submitted_at"] = source.get("submitted_at") or now.isoformat()
@@ -142,6 +168,8 @@ class AppConnectorStore:
         notes: Optional[str] = None,
         status: Optional[str] = None,
         expires_at: Optional[str] = None,
+        public_config: Optional[Dict[str, Any]] = None,
+        required_fields: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[Dict[str, Any]]:
         await self.ensure_indexes()
         coll = await self._collection()
@@ -157,9 +185,46 @@ class AppConnectorStore:
             update_fields["status"] = status
         if expires_at is not None:
             update_fields["expires_at"] = expires_at
+        if public_config is not None:
+            update_fields["public_config"] = _redact_public_config(public_config) or {}
+        if required_fields is not None:
+            update_fields["required_fields"] = [dict(field) for field in required_fields if isinstance(field, dict)]
 
         if len(update_fields) == 1:
             return await self.get_connector(app_id=app_id, service=normalized_service)
+
+        await coll.update_one(
+            {"app_id": str(app_id), "service": normalized_service},
+            {"$set": update_fields},
+            upsert=False,
+        )
+        return await self.get_connector(app_id=app_id, service=normalized_service)
+
+    async def update_connector_health(
+        self,
+        *,
+        app_id: str,
+        service: str,
+        health_status: str,
+        health_message: Optional[str] = None,
+        last_checked_at: Optional[str] = None,
+        checked_by: str = "manual",
+        health_details: Optional[Dict[str, Any]] = None,
+        error_code: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        await self.ensure_indexes()
+        coll = await self._collection()
+        normalized_service = str(service or "").strip().lower().replace(" ", "_")
+        update_fields: Dict[str, Any] = {
+            "updated_at": datetime.now(UTC),
+            "health_status": str(health_status or "unknown"),
+            "health_message": health_message,
+            "last_checked_at": last_checked_at or datetime.now(UTC).isoformat(),
+            "checked_by": str(checked_by or "manual"),
+            "health_details": _redact_public_config(health_details or {}) or {},
+        }
+        if error_code:
+            update_fields["health_error_code"] = str(error_code)
 
         await coll.update_one(
             {"app_id": str(app_id), "service": normalized_service},

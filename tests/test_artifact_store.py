@@ -298,3 +298,44 @@ async def test_list_refinement_sessions_filters_by_result_artifact_version_id() 
     assert len(rows) == 1
     assert rows[0].result_artifact_version_id == "av_child"
     coll.find.assert_called_once_with({"app_id": "app-1", "result_artifact_version_id": "av_child"})
+
+
+@pytest.mark.asyncio
+async def test_get_stale_artifact_families_returns_stale_without_current() -> None:
+    """Families with a STALE version but no CURRENT version are returned."""
+    store = ArtifactStore.__new__(ArtifactStore)
+    versions_coll = MagicMock()
+    versions_coll.distinct = AsyncMock(
+        side_effect=[
+            ["design_docs", "workflow_bundle"],  # stale query
+            ["workflow_bundle"],                 # current query — workflow_bundle was rebuilt
+        ]
+    )
+    store._coll = AsyncMock(return_value=versions_coll)
+    store._ensure_client = AsyncMock()
+
+    result = await store.get_stale_artifact_families(app_id="app-1")
+
+    # workflow_bundle has a CURRENT version, so it is not stale
+    # design_docs has no CURRENT version, so it remains stale
+    assert result == ["design_docs"]
+    assert versions_coll.distinct.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_get_stale_artifact_families_clears_when_all_rebuilt() -> None:
+    """If every stale family has a CURRENT version, the list is empty."""
+    store = ArtifactStore.__new__(ArtifactStore)
+    versions_coll = MagicMock()
+    versions_coll.distinct = AsyncMock(
+        side_effect=[
+            ["design_docs"],   # stale query
+            ["design_docs"],   # current query — rebuilt successfully
+        ]
+    )
+    store._coll = AsyncMock(return_value=versions_coll)
+    store._ensure_client = AsyncMock()
+
+    result = await store.get_stale_artifact_families(app_id="app-1")
+
+    assert result == []

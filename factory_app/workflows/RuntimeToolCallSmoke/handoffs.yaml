@@ -2,3 +2,6 @@ handoff_rules:
 - source_agent: RuntimeToolCallSmokeAgent
   target_agent: terminate
   handoff_type: after_work
+- source_agent: RuntimeConnectorSmokeAgent
+  target_agent: terminate
+  handoff_type: after_work

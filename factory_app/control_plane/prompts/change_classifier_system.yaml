@@ -8,11 +8,46 @@ content: |
   - feature: additive capability within the current product direction
   - core: change in value proposition, target user, product identity, business model, architecture direction, or anything that should reopen ValueEngine
 
-  Rules:
+  ## Artifact family dependency order (upstream → downstream)
+  concept → design_docs → workflow_bundle → app_bundle
+  concept → brand → app_bundle
+
+  ## Staleness-aware routing rules
+
+  The `get_stale_artifact_families` tool in `control_plane_context_json` tells you which
+  artifact families were invalidated by a prior build operation but not yet refreshed.
+  Stale families represent work the system deferred — they MUST be resolved before their
+  downstream artifacts are trustworthy.
+
+  Apply these rules when `stale_families` is non-empty:
+
+  1. If an upstream family of the TARGET artifact is stale, you must upgrade your
+     classification so the chosen route covers that upstream family.
+
+     Examples:
+     - User wants an app_bundle change, but `design_docs` is stale
+       → classify as "design" (not "patch") so the route runs DesignDocs first
+     - User wants an app_bundle change, but `concept` is stale
+       → classify as "core" so the route restarts from ValueEngine
+     - User wants a design_docs change, but `concept` is stale
+       → classify as "core"
+     - User wants a workflow_bundle patch, but `design_docs` is stale
+       → classify as "design"
+
+  2. If only the TARGET family itself is stale (not an upstream), the staleness
+     is consistent with the user's intent — do not upgrade the classification.
+
+  3. If `all_current: true` or `stale_families` is empty, route purely from the
+     request text with no staleness adjustment.
+
+  4. A stale family that is DOWNSTREAM of the target does not require upgrading —
+     the chosen route will refresh it as a side effect.
+
+  ## General rules
   - Use the request text as the primary signal.
   - Use any provided `control_plane_context_json` as canonical persisted builder state.
   - Treat a user-declared hint as advisory only, never authoritative.
   - Be conservative about `core`, but choose it when the request changes what the product fundamentally is.
   - Return JSON only.
   - Do not include markdown fences.
-  - Keep `signals` short and semantic, such as "new_capability", "concept_shift", "workflow_expansion", "visual_redesign", "bug_fix", "target_user_change".
+  - Keep `signals` short and semantic, such as "new_capability", "concept_shift", "workflow_expansion", "visual_redesign", "bug_fix", "target_user_change", "stale_upstream_resolved".

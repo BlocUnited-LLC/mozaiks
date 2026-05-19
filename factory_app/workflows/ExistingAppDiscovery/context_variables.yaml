@@ -4,7 +4,9 @@
 # Then the conversational stages confirm:
 # 1. product identity + existing experience
 # 2. current capabilities + service/route surfaces
-# 3. Mozaiks adoption plan
+# 3. Mozaiks adoption plan + migration_complexity
+# 4. module decomposition (ecosystem/native_migration only)
+# 5. canonical artifact assembly
 
 definitions:
   app_type:
@@ -218,6 +220,62 @@ definitions:
       type: state
       default: []
 
+  # ---------------------------------------------------------------------------
+  # Storage and connector detection signals (set by before_chat preload)
+  # ---------------------------------------------------------------------------
+
+  storage_pattern:
+    type: string
+    description: >
+      Detected storage mechanism: mongodb, sql, file_store, redis, or unknown.
+      Set by before_chat from package manifests and source patterns.
+    source:
+      type: state
+      default: "unknown"
+
+  storage_migration_required:
+    type: boolean
+    description: >
+      True when the detected storage pattern (file_store, unknown) would require
+      migration to MongoDB for a native Mozaiks module to own the data.
+    source:
+      type: state
+      default: false
+
+  detected_connectors:
+    type: object
+    description: >
+      List of ConnectorSpec objects detected from package manifests and source imports.
+      Each item has: provider_id, package_or_import, category, confidence,
+      source_files, likely_secret_envs, mozaiks_adapter_exists.
+    source:
+      type: state
+      default: []
+
+  mozaiks_vocabulary_detected:
+    type: boolean
+    description: >
+      True when Mozaiks-specific vocabulary (contractKind, module-action,
+      workflow-preparation) is found in the repo source — indicating the app
+      was built with awareness of Mozaiks patterns.
+    source:
+      type: state
+      default: false
+
+  mozaiks_authored_app:
+    type: boolean
+    description: >
+      True when strong structural signals confirm the app was built using
+      Mozaiks authoring patterns (module.yaml, contracts/, backend/ layout).
+      Implies native_migration or ecosystem is the natural adoption path.
+    source:
+      type: state
+      default: false
+
+  # ---------------------------------------------------------------------------
+  # Identity stage
+  # ---------------------------------------------------------------------------
+
   app_name:
     type: string
     description: Name of the existing application.
@@ -279,6 +337,10 @@ definitions:
           ui_hidden: true
           match:
             equals: NEXT
+
+  # ---------------------------------------------------------------------------
+  # Capability stage
+  # ---------------------------------------------------------------------------
 
   capabilities:
     type: object
@@ -356,9 +418,25 @@ definitions:
           match:
             equals: NEXT
 
+  # ---------------------------------------------------------------------------
+  # Integration planning stage
+  # ---------------------------------------------------------------------------
+
   adoption_level:
     type: string
     description: Recommended adoption level - embed, bridge, ecosystem, or native_migration.
+    source:
+      type: state
+      default: null
+
+  migration_complexity:
+    type: string
+    description: >
+      Migration effort estimate set by IntegrationPlannerAgent.
+      Values: none, low, moderate, full_rewrite, unknown.
+      none: embed only, no porting. low: Python/FastAPI + MongoDB, direct port.
+      moderate: partial stack difference or storage migration required.
+      full_rewrite: non-Python backend must be rewritten as FastAPI modules.
     source:
       type: state
       default: null
@@ -412,6 +490,20 @@ definitions:
       type: state
       default: null
 
+  theme_adaptation_strategy:
+    type: string
+    description: How Mozaiks-owned surfaces should inherit or adopt the host brand.
+    source:
+      type: state
+      default: null
+
+  embed_theme_ready:
+    type: boolean
+    description: True when enough brand token evidence exists to style a Mozaiks embed.
+    source:
+      type: state
+      default: false
+
   plan_complete:
     type: boolean
     description: True once IntegrationPlannerAgent confirms the adoption plan.
@@ -424,6 +516,38 @@ definitions:
           ui_hidden: true
           match:
             equals: NEXT
+
+  # ---------------------------------------------------------------------------
+  # Module decomposition stage (ecosystem / native_migration only)
+  # ---------------------------------------------------------------------------
+
+  module_decomposition_plan:
+    type: string
+    description: >
+      Serialized JSON string containing the ModuleDecompositionPlan produced by
+      ModuleDecomposerAgent. Null for embed and bridge adoption levels.
+      Consumed by DiscoveryArtifactAssemblerAgent and written to disk by
+      save_existing_app_artifacts when adoption_level is ecosystem or native_migration.
+    source:
+      type: state
+      default: null
+
+  decomposition_complete:
+    type: boolean
+    description: True once ModuleDecomposerAgent confirms the decomposition plan.
+    source:
+      type: state
+      default: false
+      triggers:
+        - type: agent_text
+          agent: ModuleDecomposerAgent
+          ui_hidden: true
+          match:
+            equals: NEXT
+
+  # ---------------------------------------------------------------------------
+  # Artifact output
+  # ---------------------------------------------------------------------------
 
   existing_product_spec:
     type: object
@@ -485,6 +609,11 @@ agents:
       - runtime_observations
       - auth_hypothesis
       - unresolved_questions
+      - storage_pattern
+      - storage_migration_required
+      - detected_connectors
+      - mozaiks_vocabulary_detected
+      - mozaiks_authored_app
       - app_name
       - app_description
       - app_url
@@ -511,6 +640,10 @@ agents:
       - runtime_observations
       - auth_hypothesis
       - unresolved_questions
+      - storage_pattern
+      - detected_connectors
+      - mozaiks_vocabulary_detected
+      - mozaiks_authored_app
       - capabilities
       - api_surface
       - api_docs_available
@@ -533,6 +666,11 @@ agents:
       - theme_capture_status
       - theme_capture_summary
       - theme_capture_evidence
+      - storage_pattern
+      - storage_migration_required
+      - detected_connectors
+      - mozaiks_vocabulary_detected
+      - mozaiks_authored_app
       - capabilities
       - service_surfaces
       - route_surfaces
@@ -541,6 +679,7 @@ agents:
       - auth_model
       - unresolved_questions
       - adoption_level
+      - migration_complexity
       - ui_surface_preference
       - ai_accessible_capabilities
       - auth_delegation_model
@@ -548,7 +687,31 @@ agents:
       - ecosystem_bindings
       - repo_access_willingness
       - adoption_rationale
+      - theme_adaptation_strategy
+      - embed_theme_ready
       - plan_complete
+
+  ModuleDecomposerAgent:
+    variables:
+      - app_name
+      - app_description
+      - tech_stack
+      - hosting_environment
+      - capabilities
+      - service_surfaces
+      - route_surfaces
+      - key_entities
+      - auth_model
+      - api_surface
+      - adoption_level
+      - migration_complexity
+      - storage_pattern
+      - storage_migration_required
+      - detected_connectors
+      - mozaiks_vocabulary_detected
+      - mozaiks_authored_app
+      - module_decomposition_plan
+      - decomposition_complete
 
   DiscoveryArtifactAssemblerAgent:
     variables:
@@ -569,6 +732,11 @@ agents:
       - runtime_observations
       - auth_hypothesis
       - unresolved_questions
+      - storage_pattern
+      - storage_migration_required
+      - detected_connectors
+      - mozaiks_vocabulary_detected
+      - mozaiks_authored_app
       - app_name
       - app_description
       - app_url
@@ -586,6 +754,7 @@ agents:
       - route_surfaces
       - agent_ready_capabilities
       - adoption_level
+      - migration_complexity
       - ui_surface_preference
       - ai_accessible_capabilities
       - auth_delegation_model
@@ -593,6 +762,9 @@ agents:
       - ecosystem_bindings
       - repo_access_willingness
       - adoption_rationale
+      - theme_adaptation_strategy
+      - embed_theme_ready
+      - module_decomposition_plan
       - existing_product_spec
       - capability_specs
       - agent_augmentation_plan

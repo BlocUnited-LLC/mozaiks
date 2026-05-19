@@ -17,3 +17,4 @@ handoffs, workflow routing, or session/refinement behavior.
 | [Refinement Control Plane](refinement-control-plane.md) | Refinement routing, classification, and scoped repair |
 | [Session Router](session-router.md) | Session routing and resume contract |
 | [Control-Plane Harness Architecture](control-plane-harness-architecture.md) | Builder harness ownership and contracts |
+| [Proposal-Only Workflow Pattern](proposal-only-workflow-pattern.md) | HITL planning/review workflow archetype, blocked/deferred phases, output invariants |

@@ -10,12 +10,12 @@ const require   = createRequire(import.meta.url);
 
 // ── Platform resolution ────────────────────────────────────────────────────
 // PLATFORM_PATH (from root .env) may point to either:
-// - an app bundle directory that contains app.json (e.g. mozaiks-platform/app)
+// - an app bundle directory that contains app.json (e.g. factory_app/app)
 // - a workspace root that contains ./app/app.json
 // MOZAIKS_APP_WORKSPACE_PATH is a convenience alias for an external app
 // workspace/repo root when PLATFORM_PATH is not set.
 //
-// When unset, it defaults to the local App Zero app bundle at ./mozaiks-platform/app.
+// When unset, it defaults to the first-party builder/reference app bundle at ./factory_app/app.
 const projectRoot = path.resolve(__dirname, '..');
 
 function resolveAppBundleDir(platformInputPath) {
@@ -189,6 +189,7 @@ export default defineConfig(({ mode }) => {
 
   // Platform UI extensions come from the active app bundle: <app>/ui/index.js
   const platformExtensionsFile = path.resolve(platformAppDir, 'ui/index.js');
+  const platformAppDirForward = platformAppDir.replace(/\\/g, '/');
 
   // Public (static) assets come from the active app bundle: <app>/brand
   const platformBrandDir = resolveBrandDir(platformAppDir, factoryBrandDir);
@@ -246,7 +247,9 @@ export default defineConfig(({ mode }) => {
           /[\\/]factory_app[\\/]workflows[\\/].*[\\/]ui[\\/].*\.js$/.test(id) ||
           /[\\/]factory_app[\\/]app[\\/]workflows[\\/].*[\\/]ui[\\/].*\.js$/.test(id) ||
           /[\\/]app[\\/](?:workflows|modules)[\\/].*[\\/]ui[\\/].*\.js$/.test(id);
-        const isProductUiJs = /[\\/][^/\\]+-platform[\\/].*\.js$/.test(id);
+        const isProductUiJs =
+          /[\\/][^/\\]+-platform[\\/].*\.js$/.test(id) ||
+          id.replace(/\\/g, '/').startsWith(platformAppDirForward + '/');
         if (isChatUiJs || isWorkflowOrModuleUiJs || isProductUiJs) {
           return transformWithEsbuild(code, id, { loader: 'jsx', jsx: 'automatic', jsxImportSource: 'react' });
         }

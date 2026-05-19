@@ -16,13 +16,14 @@ Why a hook instead of prompt injection via context_variables:
   it as part of its system message — not as contextual background info.
 - For AppPlanAgent: emits the exact capability_id to use in workflow_capability_ids
   and the exact trigger_events to pass downstream.
-- For ConfigMiddlewareAgent: emits the exact subscriptions.yaml entries to generate,
+- For ConfigMiddlewareAgent: emits the exact contracts/reactions.yaml entries to generate,
   pre-formatted, so the agent only needs to copy the structure.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
@@ -129,7 +130,7 @@ def _build_app_plan_block(
     else:
         lines += [
             "",
-            "  trigger_events: (none declared — no workflow subscriptions are required)",
+            "  trigger_events: (none declared — no workflow reactions are required)",
         ]
 
     lines += [
@@ -149,24 +150,26 @@ def _build_config_middleware_block(capability_id: str, trigger_events: list) -> 
     """
     Contract block for ConfigMiddlewareAgent.
 
-    Provides the exact subscriptions.yaml entries to generate, pre-formatted,
+    Provides the exact contracts/reactions.yaml entries to generate, pre-formatted,
     so the agent does not need to derive them from natural-language instructions.
     """
     lines = [
-        "An AgentGenerator workflow must be wired into this module's subscriptions.yaml.",
+        "An AgentGenerator workflow must be wired into this module's contracts/reactions.yaml.",
         "",
-        f"  capability_id (subscription target): {capability_id}",
+        f"  capability_id (reaction target): {capability_id}",
         "  Use this value as target.capability_id — never the raw workflow name.",
     ]
 
     if trigger_events:
         lines += [
             "",
-            "  subscriptions.yaml entries to generate (one per trigger event listed below):",
+            "  contracts/reactions.yaml entries to generate (one per trigger event listed below):",
         ]
-        for ev in trigger_events:
+        for index, ev in enumerate(trigger_events):
             event_type = ev.get("event_type", str(ev)) if isinstance(ev, dict) else str(ev)
+            reaction_id = _reaction_id_for_event(capability_id, event_type, index)
             lines += [
+                f"    - id: {reaction_id}",
                 f"    - event_type: {event_type}",
                 f"      target:",
                 f"        kind: capability",
@@ -175,17 +178,22 @@ def _build_config_middleware_block(capability_id: str, trigger_events: list) -> 
     else:
         lines += [
             "",
-            "  trigger_events: (none declared — no workflow subscription entries are needed)",
+            "  trigger_events: (none declared — no workflow reaction entries are needed)",
         ]
 
     lines += [
         "",
-        "HARD CONSTRAINT: subscription targets that invoke a workflow MUST use",
+        "HARD CONSTRAINT: reaction targets that invoke a workflow MUST use",
         f'  target.kind: capability and target.capability_id: "{capability_id}".',
         "  Do not use a raw workflow name as a target.",
     ]
 
     return "\n".join(lines)
+
+
+def _reaction_id_for_event(capability_id: str, event_type: str, index: int) -> str:
+    token = re.sub(r"[^a-zA-Z0-9]+", "_", f"{capability_id}_{event_type}").strip("_").lower()
+    return token or f"workflow_reaction_{index + 1}"
 
 
 def _build_generic_block(workflow_name: str, capability_id: str, startup_mode: str) -> str:

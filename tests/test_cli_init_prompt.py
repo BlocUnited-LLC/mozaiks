@@ -1,6 +1,7 @@
 import json
 from argparse import Namespace
 
+from mozaiks_cli.commands import add as add_command
 from mozaiks_cli.commands import init_command
 from mozaiks_cli.main import create_parser
 
@@ -52,7 +53,18 @@ def test_init_command_prompts_for_name_when_missing(monkeypatch, tmp_path) -> No
     modules_readme = (target_dir / "app" / "modules" / "README.md").read_text(encoding="utf-8")
     assert "backend/handler.py" in modules_readme
     assert "events.yaml" in modules_readme
+    assert "contracts/reactions.yaml" in modules_readme
+    assert "subscriptions.yaml" not in modules_readme
     assert not (target_dir / "app" / "workflows" / "HelloWorkflow").exists()
+
+
+def test_add_command_module_next_steps_use_reactions_contract(capsys) -> None:
+    add_command._show_next_steps("modules", "app")
+
+    output = capsys.readouterr().out
+
+    assert "contracts/reactions.yaml" in output
+    assert "subscriptions.yaml" not in output
 
 
 def test_init_command_uses_explicit_directory_when_provided(monkeypatch, tmp_path) -> None:

@@ -14,8 +14,9 @@ This document defines the canonical lifecycle across:
 Terminology note:
 
 - `Studio` remains the current internal host and command name
-- customer-facing UX should prefer `Apps`, `Usage`, `Health`, `Billing`, `Hosting`, and
-  `Integrations`
+- customer-facing UX should prefer `Apps`, `Usage`, `Health`, and
+  `Integrations` for the OSS factory console; hosted deployments may add their
+  own provider-owned billing or hosting sections
 - `Build` refers to the workflow-owned agent sequence for create and
   refinement, not a required persistent console page
 - when this document says `Studio` in ownership terms, it means the host and
@@ -258,7 +259,10 @@ Review state transitions:
   - validation outcome
   - coding-worker rationale when applicable
 - `accept` promotes a validated `draft` child into the new `current` artifact
-  version for that artifact family and supersedes the prior current version
+  version for that artifact family and supersedes the prior current version;
+  downstream artifact families that were marked `stale` as a result of this
+  change request are automatically resolved once each rebuilds a new `current`
+  version — see [Artifact Staleness and Routing](artifact-staleness-and-routing.md)
 - `reject` archives the `draft` child without changing the active artifact
 - refinement sessions move in parallel through `validated -> accepted |
   rejected | promoted`
@@ -462,8 +466,8 @@ These are the remaining lifecycle gaps.
 2. The preferred public path still feels too dev-script-centric.
 3. Promotion exists conceptually, but workspace-console/CLI responsibilities
    around it are not yet the dominant UX.
-4. `mozaiks-app` and hosted product behavior should consume the same staged
-   build/promotion lifecycle instead of inventing a second builder path.
+4. External hosted product workspaces should consume the same staged
+  build/promotion lifecycle instead of inventing a second builder path.
 5. `mozaiks gen`, `mozaiks onboard`, and `mozaiks studio` still need one
    coherent story rather than three adjacent tools.
 
@@ -486,7 +490,7 @@ These are the remaining lifecycle gaps.
   - defines persistent frontend surface contracts and realization boundaries
 - `database-intent-and-revision-contract.md`
   - defines canonical database intent, staged database artifacts, and revision-time migration rules
-- `mozaiks-app/docs/hosted-platform-rebuild.md`
-  - defines hosted product boundaries built around this lifecycle
+- external hosted product workspace docs (outside this repo)
+  - may define hosted-only boundaries built around this lifecycle
 
 This document defines the lifecycle that those documents assume.

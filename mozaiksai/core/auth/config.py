@@ -1,11 +1,13 @@
 """
 Authentication configuration - provider-agnostic via environment variables.
 
-Default values are for Mozaiks CIAM, but self-hosted deployments can override.
-
 OIDC Discovery:
     By default, jwks_uri and issuer are derived from OIDC discovery.
-    Set AUTH_JWKS_URL and AUTH_ISSUER to override (skip discovery).
+    Set AUTH_JWKS_URL and AUTH_ISSUER to override (skip discovery entirely).
+
+    No identity provider is configured by default. Deployments must set
+    MOZAIKS_OIDC_AUTHORITY (and optionally MOZAIKS_OIDC_TENANT_ID) or provide
+    AUTH_JWKS_URL + AUTH_ISSUER to enable JWT validation.
 """
 
 import os
@@ -56,12 +58,6 @@ class AuthConfig:
         return not (self.issuer_override and self.jwks_url_override)
 
 
-# Mozaiks CIAM defaults
-_DEFAULT_OIDC_AUTHORITY = "https://mozaiks.ciamlogin.com"
-_DEFAULT_OIDC_TENANT_ID = "9d0073d5-42e8-46f0-a325-5b4be7b1a38d"
-_DEFAULT_AUDIENCE = "api://mozaiks-auth"
-_DEFAULT_SCOPE = "access_as_user"
-
 
 def _parse_bool(value: str) -> bool:
     """Parse boolean from env var string."""
@@ -82,8 +78,8 @@ def get_auth_config() -> AuthConfig:
     Load auth configuration from environment variables.
 
     OIDC Discovery Variables:
-        MOZAIKS_OIDC_AUTHORITY: Base authority URL (default: https://mozaiks.ciamlogin.com)
-        MOZAIKS_OIDC_TENANT_ID: Tenant ID for discovery URL computation
+        MOZAIKS_OIDC_AUTHORITY: Base authority URL of the identity provider (required for discovery)
+        MOZAIKS_OIDC_TENANT_ID: Tenant ID appended to authority for discovery URL computation
         MOZAIKS_OIDC_DISCOVERY_URL: Explicit discovery URL (overrides authority/tenant)
 
     Override Variables (skip discovery):
@@ -119,15 +115,15 @@ def get_auth_config() -> AuthConfig:
     return AuthConfig(
         enabled=enabled,
         # OIDC discovery settings
-        oidc_authority=os.getenv("MOZAIKS_OIDC_AUTHORITY", _DEFAULT_OIDC_AUTHORITY),
-        oidc_tenant_id=os.getenv("MOZAIKS_OIDC_TENANT_ID", _DEFAULT_OIDC_TENANT_ID),
+        oidc_authority=os.getenv("MOZAIKS_OIDC_AUTHORITY", ""),
+        oidc_tenant_id=os.getenv("MOZAIKS_OIDC_TENANT_ID", ""),
         oidc_discovery_url=os.getenv("MOZAIKS_OIDC_DISCOVERY_URL", ""),
         # Override settings
         issuer_override=_none_if_empty(os.getenv("AUTH_ISSUER")),
         jwks_url_override=_none_if_empty(os.getenv("AUTH_JWKS_URL")),
-        # Audience and scope
-        audience=os.getenv("AUTH_AUDIENCE", _DEFAULT_AUDIENCE),
-        required_scope=os.getenv("AUTH_REQUIRED_SCOPE", _DEFAULT_SCOPE),
+        # Audience and scope (empty = not enforced; set via env for your provider)
+        audience=os.getenv("AUTH_AUDIENCE", ""),
+        required_scope=os.getenv("AUTH_REQUIRED_SCOPE", ""),
         # Claim mappings
         user_id_claim=os.getenv("AUTH_USER_ID_CLAIM", "sub"),
         email_claim=os.getenv("AUTH_EMAIL_CLAIM", "email"),

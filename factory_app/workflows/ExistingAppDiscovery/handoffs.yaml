@@ -1,17 +1,22 @@
 # ExistingAppDiscovery Handoff Rules
 #
-# Linear pipeline: Host → Mapper → Planner → Assembler → user
-# Each conversational agent hands off to user between turns,
+# Pipeline:
+#   Host → Mapper → Planner → (ecosystem/native_migration) ModuleDecomposer → Assembler → user
+#                           → (embed/bridge) Assembler → user
+#
+# Each conversational agent reverts to user between turns,
 # then advances to the next agent when their phase is complete.
 
 handoff_rules:
-# DiscoveryHostAgent waits for user input between turns
+
+# ---------------------------------------------------------------------------
+# DiscoveryHostAgent
+# ---------------------------------------------------------------------------
 - source_agent: DiscoveryHostAgent
   target_agent: user
   handoff_type: after_work
   transition_target: RevertToUserTarget
 
-# Host → CapabilityMapper when identity is gathered
 - source_agent: DiscoveryHostAgent
   target_agent: CapabilityMapperAgent
   handoff_type: condition
@@ -19,13 +24,14 @@ handoff_rules:
   condition: ${identity_complete} == True
   transition_target: AgentTarget
 
-# CapabilityMapperAgent waits for user input between turns
+# ---------------------------------------------------------------------------
+# CapabilityMapperAgent
+# ---------------------------------------------------------------------------
 - source_agent: CapabilityMapperAgent
   target_agent: user
   handoff_type: after_work
   transition_target: RevertToUserTarget
 
-# Mapper → IntegrationPlanner when capabilities are mapped
 - source_agent: CapabilityMapperAgent
   target_agent: IntegrationPlannerAgent
   handoff_type: condition
@@ -33,27 +39,58 @@ handoff_rules:
   condition: ${capabilities_complete} == True
   transition_target: AgentTarget
 
-# IntegrationPlannerAgent waits for user input between turns
+# ---------------------------------------------------------------------------
+# IntegrationPlannerAgent
+# ---------------------------------------------------------------------------
 - source_agent: IntegrationPlannerAgent
   target_agent: user
   handoff_type: after_work
   transition_target: RevertToUserTarget
 
-# Planner → DiscoveryArtifactAssembler when integration plan is confirmed
+# ecosystem or native_migration → ModuleDecomposerAgent for capability decomposition
+- source_agent: IntegrationPlannerAgent
+  target_agent: ModuleDecomposerAgent
+  handoff_type: condition
+  condition_type: expression
+  condition: ${plan_complete} == True and ${adoption_level} in ["ecosystem", "native_migration"]
+  transition_target: AgentTarget
+
+# embed or bridge → skip decomposition, go straight to assembler
 - source_agent: IntegrationPlannerAgent
   target_agent: DiscoveryArtifactAssemblerAgent
   handoff_type: condition
   condition_type: expression
-  condition: ${plan_complete} == True
+  condition: ${plan_complete} == True and ${adoption_level} in ["embed", "bridge"]
   transition_target: AgentTarget
 
-# DiscoveryArtifactAssembler → user (presents the artifact for review)
+# ---------------------------------------------------------------------------
+# ModuleDecomposerAgent (ecosystem / native_migration only)
+# ---------------------------------------------------------------------------
+- source_agent: ModuleDecomposerAgent
+  target_agent: user
+  handoff_type: after_work
+  transition_target: RevertToUserTarget
+
+- source_agent: ModuleDecomposerAgent
+  target_agent: DiscoveryArtifactAssemblerAgent
+  handoff_type: condition
+  condition_type: expression
+  condition: ${decomposition_complete} == True
+  transition_target: AgentTarget
+
+# ---------------------------------------------------------------------------
+# DiscoveryArtifactAssemblerAgent
+# ---------------------------------------------------------------------------
 - source_agent: DiscoveryArtifactAssemblerAgent
   target_agent: user
   handoff_type: after_work
   transition_target: RevertToUserTarget
 
-# User wants to revise something → restart from host
+# ---------------------------------------------------------------------------
+# User revision routes
+# ---------------------------------------------------------------------------
+
+# Back to identity
 - source_agent: user
   target_agent: DiscoveryHostAgent
   handoff_type: condition
@@ -63,7 +100,7 @@ handoff_rules:
     beginning, start over, or correct something about the app identity.
   transition_target: AgentTarget
 
-# User wants to update capabilities → go to mapper
+# Back to capability mapping
 - source_agent: user
   target_agent: CapabilityMapperAgent
   handoff_type: condition
@@ -73,7 +110,7 @@ handoff_rules:
     features, or update their API or entity information.
   transition_target: AgentTarget
 
-# User wants to update integration plan → go to planner
+# Back to integration planning
 - source_agent: user
   target_agent: IntegrationPlannerAgent
   handoff_type: condition
@@ -83,7 +120,18 @@ handoff_rules:
     capabilities are AI-accessible, or revise auth delegation settings.
   transition_target: AgentTarget
 
-# User approves the augmentation artifact → terminate
+# Back to module decomposition (only relevant for ecosystem/native_migration)
+- source_agent: user
+  target_agent: ModuleDecomposerAgent
+  handoff_type: condition
+  condition_type: string_llm
+  condition: >
+    When the user wants to revise the module decomposition plan, adjust
+    module boundaries, change proposed workflows, update adapter ownership,
+    or modify the implementation phases.
+  transition_target: AgentTarget
+
+# Artifact approved → terminate
 - source_agent: user
   target_agent: terminate
   handoff_type: condition

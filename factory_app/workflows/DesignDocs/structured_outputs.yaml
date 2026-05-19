@@ -258,6 +258,90 @@ models:
         type: DatabaseIntentPolicies
         description: Global migration and scoping policies for the app.
 
+  UIPageSection:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Kebab-case section id.
+      primitive:
+        type: literal
+        values:
+        - DataTable
+        - Form
+        - Grid
+        - Button
+        - Modal
+        - Alert
+        - Skeleton
+        - Empty
+        - PageHeader
+        - ResourceTable
+        - SummaryStrip
+        - InlineEmptyState
+        - LoadingState
+        - ErrorState
+        - Panel
+        - SurfaceCard
+        - StatusPill
+        - Metric
+        - SegmentedBar
+        - Timeline
+        - CodeBlock
+        - ProgressTracker
+        - AlertBanner
+        - ActionButton
+        - FileList
+        description: Primitive type from the shipped UI primitive registry.
+      intent:
+        type: str
+        description: What this section exists to let the user do or see.
+      config_hint:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: Partial primitive config scaffold with required fields populated. Null when config is entirely context-dependent.
+
+  UIPage:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Human-readable page name.
+      route:
+        type: str
+        description: Primary route path for the page.
+      layout:
+        type: literal
+        values:
+        - grid
+        - sidebar
+        - full-width
+        - split
+        description: Page layout mode.
+      intent:
+        type: str
+        description: What the page exists to let the user do.
+      sections:
+        type: list
+        items: UIPageSection
+        description: Ordered list of primitive sections composing the page.
+
+  ExperienceSpec:
+    type: model
+    fields:
+      navigation_model:
+        type: str
+        description: How primary destinations are navigated (e.g. "top-level routes with shell navigation").
+      brand_direction:
+        type: str
+        description: Brief summary of the desired app feel and experience posture.
+      pages:
+        type: list
+        items: UIPage
+        description: Complete ordered list of persistent pages for the app.
+
   DesignDocsBundle:
     type: model
     fields:
@@ -273,9 +357,9 @@ models:
       database_markdown:
         type: str
         description: Complete database design document in Markdown.
-      ui_schema_yaml:
-        type: str
-        description: Complete persistent UI schema document in YAML.
+      experience_spec:
+        type: ExperienceSpec
+        description: Typed UI experience specification — navigation model, brand direction, and the complete declarative page structure with primitive-level section intent. This is the machine-readable contract that AppPlanAgent uses as the authoritative page source.
       surface_map:
         type: DesignSurfaceMap
         description: Canonical typed surface realization contract mirrored into the saved backend and ui_schema docs.

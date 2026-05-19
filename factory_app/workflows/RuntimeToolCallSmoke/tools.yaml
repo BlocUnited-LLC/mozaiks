@@ -36,4 +36,44 @@ tools:
           user_input:
             type: string
         additionalProperties: true
+- agent: RuntimeConnectorSmokeAgent
+  file: runtime_connector_readiness.py
+  function: collect_runtime_connector_readiness
+  description: Exercise shared connector readiness with inline credential collection and connector persistence.
+  tool_type: UI_Tool
+  auto_tool_call: false
+  ui:
+    component: AgentAPIKeysBundleInput
+    mode: inline
+    workflow_primitive: form_card
+    realization: workflow_wrapper
+  ui_contract:
+    surface_kind: agent_tool
+    payload_schema:
+      type: object
+      properties:
+        heading:
+          type: string
+        description:
+          type: string
+        services:
+          type: array
+      additionalProperties: true
+    actions_schema:
+    - id: submit
+      label: Submit Keys
+      variant: primary
+      payload_schema:
+        type: object
+        properties:
+          services:
+            type: array
+        additionalProperties: true
+    - id: cancel
+      label: Cancel
+      variant: secondary
+      payload_schema:
+        type: object
+        properties: {}
+        additionalProperties: true
 lifecycle_tools: []

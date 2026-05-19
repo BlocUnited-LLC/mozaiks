@@ -4,10 +4,11 @@
 #              If connector exists and has reusable secret storage, returns the secret.
 #              If expired, metadata-only, or missing, prompts user via UI tool.
 # ==============================================================================
-from typing import Any, Dict, Optional, Annotated
-from logs.logging_config import get_workflow_logger
+from typing import Annotated, Any, Dict, Optional
+
 from autogen.tools.dependency_injection import Field
 
+from logs.logging_config import get_workflow_logger
 
 __all__ = ["get_or_request_api_key"]
 
@@ -31,7 +32,7 @@ def _context_get(context_variables: Any, key: str, default: Any = None) -> Any:
 async def get_or_request_api_key(
     service: Annotated[
         str,
-        Field(description="The service name, such as openai, stripe, or sendgrid."),
+        Field(description="The normalized connector service id, such as model_provider, payment_provider, or email_provider."),
     ],
     display_name: Annotated[
         Optional[str],

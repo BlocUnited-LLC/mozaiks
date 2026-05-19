@@ -27,6 +27,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert registry["DatabaseAgent"] == "DatabaseOutput"
     assert registry["ModelAgent"] == "ModelOutput"
     assert registry["ServiceAgent"] == "ServiceOutput"
+    assert registry["ModuleRuntimeQualityAgent"] == "ModuleRuntimeQualityReviewRequest"
     assert registry["FrontendStubAgent"] == "FrontendStubOutput"
     assert registry["ControllerAgent"] == "ControllerOutput"
     assert "module_contract" in models["AppBuildTask"]["fields"]["task_type"]["values"]
@@ -36,7 +37,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "ModuleIdentity",
         "ModuleManifest",
         "ModuleEventsManifest",
-        "ModuleSubscriptionsManifest",
+        "ModuleReactionsManifest",
         "ModuleNotificationsManifest",
         "ModuleSettingsManifest",
         "ModuleAdminPanel",
@@ -76,6 +77,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "AppShellChromeViewportPatch",
         "ModuleContractBundle",
         "ConfigMiddlewareOutput",
+        "ModuleRuntimeQualityReviewRequest",
         "ImplementedPythonStub",
         "ServiceOutput",
         "ImplementedJsStub",
@@ -85,6 +87,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         assert model_name in models
 
     contract_fields = models["ModuleContractBundle"]["fields"]
+    assert contract_fields["reactions_yaml"]["type"] == "ModuleReactionsManifest"
     assert contract_fields["admin_yaml"]["type"] == "ModuleAdminManifest"
     assert contract_fields["python_stubs"]["items"] == "ModulePythonStub"
     assert contract_fields["js_stubs"]["items"] == "ModuleJsStub"
@@ -183,6 +186,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
     assert "Persistent app pages still belong in `app.json` + `ui/pages/*.yaml`." in source
     assert "`ui/route_manifest.json` + `ui/pages/custom/*.jsx`" in source
     assert "custom_route_bundle" in source
+    assert "contracts/reactions.yaml" in source
     assert "schema_version: mozaiks.admin.app_backend.v1" in source
     assert "ControllerOutput.app_backend_admin_config" in source
     assert "\"mode\": \"app_backend_admin_surface\"" in source
@@ -219,7 +223,11 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
     assert "states.yaml" not in source
     assert "transitions.yaml" not in source
     assert any(
-        rule["source_agent"] == "ServiceAgent" and rule["target_agent"] == "FrontendStubAgent"
+        rule["source_agent"] == "ServiceAgent" and rule["target_agent"] == "ModuleRuntimeQualityAgent"
+        for rule in handoffs["handoff_rules"]
+    )
+    assert any(
+        rule["source_agent"] == "ModuleRuntimeQualityAgent" and rule["target_agent"] == "FrontendStubAgent"
         for rule in handoffs["handoff_rules"]
     )
     assert any(
@@ -242,10 +250,12 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
 
     module_contract = file_contracts["task_contracts"]["module_contract"]
     assert module_contract["required_outputs"] == ["modules/{pack_name}/module.yaml"]
-    assert "modules/{pack_name}/contracts/subscriptions.yaml" in module_contract["optional_outputs"]
+    assert "modules/{pack_name}/contracts/reactions.yaml" in module_contract["optional_outputs"]
+    assert "modules/{pack_name}/contracts/subscriptions.yaml" not in module_contract["optional_outputs"]
     assert "modules/{pack_name}/contracts/admin.yaml" in module_contract["optional_outputs"]
     assert "backend/handler.py" in module_contract["downstream_python_defaults"]
     assert "backend/notifications.py" in module_contract["optional_python_hooks"]
+    assert "backend/subscriptions.py" not in module_contract["optional_python_hooks"]
     assert "ui/index.js" in module_contract["optional_js_stubs"]
 
     workflow_archetype = module_archetypes["archetypes"]["workflow"]

@@ -11,14 +11,14 @@ The production app console keeps these pages visible instead:
 /apps/:appId/health
 /apps/:appId/users
 /apps/:appId/usage
-/apps/:appId/billing
-/apps/:appId/hosting
 /apps/:appId/integrations
 ```
 
 Framework-owned admin composition remains internal and host-owned. Build,
-Health, Billing, Hosting, and Integrations are product surfaces; they are not admin
-sections.
+Health, Usage, and Integrations are product surfaces; they are not admin
+sections. Hosted deployments may provide billing or hosting surfaces through
+their own workspace routes or capability packs; the OSS factory console does
+not hardcode those hosted product routes.
 
 Terminology note:
 

@@ -203,3 +203,16 @@ def test_chat_ui_src_root_defaults_to_repo_checkout(monkeypatch) -> None:
     root = _resources.resolve_chat_ui_src_root()
 
     assert root == (repo_root / "chat-ui" / "src").resolve()
+
+
+def test_resource_resolution_prefers_repo_assets_over_stale_package_copy(monkeypatch, tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    stale_package_root = tmp_path / "stale-package"
+    stale_package_root.mkdir()
+    monkeypatch.chdir(repo_root)
+    monkeypatch.delenv("MOZAIKS_WEB_SHELL_PATH", raising=False)
+    monkeypatch.delenv("MOZAIKS_CHAT_UI_PATH", raising=False)
+    monkeypatch.setattr(_resources, "_resolve_package_dir", lambda _package_name: stale_package_root)
+
+    assert _resources.resolve_web_shell_root() == (repo_root / "web_shell").resolve()
+    assert _resources.resolve_chat_ui_root() == (repo_root / "chat-ui").resolve()

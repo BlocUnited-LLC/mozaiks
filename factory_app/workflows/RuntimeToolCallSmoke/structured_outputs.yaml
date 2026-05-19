@@ -1,5 +1,6 @@
 registry:
   RuntimeToolCallSmokeAgent: RuntimeToolCallSmokeResult
+  RuntimeConnectorSmokeAgent: RuntimeConnectorSmokeResult
 
 models:
   RuntimeToolCallSmokeResult:
@@ -17,3 +18,27 @@ models:
       confirmed:
         type: bool
         description: Whether the response matched the expected confirmation text.
+  RuntimeConnectorSmokeResult:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: User-facing confirmation message.
+      status:
+        type: str
+        description: Connector readiness status returned by the tool.
+      ready:
+        type: bool
+        description: Whether connector readiness is complete.
+      checked_services:
+        type: optional_list
+        items: str
+        description: Connector services checked by the smoke.
+      ready_services:
+        type: optional_list
+        items: str
+        description: Connector services ready after the smoke.
+      unresolved_required_services:
+        type: optional_list
+        items: str
+        description: Required services still unresolved.

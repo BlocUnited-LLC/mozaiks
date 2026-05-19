@@ -1,12 +1,21 @@
 # ExistingAppDiscovery Structured Outputs
 #
 # Only DiscoveryArtifactAssemblerAgent produces structured output.
-# The conversational agents remain free-form.
+# The conversational agents (including ModuleDecomposerAgent) remain free-form.
+#
+# For adoption_level embed or bridge:
+#   ExistingAppAugmentationArtifact.module_decomposition_plan is null.
+#
+# For adoption_level ecosystem or native_migration:
+#   ExistingAppAugmentationArtifact.module_decomposition_plan is populated.
+#   save_existing_app_artifacts also writes module_decomposition_plan to
+#   the generated artifact path for downstream AppGenerator consumption.
 
 registry:
   DiscoveryHostAgent: null
   CapabilityMapperAgent: null
   IntegrationPlannerAgent: null
+  ModuleDecomposerAgent: null
   DiscoveryArtifactAssemblerAgent: ExistingAppAugmentationArtifact
 
 models:
@@ -92,6 +101,52 @@ models:
         items: str
         description: Host shell/layout cues such as sidebar, top-bar, footer, or glass.
 
+  # ---------------------------------------------------------------------------
+  # ConnectorSpec — a single external service integration detected in the app
+  # ---------------------------------------------------------------------------
+  ConnectorSpec:
+    type: model
+    description: >
+      An external service connector detected in the existing app.
+      provider_id uses generic provider identifiers only — no provider
+      implementations are included in this schema.
+    fields:
+      provider_id:
+        type: str
+        description: >
+          Generic provider identifier. Known values: aws, azure, gcp, stripe,
+          sendgrid, twilio, cloudflare, github, slack, openai, anthropic,
+          unknown_http. Use "unknown_http" for generic HTTP client wrappers.
+      package_or_import:
+        type: str
+        description: The package name or import statement that was detected.
+      category:
+        type: str
+        description: >
+          Connector category. One of: cloud, payments, email, communications,
+          infrastructure, developer, ai, http_client, database, unknown.
+      confidence:
+        type: str
+        description: Detection confidence - "confirmed" (from manifest), "inferred" (from source scan), or "unverified".
+      source_files:
+        type: list
+        items: str
+        description: Relative file paths where the connector was detected.
+      likely_secret_envs:
+        type: list
+        items: str
+        description: >
+          Common environment variable names associated with this provider.
+          These are hints only — no actual credentials are read or stored.
+      mozaiks_adapter_exists:
+        type: bool
+        description: >
+          Whether mozaiksai/core/adapters/ already contains an adapter for
+          this provider. False by default; populated by preload scan.
+
+  # ---------------------------------------------------------------------------
+  # CapabilitySpec — existing product capabilities
+  # ---------------------------------------------------------------------------
   CapabilitySpec:
     type: model
     description: A product capability already present in the existing app.
@@ -124,8 +179,26 @@ models:
         description: Related entity names already present in the host app.
       agent_ready:
         type: bool
-        description: Whether the capability is technically ready for agent access without a deeper migration.
+        description: >
+          Whether the capability is technically ready for agent access without
+          deeper migration. Most meaningful for embed and bridge adoption levels.
+          For native_migration, consult migration_priority instead.
+      migration_priority:
+        type: optional_str
+        description: >
+          Priority for porting this capability when adoption_level is
+          native_migration or ecosystem. One of: p1_critical, p2_important,
+          p3_useful, p4_deferred. Null for embed and bridge.
+      connector_requirements:
+        type: optional_list
+        items: str
+        description: >
+          provider_ids this capability depends on (from ConnectorSpec.provider_id).
+          Null or empty for capabilities with no external connector dependency.
 
+  # ---------------------------------------------------------------------------
+  # ExistingProductSpec — canonical host product artifact
+  # ---------------------------------------------------------------------------
   ExistingProductSpec:
     type: model
     description: The canonical product artifact discovered from the existing application.
@@ -182,7 +255,40 @@ models:
         type: list
         items: str
         description: Known constraints that shape the adoption path.
+      # --- New fields for native_migration and improved discovery ---
+      storage_pattern:
+        type: str
+        description: >
+          Detected data storage mechanism. One of: mongodb, sql, file_store,
+          redis, unknown. Populated by preload scan. Use "unknown" when no
+          clear signal was detected.
+      storage_migration_required:
+        type: bool
+        description: >
+          True when storage_pattern is file_store or unknown, indicating that
+          MongoDB migration or schema design is required before module porting.
+      detected_connectors:
+        type: list
+        items: ConnectorSpec
+        description: >
+          External service connectors detected via package manifests and source
+          import scan. Empty list when no connectors are detected.
+      mozaiks_vocabulary_detected:
+        type: bool
+        description: >
+          True when Mozaiks-specific vocabulary (contractKind, module-action,
+          workflow-preparation) was found in the source. Suggests the app was
+          authored with Mozaiks patterns in mind.
+      mozaiks_authored_app:
+        type: bool
+        description: >
+          True when both Mozaiks vocabulary AND Mozaiks structural indicators
+          (module.yaml, contracts/reactions.yaml, app/modules/ layout) are
+          present. Strong signal for native_migration adoption level.
 
+  # ---------------------------------------------------------------------------
+  # AgentAugmentationPlan — Mozaiks adoption plan
+  # ---------------------------------------------------------------------------
   AgentAugmentationPlan:
     type: model
     description: How the existing app should adopt Mozaiks incrementally.
@@ -208,7 +314,7 @@ models:
         items: str
         description: The first Mozaiks workflows or agentic experiences to attach.
       ecosystem_bindings:
-        type: list
+        type: optional_list
         items: str
         description: Optional Mozaiks ecosystem modules to bind next such as discovery, campaigns, hosting, or payments.
       repo_access_willingness:
@@ -220,7 +326,266 @@ models:
       embed_theme_ready:
         type: bool
         description: Whether the current evidence is strong enough to theme an embed surface immediately.
+      # --- New fields ---
+      migration_complexity:
+        type: str
+        description: >
+          Overall complexity of native_migration or ecosystem adoption.
+          One of: none, low, moderate, full_rewrite, unknown.
+          - none: embed only, no migration needed.
+          - low: same tech stack as Mozaiks modules (Python/FastAPI), compatible storage.
+          - moderate: partial stack difference or storage migration needed.
+          - full_rewrite: non-Python backend (TypeScript, Go, .NET) requires complete
+            backend rewrite to Python FastAPI module pattern.
+          - unknown: insufficient evidence to assess.
+          Set to "none" for embed and bridge levels.
+      storage_migration_required:
+        type: bool
+        description: >
+          True when the host app's storage (file_store, SQL, unknown) must be
+          migrated to MongoDB to use the canonical Mozaiks module persistence pattern.
+      new_adapters_required:
+        type: optional_list
+        items: str
+        description: >
+          provider_ids that need new adapter implementations before module
+          porting can complete. Subset of detected_connectors that have
+          mozaiks_adapter_exists == false. Null for embed and bridge.
 
+  # ---------------------------------------------------------------------------
+  # ModuleDecompositionPlan — produced for ecosystem and native_migration
+  # ---------------------------------------------------------------------------
+  ProposedAction:
+    type: model
+    description: A single action a proposed Mozaiks module should expose.
+    fields:
+      action_id:
+        type: str
+        description: Snake_case action identifier using verb_noun convention.
+      verb:
+        type: str
+        description: Action verb - create, read, update, delete, trigger, query, list, run, approve, execute.
+      description:
+        type: str
+        description: What this action does in one sentence.
+      entity_refs:
+        type: list
+        items: str
+        description: Entity names this action creates, reads, or modifies.
+      connector_refs:
+        type: list
+        items: str
+        description: provider_ids this action requires.
+
+  ProposedModule:
+    type: model
+    description: A canonical Mozaiks module proposed to implement discovered capabilities.
+    fields:
+      module_id:
+        type: str
+        description: Snake_case module identifier matching Mozaiks module naming convention.
+      purpose:
+        type: str
+        description: One sentence describing what this module owns and manages.
+      source_capabilities:
+        type: list
+        items: str
+        description: capability_ids from CapabilitySpec that this module implements.
+      source_files:
+        type: list
+        items: str
+        description: Relative source file paths in the existing app this module is ported from.
+      proposed_actions:
+        type: list
+        items: ProposedAction
+        description: Actions this module should expose via module.yaml.
+      emitted_events:
+        type: list
+        items: str
+        description: >
+          Domain event types this module should emit. Use
+          <namespace>.<module_id>.<entity>.<past_tense_verb> convention.
+      reactions:
+        type: list
+        items: str
+        description: >
+          Event types this module should react to from other modules.
+          These become contracts/reactions.yaml entries.
+      persistence_entities:
+        type: list
+        items: str
+        description: MongoDB collection names or entity names this module will own.
+      external_connectors:
+        type: list
+        items: str
+        description: provider_ids this module's services depend on.
+      priority:
+        type: str
+        description: Implementation priority - p1_critical, p2_important, p3_useful, p4_deferred.
+      notes:
+        type: optional_str
+        description: Implementation notes, caveats, or decisions the implementer should know.
+
+  ProposedWorkflow:
+    type: model
+    description: >
+      An AI workflow proposed to augment native module capabilities.
+      Workflows should never own provider secrets or bypass module boundaries.
+    fields:
+      workflow_id:
+        type: str
+        description: PascalCase workflow name matching Mozaiks workflow naming convention.
+      purpose:
+        type: str
+        description: What human value this workflow delivers.
+      source_capabilities:
+        type: list
+        items: str
+        description: capability_ids this workflow augments.
+      module_actions_used:
+        type: list
+        items: str
+        description: >
+          Module actions this workflow calls in the format
+          module_id.action_id. Workflows must not call external
+          provider APIs directly.
+      human_approval_points:
+        type: list
+        items: str
+        description: Decision points where human review or approval is required.
+      structured_outputs:
+        type: list
+        items: str
+        description: Named structured output models this workflow produces.
+      priority:
+        type: str
+        description: Implementation priority - p1_critical, p2_important, p3_useful, p4_deferred.
+
+  ProposedPage:
+    type: model
+    description: A UI page proposed for the Mozaiks app shell or admin portal.
+    fields:
+      page_id:
+        type: str
+        description: Snake_case page identifier.
+      label:
+        type: str
+        description: Human-readable page label shown in navigation.
+      route:
+        type: str
+        description: Proposed URL route such as /admin/ops/assurance.
+      page_type:
+        type: str
+        description: >
+          One of: custom_jsx (complex interactive page), declarative_yaml
+          (ResourceTable / SummaryStrip primitive), admin_panel (registered
+          in admin_registry.yaml), studio_surface (Studio management interface).
+      purpose:
+        type: str
+        description: What operators or users do on this page.
+      module_bindings:
+        type: list
+        items: str
+        description: module_ids whose actions this page calls.
+      priority:
+        type: str
+        description: Implementation priority.
+
+  ProposedAdapter:
+    type: model
+    description: >
+      An external provider adapter proposed for the implementation.
+      Adapters are provider-specific clients — they must not appear in OSS.
+    fields:
+      provider_id:
+        type: str
+        description: Generic provider identifier from ConnectorSpec.
+      provider_type:
+        type: str
+        description: What kind of provider this is - dns, domain_registrar, cloud_storage, payments, email, etc.
+      ownership:
+        type: str
+        description: >
+          Where this adapter should live. One of:
+          - generic_oss_adapter: provider-neutral utility that belongs in mozaiksai/core/adapters/
+            (e.g., DNS probe, TLS probe, HTTP health check).
+          - app_specific_adapter: provider-specific implementation that stays in the app
+            (e.g., OpenSRS, Cloudflare with proprietary auth).
+          - external_service: managed service where no adapter code is needed.
+      source_files:
+        type: list
+        items: str
+        description: Source files in the existing app this adapter is ported from.
+      secret_requirements:
+        type: list
+        items: str
+        description: Environment variable names this adapter expects. No values — names only.
+      priority:
+        type: str
+        description: Implementation priority.
+
+  ModuleDecompositionPlan:
+    type: model
+    description: >
+      Canonical decomposition of an existing app into Mozaiks modules, workflows,
+      pages, and adapters. Produced when adoption_level is native_migration or
+      ecosystem. Null for embed and bridge.
+    fields:
+      adoption_level:
+        type: str
+        description: The confirmed adoption level that triggered decomposition.
+      migration_complexity:
+        type: str
+        description: Overall migration complexity inherited from AgentAugmentationPlan.
+      source_app_summary:
+        type: str
+        description: One-paragraph summary of what the source app is and why it is being ported.
+      proposed_modules:
+        type: list
+        items: ProposedModule
+        description: Canonical Mozaiks modules to implement, ordered by priority.
+      proposed_workflows:
+        type: list
+        items: ProposedWorkflow
+        description: AI workflows to add once modules are stable.
+      proposed_pages:
+        type: list
+        items: ProposedPage
+        description: UI pages or admin panels to implement.
+      proposed_adapters:
+        type: list
+        items: ProposedAdapter
+        description: External service adapters required, with OSS vs app-specific ownership.
+      persistence_migration:
+        type: str
+        description: >
+          Summary of storage migration needed: what source storage exists,
+          what MongoDB collections will replace it, whether seed/import scripts
+          are needed, and whether schema_migrations should track it.
+      security_migration:
+        type: str
+        description: >
+          Summary of auth and tenancy hardening required: what the source app
+          uses today, what the target model is, and what must be fixed before
+          production use.
+      implementation_phases:
+        type: list
+        items: str
+        description: >
+          Ordered implementation phase labels, each summarising what gets built
+          in that phase and why that ordering makes sense.
+      risks:
+        type: list
+        items: str
+        description: Known risks, data migration concerns, or blocking dependencies.
+      unresolved_questions:
+        type: optional_list
+        items: UnresolvedQuestion
+        description: Open questions that remain after decomposition.
+
+  # ---------------------------------------------------------------------------
+  # ExistingAppAugmentationArtifact — canonical top-level output
+  # ---------------------------------------------------------------------------
   ExistingAppAugmentationArtifact:
     type: model
     description: >
@@ -240,6 +605,12 @@ models:
       agent_augmentation_plan:
         type: AgentAugmentationPlan
         description: Recommended Mozaiks adoption and augmentation plan.
+      module_decomposition_plan:
+        type: optional_str
+        description: >
+          Populated with the serialized ModuleDecompositionPlan JSON string when
+          adoption_level is native_migration or ecosystem. Null for embed and
+          bridge. The saver tool deserializes this and writes it to generated/.
       discovery_brief:
         type: str
         description: Human-readable discovery summary for operator review.

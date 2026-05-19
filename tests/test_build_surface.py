@@ -38,7 +38,7 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     assert '"path": "/apps/new"' in manifest_source
     assert '"path": "/usage"' in manifest_source
     assert '"path": "/health"' in manifest_source
-    assert '"path": "/billing"' in manifest_source
+    assert '"path": "/billing"' not in manifest_source
     assert '"path": "/hosting"' not in manifest_source
     assert '"path": "/operations"' not in manifest_source
     assert '"path": "/settings"' not in manifest_source
@@ -47,7 +47,7 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     assert '"path": "/apps/:appId/users"' in manifest_source
     assert '"path": "/apps/:appId/usage"' in manifest_source
     assert '"path": "/apps/:appId/health"' in manifest_source
-    assert '"path": "/apps/:appId/billing"' in manifest_source
+    assert '"path": "/apps/:appId/billing"' not in manifest_source
     assert '"path": "/apps/:appId/hosting"' not in manifest_source
     assert '"path": "/apps/:appId/build"' not in manifest_source
     assert '"path": "/apps/:appId/deploy"' not in manifest_source
@@ -170,7 +170,7 @@ def test_workspace_layout_links_console_and_hosting_sections() -> None:
     assert "Mozaiks Console" in source
     assert "App Console" in source
     assert '"label": "Users"' in manifest_source
-    assert '"label": "Billing"' in manifest_source
+    assert '"label": "Billing"' not in manifest_source
     assert '"label": "Health"' in manifest_source
     assert '"label": "Hosting"' not in manifest_source
     assert '"label": "Usage"' in manifest_source
@@ -201,6 +201,62 @@ def test_workspace_layout_links_console_and_hosting_sections() -> None:
     assert "description:" not in source
 
 
+def test_admin_console_pages_use_workspace_layout_not_page_frame() -> None:
+    """Every file in factory_app/app/admin/pages/ is a workspace/app console surface.
+    It must import WorkspaceLayout (or AppConsoleLayout) and must NOT use PageFrame
+    as the root layout shell, or the sidebar will be missing at runtime."""
+    admin_pages_dir = _workspace() / "factory_app" / "app" / "admin" / "pages"
+    violations = []
+    for jsx_file in sorted(admin_pages_dir.glob("*.jsx")):
+        source = jsx_file.read_text(encoding="utf-8")
+        has_workspace_layout = "WorkspaceLayout" in source or "AppConsoleLayout" in source
+        has_page_frame_as_root = (
+            "PageFrame" in source and not has_workspace_layout
+        )
+        if has_page_frame_as_root:
+            violations.append(jsx_file.name)
+    assert not violations, (
+        f"Admin console pages use PageFrame instead of WorkspaceLayout — "
+        f"sidebar will be missing at runtime: {violations}. "
+        "Import WorkspaceLayout from @mozaiks/chat-ui/workspace instead."
+    )
+
+
+def test_route_manifest_components_all_registered_in_admin_index() -> None:
+    """Every component named in factory_app/app/ui/route_manifest.json must have
+    a registerComponent() call in factory_app/app/admin/index.js, or the shell
+    will log 'Component Not Registered' and render nothing."""
+    import json
+    manifest = json.loads(_read("factory_app/app/ui/route_manifest.json"))
+    admin_index = _read("factory_app/app/admin/index.js")
+
+    unregistered = []
+    for page in manifest["pages"]:
+        component = page.get("component")
+        if not component or component == "AdminPortal":
+            continue
+        if f"registerComponent('{component}'" not in admin_index:
+            unregistered.append(component)
+
+    assert not unregistered, (
+        f"Components in route_manifest.json not registered in admin/index.js: {unregistered}. "
+        "Add a registerComponent() call for each or the shell will fail to render the route."
+    )
+
+
+def test_integrations_route_is_app_scoped_only() -> None:
+    manifest_source = _read("factory_app/app/ui/route_manifest.json")
+    admin_registry = _read("factory_app/app/admin/admin_registry.yaml")
+    playwright_source = _read("web_shell/playwright/apps.responsive.smoke.spec.js")
+
+    assert '"/apps/:appId/integrations"' in manifest_source
+    assert '"/integrations"' not in manifest_source
+    assert "path: /apps/:appId/integrations" in admin_registry
+    assert "path: /integrations" not in admin_registry
+    assert "page.goto(`/apps/${APP_ID}/integrations`)" in playwright_source
+    assert "page.goto('/integrations')" not in playwright_source
+
+
 def test_integrations_page_uses_integrations_eyebrow() -> None:
     source = _read("factory_app/app/admin/pages/AppIntegrationsPage.jsx")
     assert "Integrations" in source
@@ -211,6 +267,62 @@ def test_integrations_page_focuses_on_external_integrations() -> None:
     source = _read("factory_app/app/admin/pages/AppIntegrationsPage.jsx")
     assert 'External Integrations' in source
     assert 'Add Integration' in source
+    assert 'analytics_provider' in source
+    assert 'Hosted Analytics' in source
+    assert 'stripe' not in source.lower()
     assert 'Connector Secret Backend' not in source
     assert 'Runtime Adapters' not in source
     assert 'Connection State' not in source
+
+
+def test_integrations_page_displays_safe_connector_health() -> None:
+    source = _read("factory_app/app/admin/pages/AppIntegrationsPage.jsx")
+    assert "connector?.health?.status" in source
+    assert "ConnectorHealthPill" in source
+    assert "ConnectorReadinessPill" in source
+    assert "missing_fields" in source
+    assert "last_checked_at" in source
+    assert "checked_by" in source
+    assert "public_config" in source
+    assert "Missing required fields" in source
+    assert "Needs attention" in source
+    assert "Unknown" in source
+
+
+def test_integrations_page_supports_manual_connector_health_checks() -> None:
+    source = _read("factory_app/app/admin/pages/AppIntegrationsPage.jsx")
+    assert "connectorSupportsHealthCheck" in source
+    assert "health_check_supported" in source
+    assert "Check now" in source
+    assert "Checking..." in source
+    assert "checkConnectorHealth" in source
+    assert "/api/studio/integrations/connectors/" in source
+    assert "/health-check?app_id=" in source
+    assert "method: 'POST'" in source
+    assert "setData((prev)" in source
+    assert "safe_details" in source
+    assert "Health details" in source
+    assert "checkConnectorHealth(" not in source.split("useEffect", 1)[1].split("async function saveConnector", 1)[0]
+
+
+def test_integrations_page_redacts_secret_shaped_public_config() -> None:
+    source = _read("factory_app/app/admin/pages/AppIntegrationsPage.jsx")
+    assert "function isSecretFieldName" in source
+    assert "function getSafePublicConfigEntries" in source
+    assert "api[_-]?key" in source
+    assert ".filter(([key]) => !isSecretFieldName(key))" in source
+    assert "function getSafeHealthDetailEntries" in source
+    assert "test-secret-value" not in source
+
+
+def test_integrations_page_uses_shared_primitives_for_health_ui() -> None:
+    source = _read("factory_app/app/admin/pages/AppIntegrationsPage.jsx")
+    assert "StatusPill" in source
+    assert "SurfaceCard" in source
+    assert "Panel" in source
+    assert "ConsoleInlineEmptyState" in source
+    assert "ConsoleLoadingState" in source
+    assert "ConsoleErrorState" in source
+    assert "function StatusPill" not in source
+    assert "function MetricTile" not in source
+    assert "function StatCard" not in source

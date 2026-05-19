@@ -208,5 +208,9 @@ def test_appgenerator_context_exposes_app_child_workflows() -> None:
     agents = context_vars["agents"]
 
     assert "app_child_workflows" in definitions
+    assert "integration_needs" in definitions
+    assert "integration_readiness_status" in definitions
     assert definitions["app_child_workflows"]["source"]["type"] == "computed"
     assert "app_child_workflows" in agents["AssemblyAgent"]["variables"]
+    assert "mfj_app_task_results" in agents["IntegrationReadinessAgent"]["variables"]
+    assert "integration_needs" in agents["IntegrationReadinessAgent"]["variables"]

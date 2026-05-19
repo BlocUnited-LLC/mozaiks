@@ -30,6 +30,7 @@ def test_load_default_factory_control_plane_pack() -> None:
     assert request_intake.tool_ids == [
         "get_revision_context",
         "get_artifact_summary",
+        "get_stale_artifact_families",
     ]
     decision = pack.checkpoint_by_event("decision_requested")
     assert decision is not None
@@ -60,6 +61,7 @@ def test_load_default_factory_control_plane_pack() -> None:
         "get_artifact_summary",
         "get_artifact_workspace_scope",
         "get_artifact_workspace_catalog",
+        "get_stale_artifact_families",
     ]
 
 

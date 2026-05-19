@@ -2,5 +2,6 @@ visual_agents:
 - InterviewAgent
 - user
 - AssemblyAgent
+- IntegrationReadinessAgent
 - AppValidationAgent
 - DownloadAgent

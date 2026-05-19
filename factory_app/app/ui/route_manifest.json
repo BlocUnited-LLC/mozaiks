@@ -68,23 +68,6 @@
       }
     },
     {
-      "path": "/billing",
-      "component": "WorkspaceBillingPage",
-      "label": "Billing",
-      "order": 7,
-      "meta": {
-        "surfaces": ["studio"],
-        "requiresRole": "admin",
-        "title": "Billing",
-        "appShell": true,
-        "navigation": {
-          "group": "workspace-console",
-          "scope": "local",
-          "icon": "billing"
-        }
-      }
-    },
-    {
       "path": "/apps/:appId",
       "component": "ConsolePage",
       "label": "App Console",
@@ -182,23 +165,6 @@
           "group": "app-console",
           "scope": "local",
           "icon": "chart"
-        }
-      }
-    },
-    {
-      "path": "/apps/:appId/billing",
-      "component": "AppBillingPage",
-      "label": "Billing",
-      "order": 25,
-      "meta": {
-        "surfaces": ["studio"],
-        "requiresRole": "admin",
-        "title": "Billing",
-        "appShell": true,
-        "navigation": {
-          "group": "app-console",
-          "scope": "local",
-          "icon": "billing"
         }
       }
     }

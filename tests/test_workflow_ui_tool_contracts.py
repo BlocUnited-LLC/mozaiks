@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+
 from mozaiksai.core.workflow.workflow_ui_catalog import get_workflow_shipped_component_names
 
 
@@ -147,7 +148,7 @@ def test_generator_prompts_treat_connector_state_as_platform_owned() -> None:
     assert "some integrations may already be ready from the workspace integrations surface" in agent_generator
     assert "missing dependency" in agent_generator
     assert "must not be modeled as app/business collections inside `database_intent_bundle`" in design_docs
-    assert "Connector credentials, API-key metadata, and workspace integration records are platform-owned integration state." in app_generator
+    assert "Connector credentials, API-key metadata, and app-scoped integration records are platform-owned integration state." in app_generator
     assert "app connector inventory as the source of truth" in app_generator
 
 
@@ -164,10 +165,12 @@ def test_app_generator_page_contract_stays_declarative() -> None:
         "AppUIQualityAgent",
         "AdminRegistryAgent",
         "AssemblyAgent",
+        "IntegrationReadinessAgent",
         "DatabaseAgent",
         "ControlPlaneAgent",
         "ConfigMiddlewareAgent",
         "ModuleContractQualityAgent",
+        "ModuleRuntimeQualityAgent",
         "ModelAgent",
         "AppValidationAgent",
         "IntegrationTestAgent",
@@ -175,7 +178,6 @@ def test_app_generator_page_contract_stays_declarative() -> None:
         "ServiceAgent",
         "FrontendStubAgent",
         "ControllerAgent",
-        "ControlPlaneAgent",
     }
     connected_agents = {
         rule[side]
@@ -195,6 +197,8 @@ def test_app_generator_page_contract_stays_declarative() -> None:
     assert "shell_config" in content
     assert "config/shell.json" in content
     assert "brand/theme_config.json" in content
+    assert "IntegrationReadinessAgent" in content
+    assert "record_integration_need" in content
     assert agent_names == expected_agents
     assert connected_agents <= expected_agents
 

@@ -91,14 +91,14 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert (_workspace() / "web_shell" / "playwright" / "apps.responsive.smoke.spec.js").exists()
     assert "workspace usage route stays responsive across desktop and mobile widths" in smoke_source
     assert "workspace health route stays responsive across desktop and mobile widths" in smoke_source
-    assert "workspace billing route stays responsive across desktop and mobile widths" in smoke_source
+    assert "workspace billing route stays responsive across desktop and mobile widths" not in smoke_source
     assert "workspace hosting route stays responsive across desktop and mobile widths" not in smoke_source
     assert "app console root redirects to overview" in smoke_source
     assert "app overview route stays responsive across desktop and mobile widths" in smoke_source
     assert "app health route stays responsive across desktop and mobile widths" in smoke_source
     assert "app integrations route stays responsive across desktop and mobile widths" in smoke_source
     assert "app usage route stays responsive across desktop and mobile widths" in smoke_source
-    assert "app billing route stays responsive across desktop and mobile widths" in smoke_source
+    assert "app billing route stays responsive across desktop and mobile widths" not in smoke_source
     assert "app users route stays responsive across desktop and mobile widths" in smoke_source
     assert "app hosting route stays responsive across desktop and mobile widths" not in smoke_source
     assert "mobile app console navigation keeps route transitions stable" in smoke_source
@@ -120,13 +120,11 @@ def test_factory_app_console_routes_are_all_covered_by_smoke() -> None:
         "AppsPage": "apps route stays responsive across desktop and mobile widths",
         "WorkspaceUsagePage": "workspace usage route stays responsive across desktop and mobile widths",
         "WorkspaceHealthPage": "workspace health route stays responsive across desktop and mobile widths",
-        "WorkspaceBillingPage": "workspace billing route stays responsive across desktop and mobile widths",
         "ConsolePage": "app console root redirects to overview",
         "AppOverviewPage": "app overview route stays responsive across desktop and mobile widths",
         "AppHealthPage": "app health route stays responsive across desktop and mobile widths",
         "AppUsersPage": "app users route stays responsive across desktop and mobile widths",
         "AppUsagePage": "app usage route stays responsive across desktop and mobile widths",
-        "AppBillingPage": "app billing route stays responsive across desktop and mobile widths",
         "AppIntegrationsPage": "app integrations route stays responsive across desktop and mobile widths",
     }
     route_components = {

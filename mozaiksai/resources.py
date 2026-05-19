@@ -48,8 +48,8 @@ def _resolve_package_dir(package_name: str) -> Path | None:
 def resolve_factory_app_root() -> Path | None:
     return (
         _resolve_env_dir("MOZAIKS_FACTORY_APP_PATH")
-        or _resolve_package_dir("factory_app")
         or _resolve_repo_dir("factory_app")
+        or _resolve_package_dir("factory_app")
     )
 
 
@@ -72,16 +72,16 @@ def resolve_factory_brand_root() -> Path | None:
 def resolve_web_shell_root() -> Path | None:
     return (
         _resolve_env_dir("MOZAIKS_WEB_SHELL_PATH")
-        or _resolve_package_dir("web_shell")
         or _resolve_repo_dir("web_shell")
+        or _resolve_package_dir("web_shell")
     )
 
 
 def resolve_chat_ui_root() -> Path | None:
     return (
         _resolve_env_dir("MOZAIKS_CHAT_UI_PATH")
-        or _resolve_package_dir("mozaiks_chat_ui")
         or _resolve_repo_dir("chat-ui")
+        or _resolve_package_dir("mozaiks_chat_ui")
     )
 
 

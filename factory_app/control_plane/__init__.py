@@ -1,6 +1,6 @@
 """Factory app control-plane pack.
 
-This package is declarative app-zero surface area only:
+This package is declarative first-party builder/reference app surface area only:
 
 - `config/` declares checkpoints, tools, and policies
 - `prompts/` contains checkpoint prompt files

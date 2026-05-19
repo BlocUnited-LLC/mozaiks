@@ -1,2 +1,3 @@
 visual_agents:
 - RuntimeToolCallSmokeAgent
+- RuntimeConnectorSmokeAgent

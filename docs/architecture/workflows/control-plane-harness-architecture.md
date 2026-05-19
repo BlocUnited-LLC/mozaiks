@@ -25,6 +25,11 @@ Examples:
 - "Restart this from concept."
 - "This should become investor-facing."
 
+In the first-party builder experience today, this refinement loop is driven by
+checkpoint routing declared through `app/config/ai.json` and the selected
+`control_plane.yaml` pack. Do not document a dedicated `RefinementWorkflow`
+unless the runtime actually introduces one.
+
 Those requests need:
 
 - persisted session/artifact context
@@ -82,7 +87,7 @@ This is the canonical runtime package.
 
 ### `factory_app/control_plane/`
 
-App-zero declaratives and builder-specific tools.
+First-party builder/reference app declaratives and builder-specific tools.
 
 ```text
 factory_app/control_plane/
@@ -104,8 +109,8 @@ factory_app/control_plane/
   ui/
 ```
 
-`factory_app` is app-zero. It should feel like an authored app surface, not the
-owner of the framework runtime.
+`factory_app` is the first-party builder/reference app workspace. It should
+feel like an authored app surface, not the owner of the framework runtime.
 
 This layer owns:
 
@@ -236,7 +241,7 @@ schema_version: mozaiks.control_plane
 profile:
   id: factory_app
   display_name: Factory App Harness
-  description: App-zero declarative control-plane pack for the first-party Mozaiks build experience.
+  description: First-party declarative control-plane pack for the Mozaiks build experience.
 harness:
   implementation: mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness
   supported_trigger_sources:

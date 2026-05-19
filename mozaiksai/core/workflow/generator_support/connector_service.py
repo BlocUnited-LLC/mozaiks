@@ -14,6 +14,11 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from mozaiksai.core.data.persistence import AppConnectorStore
 from mozaiksai.core.secrets import describe_connector_vault_backend, get_connector_vault_backend
+from mozaiksai.core.workflow.generator_support.connector_health import (
+    connector_health_check_supported,
+)
+
+SECRET_FIELD_TYPES = {"secret", "password", "api_key", "token"}
 
 
 def _get_store(store: Optional[AppConnectorStore] = None) -> AppConnectorStore:
@@ -24,9 +29,131 @@ def _normalize_service(service: str) -> str:
     return str(service or "").strip().lower().replace(" ", "_")
 
 
+def _health_supported_for_record(record: Optional[Dict[str, Any]]) -> bool:
+    if not isinstance(record, dict):
+        return False
+    service = _normalize_service(str(record.get("service") or ""))
+    integration_id = _normalize_service(str(record.get("integration_id") or record.get("provider") or service))
+    return connector_health_check_supported(integration_id) or connector_health_check_supported(service)
+
+
 def _display_service(service: str) -> str:
     normalized = _normalize_service(service)
     return normalized.replace("_", " ").title()
+
+
+def _normalize_required_fields(required_fields: Optional[Sequence[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    if not isinstance(required_fields, Sequence) or isinstance(required_fields, (str, bytes)):
+        return normalized
+    for field in required_fields:
+        if not isinstance(field, dict):
+            continue
+        name = str(field.get("name") or "").strip()
+        if not name:
+            continue
+        field_type = str(field.get("type") or "text").strip().lower()
+        is_secret = bool(field.get("secret")) or field_type in SECRET_FIELD_TYPES
+        normalized.append(
+            {
+                "name": name,
+                "label": str(field.get("label") or name.replace("_", " ").title()),
+                "type": "secret" if is_secret else field_type,
+                "required": bool(field.get("required", True)),
+                "frontend_safe": False if is_secret else bool(field.get("frontend_safe", True)),
+            }
+        )
+    return normalized
+
+
+def compute_connector_health(
+    record: Optional[Dict[str, Any]],
+    *,
+    required_fields: Optional[Sequence[Dict[str, Any]]] = None,
+    checked_by: str = "readiness",
+) -> Dict[str, Any]:
+    """Compute frontend-safe connector configuration health without network calls."""
+
+    now = datetime.now(UTC).isoformat()
+    if not isinstance(record, dict):
+        missing = [
+            field["name"]
+            for field in _normalize_required_fields(required_fields)
+            if bool(field.get("required", True))
+        ]
+        return {
+            "status": "not_configured",
+            "last_checked_at": now,
+            "message": "Connector is not configured.",
+            "missing_fields": missing,
+            "checked_by": checked_by,
+            "frontend_safe": True,
+        }
+
+    fields = _normalize_required_fields(required_fields or record.get("required_fields"))
+    public_config = record.get("public_config") if isinstance(record.get("public_config"), dict) else {}
+    missing_fields: List[str] = []
+    has_secret = bool(record.get("secret_available")) or int(record.get("key_length") or 0) > 0
+
+    for field in fields:
+        if not bool(field.get("required", True)):
+            continue
+        name = str(field.get("name") or "").strip()
+        if not name:
+            continue
+        field_type = str(field.get("type") or "").lower()
+        if field_type in SECRET_FIELD_TYPES:
+            if not has_secret:
+                missing_fields.append(name)
+            continue
+        value = public_config.get(name)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            missing_fields.append(name)
+
+    if missing_fields:
+        status = "not_configured"
+        message = "Connector is missing required configuration."
+    elif str(record.get("health_status") or "").strip() in {"healthy", "unhealthy"}:
+        status = str(record.get("health_status"))
+        message = str(record.get("health_message") or "").strip() or None
+    elif fields or record.get("secret_available") or public_config:
+        status = "configured"
+        message = "Connector has required configuration; no provider validation has run."
+    else:
+        status = "unknown"
+        message = "Connector health has not been checked."
+
+    return {
+        "status": status,
+        "last_checked_at": record.get("last_checked_at") or now,
+        "message": message,
+        "missing_fields": missing_fields,
+        "checked_by": checked_by,
+        "safe_details": record.get("health_details") if isinstance(record.get("health_details"), dict) else {},
+        "error_code": record.get("health_error_code"),
+        "health_check_supported": _health_supported_for_record(record),
+        "frontend_safe": True,
+    }
+
+
+def _with_connector_health(
+    record: Optional[Dict[str, Any]],
+    *,
+    required_fields: Optional[Sequence[Dict[str, Any]]] = None,
+    checked_by: str = "readiness",
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(record, dict):
+        return None
+    enriched = dict(record)
+    enriched["health"] = compute_connector_health(
+        enriched,
+        required_fields=required_fields,
+        checked_by=checked_by,
+    )
+    configuration_complete = enriched["health"]["status"] != "not_configured" and not enriched["health"].get("missing_fields")
+    enriched["configured"] = configuration_complete
+    enriched["ready"] = _classify_connector_status(enriched).get("status") in {"active", "expiring"} and configuration_complete
+    return enriched
 
 
 def _classify_connector_status(record: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -89,10 +216,12 @@ def _summarize_connector_inventory(
         "metadata_only": [],
     }
     display_names: Dict[str, str] = {}
+    ready_candidates: set[str] = set()
 
     for connector in connectors:
         if not isinstance(connector, dict):
             continue
+        connector = _with_connector_health(connector) or connector
         service = _normalize_service(str(connector.get("service") or ""))
         if not service:
             continue
@@ -103,8 +232,10 @@ def _summarize_connector_inventory(
             by_status[status_bucket] = []
         if service not in by_status[status_bucket]:
             by_status[status_bucket].append(service)
+        if bool(connector.get("ready")):
+            ready_candidates.add(service)
 
-    ready_services = sorted(set(by_status.get("active", [])) | set(by_status.get("expiring", [])))
+    ready_services = sorted(ready_candidates)
     known_services = sorted({service for values in by_status.values() for service in values})
     missing_required_services = sorted(required_set - set(ready_services))
     known_but_unready_required = sorted(required_set & (set(by_status.get("metadata_only", [])) | set(by_status.get("expired", [])) | set(by_status.get("revoked", []))))
@@ -119,7 +250,7 @@ def _summarize_connector_inventory(
         "entirely_missing_required_services": entirely_missing_required,
         "status_buckets": by_status,
         "display_names": display_names,
-        "connectors": list(connectors),
+        "connectors": [_with_connector_health(connector) or connector for connector in connectors],
     }
 
 
@@ -134,6 +265,8 @@ async def record_connector_metadata(
     chat_id: Optional[str],
     agent_message_id: Optional[str],
     ui_event_id: Optional[str],
+    public_config: Optional[Dict[str, Any]] = None,
+    required_fields: Optional[Sequence[Dict[str, Any]]] = None,
     logger: Optional[Any] = None,
     status_reason: Optional[str] = None,
     store: Optional[AppConnectorStore] = None,
@@ -150,6 +283,8 @@ async def record_connector_metadata(
         secret_storage="unmanaged",
         secret_available=False,
         key_length=key_length,
+        public_config=public_config,
+        required_fields=_normalize_required_fields(required_fields),
         source={
             "origin": "workflow_ui",
             "workflow": workflow_name,
@@ -176,6 +311,7 @@ async def get_connector_status(
 ) -> Dict[str, Any]:
     connector_store = _get_store(store)
     record = await connector_store.get_connector(app_id=str(app_id), service=_normalize_service(service))
+    record = _with_connector_health(record)
     classified = _classify_connector_status(record)
     if logger:
         if classified["exists"]:
@@ -222,6 +358,8 @@ async def store_connector(
     secret_value: str,
     display_name: Optional[str] = None,
     ttl_days: int = 30,
+    public_config: Optional[Dict[str, Any]] = None,
+    required_fields: Optional[Sequence[Dict[str, Any]]] = None,
     logger: Optional[Any] = None,
     store: Optional[AppConnectorStore] = None,
 ) -> Dict[str, Any]:
@@ -251,6 +389,8 @@ async def store_connector(
         secret_available=success,
         key_length=len(secret_value or ""),
         expires_at=expires_at,
+        public_config=public_config,
+        required_fields=_normalize_required_fields(required_fields),
         status_reason=(
             f"Connector secret persisted via {provider}."
             if success
@@ -294,7 +434,8 @@ async def store_connector(
 
 async def list_connectors(app_id: str, store: Optional[AppConnectorStore] = None) -> List[Dict[str, Any]]:
     connector_store = _get_store(store)
-    return await connector_store.list_connectors(app_id=str(app_id))
+    connectors = await connector_store.list_connectors(app_id=str(app_id))
+    return [_with_connector_health(connector) or connector for connector in connectors]
 
 
 async def get_connector_inventory(
@@ -317,6 +458,8 @@ async def update_connector_metadata(
     notes: Optional[str] = None,
     status: Optional[str] = None,
     expires_at: Optional[str] = None,
+    public_config: Optional[Dict[str, Any]] = None,
+    required_fields: Optional[Sequence[Dict[str, Any]]] = None,
     store: Optional[AppConnectorStore] = None,
 ) -> Optional[Dict[str, Any]]:
     connector_store = _get_store(store)
@@ -328,6 +471,8 @@ async def update_connector_metadata(
         notes=notes,
         status=status,
         expires_at=expires_at,
+        public_config=public_config,
+        required_fields=_normalize_required_fields(required_fields),
     )
 
 
@@ -372,6 +517,7 @@ async def get_connector_backend_summary() -> Dict[str, Any]:
 
 
 __all__ = [
+    "compute_connector_health",
     "delete_connector_metadata",
     "delete_connector",
     "get_connector_inventory",

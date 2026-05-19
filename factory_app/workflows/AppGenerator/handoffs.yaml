@@ -62,22 +62,36 @@ handoff_rules:
   condition_scope: null
   condition: ${app_ui_quality_status} == "blocked"
   transition_target: RevertToUserTarget
-# Schema-driven path: schemas are written to disk by save_app_schema; go straight to download
 - source_agent: AssemblyAgent
-  target_agent: DownloadAgent
-  handoff_type: condition
-  condition_type: expression
-  condition_scope: null
-  condition: ${app_schema_ready} == True
-  transition_target: AgentTarget
-# Code-generation path: validate before download
-- source_agent: AssemblyAgent
-  target_agent: AppValidationAgent
+  target_agent: IntegrationReadinessAgent
   handoff_type: after_work
   condition_type: null
   condition_scope: null
   condition: null
   transition_target: AgentTarget
+# Schema-driven path: schemas are written to disk by save_app_schema; check integration readiness before download
+- source_agent: IntegrationReadinessAgent
+  target_agent: DownloadAgent
+  handoff_type: condition
+  condition_type: expression
+  condition_scope: null
+  condition: ${app_schema_ready} == True and ${integration_readiness_status} != "blocked"
+  transition_target: AgentTarget
+# Code-generation path: check integration readiness before validation
+- source_agent: IntegrationReadinessAgent
+  target_agent: AppValidationAgent
+  handoff_type: condition
+  condition_type: expression
+  condition_scope: null
+  condition: ${app_schema_ready} != True and ${integration_readiness_status} != "blocked"
+  transition_target: AgentTarget
+- source_agent: IntegrationReadinessAgent
+  target_agent: user
+  handoff_type: condition
+  condition_type: expression
+  condition_scope: null
+  condition: ${integration_readiness_status} == "blocked"
+  transition_target: RevertToUserTarget
 - source_agent: DatabaseAgent
   target_agent: terminate
   handoff_type: condition
@@ -149,12 +163,33 @@ handoff_rules:
   condition: null
   transition_target: AgentTarget
 - source_agent: ServiceAgent
-  target_agent: FrontendStubAgent
+  target_agent: ModuleRuntimeQualityAgent
   handoff_type: after_work
   condition_type: null
   condition_scope: null
   condition: null
   transition_target: AgentTarget
+- source_agent: ModuleRuntimeQualityAgent
+  target_agent: ServiceAgent
+  handoff_type: condition
+  condition_type: expression
+  condition_scope: null
+  condition: ${module_runtime_quality_status} == "needs_revision"
+  transition_target: AgentTarget
+- source_agent: ModuleRuntimeQualityAgent
+  target_agent: FrontendStubAgent
+  handoff_type: condition
+  condition_type: expression
+  condition_scope: null
+  condition: ${module_runtime_quality_status} == "passed"
+  transition_target: AgentTarget
+- source_agent: ModuleRuntimeQualityAgent
+  target_agent: user
+  handoff_type: condition
+  condition_type: expression
+  condition_scope: null
+  condition: ${module_runtime_quality_status} == "blocked"
+  transition_target: RevertToUserTarget
 - source_agent: FrontendStubAgent
   target_agent: terminate
   handoff_type: condition
@@ -177,7 +212,7 @@ handoff_rules:
   condition: ${task_run_mode} == True
   transition_target: TerminateTarget
 - source_agent: ControllerAgent
-  target_agent: AppValidationAgent
+  target_agent: IntegrationReadinessAgent
   handoff_type: after_work
   condition_type: null
   condition_scope: null

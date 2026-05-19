@@ -782,7 +782,7 @@ agents:
       2. **Derive `agent_tools`** (Backend/Logic Tools Only):
          - Create tools for backend logic implied by module purpose (analysis, computation, API calls).
          - Do NOT create tools for UI interactions; those are encoded in `ui_requirements`.
-         - If a workflow needs third-party credentials, reuse the platform connector flow (`get_or_request_api_key`, `request_api_keys_bundle`, and the workspace integrations/admin surface) instead of inventing a custom API-key table, raw Mongo write, or bespoke credential form.
+         - If a workflow needs third-party credentials, reuse the platform connector flow (`get_or_request_api_key`, shared connector bundle collection, and the workspace integrations/admin surface) instead of inventing a custom API-key table, raw Mongo write, or bespoke credential form.
          - Treat connector availability as app-scoped runtime context: some integrations may already be ready from the workspace integrations surface, some may be metadata-only, and others may be missing entirely.
          - When an integration is required but not ready, explicitly call it out as a missing dependency and recommend collecting/configuring it instead of assuming the agent can already use it.
          - **Decomposition Logic**:
@@ -1182,7 +1182,8 @@ agents:
          - Set `auto_tool_call`: true for `UI_Tool` and `UI_Surface` when the surface should emit automatically from structured output; for `Agent_Tool`, true only when downstream persistence/auto store is required, else false.
          - Set `file`="tools/<name>.py" and `function`="<name>".
          - Every Python or React file you imply must be declared through this manifest first. Do not invent helper files outside the tool contract.
-         - Tool paths are workflow-local only. Never emit `workflows/_shared`, `app.workflows._shared`, sibling-workflow paths, or root-level shared tool paths.
+        - Tool paths are workflow-local only. Never emit `workflows/_shared`, `app.workflows._shared`, sibling-workflow paths, or root-level shared tool paths.
+        - Factory-owned generator infrastructure may use `factory_app/workflows/_shared/`, but generated workflow bundles must not emit or depend on that path.
          - If a helper is specific to this workflow, generate it inside this workflow's `tools/` directory. If a platform service is truly framework-owned, import the documented `mozaiksai.core.*` API from a workflow-local tool.
          - Connector credentials are platform-owned. Do not emit tool contracts that persist API keys directly to workflow collections; use the shipped connector helpers and surface sanitized connector records through the adapters/admin surface instead.
 
@@ -1474,7 +1475,7 @@ agents:
            and calls `use_ui_tool(ui.component, payload, chat_id=chat_id, workflow_name=workflow_name)`.
            This emits a `chat.tool_call` workflow UI request; do not design around legacy `ui_tool_event` transport semantics.
            Do not use low-level `send_tool_call_event` directly.
-           Do not import from `workflows._shared` or `app.workflows._shared`.
+          Do not import from `workflows._shared` or `app.workflows._shared` in generated workflow code. Factory-owned generator infrastructure may import `factory_app.workflows._shared`, but generated workflow bundles must remain self-contained.
          - React component (`ui/<WorkflowName>/<Component>.jsx`): receives shell props from
            `WorkflowUIRouter` (`payload`, `onResponse`, `onCancel`,
            `toolName`, `toolCallId`, `workflowName`, `componentId`), composes primitives from
@@ -1569,6 +1570,7 @@ agents:
          - Write all generated backend tools under this workflow's `tools/` directory.
          - Generate only files declared by the tools manifest. If a helper is needed, keep it workflow-local and referenced by a declared tool or hook contract.
          - Do not import from or create `workflows._shared` / `app.workflows._shared`; workflow-specific helpers belong beside the tool that uses them.
+         - `factory_app.workflows._shared` is reserved for factory-owned generator infrastructure, not generated workflow bundle code.
 
       3. **Emit Output**:
          - Generate `AgentToolsFileGeneratorOutput` JSON.

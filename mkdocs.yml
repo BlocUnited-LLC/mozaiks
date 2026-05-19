@@ -159,6 +159,7 @@ nav:
       - Builder and Generation:
           - App Builder Architecture: architecture/builder/app-builder-architecture.md
           - App Planning Contracts: architecture/builder/app-planning-contracts.md
+          - Shared Workflow Infrastructure: architecture/builder/shared-workflow-infrastructure.md
           - Builder Execution Model: architecture/builder/builder-execution-model.md
           - End-to-End Build Lifecycle: architecture/builder/end-to-end-build-lifecycle.md
           - Console Product Model: architecture/builder/console-product-model.md

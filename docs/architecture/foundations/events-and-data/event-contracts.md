@@ -305,39 +305,37 @@ source:
 
 ## Module Event Files
 
-### `events.yaml`
+### `contracts/events.yaml`
 
-Declares events the module may publish.
+Declares events the module may publish. Event types must use a valid namespace
+owned by the emitting layer such as `domain.*`, `platform.*`, or `hosted.*`.
+For app modules, `module.yaml.actions[].emits` must reference event types
+declared here and those emitted types are normally `domain.*`.
 
 ```yaml
 schema_version: mozaiks.events.v1
 events:
-  - type: domain.tasks.task_created
+  - type: domain.tasks.task.completed
     version: 1
+    description: Emitted when a task is completed.
     producer: tasks
-    subject:
-      type: task
-      id_path: payload.task_id
-    payload_schema:
-      type: object
-      required: [task_id, title]
-      properties:
-        task_id: { type: string }
-        title: { type: string }
 ```
 
-### `reactions.yaml`
+### `contracts/reactions.yaml`
 
-Declares module-owned reactions.
+Declares module-owned reactions. This is the canonical reaction contract.
+It uses `schema_version: mozaiks.reactions.v1`, root key `reactions`,
+`event_type` for the incoming event, and nested `target.kind` for routing.
 
 ```yaml
 schema_version: mozaiks.reactions.v1
 reactions:
-  - id: task_created_notify_owner
-    event_type: domain.tasks.task_created
+  - id: update_project_progress
+    event_type: domain.tasks.task.completed
+    description: Update project progress when a task completes.
     target:
-      kind: notification
-      notification_id: task_created
+      kind: handler
+      handler_method: update_project_progress
 ```
 
 Targets may be:
@@ -345,6 +343,12 @@ Targets may be:
 - `handler`
 - `capability`
 - `notification`
+
+Target field mapping:
+
+- `target.kind: handler` uses `target.handler_method`
+- `target.kind: capability` uses `target.capability_id`
+- `target.kind: notification` uses `target.notification_id`
 
 Current platform support:
 
@@ -354,29 +358,39 @@ Current platform support:
   `target.capability_id` against workflow `orchestrator.yaml` trigger
   declarations, creates the routed workflow session, and emits
   `platform.workflow_capability_started`.
-- `handler` targets remain reserved reaction contracts. They must stay
-  platform-routed and must not cause modules to import workflow/runtime
-  internals.
+- `handler` targets are active. `ModuleEventRouter` invokes
+  `target.handler_method` on the module handler class and passes event payload
+  fields as keyword arguments.
 
 Workflow starts must go through capability resolution or workflow trigger
 resolution. Do not hardcode workflow internals in module code.
 
-### `notifications.yaml`
+### `contracts/notifications.yaml`
 
-Declares notification derivation rules.
+Declares notification derivation rules derived from events. It should not be
+confused with `contracts/reactions.yaml`: notifications define delivery rules,
+while reactions define event routing.
 
 ```yaml
 schema_version: mozaiks.notifications.v1
 notifications:
-  - id: task_created
-    event_type: domain.tasks.task_created
+  - id: task_completed
+    event_type: domain.tasks.task.completed
     channels: [in_app]
     audience:
       roles: [owner, admin]
     template:
-      title: "Task created"
-      body: "{payload.title}"
+      title: "Task completed"
+      body: "{payload.task_id}"
 ```
+
+### Legacy Compatibility
+
+`contracts/subscriptions.yaml` is deprecated compatibility only.
+
+- Do not author new modules with `contracts/subscriptions.yaml`.
+- Runtime may load it only when `contracts/reactions.yaml` is absent.
+- New generator and CLI output must use `contracts/reactions.yaml`.
 
 ### `orchestrator.yaml`
 

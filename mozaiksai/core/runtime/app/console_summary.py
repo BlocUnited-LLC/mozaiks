@@ -5,16 +5,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, BuilderCollections, PlatformCollections
-from mozaiksai.core.workflow.generator_support.connector_service import (
-    get_connector_backend_summary,
-    list_connectors,
+from mozaiksai.core.data.persistence.namespaces import (
+    SYSTEM_DATABASE,
+    BuilderCollections,
+    PlatformCollections,
 )
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     build_app_validation_strategy_summary,
 )
+from mozaiksai.core.workflow.generator_support.connector_service import (
+    get_connector_backend_summary,
+    list_connectors,
+)
 from mozaiksai.resources import resolve_factory_brand_root
-
 
 GENERATOR_WORKFLOW_IDS = [
     "ValueEngine",
@@ -313,11 +316,22 @@ def _build_connector_summary(connectors: list[dict[str, Any]]) -> dict[str, int]
         "revoked": 0,
         "expiring": 0,
         "expired": 0,
+        "configured": 0,
+        "healthy": 0,
+        "unhealthy": 0,
+        "not_configured": 0,
+        "unknown_health": 0,
     }
     for connector in connectors:
         status = str(connector.get("status") or "").strip().lower()
         if status in summary:
             summary[status] += 1
+        health = connector.get("health") if isinstance(connector.get("health"), dict) else {}
+        health_status = str(health.get("status") or "unknown").strip().lower()
+        if health_status == "unknown":
+            summary["unknown_health"] += 1
+        elif health_status in summary:
+            summary[health_status] += 1
     return summary
 
 

@@ -104,7 +104,7 @@ def _show_next_steps(feature_or_preset, app_root_label: str):
 
     if feature_or_preset == "modules" or feature_or_preset in ["integrated", "full"]:
         print(f"  - Create modules in {app_root_label}/modules/<name>/")
-        print("  - Each module needs: module.yaml, events.yaml, settings.yaml, notifications.yaml, subscriptions.yaml, admin.yaml, backend/handler.py")
+        print("  - Each module needs: module.yaml, backend/handler.py, and any needed contracts/events.yaml, contracts/reactions.yaml, contracts/settings.yaml, contracts/notifications.yaml, and contracts/admin.yaml")
 
     if feature_or_preset == "event_bus" or feature_or_preset in ["integrated", "full"]:
         print("  - Use event_bus.publish() to emit app events")

@@ -27,7 +27,7 @@ def test_designdocs_defines_event_architecture_before_generation() -> None:
     assert "UI events are not durable business facts" in source
     assert "strict structured outputs" in source
     assert "do not invent ad hoc YAML keys" in source
-    assert "event_model:" in source
+    assert "experience_spec" in source
 
 
 def test_appgenerator_build_plan_preserves_event_flows() -> None:

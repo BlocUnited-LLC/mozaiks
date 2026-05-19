@@ -107,7 +107,7 @@ def test_app_plan_agent_prompt_requires_capability_first_planning() -> None:
 
     assert "Decompose into product capability packs first" in content
     assert "capability_pack_hints" in content
-    assert "experience_spec_document" in content
+    assert "experience_spec" in content
     assert "The default owner of persistent pages is `AppSchemaAgent`." in content
     assert "Do NOT plan a second raw-frontend lane inside AppGenerator." in content
     assert "domain-specific profile records" in content
@@ -117,11 +117,18 @@ def test_app_plan_agent_prompt_requires_capability_first_planning() -> None:
     assert '\n        "workflows": [' in content
 
 
-def test_appgenerator_context_exposes_current_experience_spec_alias() -> None:
+def test_appgenerator_context_exposes_experience_spec_as_typed_object() -> None:
     context_vars = _read_yaml("factory_app/workflows/AppGenerator/context_variables.yaml")
     definitions = context_vars["definitions"]
     agents = context_vars["agents"]
 
+    # Typed object for AppPlanAgent — loads from experience_spec extra_field
+    assert "experience_spec" in definitions
+    assert definitions["experience_spec"]["source"]["query_template"]["kind"] == "ui_schema"
+    assert definitions["experience_spec"]["source"]["fields"] == ["experience_spec"]
+    assert "experience_spec" in agents["AppPlanAgent"]["variables"]
+
+    # Human-readable string fallback still present for AppSchemaAgent and AgentGenerator
     assert "experience_spec_document" in definitions
     assert definitions["experience_spec_document"]["source"]["query_template"]["kind"] == "ui_schema"
     assert "experience_spec_document" in agents["AppSchemaAgent"]["variables"]

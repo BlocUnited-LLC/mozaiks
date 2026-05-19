@@ -15,9 +15,10 @@ Use these terms in visible product copy:
 - `Health`
 - `Users`
 - `Usage`
-- `Billing`
-- `Hosting`
 - `Integrations`
+
+Hosted deployments may add provider-owned sections such as billing or hosting,
+but those routes are not owned by the OSS first-party factory console.
 
 Workflow-owned concepts like `Build` may still appear in lifecycle copy, but
 they are not standalone console pages in the current production surface.
@@ -28,7 +29,6 @@ These terms may remain in code, APIs, and host/runtime composition, but should
 not appear as primary customer-facing product language:
 
 - `factory_app`
-- `App Zero`
 - `Hub`
 - `Studio host`
 - `Control Plane`
@@ -42,8 +42,6 @@ Workspace-level routes:
 - `/apps` -> workspace app portfolio home
 - `/usage` -> workspace workflow token usage and cost totals
 - `/health` -> workspace cross-app health summary
-- `/billing` -> workspace billing summary
-- `/hosting` -> workspace provider-style hosting summary
 
 App-level routes:
 
@@ -52,8 +50,6 @@ App-level routes:
 - `/apps/:appId/health` -> app health
 - `/apps/:appId/users` -> app users
 - `/apps/:appId/usage` -> app usage
-- `/apps/:appId/billing` -> app billing
-- `/apps/:appId/hosting` -> app hosting
 - `/apps/:appId/integrations` -> app integrations
 
 Primary app navigation is:
@@ -63,12 +59,15 @@ Primary app navigation is:
 - Users
 - Integrations
 - Usage
-- Billing
-- Hosting
 
 The Console route model is canonical. Do not add compatibility aliases for
 retired customer-facing terms such as `Hub`, `Studio`, `Treasury`, `Adapters`,
 `Deploy`, `Operations`, `Settings`, or `Admin`.
+
+Provider-owned billing or hosting pages belong in hosted app workspaces through
+hosted packs, custom routes, or generated app-owned facades backed by explicit
+host capability metadata. The OSS factory console must not hardcode hosted
+product billing routes.
 
 ## Route Map
 
@@ -77,16 +76,12 @@ retired customer-facing terms such as `Hub`, `Studio`, `Treasury`, `Adapters`,
 | `/apps` | Workspace Apps | Primary workspace home and app portfolio |
 | `/usage` | Workspace Usage | Cross-app workflow input/output tokens, totals, and averages |
 | `/health` | Workspace Health | Cross-app health posture and app-level risk visibility |
-| `/billing` | Workspace Billing | Revenue, recurring value, and finance readiness |
-| `/hosting` | Workspace Hosting | Provider-style hosting posture across domains, email, SSL, and backups |
 | `/create` | Workflow entrypoint | Workflow-owned create path; not part of the persistent console nav |
 | `/apps/:appId` | App Console | Redirects to app overview |
 | `/apps/:appId/overview` | App Overview | App-scoped summary and next actions |
 | `/apps/:appId/health` | App Health | Overall app health across runtime, workflows, hosting, and integrations |
 | `/apps/:appId/users` | App Users | App-scoped users and customer activity |
 | `/apps/:appId/usage` | App Usage | App-scoped input/output token usage, cost signals, totals, and averages |
-| `/apps/:appId/billing` | App Billing | App revenue, customer billing, and finance posture |
-| `/apps/:appId/hosting` | App Hosting | Provider-style hosting resources for domains, email, SSL, and backups |
 | `/apps/:appId/integrations` | App Integrations | App-scoped connectors, credentials, and permissions |
 
 ## Lifecycle States
@@ -116,8 +111,6 @@ Behavior expectations:
 - apps
 - usage
 - health
-- billing
-- hosting
 
 `App Console` is single-app scope:
 
@@ -126,8 +119,6 @@ Behavior expectations:
 - users
 - integrations
 - usage
-- billing
-- hosting
 
 ## Deprecated Terms
 
@@ -141,10 +132,9 @@ Replace these in customer-facing UX:
 | `Operations` | none in console IA | Customer-facing | Do not present unfinished operations pages in the production console |
 | `Settings` | none in console IA | Customer-facing | Do not present unfinished settings pages in the production console |
 | `Admin Portal` | none in console IA | Customer-facing | App-admin routes are not part of the current production console |
-| `Treasury` | `Billing` | Customer-facing | Revenue and recurring value stay under Billing |
+| `Treasury` | provider-owned billing capability | Hosted/product-owned | Do not add OSS factory console billing routes for hosted billing products |
 | `Adapters` | `Integrations` | Customer-facing | Use `Integrations` for visible app surfaces; workspace adapter routing is hidden |
 | `Factory App` | `Mozaiks` / `Mozaiks Console` | Customer-facing | `factory_app` remains an internal package name |
-| `App Zero` | none | Internal-only | Internal bootstrap/reference term only |
 | `Control Plane` | none | Internal-only | Do not expose as primary product copy |
 
 Keep internal API and host names stable unless runtime work explicitly requires

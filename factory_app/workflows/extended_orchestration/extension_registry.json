@@ -3,6 +3,14 @@
   "version": 3,
   "description": "Universal workflow routing layer. Defines workflow registry entries, dependencies, transition routes, and optional workflow sequence metadata. NOT agent routing; that lives in handoffs.yaml.",
 
+  "artifact_dependency_graph": {
+    "concept":         [],
+    "brand":           ["concept"],
+    "design_docs":     ["concept"],
+    "workflow_bundle": ["design_docs"],
+    "app_bundle":      ["design_docs", "workflow_bundle", "brand"]
+  },
+
   "workflows": [
     { "id": "ValueEngine",          "description": "Concept & value decomposition" },
     { "id": "ThemeCapture",         "description": "Captures visual identity and produces theme_config.json", "dependencies": ["ValueEngine"] },

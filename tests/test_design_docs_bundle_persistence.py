@@ -1,30 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import importlib.util
-from pathlib import Path
 
+from tests.import_utils import import_module_directly
 
-def _load_design_docs_module():
-    workspace = Path(__file__).resolve().parents[1]
-    file_path = (
-        workspace
-        / "factory_app"
-        / "workflows"
-        / "DesignDocs"
-        / "tools"
-        / "save_design_doc.py"
-    )
-    module_name = "tests.design_docs_save_bundle_direct"
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Unable to load module spec for {file_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-design_docs_module = _load_design_docs_module()
+design_docs_module = import_module_directly(
+    "factory_app.workflows.DesignDocs.tools.save_design_doc"
+)
 
 
 class _Context:
@@ -102,7 +84,26 @@ def _bundle():
         "frontend_markdown": "# Frontend Design\n\nFrontend doc.",
         "backend_markdown": "# Backend Design\n\nBackend doc.",
         "database_markdown": "# Database Design\n\nDatabase doc.",
-        "ui_schema_yaml": "experience:\n  navigation_model: top-level routes\npages: []\n",
+        "experience_spec": {
+            "navigation_model": "top-level routes with shell navigation",
+            "brand_direction": "clean and professional",
+            "pages": [
+                {
+                    "name": "Users",
+                    "route": "/users",
+                    "layout": "full-width",
+                    "intent": "Manage users",
+                    "sections": [
+                        {
+                            "id": "user-list",
+                            "primitive": "DataTable",
+                            "intent": "List all users",
+                            "config_hint": {"columns": ["id", "name", "email"], "api_endpoint": "/api/users"},
+                        }
+                    ],
+                }
+            ],
+        },
         "surface_map": {
             "surfaces": [
                 {
@@ -188,12 +189,24 @@ def test_save_design_docs_bundle_persists_surface_map_and_database_intent(monkey
     assert result["ok"] is True
     assert context.data["design_surface_map"]["surfaces"][0]["surface_id"] == "users"
     assert context.data["database_intent_bundle"]["app_id"] == "app_123"
+    # Typed ExperienceSpec must be set on context as a structured object
+    assert context.data["experience_spec"]["navigation_model"] == "top-level routes with shell navigation"
+    assert context.data["experience_spec"]["pages"][0]["name"] == "Users"
+    # Human-readable YAML string must still be set for backward-compat consumers
+    assert "navigation_model" in context.data["experience_spec_document"]
     assert len(design_docs_collection.updates) >= 4
     assert any(
         update[0].get("kind") == "backend" and "surface_map" in update[1]["$set"]
+        for update in design_docs_collection.updates
+    )
+    # ui_schema doc must carry both surface_map and experience_spec as extra_fields
+    assert any(
+        update[0].get("kind") == "ui_schema" and "experience_spec" in update[1]["$set"]
         for update in design_docs_collection.updates
     )
     assert database_intents_collection.updates[0][1]["$set"]["database_intent_bundle"]["artifact_version_id"] == "artifact_123"
     assert summary_artifact["artifact_kind"] == "design_docs"
     assert summary_artifact["input_artifact_kinds"] == ("concept", "build_plan")
     assert summary_artifact["summary_payload"]["surface_map"]["surfaces"][0]["surface_id"] == "users"
+    assert summary_artifact["summary_payload"]["experience_spec"]["pages"][0]["name"] == "Users"
+    assert result["page_count"] == 1

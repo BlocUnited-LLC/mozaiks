@@ -676,6 +676,44 @@ class ArtifactStore:
         return [RefinementSessionDoc.model_validate(row) for row in rows]
 
 
+    async def get_stale_artifact_families(self, *, app_id: str) -> List[str]:
+        """Return artifact family names that are genuinely stale.
+
+        A family is stale when it has at least one STALE version AND no CURRENT
+        version.  If a rebuild has already produced a new CURRENT version for that
+        family the STALE record is superseded in effect, even if not yet archived,
+        so the family must not appear as stale to the classifier.
+
+        Used by the control-plane classifier to detect upstream families that were
+        invalidated by a prior change request and need to be included in the next build.
+        """
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            return []
+        await self._ensure_client()
+        versions = await self._coll("ArtifactVersions")
+        try:
+            scope = build_app_scope_filter(resolved_app_id)
+            stale_kinds: set[str] = set(
+                await versions.distinct(
+                    "artifact_kind",
+                    {**scope, "lifecycle_status": ArtifactLifecycleStatus.STALE.value},
+                )
+            )
+            if not stale_kinds:
+                return []
+            current_kinds: set[str] = set(
+                await versions.distinct(
+                    "artifact_kind",
+                    {**scope, "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value},
+                )
+            )
+            return sorted(str(k) for k in (stale_kinds - current_kinds) if k)
+        except Exception as exc:
+            logger.warning("get_stale_artifact_families failed for app %s: %s", resolved_app_id, exc)
+            return []
+
+
 _artifact_store: Optional[ArtifactStore] = None
 
 

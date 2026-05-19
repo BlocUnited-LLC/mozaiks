@@ -502,7 +502,7 @@ export function buildConsoleDemoAppSummary(appId) {
       model: 'gpt-4o-mini',
     },
     theme: {
-      primary: '#28c7ff',
+      primary: 'cyan',
       tagline: 'Enterprise orchestration with app-scoped controls.',
       logo_alt: 'Mozaiks',
     },

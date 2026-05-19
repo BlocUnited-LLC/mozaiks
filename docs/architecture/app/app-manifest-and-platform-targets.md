@@ -133,10 +133,16 @@ Do not overload `app.json` with brand concerns.
 
 Branding belongs in:
 
-- `app/brand/theme_config.json` for shell tokens and chrome
+- `app/brand/theme_config.json` for visual tokens, typography, radius, density,
+  shadows, and brand asset references
 - `app/brand/assets/` for images and icons
 - `app/brand/fonts/` for fonts
 - `app/brand/login-theme/` for Keycloak login theme assets
+
+Shell and navigation behavior belongs in `app/config/shell.json`, not in
+`app.json` and not in theme config. `shell.json` owns header/profile/footer
+behavior, navigation policy, shortcuts, and chrome mode defaults; it does not
+own colors, fonts, radius, or visual palettes.
 
 That is the real shell-brand contract.
 

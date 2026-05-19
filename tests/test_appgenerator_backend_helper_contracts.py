@@ -92,9 +92,9 @@ class TestFileContractsAllowedAndProhibited:
         allowed = " ".join(str(x) for x in self._contract().get("allowed_when", []))
         assert "runtime_extension" in allowed.lower() or "entrypoint" in allowed.lower() or "api_router" in allowed.lower()
 
-    def test_allowed_when_covers_usage_entitlement_wrapper(self):
+    def test_allowed_when_covers_module_local_guard_wrapper(self):
         allowed = " ".join(str(x) for x in self._contract().get("allowed_when", []))
-        assert "usage" in allowed.lower() or "entitlement" in allowed.lower()
+        assert "guard" in allowed.lower() or "declared capability" in allowed.lower()
 
     def test_prohibited_for_covers_generic_service_logic(self):
         prohibited = " ".join(str(x) for x in self._contract().get("prohibited_for", []))
@@ -229,9 +229,15 @@ class TestAppPlanAgentHelperGuidance:
         text = _agents_text()
         assert "rationale" in text.lower() or "purpose" in text.lower() or "justified" in text.lower()
 
-    def test_app_plan_agent_mentions_example_stripe_client(self):
+    def test_app_plan_agent_mentions_example_provider_client(self):
+        # Neutral provider client example — stripe_client replaced with generic provider_client
         text = _agents_text()
-        assert "stripe_client.py" in text or "stripe_client" in text
+        assert (
+            "stripe_client.py" in text
+            or "stripe_client" in text
+            or "provider_client.py" in text
+            or "provider_client" in text
+        )
 
     def test_app_plan_agent_mentions_routes_webhooks_example(self):
         text = _agents_text()
@@ -325,3 +331,56 @@ class TestFileContractsIntegrity:
         contracts_str = str(text)
         assert "mozaiksai.core" not in contracts_str
         assert "mozaiksai.hosts" not in contracts_str
+
+
+# ---------------------------------------------------------------------------
+# 10. file_contracts.yaml — helper examples are provider-neutral (no Stripe, etc.)
+# ---------------------------------------------------------------------------
+
+class TestHelperExamplesProviderNeutral:
+    def test_helper_examples_no_stripe_reference(self):
+        data = _load_yaml(_FILE_CONTRACTS)
+        examples = data["backend_helper_files"].get("examples", [])
+        examples_str = " ".join(examples)
+        assert "stripe" not in examples_str.lower(), (
+            f"Helper file examples must be provider-neutral. Found Stripe reference in: {examples}"
+        )
+
+    def test_helper_examples_use_generic_provider_naming(self):
+        data = _load_yaml(_FILE_CONTRACTS)
+        examples = data["backend_helper_files"].get("examples", [])
+        # Should have provider_client.py, not stripe_client.py
+        examples_str = " ".join(examples)
+        assert "provider_client.py" in examples_str or "provider_client" in examples_str, (
+            "Helper examples should include a generic provider_client.py example"
+        )
+
+    def test_allowed_when_uses_generic_language(self):
+        data = _load_yaml(_FILE_CONTRACTS)
+        allowed = data["backend_helper_files"]["helper_contract"].get("allowed_when", [])
+        allowed_str = " ".join(str(x) for x in allowed)
+        # Should say "external provider client" not "Stripe SDK wrapper"
+        assert "stripe" not in allowed_str.lower(), (
+            "Helper file allowed_when rules must be provider-neutral"
+        )
+        assert "provider" in allowed_str.lower() or "external" in allowed_str.lower(), (
+            "Helper file rules should reference generic 'provider' or 'external' concepts"
+        )
+
+    def test_examples_routes_file_uses_generic_naming(self):
+        data = _load_yaml(_FILE_CONTRACTS)
+        examples = data["backend_helper_files"].get("examples", [])
+        examples_str = " ".join(examples)
+        # Should have routes_hooks.py, not routes_webhooks.py (which is Stripe-specific)
+        assert "routes_hooks.py" in examples_str or "routes" in examples_str, (
+            "Routes example should use generic naming like routes_hooks.py"
+        )
+
+    def test_examples_worker_file_uses_generic_naming(self):
+        data = _load_yaml(_FILE_CONTRACTS)
+        examples = data["backend_helper_files"].get("examples", [])
+        examples_str = " ".join(examples)
+        # Should have event_worker.py, not event_subscriber.py (more specific)
+        assert "worker" in examples_str.lower() or "event" in examples_str.lower(), (
+            "Worker example should use generic naming"
+        )

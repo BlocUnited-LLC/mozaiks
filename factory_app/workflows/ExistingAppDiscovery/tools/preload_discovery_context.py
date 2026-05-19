@@ -32,6 +32,167 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Storage pattern detection signals
+# ---------------------------------------------------------------------------
+_STORAGE_PACKAGE_SIGNALS: Dict[str, List[str]] = {
+    "mongodb": ["mongoose", "motor", "pymongo", "mongodb", "@mongodb-js"],
+    "sql": [
+        "sqlalchemy", "prisma", "sequelize", "pg", "mysql2", "typeorm",
+        "knex", "alembic", "psycopg2", "asyncpg", "tortoise-orm",
+    ],
+    "redis": ["ioredis", "redis", "aioredis", "valkey", "upstash-redis"],
+}
+
+_STORAGE_SOURCE_PATTERNS: Dict[str, List[str]] = {
+    "mongodb": ["MongoClient(", "mongoose.connect(", "motor.motor_asyncio", "AsyncIOMotorClient"],
+    "sql": [
+        "create_engine(", "DataSource({", "PrismaClient(", "new Sequelize(",
+        "knex({", "TypeOrmModule",
+    ],
+    "file_store": [
+        # CommonJS sync API
+        "fs.readFileSync(", "fs.writeFileSync(", "JSON.parse(fs.",
+        "readFileSync(", "writeFileSync(", "fs.appendFileSync(",
+        ".json', 'r')", ".json', 'w')",
+        # ESM async API (node:fs/promises — common in modern TypeScript backends)
+        "from 'node:fs/promises'", 'from "node:fs/promises"',
+        "from 'node:fs'", 'from "node:fs"',
+        "readFile(", "writeFile(", "appendFile(",
+    ],
+    "redis": [
+        "createClient(", "redis.connect(", "new Redis(", "aioredis.from_url(",
+        "Redis.from_url(",
+    ],
+}
+
+# ---------------------------------------------------------------------------
+# Connector detection signals
+# ---------------------------------------------------------------------------
+_CONNECTOR_SIGNALS: List[Dict[str, Any]] = [
+    {
+        "provider_id": "azure",
+        "packages": ["@azure/", "azure-sdk", "azure-mgmt-", "azure-identity", "@azure/identity"],
+        "imports": ["from azure.", "import azure.", "require('@azure/", 'require("@azure/'],
+        "category": "cloud",
+        "likely_secret_envs": ["AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID", "AZURE_KEY_VAULT_NAME"],
+    },
+    {
+        "provider_id": "aws",
+        "packages": ["aws-sdk", "@aws-sdk/", "boto3", "botocore", "aiobotocore"],
+        "imports": ["import boto3", "from boto3", "require('aws-sdk')", 'require("aws-sdk")'],
+        "category": "cloud",
+        "likely_secret_envs": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION"],
+    },
+    {
+        "provider_id": "gcp",
+        "packages": ["@google-cloud/", "google-cloud-", "google.cloud", "google-auth-library"],
+        "imports": ["from google.cloud", "require('@google-cloud/"],
+        "category": "cloud",
+        "likely_secret_envs": ["GOOGLE_APPLICATION_CREDENTIALS", "GCP_PROJECT_ID"],
+    },
+    {
+        "provider_id": "stripe",
+        "packages": ["stripe"],
+        "imports": ["import stripe", "from stripe", "require('stripe')", "new Stripe("],
+        "category": "payments",
+        "likely_secret_envs": ["STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET"],
+    },
+    {
+        "provider_id": "sendgrid",
+        "packages": ["@sendgrid/mail", "sendgrid", "sendgrid-python"],
+        "imports": ["import sendgrid", "sgMail", "require('@sendgrid/"],
+        "category": "email",
+        "likely_secret_envs": ["SENDGRID_API_KEY"],
+    },
+    {
+        "provider_id": "twilio",
+        "packages": ["twilio"],
+        "imports": ["import twilio", "from twilio", "require('twilio')", "new Twilio("],
+        "category": "communications",
+        "likely_secret_envs": ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"],
+    },
+    {
+        "provider_id": "cloudflare",
+        "packages": ["cloudflare", "@cloudflare/"],
+        "imports": [
+            "Cloudflare(", "new Cloudflare", "require('cloudflare')", 'require("cloudflare")',
+            "CloudflareConnector", "CF_API", "api.cloudflare.com",
+        ],
+        "category": "infrastructure",
+        "likely_secret_envs": ["CLOUDFLARE_API_TOKEN", "CF_API_TOKEN"],
+    },
+    {
+        "provider_id": "godaddy",
+        "packages": ["godaddy", "@godaddy/"],
+        "imports": [
+            "GoDaddyConnector", "GD_API", "api.godaddy.com",
+            "require('godaddy')", 'require("godaddy")',
+        ],
+        "category": "infrastructure",
+        "likely_secret_envs": ["GODADDY_API_KEY", "GODADDY_API_SECRET"],
+    },
+    {
+        "provider_id": "opensrs",
+        "packages": ["opensrs"],
+        "imports": [
+            "OpenSrsConnector", "opensrs.net", "rr-n1-tor.opensrs.net",
+            "horizon.opensrs.net", "xcpItem", "XCP",
+        ],
+        "category": "infrastructure",
+        "likely_secret_envs": ["OPENSRS_API_KEY", "OPENSRS_RESELLER_USERNAME", "OPENSRS_API_HOST"],
+    },
+    {
+        "provider_id": "github",
+        "packages": ["@octokit/", "octokit", "PyGithub", "pygithub"],
+        "imports": ["Octokit(", "from github import", "import github"],
+        "category": "developer",
+        "likely_secret_envs": ["GITHUB_TOKEN", "GH_TOKEN"],
+    },
+    {
+        "provider_id": "slack",
+        "packages": ["@slack/web-api", "@slack/bolt", "slack-sdk", "slack_sdk"],
+        "imports": ["WebClient(", "from slack_sdk", "Bolt("],
+        "category": "communications",
+        "likely_secret_envs": ["SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET"],
+    },
+    {
+        "provider_id": "openai",
+        "packages": ["openai"],
+        "imports": ["from openai", "import openai", "OpenAI(", "new OpenAI("],
+        "category": "ai",
+        "likely_secret_envs": ["OPENAI_API_KEY"],
+    },
+    {
+        "provider_id": "anthropic",
+        "packages": ["anthropic", "@anthropic-ai/"],
+        "imports": ["import Anthropic", "from anthropic", "new Anthropic("],
+        "category": "ai",
+        "likely_secret_envs": ["ANTHROPIC_API_KEY"],
+    },
+    {
+        "provider_id": "unknown_http",
+        "packages": ["axios", "node-fetch", "got", "ky"],
+        "imports": [],
+        "category": "http_client",
+        "likely_secret_envs": [],
+    },
+]
+
+# ---------------------------------------------------------------------------
+# Mozaiks vocabulary detection signals
+# ---------------------------------------------------------------------------
+_MOZAIKS_VOCAB_PATTERNS: List[str] = [
+    "contractKind",
+    "module-action",
+    "workflow-preparation",
+]
+
+_MOZAIKS_STRUCTURE_GLOB_CHECKS: List[str] = [
+    "**/module.yaml",
+    "**/contracts/reactions.yaml",
+]
+
 _EXCLUDED_DIRS = {
     ".git",
     ".hg",
@@ -855,6 +1016,242 @@ async def _probe_backend(backend_base_url: Optional[str]) -> Dict[str, Any]:
     return {"success": False, "error": f"Backend probe failed for {base_url}"}
 
 
+def _check_mozaiks_adapter_exists(provider_id: str) -> bool:
+    """Return True if mozaiksai/core/adapters/ has a file matching provider_id."""
+    adapters_root = _workspace_root() / "mozaiksai" / "core" / "adapters"
+    if not adapters_root.exists():
+        return False
+    needle = provider_id.lower().replace("-", "_")
+    return any(True for _ in adapters_root.glob(f"*{needle}*"))
+
+
+def _collect_package_names_from_root(repo_root: Path) -> List[str]:
+    """Read package.json, pyproject.toml, and requirements.txt for dependency names."""
+    names: List[str] = []
+
+    # package.json — search repo root and one level deep (monorepos)
+    pkg_candidates = [repo_root / "package.json"] + list(repo_root.glob("*/package.json"))[:3]
+    for pkg_path in pkg_candidates:
+        if not pkg_path.exists():
+            continue
+        try:
+            pkg_data = json.loads(pkg_path.read_text(encoding="utf-8"))
+            deps: Dict[str, Any] = {}
+            deps.update(pkg_data.get("dependencies", {}) or {})
+            deps.update(pkg_data.get("devDependencies", {}) or {})
+            names.extend(list(deps.keys()))
+        except Exception:
+            pass
+
+    # pyproject.toml
+    pyproject_path = repo_root / "pyproject.toml"
+    if pyproject_path.exists():
+        try:
+            data = tomllib.loads(pyproject_path.read_bytes().decode("utf-8"))
+            project = data.get("project", {}) if isinstance(data, dict) else {}
+            for dep in project.get("dependencies", []) or []:
+                dep_name = str(dep).split("[")[0].split(">=")[0].split("==")[0].strip()
+                if dep_name:
+                    names.append(dep_name)
+        except Exception:
+            pass
+
+    # requirements.txt
+    req_path = repo_root / "requirements.txt"
+    if req_path.exists():
+        try:
+            for line in req_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    dep_name = line.split("[")[0].split(">=")[0].split("==")[0].strip()
+                    if dep_name:
+                        names.append(dep_name)
+        except Exception:
+            pass
+
+    return names
+
+
+def _detect_storage_pattern(
+    package_names: List[str],
+    source_sample: str,
+) -> str:
+    """
+    Detect primary storage pattern from package names and sampled source text.
+
+    Returns one of: mongodb, sql, file_store, redis, unknown.
+    """
+    pkg_blob = " ".join(package_names).lower()
+
+    # Package-level detection first (higher confidence)
+    for pattern, signals in _STORAGE_PACKAGE_SIGNALS.items():
+        for signal in signals:
+            if signal.lower() in pkg_blob:
+                return pattern
+
+    # Source-level detection (inferred)
+    for pattern, patterns in _STORAGE_SOURCE_PATTERNS.items():
+        for pat in patterns:
+            if pat in source_sample:
+                return pattern
+
+    return "unknown"
+
+
+def _detect_connectors(
+    package_names: List[str],
+    source_sample: str,
+) -> List[Dict[str, Any]]:
+    """
+    Detect external service connectors from package names and sampled source.
+
+    Returns a list of ConnectorSpec dicts (without actual secrets).
+    """
+    pkg_blob = " ".join(package_names).lower()
+    detected: List[Dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    for signal in _CONNECTOR_SIGNALS:
+        provider_id = signal["provider_id"]
+        found_pkg: Optional[str] = None
+        found_import: Optional[str] = None
+        source_files: List[str] = []
+        confidence = "unverified"
+
+        # Package detection (confirmed)
+        if provider_id != "unknown_http":
+            for pkg in signal["packages"]:
+                if pkg.lower() in pkg_blob:
+                    found_pkg = pkg
+                    confidence = "confirmed"
+                    break
+
+        # Source import detection (inferred)
+        if not found_pkg:
+            for imp in signal.get("imports", []):
+                if imp in source_sample:
+                    found_import = imp
+                    confidence = "inferred"
+                    break
+
+        if not found_pkg and not found_import:
+            # Check generic http client packages regardless of provider_id
+            if provider_id == "unknown_http":
+                for pkg in signal["packages"]:
+                    if pkg.lower() in pkg_blob:
+                        found_pkg = pkg
+                        confidence = "confirmed"
+                        break
+            if not found_pkg:
+                continue
+
+        if provider_id in seen_ids:
+            continue
+        seen_ids.add(provider_id)
+
+        detected.append({
+            "provider_id": provider_id,
+            "package_or_import": found_pkg or found_import or provider_id,
+            "category": signal["category"],
+            "confidence": confidence,
+            "source_files": source_files,
+            "likely_secret_envs": signal.get("likely_secret_envs", []),
+            "mozaiks_adapter_exists": _check_mozaiks_adapter_exists(provider_id),
+        })
+
+    return detected
+
+
+def _detect_mozaiks_vocabulary(
+    repo_root: Path,
+    source_sample: str,
+) -> Dict[str, Any]:
+    """
+    Detect Mozaiks-specific vocabulary and structural indicators.
+
+    Returns:
+        mozaiks_vocabulary_detected: bool — vocab terms found in source.
+        mozaiks_authored_app: bool — vocab + structural indicators both found.
+        vocab_terms_found: list[str]
+        structure_indicators_found: list[str]
+    """
+    vocab_found: List[str] = []
+    structure_found: List[str] = []
+
+    # Vocabulary in sampled source text
+    for term in _MOZAIKS_VOCAB_PATTERNS:
+        if term in source_sample:
+            vocab_found.append(term)
+
+    # Structural indicators via glob (cheap existence checks)
+    if (repo_root / "app" / "modules").exists():
+        structure_found.append("app/modules/")
+
+    for glob_pattern in _MOZAIKS_STRUCTURE_GLOB_CHECKS:
+        try:
+            for path in repo_root.glob(glob_pattern):
+                if not any(part in _EXCLUDED_DIRS for part in path.parts):
+                    indicator = glob_pattern.lstrip("**/")
+                    if indicator not in structure_found:
+                        structure_found.append(indicator)
+                    break
+        except Exception:
+            pass
+
+    vocab_detected = bool(vocab_found)
+
+    # High-density vocabulary in TypeScript/non-YAML repos is itself a structural
+    # signal — the team built the app using Mozaiks vocabulary conventions even
+    # without the canonical .yaml file layout.  Count occurrences of each found
+    # term; if multiple terms appear many times, treat that as equivalent to a
+    # file-structure indicator.
+    _HIGH_DENSITY_THRESHOLD = 10  # occurrences per term
+    _HIGH_DENSITY_MIN_TERMS = 2   # at least this many terms must exceed threshold
+    dense_terms = [
+        t for t in vocab_found
+        if source_sample.count(t) >= _HIGH_DENSITY_THRESHOLD
+    ]
+    if len(dense_terms) >= _HIGH_DENSITY_MIN_TERMS:
+        structure_found.append("high_density_vocabulary")
+
+    # authored_app: vocabulary detected AND at least one structural indicator
+    # (file layout OR high-density vocabulary count)
+    authored = vocab_detected and bool(structure_found)
+
+    return {
+        "mozaiks_vocabulary_detected": vocab_detected,
+        "mozaiks_authored_app": authored,
+        "vocab_terms_found": vocab_found,
+        "structure_indicators_found": structure_found,
+    }
+
+
+def _sample_source_text(repo_root: Path, max_files: int = 120, max_chars_per_file: int = 15_000) -> str:
+    """
+    Return a concatenated sample of source text from the repo for pattern detection.
+    Limits total output to avoid excessive memory use.
+    """
+    _SOURCE_EXTENSIONS = {".py", ".ts", ".js", ".tsx", ".jsx", ".yaml", ".yml", ".json"}
+    parts: List[str] = []
+    total_chars = 0
+    max_total = max_files * max_chars_per_file
+
+    for path in _iter_repo_files(repo_root, limit=500):
+        if len(parts) >= max_files or total_chars >= max_total:
+            break
+        if path.suffix.lower() not in _SOURCE_EXTENSIONS:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        excerpt = text[:max_chars_per_file]
+        parts.append(excerpt)
+        total_chars += len(excerpt)
+
+    return "\n".join(parts)
+
+
 def _merge_unresolved(existing: List[Dict[str, Any]], question: str, context: str, priority: str = "medium") -> None:
     if any(item.get("question") == question for item in existing):
         return
@@ -1095,6 +1492,48 @@ async def collect_prechat_discovery_context(context_variables: Optional[Any] = N
     inferred_service_surfaces = _infer_service_surfaces(service_surface_summary, api_inventory, runtime_observations)
     inferred_route_surfaces = _infer_route_surfaces(route_surface_summary)
 
+    # -----------------------------------------------------------------------
+    # App pattern detection: storage, connectors, Mozaiks vocabulary
+    # -----------------------------------------------------------------------
+    storage_pattern = "unknown"
+    storage_migration_required = False
+    detected_connectors: List[Dict[str, Any]] = []
+    mozaiks_vocabulary_detected = False
+    mozaiks_authored_app = False
+
+    active_repo_root: Optional[Path] = None
+    for candidate_path in [repo_path, frontend_repo_path, backend_repo_path]:
+        if candidate_path:
+            candidate = Path(str(candidate_path)).expanduser().resolve()
+            if candidate.exists() and candidate.is_dir():
+                active_repo_root = candidate
+                break
+
+    if active_repo_root:
+        try:
+            package_names = _collect_package_names_from_root(active_repo_root)
+            source_sample = _sample_source_text(active_repo_root)
+
+            storage_pattern = _detect_storage_pattern(package_names, source_sample)
+            storage_migration_required = storage_pattern in ("file_store", "unknown")
+
+            detected_connectors = _detect_connectors(package_names, source_sample)
+
+            vocab_result = _detect_mozaiks_vocabulary(active_repo_root, source_sample)
+            mozaiks_vocabulary_detected = vocab_result["mozaiks_vocabulary_detected"]
+            mozaiks_authored_app = vocab_result["mozaiks_authored_app"]
+
+            logger.info(
+                "[ExistingAppDiscovery] App pattern scan: storage=%s connectors=%s "
+                "mozaiks_vocab=%s mozaiks_authored=%s",
+                storage_pattern,
+                [c["provider_id"] for c in detected_connectors],
+                mozaiks_vocabulary_detected,
+                mozaiks_authored_app,
+            )
+        except Exception as exc:
+            logger.warning("[ExistingAppDiscovery] App pattern detection failed: %s", exc)
+
     if inferred_service_surfaces and not _ctx_get(ctx, "service_surfaces"):
         _ctx_set(ctx, "service_surfaces", inferred_service_surfaces)
     if inferred_route_surfaces and not _ctx_get(ctx, "route_surfaces"):
@@ -1161,6 +1600,12 @@ async def collect_prechat_discovery_context(context_variables: Optional[Any] = N
     _ctx_set(ctx, "preloaded_context_ready", bool(successful_sources))
     _ctx_set(ctx, "preload_status", preload_status)
     _ctx_set(ctx, "preload_summary", "\n".join(summary_lines) if summary_lines else "No deterministic evidence was preloaded.")
+    # App pattern detection results
+    _ctx_set(ctx, "storage_pattern", storage_pattern)
+    _ctx_set(ctx, "storage_migration_required", storage_migration_required)
+    _ctx_set(ctx, "detected_connectors", detected_connectors)
+    _ctx_set(ctx, "mozaiks_vocabulary_detected", mozaiks_vocabulary_detected)
+    _ctx_set(ctx, "mozaiks_authored_app", mozaiks_authored_app)
 
     logger.info(
         "[ExistingAppDiscovery] before_chat preload complete: status=%s, sources=%s",

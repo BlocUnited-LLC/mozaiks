@@ -46,15 +46,16 @@ They do not define authentication.
 
 ### Environment Variables
 
-Own deployment-time backend overrides and local dev auth convenience, such as:
+Own deployment-time backend configuration, such as:
 
-- `MOZAIKS_OIDC_AUTHORITY`
-- `AUTH_AUDIENCE`
-- `AUTH_REQUIRED_SCOPE`
-- `AUTH_ROLES_CLAIM`
-- `VITE_DEV_AUTH_MODE`
-- `VITE_DEV_AUTOLOGIN`
-- `VITE_MOCK_MODE`
+- `MOZAIKS_OIDC_AUTHORITY` — required; base URL of the OIDC identity provider
+- `MOZAIKS_OIDC_TENANT_ID` — optional; appended to authority for discovery URL
+- `MOZAIKS_OIDC_DISCOVERY_URL` — optional; explicit `.well-known` URL (overrides authority/tenant)
+- `AUTH_AUDIENCE` — expected audience claim for token validation
+- `AUTH_REQUIRED_SCOPE` — required scope for user-authenticated endpoints
+- `AUTH_ROLES_CLAIM` — JWT claim name for roles (default: `roles`)
+- `VITE_OIDC_AUTHORITY` — frontend: OIDC authority for the browser auth flow
+- `VITE_MOCK_MODE` — frontend: skip auth for local development
 
 ### `app/brand/login-theme/`
 

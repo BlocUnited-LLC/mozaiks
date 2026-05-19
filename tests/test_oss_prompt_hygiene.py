@@ -315,3 +315,146 @@ class TestNoProprietaryNamesInOssDefaults:
                 f"Proprietary name {name!r} found in OSS default file {file_path.name}. "
                 "OSS base prompts must be host-agnostic."
             )
+
+
+# ---------------------------------------------------------------------------
+# 5. Backend helper governance: ServiceAgent cannot invent helpers
+# ---------------------------------------------------------------------------
+
+
+class TestBackendHelperGovernanceInAgents:
+    """Verify backend helper file governance is enforced in agents.yaml."""
+
+    def _read_agents(self) -> str:
+        return _AGENTS_YAML_PATH.read_text(encoding="utf-8")
+
+    def test_service_agent_prohibits_inventing_helpers(self) -> None:
+        """ServiceAgent guidance must explicitly prohibit inventing helper files."""
+        source = self._read_agents()
+        assert "Do not invent" in source or "do not invent" in source, (
+            "ServiceAgent section must contain prohibition on inventing helper files."
+        )
+
+    def test_service_agent_requires_helper_declaration(self) -> None:
+        """ServiceAgent must require helper files to be declared before generation."""
+        source = self._read_agents()
+        assert "helper" in source.lower()
+        assert "declared" in source.lower() or "python_stubs" in source.lower(), (
+            "ServiceAgent must require that helper files be declared in python_stubs."
+        )
+
+    def test_app_plan_agent_requires_helper_rationale(self) -> None:
+        """AppPlanAgent must require that helper files include a rationale."""
+        source = self._read_agents()
+        assert "helper" in source.lower()
+        assert "rationale" in source.lower() or "justified" in source.lower(), (
+            "AppPlanAgent must require a rationale or justification for helper files."
+        )
+
+    def test_canonical_backend_layers_unchanged(self) -> None:
+        """All five canonical backend layers must be mentioned in agents.yaml."""
+        source = self._read_agents()
+        layers = [
+            "backend/handler.py",
+            "backend/service.py",
+            "backend/repo.py",
+            "backend/policy.py",
+            "backend/schemas.py",
+        ]
+        for layer in layers:
+            assert layer in source, (
+                f"agents.yaml must mention canonical layer: {layer}"
+            )
+
+    def test_handler_described_as_thin_dispatch(self) -> None:
+        """handler.py must be described as thin dispatch, not a business logic layer."""
+        source = self._read_agents()
+        assert "thin" in source.lower(), (
+            "agents.yaml must describe handler.py as 'thin' dispatch."
+        )
+        assert "dispatch" in source.lower() or "adapter" in source.lower(), (
+            "agents.yaml must describe handler.py as dispatch or adapter layer."
+        )
+
+    def test_service_described_as_business_logic(self) -> None:
+        """service.py must own all business logic."""
+        source = self._read_agents()
+        assert "business logic" in source.lower(), (
+            "agents.yaml must assign business logic responsibility to service.py."
+        )
+
+    def test_repo_described_as_persistence_only(self) -> None:
+        """repo.py must be described as persistence layer, not logic."""
+        source = self._read_agents()
+        assert "persistence" in source.lower() or "database" in source.lower(), (
+            "agents.yaml must describe repo.py as persistence layer."
+        )
+
+    def test_policy_described_as_authorization_scoping(self) -> None:
+        """policy.py must own authorization and scoping."""
+        source = self._read_agents()
+        assert (
+            "authz" in source.lower()
+            or "authorization" in source.lower()
+            or "ownership" in source.lower()
+        ), (
+            "agents.yaml must assign authorization/ownership to policy.py."
+        )
+
+
+# ---------------------------------------------------------------------------
+# 6. Provider-neutral helper examples
+# ---------------------------------------------------------------------------
+
+
+class TestProviderNeutralHelperExamples:
+    """Verify helper file examples use provider-neutral naming."""
+
+    def _read_agents(self) -> str:
+        return _AGENTS_YAML_PATH.read_text(encoding="utf-8")
+
+    def _read_file_contracts(self) -> dict:
+        file_contracts_path = _APPGEN_TOOLS / "file_contracts.yaml"
+        with file_contracts_path.open(encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+
+    def test_helper_examples_no_stripe_reference(self) -> None:
+        """Helper file examples must not reference Stripe."""
+        contracts = self._read_file_contracts()
+        examples = contracts.get("backend_helper_files", {}).get("examples", [])
+        examples_str = " ".join(str(e) for e in examples)
+        assert "stripe" not in examples_str.lower(), (
+            "Helper file examples must be provider-neutral. Found Stripe reference."
+        )
+
+    def test_helper_examples_use_generic_provider_client(self) -> None:
+        """Helper examples should have a generic 'provider_client.py' example."""
+        contracts = self._read_file_contracts()
+        examples = contracts.get("backend_helper_files", {}).get("examples", [])
+        examples_str = " ".join(str(e) for e in examples)
+        assert "provider_client.py" in examples_str or "provider_client" in examples_str, (
+            "Helper examples should include generic 'provider_client.py' pattern."
+        )
+
+    def test_routes_example_uses_generic_naming(self) -> None:
+        """Routes helper should use 'routes_hooks.py', not 'routes_webhooks.py'."""
+        contracts = self._read_file_contracts()
+        examples = contracts.get("backend_helper_files", {}).get("examples", [])
+        examples_str = " ".join(str(e) for e in examples)
+        # Should have generic routes example
+        assert "routes_" in examples_str, (
+            "Helper examples should include a routes_* pattern."
+        )
+        # Should not be Stripe-specific
+        assert "stripe_webhook" not in examples_str.lower(), (
+            "Routes example must be provider-neutral, not Stripe-specific."
+        )
+
+    def test_worker_example_uses_generic_naming(self) -> None:
+        """Worker/service helper should use generic naming like 'event_worker.py'."""
+        contracts = self._read_file_contracts()
+        examples = contracts.get("backend_helper_files", {}).get("examples", [])
+        examples_str = " ".join(str(e) for e in examples)
+        assert "worker" in examples_str.lower() or "service" in examples_str.lower(), (
+            "Helper examples should include a generic worker or service pattern."
+        )

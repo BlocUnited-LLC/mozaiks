@@ -18,12 +18,10 @@ const ConsolePage        = lazy(() => import('./pages/ConsolePage.jsx'))
 const AppsPage           = lazy(() => import('./pages/AppsPage.jsx'))
 const WorkspaceUsagePage = lazy(() => import('./pages/WorkspaceUsagePage.jsx'))
 const WorkspaceHealthPage  = lazy(() => import('./pages/WorkspaceHealthPage.jsx'))
-const WorkspaceBillingPage = lazy(() => import('./pages/WorkspaceBillingPage.jsx'))
 const AppOverviewPage    = lazy(() => import('./pages/AppOverviewPage.jsx'))
 const AppHealthPage      = lazy(() => import('./pages/AppHealthPage.jsx'))
 const AppUsersPage       = lazy(() => import('./pages/AppUsersPage.jsx'))
 const AppUsagePage       = lazy(() => import('./pages/AppUsagePage.jsx'))
-const AppBillingPage     = lazy(() => import('./pages/AppBillingPage.jsx'))
 const AppIntegrationsPage = lazy(() => import('./pages/AppIntegrationsPage.jsx'))
 
 export function registerAdminComponents(registerComponent) {
@@ -49,10 +47,6 @@ export function registerAdminComponents(registerComponent) {
     description: 'Workspace health surface — cross-app runtime, workflow, and hosting health in one portfolio view.',
   })
 
-  registerComponent('WorkspaceBillingPage', WorkspaceBillingPage, {
-    description: 'Workspace billing surface — portfolio-level payment readiness, billing setup, and revenue visibility.',
-  })
-
   registerComponent('AppOverviewPage', AppOverviewPage, {
     description: 'App overview surface — shows app intent, readiness, and the next recommended build step.',
   })
@@ -67,10 +61,6 @@ export function registerAdminComponents(registerComponent) {
 
   registerComponent('AppUsagePage', AppUsagePage, {
     description: 'App usage surface — app-scoped usage, adoption, and metering visibility.',
-  })
-
-  registerComponent('AppBillingPage', AppBillingPage, {
-    description: 'App billing surface — app-scoped payment readiness, plans, subscriptions, and revenue reporting.',
   })
 
   registerComponent('AppIntegrationsPage', AppIntegrationsPage, {

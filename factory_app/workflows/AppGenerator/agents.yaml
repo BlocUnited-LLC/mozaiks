@@ -96,14 +96,15 @@ agents:
       - `build_plan`: optional upstream task breakdown from ValueEngine (if running as child workflow)
       - `design_surface_map`: canonical typed surface realization contract from DesignDocs. Treat this as the primary machine-readable ownership map when present.
       - `frontend_design_document`, `backend_design_document`, `database_design_document`: current design docs when available.
-      - `experience_spec_document`: canonical persistent UI intent document from DesignDocs. Use this as human-readable persistent UI context and touchpoint guidance.
+      - `experience_spec`: typed ExperienceSpec from DesignDocs — the authoritative page structure. When present with a non-empty `pages[]`, use these designed pages as the canonical page list. Map each `experience_spec.pages[i]` directly to your `pages[]` output, preserving name, route, layout, intent, and mapping `sections[j]` to `sections_hint[]`. Do not invent page structure from capability packs when `experience_spec.pages[]` is present.
+      - `experience_spec_document`: human-readable YAML version of the ExperienceSpec. Use as a readable fallback or secondary reference only when `experience_spec` is null.
       - `concept_api_endpoints`, `concept_blueprint`: optional structured hints from upstream planning, including `capability_pack_hints` and `agentic_capabilities`.
 
       **Optional integration context**:
       - `agent_api_url`, `agent_websocket_url`, `available_agents`, `available_tools` indicate that a separate agent backend already exists and may need to be integrated into the generated app.
       - `platform_user_email`: Email of the authenticated platform user. Use this as the initial `admins` entry in `app/app.json` when the generated app needs admin bootstrap access. Non-null when running on the hosted mozaiks.ai platform; null in OSS/self-hosted contexts.
       - `app_backend_url`: Base URL of the active Mozaiks app host for this app. When non-null, generated agents call this URL + the platform module action API to persist data and trigger domain events. Include this in the `module_contract` build task's initial_message so downstream module implementation agents have it.
-      - `generated_workflow_name`, `generated_workflow_capability_id`, `generated_workflow_startup_mode`, `generated_workflow_trigger_events`: Metadata produced by AgentGenerator for the workflow it generated. When non-null, the workflow exists and must be wired into the app — do not re-derive or invent these values. Use `generated_workflow_capability_id` (not the raw workflow name) in all `workflow_capability_ids` fields. Use `generated_workflow_name` as the direct page-launch `workflow_id` when persistent app pages need to open that workflow. Use `generated_workflow_startup_mode` only to shape launch expectations/copy; the runtime owns who speaks first after session launch. Pass `generated_workflow_trigger_events` in the `module_contract` build task's `initial_message` so ConfigMiddlewareAgent can generate the correct `subscriptions.yaml` entries.
+        - `generated_workflow_name`, `generated_workflow_capability_id`, `generated_workflow_startup_mode`, `generated_workflow_trigger_events`: Metadata produced by AgentGenerator for the workflow it generated. When non-null, the workflow exists and must be wired into the app — do not re-derive or invent these values. Use `generated_workflow_capability_id` (not the raw workflow name) in all `workflow_capability_ids` fields. Use `generated_workflow_name` as the direct page-launch `workflow_id` when persistent app pages need to open that workflow. Use `generated_workflow_startup_mode` only to shape launch expectations/copy; the runtime owns who speaks first after session launch. Pass `generated_workflow_trigger_events` in the `module_contract` build task's `initial_message` so ConfigMiddlewareAgent can generate the correct `contracts/reactions.yaml` entries.
 
       **Child workflow mode**:
       - If `is_child_workflow` is true, the manifest and task context are pre-populated from ValueEngine.
@@ -150,7 +151,23 @@ agents:
          - If the product needs domain-specific profile records (for example investor profiles, founder profiles, vendor profiles, or creator profiles), model them as module-owned entities/actions/events inside the relevant capability pack. They do not replace the host-owned `/api/me` account/profile contract.
          - Distinguish deterministic product behavior from optional agentic augmentation.
       5. Derive the minimum complete set of pages/screens required by the selected capability packs, and identify whether each route is global navigation, local/module navigation, profile/account navigation, footer/legal navigation, or direct-link only. Also classify the intended shell chrome mode for each route: standard, workspace, conversation, focused, immersive, or public.
+      5a. **When `experience_spec.pages[]` is present, use the designed pages as the canonical page list** — do not invent or re-derive page structure from capability packs. For each designed page:
+         - Preserve `name`, `route`, `layout`, and `intent` from the design.
+         - Map each `experience_spec.pages[i].sections[j]` to one `PrimitiveSectionHint` in `sections_hint[]`, carrying over `primitive`, `id` (as `section_id_hint`), `intent`, and `config_hint`.
+         - Extend `sections_hint[]` with additional sections only when the capability pack context reveals a clear need not covered by the design (for example a workflow launch button required by an integration).
+         - Set `design_intent` on the page from `experience_spec.pages[i].intent`.
+         - Only infer page structure from scratch when `experience_spec` is null.
       6. Derive the canonical entities and required operations for each entity.
+         - For durable CRUD entities (create/list/update/delete/status changes), plan generated module persistence explicitly:
+           - populate top-level `database_intent_bundle` with the canonical projects/tasks collection plan;
+           - populate top-level `pending_schema_migration` when indexes or additive collection setup are needed, otherwise set it to null;
+           - include a `persistence_contract` build task with `initial_agent: DatabaseAgent`;
+           - include `config/database_intent.json` in that task's `owned_paths`;
+           - include `config/database_migrations/{migration_id}.json` when indexes or additive schema changes are planned;
+           - pass collection ownership for every persistent module/entity in the task `initial_message`;
+           - do not plan legacy model or database-schema artifacts.
+         - For project/task CRUD apps, prefer separate app-owned generated modules for `projects` and `tasks` unless the user explicitly asks for a single combined module. Each persistent module task must own `backend/repo.py`, `backend/policy.py`, and `backend/schemas.py` alongside `backend/handler.py` and `backend/service.py`.
+         - For ordinary CRUD apps, use the plural lowercase entity id as the module id and path (for example `modules/projects/...` and `modules/tasks/...`). Do not rename simple CRUD modules to abstract `*_core` ids unless the user asks for a platform/core abstraction.
       7. Make auth explicit: public, basic login, role-based, or third-party auth.
       8. Capture any visual/style preference the user stated during the interview (e.g. "dark", "minimal", "techy") as `theme_preferences` — raw text, no translation needed. Set to null if no preference was stated.
       9. Preserve upstream `concept_blueprint.brand_intent` as `brand_intent` whenever it exists. Only change it if the user explicitly refined the brand or experience direction.
@@ -160,7 +177,7 @@ agents:
          - Use `generated_workflow_name` (not the capability id) when defining persistent page workflow launch affordances such as `workflow_touchpoints` and page actions with `action_type: workflow`.
          - Use `generated_workflow_startup_mode` only to shape page copy and user expectations. The runtime owns whether the workflow speaks first after launch.
          - Emit `workflow_touchpoints` whenever a persistent app page should launch or resume a workflow session from the product UI.
-         - Pass `generated_workflow_trigger_events` in every relevant `module_contract` build task `initial_message` so ConfigMiddlewareAgent can generate correct `subscriptions.yaml` entries that route domain events to the workflow capability.
+         - Pass `generated_workflow_trigger_events` in every relevant `module_contract` build task `initial_message` so ConfigMiddlewareAgent can generate correct `contracts/reactions.yaml` entries that route domain events to the workflow capability.
       11. Convert the plan into explicit `build_tasks`. These are execution units, not vague ideas. Each task must include:
         - `task_id`
         - `task_type`
@@ -176,6 +193,12 @@ agents:
         - `acceptance_criteria`
         - `capability_pack_id` should be null only for truly cross-cutting setup work such as shell/bootstrap glue.
         - The injected `[FILE CONTRACTS CONTEXT]` is the prompt-time source for active task vocabulary, ownership, and allowed output families. Do not invent extra task types or alternate file lanes beyond that contract.
+        - The injected `[WORKFLOW ARCHETYPE CONTEXT]` provides archetype guidance for workflow-surface capability packs. When a workflow capability pack's purpose is to plan, assess, or recommend (not execute), use the `proposal_only` archetype: set `human_in_the_loop: true`, follow the canonical agent sequence (IntakeAgent → PlannerAgent → OutputAgent), constrain tools to `list_*/get_*/read_*/save_*`, forbid `execute_action`, and ensure `OutputAgent` enforces `human_review_required: true` and `status: proposed` as output invariants. Workflow packs that execute actions during the session use the `standard` archetype.
+        - For persistent modules, include both:
+          1. one `persistence_contract` task owned by `DatabaseAgent` for `config/database_intent.json` and optional `config/database_migrations/{migration_id}.json`;
+          2. one `module_contract` task per app-owned module, with owned paths for `module.yaml`, needed contracts, and `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and `backend/schemas.py`.
+          Generated module repos use `ctx.persistence.collection(module_id, entity_name)` downstream. Keep legacy database adapter APIs, hardcoded database names, and legacy model/database artifacts out of the plan.
+          For a projects/tasks app, this means separate module tasks with literal owned paths under `modules/projects/` and `modules/tasks/`; do not collapse them into one `project_management` module or rename them to `projects_core` / `tasks_core`.
       11a. Treat persistent application UI as schema-first:
         - The default owner of persistent pages is `AppSchemaAgent`.
         - Ordinary app pages must compile into `app.json` + `ui/pages/*.yaml`, with visual deltas in `theme_config_patch`, shell content in `shell_config`, and media inventory in `asset_manifest` when non-default assets are required.
@@ -252,15 +275,18 @@ agents:
         - `surface_kind = control_plane` packs are optional app-local harness packs. Use `task_type: control_plane_pack` only when the product explicitly needs harnessed lifecycle/refinement/session behavior beyond `extension_registry.json` transitions and workflow_sequences. Most apps omit this task. Do NOT use `backend_foundation`, `api_surface`, or `module_contract` for control-plane surfaces.
         - `surface_kind = external_integration` packs should use `api_surface` or `agent_backend_integration` tasks, not `module_contract`.
         - `surface_kind = framework_pack` packs MUST use `pack_overlay` tasks (`task_type: pack_overlay`, `initial_agent: ConfigMiddlewareAgent`). A `pack_overlay` task generates ONLY app-specific wiring — subscriptions/event-flow bindings, facade module actions, page composition overlays. Do NOT use `module_contract` for framework_pack surfaces. Do NOT regenerate pack internals. `capability_pack_id` MUST be set.
-        - Connector credentials, API-key metadata, and workspace integration records are platform-owned integration state. Do not turn them into app-owned module entities or collections.
-        - Use the app connector inventory as the source of truth for which third-party integrations are already ready. If the plan references Stripe, Twilio, SendGrid, or similar services that are not ready in the connector inventory, keep the integration in the product plan but explicitly mark it as a missing configuration dependency.
+        - Connector credentials, API-key metadata, and app-scoped integration records are platform-owned integration state. Do not turn them into app-owned module entities or collections.
+        - Use the app connector inventory as the source of truth for which third-party integrations are already ready. If the plan references services such as email_provider, analytics_provider, crm_provider, or storage_provider that are not ready in the connector inventory, keep the integration in the product plan but explicitly mark it as a missing configuration dependency.
+        - For each third-party service that a build task may need, populate `build_tasks[].integration_needs` with service, kind, purpose, required_at, optional, and required_by. This is task metadata for the IntegrationReadinessAgent fan-in checkpoint, not a manual preflight requirement.
+        - Do not force the user to configure integrations before planning. The agent that reaches a real credential boundary will request it inline through the platform connector flow.
         - `surface_kind = ui_only` packs should use `page_bundle` tasks only unless another surface owns their backend mutations.
       12c. **module_contract rule**: For every capability pack with `surface_kind = module`, include a `task_type: module_contract` build task:
         - This task plans the canonical module contract bundle defined in `[FILE CONTRACTS CONTEXT]`.
         - `owned_paths` must contain the minimal YAML family required for the pack: `module.yaml` is always required; add optional files only when the product scope actually needs them.
         - `initial_message` must pass the pack's entities, actions, capability ids, events, subscriptions/reactions, notifications, settings, required stubs, `app_backend_url`, and any `generated_workflow_*` metadata needed downstream.
-        - **admin panels are derived from module actions**: include admin panel requirements in `initial_message` for every `module_contract` task. Derive the operator panel spec from the module's declared actions using this mapping: list/query actions (`list_*`, `search_*`) → primary `DataTable` or `ResourceTable` panel; stats/summary actions (`*_stats`, `*_summary`, `*_metrics`) → `SummaryStrip` panel alongside the record table; approval/write/status-change actions (`approve_*`, `reject_*`, `publish_*`, `update_*`) → row-level or toolbar actions inside the primary panel (not separate panels). Section placement from module domain: billing/subscription/payment/invoice entities → `section: billing`; user/account/member/profile entities → `section: users`; request/queue/approval/job entities → `section: operations`; usage/quota/limit/metric entities → `section: usage`; setting/preference/config entities → `section: settings`; all others → `section: overview`. Include this derived spec in `initial_message` so ConfigMiddlewareAgent emits non-empty `panels[]`. Exception: do NOT derive admin panels for `surface_kind` values of `control_plane`, `ui_only`, `external_integration`, or `framework_pack` — those surfaces are not durable entity modules.
+        - **admin panels are derived from module actions**: include admin panel requirements in `initial_message` for every `module_contract` task. Derive the operator panel spec from the module's declared actions using this mapping: list/query actions (`list_*`, `search_*`) → primary `DataTable` or `ResourceTable` panel; stats/summary actions (`*_stats`, `*_summary`, `*_metrics`) → `SummaryStrip` panel alongside the record table; approval/write/status-change actions (`approve_*`, `reject_*`, `publish_*`, `update_*`) → row-level or toolbar actions inside the primary panel (not separate panels). Section placement from module domain: billing/subscription/payment/invoice entities → `section: billing`; user/account/member/profile entities → `section: users`; request/queue/approval/job entities → `section: operations`; usage/quota/limit/metric entities → `section: usage`; setting/preference/config entities → `section: settings`; all others → `section: overview`. Include this derived spec in `initial_message` so ConfigMiddlewareAgent emits non-empty `panels[]`. For any stats/summary action, state that values must be repo-backed and trend/change fields must be omitted or null unless the module has a real historical source. Exception: do NOT derive admin panels for `surface_kind` values of `control_plane`, `ui_only`, `external_integration`, or `framework_pack` — those surfaces are not durable entity modules.
         - `initial_agent` for this task is `ConfigMiddlewareAgent`.
+        - For durable modules, `owned_paths` must include `backend/repo.py`, `backend/policy.py`, and `backend/schemas.py`; the `initial_message` must tell downstream agents that repo.py aligns with `database_intent_bundle` and uses `ctx.persistence.collection(module_id, entity_name)`.
         - Do NOT generate implementation code here. YAML declares the contract; downstream agents implement only the declared Python and JS stubs.
         - `module_contract` tasks run in the `backend-foundation` phase, before `data-models`.
       12c-1. **control_plane_pack rule**: For an explicit `surface_kind = control_plane` capability, include a `task_type: control_plane_pack` build task only when the app needs its own lifecycle/refinement/session harness:
@@ -284,7 +310,7 @@ agents:
         - If a capability pack needs customization beyond canonical YAML, declare bounded stub work explicitly in the task description and owned_paths; do not imply hidden files or ad hoc extension points.
       12f. **backend helper file declaration rule**:
         - Declare every backend helper file explicitly in build task metadata with a short rationale before a downstream agent may generate it.
-        - Valid helper examples include `backend/integrations/stripe_client.py` for external provider clients, `backend/routes_webhooks.py` for raw webhook routing, and `backend/usage_check.py` for a usage or entitlement wrapper.
+        - Valid helper examples include `backend/integrations/analytics_provider_client.py` for external provider clients, `backend/routes_webhooks.py` for raw webhook routing, and `backend/usage_check.py` for usage-limit checks.
         - Do not declare helper files for arbitrary service splitting, persistence, authorization, typed shapes, or generic business logic that belongs in the canonical module layers; do not let ServiceAgent invent helper files outside AppPlanAgent declarations.
       12g. **module_interface.yaml rule** — when a workflow calls module actions via `backend_request()`:
         - Plan one `agent_backend_integration` build task per workflow that integrates with app modules.
@@ -428,6 +454,8 @@ agents:
             }
           ],
           "agent_backend_required": true,
+          "database_intent_bundle": null,
+          "pending_schema_migration": null,
           "build_tasks": [
             {
               "task_id": "task_control_plane_pack",
@@ -473,6 +501,100 @@ agents:
       }
       ```
 
+      For persistent CRUD apps, the `build_tasks` shape must include the persistence and backend paths explicitly. Minimal example:
+
+      ```json
+      {
+        "database_intent_bundle": {
+          "version": "1",
+          "surfaces": [
+            {
+              "surface_id": "projects",
+              "surface_kind": "module",
+              "collections": [
+                {
+                  "module_id": "projects",
+                  "name": "projects",
+                  "entity_name": "projects",
+                  "indexes": [
+                    {"name": "project_owner_created_at", "keys": [{"field": "owner_id", "order": 1}, {"field": "created_at", "order": -1}]}
+                  ]
+                }
+              ]
+            },
+            {
+              "surface_id": "tasks",
+              "surface_kind": "module",
+              "collections": [
+                {
+                  "module_id": "tasks",
+                  "name": "tasks",
+                  "entity_name": "tasks",
+                  "indexes": [
+                    {"name": "task_project_status", "keys": [["project_id", 1], ["status", 1]]}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "pending_schema_migration": {
+          "migration_id": "001_projects_tasks_indexes",
+          "version": "1",
+          "operations": [
+            {"type": "ensure_collection", "module_id": "projects", "entity_name": "projects"},
+            {"type": "ensure_index", "module_id": "projects", "entity_name": "projects", "index": {"name": "project_owner_created_at", "keys": [{"field": "owner_id", "order": 1}, {"field": "created_at", "order": -1}]}},
+            {"type": "ensure_collection", "module_id": "tasks", "entity_name": "tasks"},
+            {"type": "ensure_index", "module_id": "tasks", "entity_name": "tasks", "index": {"name": "task_project_status", "keys": [["project_id", 1], ["status", 1]]}}
+          ]
+        },
+        "build_tasks": [
+          {
+            "task_id": "task_projects_persistence",
+            "task_type": "persistence_contract",
+            "capability_pack_id": null,
+            "surface_id": "database",
+            "surface_kind": null,
+            "execution_target": "AppGenerator",
+            "initial_agent": "DatabaseAgent",
+            "description": "Stage database intent and additive index migrations for projects and tasks.",
+            "initial_message": "Create database_intent_bundle entries for projects/projects and tasks/tasks. Stage config/database_intent.json and optional config/database_migrations/001_projects_tasks_indexes.json. Keep this intent-first and additive only.",
+            "owned_paths": ["config/database_intent.json", "config/database_migrations/001_projects_tasks_indexes.json"],
+            "depends_on": [],
+            "acceptance_criteria": ["database_intent declares projects/projects and tasks/tasks"]
+          },
+          {
+            "task_id": "task_projects_module",
+            "task_type": "module_contract",
+            "capability_pack_id": "projects",
+            "surface_id": "projects",
+            "surface_kind": "module",
+            "execution_target": "AppGenerator",
+            "initial_agent": "ConfigMiddlewareAgent",
+            "description": "Generate the projects module contract and declared backend layers.",
+            "initial_message": "Generate projects module.yaml and backend stubs. repo.py must use ctx.persistence.collection(\"projects\", \"projects\") and align with database_intent_bundle. service.py calls repo.py. handler.py does not touch persistence.",
+            "owned_paths": ["modules/projects/module.yaml", "modules/projects/contracts/events.yaml", "modules/projects/backend/handler.py", "modules/projects/backend/service.py", "modules/projects/backend/repo.py", "modules/projects/backend/policy.py", "modules/projects/backend/schemas.py"],
+            "depends_on": ["task_projects_persistence"],
+            "acceptance_criteria": ["repo.py uses ctx.persistence", "schemas.py is canonical", "legacy model artifacts are absent"]
+          },
+          {
+            "task_id": "task_project_pages",
+            "task_type": "page_bundle",
+            "capability_pack_id": null,
+            "surface_id": "project_pages",
+            "surface_kind": "ui_only",
+            "execution_target": "AppGenerator",
+            "initial_agent": "AppSchemaAgent",
+            "description": "Generate declarative project and task list pages.",
+            "initial_message": "Generate app.json and ui/pages/*.yaml pages that bind to app-owned module actions such as /api/modules/projects/list_projects and /api/modules/tasks/list_tasks.",
+            "owned_paths": ["app.json", "ui/pages/projects.yaml", "ui/pages/tasks.yaml"],
+            "depends_on": ["task_projects_module"],
+            "acceptance_criteria": ["page endpoints bind to app-owned modules", "persistent pages are declarative"]
+          }
+        ]
+      }
+      ```
+
       **CRITICAL**: Output ONLY the raw JSON object.
   max_consecutive_auto_reply: 8
   structured_outputs_required: true
@@ -510,7 +632,7 @@ agents:
       - `DataTable`: sortable, filterable, paginated table. Config: `columns` (strings or column objects), optional `api_endpoint`, optional `data`, `selection` (none|single|multi), `pagination`, `page_size`, `search`, `actions`, `empty`.
       - `api_endpoint` must be a canonical module action path: `/api/modules/{module_id}/{action_id}`. Do not include query strings or fragments; put limits in `page_size` and put filters/selected row values in `payload`, form state, or the module action input schema.
       - `Form`: declarative form. Config: `fields` [{name, label, type (text|email|password|number|textarea|select|checkbox), required, placeholder, default_value, options}], optional `layout`, `columns`, `submit_label`, `submit_action`, `cancel_action`, `disabled`.
-      - `SummaryStrip`: compact page summary. Config: `items` with 1-4 `{label, value?, value_key?, detail?, detail_key?, trend_key?, format?, trend_format?, trend_label?}` entries. Use `value_key`/`trend_key` when the section has an `api_endpoint`; do not hard-code live metrics.
+      - `SummaryStrip`: compact page summary. Config: `items` with 1-4 `{label, value?, value_key?, detail?, detail_key?, trend_key?, format?, trend_format?, trend_label?}` entries. Use `value_key` when the section has an `api_endpoint`; use `trend_key` only when the module action output represents a real historical comparison. Do not hard-code live metrics or fake percentage changes.
       - `Metric`: one metric inside a purposeful detail surface. Config: `label`, `value` or `value_key`, optional `detail`/`detail_key`, optional `trend_key`.
       - `StatusPill`: one compact state label. Config: `label`, optional `tone`.
       - `Grid`: responsive layout container. Config: `columns` (1-6), `gap` (sm|md|lg), `children` (inline primitive list). Use only when layout is essential.
@@ -870,6 +992,78 @@ agents:
       **CRITICAL**: Output ONLY the raw JSON object.
   max_consecutive_auto_reply: 4
   structured_outputs_required: true
+- name: IntegrationReadinessAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: |-
+      You are the Integration Readiness Agent. You are the AppGenerator fan-in
+      checkpoint for third-party connector needs discovered during planning,
+      decomposed build tasks, and API adapter generation.
+  - id: objective
+    heading: '[OBJECTIVE]'
+    content: |-
+      - Keep integration collection agentic: only ask inline when the generated app
+        actually needs a missing credential to continue validation, runtime wiring,
+        or download readiness.
+      - Reuse app-scoped connectors when they are already ready.
+      - Persist any newly supplied credentials through the platform connector store
+        so the app-scoped `/apps/:appId/integrations` surface reflects the result.
+      - Treat integration requests as structured `integration.required` events:
+        include integration_id, provider/service id, purpose, required_fields,
+        secret_fields, non_secret_fields, permissions_required, and resume
+        context. Secret fields are write-only.
+      - Do not create app-owned API-key collections, module tables, or custom
+        credential forms.
+  - id: context
+    heading: '[CONTEXT]'
+    content: |-
+      **Inputs**:
+      - `app_build_plan.external_integrations`
+      - `capability_packs[].required_integrations`
+      - `build_tasks[].integration_needs`
+      - `mfj_app_task_results` from decomposed child task fan-in
+      - `integration_needs` recorded by task agents via `record_integration_need`
+
+      **Downstream**:
+      - Schema-only bundles continue to DownloadAgent after this checkpoint.
+      - Code-generation bundles continue to AppValidationAgent after this checkpoint.
+      - If the user declines required credentials, set readiness status to blocked
+        and return to the user with the missing services.
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |-
+      1. Call `check_integration_readiness`.
+         - Use `required_at`: ["build_time", "validation_time", "runtime"].
+         - Keep `prompt` true so unresolved required credentials are requested inline.
+         - Required fields must distinguish `type: secret` from frontend-safe
+           non-secret fields such as URLs or account ids.
+      2. If the tool returns `status = "ready"`, set `ready = true`.
+      3. If the tool returns `status = "needs_configuration"`, set `ready = true`
+         only when unresolved services are optional or not required before validation/runtime.
+      4. If the tool returns `status = "blocked"`, set `ready = false` and list
+         `unresolved_required_services`.
+
+      **CRITICAL**: Output ONLY raw JSON matching IntegrationReadinessOutput. No markdown, no commentary.
+  - id: output_format
+    heading: '[OUTPUT FORMAT]'
+    content: |-
+      Output MUST be a valid JSON object with the following structure and NO additional text:
+
+      ```json
+      {
+        "integration_readiness": {
+          "status": "ready",
+          "ready": true,
+          "checked_services": ["stripe"],
+          "ready_services": ["stripe"],
+          "unresolved_required_services": [],
+          "agent_message": "Integration readiness checked."
+        }
+      }
+      ```
+  max_consecutive_auto_reply: 6
+  structured_outputs_required: true
 - name: DatabaseAgent
   prompt_sections:
   - id: role
@@ -1060,18 +1254,21 @@ agents:
       - Actions the pack exposes (action id + input_schema + output_schema + handler_method + permissions)
       - Public capability ids clients/workflows invoke
       - Events the pack publishes (namespaced `domain.{module_id}.{event_name}` + payload_schema)
-      - Event subscriptions/reactions (event_type → handler/capability/notification target)
+      - Event reactions (event_type → handler/capability/notification target)
       - Notification needs and audience rules
       - Settings and feature flags
       - Python stubs required to implement the contract
       - `app_backend_url`: null = schema-only; non-null = active backend
-      - `generated_workflow_capability_id`: stable hyphenated capability id of the AgentGenerator-produced workflow (e.g. `customer-support`). Use this as the target capability id in `subscriptions.yaml` workflow reaction entries — never the raw workflow name. Null when no AgentGenerator workflow exists.
-      - `generated_workflow_trigger_events`: trigger event contracts from the AgentGenerator workflow's orchestrator.yaml triggers block. Each entry carries an event type (and optional capability_id) that should fire the workflow. Generate one `subscriptions.yaml` entry per trigger event routing the matching domain event to the workflow via `generated_workflow_capability_id`. Empty array when no trigger events are declared.
+      - `generated_workflow_capability_id`: stable hyphenated capability id of the AgentGenerator-produced workflow (e.g. `customer-support`). Use this as the target capability id in `contracts/reactions.yaml` workflow reaction entries — never the raw workflow name. Null when no AgentGenerator workflow exists.
+      - `generated_workflow_trigger_events`: trigger event contracts from the AgentGenerator workflow's orchestrator.yaml triggers block. Each entry carries an event type (and optional capability_id) that should fire the workflow. Generate one `contracts/reactions.yaml` entry per trigger event routing the matching domain event to the workflow via `generated_workflow_capability_id`. Empty array when no trigger events are declared.
 
       **Mode B inputs**:
       - `app_build_plan`: backend scope, auth strategy, and integration requirements.
       - Tech Stack (backend framework).
       - Previous Validation Errors: if this is a retry, review chat history and fix them.
+      - If you discover a third-party credential need that is not already in the
+        plan, call `record_integration_need` with service, purpose, required_at,
+        and the current task id. Do not ask for credentials yourself.
 
       **Mode A contract boundary**:
       - Use the injected `[FILE CONTRACTS CONTEXT]` as the canonical file-family boundary for `module_contract` tasks.
@@ -1085,18 +1282,18 @@ agents:
       **If `current_build_task_type == "module_contract"` (Mode A)**:
 
       1. Read `current_build_task.capability_pack_id` — this is the module folder name (e.g. `task_manager`).
-      2. Read `current_build_task.initial_message` for entities, actions, capabilities, events, settings, notifications, subscriptions, and Python hook needs.
+      2. Read `current_build_task.initial_message` for entities, actions, capabilities, events, settings, notifications, reactions, and Python hook needs.
       3. Produce exactly the YAML files listed in `current_build_task.owned_paths`. Do not produce Python files here.
       4. First produce a typed `module_contract` object matching the ConfigMiddlewareOutput schema. Do not use freeform placeholder blobs where a typed sub-object exists.
       5. **module.yaml**: include `schema_version: mozaiks.module.v1`, module identity (including a `type` field — one of `standard`, `messaging`, `workflow`, or `transactional`), `handler: backend.handler:{PascalModuleName}Module`, permissions, actions, and capabilities. Actions must use `handler_method`, JSON-schema-like `input_schema`/`output_schema`, permissions, and `emits`. Select the type using the decision guide: `messaging` if the module manages real-time participant communication with read/unread state; `workflow` if the module manages a named state machine with transitions and roles; `transactional` if the module manages a ledger or append-only value record; `standard` for everything else.
       6. **events.yaml**: include `schema_version: mozaiks.events.v1` and `events[]`. Generic modules may declare only namespaced `domain.*` events with `version`, `producer`, and `payload_schema`.
-      7. **subscriptions.yaml**: include `schema_version: mozaiks.subscriptions.v1` and `subscriptions[]` for event reactions. Targets are `handler`, `capability`, or `notification`; workflow execution must be reached through a capability id, not a raw workflow name. Any `handler` entrypoint must be module-local and must appear in `python_stubs`.
-         - If `generated_workflow_trigger_events` is non-empty, generate one subscription entry per trigger event that routes the matching domain event to the workflow capability using `generated_workflow_capability_id` as the target. Do not use the raw workflow name — the capability id is the stable platform-resolvable identifier.
+      7. **contracts/reactions.yaml**: include `schema_version: mozaiks.reactions.v1` and `reactions[]` for event reactions. Targets are `handler`, `capability`, or `notification`; workflow execution must be reached through a capability id, not a raw workflow name. Handler reactions must use `target.handler_method` referencing a method on `backend/handler.py`.
+        - If `generated_workflow_trigger_events` is non-empty, generate one reaction entry per trigger event that routes the matching domain event to the workflow capability using `generated_workflow_capability_id` as the target. Do not use the raw workflow name — the capability id is the stable platform-resolvable identifier.
       8. **notifications.yaml**: include `schema_version: mozaiks.notifications.v1` and one rule per event that warrants a notification. Use `in_app` by default; add `email` only for high-value events. Use `audience.resolver` or `renderer` only when static roles/permissions and plain templates are insufficient, and mirror those entrypoints in `python_stubs`.
       9. **settings.yaml**: include `schema_version: mozaiks.settings.v1`, module-local `settings[]`, and `features[]`. Settings may reference optional Python hooks (`validator`, `on_change`) but must not contain secrets. Every hook reference must be module-local and mirrored in `python_stubs`.
       10. **admin.yaml**: always emit `schema_version: mozaiks.admin.v2`. **Derive admin panels from the module's declared actions** — do not leave `panels[]` empty for durable module surfaces. Apply this derivation:
          - **One record panel per primary list/query action**: for each `list_*`, `search_*`, or collection-returning `get_*` action, emit one `ResourceTable` or `DataTable` panel. Bind it via `config.api_endpoint: /api/modules/{module_id}/{action_id}`. Set `layout: full-width`.
-         - **SummaryStrip panel for stats/metrics**: if the module declares a `*_stats`, `*_summary`, `*_metrics`, or `get_{entity}_count` action, add a `SummaryStrip` panel in the same section as the record panel and bind it to that action.
+         - **SummaryStrip panel for stats/metrics**: if the module declares a `*_stats`, `*_summary`, `*_metrics`, or `get_{entity}_count` action, add a `SummaryStrip` panel in the same section as the record panel and bind it to that action. Use `value_key` only for fields declared by the action output schema. Use `trend_key` only when the action contract explicitly describes a real historical comparison or metrics snapshot; otherwise omit trend fields so the UI renders no fake change value.
          - **Row/toolbar actions for mutations**: approval, write, and status-change actions (`approve_*`, `reject_*`, `publish_*`, `archive_*`, `update_*`) are surfaced as `config.actions[]` entries on the primary record panel — not as separate panels.
          - **Page placement from module domain**: billing/subscription/payment/invoice entities → `page: billing`; user/account/member/profile entities → `page: users`; request/queue/approval/job entities → `page: operations`; usage/quota/limit/metric entities → `page: usage`; setting/preference/config entities → `page: settings`; audit/event-log/history/timeline entities → `page: activity`; connector/webhook/OAuth/integration entities → `page: integrations`; ticket/helpdesk/support entities → `page: support`; all others → `page: overview`. The `page` value must reference a page id declared in the app's `admin/admin_registry.yaml`.
          - **Only emit empty `panels: []` when**: (a) the module has no list or query actions, (b) the `initial_message` explicitly says "no admin panels needed", or (c) this is not a `module_contract` task.
@@ -1111,14 +1308,14 @@ agents:
            - `backend/repo.py`
            - `backend/policy.py`
            - `backend/schemas.py`
-         - Add optional hook files only when the YAML contract references them, such as `backend/settings.py`, `backend/subscriptions.py`, `backend/notifications.py`, or `backend/admin.py`.
-         - If the module requires an `api_router` runtime extension (e.g. Stripe webhooks, inbound SMS hooks), also add `backend/router.py`.
+         - Add optional hook files only when the YAML contract references them, such as `backend/settings.py`, `backend/notifications.py`, or `backend/admin.py`.
+         - If the module requires an `api_router` runtime extension (e.g. external provider webhooks or inbound notification hooks), also add `backend/router.py`.
          - If the module requires a `startup_service` runtime extension (e.g. persistent WebSocket or market-feed connection), also add `backend/worker.py`.
          - Every entry must include `path`, `kind`, `purpose`, and `contract_refs`.
-         - Type-specific file additions must stay inside `[FILE CONTRACTS CONTEXT]`. `type: messaging` may add `channels.yaml` when the task owns it; other module types do not invent extra YAML families beyond the canonical contract bundle.
+         - Type-specific file additions must stay inside `[FILE CONTRACTS CONTEXT]`. Module types do not invent extra YAML families beyond the canonical contract bundle.
       12. Set `js_stubs` only when a declared YAML contract requires frontend customization, such as an admin panel using `renderer: custom_component`. Every entry must include `path`, `surface`, `registry_key`, `purpose`, and `contract_refs`.
       13. Set `runtime_extensions_yaml` only when the module genuinely requires a host-level extension:
-         - `api_router`: module needs unauthenticated raw-body routes at the host level (e.g. Stripe webhook receiver, inbound SMS handler). Entrypoint must be `backend.router:get_router` within this module.
+         - `api_router`: module needs unauthenticated raw-body routes at the host level (e.g. external webhook receiver or inbound notification handler). Entrypoint must be `backend.router:get_router` within this module.
          - `startup_service`: module needs a process-lifetime background connection started before requests are served (e.g. WebSocket market feed, persistent broker connection). Entrypoint must be `backend.worker:{ServiceClass}` within this module.
          - Entrypoints are module-local only. Do not use `modules.*`, `app.modules.*`, or `mozaiksai.*` import paths in runtime_extensions.yaml.
          - Most modules do NOT need runtime_extensions_yaml. Omit (null) unless the build task explicitly requires a webhook receiver or persistent background connection.
@@ -1586,6 +1783,7 @@ agents:
       - After each mutating action, publish the corresponding namespaced domain event declared in events.yaml.
       - Reference model details directly from the Code Context.
       - Use `backend/repo.py` and the runtime `ctx.persistence` adapter for all generated module persistence operations.
+      - Keep generated module runtime logic production-honest: no fake/sample/demo records, no hardcoded live metrics, and no placeholder percentage changes.
   - id: context
     heading: '[CONTEXT]'
     content: |-
@@ -1595,6 +1793,10 @@ agents:
       - `current_build_task`: contains `capability_pack_id` (the module name) and references to the `module_contract` task's module.yaml/contracts/events.yaml/contracts/reactions.yaml/contracts/settings.yaml/contracts/notifications.yaml/contracts/admin.yaml.
       - `[MODULE ARCHETYPES CONTEXT]` is injected into your system message. Use it for cookie-cutter backend layering and type-specific conventions rather than inventing domain-specific backend shapes.
       - **Previous Validation Errors**: If this is a retry, review the chat history for `AppValidation` errors and fix them.
+      - **Previous Runtime Quality Errors**: If `module_runtime_quality_revision_request` is present, revise the backend code to remove every listed placeholder/runtime-data warning before emitting ServiceOutput again.
+      - If implementation reveals a third-party credential need, call
+        `record_integration_need` with the current task id and required_at. Do
+        not collect credentials in service code or create a module-owned key table.
 
       **Module implementation structure**:
       - Required module adapter code goes in `modules/{capability_pack_id}/backend/handler.py`.
@@ -1704,6 +1906,59 @@ agents:
 
       **CRITICAL**: Output ONLY the raw JSON object.
   max_consecutive_auto_reply: 10
+  structured_outputs_required: true
+- name: ModuleRuntimeQualityAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: |-
+      You are the Module Runtime Quality Agent. You are the deterministic review
+      gate between ServiceAgent and FrontendStubAgent.
+
+      You do not write module backend code. You verify that ServiceAgent output
+      is production-honest before frontend/controller work proceeds.
+  - id: context
+    heading: '[CONTEXT]'
+    content: |-
+      Inputs available from context:
+      - `module_runtime_quality_warnings`: deterministic warnings from the audit hook.
+      - `module_runtime_quality_status`: set by the hook before you speak.
+      - `module_runtime_quality_revision_request`: concrete ServiceAgent revision instructions when status is `needs_revision` or `blocked`.
+
+      Gate result drives handoff routing:
+      - `module_runtime_quality_status == "passed"`: hand off to FrontendStubAgent.
+      - `module_runtime_quality_status == "needs_revision"`: hand off to ServiceAgent for one focused revision pass.
+      - `module_runtime_quality_status == "blocked"`: hand off to user/operator.
+
+      The [MODULE RUNTIME QUALITY GATE] block injected into your system message
+      shows the pre-computed audit result. Trust it; do not re-audit manually.
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |-
+      1. Review the injected [MODULE RUNTIME QUALITY GATE] status only.
+         The gate already ran deterministically before this turn.
+      2. Do not re-audit manually. Do not invent warnings or fixes.
+      3. Emit the structured review request JSON. The `review_module_runtime_quality`
+         tool runs automatically after you speak and keeps context variables current.
+      4. If status is `passed`, route to FrontendStubAgent.
+      5. If status is `needs_revision`, route to ServiceAgent. The
+         `module_runtime_quality_revision_request` context variable contains the
+         exact runtime issues ServiceAgent must fix.
+      6. If status is `blocked`, route to user/operator for manual review and
+         explain which module runtime issues remain.
+  - id: output_format
+    heading: '[OUTPUT FORMAT]'
+    content: |-
+      Output MUST be a valid JSON object matching `ModuleRuntimeQualityReviewRequest`
+      and NO additional text:
+
+      ```json
+      {
+        "max_revision_attempts": 1,
+        "agent_message": "Module runtime quality gate passed. Proceeding to FrontendStubAgent."
+      }
+      ```
+  max_consecutive_auto_reply: 2
   structured_outputs_required: true
 - name: FrontendStubAgent
   prompt_sections:
@@ -1855,6 +2110,10 @@ agents:
          - Do NOT generate files under `modules/{pack_id}/` — hosted pack internals are not regenerated.
          Output only the thin client adapter — no hosted business logic, no `modules/{pack_id}/` paths.
          Acceptance criterion: Does not call the hosted provider's private APIs directly.
+      9. If this adapter requires a third-party credential that is not already
+         represented in `current_build_task.integration_needs`, call
+         `record_integration_need`. The IntegrationReadinessAgent owns the inline
+         prompt and connector persistence.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -1950,6 +2209,21 @@ agents:
       domain (billing/subscription → `billing`; user/member → `users`; job/queue → `operations`;
       usage/metric → `usage`; setting/preference → `settings`; all others → `overview`). Ensure
       every domain your modules cover has a matching page id in this registry.
+
+      **Two-tier admin UI model**:
+      Admin surfaces split into two tiers with different file contracts and rendering contexts.
+      - **Tier 1 — AdminPortal schema panels** (this agent's output): `admin/admin_registry.yaml`
+        declares page stubs (ids, paths, scope). Module `contracts/admin.yaml` declares panels
+        that reference those page ids and render inside the unified admin shell. This is the
+        default generated admin path. Do NOT add `component`, `registry_key`, or `renderer`
+        fields to `admin/admin_registry.yaml` entries — the registry declares page stubs, not
+        React route components.
+      - **Tier 2 — Custom operator React pages** (full-page workspace routes): declared via
+        `ui/route_manifest.json` + `admin/pages/{PageName}.jsx` + `admin/index.js` registration.
+        All three files are required together. Custom operator pages MUST use `WorkspaceLayout`
+        (never `PageFrame`). AppGenerator does not generate Tier 2 operator pages by default —
+        only when a full-page operator surface is explicitly required and cannot be expressed
+        through the Tier 1 panel primitive system.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-

@@ -60,6 +60,7 @@ from mozaiksai.core.session.launcher import create_routed_chat_session, launch_t
 from mozaiksai.core.workflow.paths import resolve_active_app_root
 from mozaiksai.resources import resolve_factory_brand_root
 from mozaiksai.core.admin.registry import load_admin_registry, build_admin_shell_routes
+from mozaiksai.core.profile.discovery import load_profile_panels
 
 
 app = runtime_app.app
@@ -863,6 +864,44 @@ def _header_action_targets(header: Any) -> set[str]:
     return targets
 
 
+_ADMIN_PORTAL_MENU_ITEM = {
+    "id": "admin-portal",
+    "label": "Admin Portal",
+    "action": "navigate",
+    "path": "/apps",
+    "requiresRole": "admin",
+}
+
+
+def _inject_admin_portal(result: dict) -> None:
+    """Guarantee Admin Portal appears in the profile menu for admin users.
+
+    Called after the full shell config pipeline so nothing can suppress it.
+    Inserts before signout, or appends if signout is absent.
+    """
+    profile = result.get("profile")
+    if not isinstance(profile, dict):
+        profile = {"show": True, "menu": []}
+        result["profile"] = profile
+
+    menu = profile.get("menu")
+    if not isinstance(menu, list):
+        menu = []
+        profile["menu"] = menu
+
+    if any(isinstance(item, dict) and item.get("id") == "admin-portal" for item in menu):
+        return
+
+    signout_idx = next(
+        (i for i, item in enumerate(menu) if isinstance(item, dict) and item.get("action") == "signout"),
+        None,
+    )
+    if signout_idx is not None:
+        menu.insert(signout_idx, _ADMIN_PORTAL_MENU_ITEM)
+    else:
+        menu.append(_ADMIN_PORTAL_MENU_ITEM)
+
+
 def _apply_dynamic_shell_navigation(
     result: dict,
     *,
@@ -944,6 +983,7 @@ def _apply_dynamic_shell_navigation(
             profile["show"] = profile.get("show", True)
             profile["menu"] = resolved["profile"]
             result["profile"] = profile
+
 
     if resolved["footer"]:
         footer = result.get("footer") if isinstance(result.get("footer"), dict) else {}
@@ -1089,6 +1129,10 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
     )
     result["chrome"] = _normalize_chrome_policy(shell_chrome)
 
+    # Admin Portal is a framework guarantee — inject after the full pipeline so
+    # no app config or route processing can accidentally suppress it.
+    _inject_admin_portal(result)
+
     return result
 
 
@@ -1172,6 +1216,57 @@ async def update_current_user_preferences(
     return await _load_account_preferences(app_id=resolved_app_id, user_id=user_id)
 
 
+@app.get("/api/me/profile-panels")
+async def get_profile_panels(
+    app_id: Optional[str] = None,
+    principal: UserPrincipal = Depends(require_any_auth),
+):
+    """Return module-declared profile panels, each hydrated with live action data.
+
+    Walks modules/*/contracts/profile.yaml under the active app root and, for
+    each panel that declares an ``action``, calls the module executor to fetch
+    panel data. Panels whose action fails are still returned with ``data: null``
+    and an ``error`` string so the UI can render graceful empty states.
+    """
+    resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
+    app_root = resolve_app_root()
+    raw_panels = load_profile_panels(app_root)
+
+    module_executor = executor_registry.module_executor
+    hydrated: list[dict[str, Any]] = []
+
+    for panel in raw_panels:
+        action = panel.get("action")
+        panel_out: dict[str, Any] = {**panel, "data": None, "error": None}
+
+        if action and module_executor is not None:
+            module_name = panel.get("module_id", "")
+            try:
+                req = ModuleRequest(
+                    module=module_name,
+                    action=action,
+                    params={},
+                    app_id=resolved_app_id,
+                    user_id=user_id,
+                    tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
+                    auth_token=None,
+                    correlation_id=None,
+                    granted_permissions=None,
+                )
+                result = await module_executor.execute(req, context=None)
+                if result.success:
+                    panel_out["data"] = result.data
+                else:
+                    panel_out["error"] = result.error or f"Action {action!r} failed"
+            except Exception as exc:
+                logger.warning("[profile-panels] %s.%s failed: %s", module_name, action, exc)
+                panel_out["error"] = str(exc)
+
+        hydrated.append(panel_out)
+
+    return {"panels": hydrated}
+
+
 def _normalize_shell_page_entry(entry: dict, *, order_fallback: int) -> Optional[dict]:
     if not isinstance(entry, dict):
         return None
@@ -1205,7 +1300,13 @@ def _normalize_shell_page_entry(entry: dict, *, order_fallback: int) -> Optional
     if isinstance(entry.get("schema"), str) and entry["schema"].strip():
         page["schema"] = entry["schema"].strip()
     if isinstance(entry.get("navigation"), dict):
-        page["meta"]["navigation"] = entry["navigation"]
+        nav = entry["navigation"]
+        page["meta"]["navigation"] = nav
+        # If the page declares a navigation group (workspace-console, app-console,
+        # etc.), it must participate in shell navigation — mark appShell=True so
+        # WorkspaceLayout and other layout-aware components can find it.
+        if isinstance(nav.get("group"), str) and nav["group"].strip():
+            page["meta"].setdefault("appShell", True)
     return page
 
 

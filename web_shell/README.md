@@ -1,84 +1,74 @@
-# Mozaiks frontend template
+# web_shell
 
-Runnable starter app for `@mozaiks/chat-ui`. Part of the `templates/` stack.
+`web_shell/` is the repo-local Vite shell used to develop and preview Mozaiks
+UI surfaces. It is not a generated app workspace, and contributors do not need
+any private hosted-product repo to run it.
 
-## Quick start
+## What It Loads
 
-```bash
-# From the repo root:
-cd templates/frontend
-npm install
-npm run dev
-# → http://localhost:3000
+- By default, the shell resolves the first-party builder/reference app bundle at
+  `factory_app/app`.
+- If `PLATFORM_PATH` or `MOZAIKS_APP_WORKSPACE_PATH` is set, the shell resolves
+  that selected app bundle or workspace instead.
+- Shared build sequencing still comes from
+  `factory_app/workflows/extended_orchestration/extension_registry.json` when no
+  app-local workflow root overrides it.
+
+## Quick Start
+
+From the repo root:
+
+```powershell
+npm --prefix web_shell install
+.\scripts\run-studio.ps1
 ```
 
-> One-time: also install the chat-ui library deps if you haven't yet:
-> `cd ../../packages/frontend/chat-ui && npm install`
+That starts:
 
-## What connects to what
+- the Studio backend on `http://localhost:8000`
+- the Vite frontend on `http://localhost:3000/apps`
 
-| File | Role |
+## Other Dev Modes
+
+Frontend only:
+
+```powershell
+npm --prefix web_shell install
+.\scripts\run-frontend.ps1
+```
+
+Split backend/frontend terminals:
+
+```powershell
+.\scripts\run-backend.ps1
+.\scripts\run-frontend.ps1
+```
+
+Direct Vite command:
+
+```powershell
+npm --prefix web_shell run dev -- --host 0.0.0.0 --port 3000 --strictPort
+```
+
+## Path Selection
+
+- Leave `PLATFORM_PATH` unset to use `factory_app/app`.
+- Pass `-AppWorkspacePath <path>` to `scripts/run-backend.ps1` or
+  `scripts/run-frontend.ps1` to point at an external app workspace.
+- `PLATFORM_PATH` may target either an app bundle directory containing
+  `app.json` or a workspace root containing `app/app.json`.
+
+## What You Usually Edit
+
+| Path | Role |
 |------|------|
-| `app.json` | App identity, targets, auth intent, startup landing spot |
-| `App.jsx` | Root component — reads `app.json`, renders `<MozaiksApp>` |
-| `brand/public/brand.json` | Colors, fonts, shadows, asset filenames |
-| `brand/public/ui.json` | Header, profile menu, notifications, footer |
-| `mozaiks-platform/app/ui/route_manifest.json` | App Zero custom React page route ownership |
-| `factory_app/workflows/*/extended_orchestration/extension_registry.json` | Workflow entrypoints and transitions |
-| `mozaiks-platform/app/config/shell.json` | App Zero shell chrome |
-| `brand/public/auth.json` | Auth provider config (Keycloak), roles, admin emails |
-| `brand/public/assets/` | SVG icons and images |
-| `brand/public/fonts/` | Self-hosted font files |
-| `workflows/` | Your workflow modules — auto-discovered |
+| `factory_app/app/` | First-party builder/reference app bundle loaded by default |
+| `factory_app/app/ui/` | First-party UI pages, custom React, and route ownership |
+| `factory_app/app/config/` | Shell, AI, auth, and other app-level config |
+| `factory_app/app/brand/` | Brand assets and theme config |
+| `factory_app/workflows/` | Shared builder workflows and extension registry |
+| `web_shell/vite.config.js` | Shell path resolution and Vite/runtime integration |
 
-## Files you edit
-
-```
-app.json                      ← start here: appName, targets, startup landing spot
-brand/public/brand.json       ← colors, fonts, shadows, asset filenames
-brand/public/ui.json          ← header actions, profile menu, notifications, footer
-mozaiks-platform/app/ui/route_manifest.json    ← custom React page routes
-factory_app/workflows/.../extension_registry.json ← workflow entrypoints and transitions
-mozaiks-platform/app/config/shell.json    ← header/profile/notification/footer chrome
-brand/public/auth.json        ← auth provider, roles, admin emails
-brand/public/assets/          ← drop SVG icons and images here
-workflows/hello_world/        ← copy this folder to add a new workflow
-App.jsx                       ← swap mockApiAdapter when backend is ready
-```
-
-## Files you don't edit
-
-- `main.jsx` — standard React root
-- `vite.config.js` — Vite config, aliases, mock API server
-- `tailwind.config.js` / `postcss.config.js` / `styles.css` — Tailwind setup
-- `workflows/index.js` — auto-discovers workflow folders (no manual registration)
-
-## Swapping in a real API adapter
-
-```jsx
-// App.jsx
-import { MozaiksApp, RestApiAdapter } from '@mozaiks/chat-ui';
-import appConfig from './app.json';
-
-const apiAdapter = new RestApiAdapter({ baseUrl: appConfig.apiUrl });
-
-export default function App() {
-  return (
-    <MozaiksApp
-      appName={appConfig.appName}
-      defaultAppId={appConfig.appId}
-      apiAdapter={apiAdapter}
-    />
-  );
-}
-```
-
-## Icon values must be filenames
-
-`brand.json` and `ui.json` icon values must be filenames — e.g. `"sparkle.svg"`.
-Bare token strings like `"sparkle"` are not supported (`ActionIcon` will warn and render nothing).
-
-## Docs
-
-See `docs/guides/customizing-frontend/` for the full step-by-step guide.
+`web_shell/` hosts those surfaces; it is not the canonical place to author app
+contracts or builder workflows.
 

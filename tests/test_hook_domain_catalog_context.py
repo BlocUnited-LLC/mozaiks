@@ -302,8 +302,8 @@ class TestInjectModuleFileManifestGuard:
         )
         self.mod.inject_module_file_manifest_guard(agent, [])
         msg = agent.system_message
-        # subscriptions.yaml was not declared — should appear as omit
-        assert "subscriptions.yaml" in msg
+        # reactions.yaml was not declared — should appear as omit
+        assert "reactions.yaml" in msg
         assert "omit" in msg.lower() or "NOT" in msg
 
     def test_file_manifest_override_is_honoured(self):
@@ -316,7 +316,7 @@ class TestInjectModuleFileManifestGuard:
                     "owned_paths": [
                         "modules/orders/module.yaml",
                         "modules/orders/events.yaml",
-                        "modules/orders/subscriptions.yaml",
+                        "modules/orders/reactions.yaml",
                     ],
                     "file_manifest": {
                         "yaml_files": ["module.yaml", "events.yaml"],
@@ -326,8 +326,8 @@ class TestInjectModuleFileManifestGuard:
         )
         self.mod.inject_module_file_manifest_guard(agent, [])
         msg = agent.system_message
-        # file_manifest overrides owned_paths — subscriptions.yaml should be omitted
-        assert "subscriptions.yaml" not in msg.split("[MODULE FILE MANIFEST GUARD]")[1].split("omit")[0]
+        # file_manifest overrides owned_paths — reactions.yaml should be omitted
+        assert "reactions.yaml" not in msg.split("[MODULE FILE MANIFEST GUARD]")[1].split("omit")[0]
 
     def test_is_idempotent(self):
         ctx = {

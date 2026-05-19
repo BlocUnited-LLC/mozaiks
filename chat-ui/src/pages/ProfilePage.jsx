@@ -1,17 +1,22 @@
 /**
- * ProfilePage — First-class user profile page.
+ * ProfilePage — Modular user profile page.
  *
- * Registered in coreComponents.js as a host-owned account surface.
- * The shell links to it through the default profile menu entry and the platform
- * host mounts the /profile route automatically.
+ * Renders three layers in order:
+ *   1. Identity panel (framework-owned, always shown, order 0)
+ *   2. Module-declared profile panels (from GET /api/me/profile-panels)
+ *      sorted by `order`, rendered between identity and preferences
+ *   3. App Preferences panel (framework-owned, always shown, order 999)
  *
- * Calls the host runtime /api/me and /api/me/preferences endpoints for account data.
- * The host API base URL is resolved from the injected API adapter first, then
- * env config, then same-origin /api as a final fallback.
+ * Module panels declare their shape in modules/{module}/contracts/profile.yaml.
+ * The platform hydrates each panel with live action data before sending them.
+ * ProfilePage never imports wallet, billing, or any app-specific module.
+ *
+ * See: docs/architecture/foundations/profile-panel-contract.md
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import { useChatUI } from '../context/ChatUIContext';
+import componentRegistry from '../registry/componentRegistry';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -20,11 +25,8 @@ import { useChatUI } from '../context/ChatUIContext';
 function getHostApiBaseUrl(config, api) {
   if (api && typeof api.getHttpBaseUrl === 'function') {
     const baseUrl = api.getHttpBaseUrl();
-    if (typeof baseUrl === 'string') {
-      return baseUrl.replace(/\/+$/, '');
-    }
+    if (typeof baseUrl === 'string') return baseUrl.replace(/\/+$/, '');
   }
-
   const configured = (
     config?.apiUrl ||
     config?.api_url ||
@@ -34,7 +36,6 @@ function getHostApiBaseUrl(config, api) {
     (typeof import.meta !== 'undefined' && import.meta.env?.VITE_CORE_URL) ||
     ''
   );
-
   return typeof configured === 'string' ? configured.replace(/\/+$/, '') : '';
 }
 
@@ -43,6 +44,24 @@ async function fetchWithAuth(url, options = {}, auth = null) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   return fetch(url, { ...options, headers });
+}
+
+function formatFieldValue(value, type) {
+  if (value == null) return '—';
+  switch (type) {
+    case 'currency':
+      return typeof value === 'number'
+        ? new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(value)
+        : String(value);
+    case 'number':
+      return typeof value === 'number' ? value.toLocaleString() : String(value);
+    case 'date':
+      try { return new Date(value).toLocaleDateString(); } catch { return String(value); }
+    case 'boolean':
+      return value ? 'Yes' : 'No';
+    default:
+      return String(value);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -65,8 +84,28 @@ function Badge({ children, variant = 'default' }) {
     warning: 'bg-warning/20 text-warning',
   };
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${styles[variant]}`}>
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${styles[variant] || styles.default}`}>
       {children}
+    </span>
+  );
+}
+
+function StatusPill({ value }) {
+  const lower = String(value || '').toLowerCase();
+  const tone =
+    lower === 'active' || lower === 'connected' || lower === 'yes' || lower === 'true'
+      ? 'success'
+      : lower === 'pending' || lower === 'warning'
+        ? 'warning'
+        : 'default';
+  const toneClass = {
+    success: 'bg-success/10 text-success border border-success/30',
+    warning: 'bg-warning/10 text-warning border border-warning/30',
+    default: 'bg-muted text-muted-foreground border border-border',
+  }[tone];
+  return (
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${toneClass}`}>
+      {value}
     </span>
   );
 }
@@ -103,9 +142,7 @@ function formatSettings(settings) {
 
 function parseSettingsText(raw) {
   let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (_error) {
+  try { parsed = JSON.parse(raw); } catch {
     throw new Error('Preferences must be valid JSON.');
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -115,7 +152,7 @@ function parseSettingsText(raw) {
 }
 
 // ---------------------------------------------------------------------------
-// Panels
+// Built-in panels (Identity + Preferences)
 // ---------------------------------------------------------------------------
 
 function ProfilePanel({ backendUrl, auth }) {
@@ -267,9 +304,7 @@ function PreferencesPanel({ backendUrl, auth }) {
     }
   }, [backendUrl, auth]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -315,11 +350,7 @@ function PreferencesPanel({ backendUrl, auth }) {
         </div>
         {!editing && (
           <button
-            onClick={() => {
-              setEditing(true);
-              setSaveError(null);
-              setSettingsText(formatSettings(prefs?.settings));
-            }}
+            onClick={() => { setEditing(true); setSaveError(null); setSettingsText(formatSettings(prefs?.settings)); }}
             className="rounded-lg border border-border px-4 py-1.5 text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
           >
             {isEmpty ? 'Add Preferences' : 'Edit'}
@@ -345,10 +376,7 @@ function PreferencesPanel({ backendUrl, auth }) {
             >
               {saving ? 'Saving…' : 'Save Preferences'}
             </button>
-            <button
-              onClick={handleCancel}
-              className="rounded-lg border border-border px-4 py-1.5 text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
-            >
+            <button onClick={handleCancel} className="rounded-lg border border-border px-4 py-1.5 text-sm text-muted-foreground hover:bg-muted/50 transition-colors">
               Cancel
             </button>
           </div>
@@ -372,6 +400,107 @@ function PreferencesPanel({ backendUrl, auth }) {
 }
 
 // ---------------------------------------------------------------------------
+// Module panel renderers
+// ---------------------------------------------------------------------------
+
+function MetricsPanel({ panel }) {
+  const { data, fields = [], error } = panel;
+  if (error) {
+    return <ErrorBox message={`Could not load ${panel.title}: ${error}`} />;
+  }
+  return (
+    <div className="rounded-xl border border-border bg-card p-6">
+      <div className="mb-4">
+        <h3 className="text-base font-semibold text-foreground">{panel.title}</h3>
+        {panel.description && <p className="mt-0.5 text-sm text-muted-foreground">{panel.description}</p>}
+      </div>
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+        {fields.map((field) => (
+          <div key={field.id} className="rounded-xl border border-border bg-background/60 px-4 py-3">
+            <span className="block text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+              {field.label}
+            </span>
+            <span className="text-lg font-semibold text-foreground">
+              {data ? formatFieldValue(data[field.id], field.type) : '—'}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ListPanel({ panel }) {
+  const { data, fields = [], error } = panel;
+  if (error) {
+    return <ErrorBox message={`Could not load ${panel.title}: ${error}`} />;
+  }
+  return (
+    <div className="rounded-xl border border-border bg-card p-6">
+      <div className="mb-4">
+        <h3 className="text-base font-semibold text-foreground">{panel.title}</h3>
+        {panel.description && <p className="mt-0.5 text-sm text-muted-foreground">{panel.description}</p>}
+      </div>
+      <div className="divide-y divide-border rounded-xl border border-border">
+        {fields.map((field) => (
+          <div key={field.id} className="flex items-center justify-between gap-4 px-5 py-3">
+            <span className="text-sm text-muted-foreground">{field.label}</span>
+            {field.type === 'status'
+              ? <StatusPill value={data ? String(data[field.id] ?? '—') : '—'} />
+              : <span className="text-sm font-medium text-foreground">
+                  {data ? formatFieldValue(data[field.id], field.type) : '—'}
+                </span>
+            }
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ComponentPanel({ panel }) {
+  const { component: componentName, data, error } = panel;
+  const Component = componentRegistry.getComponent(componentName);
+  if (!Component) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-6">
+        <h3 className="text-base font-semibold text-foreground mb-1">{panel.title}</h3>
+        <p className="text-sm text-muted-foreground italic">
+          Component {JSON.stringify(componentName)} is not registered.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-border bg-card p-6">
+      <div className="mb-4">
+        <h3 className="text-base font-semibold text-foreground">{panel.title}</h3>
+        {panel.description && <p className="mt-0.5 text-sm text-muted-foreground">{panel.description}</p>}
+      </div>
+      {error
+        ? <ErrorBox message={`Could not load ${panel.title}: ${error}`} />
+        : <Component panel={panel} data={data} />
+      }
+    </div>
+  );
+}
+
+function ModulePanelSection({ panel }) {
+  switch (panel.kind) {
+    case 'metrics': return <MetricsPanel panel={panel} />;
+    case 'list':    return <ListPanel panel={panel} />;
+    case 'component': return <ComponentPanel panel={panel} />;
+    default:
+      return (
+        <div className="rounded-xl border border-border bg-card p-6">
+          <h3 className="text-base font-semibold text-foreground mb-1">{panel.title}</h3>
+          <p className="text-sm text-muted-foreground italic">Unsupported panel kind: {panel.kind}</p>
+        </div>
+      );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Root
 // ---------------------------------------------------------------------------
 
@@ -379,7 +508,21 @@ export default function ProfilePage() {
   const { user, config, auth, api } = useChatUI();
   const backendUrl = getHostApiBaseUrl(config, api);
 
-  if (backendUrl == null) {
+  const [modulePanels, setModulePanels] = useState([]);
+  const [panelsLoading, setPanelsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!backendUrl) { setPanelsLoading(false); return; }
+    let cancelled = false;
+    fetchWithAuth(`${backendUrl}/api/me/profile-panels`, {}, auth)
+      .then((res) => res.ok ? res.json() : Promise.resolve({ panels: [] }))
+      .then((body) => { if (!cancelled) setModulePanels(Array.isArray(body?.panels) ? body.panels : []); })
+      .catch(() => { if (!cancelled) setModulePanels([]); })
+      .finally(() => { if (!cancelled) setPanelsLoading(false); });
+    return () => { cancelled = true; };
+  }, [backendUrl, auth]);
+
+  if (!backendUrl) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="rounded-xl border border-border bg-card p-8 text-center max-w-sm">
@@ -395,7 +538,6 @@ export default function ProfilePage() {
   return (
     <div className="min-h-screen bg-background px-4 py-8 sm:px-8">
       <div className="mx-auto max-w-2xl">
-
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-foreground">Profile</h1>
           <p className="text-sm text-muted-foreground mt-1">
@@ -403,11 +545,20 @@ export default function ProfilePage() {
           </p>
         </div>
 
+        {/* Identity — always first */}
         <ProfilePanel backendUrl={backendUrl} auth={auth} />
 
+        {/* Module-declared panels — sorted by order, injected between identity and prefs */}
+        {!panelsLoading && modulePanels.map((panel) => (
+          <div key={`${panel.module_id}-${panel.id}`}>
+            <SectionHeading>{panel.title}</SectionHeading>
+            <ModulePanelSection panel={panel} />
+          </div>
+        ))}
+
+        {/* App Preferences — always last */}
         <SectionHeading>Preferences</SectionHeading>
         <PreferencesPanel backendUrl={backendUrl} auth={auth} />
-
       </div>
     </div>
   );

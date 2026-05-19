@@ -17,7 +17,8 @@ def _write_canonical_module(
     emitted_event: str = "domain.tasks.task_created",
     include_events_manifest: bool = True,
     action_emits: str | None = None,
-    subscription_target: str = "notification",
+    reaction_target: str = "notification",
+    reaction_manifest_name: str = "reactions.yaml",
 ) -> Path:
     module_dir = root / "modules" / module_id
     (module_dir / "backend").mkdir(parents=True)
@@ -79,38 +80,51 @@ events:
             encoding="utf-8",
         )
 
-    if subscription_target == "capability":
-        subscriptions_yaml = """
-schema_version: mozaiks.subscriptions.v1
-subscriptions:
+    if reaction_target == "capability":
+        reaction_items_yaml = """
   - id: task_created_react
     event_type: domain.tasks.task_created
     target:
       kind: capability
       capability_id: tasks.review
-""".lstrip()
+""".rstrip()
     else:
-        subscriptions_yaml = """
-schema_version: mozaiks.subscriptions.v1
-subscriptions:
+        reaction_items_yaml = """
   - id: task_created_notify
     event_type: domain.tasks.task_created
     target:
       kind: notification
       notification_id: task_created
+""".rstrip()
+
+    if reaction_manifest_name == "subscriptions.yaml":
+        reactions_yaml = f"""
+schema_version: mozaiks.subscriptions.v1
+subscriptions:
+{reaction_items_yaml}
 """.lstrip()
-    module_dir.joinpath("contracts", "subscriptions.yaml").write_text(subscriptions_yaml, encoding="utf-8")
-    if subscription_target != "capability":
+    else:
+        reactions_yaml = f"""
+schema_version: mozaiks.reactions.v1
+reactions:
+{reaction_items_yaml}
+""".lstrip()
+
+    module_dir.joinpath("contracts", reaction_manifest_name).write_text(
+        reactions_yaml,
+        encoding="utf-8",
+    )
+    if reaction_target != "capability":
         module_dir.joinpath("contracts", "notifications.yaml").write_text(
-        """
+            """
 schema_version: mozaiks.notifications.v1
 notifications:
   - id: task_created
     event_type: domain.tasks.task_created
     channels: [in_app]
 """.lstrip(),
-        encoding="utf-8",
-    )
+            encoding="utf-8",
+        )
     module_dir.joinpath("contracts", "settings.yaml").write_text(
         """
 schema_version: mozaiks.settings.v1
@@ -124,6 +138,13 @@ features: []
 schema_version: mozaiks.admin.v2
 panels: []
 hooks: []
+""".lstrip(),
+        encoding="utf-8",
+    )
+    module_dir.joinpath("contracts", "profile.yaml").write_text(
+        """
+schema_version: mozaiks.profile.v1
+panels: []
 """.lstrip(),
         encoding="utf-8",
     )
@@ -148,11 +169,86 @@ def test_module_loader_loads_canonical_contract(tmp_path: Path) -> None:
     assert loaded.definition.schema_version == "mozaiks.module.v1"
     assert loaded.action_method_map == {"create": "create_task"}
     assert loaded.manifests.events.event_types == {"domain.tasks.task_created"}
+    assert loaded.manifests.reactions is not None
+    assert loaded.manifests.reactions.reactions[0].id == "task_created_notify"
     assert type(loaded.handler).__name__ == "TasksModule"
 
 
+def test_module_loader_loads_legacy_subscriptions_as_reactions(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _write_canonical_module(tmp_path, reaction_manifest_name="subscriptions.yaml")
+
+    with caplog.at_level("WARNING"):
+        loaded = ModuleLoader(str(tmp_path)).load("tasks")
+
+    assert loaded.manifests.reactions is not None
+    assert loaded.manifests.reactions.reactions[0].id == "task_created_notify"
+    assert loaded.manifests.reactions.reactions[0].target.kind == "notification"
+    assert "MODULE_REACTIONS_LEGACY_DEPRECATED" in caplog.text
+
+
+def test_module_loader_prefers_canonical_reactions_when_both_files_exist(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("contracts", "subscriptions.yaml").write_text(
+        """
+schema_version: mozaiks.subscriptions.v1
+subscriptions:
+  - id: legacy_task_created_react
+    event_type: domain.tasks.task_created
+    target:
+      kind: capability
+      capability_id: tasks.review
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with caplog.at_level("WARNING"):
+        loaded = ModuleLoader(str(tmp_path)).load("tasks")
+
+    assert loaded.manifests.reactions is not None
+    assert loaded.manifests.reactions.reactions[0].id == "task_created_notify"
+    assert loaded.manifests.reactions.reactions[0].target.kind == "notification"
+    assert "MODULE_REACTIONS_LEGACY_IGNORED" in caplog.text
+
+
+def test_module_loader_does_not_fallback_to_legacy_when_canonical_is_invalid(tmp_path: Path) -> None:
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("contracts", "reactions.yaml").write_text(
+        """
+schema_version: mozaiks.reactions.v1
+reactions:
+  - id: invalid_reaction
+    event_type: invalid.event
+    target:
+      kind: notification
+      notification_id: task_created
+""".lstrip(),
+        encoding="utf-8",
+    )
+    module_dir.joinpath("contracts", "subscriptions.yaml").write_text(
+        """
+schema_version: mozaiks.subscriptions.v1
+subscriptions:
+  - id: legacy_task_created_notify
+    event_type: domain.tasks.task_created
+    target:
+      kind: notification
+      notification_id: task_created
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ModuleLoadError, match="Invalid reactions.yaml"):
+        ModuleLoader(str(tmp_path)).load("tasks")
+
+
 @pytest.mark.asyncio
-async def test_module_event_router_creates_notification_from_subscription(tmp_path: Path) -> None:
+async def test_module_event_router_creates_notification_from_reaction(tmp_path: Path) -> None:
     loaded = ModuleLoader(str(tmp_path)).load(_write_canonical_module(tmp_path).name)
     emitted: list[tuple[str, dict]] = []
     stored: list[dict] = []
@@ -196,7 +292,7 @@ async def test_module_event_router_creates_notification_from_subscription(tmp_pa
 @pytest.mark.asyncio
 async def test_module_event_router_invokes_capability_target(tmp_path: Path) -> None:
     loaded = ModuleLoader(str(tmp_path)).load(
-        _write_canonical_module(tmp_path, subscription_target="capability").name
+        _write_canonical_module(tmp_path, reaction_target="capability").name
     )
     emitted: list[tuple[str, dict]] = []
     invoked: list[tuple[str, dict, dict]] = []
@@ -577,6 +673,98 @@ hooks: []
     loaded = ModuleLoader(str(tmp_path)).load("tasks")
     assert loaded.manifests.admin.panels[0].page == "billing"
     assert loaded.manifests.admin.panels[1].page == "settings"
+
+
+def test_module_loader_loads_profile_manifest_with_panels(tmp_path: Path) -> None:
+    """ModuleLoader must expose a non-empty profile.yaml as manifests.profile."""
+    from mozaiksai.core.profile.discovery import load_profile_panels
+
+    module_dir = _write_canonical_module(tmp_path)
+    # Overwrite the empty profile.yaml that _write_canonical_module creates with
+    # a real panel that has an action binding.
+    module_dir.joinpath("contracts", "profile.yaml").write_text(
+        """
+schema_version: mozaiks.profile.v1
+panels:
+  - id: activity-summary
+    title: Activity Summary
+    description: Account activity.
+    order: 30
+    kind: metrics
+    action: create
+    fields:
+      - { id: total, label: Total, type: number }
+      - { id: status, label: Status, type: status }
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    loaded = ModuleLoader(str(tmp_path)).load("tasks")
+
+    assert loaded.manifests.profile is not None
+    assert len(loaded.manifests.profile.panels) == 1
+    panel = loaded.manifests.profile.panels[0]
+    assert panel.id == "activity-summary"
+    assert panel.kind == "metrics"
+    assert panel.action == "create"
+    assert len(panel.fields) == 2
+    assert panel.fields[0].type == "number"
+    assert panel.fields[1].type == "status"
+
+    # Discovery layer also surfaces the same panel.
+    discovered = load_profile_panels(tmp_path)
+    assert len(discovered) == 1
+    assert discovered[0]["id"] == "activity-summary"
+    assert discovered[0]["module_id"] == "tasks"
+
+
+def test_module_loader_loads_profile_manifest_component_kind(tmp_path: Path) -> None:
+    """component-kind panels must be accepted with a component name and no fields."""
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("contracts", "profile.yaml").write_text(
+        """
+schema_version: mozaiks.profile.v1
+panels:
+  - id: usage-detail
+    title: Usage Detail
+    order: 40
+    kind: component
+    component: UsageDetailPanel
+    action: create
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    loaded = ModuleLoader(str(tmp_path)).load("tasks")
+
+    assert loaded.manifests.profile is not None
+    panel = loaded.manifests.profile.panels[0]
+    assert panel.kind == "component"
+    assert panel.component == "UsageDetailPanel"
+    assert panel.fields == []
+
+
+def test_module_loader_rejects_profile_manifest_form_kind(tmp_path: Path) -> None:
+    """form kind is reserved and must be rejected at load time."""
+    from mozaiksai.core.runtime.app.module_loader import ModuleLoadError
+
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("contracts", "profile.yaml").write_text(
+        """
+schema_version: mozaiks.profile.v1
+panels:
+  - id: edit-preferences
+    title: Edit Preferences
+    order: 50
+    kind: form
+    fields:
+      - { id: pref_key, label: Preference, type: string }
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ModuleLoadError, match="kind"):
+        ModuleLoader(str(tmp_path)).load("tasks")
 
 
 def test_module_loader_rejects_absolute_runtime_extension_entrypoint(tmp_path: Path) -> None:

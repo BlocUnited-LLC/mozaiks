@@ -20,6 +20,10 @@ const composedShellConfig = {
   pages: routeManifest.pages || [],
 };
 const APP_ID = 'campaign-revision-workbench';
+const INTEGRATIONS_QA_DIR = process.env.INTEGRATIONS_UI_QA_DIR
+  || path.join(repoRoot, '.logs', 'ui-qa', 'integrations-health-check');
+const INTEGRATIONS_QA_ENABLED = Boolean(process.env.INTEGRATIONS_UI_QA);
+const SECRET_SENTINEL = 'test-secret-value';
 
 const appsPayload = {
   apps: [
@@ -145,12 +149,146 @@ function buildAppConsolePayload(appId = APP_ID) {
     integrations: {
       app_connectors: [
         {
-          service: 'stripe',
-          display_name: 'Stripe',
-          notes: 'Payments enabled for this app.',
+          service: 'analytics_provider',
+          display_name: 'Hosted Analytics',
+          notes: 'Usage events are sent through this configured analytics connector.',
           secret_available: true,
+          configured: true,
+          ready: true,
+          required_fields: [
+            {
+              name: 'api_key',
+              label: 'API Key',
+              type: 'secret',
+              required: true,
+              frontend_safe: false,
+            },
+            {
+              name: 'endpoint_url',
+              label: 'Endpoint URL',
+              type: 'url',
+              required: true,
+              frontend_safe: true,
+            },
+            {
+              name: 'workspace_id',
+              label: 'Workspace ID',
+              type: 'text',
+              required: false,
+              frontend_safe: true,
+            },
+          ],
+          public_config: {
+            endpoint_url: 'https://analytics.example.test',
+            workspace_id: 'demo-workspace',
+            api_key: SECRET_SENTINEL,
+          },
+          health: {
+            status: 'configured',
+            last_checked_at: '2026-05-17T12:00:00Z',
+            message: 'Required configuration is present.',
+            missing_fields: [],
+            checked_by: 'readiness',
+            health_check_supported: true,
+            frontend_safe: true,
+          },
+        },
+        {
+          service: 'reporting_provider',
+          display_name: 'Reporting Provider',
+          notes: 'Scheduled report exports need this connector before workflow use.',
+          secret_available: false,
+          configured: false,
+          ready: false,
+          required_fields: [
+            {
+              name: 'api_key',
+              label: 'API Key',
+              type: 'secret',
+              required: true,
+              frontend_safe: false,
+            },
+            {
+              name: 'endpoint_url',
+              label: 'Endpoint URL',
+              type: 'url',
+              required: true,
+              frontend_safe: true,
+            },
+          ],
+          public_config: {},
+          health: {
+            status: 'not_configured',
+            last_checked_at: '2026-05-17T12:05:00Z',
+            message: 'Required connector fields are missing.',
+            missing_fields: ['api_key', 'endpoint_url'],
+            checked_by: 'readiness',
+            health_check_supported: false,
+            frontend_safe: true,
+          },
+        },
+        {
+          service: 'search_provider',
+          display_name: 'Search Provider',
+          notes: 'Search indexing can be enabled after this connector is reviewed.',
+          secret_available: true,
+          configured: false,
+          ready: false,
+          required_fields: [
+            {
+              name: 'api_key',
+              label: 'API Key',
+              type: 'secret',
+              required: true,
+              frontend_safe: false,
+            },
+          ],
+          public_config: {
+            endpoint_url: 'https://search.example.test',
+          },
+          health: {
+            status: 'unhealthy',
+            last_checked_at: '2026-05-17T12:10:00Z',
+            message: 'Manual review required before workflow use.',
+            missing_fields: [],
+            checked_by: 'manual',
+            health_check_supported: true,
+            frontend_safe: true,
+          },
+        },
+        {
+          service: 'notification_provider',
+          display_name: 'Notification Provider',
+          notes: 'This connector has not been checked yet.',
+          secret_available: false,
+          configured: false,
+          ready: false,
+          required_fields: [],
+          public_config: {},
+          health: {
+            status: 'unknown',
+            last_checked_at: null,
+            message: null,
+            missing_fields: [],
+            checked_by: null,
+            health_check_supported: false,
+            frontend_safe: true,
+          },
         },
       ],
+      connector_summary: {
+        total: 4,
+        configured: 1,
+        healthy: 0,
+        not_configured: 1,
+        unhealthy: 1,
+        unknown_health: 1,
+      },
+      runtime_integrations: {
+        connector_vault: {
+          configured: true,
+        },
+      },
     },
     activity: [],
   };
@@ -281,6 +419,31 @@ async function expectNoHorizontalOverflow(page) {
   expect(overflow).toBeLessThanOrEqual(2);
 }
 
+async function writeIntegrationsQaArtifact(name, content) {
+  if (!INTEGRATIONS_QA_ENABLED) return;
+  fs.mkdirSync(INTEGRATIONS_QA_DIR, { recursive: true });
+  const filePath = path.join(INTEGRATIONS_QA_DIR, name);
+  if (typeof content === 'string') {
+    fs.writeFileSync(filePath, content, 'utf8');
+    return;
+  }
+  fs.writeFileSync(filePath, JSON.stringify(content, null, 2), 'utf8');
+}
+
+async function captureIntegrationsQa(page, testInfo, name, findings) {
+  if (!INTEGRATIONS_QA_ENABLED) return;
+  fs.mkdirSync(INTEGRATIONS_QA_DIR, { recursive: true });
+  const projectName = testInfo.project.name.replace(/[^a-z0-9_-]+/gi, '-').toLowerCase();
+  const screenshotPath = path.join(INTEGRATIONS_QA_DIR, `${projectName}-${name}.png`);
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+  await writeIntegrationsQaArtifact(`${projectName}-${name}-report.json`, {
+    page: `/apps/${APP_ID}/integrations`,
+    screenshot: path.relative(repoRoot, screenshotPath).replace(/\\/g, '/'),
+    viewport: page.viewportSize(),
+    findings,
+  });
+}
+
 test.beforeEach(async ({ page }) => {
   await mockConsoleApis(page);
 });
@@ -390,26 +553,6 @@ test('workspace health route stays responsive across desktop and mobile widths',
   }
 });
 
-test('workspace billing route stays responsive across desktop and mobile widths', async ({ page }) => {
-  await page.goto('/billing');
-  const main = page.locator('main');
-
-  await expect(main.getByRole('heading', { name: 'Billing', exact: true })).toBeVisible();
-  await expect(main.getByPlaceholder('Search billing...')).toBeVisible();
-  await expect(main.getByText('Billing reporting pending')).toBeVisible();
-  await expect(main.getByText('Total Revenue')).toBeVisible();
-  await expectNoHorizontalOverflow(page);
-
-  const viewport = page.viewportSize();
-  expect(viewport).not.toBeNull();
-
-  if (viewport.width < 768) {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeVisible();
-  } else {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeHidden();
-  }
-});
-
 test('app console root redirects to overview', async ({ page }) => {
   await page.goto(`/apps/${APP_ID}`);
 
@@ -439,7 +582,73 @@ test('app overview route stays responsive across desktop and mobile widths', asy
   }
 });
 
-test('app integrations route stays responsive across desktop and mobile widths', async ({ page }) => {
+test('app integrations route stays responsive across desktop and mobile widths', async ({ page }, testInfo) => {
+  const consoleMessages = [];
+  const responseFindings = [];
+  const providerUrlRequests = [];
+  let healthCheckRequests = 0;
+  page.on('console', (message) => {
+    if (['warning', 'error'].includes(message.type())) {
+      consoleMessages.push({
+        type: message.type(),
+        text: message.text(),
+      });
+    }
+  });
+  page.on('response', (response) => {
+    if (response.status() >= 400) {
+      responseFindings.push({
+        status: response.status(),
+        url: response.url(),
+      });
+    }
+  });
+  page.on('request', (request) => {
+    const requestUrl = request.url();
+    if (requestUrl.includes('analytics.example.test') || requestUrl.includes('search.example.test')) {
+      providerUrlRequests.push(requestUrl);
+    }
+  });
+  await page.route('**/api/studio/integrations/connectors/*/health-check?**', async (route) => {
+    healthCheckRequests += 1;
+    const url = new URL(route.request().url());
+    const service = decodeURIComponent(url.pathname.split('/connectors/')[1].split('/health-check')[0]);
+    expect(url.searchParams.get('app_id')).toBe(APP_ID);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 250);
+    });
+    if (service === 'search_provider') {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: 'Health check unavailable.',
+        }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        app_id: APP_ID,
+        service: 'analytics_provider',
+        health: {
+          status: 'healthy',
+          last_checked_at: '2026-05-17T13:00:00Z',
+          message: 'Manual health check passed.',
+          missing_fields: [],
+          checked_by: 'manual',
+          safe_details: {
+            response_code: 'ok',
+          },
+          health_check_supported: true,
+          frontend_safe: true,
+        },
+      }),
+    });
+  });
+
   await page.goto(`/apps/${APP_ID}/integrations`);
   const main = page.locator('main');
 
@@ -447,10 +656,97 @@ test('app integrations route stays responsive across desktop and mobile widths',
   await expect(main.getByRole('heading', { name: 'Enabled and disabled integrations' })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Used by agents and workflows' })).toBeVisible();
   await expect(main.getByRole('button', { name: 'Add Integration' })).toBeVisible();
-  await expect(main.getByText('Stripe').first()).toBeVisible();
+  await expect(main.getByText('Hosted Analytics').first()).toBeVisible();
+  await expect(main.getByText('Reporting Provider').first()).toBeVisible();
+  await expect(main.getByText('Search Provider').first()).toBeVisible();
+  await expect(main.getByText('Notification Provider').first()).toBeVisible();
+  await expect(main.getByText('Configured').first()).toBeVisible();
+  await expect(main.getByText('Missing setup').first()).toBeVisible();
+  await expect(main.getByText('Needs attention').first()).toBeVisible();
+  await expect(main.getByText('Unknown').first()).toBeVisible();
+  await expect(main.getByText('Ready').first()).toBeVisible();
+  await expect(main.getByText('Incomplete').first()).toBeVisible();
+  await expect(main.getByText('Review').first()).toBeVisible();
+  await expect(main.getByText('Missing required fields: API Key, Endpoint URL')).toBeVisible();
+  await expect(main.getByText('Source readiness').first()).toBeVisible();
+  await expect(main.getByText('Source manual').first()).toBeVisible();
+  await expect(main.getByText('https://analytics.example.test')).toBeVisible();
+  await expect(main.getByText('demo-workspace')).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Check now' })).toHaveCount(2);
+  await expect(main.getByText(SECRET_SENTINEL)).toHaveCount(0);
+  await expect(main.getByText('api key', { exact: true })).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
+  expect(healthCheckRequests).toBe(0);
+  expect(providerUrlRequests).toHaveLength(0);
+
+  await captureIntegrationsQa(page, testInfo, 'initial', {
+    shell_layout: 'rendered',
+    supported_connectors_show_check_now: true,
+    unsupported_connectors_hide_check_now: true,
+    health_check_requests_on_page_load: healthCheckRequests,
+    provider_url_requests: providerUrlRequests,
+    secret_values_visible: false,
+    console_messages: consoleMessages,
+    response_findings: responseFindings,
+  });
+
+  const firstCheckButton = main.getByRole('button', { name: 'Check now' }).first();
+  await firstCheckButton.click();
+  await expect(main.getByRole('button', { name: 'Checking...' })).toBeVisible();
+  await captureIntegrationsQa(page, testInfo, 'checking', {
+    state: 'checking',
+    health_check_requests: healthCheckRequests,
+    provider_url_requests: providerUrlRequests,
+    secret_values_visible: false,
+  });
+  await expect(main.getByText('Manual health check passed.')).toBeVisible();
+  await expect(main.getByText('response code')).toBeVisible();
+  expect(healthCheckRequests).toBe(1);
+  expect(providerUrlRequests).toHaveLength(0);
+
+  await captureIntegrationsQa(page, testInfo, 'success', {
+    shell_layout: 'rendered',
+    summary_counts: ['Configured', 'Healthy', 'Missing required fields', 'Needs attention', 'Unknown'],
+    connector_health_states: ['configured', 'not_configured', 'unhealthy', 'unknown'],
+    public_config_visible: ['endpoint_url', 'workspace_id'],
+    secret_values_visible: false,
+    manual_health_check_requests: healthCheckRequests,
+    console_messages: consoleMessages,
+    response_findings: responseFindings,
+  });
+
+  await main.getByRole('button', { name: 'Check now' }).nth(1).click();
+  await expect(main.getByText(/503|Health check failed/i)).toBeVisible();
+  await expect(main.getByText(SECRET_SENTINEL)).toHaveCount(0);
+  expect(healthCheckRequests).toBe(2);
+  expect(providerUrlRequests).toHaveLength(0);
+
+  await captureIntegrationsQa(page, testInfo, 'failure', {
+    state: 'failure',
+    safe_error_visible: true,
+    secret_values_visible: false,
+    provider_url_requests: providerUrlRequests,
+    console_messages: consoleMessages,
+    response_findings: responseFindings,
+  });
+
+  await writeIntegrationsQaArtifact(`${testInfo.project.name.replace(/[^a-z0-9_-]+/gi, '-').toLowerCase()}-report.json`, {
+    page: `/apps/${APP_ID}/integrations`,
+    states_verified: ['initial', 'checking', 'success', 'failure'],
+    health_check_requests: healthCheckRequests,
+    health_check_requests_on_page_load: 0,
+    provider_url_requests: providerUrlRequests,
+    secret_values_visible: false,
+    supported_connectors_show_check_now: true,
+    unsupported_connectors_hide_check_now: true,
+    console_messages: consoleMessages,
+    response_findings: responseFindings,
+  });
+
   await main.getByRole('button', { name: 'Add Integration' }).click();
   await expect(page.getByText('Register a new external service for this app.')).toBeVisible();
-  await expect(page.locator('input[placeholder="stripe"]').first()).toBeVisible();
+  await expect(page.locator('input[placeholder="analytics_provider"]').first()).toBeVisible();
+  await expect(page.locator('input[placeholder="Hosted Analytics"]').first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -461,6 +757,14 @@ test('app integrations route stays responsive across desktop and mobile widths',
   } else {
     await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeHidden();
   }
+
+  await captureIntegrationsQa(page, testInfo, 'add-integration-overlay', {
+    shell_layout: 'rendered',
+    overlay: 'add integration',
+    secret_values_visible: false,
+    console_messages: consoleMessages,
+    response_findings: responseFindings,
+  });
 });
 
 test('app usage route stays responsive across desktop and mobile widths', async ({ page }) => {
@@ -493,28 +797,6 @@ test('app health route stays responsive across desktop and mobile widths', async
   await expect(main.getByRole('heading', { name: 'Current app health' })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Workflow reliability' })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Integration posture' })).toBeVisible();
-  await expectNoHorizontalOverflow(page);
-
-  const viewport = page.viewportSize();
-  expect(viewport).not.toBeNull();
-
-  if (viewport.width < 768) {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeVisible();
-  } else {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeHidden();
-  }
-});
-
-test('app billing route stays responsive across desktop and mobile widths', async ({ page }) => {
-  await page.goto(`/apps/${APP_ID}/billing`);
-  const main = page.locator('main');
-
-  await expect(main.getByRole('heading', { name: 'Billing', exact: true })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Revenue status' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Plans and subscriptions' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Payments and refunds' })).toBeVisible();
-  await expect(main.getByRole('link', { name: 'Review Hosting' })).toBeVisible();
-  await expect(main.getByRole('link', { name: 'Connect Payments' })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -566,11 +848,6 @@ test('mobile app console navigation keeps route transitions stable', async ({ pa
       detail: async () => expect(main.getByRole('heading', { name: 'Workflow token breakdown' })).toBeVisible(),
     },
     {
-      href: `/apps/${APP_ID}/billing`,
-      heading: 'Billing',
-      detail: async () => expect(main.getByRole('heading', { name: 'Revenue status' })).toBeVisible(),
-    },
-    {
       href: `/apps/${APP_ID}/users`,
       heading: 'Users',
       detail: async () => expect(main.getByRole('heading', { name: 'People using this app' })).toBeVisible(),
@@ -606,11 +883,6 @@ test('mobile workspace console navigation keeps route transitions stable', async
       href: '/health',
       heading: 'Health',
       detail: async () => expect(main.getByRole('heading', { name: 'Health by app' })).toBeVisible(),
-    },
-    {
-      href: '/billing',
-      heading: 'Billing',
-      detail: async () => expect(main.getByText('Total Revenue')).toBeVisible(),
     },
     {
       href: '/apps',

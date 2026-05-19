@@ -110,13 +110,27 @@ Current implementation:
 - Handler targets route the event payload directly to a named module action
   method, enabling module-to-module event-driven calls without HTTP indirection.
 
+### Module Event/Reaction Contract
+
+- `contracts/events.yaml` declares the event types a module may emit.
+  Emitted event types in `module.yaml.actions[].emits` must be declared there.
+- `contracts/reactions.yaml` is the canonical reaction contract. It uses
+  `schema_version: mozaiks.reactions.v1`, root key `reactions`, `event_type`,
+  and nested `target.kind`.
+- `contracts/notifications.yaml` declares notification rules derived from
+  events; it is not a reaction-routing file.
+- `contracts/subscriptions.yaml` is deprecated compatibility only. Runtime may
+  load it only when `contracts/reactions.yaml` is absent. New modules,
+  generator output, and CLI guidance should use `contracts/reactions.yaml`.
+
 ### Reaction target reference
 
 ```yaml
 # contracts/reactions.yaml
+schema_version: mozaiks.reactions.v1
 reactions:
   - id: task_created_notify_owner
-    event: domain.tasks.task_created      # event type to react to
+    event_type: domain.tasks.task_created
 
     # Target kind 1: notification
     # Creates a platform notification intent from notifications.yaml rule.
@@ -125,7 +139,7 @@ reactions:
       notification_id: task_created
 
   - id: my_workflow_trigger
-    event: domain.tasks.task_created
+    event_type: domain.tasks.task_created
 
     # Target kind 2: capability
     # Resolves capability_id against workflow orchestrator.yaml triggers.
@@ -135,19 +149,20 @@ reactions:
       capability_id: tasks.review
 
   - id: my_handler_call
-    event: hosted.other_module.something_happened
+    event_type: domain.other_module.something_happened
 
     # Target kind 3: handler (module-to-module event routing)
-    # Routes payload fields as keyword arguments to the named module action.
-    # Format: hosted.{module_id}.{handler_method_name}
-    # The receiving handler method must accept the event payload fields as kwargs.
-    handler: hosted.{module_id}.{handler_method_name}
+    # Routes payload fields as keyword arguments to the target handler method.
+    # The receiving handler method must live on this module's handler class.
+    target:
+      kind: handler
+      handler_method: handle_task_created
 ```
 
 **Handler target rules:**
 
-- Use `handler:` (not `target: kind: handler`) — it is a top-level key.
-- The handler reference format is `hosted.{module_id}.{method_name}`.
+- Use `target.kind: handler` with `target.handler_method`.
+- `target.handler_method` names a method on this module's `backend/handler.py` class.
 - The event payload is unpacked as keyword arguments into the handler method.
 - The receiving method must be declared as an action in its `module.yaml` or be
   a documented reaction handler on the handler class.
@@ -156,8 +171,22 @@ reactions:
 - `/api/notifications/count` reads unread platform notification intents for the
   current principal.
 
+### Provider-Neutral Example
+
+```yaml
+# app/modules/tasks/contracts/reactions.yaml
+schema_version: mozaiks.reactions.v1
+reactions:
+  - id: update_project_progress
+    event_type: domain.tasks.task.completed
+    description: Update project progress when a task completes.
+    target:
+      kind: handler
+      handler_method: update_project_progress
+```
+
 Workflow-trigger resolution stays platform-owned: modules publish validated
-`domain.*` or `hosted.*` events, and the platform host resolves them to
+`domain.*`, `platform.*`, or `hosted.*` events, and the platform host resolves them to
 workflow sessions without module code importing workflow internals.
 
 ### Studio And Mozaiks Product

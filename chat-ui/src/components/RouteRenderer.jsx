@@ -2,8 +2,8 @@
  * Route Renderer
  *
  * ChatPage is the only hardcoded core route — it is the agentic shell.
- * Platform modules/adapters are loaded via auto-discovery and routed through
- * backend navigation entries composed from page/UI/workflow owner manifests.
+ * Platform extensions are registered explicitly at shell bootstrap and routed
+ * through backend navigation entries composed from page/UI/workflow owner manifests.
  * app.json controls `landing_spot`; shell.json controls header chrome.
  * All routes require auth unless explicitly opted out via meta.requiresAuth: false.
  *
@@ -25,7 +25,7 @@ import { getChatBackgroundSrc } from '../styles/brandAssets';
 /**
  * Core routes that are ALWAYS mounted — not driven by owner manifests.
  * Only ChatPage is a true core route. All platform modules/adapters
- * (including AdminPortal) are registered via auto-discovery and routed
+ * (including AdminPortal) are registered through explicit extension barrels and routed
  * through navigation entries.
  */
 const CORE_ROUTES = [

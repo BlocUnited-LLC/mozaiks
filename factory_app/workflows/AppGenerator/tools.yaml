@@ -29,6 +29,17 @@ tools:
     ModuleContractQualityAgent speaks.
   tool_type: Agent_Tool
   auto_tool_call: true
+- agent: ModuleRuntimeQualityAgent
+  file: module_runtime_quality.py
+  function: review_module_runtime_quality
+  description: >
+    Audit generated module backend Python from ServiceAgent for runtime
+    placeholder data, hardcoded stats/trends, and TODO/mock/sample logic. Sets
+    module_runtime_quality_status to passed, needs_revision, or blocked for the
+    AppGenerator handoff gate. Called automatically after
+    ModuleRuntimeQualityAgent speaks.
+  tool_type: Agent_Tool
+  auto_tool_call: true
 - agent: AppPlanAgent
   file: app_build_plan.py
   function: app_build_plan
@@ -50,6 +61,67 @@ tools:
   file: assemble_app_tasks.py
   function: assemble_app_tasks
   description: Merge MFJ child task outputs into one assembled code_files bundle.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: IntegrationReadinessAgent
+  file: integration_readiness.py
+  function: check_integration_readiness
+  description: >
+    Aggregate integration needs from AppGenerator planning, MFJ child task
+    fan-in, and discovered task context. Reuse app connectors when ready and
+    prompt inline for unresolved required credentials before validation/download.
+  tool_type: UI_Tool
+  auto_tool_call: false
+  ui:
+    component: AgentAPIKeysBundleInput
+    mode: inline
+    workflow_primitive: form_card
+    realization: workflow_wrapper
+  ui_contract:
+    surface_kind: agent_tool
+    payload_schema:
+      type: object
+      properties:
+        heading:
+          type: string
+        description:
+          type: string
+        services:
+          type: array
+      additionalProperties: true
+    actions_schema:
+    - id: submit
+      label: Submit Keys
+      variant: primary
+      payload_schema:
+        type: object
+        properties:
+          services:
+            type: array
+        additionalProperties: true
+    - id: cancel
+      label: Cancel
+      variant: secondary
+      payload_schema:
+        type: object
+        properties: {}
+        additionalProperties: true
+- agent: ControllerAgent
+  file: integration_readiness.py
+  function: record_integration_need
+  description: Record an integration need discovered while generating an API adapter or controller surface.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: ConfigMiddlewareAgent
+  file: integration_readiness.py
+  function: record_integration_need
+  description: Record an integration need discovered while generating module contracts or runtime extension wiring.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: ServiceAgent
+  file: integration_readiness.py
+  function: record_integration_need
+  description: Record an integration need discovered while implementing module service logic.
   tool_type: Agent_Tool
   auto_tool_call: false
 - agent: DownloadAgent

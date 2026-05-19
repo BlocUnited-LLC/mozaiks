@@ -1,5 +1,63 @@
-definitions: {}
+definitions:
+  app_build_plan:
+    type: object
+    description: Minimal app build plan used by RuntimeConnectorSmokeAgent to declare connector needs.
+    source:
+      type: state
+      default: null
+  integration_needs:
+    type: array
+    description: Connector needs discovered during smoke execution.
+    source:
+      type: computed
+      default: []
+  integration_readiness_status:
+    type: string
+    description: Connector readiness status from collect_runtime_connector_readiness.
+    source:
+      type: computed
+      default: null
+  integration_readiness_result:
+    type: object
+    description: Raw connector readiness result.
+    source:
+      type: computed
+      default: null
+  connector_inventory:
+    type: object
+    description: Connector inventory snapshot.
+    source:
+      type: computed
+      default: null
+  required_connector_services:
+    type: array
+    description: Required connector service ids.
+    source:
+      type: computed
+      default: []
+  ready_connector_services:
+    type: array
+    description: Ready connector service ids.
+    source:
+      type: computed
+      default: []
+  missing_connector_services:
+    type: array
+    description: Missing connector service ids.
+    source:
+      type: computed
+      default: []
 
 agents:
   RuntimeToolCallSmokeAgent:
     variables: []
+  RuntimeConnectorSmokeAgent:
+    variables:
+    - app_build_plan
+    - integration_needs
+    - integration_readiness_status
+    - integration_readiness_result
+    - connector_inventory
+    - required_connector_services
+    - ready_connector_services
+    - missing_connector_services

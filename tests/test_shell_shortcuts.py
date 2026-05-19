@@ -66,7 +66,12 @@ def test_platform_shell_config_expands_shortcuts(monkeypatch, tmp_path: Path) ->
 
     assert shell["header"]["logo"]["href"] == "/dashboard"
     assert [item["path"] for item in shell["header"]["pages"]] == ["/dashboard", "/wallet"]
-    assert [item["id"] for item in shell["profile"]["menu"]] == ["profile", "wallet", "signout"]
+    assert [item["id"] for item in shell["profile"]["menu"]] == [
+        "profile",
+        "wallet",
+        "admin-portal",
+        "signout",
+    ]
     assert [item["path"] for item in shell["mobile"]["bottomBar"]["items"]] == ["/dashboard", "/wallet", "/profile"]
     assert shell["footer"]["links"][0] == {"label": "Legal Notice", "href": "/legal"}
     assert shell["footer"]["hideOnMobile"] is True

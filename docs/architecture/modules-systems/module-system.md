@@ -29,6 +29,7 @@ app/modules/{module_id}/
 │   ├── notifications.yaml   # Notification rules per event
 │   ├── settings.yaml        # User/app settings schema
 │   ├── admin.yaml           # Admin panels mounted into /admin/*
+│   ├── profile.yaml         # User profile page panels (optional)
 │   └── entitlements.yaml    # Capability entitlements (optional)
 ├── runtime_extensions.yaml  # Optional: api_router / startup_service host hooks
 └── backend/
@@ -38,9 +39,29 @@ app/modules/{module_id}/
     ├── repo.py              # Recommended: MongoDB access layer, no logic
     ├── policy.py            # Recommended: query scoping for multi-tenancy
     ├── schemas.py           # Recommended: typed request/response + document shapes
+    ├── {helper_files}.py    # Optional: declared, justified, module-local support files
     ├── settings.py          # Optional: settings hooks
     └── admin.py             # Optional: admin panel data hooks
 ```
+
+  ### Backend file responsibilities
+
+  The backend layer is intentionally split into small, canonical files:
+
+  - `handler.py` is thin dispatch only. It exposes one method per declared action and delegates immediately.
+  - `service.py` owns business logic, validation, and event emission after state is committed.
+  - `repo.py` owns persistence access only. It does not validate, branch on product policy, or emit events.
+  - `policy.py` owns ownership, scoping, and transition checks such as multi-tenancy filters.
+  - `schemas.py` owns typed request/response objects, enums, and normalization helpers.
+
+  Helper files are allowed, but only as explicit module-local extensions of those canonical layers. They must be declared before generation, justified by a specific purpose, imported by a canonical layer or referenced by `runtime_extensions.yaml`, and kept under the module's own `backend/` package. They should not become a catch-all for generic business logic.
+
+  Rules for helper files:
+
+  - declare them explicitly in the module's owned paths or generated stubs
+  - keep them module-local
+  - import them from a canonical layer, or reference them from `runtime_extensions.yaml`
+  - do not use them to bypass the handler/service/repo/policy/schema split
 
 ### What is required
 
@@ -96,6 +117,57 @@ actions:
 
 ## `contracts/` Companion Manifests
 
+### Module Event/Reaction Contract
+
+1. `contracts/events.yaml` declares the events this module may emit.
+  Event types must use a valid namespace owned by the emitting layer such as
+  `domain.*`, `platform.*`, or `hosted.*`. For ordinary app modules, emitted
+  events in `module.yaml.actions[].emits` must be declared here and are
+  normally `domain.*`.
+2. `contracts/reactions.yaml` is the canonical reaction contract.
+  It uses `schema_version: mozaiks.reactions.v1`, root key `reactions`,
+  `event_type` for the incoming event, and nested `target.kind` for routing.
+3. Reaction targets use one of three canonical kinds:
+  `handler` calls `target.handler_method` on this module's handler class,
+  `capability` invokes `target.capability_id`, and `notification` links
+  `target.notification_id` to a rule in `contracts/notifications.yaml`.
+4. `contracts/notifications.yaml` declares notification rules derived from
+  events. It is not a reaction file and should not be confused with
+  `contracts/reactions.yaml`.
+5. `contracts/subscriptions.yaml` is deprecated compatibility only.
+  Do not author new modules with it. Runtime may load it only when
+  `contracts/reactions.yaml` is absent, and new generator/CLI output must use
+  `contracts/reactions.yaml`.
+
+#### Canonical Example
+
+`app/modules/tasks/contracts/events.yaml`
+
+```yaml
+schema_version: mozaiks.events.v1
+events:
+  - type: domain.tasks.task.completed
+    version: 1
+    description: Emitted when a task is completed.
+    producer: tasks
+```
+
+`app/modules/tasks/contracts/reactions.yaml`
+
+```yaml
+schema_version: mozaiks.reactions.v1
+reactions:
+  - id: update_project_progress
+    event_type: domain.tasks.task.completed
+    description: Update project progress when a task completes.
+    target:
+      kind: handler
+      handler_method: update_project_progress
+```
+
+Add `update_project_progress` to `backend/handler.py` and delegate to
+`service.py`.
+
 ### `contracts/events.yaml`
 
 Declare events this module may publish. Use `domain.*` namespace for app modules.
@@ -122,10 +194,13 @@ Declare reactions to events published by other modules. Each reaction routes an
 event to a handler method on this module's handler class.
 
 ```yaml
+schema_version: mozaiks.reactions.v1
 reactions:
   - id: my_module.on_other_event
-    event: domain.other_module.something_happened
-    handler_method: handle_something
+    event_type: domain.other_module.something_happened
+    target:
+      kind: handler
+      handler_method: handle_something
 ```
 
 Add the matching method to `handler.py` and delegate to service.
@@ -139,12 +214,13 @@ channels, and a message template.
 schema_version: mozaiks.notifications.v1
 notifications:
   - id: my_module.item_created.admin
-    event: domain.my_module.item_created
+    event_type: domain.my_module.item_created
     channels: [in_app, email]
-    recipients: [admin]
+    audience:
+      roles: [admin]
     template:
-      subject: "New item: {{name}}"
-      body: "An item was created by {{owner_id}}."
+      title: "New item"
+      body: "{payload.name}"
 ```
 
 ### `contracts/settings.yaml`
@@ -163,17 +239,57 @@ Declare admin panels this module contributes to the unified `/admin` shell.
 Omit the file when the module has no admin panels.
 
 ```yaml
-schema_version: mozaiks.admin.v1
-admin_panels: []
+schema_version: mozaiks.admin.v2
+panels: []
+hooks: []
 ```
+
+### `contracts/profile.yaml`
+
+Declare panels this module contributes to the user profile page (`/profile`).
+Only add this file when the module has user-scoped account data worth surfacing
+there — for example, activity summaries, notification preferences, or usage
+stats. Do not add it to every module.
+
+Valid `kind` values: `metrics` (grid of labelled tiles), `list` (key/value
+list), `component` (registered React component). `form` is reserved and not yet
+implemented — the validator rejects it at load time.
+
+Profile panels bind to module actions via `action:`. The platform calls that
+action at `/api/me/profile-panels` request time and attaches the result as
+`data`. Panel action failures return safe error metadata — they do not crash the
+profile page.
+
+Profile panels must not expose admin-only actions or secrets. They do not
+replace or override `/api/me` identity.
+
+```yaml
+schema_version: mozaiks.profile.v1
+panels:
+  - id: activity-summary
+    title: Activity Summary
+    description: Account-level summary.
+    order: 30          # 1–998; identity=0, preferences=999
+    kind: metrics
+    action: get_activity_summary
+    fields:
+      - { id: total, label: Total, type: number }
+      - { id: status, label: Status, type: status }
+```
+
+See [profile-panel-contract.md](../foundations/profile-panel-contract.md) for
+the full contract reference.
 
 ---
 
 ## `runtime_extensions.yaml`
 
-Host-level capabilities registered at server startup — not turn-level hooks.
-Use only when the module needs to mount custom routes (e.g., webhook receivers)
-or a persistent background service.
+Optional module-level host extension file.
+
+Use `runtime_extensions.yaml` only when normal module actions are insufficient
+and the module needs to mount a custom route (`api_router`) or start a
+process-lifetime background service (`startup_service`) at host startup. It is
+not a turn-level hook file.
 
 ```yaml
 schema_version: mozaiks.runtime_extensions.v1
@@ -187,10 +303,21 @@ extensions:
 ```
 
 Two kinds:
-- `api_router` — mounts a FastAPI `APIRouter` at host startup. Required when the module
-  needs unauthenticated or custom-path routes (e.g. Stripe or Slack webhooks).
-- `startup_service` — starts a background service for the process lifetime. Required for
-  persistent external connections (WebSocket feeds, polling workers).
+- `api_router` — mounts a FastAPI `APIRouter` at host startup. Use for a
+  module-local generic external webhook receiver or custom inbound callback route.
+- `startup_service` — starts a background service for the process lifetime. Use
+  for a module-local audit/event subscriber or polling worker.
+
+Runtime extension rules:
+
+- entrypoints must be module-local backend files such as
+  `backend.webhooks:get_router` or `backend.audit_subscriber:AuditSubscriber`
+- entrypoint files must also be declared in generated backend outputs or Python stubs
+- do not use runtime extensions for generic business logic; put that in `service.py`
+- do not use runtime extensions for persistence/query code; put that in `repo.py`
+- do not use runtime extensions for auth, tenancy, or scope helpers; put that in `policy.py`
+- do not use runtime extensions for transport or WebSocket infrastructure
+- do not use runtime extensions for workflow orchestration
 
 ---
 
@@ -298,6 +425,31 @@ Pure functions that build scoped MongoDB query dicts from `ctx`. No DB access.
 
 TypedDicts for document shapes. Pure helper functions (timestamp, coerce). No I/O.
 
+### Helper files — Declared module-local support only
+
+Helper files are allowed when they keep the canonical layers clear. They must be
+declared before generation, live under the module's `backend/` package, and have
+a specific purpose that is imported by a canonical layer or referenced by
+`runtime_extensions.yaml`.
+
+Allowed generic examples:
+
+- `backend.external_client.py` for a generic external provider client
+- `backend.webhooks.py` for a runtime extension router
+- `backend.audit_subscriber.py` for a startup service helper
+- `backend.notification_client.py` for a notification delivery client
+- `backend.domain_rules.py` for complex pure domain helpers that would bloat `service.py`
+
+Prohibited helper files:
+
+- generic business logic that belongs in `service.py`
+- persistence/query code that belongs in `repo.py`
+- auth, tenancy, or scope logic that belongs in `policy.py`
+- DTOs, typed shapes, or pure serialization helpers that belong in `schemas.py`
+- transport or WebSocket infrastructure
+- workflow orchestration
+- arbitrary file splitting
+
 ---
 
 ## Event Model
@@ -307,7 +459,7 @@ events to workflow triggers and notification rules.
 
 **Event namespace rules:**
 - App modules use `domain.*` — e.g., `domain.orders.order_placed`
-- Hosted product modules use `hosted.*` — e.g., `hosted.billing.payment_succeeded`
+- Hosted product modules use `hosted.*` — e.g., `hosted.analytics.metric_recorded`
 - Platform events use `platform.*` — owned by the runtime, not generated
 
 Modules must declare every event they emit in `contracts/events.yaml`. The platform
@@ -318,8 +470,8 @@ validates that emitted events match declared types on startup.
 service.py → ctx.emit(event_type, payload)
            → UnifiedEventDispatcher
            → ModuleEventRouter
-               → reactions.yaml → handler_method on target module
-               → notifications.yaml → notification stored in platform_notifications
+         → reactions.yaml → target.kind handler/capability/notification
+         → notifications.yaml → notification stored in platform_notifications
                → orchestrator.yaml triggers → workflow start/resume
 ```
 
@@ -366,7 +518,7 @@ page composition, event flow declarations).
 Licensed capability packs that depend on private Mozaiks App hosted services.
 OSS apps must not copy these.
 
-Examples: `payments_integration`, `investor_distribution_integration`.
+Examples: `generic_hosted_analytics`, `managed_search`.
 
 **Rule:** Generate the integration facade and wiring for the app; the hosted service
 engine lives in the private product repo.
@@ -387,7 +539,7 @@ Examples: `orders`, `inventory`, `profiles`, `campaigns`.
 A facade to an outside system. Generate the integration wiring (adapter, `runtime_extensions.yaml`
 for webhook receivers, event bridge) — not the external system itself.
 
-Examples: Stripe webhook receiver, Slack notification bridge, C# settlement service adapter.
+Examples: generic external webhook receiver, notification bridge, search index sync adapter.
 
 **Rule:** The real system lives outside Mozaiks. Generate only the facade and event bridge.
 Use `runtime_extensions.yaml api_router` for inbound webhooks.
@@ -402,14 +554,17 @@ AppGenerator generates `generated_module` class capabilities. For each module in
 2. Outputs `contracts/events.yaml` — domain events the module publishes
 3. Outputs `contracts/reactions.yaml` — reactions to events from other modules (if any)
 4. Outputs `contracts/notifications.yaml` — notification rules (if any)
-5. Outputs `backend/handler.py`, `backend/service.py`, `backend/repo.py`,
+5. Outputs `contracts/profile.yaml` — user profile page panels, when the module has user-scoped account data worth surfacing (activity summaries, usage stats, notification preferences). Do not emit for every module.
+6. Outputs `backend/handler.py`, `backend/service.py`, `backend/repo.py`,
    `backend/policy.py`, `backend/schemas.py` — backend stubs
 
 AppGenerator does **not** generate:
 - auth, user management, session infrastructure → `host_universal`
 - notification delivery infrastructure, admin shell → `host_universal`
+- the user profile page or `/api/me` identity — both are `host_universal`
 - pack internals for framework packs → `framework_pack`
-- MozaiksPay, settlement, payout engine → `hosted_pack` / `external_adapter`
+- hosted service engines or external systems → `hosted_pack` / `external_adapter`
+- `contracts/profile.yaml` with `kind: form` — `form` is reserved and rejected by the validator
 
 ---
 
@@ -425,7 +580,7 @@ runtime state.
 | `contracts/reactions.yaml` | Canonical event reaction contract |
 | All companion manifests optional | Fully wired — absent files yield `None`, not empty defaults |
 | `settings.py` injected into ctx | Not yet injected; add `ctx.settings` |
-| `contracts/reactions.yaml` handler routing | Runtime-alignment work if any loader still references legacy reaction filenames |
+| `contracts/reactions.yaml` handler routing | Fully wired — `ModuleEventRouter` resolves handler, capability, and notification targets from canonical reactions |
 | `notifications.py` audience hooks | Stored but not called by `ModuleEventRouter` |
 | Module permissions enforcement | Declared but not enforced by `ModuleExecutor` |
 | Input/output schema validation | Declared but not validated by `ModuleExecutor` |

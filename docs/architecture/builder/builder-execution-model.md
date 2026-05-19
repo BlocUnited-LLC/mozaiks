@@ -16,6 +16,11 @@ typed contracts and hidden authoring workflows.
 - build sequencing and refinement routing belong to the builder session loop,
   not to workflow-local AG2 handoffs
 
+In the first-party builder, that loop is sequence-driven: `workflow_sequences`
+in `factory_app/workflows/extended_orchestration/extension_registry.json`
+coordinate the build, while `AgentGenerator` and `AppGenerator` are individual
+workflows inside that broader sequence.
+
 ## The Pipeline
 
 ```text
@@ -229,7 +234,8 @@ The builder should reason toward:
   - `app/brand/*`
 
 At runtime, the same contract is consumed from the active app root, such as
-`mozaiks-platform/app/` for App Zero or `app/` inside a generated workspace.
+`factory_app/app/` for the first-party builder/reference app workspace or
+`app/` inside a generated workspace.
 
 ## Outputs
 

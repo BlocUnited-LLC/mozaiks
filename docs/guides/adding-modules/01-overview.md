@@ -43,6 +43,11 @@ app/modules/{name}/
 Only `module.yaml` and `backend/handler.py` are required. Add contracts and
 backend files only when the module needs them.
 
+Use `contracts/reactions.yaml` as the canonical event-reaction contract.
+The runtime still accepts deprecated `contracts/subscriptions.yaml` only as a
+temporary fallback when `contracts/reactions.yaml` is absent, but new
+contributor-facing changes should author `contracts/reactions.yaml` only.
+
 The runtime auto-discovers and registers all modules at startup. No registration
 step is needed. Routes are auto-mounted at `/api/modules/{name}/{action_id}`.
 
@@ -55,6 +60,27 @@ step is needed. Routes are auto-mounted at `/api/modules/{name}/{action_id}`.
 | `repo.py` | MongoDB queries only | Business logic, validation, events |
 | `policy.py` | Build query dicts from ctx | DB access, side effects |
 | `schemas.py` | TypedDicts, timestamp helpers | I/O, imports from service or repo |
+
+## Runtime Data Integrity
+
+Modules own runtime facts. UI primitives should only render values returned by
+module actions, so module services must not manufacture fake product data.
+
+For generated and hand-authored modules:
+
+- do not return sample, demo, mock, fake, placeholder, or random records from
+  runtime actions
+- do not hardcode KPI counts, balances, totals, percentages, or status trends
+- do not leave `TODO`, `NotImplemented`, or "in production" branches in module
+  runtime paths
+- compute `*_summary`, `*_stats`, `*_metrics`, and `get_*_count` values from
+  `repo.py` / MongoDB queries
+- return honest empty values such as `0`, `[]`, or `null` when no data exists
+- return trend/change fields only when the module queries a real historical
+  comparison or metrics snapshot; otherwise return `null` or omit the field
+
+This keeps pages and admin panels reusable: `SummaryStrip` and `Metric` render
+module output, while modules remain responsible for truth and provenance.
 
 ## Minimum `module.yaml`
 

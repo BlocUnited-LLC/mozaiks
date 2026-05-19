@@ -235,6 +235,8 @@ For build-style workflows, the output should include ownership and dependency in
 - `owned_paths`
 - `depends_on`
 - `acceptance_criteria`
+- `integration_needs` when a child task expects third-party credentials or
+  connector configuration
 
 ## Cross-Workflow Data Transfer
 
@@ -337,6 +339,11 @@ Decompose into product artifacts first, not workflows first.
 - modules and persistent pages come from deterministic product planning
 - workflows are attached only when a capability requires agentic behavior
 - refinements route by artifact boundary (`ProductSpec`, `CapabilitySpec[]`, `ExperienceSpec`, `AgentAugmentationPlan`, `BuildGraph`)
+- third-party credentials are requested agentically at the point of need. Child
+  tasks may declare or record `integration_needs`; the parent fan-in checkpoint
+  aggregates them, reuses ready app connectors, prompts inline for missing
+  required credentials, and persists results to the app-scoped
+  `/apps/{appId}/integrations` surface.
 
 ## Summary
 

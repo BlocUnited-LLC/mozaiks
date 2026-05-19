@@ -37,24 +37,6 @@ pages:
     order: 20
     enabled: true
 
-  - id: workspace-integrations
-    label: Integrations
-    path: /integrations
-    icon: plug
-    scope: workspace
-    surfaces: [studio]
-    order: 25
-    enabled: true
-
-  - id: workspace-billing
-    label: Billing
-    path: /billing
-    icon: billing
-    scope: workspace
-    surfaces: [studio]
-    order: 30
-    enabled: true
-
   # ── App-level (per-app admin portal) ──────────────────────────────────────
   - id: overview
     label: Overview
@@ -81,15 +63,6 @@ pages:
     scope: app
     surfaces: [studio]
     order: 20
-    enabled: true
-
-  - id: billing
-    label: Billing
-    path: /apps/:appId/billing
-    icon: billing
-    scope: app
-    surfaces: [studio]
-    order: 30
     enabled: true
 
   - id: activity

@@ -1,4 +1,4 @@
-"""Inject AppGenerator file contracts and module archetypes into agent prompts."""
+"""Inject AppGenerator file contracts, module archetypes, and workflow archetypes into agent prompts."""
 
 from __future__ import annotations
 
@@ -11,9 +11,11 @@ logger = logging.getLogger(__name__)
 _TOOLS_DIR = Path(__file__).parent
 _FILE_CONTRACTS_PATH = _TOOLS_DIR / "file_contracts.yaml"
 _MODULE_ARCHETYPES_PATH = _TOOLS_DIR / "module_archetypes.yaml"
+_WORKFLOW_ARCHETYPES_PATH = _TOOLS_DIR / "workflow_archetypes.yaml"
 
 _FILE_CONTRACTS_HEADER = "[FILE CONTRACTS CONTEXT]"
 _MODULE_ARCHETYPES_HEADER = "[MODULE ARCHETYPES CONTEXT]"
+_WORKFLOW_ARCHETYPES_HEADER = "[WORKFLOW ARCHETYPE CONTEXT]"
 
 _PLANNING_CONTRACT_ORDER = (
     "page_bundle",
@@ -245,8 +247,54 @@ def _build_module_archetypes_body(agent: Any, module_archetypes: Dict[str, Any])
     return "\n\n".join(lines)
 
 
+def _build_workflow_archetypes_body(agent: Any, workflow_archetypes: Dict[str, Any]) -> str:
+    """Render workflow archetype guidance for injection into AppPlanAgent."""
+    agent_name = getattr(agent, "name", "")
+    if agent_name != "AppPlanAgent":
+        return ""
+
+    archetypes = workflow_archetypes.get("archetypes")
+    if not isinstance(archetypes, dict) or not archetypes:
+        return ""
+
+    lines = [
+        "Workflow archetypes guide orchestrator shape, agent sequence, tool constraints,",
+        "and output invariants for workflow-surface capability packs. Apply when planning",
+        "any capability pack with surface_kind=workflow.",
+    ]
+
+    for name, archetype in archetypes.items():
+        if not isinstance(archetype, dict):
+            continue
+
+        summary = str(archetype.get("summary", "")).strip()
+        select_when = archetype.get("select_when") or []
+        hard_constraints = archetype.get("hard_constraints") or []
+        blocked_pattern = archetype.get("blocked_phase_pattern")
+
+        lines.append("")
+        lines.append(f"archetype: {name}")
+        if summary:
+            lines.append(f"  summary: {summary[:250]}")
+        if select_when:
+            lines.append("  select_when:")
+            for sw in select_when[:5]:
+                lines.append(f"    - {str(sw).strip()[:140]}")
+        if hard_constraints:
+            lines.append("  hard_constraints:")
+            for hc in hard_constraints[:6]:
+                lines.append(f"    - {str(hc).strip()[:140]}")
+        if blocked_pattern and isinstance(blocked_pattern, dict):
+            rule = str(blocked_pattern.get("rule", "")).strip()
+            if rule:
+                lines.append("  blocked_phase_rule:")
+                lines.append(f"    {rule[:250]}")
+
+    return "\n".join(lines)
+
+
 def inject_cookie_cutter_contracts_context(agent: Any, messages: List[Dict[str, Any]]) -> None:
-    """Inject file contracts and module archetypes into relevant AppGenerator agents."""
+    """Inject file contracts, module archetypes, and workflow archetypes into AppGenerator agents."""
     del messages
 
     agent_name = getattr(agent, "name", "")
@@ -273,6 +321,12 @@ def inject_cookie_cutter_contracts_context(agent: Any, messages: List[Dict[str, 
             module_archetypes_body = _build_module_archetypes_body(agent, module_archetypes)
             if module_archetypes_body:
                 _update_section(agent, _MODULE_ARCHETYPES_HEADER, module_archetypes_body)
+
+        workflow_archetypes = _load_yaml(_WORKFLOW_ARCHETYPES_PATH)
+        if workflow_archetypes:
+            workflow_archetypes_body = _build_workflow_archetypes_body(agent, workflow_archetypes)
+            if workflow_archetypes_body:
+                _update_section(agent, _WORKFLOW_ARCHETYPES_HEADER, workflow_archetypes_body)
 
     except Exception as exc:
         logger.error("[%s] Failed to inject cookie-cutter contracts context: %s", agent_name, exc)

@@ -20,13 +20,13 @@ Flow:
 6. Cache connector inventory in context for downstream agents
 """
 
-import asyncio
 import logging
-from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime, UTC
+from datetime import UTC, datetime
+from typing import Any
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.transport.simple_transport import SimpleTransport
+from mozaiksai.core.workflow.generator_support.connector_request import request_connector_bundle
 from mozaiksai.core.workflow.generator_support.connector_service import get_connector_inventory
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ def _normalize_service_name(service: str) -> str:
         return ""
     return str(service).strip().lower().replace(" ", "_")
 
-def _extract_integrations_from_action_plan(action_plan: Dict[str, Any]) -> List[Dict[str, str]]:
+def _extract_integrations_from_action_plan(action_plan: dict[str, Any]) -> list[dict[str, str]]:
     """
     Extract all integrations that require external API keys from the Action Plan.
 
@@ -70,7 +70,7 @@ def _extract_integrations_from_action_plan(action_plan: Dict[str, Any]) -> List[
     Returns:
         Deduplicated list of service metadata dicts containing normalized identifier and display label.
     """
-    services: Dict[str, str] = {}
+    services: dict[str, str] = {}
 
     def _record_service(raw_value: Any) -> None:
         if not raw_value:
@@ -111,7 +111,7 @@ def _extract_integrations_from_action_plan(action_plan: Dict[str, Any]) -> List[
     except Exception as e:
         logger.warning(f"Failed to extract integrations from Action Plan: {e}")
 
-    def _sort_key(item: Tuple[str, str]) -> Tuple[str, str]:
+    def _sort_key(item: tuple[str, str]) -> tuple[str, str]:
         normalized, display = item
         return (display.lower(), normalized)
 
@@ -122,7 +122,7 @@ def _extract_integrations_from_action_plan(action_plan: Dict[str, Any]) -> List[
     ]
 
 
-async def collect_api_keys_from_action_plan(context_variables: Any = None) -> Dict[str, Any]:
+async def collect_api_keys_from_action_plan(context_variables: Any = None) -> dict[str, Any]:
     """
     Lifecycle tool: Extract integrations from the Action Plan and collect API keys.
     
@@ -194,15 +194,8 @@ async def collect_api_keys_from_action_plan(context_variables: Any = None) -> Di
     if ready_services:
         wf_logger.info("✓ Reusing ready app connectors: %s", sorted(ready_services))
     
-    # Import consolidated API key bundle helper
-    try:
-        from .request_api_key import request_api_keys_bundle
-    except ImportError:
-        wf_logger.error("Failed to import request_api_keys_bundle - cannot collect API keys")
-        return {"status": "import_error", "services_collected": []}
-
     # Build payload for consolidated UI interaction
-    bundle_services: List[Dict[str, Any]] = []
+    bundle_services: list[dict[str, Any]] = []
     for service in services:
         service_identifier = (service.get("service") or "").strip()
         if not service_identifier:
@@ -235,13 +228,13 @@ async def collect_api_keys_from_action_plan(context_variables: Any = None) -> Di
             "connector_inventory": inventory_after,
         }
 
-    collected_services: List[str] = []
-    failed_services: List[str] = []
-    collected_details: List[Dict[str, Any]] = []
-    failed_details: List[Dict[str, Any]] = []
+    collected_services: list[str] = []
+    failed_services: list[str] = []
+    collected_details: list[dict[str, Any]] = []
+    failed_details: list[dict[str, Any]] = []
 
     try:
-        bundle_result = await request_api_keys_bundle(
+        bundle_result = await request_connector_bundle(
             services=bundle_services,
             agent_message="Please provide the required API keys for the integrations that are not already connected.",
             description="We will reuse active app connectors when they already exist. Raw secrets are never persisted in MongoDB; only sanitized metadata and optional vault-backed storage are used.",
@@ -275,7 +268,7 @@ async def collect_api_keys_from_action_plan(context_variables: Any = None) -> Di
     if missing_required:
         wf_logger.warning("⚠️ Required API keys still missing: %s", missing_required)
 
-    results_by_service: Dict[str, Dict[str, Any]] = {}
+    results_by_service: dict[str, dict[str, Any]] = {}
     if isinstance(service_results, list):
         for entry in service_results:
             service_key = entry.get("service")
@@ -353,7 +346,7 @@ async def collect_api_keys_from_action_plan(context_variables: Any = None) -> Di
 
     # Prepare sanitized .env attachment for downstream download bundle
     try:
-        env_lines: List[str] = [
+        env_lines: list[str] = [
             "# API keys required for the approved action plan",
             f"# Generated at {datetime.now(UTC).isoformat()}",
             "",

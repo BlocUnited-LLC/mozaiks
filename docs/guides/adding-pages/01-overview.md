@@ -25,6 +25,7 @@ For cases the schema cannot express:
 ```text
 app/ui/pages/custom/{Name}.jsx   ← custom React route
 app/ui/route_manifest.json       ← registers the route
+app/ui/index.js                  ← registers the component key used by the route
 ```
 
 ## Minimum Page Schema
@@ -190,6 +191,11 @@ Register the component in `app/ui/index.js`:
 const MyPage = lazy(() => import('./pages/custom/MyPage.jsx'))
 registerComponent('MyPage', MyPage)
 ```
+
+There is no implicit discovery for custom React routes. A route is valid only
+when `app/ui/route_manifest.json`, `app/ui/pages/custom/{Name}.jsx`, and
+`app/ui/index.js` all agree on the same component key. `admin/admin_registry.yaml`
+is not a route registry and must not own full-page custom React components.
 
 Use custom routes sparingly. Extend an existing primitive before reaching for a
 custom route.

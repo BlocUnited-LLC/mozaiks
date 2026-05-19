@@ -7,7 +7,7 @@ The goal is to keep the runtime and shared builder clean while still allowing:
 
 - strong greenfield foundations for generated apps
 - optional first-party feature packs such as notifications or messaging
-- private hosted integrations such as MozaiksPay
+- private hosted integrations such as generic hosted analytics
 
 ## Core Decision
 
@@ -25,7 +25,7 @@ A capability pack is a packaged feature family that may contribute:
 The capability pack is the reusable feature unit.
 
 The runtime is **not** the place to store app-specific business features such as
-payments, messaging, or investor distributions.
+search, notifications, or hosted analytics.
 
 ## V1 Simplicity Rule
 
@@ -94,14 +94,14 @@ services.
 
 Examples:
 
-- payments integration
-- investor distribution integration
-- marketplace settlement integration
+- generic hosted analytics
+- managed search integration
+- external notification delivery integration
 
 These packs should live in the private hosted product repo, not in the public
 framework repo.
 
-Recommended root in `mozaiks-app`:
+Recommended root in a private hosted product workspace:
 
 ```text
 capability_packs/licensed/
@@ -111,8 +111,8 @@ The private hosted service logic should live separately under product service
 roots such as:
 
 ```text
-services/mozaikspay/
-services/investor_distribution/
+services/hosted_analytics/
+services/managed_search/
 ```
 
 ### 4. Generated app-specific output
@@ -167,7 +167,7 @@ composition, event flow declarations).
 Licensed packs that depend on private Mozaiks App hosted services.
 OSS apps must not include these.
 
-Examples: `payments_integration`, `investor_distribution_integration`.
+Examples: `generic_hosted_analytics`, `managed_search`.
 
 **Rule:** Generate the integration facade and wiring; the hosted service engine
 lives in the private product repo.
@@ -188,7 +188,7 @@ Examples: `orders`, `inventory`, `profiles`, `campaigns`.
 A facade to an outside system. Generate the integration wiring only — not the
 external system itself.
 
-Examples: Stripe webhook receiver, Slack notification bridge, C# settlement adapter.
+Examples: generic external webhook receiver, notification bridge, search index sync adapter.
 
 **Rule:** Generate the facade and event bridge. Use `runtime_extensions.yaml api_router`
 for inbound webhooks. The real system lives outside Mozaiks.
@@ -212,9 +212,9 @@ This is the real unit you should think about.
 Examples:
 
 - `notifications`
-- `messaging`
-- `payments_integration`
-- `investor_distribution_integration`
+- `audit`
+- `search`
+- `generic_hosted_analytics`
 
 ### `source_pack_id`
 
@@ -222,7 +222,7 @@ This is provenance metadata.
 
 Example:
 
-- the Billing page exists because the `payments_integration` pack added it
+- the Analytics page exists because the `generic_hosted_analytics` pack added it
 
 If this field creates more confusion than value during the first implementation,
 it can remain internal planning metadata.
@@ -233,10 +233,10 @@ This is not an AI concept. It is just the map from domain facts to reactions.
 
 Example:
 
-- `domain.payments.payment_succeeded`
-- update subscription state
+- `domain.audit.record_created`
+- update an activity summary
 - notify the user
-- refresh a billing view
+- refresh an audit view
 - optionally trigger a workflow
 
 The important rule is: the app backend emits domain facts, not workflow names.
@@ -247,12 +247,12 @@ This is the recommended v1 manifest shape for both public and private packs.
 
 ```yaml
 schema_version: mozaiks.capability_pack.v1
-capability_pack_id: messaging
-label: Messaging
-summary: Direct messages, threads, channels, read state, and notification hooks.
+capability_pack_id: notifications
+label: Notifications
+summary: In-app notification records, delivery preferences, and event-driven delivery hooks.
 visibility: public
 
-pack_type: messaging_pack
+pack_type: notification_pack
 implementation_mode: declarative_module
 delivery_mode: app_embedded
 
@@ -262,21 +262,20 @@ requires:
 
 contributes:
   modules:
-    - threads
-    - messages
-    - announcements
+    - notifications
+    - notification_preferences
   pages:
-    - messages
+    - notifications
   admin_sections: []
   workflows: []
   events:
-    - domain.messaging.thread_created
-    - domain.messaging.message_sent
+    - domain.notifications.notification_created
+    - domain.notifications.notification_read
 
 hard_constraints:
   - Keep handler.py thin.
   - Publish only declared domain events.
-  - Use thread/member read-state records for delivery semantics.
+  - Use persisted notification records for delivery and read-state semantics.
 ```
 
 Recommended field meanings:
@@ -292,22 +291,58 @@ Recommended field meanings:
 | `contributes.*` | What the pack adds to an app workspace |
 | `hard_constraints` | Rules the builder and downstream agents must not violate |
 
+Hosted and external packs may also provide build-time metadata:
+
+| Field | Meaning |
+| --- | --- |
+| `capability_source` | Ownership source such as `framework_pack`, `hosted_pack`, `generated_module`, or `external_adapter` |
+| `surfaces` | Named UI/API surfaces the pack may enable, with status and route hints |
+| `supported_domains` | Provider-neutral app domains where the pack is relevant |
+| `branding` | Optional display metadata, never implementation logic |
+| `generation_rules` | Builder constraints that agents must follow when composing the app |
+| `supersedes` | Pack ids this pack replaces when both are available |
+| `adapter_template` | Optional backend integration template copied into `backend/integrations/` |
+
+### Hosted-pack facade path
+
+Hosted packs must be consumed through generated app-owned facades:
+
+```text
+hosted_pack
+  -> backend/integrations/{pack_id}_client.py
+  -> app-owned facade module
+  -> ui/pages bind to the facade module
+```
+
+Provider-neutral example:
+
+```text
+hosted_analytics
+  -> backend/integrations/hosted_analytics_client.py
+  -> modules/analytics_dashboard/
+  -> ui/pages/analytics.yaml
+  -> /api/modules/analytics_dashboard/get_metrics
+```
+
+Pages must not call hosted pack internals directly. They call the generated
+facade module, and the facade module calls the integration client.
+
 ## Public Pack Example In This Repo
 
 Recommended location:
 
 ```text
-factory_app/capability_packs/public/messaging/
+factory_app/capability_packs/public/notifications/
 ```
 
 Recommended shape:
 
 ```text
-factory_app/capability_packs/public/messaging/
+factory_app/capability_packs/public/notifications/
 ├── manifest.yaml
 ├── app_overlay/
 │   ├── modules/
-│   │   ├── threads/
+│   │   ├── notifications/
 │   │   │   ├── module.yaml
 │   │   │   ├── contracts/
 │   │   │   │   ├── events.yaml
@@ -321,46 +356,46 @@ factory_app/capability_packs/public/messaging/
 │   │   │       ├── repo.py
 │   │   │       ├── policy.py
 │   │   │       └── schemas.py
-│   │   └── messages/
+│   │   └── notification_preferences/
 │   │       └── ...
 │   ├── ui/
 │   │   ├── pages/
-│   │   │   └── messages.yaml
+│   │   │   └── notifications.yaml
 │   │   └── components/
-│   │       └── MessageComposer.jsx
+│   │       └── NotificationList.jsx
 │   └── workflows/
-│       └── MessageModeration/
+│       └── NotificationDigest/
 │           └── ...
 └── tests/
-    └── test_messaging_pack.py
+    └── test_notifications_pack.py
 ```
 
 Notes:
 
 - `app_overlay/` is not a full standalone app. It is a promotable fragment that maps onto the canonical app root.
 - A public pack may include workflows, but only when the feature really needs AI behavior.
-- Messaging itself is primarily deterministic module logic, not a workflow-first feature.
+- Notifications are primarily deterministic module logic, not a workflow-first feature.
 
-## Private Pack Example In `mozaiks-app`
+## Hosted Pack Example Outside OSS
 
 Recommended locations:
 
 ```text
-capability_packs/licensed/payments_integration/
-services/mozaikspay/
+capability_packs/licensed/generic_hosted_analytics/
+services/hosted_analytics/
 ```
 
 Recommended shape:
 
 ```text
-mozaiks-app/
+hosted-product-workspace/
 ├── capability_packs/
 │   └── licensed/
-│       └── payments_integration/
+│       └── generic_hosted_analytics/
 │           ├── manifest.yaml
 │           ├── app_overlay/
 │           │   ├── modules/
-│           │   │   ├── payments/
+│           │   │   ├── analytics_dashboard/
 │           │   │   │   ├── module.yaml
 │           │   │   │   ├── contracts/
 │           │   │   │   │   ├── events.yaml
@@ -371,42 +406,43 @@ mozaiks-app/
 │           │   │   │   └── backend/
 │           │   │   │       ├── handler.py
 │           │   │   │       ├── service.py
-│           │   │   │       └── client.py
+│           │   │   │       ├── repo.py
+│           │   │   │       ├── policy.py
+│           │   │   │       ├── schemas.py
+│           │   │   │       └── analytics_client.py
 │           │   └── ui/
 │           │       └── pages/
-│           │           └── billing.yaml
+│           │           └── analytics.yaml
 │           ├── build_extensions/
-│           │   └── inject_payments_context.py
+│           │   └── inject_hosted_analytics_context.py
 │           └── tests/
-│               └── test_payments_integration_pack.py
+│               └── test_hosted_analytics_pack.py
 └── services/
-    └── mozaikspay/
+    └── hosted_analytics/
         ├── api/
-        ├── ledger/
-        ├── payouts/
-        ├── settlement/
-        └── webhooks/
+        ├── aggregation/
+        ├── reports/
+        └── callbacks/
 ```
 
 Notes:
 
-- The **integration pack** lives with the builder-facing hosted product assets.
-- The real payment engine lives in the private service layer.
-- Generated apps receive app-side integrations, pages, modules, and admin wiring.
-- Generated apps do **not** receive the private payout or settlement engine source code.
+- The integration pack lives with the builder-facing hosted product assets.
+- The real hosted analytics engine lives in the private service layer.
+- Generated apps receive app-side facade modules, pages, and admin wiring.
+- Generated apps do **not** receive the private hosted service engine source code.
 
-## Billing Should Be First-Class Optional, Not Mandatory
+## Hosted Operator Surfaces Are Optional
 
-Billing is a valid first-class admin section in the shell.
-
-That does **not** mean every app must carry billing logic.
+A shell or admin system may know how to place optional operator surfaces, but
+that does **not** mean every app carries implementation logic for those surfaces.
 
 Recommended rule:
 
-- the admin shell may know what a Billing section is
-- a capability pack decides whether Billing is populated for a given app
-- a public subscription pack may fill basic billing/usage surfaces
-- a private payments integration pack may fill Billing with proprietary hosted integrations
+- a capability pack decides whether a hosted operator surface is populated
+- public packs fill public surfaces with embedded app logic
+- hosted packs fill hosted surfaces through facade modules and external adapters
+- standard generated app bundles must not include hosted-only operator surfaces unless the host context explicitly provides the pack
 
 ## Recommended Build Path
 
@@ -425,14 +461,14 @@ Example policy input:
 ```yaml
 host_mode: oss
 licensed_services:
-  - mozaikspay
+  - hosted_analytics
 ```
 
 With that input:
 
-- `messaging` is allowed because it is public
-- `payments_integration` is allowed because `mozaikspay` is licensed
-- the real `MozaiksPay` ledger still remains private
+- `notifications` is allowed because it is public
+- `generic_hosted_analytics` is allowed because `hosted_analytics` is licensed
+- the real hosted analytics engine still remains private
 
 ## What The Agents Should Generate Versus Reuse
 
@@ -442,8 +478,7 @@ With that input:
 - settings
 - files/media
 - audit/activity
-- messaging/community
-- public subscription and billing shell behavior
+- search
 
 ### Generate per app
 
@@ -455,51 +490,48 @@ With that input:
 
 ### Keep private and integrate
 
-- payment rails
-- settlement
-- payouts
-- investor distributions
-- campaign revenue allocation
+- hosted analytics engines
+- managed search engines
+- external provider services
 
-## Naming Clarity — reactions.yaml vs SaaS Subscriptions
+## Naming Clarity — reactions.yaml vs External Event Subscriptions
 
-Keep event reactions and SaaS subscriptions separate:
+Keep event reactions and external event subscriptions separate:
 
 **`contracts/reactions.yaml`**
 
 An optional module contract file. It declares which domain events a module
-reacts to. It has nothing to do with billing, plans, or SaaS subscriptions.
+reacts to. It does not declare persistent external connections or hosted
+service subscriptions.
 
 ```yaml
-# modules/orders/contracts/reactions.yaml
+# modules/audit/contracts/reactions.yaml
 reactions:
-  - id: orders.on_payment_succeeded
-    event_type: hosted.billing.payment_succeeded
+  - id: audit.on_notification_created
+    event_type: domain.notifications.notification_created
     target:
       kind: handler
-      handler_method: handle_payment_succeeded
+      handler_method: record_notification_event
 ```
 
-**`entitlements` capability pack**
+**External event subscription**
 
-A framework pack for SaaS plan/tier management and feature access control.
-Owns the plan catalog, user plan assignment, trial lifecycle, and feature gates.
-Connects to hosted payment capabilities via domain events.
+An external event subscription is runtime integration behavior. Model it through
+a module-owned `runtime_extensions.yaml` startup service or API router only when
+normal module actions are insufficient.
 
-An app selects this pack when it needs to gate features by plan, manage
-free/paid tiers, or run trials. SaaS subscriptions are modeled by billing or
-subscription modules plus entitlements, not by event reactions.
+Example:
 
 ```yaml
-# app/app.json (simplified)
-capability_packs:
-  - entitlements
-  - payments_integration
+# modules/audit/runtime_extensions.yaml
+schema_version: mozaiks.runtime_extensions.v1
+extensions:
+  - kind: startup_service
+    entrypoint: backend.audit_subscriber:AuditSubscriber
 ```
 
-An entitlements module may use `contracts/reactions.yaml` internally to react to
-`hosted.billing.payment_succeeded` and upgrade plan state. That is event
-reaction routing, not the SaaS subscription model itself.
+`contracts/reactions.yaml` routes already-committed domain events between
+modules. `runtime_extensions.yaml` connects a module to host startup behavior.
 
 ---
 

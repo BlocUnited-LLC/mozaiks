@@ -54,7 +54,7 @@ The closest language family is:
 | --- | --- | --- | --- |
 | Customer-facing product language | end users, admins, operators | navigation, UI copy, onboarding | `Apps`, `Build`, `Deploy`, `Usage`, `Operations`, `Integrations`, `Admin` |
 | Restrained branded language | product marketing, onboarding, shell descriptors | light thematic cohesion | `Mozaiks Console` |
-| Internal engineering language | runtime contributors, framework engineers | implementation boundaries and repo ownership | `factory_app`, `App Zero`, `Studio host`, `workflow_sequence` |
+| Internal engineering language | runtime contributors, framework engineers | implementation boundaries and repo ownership | `factory_app`, `Studio host`, `workflow_sequence` |
 | Runtime and operational language | runtime engineers, observability surfaces, internal docs | transport, orchestration, persistence, telemetry | `control_plane`, `artifact_version`, `revision_context`, `journey` |
 
 ## Customer-Facing Vocabulary
@@ -76,6 +76,10 @@ These are the preferred visible terms.
 | `Users` | app-level or workspace-level user management | context determines scope |
 | `Settings` | configuration and defaults | use instead of custom nouns |
 | `Admin` | privileged management surface | user-facing name for the admin shell |
+
+Host apps may add commercial terms such as billing when they expose a
+host-owned capability. The OSS factory console does not reserve or hardcode a
+billing route.
 
 ## Restrained Branded Language
 
@@ -108,7 +112,6 @@ implementation contracts.
 | Internal Term | Meaning |
 | --- | --- |
 | `factory_app` | first-party workspace that co-locates the app bundle, builder workflows, and first-party harness pack |
-| `App Zero` | internal dogfood/reference concept for the first-party workspace |
 | `Studio` | host/composition term for the management interface layer |
 | `Studio host` | `mozaiksai.hosts.studio` runtime composition |
 | `Control Plane` | runtime orchestration and refinement routing subsystem |
@@ -142,7 +145,6 @@ Do not use these as visible product concepts:
 - `Hub`
 - `Studio` as a top-level product area
 - `Factory App`
-- `App Zero`
 - `Control Plane`
 - `workflow_sequence`
 - `Adapters`
@@ -171,11 +173,8 @@ Use the product term in visible UI even when the implementation name differs.
 
 Examples:
 
-- visible: `Hosting`
-- internal: `AppHostingPage`
-
 - visible: `Integrations`
 - internal: `AppIntegrationsPage`
 
-- visible: `Billing`
-- internal: `AppBillingPage`
+- visible: host-provided commercial section
+- internal: host-owned route/component name

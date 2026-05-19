@@ -78,7 +78,7 @@ layers:
       - id: entitlements
         covers: >
           SaaS plan/tier catalog, user plan assignment, trial lifecycle, feature gates.
-          Reacts to payment events from payments_integration via subscriptions.yaml —
+          Reacts to payment events from payments_integration via contracts/reactions.yaml —
           does not own payment processing. Use this whenever an app needs to gate
           features by plan, manage free/paid tiers, or run trials.
         capability_kind: framework_pack
@@ -99,11 +99,11 @@ layers:
 
     naming_note: >
       IMPORTANT — do not confuse these two things:
-        subscriptions.yaml (module contract file) — declares which domain events from
+        contracts/reactions.yaml (module contract file) — declares which domain events from
           other modules THIS module reacts to. Pub-sub routing. Every module may have one.
         entitlements pack — SaaS subscription plans, feature gates, trial management.
           A capability pack selected by apps that need plan-based access control.
-      They share no implementation. Use subscriptions.yaml for event wiring in any module.
+      They share no implementation. Use contracts/reactions.yaml for event wiring in any module.
       Use the entitlements pack when the product needs SaaS plan/tier logic.
 
   custom_owned:

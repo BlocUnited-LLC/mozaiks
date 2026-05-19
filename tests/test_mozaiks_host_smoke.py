@@ -19,12 +19,12 @@ async def test_studio_shell_config_injects_studio_routes():
 
     assert "/apps" in page_paths
     assert "/apps/:appId/overview" in page_paths
-    assert "/apps/:appId/billing" in page_paths
+    assert "/apps/:appId/billing" not in page_paths
     assert "/apps/:appId/hosting" not in page_paths
     assert "/apps/:appId/integrations" in page_paths
     assert "/apps/:appId/users" in page_paths
     assert "/apps/:appId/usage" in page_paths
-    assert "/billing" in page_paths
+    assert "/billing" not in page_paths
     assert "/hosting" not in page_paths
     assert "/apps/:appId/build" not in page_paths
     assert "/apps/:appId/deploy" not in page_paths

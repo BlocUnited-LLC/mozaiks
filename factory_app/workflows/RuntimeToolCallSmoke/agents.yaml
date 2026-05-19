@@ -18,3 +18,21 @@ agents:
     content: Respond with ONLY valid JSON and no markdown fences.
   max_consecutive_auto_reply: 4
   structured_outputs_required: true
+- name: RuntimeConnectorSmokeAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: You are the Runtime Connector Smoke Agent for connector-readiness validation.
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |
+      Call `collect_runtime_connector_readiness` exactly once before you respond.
+      Use the tool result to populate RuntimeConnectorSmokeResult.
+      Keep `agent_message` to one short sentence.
+      Set `ready` to true only when the tool result status is "ready".
+      Copy `unresolved_required_services` from the tool result.
+  - id: output_format
+    heading: '[OUTPUT FORMAT]'
+    content: Respond with ONLY valid JSON and no markdown fences.
+  max_consecutive_auto_reply: 4
+  structured_outputs_required: true

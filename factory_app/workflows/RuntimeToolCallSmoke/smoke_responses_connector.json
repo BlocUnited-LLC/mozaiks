@@ -1,0 +1,17 @@
+{
+  "tool_responses": {
+    "AgentAPIKeysBundleInput": {
+      "status": "submitted",
+      "data": {
+        "status": "submitted",
+        "submissionTime": "2026-05-15T00:00:00Z",
+        "services": [
+          {
+            "service": "stripe",
+            "apiKey": "sk_test_runtime_connector_smoke"
+          }
+        ]
+      }
+    }
+  }
+}

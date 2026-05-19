@@ -278,9 +278,14 @@ Current default classifier grounding:
     `concept`, `build_plan`, `design_docs`, and `theme_capture`
   - one-level resolved `canonical_inputs_version` lineage so downstream bundle
     artifacts can expose the upstream artifacts they were built from
-- when a `ChangeRequest` is persisted, the control plane now also marks the
-  affected persisted artifact versions `stale` using the change-request id as
-  the invalidation reason
+- when a `ChangeRequest` is persisted, the control plane marks the affected
+  persisted artifact versions `stale` using the change-request id as the
+  invalidation reason; it also propagates staleness transitively to all
+  downstream artifact families using the declared `artifact_dependency_graph`
+  (see [Artifact Staleness and Routing](../builder/artifact-staleness-and-routing.md))
+- the `get_stale_artifact_families` control plane tool surfaces that stale set
+  to the classifier at `request_submitted` so routing upgrades to the minimal
+  necessary sequence automatically
 - the first-party factory pack pairs that runtime context with
   `get_artifact_summary`
 - app-specific packs may add extra tools, but the harness backbone should start

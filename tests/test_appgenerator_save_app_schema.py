@@ -400,6 +400,74 @@ def test_save_app_schema_rejects_custom_route_overlap(monkeypatch, tmp_path: Pat
         )
 
 
+def test_save_app_schema_rejects_custom_route_component_without_matching_registration(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    manifest = {
+        "app_name": "Analytics App",
+        "version": "1.0.0",
+        "default_route": "/analytics",
+        "pages": [],
+        "custom_routes": ["analytics"],
+    }
+    custom_bundle = _custom_route_bundle()
+    custom_bundle["route_manifest"][0]["id"] = "analytics"
+    custom_bundle["route_manifest"][0]["path"] = "/analytics"
+    custom_bundle["route_manifest"][0]["component"] = "AnalyticsPage"
+    custom_bundle["page_files"][0]["route_id"] = "analytics"
+    custom_bundle["page_files"][0]["path"] = "ui/pages/custom/AnalyticsPage.jsx"
+    custom_bundle["page_files"][0]["component_name"] = "AnalyticsPage"
+    custom_bundle["page_files"][0]["registry_key"] = "WrongPage"
+
+    with pytest.raises(ValueError) as exc_info:
+        save_app_schema_module.save_app_schema(
+            manifest=manifest,
+            pages=[],
+            custom_route_bundle=custom_bundle,
+            context_variables=_Context(),
+        )
+
+    message = str(exc_info.value)
+    assert "WrongPage" in message
+    assert "AnalyticsPage" in message
+    assert "/analytics" in message
+    assert "ui/index.js registerComponent key" in message
+
+
+def test_save_app_schema_rejects_custom_page_file_without_route_owner(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    manifest = {
+        "app_name": "Reports App",
+        "version": "1.0.0",
+        "default_route": "/reports",
+        "pages": [],
+        "custom_routes": ["reports"],
+    }
+    custom_bundle = _custom_route_bundle()
+    custom_bundle["route_manifest"][0]["id"] = "reports"
+    custom_bundle["route_manifest"][0]["path"] = "/reports"
+    custom_bundle["route_manifest"][0]["component"] = "ReportsPage"
+    custom_bundle["page_files"][0]["route_id"] = "orphan"
+    custom_bundle["page_files"][0]["path"] = "ui/pages/custom/OrphanPage.jsx"
+    custom_bundle["page_files"][0]["component_name"] = "OrphanPage"
+    custom_bundle["page_files"][0]["registry_key"] = "OrphanPage"
+
+    with pytest.raises(ValueError) as exc_info:
+        save_app_schema_module.save_app_schema(
+            manifest=manifest,
+            pages=[],
+            custom_route_bundle=custom_bundle,
+            context_variables=_Context(),
+        )
+
+    message = str(exc_info.value)
+    assert "route_id 'orphan'" in message
+    assert "route path, component key, custom page file, and ui/index.js registration" in message
+
+
 def test_save_app_schema_rejects_duplicate_section_ids(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     page = _base_page()

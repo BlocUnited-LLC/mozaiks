@@ -6,6 +6,14 @@ Fetches the OpenID Connect discovery document to obtain:
 - issuer: Expected token issuer
 
 This makes JWT validation provider-agnostic by dynamically discovering endpoints.
+
+OIDC discovery requires explicit configuration. The OSS runtime does not provide
+a default identity provider. Configure discovery via one of:
+  - MOZAIKS_OIDC_DISCOVERY_URL  — direct URL to the .well-known document
+  - MOZAIKS_OIDC_AUTHORITY + MOZAIKS_OIDC_TENANT_ID  — computed discovery URL
+  - AUTH_JWKS_URL + AUTH_ISSUER  — skip discovery entirely
+
+Hosted deployments may set MOZAIKS_OIDC_AUTHORITY to their own identity provider.
 """
 
 import asyncio
@@ -21,9 +29,6 @@ from logs.logging_config import get_core_logger
 logger = get_core_logger("auth.discovery")
 
 
-# Mozaiks CIAM defaults
-_DEFAULT_AUTHORITY = "https://mozaiks.ciamlogin.com"
-_DEFAULT_TENANT_ID = "9d0073d5-42e8-46f0-a325-5b4be7b1a38d"
 _DEFAULT_DISCOVERY_CACHE_TTL = 86400  # 24 hours (discovery rarely changes)
 
 
@@ -64,22 +69,35 @@ class OIDCDiscoveryClient:
         Initialize OIDC discovery client.
 
         Args:
-            discovery_url: Direct URL to discovery document. If None, computed from
-                           MOZAIKS_OIDC_AUTHORITY and MOZAIKS_OIDC_TENANT_ID.
+            discovery_url: Direct URL to discovery document. If None, resolved from
+                           MOZAIKS_OIDC_DISCOVERY_URL, or computed from
+                           MOZAIKS_OIDC_AUTHORITY + MOZAIKS_OIDC_TENANT_ID.
+                           If no authority is configured, discovery_url is None and
+                           get_discovery() raises a RuntimeError on first call.
             cache_ttl: Cache TTL in seconds (default: 86400 = 24h)
         """
-        # Allow explicit override via MOZAIKS_OIDC_DISCOVERY_URL
+        # Explicit env override takes highest priority.
         explicit_url = os.getenv("MOZAIKS_OIDC_DISCOVERY_URL", "").strip()
-        
+
         if explicit_url:
-            self._discovery_url = explicit_url
+            self._discovery_url: Optional[str] = explicit_url
         elif discovery_url:
             self._discovery_url = discovery_url
         else:
-            # Compute from authority + tenant
-            authority = os.getenv("MOZAIKS_OIDC_AUTHORITY", _DEFAULT_AUTHORITY).rstrip("/")
-            tenant_id = os.getenv("MOZAIKS_OIDC_TENANT_ID", _DEFAULT_TENANT_ID)
-            self._discovery_url = f"{authority}/{tenant_id}/v2.0/.well-known/openid-configuration"
+            # Compute from authority + tenant if both are configured.
+            authority = os.getenv("MOZAIKS_OIDC_AUTHORITY", "").strip().rstrip("/")
+            tenant_id = os.getenv("MOZAIKS_OIDC_TENANT_ID", "").strip()
+            if authority and tenant_id:
+                self._discovery_url = (
+                    f"{authority}/{tenant_id}/v2.0/.well-known/openid-configuration"
+                )
+            elif authority:
+                # Authority without tenant: use the bare well-known endpoint.
+                self._discovery_url = f"{authority}/.well-known/openid-configuration"
+            else:
+                # No authority configured — discovery is unavailable.
+                # get_discovery() will raise a clear error on first call.
+                self._discovery_url = None
 
         self._cache_ttl = cache_ttl or int(
             os.getenv("AUTH_DISCOVERY_CACHE_TTL", str(_DEFAULT_DISCOVERY_CACHE_TTL))
@@ -88,8 +106,8 @@ class OIDCDiscoveryClient:
         self._lock = asyncio.Lock()
 
     @property
-    def discovery_url(self) -> str:
-        """Return the configured discovery URL."""
+    def discovery_url(self) -> Optional[str]:
+        """Return the configured discovery URL, or None if not configured."""
         return self._discovery_url
 
     async def get_discovery(self) -> CachedDiscovery:
@@ -100,8 +118,14 @@ class OIDCDiscoveryClient:
             CachedDiscovery with the document and metadata
 
         Raises:
-            RuntimeError on fetch failure (fail-closed)
+            RuntimeError if OIDC authority is not configured or fetch fails (fail-closed)
         """
+        if self._discovery_url is None:
+            raise RuntimeError(
+                "OIDC discovery is not configured. "
+                "Set MOZAIKS_OIDC_DISCOVERY_URL, or set MOZAIKS_OIDC_AUTHORITY "
+                "(and optionally MOZAIKS_OIDC_TENANT_ID) to enable discovery-based auth."
+            )
         if self._cache is not None and not self._cache.is_expired():
             return self._cache
 

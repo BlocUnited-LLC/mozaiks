@@ -35,3 +35,49 @@ def test_integrations_summary_always_includes_connector_vault(monkeypatch) -> No
     assert summary["integrations"]["connector_vault"]["kind"] == "vault"
     assert summary["integrations"]["connector_vault"]["mode"] == "auto"
     assert summary["runtime_integrations"]["connector_vault"]["provider"] == "disabled"
+
+
+def test_integrations_summary_includes_connector_health_counts(monkeypatch) -> None:
+    console_summary = _load_console_summary_module()
+
+    async def fake_connector_backend_summary():
+        return {
+            "provider": "disabled",
+            "configured": False,
+            "mode": "auto",
+            "vault_name": None,
+            "secret_prefix": "mozaiks-connector",
+            "error": None,
+        }
+
+    async def fake_list_connectors(app_id: str):
+        assert app_id == "app_1"
+        return [
+            {
+                "service": "analytics_provider",
+                "status": "active",
+                "health": {
+                    "status": "configured",
+                    "missing_fields": [],
+                    "frontend_safe": True,
+                },
+            },
+            {
+                "service": "email_provider",
+                "status": "metadata_only",
+                "health": {
+                    "status": "not_configured",
+                    "missing_fields": ["api_key"],
+                    "frontend_safe": True,
+                },
+            },
+        ]
+
+    monkeypatch.setattr(console_summary, "get_connector_backend_summary", fake_connector_backend_summary)
+    monkeypatch.setattr(console_summary, "list_connectors", fake_list_connectors)
+
+    summary = asyncio.run(console_summary.build_integrations_summary(app_id="app_1"))
+
+    assert summary["connector_summary"]["configured"] == 1
+    assert summary["connector_summary"]["not_configured"] == 1
+    assert summary["app_connectors"][1]["health"]["missing_fields"] == ["api_key"]

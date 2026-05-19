@@ -1,0 +1,218 @@
+version: 1
+
+description: >
+  Advisory workflow archetypes used as prompt-time guidance for AppPlanAgent
+  when planning workflow-surface capability packs. These archetypes define the
+  expected orchestrator shape, canonical agent sequence, tool constraints,
+  structured output field defaults, and output invariants for common workflow
+  patterns.
+
+  Archetypes do not change the canonical structured output models.
+  They guide AppPlanAgent and downstream workflow authors in selecting the right
+  orchestrator shape and agent conventions for each workflow capability pack.
+
+  Injected into AppPlanAgent via [WORKFLOW ARCHETYPE CONTEXT].
+
+archetypes:
+
+  proposal_only:
+    summary: >
+      A human-in-the-loop workflow that produces a structured proposal, plan,
+      or review brief for operator approval. No irreversible action is taken by
+      the workflow itself. All phases or steps are status=proposed or
+      status=blocked, never executed. The operator must review the output and
+      advance through a separate execution or approval workflow.
+    select_when:
+      - "The workflow purpose is to plan, assess, or recommend — not to execute."
+      - "The output requires human review before any data or system change is made."
+      - "High-risk or irreversible actions must be deferred to a downstream execution workflow."
+      - "Applicable to: compliance review, migration planning, deployment remediation plan, data cleanup plan, content moderation proposal, change proposal review, deployment impact assessment."
+    orchestrator_defaults:
+      human_in_the_loop: true
+      max_turns: 30
+      workflow_startup_mode: AgentDriven
+    canonical_agent_sequence:
+      - IntakeAgent:
+          role: >
+            Gathers operator scope (tenant, domain, subject). Read-only.
+            Confirms scope with the operator. Emits NEXT on confirmation.
+            Does not execute anything. Does not call provider APIs.
+          max_consecutive_auto_reply: 8
+          structured_outputs_required: false
+      - PlannerAgent:
+          role: >
+            Reads relevant data using read-only tools (list_*, get_*, read_*).
+            Synthesizes a structured proposal or review brief covering findings,
+            recommended actions, risks, assumptions, and a next_step.
+            Emits NEXT when the analysis is ready.
+            Must not call execute_action, approve, or any mutating action.
+          max_consecutive_auto_reply: 12
+          structured_outputs_required: false
+      - OutputAgent:
+          role: >
+            Serializes the proposal into the top-level structured output model.
+            Must enforce all output invariants regardless of prior agent output.
+            Output is JSON only — no prose.
+          max_consecutive_auto_reply: 4
+          structured_outputs_required: true
+    optional_agents:
+      - ReviewerAgent:
+          role: >
+            Optional intermediate agent for second-opinion or stakeholder review.
+            May inject risks or caveats but must not approve or execute.
+    tool_constraints:
+      allowed:
+        - "list_* — read-only data enumeration (lists records, zones, items)"
+        - "get_* — read-only record fetch (fetches a single record or snapshot)"
+        - "read_* — read-only snapshot or document read"
+        - "save_* — proposal artifact persistence (auto_tool_call: true, OutputAgent only)"
+      forbidden:
+        - "execute_action — bypasses the approval state machine; always forbidden"
+        - "approve — operator-only action; must not be triggered by the workflow"
+        - "create_* / update_* / delete_* — write-path actions deferred to execution workflow"
+        - "Any direct external provider API call (cloud, DNS, registrar, storage)"
+    structured_output_defaults:
+      description: >
+        Minimum required fields for the top-level output model of a proposal_only workflow.
+        OutputAgent must enforce the invariant fields regardless of prior agent output.
+      required_fields:
+        proposal_id:
+          type: str
+          description: "Unique identifier for this proposal artifact (uuid4 recommended)."
+        artifact_type:
+          type: str
+          description: >
+            Semantic type of this proposal (e.g. migration_plan, compliance_brief,
+            remediation_plan, content_review_brief, deployment_assessment).
+        human_review_required:
+          type: bool
+          description: >
+            Always true. OutputAgent must enforce this as true regardless of what
+            prior agents produced. Schema-level invariant enforcement is a future enhancement;
+            OutputAgent prompt instructions are the current enforcement mechanism.
+        status:
+          type: str
+          description: >
+            Overall proposal status. Always "proposed" in workflow output.
+            Never "approved", "active", "in_progress", or "executed".
+        risks:
+          type: list
+          items: str
+          description: "Identified risks or open questions for operator validation."
+        assumptions:
+          type: list
+          items: str
+          description: "Key assumptions the proposal is based on."
+        next_step:
+          type: object
+          description: >
+            Operator instructions for advancing the proposal after review.
+            next_step.requires_human_approval must always be true.
+      optional_fields:
+        phases:
+          description: "Ordered list of proposed phases or steps (see blocked_phase_pattern)."
+        blockers:
+          description: >
+            Systemic blockers that prevent phases from being executable in the current
+            product phase. Use the blocked_phase_pattern for each entry.
+        approval_instructions:
+          description: >
+            Step-by-step operator instructions for advancing proposals through an
+            approval state machine after review.
+    output_invariants:
+      description: >
+        OutputAgent must enforce these invariants in the final structured output.
+        They are enforced through explicit OutputAgent prompt instructions, not through
+        schema-level constraints. A future enhancement may add schema-level invariant
+        metadata to structured_outputs.yaml (TODO — schema-level invariants).
+      invariants:
+        - field: human_review_required
+          enforced_value: true
+          prompt_instruction: "human_review_required: true (always — never false)"
+        - field: status
+          allowed_values:
+            - proposed
+            - blocked
+          forbidden_values:
+            - approved
+            - active
+            - in_progress
+            - executed
+          prompt_instruction: >
+            All status values must be "proposed" or "blocked".
+            Never "approved", "active", "in_progress", or "executed".
+        - field: next_step.requires_human_approval
+          enforced_value: true
+          prompt_instruction: "next_step.requires_human_approval: true (always)"
+    hard_constraints:
+      - "DO NOT add execute_action as a callable tool in any proposal_only workflow."
+      - "DO NOT set human_review_required to false under any circumstances."
+      - "DO NOT set any phase, step, or item status to approved, active, in_progress, or executed."
+      - "DO NOT call provider write APIs (cloud DNS, registrar, storage, external SaaS)."
+      - "All tool functions must start with list_, get_, read_, or save_."
+      - "OutputAgent must have structured_outputs_required: true."
+      - "OutputAgent [OUTPUT FORMAT] section must list all output invariants explicitly."
+      - "OutputAgent must enforce invariants regardless of what prior agents produced."
+      - "Blocked/deferred phases must appear in the output — never silently omitted."
+    blocked_phase_pattern:
+      description: >
+        When a proposal includes phases or steps that cannot be executed in the
+        current product phase (e.g. write adapters not yet implemented, required
+        credentials not yet issued), those phases are represented as blocked.
+        Blocked phases must still appear in the output plan so operators have
+        full visibility. They must never be silently omitted.
+      fields:
+        status:
+          value: blocked
+          note: "Never proposed, approved, or executed for a phase that cannot run."
+        blocked_reason:
+          type: str
+          description: >
+            Error code or human-readable reason (e.g. WRITE_NOT_IMPLEMENTED,
+            ADAPTER_NOT_READY, CREDENTIALS_REQUIRED).
+        deferred_to:
+          type: str
+          description: >
+            Phase, release, or condition when this will become executable
+            (e.g. Phase 3D, v2.0, after_operator_approval).
+      example:
+        phase_id: dangerous_cutover
+        phase_type: nameserver_cutover
+        status: blocked
+        blocked_reason: WRITE_NOT_IMPLEMENTED
+        deferred_to: Phase 3D
+        risk_level: high
+        rollback_note: >
+          Revert to previous state via the operator web console.
+          Allow up to 48 hours for propagation.
+      rule: >
+        A tool call returning WRITE_NOT_IMPLEMENTED or similar error is a signal
+        to mark the related phase as blocked — not to skip it. The operator benefits
+        from seeing blocked phases so they can plan around current limitations.
+
+  standard:
+    summary: >
+      A general agentic workflow that may execute tasks, call module actions,
+      and write data — with human in the loop for scope confirmation, not for
+      every individual action. The workflow produces results during the session.
+    select_when:
+      - "The workflow creates, updates, or manages records during the session."
+      - "Write actions are expected and permitted after operator scope confirmation."
+      - "The workflow is not exclusively a planning or review surface."
+      - "Applicable to: chat assistant, onboarding wizard, content generation, form submission."
+    orchestrator_defaults:
+      human_in_the_loop: true
+      workflow_startup_mode: AgentDriven
+    tool_constraints:
+      allowed:
+        - "list_*, get_*, read_* — read-only tools always allowed"
+        - "Write-path module actions when declared in module_interface.yaml"
+        - "emit_event — publish domain events to the app event bus"
+      forbidden:
+        - "Do not implement business logic that belongs in a deterministic module."
+        - "Do not call raw external APIs that bypass the app module action contract."
+    hard_constraints:
+      - "Declare all module actions the workflow calls in module_interface.yaml."
+      - "Emit domain events only through emit_event, not through direct module calls."
+      - "Do not implement business logic that belongs in a deterministic module."
+      - "Write-path actions must be declared in the plan before a downstream agent generates them."

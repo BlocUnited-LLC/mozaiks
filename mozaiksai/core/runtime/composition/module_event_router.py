@@ -5,7 +5,7 @@ from __future__ import annotations
 The runtime dispatcher transports events. This router interprets app/module
 manifests loaded by the platform host:
 
-- subscriptions.yaml maps events to reactions
+- reactions.yaml maps events to module-owned reactions
 - notifications.yaml maps events to notification intents
 
 This keeps module event meaning above the runtime kernel.
@@ -27,8 +27,8 @@ NotificationStore = Callable[[Dict[str, Any]], Awaitable[Any] | Any]
 CapabilityInvoker = Callable[[str, Dict[str, Any], Dict[str, Any]], Awaitable[Any] | Any]
 
 
-class _SubscriptionCtx:
-    """Minimal context passed to handler methods during subscription dispatch."""
+class _ReactionCtx:
+    """Minimal context passed to handler methods during reaction dispatch."""
 
     def __init__(self, *, app_id: str, tenant_id: str, user_id: str, event_emitter: Optional[EventEmitter]) -> None:
         self.app_id = app_id
@@ -55,7 +55,7 @@ class ModuleEventRouter:
         self._event_emitter = event_emitter
         self._notification_store = notification_store
         self._capability_invoker = capability_invoker
-        self._subscriptions_by_event: Dict[str, List[dict]] = defaultdict(list)
+        self._reactions_by_event: Dict[str, List[dict]] = defaultdict(list)
         self._notifications_by_event: Dict[str, List[dict]] = defaultdict(list)
         self._notifications_by_key: Dict[tuple[str, str], dict] = {}
         self._handlers_by_module: Dict[str, Any] = {}
@@ -63,7 +63,7 @@ class ModuleEventRouter:
 
     @property
     def event_types(self) -> List[str]:
-        return sorted(set(self._subscriptions_by_event) | set(self._notifications_by_event))
+        return sorted(set(self._reactions_by_event) | set(self._notifications_by_event))
 
     def register(self, dispatcher: Any) -> int:
         """Register this router with the runtime dispatcher."""
@@ -79,13 +79,13 @@ class ModuleEventRouter:
         """Handle one canonical module event envelope."""
         emitted_notifications: set[tuple[str, str]] = set()
 
-        for subscription in self._subscriptions_by_event.get(event_type, []):
-            target = subscription.get("target") if isinstance(subscription.get("target"), dict) else {}
+        for reaction in self._reactions_by_event.get(event_type, []):
+            target = reaction.get("target") if isinstance(reaction.get("target"), dict) else {}
             target_kind = str(target.get("kind") or "").strip()
             if target_kind == "notification":
                 notification_id = str(target.get("notification_id") or "").strip()
                 rule = self._find_notification_rule(
-                    module_id=str(subscription.get("module_id") or ""),
+                    module_id=str(reaction.get("module_id") or ""),
                     notification_id=notification_id,
                     event_type=event_type,
                 )
@@ -94,9 +94,9 @@ class ModuleEventRouter:
                     await self._create_notification(rule, event_type, envelope)
                     emitted_notifications.add(key)
             elif target_kind == "handler":
-                await self._dispatch_handler(subscription, event_type, envelope)
+                await self._dispatch_handler(reaction, event_type, envelope)
             elif target_kind:
-                await self._emit_platform_reaction(subscription, event_type, envelope)
+                await self._emit_platform_reaction(reaction, event_type, envelope)
 
         for rule in self._notifications_by_event.get(event_type, []):
             key = (str(rule.get("module_id") or ""), str(rule.get("id") or ""))
@@ -107,16 +107,14 @@ class ModuleEventRouter:
         for module in modules:
             module_id = module.name
             self._handlers_by_module[module_id] = module.handler
-            if module.manifests.subscriptions is not None:
-                for raw_subscription in module.manifests.subscriptions.subscriptions:
-                    if not isinstance(raw_subscription, dict):
-                        continue
-                    event_type = str(raw_subscription.get("event_type") or "").strip()
+            if module.manifests.reactions is not None:
+                for reaction_model in module.manifests.reactions.reactions:
+                    event_type = str(reaction_model.event_type or "").strip()
                     if not event_type:
                         continue
-                    subscription = dict(raw_subscription)
-                    subscription["module_id"] = module_id
-                    self._subscriptions_by_event[event_type].append(subscription)
+                    reaction = reaction_model.model_dump(mode="python", exclude_none=True)
+                    reaction["module_id"] = module_id
+                    self._reactions_by_event[event_type].append(reaction)
 
             if module.manifests.notifications is not None:
                 for raw_rule in module.manifests.notifications.notifications:
@@ -158,13 +156,13 @@ class ModuleEventRouter:
 
     async def _emit_platform_reaction(
         self,
-        subscription: dict,
+        reaction: dict,
         event_type: str,
         envelope: Dict[str, Any],
     ) -> None:
         if self._event_emitter is None:
             return
-        target = subscription.get("target") if isinstance(subscription.get("target"), dict) else {}
+        target = reaction.get("target") if isinstance(reaction.get("target"), dict) else {}
         target_kind = str(target.get("kind") or "unknown").strip() or "unknown"
         capability_result = None
         if target_kind == "capability":
@@ -176,7 +174,7 @@ class ModuleEventRouter:
             ).strip()
             if capability_id and self._capability_invoker is not None:
                 capability_result = await self._maybe_await(
-                    self._capability_invoker(capability_id, envelope, subscription)
+                    self._capability_invoker(capability_id, envelope, reaction)
                 )
 
         reaction_event_type = f"platform.subscription.{target_kind}_requested"
@@ -187,8 +185,8 @@ class ModuleEventRouter:
             "occurred_at": _utc_now(),
             "source": {
                 "layer": "platform",
-                "module_id": subscription.get("module_id"),
-                "subscription_id": subscription.get("id"),
+                "module_id": reaction.get("module_id"),
+                "subscription_id": reaction.get("id"),
             },
             "tenant": envelope.get("tenant") if isinstance(envelope.get("tenant"), dict) else {},
             "correlation": envelope.get("correlation") if isinstance(envelope.get("correlation"), dict) else {},
@@ -205,18 +203,18 @@ class ModuleEventRouter:
 
     async def _dispatch_handler(
         self,
-        subscription: dict,
+        reaction: dict,
         event_type: str,
         envelope: Dict[str, Any],
     ) -> None:
-        module_id = str(subscription.get("module_id") or "").strip()
-        target = subscription.get("target") if isinstance(subscription.get("target"), dict) else {}
+        module_id = str(reaction.get("module_id") or "").strip()
+        target = reaction.get("target") if isinstance(reaction.get("target"), dict) else {}
         handler_method = str(target.get("handler_method") or "").strip()
 
         if not module_id or not handler_method:
             logger.warning(
-                "HANDLER_TARGET_SKIPPED: subscription %r missing module_id or handler_method",
-                subscription.get("id"),
+                "HANDLER_TARGET_SKIPPED: reaction %r missing module_id or handler_method",
+                reaction.get("id"),
             )
             return
 
@@ -236,7 +234,7 @@ class ModuleEventRouter:
 
         tenant = envelope.get("tenant") if isinstance(envelope.get("tenant"), dict) else {}
         actor = envelope.get("actor") if isinstance(envelope.get("actor"), dict) else {}
-        ctx = _SubscriptionCtx(
+        ctx = _ReactionCtx(
             app_id=str(tenant.get("app_id") or ""),
             tenant_id=str(tenant.get("tenant_id") or ""),
             user_id=str(actor.get("id") or ""),

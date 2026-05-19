@@ -239,16 +239,60 @@ def _inject_backend_surface_map(backend_markdown: str, surface_map: Dict[str, An
     return doc.rstrip() + "\n\n" + block
 
 
-def _canonicalize_ui_schema_yaml(ui_schema_yaml: str, surface_map: Dict[str, Any]) -> str:
-    doc = str(ui_schema_yaml or "").strip()
-    if not doc:
-        raise ValueError("ui_schema_yaml must be a non-empty string")
-    parsed = yaml.safe_load(doc)
-    if not isinstance(parsed, dict):
-        raise ValueError("ui_schema_yaml must parse to a top-level mapping")
-    parsed["surface_map"] = surface_map
+def _canonical_experience_spec(raw: Any, *, surface_map: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate and normalise the typed ExperienceSpec from the bundle.
+
+    Returns the canonical dict ready to be stored in the experience_spec extra_field
+    and set on context_variables.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("experience_spec must be an object")
+    navigation_model = str(raw.get("navigation_model") or "").strip()
+    if not navigation_model:
+        raise ValueError("experience_spec.navigation_model must be non-empty")
+    brand_direction = str(raw.get("brand_direction") or "").strip()
+    pages = raw.get("pages")
+    if not isinstance(pages, list) or not pages:
+        raise ValueError("experience_spec.pages must be a non-empty list")
+    for idx, page in enumerate(pages):
+        if not isinstance(page, dict):
+            raise ValueError(f"experience_spec.pages[{idx}] must be an object")
+        if not page.get("name") or not page.get("route"):
+            raise ValueError(f"experience_spec.pages[{idx}] requires name and route")
+        sections = page.get("sections")
+        if not isinstance(sections, list) or not sections:
+            raise ValueError(f"experience_spec.pages[{idx}].sections must be a non-empty list")
+        for sidx, section in enumerate(sections):
+            if not isinstance(section, dict):
+                raise ValueError(f"experience_spec.pages[{idx}].sections[{sidx}] must be an object")
+            if not section.get("primitive") or not section.get("intent"):
+                raise ValueError(
+                    f"experience_spec.pages[{idx}].sections[{sidx}] requires primitive and intent"
+                )
+    return {
+        "navigation_model": navigation_model,
+        "brand_direction": brand_direction,
+        "pages": pages,
+    }
+
+
+def _experience_spec_to_yaml(experience_spec: Dict[str, Any], surface_map: Dict[str, Any]) -> str:
+    """Generate a human-readable YAML representation of the typed ExperienceSpec.
+
+    This is stored as the `content` field in DesignDocuments so that agents that
+    read the ui_schema doc as a string (AgentGenerator, AppSchemaAgent) still get
+    valid YAML.
+    """
+    doc: Dict[str, Any] = {
+        "experience": {
+            "navigation_model": experience_spec.get("navigation_model", ""),
+            "brand_direction": experience_spec.get("brand_direction", ""),
+        },
+        "surface_map": surface_map,
+        "pages": experience_spec.get("pages", []),
+    }
     return yaml.safe_dump(
-        parsed,
+        doc,
         sort_keys=False,
         allow_unicode=False,
         default_flow_style=False,
@@ -349,18 +393,22 @@ async def save_design_docs_bundle(
         frontend_markdown = str(bundle.get("frontend_markdown") or "").strip()
         backend_markdown = str(bundle.get("backend_markdown") or "").strip()
         database_markdown = str(bundle.get("database_markdown") or "").strip()
-        ui_schema_yaml = str(bundle.get("ui_schema_yaml") or "").strip()
         surface_map = _canonical_surface_map(bundle.get("surface_map"))
+        experience_spec = _canonical_experience_spec(
+            bundle.get("experience_spec"),
+            surface_map=surface_map,
+        )
         database_intent_bundle = _canonical_database_intent_bundle(
             bundle.get("database_intent_bundle"),
             app_id=app_id,
             artifact_version_id=str(artifact_version_id) if artifact_version_id else None,
             surface_map=surface_map,
         )
-        if not frontend_markdown or not backend_markdown or not database_markdown or not ui_schema_yaml:
-            raise ValueError("DesignDocsBundle must include all four document strings")
+        if not frontend_markdown or not backend_markdown or not database_markdown:
+            raise ValueError("DesignDocsBundle must include all three Markdown documents")
         backend_markdown = _inject_backend_surface_map(backend_markdown, surface_map)
-        ui_schema_yaml = _canonicalize_ui_schema_yaml(ui_schema_yaml, surface_map)
+        # Generate human-readable YAML for agents that consume ui_schema as a string
+        ui_schema_content = _experience_spec_to_yaml(experience_spec, surface_map)
     except Exception as err:
         return {"ok": False, "reason": "invalid_design_docs_bundle", "error": str(err)}
 
@@ -383,7 +431,9 @@ async def save_design_docs_bundle(
         (DesignDocKinds.FRONTEND, frontend_markdown, None),
         (DesignDocKinds.BACKEND, backend_markdown, {"surface_map": surface_map}),
         (DesignDocKinds.DATABASE, database_markdown, None),
-        (DesignDocKinds.UI_SCHEMA, ui_schema_yaml, {"surface_map": surface_map}),
+        # Store human-readable YAML as content; typed ExperienceSpec in extra_fields
+        # so AppPlanAgent can load it as a structured object via the experience_spec field.
+        (DesignDocKinds.UI_SCHEMA, ui_schema_content, {"surface_map": surface_map, "experience_spec": experience_spec}),
     )
 
     for kind, content, extra_fields in docs:
@@ -419,7 +469,7 @@ async def save_design_docs_bundle(
                 "frontend_markdown": frontend_markdown,
                 "backend_markdown": backend_markdown,
                 "database_markdown": database_markdown,
-                "ui_schema_yaml": ui_schema_yaml,
+                "experience_spec": experience_spec,
                 "surface_map": surface_map,
                 "database_intent_bundle": database_intent_bundle,
             },
@@ -446,8 +496,11 @@ async def save_design_docs_bundle(
     _cv_set(context_variables, "frontend_design_document", frontend_markdown)
     _cv_set(context_variables, "backend_design_document", backend_markdown)
     _cv_set(context_variables, "database_design_document", database_markdown)
-    _cv_set(context_variables, "ui_design_document", ui_schema_yaml)
-    _cv_set(context_variables, "experience_spec_document", ui_schema_yaml)
+    # Human-readable YAML for agents that consume ui_schema as a string (AgentGenerator, AppSchemaAgent)
+    _cv_set(context_variables, "ui_design_document", ui_schema_content)
+    _cv_set(context_variables, "experience_spec_document", ui_schema_content)
+    # Typed object for AppPlanAgent — authoritative structured page specification
+    _cv_set(context_variables, "experience_spec", experience_spec)
     _cv_set(context_variables, "design_surface_map", surface_map)
     _cv_set(context_variables, "database_intent_bundle", database_intent_bundle)
 
@@ -457,5 +510,6 @@ async def save_design_docs_bundle(
         "stage": normalized_stage,
         "kinds": list(_DOC_KINDS),
         "surface_count": len(surface_map.get("surfaces", [])),
+        "page_count": len(experience_spec.get("pages", [])),
         "database_surface_count": len(database_intent_bundle.get("surfaces", [])),
     }

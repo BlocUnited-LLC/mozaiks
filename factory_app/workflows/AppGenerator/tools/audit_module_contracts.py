@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _EXPECTED_SCHEMA_VERSIONS: Dict[str, str] = {
     "module.yaml": "mozaiks.module.v1",
     "events.yaml": "mozaiks.events.v1",
-    "subscriptions.yaml": "mozaiks.subscriptions.v1",
+    "reactions.yaml": "mozaiks.reactions.v1",
     "notifications.yaml": "mozaiks.notifications.v1",
     "settings.yaml": "mozaiks.settings.v1",
     "admin.yaml": "mozaiks.admin.v2",
@@ -85,7 +85,7 @@ def _audit_module_yaml(filename: str, data: Dict[str, Any]) -> List[str]:
 
 
 def _audit_contract_yaml(filename: str, data: Dict[str, Any]) -> List[str]:
-    """Check schema_version for companion contract files (events, subscriptions, etc.)."""
+    """Check schema_version for companion contract files (events, reactions, etc.)."""
     warnings: List[str] = []
     basename = PurePosixPath(filename).name
     expected_sv = _EXPECTED_SCHEMA_VERSIONS.get(basename)

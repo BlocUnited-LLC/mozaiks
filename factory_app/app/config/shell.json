@@ -15,7 +15,6 @@
         "path": "/create",
         "path_by_role": {
           "admin": "/create",
-          "investor": "/create",
           "default": "/create"
         },
         "variants": [
@@ -34,7 +33,7 @@
     ]
   },
   "shortcuts": {
-    "profile": ["profile", "admin_portal", "signout"],
+    "profile": ["profile", "signout"],
     "mobile": ["create", "profile"],
     "footer": ["legal", "terms", "cookies"],
     "footerHideOnMobile": true

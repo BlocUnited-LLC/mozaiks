@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+# ruff: noqa: I001
+
 import asyncio
 
-from mozaiksai.core.data.persistence.connector_store import AppConnectorStore
 from mozaiksai.core.workflow.generator_support.connector_service import (
+    compute_connector_health,
     get_connector_inventory,
     get_connector_status,
     get_secret_for_e2b,
     record_connector_metadata,
     store_connector,
 )
+from mozaiksai.core.data.persistence.connector_store import AppConnectorStore
+
+SECRET_VALUE = "secret-payment-provider-value"
 
 
 class _FakeCursor:
@@ -185,33 +190,35 @@ def test_app_connector_store_supports_crud() -> None:
     created = asyncio.run(
         store.upsert_connector(
             app_id="app_1",
-            service="openai",
-            display_name="OpenAI",
+            service="model_provider",
+            display_name="Model Provider",
             user_id="user_1",
             status="metadata_only",
             secret_storage="unmanaged",
             secret_available=False,
             key_length=51,
             notes="Collected during workflow planning.",
+            public_config={"base_url": "https://api.example.test"},
         )
     )
     patched = asyncio.run(
         store.patch_connector(
             app_id="app_1",
-            service="openai",
+            service="model_provider",
             user_id="user_1",
-            display_name="OpenAI Platform",
+            display_name="Model Provider Platform",
             status="revoked",
             notes="Operator revoked this connector.",
         )
     )
     listed = asyncio.run(store.list_connectors(app_id="app_1"))
-    deleted = asyncio.run(store.delete_connector(app_id="app_1", service="openai"))
+    deleted = asyncio.run(store.delete_connector(app_id="app_1", service="model_provider"))
 
     collection = pm.client["mozaiksai"]["AppConnectors"]
 
-    assert created["service"] == "openai"
-    assert patched["display_name"] == "OpenAI Platform"
+    assert created["service"] == "model_provider"
+    assert created["public_config"] == {"base_url": "https://api.example.test"}
+    assert patched["display_name"] == "Model Provider Platform"
     assert patched["status"] == "revoked"
     assert len(listed) == 1
     assert deleted is True
@@ -227,8 +234,8 @@ def test_connector_service_records_metadata_only_status_without_vault() -> None:
         record_connector_metadata(
             app_id="app_1",
             user_id="user_1",
-            service="anthropic",
-            display_name="Anthropic",
+            service="model_provider",
+            display_name="Model Provider",
             key_length=48,
             workflow_name="AgentGenerator",
             chat_id="chat_1",
@@ -237,14 +244,14 @@ def test_connector_service_records_metadata_only_status_without_vault() -> None:
             store=store,
         )
     )
-    status = asyncio.run(get_connector_status("app_1", "anthropic", store=store))
+    status = asyncio.run(get_connector_status("app_1", "model_provider", store=store))
     stored = asyncio.run(
         store_connector(
             app_id="app_1",
             user_id="user_1",
-            service="anthropic",
-            secret_value="sk-ant-1234567890",
-            display_name="Anthropic",
+            service="model_provider",
+            secret_value="secret-model-provider-value",
+            display_name="Model Provider",
             store=store,
         )
     )
@@ -269,21 +276,30 @@ def test_connector_service_uses_vault_backend_when_available(monkeypatch) -> Non
         store_connector(
             app_id="app_1",
             user_id="user_1",
-            service="stripe",
-            secret_value="sk_live_123456",
-            display_name="Stripe",
+            service="payment_provider",
+            secret_value=SECRET_VALUE,
+            display_name="Payment Provider",
+            public_config={"webhook_url": "https://hooks.example.test/payments"},
+            required_fields=[
+                {"name": "api_key", "type": "secret", "required": True, "frontend_safe": False},
+                {"name": "webhook_url", "type": "url", "required": True, "frontend_safe": True},
+                {"name": "workspace_id", "type": "text", "required": False, "frontend_safe": True},
+            ],
             store=store,
         )
     )
-    status = asyncio.run(get_connector_status("app_1", "stripe", store=store))
-    secret = asyncio.run(get_secret_for_e2b("app_1", "stripe"))
+    status = asyncio.run(get_connector_status("app_1", "payment_provider", store=store))
+    secret = asyncio.run(get_secret_for_e2b("app_1", "payment_provider"))
 
     assert stored["success"] is True
     assert stored["provider"] == "fake_vault"
     assert status["status"] == "active"
     assert status["connector"]["secret_storage"] == "fake_vault"
+    assert status["connector"]["public_config"] == {"webhook_url": "https://hooks.example.test/payments"}
+    assert status["connector"]["health"]["status"] == "configured"
+    assert status["connector"]["health"]["missing_fields"] == []
     assert secret["success"] is True
-    assert secret["secret_value"] == "sk_live_123456"
+    assert secret["secret_value"] == SECRET_VALUE
 
 
 def test_connector_inventory_summarizes_ready_vs_missing_services(monkeypatch) -> None:
@@ -299,9 +315,9 @@ def test_connector_inventory_summarizes_ready_vs_missing_services(monkeypatch) -
         store_connector(
             app_id="app_1",
             user_id="user_1",
-            service="stripe",
-            secret_value="sk_live_123456",
-            display_name="Stripe",
+            service="payment_provider",
+            secret_value=SECRET_VALUE,
+            display_name="Payment Provider",
             store=store,
         )
     )
@@ -309,8 +325,8 @@ def test_connector_inventory_summarizes_ready_vs_missing_services(monkeypatch) -
         record_connector_metadata(
             app_id="app_1",
             user_id="user_1",
-            service="sendgrid",
-            display_name="SendGrid",
+            service="email_provider",
+            display_name="Email Provider",
             key_length=48,
             workflow_name="AgentGenerator",
             chat_id="chat_1",
@@ -323,12 +339,91 @@ def test_connector_inventory_summarizes_ready_vs_missing_services(monkeypatch) -
     inventory = asyncio.run(
         get_connector_inventory(
             "app_1",
-            required_services=["stripe", "sendgrid", "twilio"],
+            required_services=["payment_provider", "email_provider", "sms_provider"],
             store=store,
         )
     )
 
-    assert inventory["ready_services"] == ["stripe"]
-    assert inventory["missing_required_services"] == ["sendgrid", "twilio"]
-    assert inventory["known_but_unready_required_services"] == ["sendgrid"]
-    assert inventory["entirely_missing_required_services"] == ["twilio"]
+    assert inventory["ready_services"] == ["payment_provider"]
+    assert inventory["missing_required_services"] == ["email_provider", "sms_provider"]
+    assert inventory["known_but_unready_required_services"] == ["email_provider"]
+    assert inventory["entirely_missing_required_services"] == ["sms_provider"]
+
+
+def test_compute_connector_health_reports_missing_secret_without_value() -> None:
+    record = {
+        "service": "analytics_provider",
+        "secret_available": False,
+        "key_length": 0,
+        "public_config": {"endpoint_url": "https://analytics.example.test"},
+    }
+
+    health = compute_connector_health(
+        record,
+        required_fields=[
+            {"name": "api_key", "type": "secret", "required": True, "frontend_safe": False},
+            {"name": "endpoint_url", "type": "url", "required": True, "frontend_safe": True},
+        ],
+    )
+
+    assert health["status"] == "not_configured"
+    assert health["missing_fields"] == ["api_key"]
+    assert SECRET_VALUE not in repr(health)
+
+
+def test_compute_connector_health_reports_missing_non_secret_field() -> None:
+    record = {
+        "service": "analytics_provider",
+        "secret_available": True,
+        "key_length": 24,
+        "public_config": {},
+    }
+
+    health = compute_connector_health(
+        record,
+        required_fields=[
+            {"name": "api_key", "type": "secret", "required": True, "frontend_safe": False},
+            {"name": "endpoint_url", "type": "url", "required": True, "frontend_safe": True},
+            {"name": "workspace_id", "type": "text", "required": False, "frontend_safe": True},
+        ],
+    )
+
+    assert health["status"] == "not_configured"
+    assert health["missing_fields"] == ["endpoint_url"]
+
+
+def test_compute_connector_health_optional_fields_do_not_block_configured() -> None:
+    record = {
+        "service": "analytics_provider",
+        "secret_available": True,
+        "key_length": 24,
+        "public_config": {"endpoint_url": "https://analytics.example.test"},
+    }
+
+    health = compute_connector_health(
+        record,
+        required_fields=[
+            {"name": "api_key", "type": "secret", "required": True, "frontend_safe": False},
+            {"name": "endpoint_url", "type": "url", "required": True, "frontend_safe": True},
+            {"name": "workspace_id", "type": "text", "required": False, "frontend_safe": True},
+        ],
+    )
+
+    assert health["status"] == "configured"
+    assert health["missing_fields"] == []
+
+
+def test_compute_connector_health_for_unknown_connector_is_deterministic() -> None:
+    health = compute_connector_health(
+        None,
+        required_fields=[
+            {"name": "api_key", "type": "secret", "required": True, "frontend_safe": False},
+            {"name": "endpoint_url", "type": "url", "required": True, "frontend_safe": True},
+        ],
+        checked_by="manual",
+    )
+
+    assert health["status"] == "not_configured"
+    assert health["missing_fields"] == ["api_key", "endpoint_url"]
+    assert health["checked_by"] == "manual"
+    assert health["frontend_safe"] is True

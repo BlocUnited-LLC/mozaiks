@@ -25,7 +25,7 @@ task_contracts:
       - Persistent app pages stay declarative by default.
       - "Workflow launches from pages use action_type: workflow."
       - Prefer compact config/shell.json shortcuts for common shell chrome instead of repeating full header/profile/mobile/footer arrays.
-      - Shell shortcuts may target header, profile, mobile, and footer slots using primitive ids such as dashboard, wallet, create, profile, messages, notifications, signout, signin, legal, terms, cookies, and privacy.
+      - Shell shortcuts may target header, profile, mobile, and footer slots using primitive ids such as dashboard, wallet, create, profile, messages, notifications, signout, signin, legal, terms, cookies, and privacy. Do NOT include admin_portal in any shortcuts list — it is framework-injected automatically for admin users and must not be declared by app config or generated output.
       - Prefer route-level AppPageSchema.navigation for page-owned global/local/profile/footer nav contributions; keep config/shell.json focused on app-wide navigation policy and built-in chrome shortcuts.
       - Use config/shell.json navigation.policy for placement rules such as desktop global=header, desktop local=sidebar, mobile global=bottomBar, mobile local=sheet, and mobile footer=hidden.
       - Put route chrome intent on AppPageSchema.shell_mode; use config/shell.json chrome only for app-wide mode-policy overrides.
@@ -41,10 +41,11 @@ task_contracts:
       - modules/{pack_name}/module.yaml
     optional_outputs:
       - modules/{pack_name}/contracts/events.yaml
-      - modules/{pack_name}/contracts/subscriptions.yaml
+      - modules/{pack_name}/contracts/reactions.yaml
       - modules/{pack_name}/contracts/notifications.yaml
       - modules/{pack_name}/contracts/settings.yaml
       - modules/{pack_name}/contracts/admin.yaml
+      - modules/{pack_name}/contracts/profile.yaml
       - modules/{pack_name}/runtime_extensions.yaml
     downstream_python_defaults:
       - backend/handler.py
@@ -54,7 +55,6 @@ task_contracts:
       - backend/schemas.py
     optional_python_hooks:
       - backend/settings.py
-      - backend/subscriptions.py
       - backend/notifications.py
       - backend/admin.py
     optional_js_stubs:
@@ -66,6 +66,10 @@ task_contracts:
       - Omit YAML files that would serialize to empty arrays or null objects.
       - YAML declares the contract; downstream agents implement Python and JS stubs.
       - JS stubs are allowed only for declared customization surfaces.
+      - Emit contracts/profile.yaml only when a module has user-scoped data worth surfacing on the profile page (e.g. account summary, notification preferences, usage stats). Do not emit profile.yaml for every module.
+      - profile.yaml panels must bind to module actions declared in module.yaml. Do not expose admin-only actions or secrets through profile panels.
+      - Do not emit profile.yaml with kind=form — that kind is reserved and not yet implemented.
+      - profile.yaml does not replace /api/me identity. Auth identity and core account data remain platform-owned.
       - Persistent modules express collection ownership through database_intent_bundle, not ad hoc database files.
       - backend/repo.py owns persistence operations and must not contain product policy.
       - backend/schemas.py owns typed DTO/document shapes and pure helpers.
@@ -161,7 +165,7 @@ task_contracts:
       - Delegate behavior to backend/handler.py instead of duplicating business logic.
       - App-backend admin config is a separate contract and must expose only GET /api/admin/config.
       - For hosted-pack adapter tasks (owned_paths under backend/integrations/), generate thin client wrappers only — no hosted business logic, no proprietary pack internals in generated files.
-      - Hosted adapter clients must target the stable hosted API contract supplied by the deployment host (e.g. POST {MOZAIKS_APP_URL}/api/modules/{module_id}/{action_id}). Do not embed host-specific secrets or Stripe credentials in generated files.
+      - Hosted adapter clients must target the stable hosted API contract supplied by the deployment host (e.g. POST {MOZAIKS_APP_URL}/api/modules/{module_id}/{action_id}). Do not embed host-specific secrets or provider credentials in generated files.
       - Pages must not bind directly to /api/modules/{hosted_pack_id}/{action}. When hosted-pack data must appear on a persistent page, AppGenerator generates an app-owned façade module (generated_module) whose service calls the hosted adapter client. Pages bind to /api/modules/{facade_module_id}/{action} using the standard page→module convention.
 
   agent_backend_integration:
@@ -195,14 +199,14 @@ backend_helper_files:
     generated_by: ServiceAgent
     required: false
     allowed_when:
-      - external provider client (e.g. backend/stripe_client.py wrapping the Stripe SDK)
-      - runtime_extensions.yaml api_router entrypoint implementation (e.g. backend/routes_webhooks.py)
-      - runtime_extensions.yaml startup_service entrypoint implementation (e.g. backend/event_subscriber.py)
+      - external provider client wrapper for a declared integration
+      - runtime_extensions.yaml api_router entrypoint implementation
+      - runtime_extensions.yaml startup_service entrypoint implementation
       - module-local adapter or client wrapper for an external service
       - complex domain helper that would bloat service.py without creating a new canonical layer
-      - integration helper tying two hosted capabilities together at the module level
+      - integration helper tying two declared capabilities together at the module level
       - event subscriber startup logic when declared as a startup_service extension
-      - usage/entitlement wrapper bridging a hosted capability into this module's action layer
+      - module-local guard wrapper bridging a declared capability into this module's action layer
     prohibited_for:
       - generic business logic that belongs in service.py
       - persistence or database access that belongs in repo.py
@@ -224,20 +228,20 @@ backend_helper_files:
     description: >
       When runtime_extensions.yaml is declared, each extension type requires an explicit backend file
       that must be declared in python_stubs. Entrypoints are module-local values such as
-      backend.routes_webhooks:get_router or backend.event_subscriber:MessageDeliveryWorker;
+      backend.routes_hooks:get_router or backend.event_worker:MessageDeliveryWorker;
       never use modules.*, app.modules.*, or mozaiksai.* import paths.
     api_router:
-      required_stub: backend/{router_file}.py  # e.g. backend/routes_webhooks.py
+      required_stub: backend/{router_file}.py
       factory_function: get_router
       note: Must be declared in python_stubs. ServiceAgent must not generate it unless declared.
     startup_service:
-      required_stub: backend/{worker_file}.py  # e.g. backend/event_subscriber.py
+      required_stub: backend/{worker_file}.py
       service_class: "{ServiceClass}"
       note: Must be declared in python_stubs. ServiceAgent must not generate it unless declared.
 
   examples:
-    - backend/stripe_client.py     # Stripe SDK wrapper — external provider client
-    - backend/routes_webhooks.py   # api_router entrypoint — Stripe webhook receiver
-    - backend/event_subscriber.py  # startup_service entrypoint — event bus subscription
-    - backend/usage_check.py       # module-local wrapper over hosted_usage capability
-    - backend/entitlement_check.py # module-local wrapper binding pack_id to hosted_entitlements guard
+    - backend/provider_client.py   # external provider client wrapper
+    - backend/routes_hooks.py      # api_router entrypoint — custom inbound route mounting
+    - backend/event_worker.py      # startup_service entrypoint — background subscriber/worker
+    - backend/notification_client.py # module-local wrapper over a notification capability
+    - backend/audit_subscriber.py    # startup_service entrypoint for audit event handling

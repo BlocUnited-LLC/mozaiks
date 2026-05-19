@@ -4,13 +4,16 @@ from __future__ import annotations
 
 A module lives under app/modules/{module_id}/ and must include:
 
-  - module.yaml
-  - events.yaml
-  - subscriptions.yaml
-  - notifications.yaml
-  - settings.yaml
-  - admin.yaml
-  - backend/handler.py
+    - module.yaml
+    - backend/handler.py
+
+Companion manifests live under contracts/ and are optional:
+
+    - events.yaml
+    - reactions.yaml
+    - notifications.yaml
+    - settings.yaml
+    - admin.yaml
 
 `module.yaml` declares the public module surface. `backend/handler.py`
 implements the deterministic methods referenced by `actions[].handler_method`.
@@ -277,9 +280,92 @@ class ModuleEventsManifest(ModuleContractModel):
         return self
 
 
-class ModuleSubscriptionsManifest(ModuleContractModel):
+class ModuleReactionTarget(ModuleContractModel):
+    kind: Literal["handler", "capability", "notification"]
+    handler_method: Optional[str] = None
+    capability_id: Optional[str] = None
+    notification_id: Optional[str] = None
+
+    @field_validator("handler_method", "capability_id", "notification_id", mode="before")
+    @classmethod
+    def _optional(cls, value: Any) -> Optional[str]:
+        return _optional_text(value)
+
+    @model_validator(mode="after")
+    def _validate_target_contract(self) -> "ModuleReactionTarget":
+        if self.kind == "handler":
+            if not self.handler_method:
+                raise ValueError("handler reactions must declare target.handler_method")
+            if self.capability_id or self.notification_id:
+                raise ValueError("handler reactions must not declare capability_id or notification_id")
+        elif self.kind == "capability":
+            if not self.capability_id:
+                raise ValueError("capability reactions must declare target.capability_id")
+            if self.handler_method or self.notification_id:
+                raise ValueError("capability reactions must not declare handler_method or notification_id")
+        elif self.kind == "notification":
+            if not self.notification_id:
+                raise ValueError("notification reactions must declare target.notification_id")
+            if self.handler_method or self.capability_id:
+                raise ValueError("notification reactions must not declare handler_method or capability_id")
+        return self
+
+
+class ModuleReaction(ModuleContractModel):
+    id: str
+    event_type: str
+    target: ModuleReactionTarget
+    description: Optional[str] = None
+    filters: Optional[Dict[str, Any]] = None
+    idempotency_key: Optional[str] = None
+    permissions: List[str] = Field(default_factory=list)
+
+    @field_validator("id", "event_type", mode="before")
+    @classmethod
+    def _required(cls, value: Any, info):  # type: ignore[no-untyped-def]
+        return _required_text(value, field_name=info.field_name)
+
+    @field_validator("description", "idempotency_key", mode="before")
+    @classmethod
+    def _optional(cls, value: Any) -> Optional[str]:
+        return _optional_text(value)
+
+    @field_validator("permissions", mode="before")
+    @classmethod
+    def _permissions(cls, value: Any) -> List[str]:
+        return _string_list(value)
+
+    @field_validator("event_type")
+    @classmethod
+    def _canonical_event_namespace(cls, value: str) -> str:
+        allowed = ("domain.", "platform.", "hosted.")
+        if not value.startswith(allowed):
+            raise ValueError("module reactions must use domain.*, platform.*, or hosted.* event_type values")
+        return value
+
+
+class ModuleReactionsManifest(ModuleContractModel):
+    schema_version: Literal["mozaiks.reactions.v1"] = "mozaiks.reactions.v1"
+    reactions: List[ModuleReaction] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_unique_reactions(self) -> "ModuleReactionsManifest":
+        reaction_ids = [reaction.id for reaction in self.reactions]
+        if len(reaction_ids) != len(set(reaction_ids)):
+            raise ValueError("reactions.yaml reactions must have unique id values")
+        return self
+
+
+class ModuleLegacySubscriptionsManifest(ModuleContractModel):
     schema_version: Literal["mozaiks.subscriptions.v1"] = "mozaiks.subscriptions.v1"
-    subscriptions: List[Dict[str, Any]] = Field(default_factory=list)
+    subscriptions: List[ModuleReaction] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_unique_subscriptions(self) -> "ModuleLegacySubscriptionsManifest":
+        reaction_ids = [reaction.id for reaction in self.subscriptions]
+        if len(reaction_ids) != len(set(reaction_ids)):
+            raise ValueError("subscriptions.yaml subscriptions must have unique id values")
+        return self
 
 
 class ModuleNotificationsManifest(ModuleContractModel):
@@ -397,6 +483,93 @@ class ModuleAdminManifest(ModuleContractModel):
         return self
 
 
+# ---------------------------------------------------------------------------
+# Profile panel contract — modules/{module}/contracts/profile.yaml
+# ---------------------------------------------------------------------------
+
+_PROFILE_FIELD_TYPES = {"string", "number", "currency", "date", "boolean", "status"}
+_PROFILE_PANEL_KINDS = {"metrics", "list", "component"}
+# "form" is reserved for a future implementation and intentionally excluded from
+# _PROFILE_PANEL_KINDS so that profile.yaml validation rejects it at load time
+# rather than silently producing an unsupported-kind render in the UI.
+
+
+class ModuleProfileField(ModuleContractModel):
+    id: str
+    label: str
+    type: str = "string"
+
+    @field_validator("id", "label", mode="before")
+    @classmethod
+    def _required(cls, value: Any, info):  # type: ignore[no-untyped-def]
+        return _required_text(value, field_name=f"profile field {info.field_name}")
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def _type(cls, value: Any) -> str:
+        text = str(value or "string").strip().lower()
+        if text not in _PROFILE_FIELD_TYPES:
+            raise ValueError(
+                f"profile field type must be one of {sorted(_PROFILE_FIELD_TYPES)}, got {text!r}"
+            )
+        return text
+
+
+class ModuleProfilePanel(ModuleContractModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    order: int = 100
+    kind: str = "metrics"
+    action: Optional[str] = None          # module action called to hydrate panel data
+    component: Optional[str] = None       # registered React component (kind=component)
+    fields: List[ModuleProfileField] = Field(default_factory=list)
+
+    @field_validator("id", "title", mode="before")
+    @classmethod
+    def _required(cls, value: Any, info):  # type: ignore[no-untyped-def]
+        return _required_text(value, field_name=f"profile panel {info.field_name}")
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _kind(cls, value: Any) -> str:
+        text = str(value or "metrics").strip().lower()
+        if text not in _PROFILE_PANEL_KINDS:
+            raise ValueError(
+                f"profile panel kind must be one of {sorted(_PROFILE_PANEL_KINDS)}, got {text!r}"
+            )
+        return text
+
+    @field_validator("description", "action", "component", mode="before")
+    @classmethod
+    def _optional(cls, value: Any) -> Optional[str]:
+        return _optional_text(value)
+
+    @model_validator(mode="after")
+    def _validate_panel_contract(self) -> "ModuleProfilePanel":
+        if self.kind == "component":
+            if not self.component:
+                raise ValueError("component profile panels must declare 'component'")
+            if self.fields:
+                raise ValueError("component profile panels must not declare 'fields'")
+        elif self.kind in {"metrics", "list"}:
+            if not self.fields:
+                raise ValueError(f"{self.kind} profile panels must declare 'fields'")
+        return self
+
+
+class ModuleProfileManifest(ModuleContractModel):
+    schema_version: Literal["mozaiks.profile.v1"] = "mozaiks.profile.v1"
+    panels: List[ModuleProfilePanel] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _unique_panel_ids(self) -> "ModuleProfileManifest":
+        panel_ids = [panel.id for panel in self.panels]
+        if len(panel_ids) != len(set(panel_ids)):
+            raise ValueError("profile.yaml panels must have unique id values")
+        return self
+
+
 class ModuleRuntimeExtension(ModuleContractModel):
     kind: Literal["api_router", "startup_service"]
     entrypoint: str
@@ -443,10 +616,11 @@ class ModuleRuntimeExtensionsManifest(ModuleContractModel):
 
 class ModuleCompanionManifests(ModuleContractModel):
     events: Optional[ModuleEventsManifest] = None
-    subscriptions: Optional[ModuleSubscriptionsManifest] = None
+    reactions: Optional[ModuleReactionsManifest] = None
     notifications: Optional[ModuleNotificationsManifest] = None
     settings: Optional[ModuleSettingsManifest] = None
     admin: Optional[ModuleAdminManifest] = None
+    profile: Optional[ModuleProfileManifest] = None
     runtime_extensions: Optional[ModuleRuntimeExtensionsManifest] = None
 
 
@@ -496,10 +670,11 @@ class ModuleLoader:
     CONTRACTS_DIRNAME = "contracts"
     OPTIONAL_MANIFESTS = {
         "events": ("events.yaml", ModuleEventsManifest),
-        "subscriptions": ("subscriptions.yaml", ModuleSubscriptionsManifest),
+        "reactions": ("reactions.yaml", ModuleReactionsManifest),
         "notifications": ("notifications.yaml", ModuleNotificationsManifest),
         "settings": ("settings.yaml", ModuleSettingsManifest),
         "admin": ("admin.yaml", ModuleAdminManifest),
+        "profile": ("profile.yaml", ModuleProfileManifest),
     }
 
     def __init__(self, base_path: str) -> None:
@@ -574,7 +749,40 @@ class ModuleLoader:
     ) -> ModuleCompanionManifests:
         parsed: Dict[str, Any] = {}
         contracts_dir = module_dir / self.CONTRACTS_DIRNAME
+
+        reactions_path = contracts_dir / "reactions.yaml"
+        legacy_subscriptions_path = contracts_dir / "subscriptions.yaml"
+        if reactions_path.exists():
+            try:
+                parsed["reactions"] = ModuleReactionsManifest.model_validate(_load_yaml_file(reactions_path))
+            except Exception as exc:
+                raise ModuleLoadError(f"Invalid reactions.yaml for {definition.name!r}: {exc}") from exc
+            if legacy_subscriptions_path.exists():
+                logger.warning(
+                    "MODULE_REACTIONS_LEGACY_IGNORED: %r defines both contracts/reactions.yaml and deprecated contracts/subscriptions.yaml; using reactions.yaml",
+                    definition.name,
+                )
+        elif legacy_subscriptions_path.exists():
+            try:
+                legacy = ModuleLegacySubscriptionsManifest.model_validate(
+                    _load_yaml_file(legacy_subscriptions_path)
+                )
+            except Exception as exc:
+                raise ModuleLoadError(
+                    f"Invalid legacy subscriptions.yaml for {definition.name!r}: {exc}"
+                ) from exc
+            logger.warning(
+                "MODULE_REACTIONS_LEGACY_DEPRECATED: %r uses deprecated contracts/subscriptions.yaml; migrate to contracts/reactions.yaml",
+                definition.name,
+            )
+            parsed["reactions"] = ModuleReactionsManifest(
+                schema_version="mozaiks.reactions.v1",
+                reactions=list(legacy.subscriptions),
+            )
+
         for key, (filename, model) in self.OPTIONAL_MANIFESTS.items():
+            if key == "reactions":
+                continue
             path = contracts_dir / filename
             if not path.exists():
                 continue
@@ -621,14 +829,12 @@ class ModuleLoader:
     ) -> None:
         declared_events: set[str] = manifests.events.event_types if manifests.events is not None else set()
 
-        if manifests.subscriptions is not None:
-            for subscription in manifests.subscriptions.subscriptions:
-                if not isinstance(subscription, dict):
-                    raise ModuleLoadError("subscriptions.yaml entries must be objects")
-                event_type = str(subscription.get("event_type") or "").strip()
+        if manifests.reactions is not None:
+            for reaction in manifests.reactions.reactions:
+                event_type = str(reaction.event_type or "").strip()
                 if event_type and not self._is_known_or_canonical_event(event_type, declared_events):
                     raise ModuleLoadError(
-                        f"subscriptions.yaml references non-canonical event {event_type!r}"
+                        f"reactions.yaml references non-canonical event {event_type!r}"
                     )
 
         if manifests.notifications is not None:

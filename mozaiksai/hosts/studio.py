@@ -11,7 +11,7 @@ import zipfile
 from datetime import UTC, datetime
 from difflib import unified_diff
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
 from fastapi import Depends, HTTPException
@@ -22,9 +22,15 @@ from mozaiksai.hosts.bootstrap import configure_repo_host_defaults
 
 configure_repo_host_defaults("studio")
 
-from mozaiksai.hosts import platform as platform_app
-from mozaiksai.control_plane import get_orchestration_control_harness
 from logs.logging_config import get_workflow_logger
+from mozaiksai.control_plane import get_orchestration_control_harness
+from mozaiksai.core.artifacts import (
+    ArtifactLifecycleStatus,
+    ArtifactValidationStatus,
+    ChangeClassification,
+    RefinementSessionStatus,
+    get_artifact_store,
+)
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.runtime.app.console_summary import (
     build_app_overview_summary,
@@ -36,12 +42,6 @@ from mozaiksai.core.runtime.app.console_summary import (
     load_build_state_from_db,
     save_build_state_to_db,
 )
-from mozaiksai.core.workflow.generator_support.connector_service import (
-    delete_connector,
-    list_connectors,
-    store_connector,
-    update_connector_metadata,
-)
 from mozaiksai.core.session.launcher import launch_prepared_workflow, prepare_routed_workflow_launch
 from mozaiksai.core.session.model import (
     PendingDecisionAction,
@@ -51,19 +51,20 @@ from mozaiksai.core.session.model import (
     TriggerInput,
 )
 from mozaiksai.core.session.router import configure_session_router, get_session_router
+from mozaiksai.core.workflow.generator_support.connector_health import run_connector_health_check
+from mozaiksai.core.workflow.generator_support.connector_service import (
+    compute_connector_health,
+    delete_connector,
+    list_connectors,
+    store_connector,
+    update_connector_metadata,
+)
+from mozaiksai.hosts import platform as platform_app
 from mozaiksai.hosts.platform import (
     build_shell_config,
     resolve_app_root,
     resolve_scope_from_principal,
 )
-from mozaiksai.core.artifacts import (
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    ChangeClassification,
-    RefinementSessionStatus,
-    get_artifact_store,
-)
-
 
 app = platform_app.app
 logger = get_workflow_logger("studio_app")
@@ -438,7 +439,7 @@ async def get_integration_connectors(
     connectors = await list_connectors(app_id)
     return {
         "app_id": app_id,
-        "connectors": connectors,
+        "connectors": [_redact_connector_record(connector) for connector in connectors],
     }
 
 
@@ -447,12 +448,49 @@ class IntegrationConnectorPatchRequest(BaseModel):
     notes: Optional[str] = None
     status: Optional[Literal["metadata_only", "active", "expiring", "expired", "revoked"]] = None
     expires_at: Optional[str] = None
+    public_config: Optional[Dict[str, Any]] = None
+    required_fields: Optional[List[Dict[str, Any]]] = None
     secret_value: Optional[str] = None
     ttl_days: Optional[int] = Field(default=30, ge=1, le=3650)
 
 
 class IntegrationConnectorCreateRequest(IntegrationConnectorPatchRequest):
-    service: str = Field(..., description="Connector service identifier, such as openai or stripe")
+    service: str = Field(..., description="Connector service identifier, such as email_provider or analytics_provider")
+
+
+IntegrationConnectorPatchRequest.model_rebuild()
+IntegrationConnectorCreateRequest.model_rebuild()
+
+
+_SECRET_RESPONSE_KEYS = {"secret_value", "secret", "api_key", "apikey", "token", "password"}
+
+
+def _redact_secret_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        redacted: Dict[str, Any] = {}
+        for key, item in value.items():
+            if str(key).strip().lower() in _SECRET_RESPONSE_KEYS:
+                continue
+            redacted[key] = _redact_secret_fields(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_secret_fields(item) for item in value]
+    return value
+
+
+def _redact_connector_record(record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(record, dict):
+        return None
+    enriched = dict(record)
+    if not isinstance(enriched.get("health"), dict):
+        enriched["health"] = compute_connector_health(enriched, checked_by="manual")
+    return _redact_secret_fields(enriched)
+
+
+def _redact_secret_result(result: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(result, dict):
+        return None
+    return _redact_secret_fields(result)
 
 
 @app.post("/api/studio/integrations/connectors")
@@ -472,9 +510,17 @@ async def create_or_update_integration_connector(
             secret_value=body.secret_value,
             display_name=body.display_name,
             ttl_days=body.ttl_days or 30,
+            public_config=body.public_config,
+            required_fields=body.required_fields,
         )
         record = secret_result.get("record")
-    if body.display_name is not None or body.notes is not None or body.status is not None or body.expires_at is not None:
+    if (
+        body.display_name is not None
+        or body.notes is not None
+        or body.status is not None
+        or body.expires_at is not None
+        or body.public_config is not None
+    ):
         record = await update_connector_metadata(
             app_id=app_id,
             service=body.service,
@@ -483,6 +529,8 @@ async def create_or_update_integration_connector(
             notes=body.notes,
             status=body.status or (secret_result or {}).get("connector_status") or "metadata_only",
             expires_at=body.expires_at,
+            public_config=body.public_config,
+            required_fields=body.required_fields,
         )
     if not record:
         from mozaiksai.core.data.persistence import AppConnectorStore
@@ -498,12 +546,14 @@ async def create_or_update_integration_connector(
             secret_available=False,
             notes=body.notes,
             expires_at=body.expires_at,
+            public_config=body.public_config,
+            required_fields=body.required_fields,
             status_reason="Created manually from the integrations surface.",
         )
     return {
         "app_id": app_id,
-        "connector": record,
-        "secret_result": secret_result,
+        "connector": _redact_connector_record(record),
+        "secret_result": _redact_secret_result(secret_result),
     }
 
 
@@ -531,6 +581,8 @@ async def patch_integration_connector(
             secret_value=body.secret_value,
             display_name=body.display_name,
             ttl_days=body.ttl_days or 30,
+            public_config=body.public_config,
+            required_fields=body.required_fields,
         )
     record = await update_connector_metadata(
         app_id=app_id,
@@ -540,11 +592,40 @@ async def patch_integration_connector(
         notes=body.notes,
         status=body.status,
         expires_at=body.expires_at,
+        public_config=body.public_config,
+        required_fields=body.required_fields,
     )
     return {
         "app_id": app_id,
-        "connector": record,
-        "secret_result": secret_result,
+        "connector": _redact_connector_record(record),
+        "secret_result": _redact_secret_result(secret_result),
+    }
+
+
+@app.post("/api/studio/integrations/connectors/{service}/health-check")
+async def check_integration_connector_health(
+    service: str,
+    app_id: Optional[str] = None,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    result = await run_connector_health_check(app_id=app_id, service=service, checked_by="manual")
+    return {
+        "app_id": app_id,
+        "service": service,
+        "health": _redact_secret_fields(
+            {
+                "status": result.get("status"),
+                "last_checked_at": result.get("last_checked_at"),
+                "message": result.get("message"),
+                "missing_fields": result.get("missing_fields") or [],
+                "checked_by": result.get("checked_by") or "manual",
+                "safe_details": result.get("health_details") or {},
+                "error_code": result.get("error_code"),
+                "health_check_supported": bool(result.get("health_check_supported")),
+                "frontend_safe": True,
+            }
+        ),
     }
 
 

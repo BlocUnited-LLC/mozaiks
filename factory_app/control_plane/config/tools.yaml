@@ -29,3 +29,9 @@ tools:
     entrypoint: factory_app.control_plane.tools.get_artifact_workspace_catalog:get_artifact_workspace_catalog
     available_to:
       - scope_requested
+  - id: get_stale_artifact_families
+    kind: context_tool
+    description: Return the artifact families (concept, brand, design_docs, workflow_bundle, app_bundle) that have stale versions for this app. Used by the classifier to detect upstream families invalidated by a prior change request so routing can include the minimal necessary refresh.
+    entrypoint: factory_app.control_plane.tools.get_stale_artifact_families:get_stale_artifact_families
+    available_to:
+      - request_submitted

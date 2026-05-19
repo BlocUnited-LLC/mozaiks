@@ -51,7 +51,6 @@ const getDefaultProfileMenu = (user) => {
     {
       id: "profile",
       label: "Profile",
-      icon: "profile.svg",
       action: "navigate",
       href: "/profile",
     },
@@ -69,7 +68,6 @@ const getDefaultProfileMenu = (user) => {
     items.push({
       id: "signin",
       label: "Sign In",
-      icon: "profile.svg",
       action: "signin",
     });
   }

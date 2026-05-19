@@ -59,6 +59,15 @@ models:
         - str
         - 'null'
         description: Optional section heading hint for AppSchemaAgent.
+      intent:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: >
+          Designed intent for this section, passed through from ExperienceSpec when
+          present. AppSchemaAgent uses this as the authoritative purpose statement
+          when generating the section config.
 
   AppBuildPage:
     type: model
@@ -72,6 +81,14 @@ models:
       purpose:
         type: str
         description: What the page exists to let the user do.
+      design_intent:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: >
+          Designed intent passed through from ExperienceSpec when present. Null when
+          the page was inferred from capability packs rather than designed explicitly.
       primary_entities:
         type: optional_list
         items: str
@@ -164,6 +181,12 @@ models:
       name:
         type: str
         description: Integration name.
+      service:
+        type: optional_str
+        description: Normalized connector service id such as email_provider, analytics_provider, crm_provider, storage_provider, or model_provider. Prefer this when the integration requires a platform connector.
+      display_name:
+        type: optional_str
+        description: Human-readable connector label shown in inline credential prompts and the app-scoped integrations surface.
       kind:
         type: str
         description: Integration type such as payments, email, analytics, agent-backend,
@@ -171,6 +194,75 @@ models:
       purpose:
         type: str
         description: Why the integration exists in the product.
+      required_at:
+        type: literal
+        values:
+        - build_time
+        - validation_time
+        - runtime
+        - deployment
+        - optional
+        default: runtime
+        description: Earliest lifecycle point where this integration must be configured.
+      optional:
+        type: bool
+        default: false
+        description: Whether the app can proceed without this integration.
+      required_fields:
+        type: optional_list
+        items: dict
+        description: >
+          Optional connector setup fields. Each item should include name, label,
+          type (secret, text, url, select), required, and frontend_safe. Secret
+          fields are write-only and must never be returned to generated code.
+  AppIntegrationNeed:
+    type: model
+    fields:
+      service:
+        type: str
+        description: Normalized connector service id such as email_provider, analytics_provider, crm_provider, storage_provider, or model_provider.
+      display_name:
+        type: optional_str
+        description: Human-readable label for inline credential collection.
+      kind:
+        type: literal
+        values:
+        - api_key
+        - oauth
+        - webhook
+        - hosted_pack
+        - internal_service
+        description: Connector/configuration kind.
+      purpose:
+        type: str
+        description: Why this task needs the integration.
+      required_at:
+        type: literal
+        values:
+        - build_time
+        - validation_time
+        - runtime
+        - deployment
+        - optional
+        default: runtime
+        description: Earliest lifecycle point where this credential/configuration is required.
+      optional:
+        type: bool
+        default: false
+        description: Whether the build can proceed without this service.
+      required_by:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: Task, agent, paths, or capability pack requiring this integration.
+      required_fields:
+        type: optional_list
+        items: dict
+        description: >
+          Optional connector setup fields. Each item should include name, label,
+          type (secret, text, url, select), required, and frontend_safe. Secret
+          fields are write-only and must never be returned to generated code.
   AppEventFlow:
     type: model
     fields:
@@ -455,6 +547,13 @@ models:
         - dict
         - 'null'
         description: Context variables seeded into the child run before execution.
+      integration_needs:
+        type: optional_list
+        items: AppIntegrationNeed
+        description: >
+          Third-party connectors this build task expects to need. Agents may
+          discover more at execution time with record_integration_need; the
+          IntegrationReadinessAgent fans all needs in before validation/download.
   AppBuildPlan:
     type: model
     fields:
@@ -713,6 +812,19 @@ models:
         type: str
         description: >
           Concise quality-gate message before review_module_contract_quality runs.
+  ModuleRuntimeQualityReviewRequest:
+    type: model
+    fields:
+      max_revision_attempts:
+        type: int
+        description: >
+          Maximum automated ServiceAgent revision loops before blocking for
+          user/operator review.
+        default: 1
+      agent_message:
+        type: str
+        description: >
+          Concise quality-gate message before review_module_runtime_quality runs.
   ValidationErrorEntry:
     type: model
     fields:
@@ -813,7 +925,7 @@ models:
     fields:
       path:
         type: str
-        description: Concrete model file path such as backend/schemas/user.py.
+        description: Concrete module schema helper path such as modules/tasks/backend/schemas.py.
       entity_name:
         type: union
         variants:
@@ -822,17 +934,17 @@ models:
         description: Primary entity this model file represents when known.
       purpose:
         type: str
-        description: Why this model file exists.
+        description: Why this backend/schemas.py file exists.
       content:
         type: str
-        description: Complete source for this model file.
+        description: Complete source for this schemas.py file.
   ModelOutput:
     type: model
     fields:
       model_files:
         type: list
         items: ModelFile
-        description: Typed model files emitted by ModelAgent.
+        description: Typed backend/schemas.py files emitted by ModelAgent.
       code_files:
         type: list
         items: CodeFileEntry
@@ -846,8 +958,8 @@ models:
   # ===========================================================================
   # CANONICAL MODULE CONTRACT MODELS
   # ConfigMiddlewareAgent emits these typed objects before serializing them to
-  # modules/{module_id}/{module.yaml,events.yaml,subscriptions.yaml,
-  # notifications.yaml,settings.yaml,admin.yaml}. YAML declares the contract; Python files
+  # modules/{module_id}/{module.yaml,contracts/events.yaml,contracts/reactions.yaml,
+  # contracts/notifications.yaml,contracts/settings.yaml,contracts/admin.yaml}. YAML declares the contract; Python files
   # implement behavior through referenced handlers/hooks.
   # ===========================================================================
 
@@ -873,8 +985,8 @@ models:
         description: >
           Module type governs scaffold conventions and type-specific YAML additions.
           standard = request/response CRUD (default).
-          messaging = stateful real-time communication with read/unread tracking (adds channels.yaml).
-          workflow = named state machine with transitions and roles (adds states.yaml + transitions.yaml).
+          messaging = stateful communication with read/unread tracking using canonical module contracts only.
+          workflow = named lifecycle/state behavior implemented through canonical module contracts and backend policy helpers.
           transactional = append-only ledger for value movements.
       description:
         type: str
@@ -1097,7 +1209,7 @@ models:
         items: ModuleEvent
         description: Events this module is allowed to publish.
 
-  ModuleSubscriptionTarget:
+  ModuleReactionTarget:
     type: model
     fields:
       kind:
@@ -1106,13 +1218,13 @@ models:
         - handler
         - capability
         - notification
-        description: Subscription target family.
-      handler:
+        description: Reaction target family.
+      handler_method:
         type: union
         variants:
         - str
         - 'null'
-        description: "Module-local Python entrypoint such as backend.subscriptions:on_account_archived. Use only when kind=handler and mirror it in python_stubs."
+        description: Method name on backend/handler.py used when kind=handler.
       capability_id:
         type: union
         variants:
@@ -1126,17 +1238,17 @@ models:
         - 'null'
         description: Notification rule id when kind=notification.
 
-  ModuleSubscription:
+  ModuleReaction:
     type: model
     fields:
       id:
         type: str
-        description: Stable subscription id.
+        description: Stable reaction id.
       event_type:
         type: str
         description: Namespaced event type this module reacts to.
       target:
-        type: ModuleSubscriptionTarget
+        type: ModuleReactionTarget
         description: Handler, capability, or notification target.
       filters:
         type: union
@@ -1146,21 +1258,21 @@ models:
         description: Optional declarative filters based on event envelope/payload.
       idempotency_key:
         type: str
-        description: Template used to prevent duplicate subscription execution.
+        description: Template used to prevent duplicate reaction execution.
       permissions:
         type: optional_list
         items: str
         description: Permission ids required for the reaction when applicable.
 
-  ModuleSubscriptionsManifest:
+  ModuleReactionsManifest:
     type: model
     fields:
       schema_version:
         type: str
-        description: Must be mozaiks.subscriptions.v1.
-      subscriptions:
+        description: Must be mozaiks.reactions.v1.
+      reactions:
         type: list
-        items: ModuleSubscription
+        items: ModuleReaction
         description: Event reactions declared by this module.
 
   ModuleNotificationAudience:
@@ -1352,7 +1464,6 @@ models:
         - policy
         - schemas
         - settings_hook
-        - subscriptions_hook
         - notifications_hook
         - admin_hook
         - helper
@@ -1410,7 +1521,7 @@ models:
         variants:
         - str
         - 'null'
-        description: URL prefix for api_router extensions (e.g. /webhooks/stripe). Null for startup_service.
+        description: URL prefix for api_router extensions (e.g. /webhooks/provider). Null for startup_service.
 
   ModuleRuntimeExtensionsManifest:
     type: model
@@ -1437,9 +1548,9 @@ models:
       events_yaml:
         type: ModuleEventsManifest
         description: events.yaml contract object.
-      subscriptions_yaml:
-        type: ModuleSubscriptionsManifest
-        description: subscriptions.yaml contract object.
+      reactions_yaml:
+        type: ModuleReactionsManifest
+        description: reactions.yaml contract object.
       notifications_yaml:
         type: ModuleNotificationsManifest
         description: notifications.yaml contract object.
@@ -2520,7 +2631,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Dot-path into the section api_endpoint response for trend detail.
+        description: Dot-path into the section api_endpoint response for trend detail. Use only when the bound module action computes a real historical comparison; otherwise keep null.
       format:
         type: union
         variants:
@@ -2683,7 +2794,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Dot-path into the section api_endpoint response for trend detail.
+        description: Dot-path into the section api_endpoint response for trend detail. Use only when the bound module action computes a real historical comparison; otherwise keep null.
       format:
         type: union
         variants:
@@ -3284,13 +3395,13 @@ models:
         description: Route id from AppCustomRouteEntry.id that owns this page file.
       path:
         type: str
-        description: Custom page file path under ui/pages/custom/, e.g. ui/pages/custom/InvestorDealRoom.jsx.
+        description: Custom page file path under ui/pages/custom/ with a .jsx extension, e.g. ui/pages/custom/InvestorDealRoom.jsx.
       component_name:
         type: str
         description: Default exported React component name used by the generated file.
       registry_key:
         type: str
-        description: Component registry key that must match the route entry's component field.
+        description: Component registry key that must match the owning AppCustomRouteEntry.component exactly.
       purpose:
         type: str
         description: Why this custom page file exists and what interaction/layout gap it satisfies.
@@ -3312,7 +3423,7 @@ models:
       page_files:
         type: list
         items: AppCustomPageFile
-        description: Full-page React files owned by the custom route manifest.
+        description: Full-page React files owned by the custom route manifest. There must be exactly one page file per route_manifest entry.
 
   AppManifest:
     type: model
@@ -4172,7 +4283,6 @@ models:
         - policy
         - schemas
         - settings_hook
-        - subscriptions_hook
         - notifications_hook
         - admin_hook
         - helper
@@ -4276,18 +4386,56 @@ models:
         - 'null'
         description: Optional summary message.
 
+  IntegrationReadinessSummary:
+    type: model
+    fields:
+      status:
+        type: literal
+        values:
+        - ready
+        - needs_configuration
+        - blocked
+        description: Connector readiness state after checking app-scoped integrations.
+      ready:
+        type: bool
+        description: Whether downstream validation/download may continue.
+      checked_services:
+        type: optional_list
+        items: str
+        description: Connector services considered by this checkpoint.
+      ready_services:
+        type: optional_list
+        items: str
+        description: Connector services already ready or collected inline.
+      unresolved_required_services:
+        type: optional_list
+        items: str
+        description: Required connector services still missing.
+      agent_message:
+        type: str
+        description: Short readiness summary for the user.
+
+  IntegrationReadinessOutput:
+    type: model
+    fields:
+      integration_readiness:
+        type: IntegrationReadinessSummary
+        description: AppGenerator integration readiness checkpoint result.
+
 registry:
   InterviewAgent: null
   AppPlanAgent: AppBuildPlanOutput
   AppSchemaAgent: AppSchemaOutput
   AppUIQualityAgent: AppUIQualityReviewRequest
   AdminRegistryAgent: AdminRegistryOutput
+  IntegrationReadinessAgent: IntegrationReadinessOutput
   DatabaseAgent: DatabaseOutput
   ControlPlaneAgent: ControlPlaneOutput
   ConfigMiddlewareAgent: ConfigMiddlewareOutput
   ModuleContractQualityAgent: ModuleContractQualityReviewRequest
   ModelAgent: ModelOutput
   ServiceAgent: ServiceOutput
+  ModuleRuntimeQualityAgent: ModuleRuntimeQualityReviewRequest
   FrontendStubAgent: FrontendStubOutput
   ControllerAgent: ControllerOutput
   AssemblyAgent: CodeFilesOutput

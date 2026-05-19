@@ -184,6 +184,7 @@ During build, those families are written first under
 ## Cross References
 
 - [builder-execution-model.md](builder-execution-model.md)
+- [shared-workflow-infrastructure.md](shared-workflow-infrastructure.md)
 - [app-planning-contracts.md](app-planning-contracts.md)
 - [canonical-app-structure.md](../app/canonical-app-structure.md)
 - [orchestration-control-loops.md](../workflows/orchestration-control-loops.md)

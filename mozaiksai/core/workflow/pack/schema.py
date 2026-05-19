@@ -431,6 +431,14 @@ class GlobalPackGraph(BaseModel):
     entrypoints: List[WorkflowEntrypoint] = Field(default_factory=list)
     journeys: List[GlobalJourney] = Field(default_factory=list)
     transitions: List[WorkflowTransition] = Field(default_factory=list)
+    artifact_dependency_graph: Dict[str, List[str]] = Field(
+        default_factory=dict,
+        description=(
+            "Declarative artifact family dependency graph. Each key is an artifact family; "
+            "the value lists upstream families it directly depends on. Used by the control "
+            "plane to propagate downstream staleness when an upstream family is written."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_uniqueness_and_refs(self) -> "GlobalPackGraph":

@@ -88,6 +88,7 @@ class SmokeResult:
     assistant_message: Optional[str]
     structured_output: Dict[str, Any]
     final_context: Dict[str, Any]
+    app_connectors: List[Dict[str, Any]]
     event_count: int
     observed_event_types: List[str]
 
@@ -102,6 +103,7 @@ class SmokeResult:
                 "assistant_message": self.assistant_message,
                 "structured_output": self.structured_output,
                 "final_context": self.final_context,
+                "app_connectors": self.app_connectors,
                 "event_count": self.event_count,
                 "observed_event_types": self.observed_event_types,
             }
@@ -924,6 +926,7 @@ async def run_live_mfj_smoke(
         final_doc: Optional[Dict[str, Any]] = None
         structured_output: Dict[str, Any] = {}
         final_context: Dict[str, Any] = {}
+        app_connectors: List[Dict[str, Any]] = []
         try:
             coll = await pm._coll()
             run_status_value = str((workflow_result or {}).get("run_status") or "").strip().lower()
@@ -958,9 +961,16 @@ async def run_live_mfj_smoke(
                 )
             structured_output = _extract_latest_structured_output(final_doc)
             final_context = _extract_final_context(final_doc)
+            try:
+                from mozaiksai.core.workflow.generator_support.connector_service import list_connectors
+
+                app_connectors = await list_connectors(app_id)
+            except Exception:
+                app_connectors = []
         except Exception:
             structured_output = {}
             final_context = {}
+            app_connectors = []
 
         observed_event_types = [str(event.get("type") or "") for event in events]
         assistant_message = _resolve_assistant_message(events, structured_output)
@@ -978,6 +988,7 @@ async def run_live_mfj_smoke(
             assistant_message=assistant_message,
             structured_output=structured_output,
             final_context=final_context,
+            app_connectors=app_connectors,
             event_count=len(events),
             observed_event_types=observed_event_types,
         )
@@ -1078,6 +1089,12 @@ def main() -> int:
         help="Fail if the final smoke payload does not contain this text. Repeatable.",
     )
     parser.add_argument(
+        "--expect-connector-service",
+        action="append",
+        default=[],
+        help="Fail if the app connector inventory does not contain this normalized service id. Repeatable.",
+    )
+    parser.add_argument(
         "--fail-on-needs-revision",
         action="store_true",
         help="Fail if the final UI quality status is needs_revision or blocked.",
@@ -1122,6 +1139,15 @@ def main() -> int:
         expected_text = str(expected or "")
         if expected_text and expected_text not in output_text:
             validation_errors.append(f"missing expected output text: {expected_text}")
+    connector_services = {
+        str(connector.get("service") or "").strip().lower()
+        for connector in result.app_connectors or []
+        if isinstance(connector, dict)
+    }
+    for expected in args.expect_connector_service or []:
+        expected_service = str(expected or "").strip().lower().replace(" ", "_")
+        if expected_service and expected_service not in connector_services:
+            validation_errors.append(f"missing expected connector service: {expected_service}")
     if args.fail_on_needs_revision:
         quality_status = str(
             (result.final_context or {}).get("app_ui_quality_status")

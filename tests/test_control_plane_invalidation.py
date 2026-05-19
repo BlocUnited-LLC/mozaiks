@@ -30,10 +30,15 @@ class _FakeSessionStore:
 class _FakeArtifactStore:
     def __init__(self) -> None:
         self.calls: list[dict] = []
+        self.family_calls: list[dict] = []
 
     async def invalidate_artifact_version_refs(self, **kwargs):  # noqa: ANN003
         self.calls.append(dict(kwargs))
         return ["av_design_1", "av_app_1"]
+
+    async def invalidate_artifact_family(self, **kwargs):  # noqa: ANN003
+        self.family_calls.append(dict(kwargs))
+        return 1  # simulate one version staled
 
 
 def _request() -> RefinementRequest:
@@ -99,6 +104,8 @@ async def test_artifact_invalidation_service_uses_session_refs_and_affected_fami
         "change_request_id": "cr_123",
         "affected_artifact_kinds": ["design_docs", "app_bundle"],
         "invalidated_artifact_version_ids": ["av_design_1", "av_app_1"],
+        # workflow_bundle depends on design_docs, so it is downstream-staled
+        "downstream_staled_families": ["workflow_bundle"],
     }
     assert artifact_store.calls == [
         {
@@ -110,6 +117,15 @@ async def test_artifact_invalidation_service_uses_session_refs_and_affected_fami
                 "app_bundle": "av_app_1",
             },
             "affected_artifact_kinds": ["design_docs", "app_bundle"],
+            "reason": "change_request:cr_123",
+        }
+    ]
+    # Downstream propagation should have staled workflow_bundle
+    assert artifact_store.family_calls == [
+        {
+            "app_id": "app_1",
+            "artifact_kind": "workflow_bundle",
+            "artifact_key": "workflow_bundle",
             "reason": "change_request:cr_123",
         }
     ]

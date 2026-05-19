@@ -640,9 +640,9 @@ def _drifted_feature_output(module_id: str) -> Dict[str, Any]:
              "content": "schema_version: mozaiks.module\n"},
             # DRIFT: events.yaml at flat module root (not in contracts/)
             {"filename": f"modules/{module_id}/events.yaml", "content": "drift: events\n"},
-            # DRIFT: subscriptions.yaml at flat module root
-            {"filename": f"modules/{module_id}/subscriptions.yaml",
-             "content": "drift: subscriptions\n"},
+            # DRIFT: reactions.yaml at flat module root
+            {"filename": f"modules/{module_id}/reactions.yaml",
+             "content": "drift: reactions\n"},
             # DRIFT: states.yaml at flat module root
             {"filename": f"modules/{module_id}/states.yaml", "content": "drift: states\n"},
             # DRIFT: backend/models.py instead of backend/schemas.py
@@ -736,7 +736,7 @@ class TestAssemblyFixture:
 
         # Confirm drift patterns are present (so the absence checks above are meaningful)
         assert "modules/drift_module/events.yaml" in filenames
-        assert "modules/drift_module/subscriptions.yaml" in filenames
+        assert "modules/drift_module/reactions.yaml" in filenames
         assert "modules/drift_module/states.yaml" in filenames
         assert "modules/drift_module/backend/models.py" in filenames
         assert "app/capability_packs/config.yaml" in filenames
@@ -819,7 +819,7 @@ class TestRuntimeLoadFixture:
         loaded = ModuleLoader(str(tmp_path)).load("projects")
 
         assert loaded.manifests.events is None
-        assert loaded.manifests.subscriptions is None
+        assert loaded.manifests.reactions is None
         assert loaded.manifests.notifications is None
         assert loaded.manifests.admin is None
         assert loaded.manifests.runtime_extensions is None
@@ -849,22 +849,22 @@ class TestRuntimeLoadFixture:
         assert "domain.tasks.task_created" in loaded.manifests.events.event_types
         assert "domain.tasks.task_completed" in loaded.manifests.events.event_types
 
-    def test_flat_subscriptions_yaml_at_module_root_is_ignored(self, tmp_path: Path) -> None:
-        """Flat subscriptions.yaml at the module root must not be loaded — canonical location is contracts/."""
+    def test_flat_reactions_yaml_at_module_root_is_ignored(self, tmp_path: Path) -> None:
+        """Flat reactions.yaml at the module root must not be loaded — canonical location is contracts/."""
         from mozaiksai.core.runtime.app.module_loader import ModuleLoader
 
         module_dir = _write_module(tmp_path, "tasks", _TASKS_MODULE_YAML, _TASKS_HANDLER_PY)
         (tmp_path / "app.json").write_text('{"appName": "Task Tracker"}', encoding="utf-8")
         # Write drift file at flat root
-        (module_dir / "subscriptions.yaml").write_text(
-            "schema_version: mozaiks.subscriptions.v1\nsubscriptions: []\n",
+        (module_dir / "reactions.yaml").write_text(
+            "schema_version: mozaiks.reactions.v1\nreactions: []\n",
             encoding="utf-8",
         )
 
         loaded = ModuleLoader(str(tmp_path)).load("tasks")
 
-        # Flat-root subscriptions.yaml must be ignored — canonical location is contracts/
-        assert loaded.manifests.subscriptions is None
+        # Flat-root reactions.yaml must be ignored — canonical location is contracts/
+        assert loaded.manifests.reactions is None
 
     def test_action_method_map_covers_all_declared_actions(self, tmp_path: Path) -> None:
         from mozaiksai.core.runtime.app.module_loader import ModuleLoader

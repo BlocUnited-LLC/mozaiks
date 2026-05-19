@@ -30,7 +30,7 @@ Owns:
 - authentication and account entry
 - workspace-level shell
 - app catalog
-- billing and hosted product relationship
+- hosted product relationship when provided by a host app
 - cross-app usage and operational visibility
 
 Does not own as a visible concept:
@@ -49,7 +49,7 @@ Owns:
 - create-app entry
 - aggregate usage
 - aggregate operations and health
-- workspace-level billing
+- host-provided billing or commercial controls when the host exposes them
 - workspace-level settings and team controls
 
 ### App Console
@@ -91,7 +91,6 @@ Recommended top-level sections:
 - `Apps`
 - `Usage`
 - `Operations`
-- `Billing`
 - `Settings`
 
 Definitions:
@@ -99,7 +98,8 @@ Definitions:
 - `Apps` is the default landing area and multi-app directory.
 - `Usage` is cross-app consumption and spend.
 - `Operations` is cross-app health, incidents, failures, and runtime status.
-- `Billing` is workspace billing, hosted plan, and spend controls.
+- Host apps may add billing or commercial controls as proprietary workspace
+  surfaces. They are not required OSS factory console routes.
 - `Settings` is workspace, team, permissions, and defaults.
 
 `Workspace` is the context label, not the primary nav title.
@@ -171,7 +171,6 @@ Mozaiks
      -> Apps
      -> Usage
      -> Operations
-     -> Billing
      -> Settings
 
   -> App Console
@@ -204,7 +203,6 @@ These should not appear as top-level product areas:
 - `Studio`
 - `Control Plane`
 - `Factory App`
-- `App Zero`
 
 ## UX Movement Model
 

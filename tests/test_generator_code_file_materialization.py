@@ -116,9 +116,9 @@ def test_extract_code_file_map_materializes_typed_frontend_stub_output() -> None
             {
                 "path": "ui/admin/CampaignMetricsPanel.jsx",
                 "surface": "admin_component",
-                "registry_key": "campaigns.metrics",
+                "registry_key": "projects.metrics",
                 "purpose": "Campaign metrics custom panel.",
-                "contract_refs": ["admin_yaml.panels[campaigns.metrics].component"],
+                "contract_refs": ["admin_yaml.panels[projects.metrics].component"],
                 "content": "export default function CampaignMetricsPanel() { return null; }\n",
             }
         ],
@@ -289,9 +289,9 @@ def test_assembly_phase_merges_typed_service_and_frontend_outputs() -> None:
                     {
                         "path": "ui/admin/CampaignMetricsPanel.jsx",
                         "surface": "admin_component",
-                        "registry_key": "campaigns.metrics",
+                        "registry_key": "projects.metrics",
                         "purpose": "Campaign metrics custom panel.",
-                        "contract_refs": ["admin_yaml.panels[campaigns.metrics].component"],
+                        "contract_refs": ["admin_yaml.panels[projects.metrics].component"],
                         "content": "export default function CampaignMetricsPanel() { return null; }\n",
                     }
                 ],
