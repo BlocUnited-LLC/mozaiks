@@ -161,6 +161,28 @@ When working in or generating modules:
 - AppGenerator produces these files through structured output models. Keep the
   generated shapes aligned with runtime loaders, docs, and tests.
 
+## Generated Persistence Contract
+
+AppGenerator persistence output is intent-first, not runtime-DB-first:
+
+- `database_intent_bundle` is the canonical generated database planning object.
+- Generated app bundles write it to `config/database_intent.json`.
+- Additive refinement plans belong under
+  `config/database_migrations/{migration_id}.json`.
+- Persistent modules use `backend/repo.py`, `backend/policy.py`, and
+  `backend/schemas.py`; do not generate `backend/models.py` or
+  `backend/models/*.py`.
+- Do not generate `backend/database/schema.json` or
+  `backend/database/seed.json`.
+- Do not put database access in `handler.py`, and do not put raw persistence
+  operations in `service.py`.
+- Runtime injects `ctx.persistence` into `ModuleContext` when `app_id` exists.
+  Generated `backend/repo.py` must use
+  `ctx.persistence.collection(module_id, entity_name)`.
+- `ctx.db` remains absent and non-canonical; generated code must not require or
+  emit it.
+
+
 ## Structured-Output-First Contract Rule
 
 When introducing or changing YAML contracts:

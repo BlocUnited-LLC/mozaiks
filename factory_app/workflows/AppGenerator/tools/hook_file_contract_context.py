@@ -18,6 +18,7 @@ _MODULE_ARCHETYPES_HEADER = "[MODULE ARCHETYPES CONTEXT]"
 _PLANNING_CONTRACT_ORDER = (
     "page_bundle",
     "module_contract",
+    "persistence_contract",
     "backend_foundation",
     "control_plane_pack",
     "api_surface",

@@ -62,7 +62,7 @@ class _FakeArtifactStore:
         return type("ArtifactVersion", (), {"id": "av_bundle_1"})()
 
 
-def test_persist_pending_schema_migration_records_staged_history(monkeypatch) -> None:
+def test_persist_pending_schema_migration_records_staged_history(monkeypatch, tmp_path: Path) -> None:
     fake_store = _FakeStore()
     monkeypatch.setattr(generate_and_download_module, "BuilderArtifactStore", lambda: fake_store)
 
@@ -75,7 +75,7 @@ def test_persist_pending_schema_migration_records_staged_history(monkeypatch) ->
             workflow_name="AppGenerator",
             chat_id="chat_123",
             context_variables=context,
-            generated_app_dir="C:/tmp/generated/apps/app_123/build_123/app",
+            generated_app_dir=str(tmp_path),
         )
     )
 
@@ -83,6 +83,8 @@ def test_persist_pending_schema_migration_records_staged_history(monkeypatch) ->
     assert fake_store.calls[0]["artifact_version_id"] == "artifact_123"
     assert fake_store.calls[0]["change_class"] == "feature"
     assert context.data["persisted_database_migration"]["status"] == "staged"
+    assert context.data["staged_database_migration_path"] == "config/database_migrations/m_1.json"
+    assert (tmp_path / "config" / "database_migrations" / "m_1.json").exists()
 
 
 def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatch, tmp_path: Path) -> None:

@@ -1,16 +1,17 @@
 """
 Schema Migration — diff and migration generation for AppGenerator refinement runs.
 
-Compares old schema.json (from the artifact being refined) against the new schema
-produced by DatabaseAgent and generates a typed migration file. Applied during
-refinement runs instead of full re-provisioning.
+Compares prior database intent (from the artifact being refined) against the
+new database intent produced by DatabaseAgent and generates a typed migration
+file. The migration is staged under config/database_migrations/ for later
+runtime/platform application instead of being applied by AppGenerator.
 
 Change class behaviour:
   patch   — diff schemas; apply additive changes only; warn on destructive
   design  — schema unchanged; skip DatabaseAgent entirely
   feature — expect additive only (new collections/fields); error on destructive
-  core    — full re-provisioning; no diff needed
-  null    — greenfield; full provisioning; no diff needed
+  core    — new upstream concept revision; no in-place diff needed
+  null    — greenfield; no prior intent to diff
 """
 
 from __future__ import annotations
@@ -49,7 +50,7 @@ def diff_schemas(
     new_schema: Dict[str, Any],
 ) -> SchemaDiff:
     """
-    Diff two schema.json objects.
+    Diff two database intent/schema objects.
 
     Returns a structured diff with:
       new_collections      — collections added in new_schema

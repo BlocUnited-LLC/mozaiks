@@ -46,11 +46,10 @@ _MANIFEST_GUARD_HEADER = "[MODULE FILE MANIFEST GUARD]"
 _ALL_MODULE_YAML_FILES = {
     "module.yaml",
     "events.yaml",
-    "subscriptions.yaml",
+    "reactions.yaml",
     "notifications.yaml",
     "settings.yaml",
     "admin.yaml",
-    "channels.yaml",
 }
 
 # Context variable keys AppPlanAgent uses as concept signals.
@@ -267,11 +266,11 @@ def _build_app_plan_body(
             "  - Do NOT include all six YAML files by default for every module.",
             "  - Include module.yaml always.",
             "  - Include events.yaml only if the module publishes domain events.",
-            "  - Include subscriptions.yaml only if the module reacts to events from other modules.",
+            "  - Include reactions.yaml only if the module reacts to events from other modules.",
             "  - Include notifications.yaml only if module events should trigger user notifications.",
             "  - Include settings.yaml only if the module has configurable behavior or feature flags.",
             "  - Include admin.yaml only if the module needs admin or backoffice panels.",
-            "  - Include channels.yaml only for modules requiring real-time WebSocket or push delivery.",
+            "  - Do not include channels.yaml; messaging metadata belongs in canonical contracts and backend policy helpers.",
             "  - Omit any file that would contain only an empty array or null object.",
             "  - You may combine modules from multiple domains or global_base as the app requires.",
         ])
@@ -287,7 +286,7 @@ def _build_manifest_guard_body(
 ) -> str:
     """Build the ConfigMiddlewareAgent guard block body."""
     declared_sorted = sorted(declared_yaml_files)
-    omitted = sorted(_ALL_MODULE_YAML_FILES - declared_yaml_files - {"channels.yaml"})
+    omitted = sorted(_ALL_MODULE_YAML_FILES - declared_yaml_files)
 
     lines = [
         f"Module: {module_id}",
@@ -306,11 +305,12 @@ def _build_manifest_guard_body(
         "HARD CONSTRAINTS:",
         "  1. Generate ONLY the YAML files listed above.",
         "  2. Do NOT emit events.yaml if the module publishes no events.",
-        "  3. Do NOT emit subscriptions.yaml if the module reacts to no events.",
+        "  3. Do NOT emit reactions.yaml if the module reacts to no events.",
         "  4. Do NOT emit notifications.yaml if no events warrant user notifications.",
         "  5. Do NOT emit settings.yaml if the module has no configurable behavior.",
         "  6. Do NOT emit admin.yaml if the module needs no admin panels.",
-        "  7. Do NOT emit a file with only an empty array or null object.",
+        "  7. Do NOT emit channels.yaml.",
+        "  8. Do NOT emit a file with only an empty array or null object.",
     ]
 
     return "\n".join(lines)

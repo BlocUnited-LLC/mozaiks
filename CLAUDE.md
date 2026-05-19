@@ -199,6 +199,26 @@ modules/{module_id}/
 
 ## Generator Output Boundary
 
+Generated app persistence is currently expressed as staged intent artifacts:
+
+- `database_intent_bundle` is the canonical machine-readable planning object.
+- `AppGenerator` writes it to `config/database_intent.json` when present.
+- additive refinement migrations are staged under
+  `config/database_migrations/{migration_id}.json`.
+- generated modules use `backend/schemas.py` for typed document/request shapes,
+  `backend/repo.py` for persistence operations, and `backend/policy.py` for
+  scoping helpers.
+- do not generate `backend/models.py`, `backend/models/*.py`,
+  `backend/database/schema.json`, or `backend/database/seed.json`.
+- the runtime injects `ctx.persistence` into `ModuleContext` when `app_id`
+  exists; generated `backend/repo.py` uses
+  `ctx.persistence.collection(module_id, entity_name)`.
+- `ctx.db` remains absent and non-canonical; generated code must not require or
+  emit it.
+
+## Generator Output Boundary
+
+
 Shared factory workflows live in `factory_app/workflows/`. Generator workflows
 generate app bundles and workflow bundles, but they must not write those
 outputs into active runtime paths.

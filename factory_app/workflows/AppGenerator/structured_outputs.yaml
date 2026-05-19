@@ -381,6 +381,7 @@ models:
         values:
         - backend_foundation
         - module_contract
+        - persistence_contract
         - data_models
         - business_services
         - api_surface
@@ -544,6 +545,18 @@ models:
         type: list
         items: AppBuildTask
         description: Explicit execution-oriented build tasks derived from the plan.
+      database_intent_bundle:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: Canonical generated database planning object for persistent app modules. It is written to config/database_intent.json by DatabaseAgent.
+      pending_schema_migration:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: Optional additive database migration intent for config/database_migrations/{migration_id}.json, or null when no migration is planned.
       generation_order:
         type: optional_list
         items: str
@@ -609,12 +622,12 @@ models:
     fields:
       path:
         type: str
-        description: Concrete database artifact path such as backend/database/schema.json.
+        description: Concrete database artifact path such as config/database_intent.json or config/database_migrations/{migration_id}.json.
       kind:
         type: literal
         values:
-        - schema_json
-        - seed_json
+        - database_intent_json
+        - database_migration_json
         description: Deterministic database artifact kind.
       purpose:
         type: str
@@ -632,11 +645,17 @@ models:
       database_files:
         type: list
         items: DatabaseArtifactFile
-        description: Typed database artifacts emitted by DatabaseAgent.
+        description: Typed database intent or migration artifacts emitted by DatabaseAgent.
       code_files:
         type: list
         items: CodeFileEntry
         description: Serialized file mirror. Extraction may rebuild canonical files from database_files.
+      pending_schema_migration:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: Additive migration document staged under config/database_migrations/{migration_id}.json, or null when no migration is staged.
       agent_message:
         type: union
         variants:
@@ -794,7 +813,7 @@ models:
     fields:
       path:
         type: str
-        description: Concrete model file path such as backend/models/user.py.
+        description: Concrete model file path such as backend/schemas/user.py.
       entity_name:
         type: union
         variants:
@@ -1340,7 +1359,7 @@ models:
         description: Stub family. Keep this finite and contract-driven. Layered module backends should declare handler, service, repo, policy, and schemas when a durable module is generated.
       purpose:
         type: str
-        description: Why this stub exists and what contract surface it implements.
+        description: Why this stub exists and what contract surface it implements. For kind=repo, generated content must use ctx.persistence.collection(module_id, entity_name), must not use ctx.db, and must not import get_mongo_client.
       contract_refs:
         type: optional_list
         items: str

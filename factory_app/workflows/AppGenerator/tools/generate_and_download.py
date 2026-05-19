@@ -234,6 +234,18 @@ async def _persist_pending_schema_migration(
     if not migration_id:
         return None
 
+    migration_path = (
+        Path(generated_app_dir)
+        / "config"
+        / "database_migrations"
+        / f"{migration_id}.json"
+    )
+    migration_path.parent.mkdir(parents=True, exist_ok=True)
+    migration_path.write_text(
+        json.dumps(pending_migration, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
     artifact_version_id = None
     change_class = None
     if context_variables is not None and hasattr(context_variables, "get"):
@@ -259,6 +271,10 @@ async def _persist_pending_schema_migration(
     if context_variables is not None and hasattr(context_variables, "set"):
         try:
             context_variables.set("persisted_database_migration", record)
+            context_variables.set(
+                "staged_database_migration_path",
+                f"config/database_migrations/{migration_id}.json",
+            )
         except Exception:
             pass
     return record

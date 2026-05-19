@@ -261,7 +261,7 @@ def scoped_record_query(ctx, *, record_id: str) -> dict[str, Any]:
     return query
 ```
 
-### 10. Write `backend/repo.py`
+### 11. Write `backend/repo.py`
 
 MongoDB access only. No business logic, no event emission, no validation.
 
@@ -269,21 +269,18 @@ MongoDB access only. No business logic, no event emission, no validation.
 from __future__ import annotations
 from typing import Any
 
-COLLECTION = "domain_{name}_records"
-
 
 class {Name}Repo:
 
     async def _collection(self, ctx):
-        db = getattr(ctx, "db", None)
-        if db is not None:
-            return db[COLLECTION]
-        from mozaiksai.core.core_config import get_mongo_client
-        return get_mongo_client()["mozaiks"][COLLECTION]
+        persistence = getattr(ctx, "persistence", None)
+        if persistence is None:
+            raise RuntimeError("Persistence is not available for this app context.")
+        return persistence.collection("{name}", "{name}")
 
     async def get(self, ctx, *, query: dict[str, Any]) -> dict[str, Any] | None:
         col = await self._collection(ctx)
-        return await col.find_one(query, {"_id": 0})
+        return await col.find_one(query)
 
     async def insert(self, ctx, *, record: dict[str, Any]) -> None:
         col = await self._collection(ctx)
@@ -296,15 +293,18 @@ class {Name}Repo:
 
     async def list(self, ctx, *, query: dict[str, Any], limit: int) -> list[dict[str, Any]]:
         col = await self._collection(ctx)
-        cursor = col.find(query, {"_id": 0}).sort("created_at", -1).limit(limit)
-        return await cursor.to_list(length=limit)
+        return await col.find_many(query, limit=limit, sort=[("created_at", -1)])
 
     async def count(self, ctx, *, query: dict[str, Any]) -> int:
         col = await self._collection(ctx)
-        return int(await col.count_documents(query))
+        return await col.count(query)
 ```
 
-### 11. Write `backend/service.py`
+`repo.py` must use `ctx.persistence.collection(module_id, entity_name)` with
+module/entity values that match `app/config/database_intent.json`. Do not use
+`ctx.db`, do not call `get_mongo_client()`, and do not hardcode database names.
+
+### 12. Write `backend/service.py`
 
 All business logic. Validates inputs, calls repo, emits events. Never touches DB directly.
 

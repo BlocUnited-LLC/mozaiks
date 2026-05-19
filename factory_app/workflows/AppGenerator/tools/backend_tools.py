@@ -44,7 +44,10 @@ async def provision_database(
     user_id: Annotated[Optional[str], Field(description="User ID.")] = None
 ) -> Dict[str, Any]:
     """
-    Provision a database for the application via the backend.
+    Legacy/planned endpoint wrapper.
+
+    The canonical current flow stages database_intent_bundle artifacts instead
+    of provisioning runtime databases from AppGenerator.
     """
     logger.info(f"Provisioning database for app {app_id}")
     try:
@@ -60,7 +63,10 @@ async def apply_database_schema(
     user_id: Annotated[Optional[str], Field(description="User ID.")] = None
 ) -> Dict[str, Any]:
     """
-    Apply the database schema via the backend.
+    Legacy/planned endpoint wrapper.
+
+    The canonical current flow writes config/database_intent.json and optional
+    config/database_migrations/*.json; it does not apply schemas here.
     """
     logger.info(f"Applying schema for app {app_id}")
     try:
@@ -80,7 +86,9 @@ async def seed_database(
     user_id: Annotated[Optional[str], Field(description="User ID.")] = None
 ) -> Dict[str, Any]:
     """
-    Seed the database with initial data via the backend.
+    Legacy/planned endpoint wrapper.
+
+    Seed files are not canonical AppGenerator persistence artifacts.
     """
     logger.info(f"Seeding database for app {app_id}")
     try:
@@ -100,9 +108,10 @@ async def fetch_current_schema(
     artifact_version_id: Annotated[Optional[str], Field(description="Artifact version ID of the bundle being refined. If null, returns null.")] = None,
 ) -> Dict[str, Any]:
     """
-    Fetch the schema.json that was applied for an existing app bundle artifact.
-    Returns {"schema": <dict>} on success, or {"schema": null} if no prior schema exists.
-    Used by DatabaseAgent to diff the old schema against the new one during refinement runs.
+    Fetch the prior database intent that was recorded for an existing app bundle
+    artifact. Returns {"schema": <dict>} for legacy callers, or {"schema": null}
+    if no prior intent is available. DatabaseAgent prompts should prefer
+    database_intent_bundle context and staged migration artifacts.
     """
     if not artifact_version_id:
         logger.debug("fetch_current_schema: no artifact_version_id — returning null schema (greenfield)")

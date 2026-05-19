@@ -1,0 +1,515 @@
+{
+  "AppBuildPlan": {
+    "agent_message": "Building a project management app with capabilities for managing projects and tasks.",
+    "app_kind": "project_management",
+    "surface_map": {
+      "surfaces": [
+        {
+          "surface_id": "projects",
+          "surface_kind": "module",
+          "source_pack_id": "projects",
+          "label": "Projects Module",
+          "summary": "Handles project creation, listing, and management.",
+          "primary_entities": [
+            "Project"
+          ],
+          "primary_pages": [
+            "Project List",
+            "Project Detail"
+          ],
+          "dependencies": []
+        },
+        {
+          "surface_id": "tasks",
+          "surface_kind": "module",
+          "source_pack_id": "tasks",
+          "label": "Tasks Module",
+          "summary": "Handles task creation, assignment, and completion.",
+          "primary_entities": [
+            "Task"
+          ],
+          "primary_pages": [
+            "Task List",
+            "Task Detail"
+          ],
+          "dependencies": []
+        }
+      ]
+    },
+    "capability_packs": [
+      {
+        "capability_pack_id": "projects",
+        "surface_id": "projects",
+        "surface_kind": "module",
+        "pack_type": "crud_pack",
+        "label": "Project Management",
+        "summary": "Manage projects including creation, listing, and detail views.",
+        "implementation_mode": "deterministic",
+        "primary_entities": [
+          "Project"
+        ],
+        "primary_pages": [
+          "Project List",
+          "Project Detail"
+        ],
+        "operations": [
+          "create_project",
+          "list_projects",
+          "view_project"
+        ],
+        "required_integrations": [],
+        "agentic_extensions": []
+      },
+      {
+        "capability_pack_id": "tasks",
+        "surface_id": "tasks",
+        "surface_kind": "module",
+        "pack_type": "crud_pack",
+        "label": "Task Management",
+        "summary": "Manage tasks including creation, assignment, and completion.",
+        "implementation_mode": "deterministic",
+        "primary_entities": [
+          "Task"
+        ],
+        "primary_pages": [
+          "Task List",
+          "Task Detail"
+        ],
+        "operations": [
+          "create_task",
+          "assign_task",
+          "complete_task",
+          "list_tasks"
+        ],
+        "required_integrations": [],
+        "agentic_extensions": []
+      }
+    ],
+    "pages": [
+      {
+        "name": "Project List",
+        "route": "/projects",
+        "purpose": "Display a list of all projects.",
+        "primary_entities": [
+          "Project"
+        ],
+        "primary_actions": [
+          "create_project"
+        ],
+        "page_type_hint": "record_list",
+        "ui_layout": "grid",
+        "sections_hint": [
+          {
+            "primitive": "DataTable",
+            "config_hint": {
+              "columns": [
+                "id",
+                "name",
+                "status"
+              ],
+              "selection": "single",
+              "search": true,
+              "api_endpoint": "/api/modules/projects/list_projects"
+            },
+            "section_id_hint": "project-table",
+            "title_hint": "All Projects"
+          },
+          {
+            "primitive": "ActionButton",
+            "config_hint": {
+              "layout": "row",
+              "actions": [
+                {
+                  "label": "Create Project",
+                  "action_type": "event",
+                  "event_type": "ui.modal.open"
+                }
+              ]
+            },
+            "section_id_hint": "create-project-action",
+            "title_hint": null
+          }
+        ]
+      },
+      {
+        "name": "Task List",
+        "route": "/tasks",
+        "purpose": "Display a list of all tasks.",
+        "primary_entities": [
+          "Task"
+        ],
+        "primary_actions": [
+          "create_task"
+        ],
+        "page_type_hint": "record_list",
+        "ui_layout": "grid",
+        "sections_hint": [
+          {
+            "primitive": "DataTable",
+            "config_hint": {
+              "columns": [
+                "id",
+                "name",
+                "status",
+                "project_id"
+              ],
+              "selection": "single",
+              "search": true,
+              "api_endpoint": "/api/modules/tasks/list_tasks"
+            },
+            "section_id_hint": "task-table",
+            "title_hint": "All Tasks"
+          },
+          {
+            "primitive": "ActionButton",
+            "config_hint": {
+              "layout": "row",
+              "actions": [
+                {
+                  "label": "Create Task",
+                  "action_type": "event",
+                  "event_type": "ui.modal.open"
+                }
+              ]
+            },
+            "section_id_hint": "create-task-action",
+            "title_hint": null
+          }
+        ]
+      }
+    ],
+    "entities": [
+      {
+        "name": "Project",
+        "operations": [
+          "create",
+          "read",
+          "update",
+          "delete"
+        ],
+        "notes": null
+      },
+      {
+        "name": "Task",
+        "operations": [
+          "create",
+          "read",
+          "update",
+          "delete"
+        ],
+        "notes": null
+      }
+    ],
+    "roles": [
+      "user",
+      "admin"
+    ],
+    "auth_strategy": "role-based",
+    "backend_scope": [
+      "projects",
+      "tasks"
+    ],
+    "frontend_scope": [
+      "project_pages",
+      "task_pages"
+    ],
+    "theme_preferences": null,
+    "brand_intent": {
+      "style_summary": "Professional and clean interface for project management.",
+      "brand_keywords": [
+        "project",
+        "task",
+        "management",
+        "productivity"
+      ],
+      "experience_goals": [
+        "Efficient task management",
+        "Clear project overview"
+      ],
+      "appearance_hint": null
+    },
+    "shell_preset_hint": "workspace_console",
+    "external_integrations": [],
+    "event_flows": [],
+    "agent_backend_required": false,
+    "database_intent_bundle": {
+      "version": "1",
+      "surfaces": [
+        {
+          "surface_id": "projects",
+          "surface_kind": "module",
+          "collections": [
+            {
+              "module_id": "projects",
+              "name": "projects",
+              "entity_name": "projects",
+              "indexes": [
+                {
+                  "name": "project_owner_created_at",
+                  "keys": [
+                    {
+                      "field": "owner_id",
+                      "order": 1
+                    },
+                    {
+                      "field": "created_at",
+                      "order": -1
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "surface_id": "tasks",
+          "surface_kind": "module",
+          "collections": [
+            {
+              "module_id": "tasks",
+              "name": "tasks",
+              "entity_name": "tasks",
+              "indexes": [
+                {
+                  "name": "task_project_status",
+                  "keys": [
+                    [
+                      "project_id",
+                      1
+                    ],
+                    [
+                      "status",
+                      1
+                    ]
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "pending_schema_migration": {
+      "migration_id": "001_projects_tasks_indexes",
+      "version": "1",
+      "operations": [
+        {
+          "type": "ensure_collection",
+          "module_id": "projects",
+          "entity_name": "projects"
+        },
+        {
+          "type": "ensure_index",
+          "module_id": "projects",
+          "entity_name": "projects",
+          "index": {
+            "name": "project_owner_created_at",
+            "keys": [
+              {
+                "field": "owner_id",
+                "order": 1
+              },
+              {
+                "field": "created_at",
+                "order": -1
+              }
+            ]
+          }
+        },
+        {
+          "type": "ensure_collection",
+          "module_id": "tasks",
+          "entity_name": "tasks"
+        },
+        {
+          "type": "ensure_index",
+          "module_id": "tasks",
+          "entity_name": "tasks",
+          "index": {
+            "name": "task_project_status",
+            "keys": [
+              [
+                "project_id",
+                1
+              ],
+              [
+                "status",
+                1
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "build_tasks": [
+      {
+        "task_id": "task_projects_persistence",
+        "task_type": "persistence_contract",
+        "capability_pack_id": null,
+        "surface_id": "database",
+        "surface_kind": null,
+        "execution_target": "AppGenerator",
+        "initial_agent": "DatabaseAgent",
+        "description": "Stage database intent and additive index migrations for projects and tasks.",
+        "initial_message": "Create database_intent_bundle entries for projects/projects and tasks/tasks. Stage config/database_intent.json and optional config/database_migrations/001_projects_tasks_indexes.json. Keep this intent-first and additive only.",
+        "owned_paths": [
+          "config/database_intent.json",
+          "config/database_migrations/001_projects_tasks_indexes.json"
+        ],
+        "depends_on": [],
+        "acceptance_criteria": [
+          "database_intent declares projects/projects and tasks/tasks"
+        ]
+      },
+      {
+        "task_id": "task_projects_module",
+        "task_type": "module_contract",
+        "capability_pack_id": "projects",
+        "surface_id": "projects",
+        "surface_kind": "module",
+        "execution_target": "AppGenerator",
+        "initial_agent": "ConfigMiddlewareAgent",
+        "description": "Generate the projects module contract and declared backend layers.",
+        "initial_message": "Generate projects module.yaml and backend stubs. repo.py must use ctx.persistence.collection(\"projects\", \"projects\") and align with database_intent_bundle. service.py calls repo.py. handler.py does not touch persistence.",
+        "owned_paths": [
+          "modules/projects/module.yaml",
+          "modules/projects/contracts/events.yaml",
+          "modules/projects/backend/handler.py",
+          "modules/projects/backend/service.py",
+          "modules/projects/backend/repo.py",
+          "modules/projects/backend/policy.py",
+          "modules/projects/backend/schemas.py"
+        ],
+        "depends_on": [
+          "task_projects_persistence"
+        ],
+        "acceptance_criteria": [
+          "repo.py uses ctx.persistence",
+          "schemas.py is canonical",
+          "legacy model artifacts are absent"
+        ]
+      },
+      {
+        "task_id": "task_tasks_module",
+        "task_type": "module_contract",
+        "capability_pack_id": "tasks",
+        "surface_id": "tasks",
+        "surface_kind": "module",
+        "execution_target": "AppGenerator",
+        "initial_agent": "ConfigMiddlewareAgent",
+        "description": "Generate the tasks module contract and declared backend layers.",
+        "initial_message": "Generate tasks module.yaml and backend stubs. repo.py must use ctx.persistence.collection(\"tasks\", \"tasks\") and align with database_intent_bundle. service.py calls repo.py. handler.py does not touch persistence.",
+        "owned_paths": [
+          "modules/tasks/module.yaml",
+          "modules/tasks/contracts/events.yaml",
+          "modules/tasks/backend/handler.py",
+          "modules/tasks/backend/service.py",
+          "modules/tasks/backend/repo.py",
+          "modules/tasks/backend/policy.py",
+          "modules/tasks/backend/schemas.py"
+        ],
+        "depends_on": [
+          "task_projects_persistence"
+        ],
+        "acceptance_criteria": [
+          "repo.py uses ctx.persistence",
+          "schemas.py is canonical",
+          "legacy model artifacts are absent"
+        ]
+      },
+      {
+        "task_id": "task_project_pages",
+        "task_type": "page_bundle",
+        "capability_pack_id": null,
+        "surface_id": "project_pages",
+        "surface_kind": "ui_only",
+        "execution_target": "AppGenerator",
+        "initial_agent": "AppSchemaAgent",
+        "description": "Generate declarative project list and detail pages.",
+        "initial_message": "Generate app.json and ui/pages/*.yaml pages that bind to app-owned module actions such as /api/modules/projects/list_projects.",
+        "owned_paths": [
+          "app.json",
+          "ui/pages/projects.yaml"
+        ],
+        "depends_on": [
+          "task_projects_module"
+        ],
+        "acceptance_criteria": [
+          "page endpoints bind to app-owned modules",
+          "persistent pages are declarative"
+        ]
+      },
+      {
+        "task_id": "task_task_pages",
+        "task_type": "page_bundle",
+        "capability_pack_id": null,
+        "surface_id": "task_pages",
+        "surface_kind": "ui_only",
+        "execution_target": "AppGenerator",
+        "initial_agent": "AppSchemaAgent",
+        "description": "Generate declarative task list and detail pages.",
+        "initial_message": "Generate app.json and ui/pages/*.yaml pages that bind to app-owned module actions such as /api/modules/tasks/list_tasks.",
+        "owned_paths": [
+          "app.json",
+          "ui/pages/tasks.yaml"
+        ],
+        "depends_on": [
+          "task_tasks_module"
+        ],
+        "acceptance_criteria": [
+          "page endpoints bind to app-owned modules",
+          "persistent pages are declarative"
+        ]
+      }
+    ],
+    "generation_order": [
+      "task_projects_persistence",
+      "task_projects_module",
+      "task_tasks_module",
+      "task_project_pages",
+      "task_task_pages"
+    ]
+  },
+  "workflows": [
+    {
+      "name": "AppGenerator",
+      "description": "Generate persistence and module contracts for projects and tasks.",
+      "initial_agent": "DatabaseAgent",
+      "initial_message": "Execute persistence and module contract tasks for projects and tasks.",
+      "context_variables": [
+        {
+          "key": "task_run_mode",
+          "value": true
+        },
+        {
+          "key": "current_build_task_id",
+          "value": "task_projects_persistence"
+        },
+        {
+          "key": "current_build_task_type",
+          "value": "persistence_contract"
+        }
+      ]
+    },
+    {
+      "name": "AppGenerator",
+      "description": "Generate UI pages for projects and tasks.",
+      "initial_agent": "AppSchemaAgent",
+      "initial_message": "Execute page bundle tasks for projects and tasks.",
+      "context_variables": [
+        {
+          "key": "task_run_mode",
+          "value": true
+        },
+        {
+          "key": "current_build_task_id",
+          "value": "task_project_pages"
+        },
+        {
+          "key": "current_build_task_type",
+          "value": "page_bundle"
+        }
+      ]
+    }
+  ]
+}

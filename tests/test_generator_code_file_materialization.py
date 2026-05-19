@@ -41,16 +41,16 @@ def test_extract_code_file_map_materializes_typed_database_output() -> None:
     payload = {
         "database_files": [
             {
-                "path": "backend/database/schema.json",
-                "kind": "schema_json",
-                "purpose": "Schema artifact.",
-                "entity_refs": ["user"],
+                "path": "config/database_intent.json",
+                "kind": "database_intent_json",
+                "purpose": "Database intent artifact.",
+                "entity_refs": ["project"],
                 "content": "{\"collections\":[]}\n",
             }
         ],
         "code_files": [
             {
-                "filename": "backend/database/schema.json",
+                "filename": "config/database_intent.json",
                 "content": "BROKEN",
             }
         ],
@@ -58,22 +58,22 @@ def test_extract_code_file_map_materializes_typed_database_output() -> None:
 
     file_map = extract_code_file_map_from_payload(payload)
 
-    assert file_map["backend/database/schema.json"] == "{\"collections\":[]}\n"
+    assert file_map["config/database_intent.json"] == "{\"collections\":[]}\n"
 
 
 def test_extract_code_file_map_materializes_typed_model_output() -> None:
     payload = {
         "model_files": [
             {
-                "path": "backend/models/user.py",
-                "entity_name": "user",
-                "purpose": "User model.",
-                "content": "class User:\n    pass\n",
+                "path": "modules/projects/backend/schemas.py",
+                "entity_name": "project",
+                "purpose": "Project document shapes.",
+                "content": "class ProjectRecord(TypedDict):\n    project_id: str\n",
             }
         ],
         "code_files": [
             {
-                "filename": "backend/models/user.py",
+                "filename": "modules/projects/backend/schemas.py",
                 "content": "BROKEN",
             }
         ],
@@ -81,7 +81,7 @@ def test_extract_code_file_map_materializes_typed_model_output() -> None:
 
     file_map = extract_code_file_map_from_payload(payload)
 
-    assert file_map["backend/models/user.py"] == "class User:\n    pass\n"
+    assert file_map["modules/projects/backend/schemas.py"] == "class ProjectRecord(TypedDict):\n    project_id: str\n"
 
 
 def test_extract_code_file_map_materializes_typed_backend_foundation_output() -> None:
@@ -314,10 +314,10 @@ def test_assembly_phase_merges_typed_database_model_and_backend_foundation_outpu
             {
                 "database_files": [
                     {
-                        "path": "backend/database/schema.json",
-                        "kind": "schema_json",
-                        "purpose": "Schema artifact.",
-                        "entity_refs": ["user"],
+                        "path": "config/database_intent.json",
+                        "kind": "database_intent_json",
+                        "purpose": "Database intent artifact.",
+                        "entity_refs": ["project"],
                         "content": "{\"collections\":[]}\n",
                     }
                 ],
@@ -326,10 +326,10 @@ def test_assembly_phase_merges_typed_database_model_and_backend_foundation_outpu
             {
                 "model_files": [
                     {
-                        "path": "backend/models/user.py",
-                        "entity_name": "user",
-                        "purpose": "User model.",
-                        "content": "class User:\n    pass\n",
+                        "path": "modules/projects/backend/schemas.py",
+                        "entity_name": "project",
+                        "purpose": "Project document shapes.",
+                        "content": "class ProjectRecord(TypedDict):\n    project_id: str\n",
                     }
                 ],
                 "code_files": [],
@@ -353,6 +353,6 @@ def test_assembly_phase_merges_typed_database_model_and_backend_foundation_outpu
 
     file_map = {entry["filename"]: entry["content"] for entry in merged}
 
-    assert file_map["backend/database/schema.json"] == "{\"collections\":[]}\n"
-    assert file_map["backend/models/user.py"] == "class User:\n    pass\n"
+    assert file_map["config/database_intent.json"] == "{\"collections\":[]}\n"
+    assert file_map["modules/projects/backend/schemas.py"] == "class ProjectRecord(TypedDict):\n    project_id: str\n"
     assert file_map["backend/config.py"] == "SETTINGS = {}\n"

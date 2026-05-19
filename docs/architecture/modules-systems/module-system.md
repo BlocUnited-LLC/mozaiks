@@ -264,9 +264,31 @@ class MyModuleService:
         return {"success": True, "record": dict(record)}
 ```
 
-### `repo.py` — MongoDB access only
+### `repo.py` — Persistence access only
 
 Pure data access. No business logic, no events, no validation.
+
+Generated repo code uses `ctx.persistence.collection(module_id, entity_name)`
+with module/entity values aligned to `database_intent_bundle` and staged
+`config/database_intent.json`. It must not use `ctx.db`, call
+`get_mongo_client()`, or hardcode database names.
+
+```python
+class ProjectsRepo:
+    async def _collection(self, ctx):
+        persistence = getattr(ctx, "persistence", None)
+        if persistence is None:
+            raise RuntimeError("Persistence is not available for this app context.")
+        return persistence.collection("projects", "projects")
+
+    async def list_projects(self, ctx, *, query=None, limit=50):
+        collection = await self._collection(ctx)
+        return await collection.find_many(query or {}, limit=limit)
+```
+
+The collection pair must match `config/database_intent.json`, for example
+`module_id: projects` and `entity_name: projects`. Non-persistent modules should
+not invent database logic.
 
 ### `policy.py` — Query scoping
 

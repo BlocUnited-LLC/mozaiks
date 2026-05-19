@@ -66,6 +66,50 @@ task_contracts:
       - Omit YAML files that would serialize to empty arrays or null objects.
       - YAML declares the contract; downstream agents implement Python and JS stubs.
       - JS stubs are allowed only for declared customization surfaces.
+      - Persistent modules express collection ownership through database_intent_bundle, not ad hoc database files.
+      - backend/repo.py owns persistence operations and must not contain product policy.
+      - backend/schemas.py owns typed DTO/document shapes and pure helpers.
+      - backend/policy.py owns scope query helpers.
+      - backend/repo.py may use ctx.persistence.collection(module_id, entity_name) for generated module persistence.
+      - backend/repo.py must use module_id/entity_name values aligned with database_intent_bundle and config/database_intent.json.
+      - Generated repo code must not use ctx.db.
+      - Generated repo code must not import or call get_mongo_client().
+      - Generated repo code must not hardcode database names.
+      - Do not emit backend/models.py or backend/models/*.py.
+      - Do not emit backend/database/schema.json or backend/database/seed.json.
+      - Do not put DB access in backend/handler.py.
+      - Do not put raw persistence logic in backend/service.py.
+
+  persistence_contract:
+    owner_agent: DatabaseAgent
+    summary: Canonical generated app persistence intent and migration artifact family.
+    required_outputs:
+      - config/database_intent.json
+    optional_outputs:
+      - config/database_migrations/{migration_id}.json
+    downstream_python_defaults:
+      - modules/{module_id}/backend/repo.py
+      - modules/{module_id}/backend/policy.py
+      - modules/{module_id}/backend/schemas.py
+    hard_constraints:
+      - database_intent_bundle is the canonical source of truth for durable generated app collections.
+      - config/database_intent.json is the exported app artifact for that bundle.
+      - config/database_migrations/{migration_id}.json is the exported additive migration artifact.
+      - backend/schemas.py replaces backend model files.
+      - backend/repo.py is derived from database intent and owns persistence operations only.
+      - backend/policy.py owns tenant/app/user scope query helpers.
+      - Generated repo.py must use ctx.persistence.collection(module_id, entity_name) for generated module persistence.
+      - module_id/entity_name in repo.py must match database_intent_bundle surfaces and collections.
+      - Generated repo.py must not use ctx.db.
+      - Generated repo.py must not import or call get_mongo_client().
+      - Generated repo.py must not hardcode database names.
+      - backend/service.py calls repo.py and must not contain raw persistence logic.
+      - backend/handler.py must not contain persistence logic.
+      - Do not emit backend/models.py.
+      - Do not emit backend/models/*.py.
+      - Do not emit backend/database/schema.json.
+      - Do not emit backend/database/seed.json.
+      - Do not generate destructive migrations.
 
   backend_foundation:
     owner_agent: ConfigMiddlewareAgent

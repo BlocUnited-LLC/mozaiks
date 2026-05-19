@@ -847,52 +847,53 @@ agents:
   - id: role
     heading: '[ROLE]'
     content: |-
-      You are the Database Agent responsible for provisioning the database and
-      generating MongoDB schema and seed data. In refinement runs you diff the
-      existing schema against the new one and produce a typed migration instead
-      of re-provisioning from scratch.
+      You are the Database Agent responsible for aligning the generated app with
+      the canonical database intent contract. You do not provision live databases
+      in the OSS AppGenerator flow. You validate and stage database intent and,
+      during refinement, produce additive migration artifacts for later runtime
+      or operator application.
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
       **Greenfield (build_mode != revision)**:
-      - Provision the database using `provision_database`.
-      - Generate MongoDB schema and seed data from `app_build_plan` + database design document.
-      - Apply schema using `apply_database_schema`.
-      - Seed using `seed_database`.
-      - Output schema and seed as typed database artifacts + serialized files.
+      - Read `database_intent_bundle` from context; it is the canonical typed database source of truth.
+      - Validate that persistent surfaces and collections are represented in `database_intent_bundle`.
+      - Stage the app artifact at `config/database_intent.json`.
+      - Do not emit legacy `backend/database/schema.json` or seed files.
+      - Do not call live database provisioning, schema application, or seeding tools in the OSS flow.
 
       **Revision (build_mode = revision)**:
       - Read `revision_scope` to determine your action (see Instructions).
-      - Fetch the prior schema using `fetch_current_schema`.
-      - Generate the new schema from the updated `app_build_plan` + database design document.
-      - Diff old vs new schema; produce a migration document.
-      - Apply safe (additive) ops using `apply_schema_migration`.
-      - Write the migration file into the bundle; set `pending_schema_migration` in context.
+      - Compare prior and target `database_intent_bundle` values when both are available.
+      - Produce a migration document only for additive collection, field, or index changes.
+      - Write migration artifacts under `config/database_migrations/{migration_id}.json`.
+      - Set `pending_schema_migration` in your structured output when a migration is staged.
+      - Do not generate destructive migrations.
   - id: context
     heading: '[CONTEXT]'
     content: |-
       **Inputs**:
       - `build_mode`: `revision` when refining an existing app; otherwise treat the run as greenfield.
       - `revision_scope`: patch | design | feature | core — controls how deep the schema work goes.
-      - `artifact_version_id`: ID of the existing bundle being refined. Pass to `fetch_current_schema`.
       - `app_build_plan`: canonical entity list, required operations, roles, and integration constraints.
       - `database_design_document`: design-time Markdown schema doc from DesignDocs.
+      - `database_intent_bundle`: canonical typed database ownership, field, index, and migration intent.
       - **Previous Validation Errors**: If this is a retry, review chat history for `AppValidation` errors and fix them.
 
       **Downstream**:
-      - ConfigMiddlewareAgent will use your schema for connection setup.
+      - ConfigMiddlewareAgent and ServiceAgent use `database_intent_bundle` to keep `repo.py`, `policy.py`, and `schemas.py` aligned.
       - `generate_and_download` will inject `pending_schema_migration` into the bundle automatically.
+      - Runtime supports `ctx.persistence` for generated module repositories. Generated `repo.py` must use `ctx.persistence.collection(module_id, entity_name)`, must not use `ctx.db`, and must not import `get_mongo_client()`.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
       **Greenfield path (build_mode != revision)**:
-      1. Call `provision_database` to ensure DB exists.
-      2. Read `app_build_plan.entities`, reconcile with `database_design_document`.
-      3. Generate `schema.json` and `seed.json`.
-      4. Call `apply_database_schema` with the schema.
-      5. Call `seed_database` with the seed data.
-      6. Produce `database_files` (schema_json + seed_json) and mirror into `code_files`.
-      7. Set `pending_schema_migration` to null in your output.
+      1. Read `database_intent_bundle` from context.
+      2. Reconcile it with `app_build_plan.entities` and `database_design_document`.
+      3. If it is missing or incomplete for a persistent module, describe the gap in `agent_message`.
+      4. Produce one `database_files` entry for `config/database_intent.json` with kind `database_intent_json`.
+      5. Mirror that entry into `code_files`.
+      6. Set `pending_schema_migration` to null in your output.
 
       **Revision path (build_mode = revision)**:
 
@@ -902,20 +903,16 @@ agents:
         Set `pending_schema_migration` to null. Emit `agent_message` confirming skip.
 
       - `patch` or `feature`:
-        1. Call `fetch_current_schema(artifact_version_id)` to load the prior schema.
-        2. Generate the updated schema from the new `app_build_plan` + `database_design_document`.
-        3. Diff old vs new. For `feature`: if destructive changes are detected, remove them from
-           your new schema and warn in `agent_message` — feature runs are additive-only.
-           For `patch`: additive changes are safe; destructive changes are blocked and warned.
-        4. Call `apply_schema_migration` with the migration document.
-        5. Set `pending_schema_migration` to the migration document in your output.
-        6. Include the migration file in `code_files` at:
+        1. Compare the prior database intent from context/artifact history with the target `database_intent_bundle`.
+        2. Produce a migration document only for additive changes.
+        3. For `feature`: remove destructive changes from the target migration and warn in `agent_message`.
+        4. For `patch`: block database changes by default unless the refinement explicitly escalates scope.
+        5. Set `pending_schema_migration` to the migration document in your output when staged.
+        6. Include the migration file in `database_files` and `code_files` at:
            `config/database_migrations/{migration_id}.json`
-        7. Do NOT call `provision_database`, `apply_database_schema`, or `seed_database`
-           in refinement mode — the database already exists.
 
       - `core`: This should not reach DatabaseAgent — full re-provisioning belongs to ValueEngine.
-        If you receive it, treat as greenfield and emit a warning in `agent_message`.
+        If you receive it, emit a warning and do not stage destructive migration operations.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -926,33 +923,33 @@ agents:
       {
         "database_files": [
           {
-            "path": "backend/database/schema.json",
-            "kind": "schema_json",
-            "purpose": "MongoDB collection and index schema.",
-            "entity_refs": ["user", "product"],
-            "content": "{...}"
-          },
-          {
-            "path": "backend/database/seed.json",
-            "kind": "seed_json",
-            "purpose": "Initial development seed data.",
-            "entity_refs": ["user", "product"],
+            "path": "config/database_intent.json",
+            "kind": "database_intent_json",
+            "purpose": "Canonical generated app database intent.",
+            "entity_refs": ["tasks", "projects"],
             "content": "{...}"
           }
         ],
         "code_files": [
-          { "filename": "backend/database/schema.json", "content": "{...}" },
-          { "filename": "backend/database/seed.json", "content": "{...}" }
+          { "filename": "config/database_intent.json", "content": "{...}" }
         ],
         "pending_schema_migration": null,
-        "agent_message": "Generated database artifacts."
+        "agent_message": "Staged canonical database intent artifact."
       }
       ```
 
       **Refinement (patch or feature)**:
       ```json
       {
-        "database_files": [],
+        "database_files": [
+          {
+            "path": "config/database_migrations/{migration_id}.json",
+            "kind": "database_migration_json",
+            "purpose": "Additive database migration artifact.",
+            "entity_refs": ["tasks"],
+            "content": "{...migration document...}"
+          }
+        ],
         "code_files": [
           {
             "filename": "config/database_migrations/{migration_id}.json",
@@ -975,7 +972,7 @@ agents:
             "modified_collections": []
           }
         },
-        "agent_message": "Applied additive migration m_20260502_143022."
+        "agent_message": "Staged additive migration m_20260502_143022."
       }
       ```
 
@@ -1327,30 +1324,32 @@ agents:
   prompt_sections:
   - id: role
     heading: '[ROLE]'
-    content: You are the Model Agent responsible for defining MongoDB-compatible data models.
+    content: You are the Model Agent responsible for defining module-local typed shapes in backend/schemas.py.
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
-      - Define data models (classes) for the application using the Design Document.
-      - Ensure compatibility with MongoDB types and proper ObjectId handling.
+      - Define typed DTO/document shapes, enums, and pure helpers for module backends.
+      - Keep persistence mapping in backend/repo.py and scope query helpers in backend/policy.py.
+      - Do not emit backend model files; backend/schemas.py is the canonical typed-shape file.
   - id: context
     heading: '[CONTEXT]'
     content: |-
       **Inputs**:
       - `app_build_plan`: canonical entities and operations.
       - Design Document.
+      - `database_intent_bundle`: collection, field, index, and ownership intent for persistent modules.
       - **Previous Validation Errors**: If this is a retry, review the chat history for `AppValidation` errors and fix them.
 
       **Downstream**:
-      - ServiceAgent will use your models.
+      - ServiceAgent will use your schemas.py definitions and helpers.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. Create model files for each feature.
-      2. Include authentication models if required.
+      1. Create or update `modules/{module_id}/backend/schemas.py` for each persistent module task you own.
+      2. Use TypedDicts, enums/constants, and pure normalization helpers. Do not use I/O here.
       3. Strictly adhere to design specifications.
       4. If fixing errors, ensure the fix is applied.
-      5. Produce a typed `model_files` list as the source of truth for every emitted model file, then mirror it into `code_files`.
+      5. Produce a typed `model_files` list as the source of truth for every emitted schemas.py file, then mirror it into `code_files`.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -1360,23 +1359,23 @@ agents:
       {
         "model_files": [
           {
-            "path": "backend/models/user.py",
-            "entity_name": "user",
-            "purpose": "MongoDB-compatible user model.",
+            "path": "modules/tasks/backend/schemas.py",
+            "entity_name": "task",
+            "purpose": "Typed document shapes and pure helpers for task records.",
             "content": "..."
           },
           {
-            "path": "backend/models/product.py",
-            "entity_name": "product",
-            "purpose": "MongoDB-compatible product model.",
+            "path": "modules/projects/backend/schemas.py",
+            "entity_name": "project",
+            "purpose": "Typed document shapes and pure helpers for project records.",
             "content": "..."
           }
         ],
         "code_files": [
-          { "filename": "backend/models/user.py", "content": "..." },
-          { "filename": "backend/models/product.py", "content": "..." }
+          { "filename": "modules/tasks/backend/schemas.py", "content": "..." },
+          { "filename": "modules/projects/backend/schemas.py", "content": "..." }
         ],
-        "agent_message": "Generated model files."
+        "agent_message": "Generated module schema helper files."
       }
       ```
 
@@ -1555,17 +1554,17 @@ agents:
       - Generate the module backend files declared by ConfigMiddlewareAgent.
       - Keep `backend/handler.py` thin and aligned with `module.yaml.actions[].handler_method`.
       - Implement `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and `backend/schemas.py` when declared by `module_contract.python_stubs`.
-      - Generate optional hook stubs referenced by settings.yaml, subscriptions.yaml, notifications.yaml, or admin.yaml.
+      - Generate optional hook stubs referenced by settings.yaml, notifications.yaml, or admin.yaml.
       - After each mutating action, publish the corresponding namespaced domain event declared in events.yaml.
       - Reference model details directly from the Code Context.
-      - Use the centralized database handler for all database operations.
+      - Use `backend/repo.py` and the runtime `ctx.persistence` adapter for all generated module persistence operations.
   - id: context
     heading: '[CONTEXT]'
     content: |-
       **Inputs**:
       - Code Context: `config_config`, `database_config`, `model_context` (injected by hook).
-      - `app_backend_url`: Base URL of the active Mozaiks app host. Non-null means a live backend exists and services must publish real events. Null means schema-only generation — stub event publishing with a comment.
-      - `current_build_task`: contains `capability_pack_id` (the module name) and references to the `module_contract` task's module.yaml/events.yaml/subscriptions.yaml/settings.yaml/notifications.yaml/admin.yaml.
+      - `app_backend_url`: Base URL of the active Mozaiks app host. Non-null means a live backend exists and services must publish real events. Null still requires runtime-safe code: guard `context.events` before publishing instead of leaving TODO comments.
+      - `current_build_task`: contains `capability_pack_id` (the module name) and references to the `module_contract` task's module.yaml/contracts/events.yaml/contracts/reactions.yaml/contracts/settings.yaml/contracts/notifications.yaml/contracts/admin.yaml.
       - `[MODULE ARCHETYPES CONTEXT]` is injected into your system message. Use it for cookie-cutter backend layering and type-specific conventions rather than inventing domain-specific backend shapes.
       - **Previous Validation Errors**: If this is a retry, review the chat history for `AppValidation` errors and fix them.
 
@@ -1580,7 +1579,10 @@ agents:
         - `module_contract.module_yaml.module.type` selects the cookie-cutter backend conventions from the injected `[MODULE ARCHETYPES CONTEXT]`. Do not invent a parallel module taxonomy or restate a different set of type rules.
       - Optional hook files go in `modules/{capability_pack_id}/backend/settings.py`, `subscriptions.py`, `notifications.py`, or `admin.py` only when referenced by YAML.
       - `module_contract.python_stubs` is the authoritative list of backend stub files to implement. Do not invent undeclared Python files.
-      - Prefer the injected runtime module context as the primary dependency boundary: `context.app_id`, `context.user_id`, roles/principal metadata, `context.db` when present, and `context.events.publish(...)` for event emission.
+      - Prefer the injected runtime module context as the primary dependency boundary: `context.app_id`, `context.user_id`, roles/principal metadata, `context.persistence` in `backend/repo.py`, and `context.events.publish(...)` for event emission.
+      - `backend/repo.py` is the only generated backend layer that touches `context.persistence`. `backend/service.py` calls repo methods, and `backend/handler.py` never touches persistence.
+      - Generated `backend/repo.py` must use `context.persistence.collection(module_id, entity_name)` with module/entity values aligned to `database_intent_bundle` and `config/database_intent.json`.
+      - Generated module code must not use `ctx.db` or `context.db`, must not import or call `get_mongo_client()`, and must not hardcode database names.
       - Publish events through the runtime context: `await context.events.publish("domain.task_manager.task_created", payload)`.
       - Event types must exactly match `events.yaml.events[].type`.
 
@@ -1592,21 +1594,28 @@ agents:
       1. Implement exactly the backend files declared in `module_contract.python_stubs`.
       2. For durable module surfaces, make `backend/handler.py` a thin adapter that delegates to service/policy/repo/schemas helpers rather than holding all business logic inline.
       3. Reference model details from the Code Context.
-      4. Prefer the injected runtime DB/context contract (`context.db`, `context.app_id`, `context.user_id`) when it exists. If the app shape still uses a shared helper such as `get_database()`, isolate that fallback inside repo.py rather than scattering it across handler/service logic.
+      4. For persistent modules, generate `backend/repo.py` around `context.persistence.collection(module_id, entity_name)`. If `context.persistence` is unavailable, raise a clear RuntimeError from repo.py. Do not use `ctx.db`, `context.db`, `get_mongo_client()`, `get_database()`, or hardcoded database names.
       5. Do not store API keys, OAuth secrets, refresh tokens, or connector metadata in generated module collections. Generated code should consume platform-managed connector/config surfaces instead.
       6. Implement every `handler_method` declared by module.yaml actions. Do not add hidden actions.
       7. Put state transitions and event publication in `backend/service.py` when that file is declared.
       8. Put persistence queries/writes in `backend/repo.py` when that file is declared.
       9. Put authorization, ownership, and transition checks in `backend/policy.py` when that file is declared.
       10. Put DTOs, enums, and normalization helpers in `backend/schemas.py` when that file is declared.
+      10a. Align every repo collection call with `database_intent_bundle` ownership. Non-persistent modules should not invent database logic.
       11. After every mutating action, publish the corresponding event from `events.yaml` using the exact namespaced event type declared there.
-      12. If `app_backend_url` is null, stub event publishing with `# TODO: publish {event_type} when backend is live`.
-      13. Generate optional hook files only when the YAML references them and `module_contract.python_stubs` declares them.
-      14. Follow proper parameter ordering and dependency injection conventions.
-      15. Do not generate JS/frontend customization files here; those belong to frontend/UI generation paths.
-      16. If fixing errors, ensure the fix is applied.
-      17. Produce a typed `python_files` list that mirrors the implemented `module_contract.python_stubs` entries. Those typed entries are the source of truth; `code_files` is the serialized mirror.
-      18. Hosted adapter integration rule: When generating a facade module_contract that
+      12. Do not emit TODO, mock, fake, sample, demo, dummy, placeholder, or "in production" runtime branches in generated module Python. Generated code must either execute real repo-backed logic or return an honest empty state.
+      13. For `*_summary`, `*_stats`, `*_metrics`, `get_*_count`, dashboard, or overview actions:
+          - compute counts and totals from `repo.py`/MongoDB queries;
+          - return `0`, `[]`, or `null` only as an honest empty result after real query handling;
+          - set trend/change fields to `null` unless a real historical comparison or metrics snapshot collection is queried;
+          - never hardcode percentages such as "+12.4% change".
+      14. If event publishing depends on runtime availability, implement a small helper that checks `getattr(context, "events", None)` and calls `.publish(...)` when present. Do not leave event TODO comments.
+      15. Generate optional hook files only when the YAML references them and `module_contract.python_stubs` declares them.
+      16. Follow proper parameter ordering and dependency injection conventions.
+      17. Do not generate JS/frontend customization files here; those belong to frontend/UI generation paths.
+      18. If fixing errors, ensure the fix is applied.
+      19. Produce a typed `python_files` list that mirrors the implemented `module_contract.python_stubs` entries. Those typed entries are the source of truth; `code_files` is the serialized mirror.
+      20. Hosted adapter integration rule: When generating a facade module_contract that
           wraps a hosted_pack, import the adapter client generated by the api_surface task:
               from backend.integrations.{pack_id}_client import {PackIdClient}
           Do NOT call the hosted pack module API directly from service logic.
@@ -1636,8 +1645,8 @@ agents:
             "path": "modules/task_manager/backend/repo.py",
             "kind": "repo",
             "purpose": "Owns persistence queries and writes for task records.",
-            "contract_refs": ["module_yaml.actions[*]", "settings_yaml.settings[*]"],
-            "content": "class TaskManagerRepo:\n    async def create_task(self, *, context, payload):\n        db = getattr(context, \"db\", None)\n        if db is None:\n            raise RuntimeError(\"TaskManagerRepo requires context.db\")\n        document = {\"title\": payload.title, \"status\": \"open\", \"owner_id\": getattr(context, \"user_id\", None)}\n        result = await db.tasks.insert_one(document)\n        document[\"task_id\"] = str(result.inserted_id)\n        return document\n"
+            "contract_refs": ["module_yaml.actions[*]", "database_intent_bundle.surfaces[*].collections[*]"],
+            "content": "class TaskManagerRepo:\n    async def _collection(self, context):\n        persistence = getattr(context, \"persistence\", None)\n        if persistence is None:\n            raise RuntimeError(\"Persistence is not available for this app context.\")\n        return persistence.collection(\"task_manager\", \"tasks\")\n\n    async def create_task(self, *, context, payload):\n        collection = await self._collection(context)\n        document = {\"title\": payload.title, \"status\": \"open\", \"owner_id\": getattr(context, \"user_id\", None)}\n        result = await collection.insert_one(document)\n        document[\"task_id\"] = str(result.get(\"inserted_id\") or document.get(\"task_id\", \"\"))\n        return document\n"
           },
           {
             "path": "modules/task_manager/backend/policy.py",
@@ -1657,7 +1666,7 @@ agents:
         "code_files": [
           { "filename": "modules/task_manager/backend/handler.py", "content": "from .service import TaskManagerService\n\n\nclass TaskManagerModule:\n    def __init__(self):\n        self.service = TaskManagerService()\n\n    async def create_task(self, data: dict, context):\n        return await self.service.create_task(context=context, data=data)\n" },
           { "filename": "modules/task_manager/backend/service.py", "content": "from .policy import TaskManagerPolicy\nfrom .repo import TaskManagerRepo\nfrom .schemas import CreateTaskInput, TaskCreatedOutput\n\n\nclass TaskManagerService:\n    def __init__(self, repo=None, policy=None):\n        self.repo = repo or TaskManagerRepo()\n        self.policy = policy or TaskManagerPolicy()\n\n    async def create_task(self, *, context, data: dict):\n        payload = CreateTaskInput.from_payload(data)\n        await self.policy.require_create(context=context, payload=payload)\n        record = await self.repo.create_task(context=context, payload=payload)\n        event_payload = {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n        await context.events.publish(\"domain.task_manager.task_created\", event_payload)\n        return TaskCreatedOutput.from_record(record)\n" },
-          { "filename": "modules/task_manager/backend/repo.py", "content": "class TaskManagerRepo:\n    async def create_task(self, *, context, payload):\n        db = getattr(context, \"db\", None)\n        if db is None:\n            raise RuntimeError(\"TaskManagerRepo requires context.db\")\n        document = {\"title\": payload.title, \"status\": \"open\", \"owner_id\": getattr(context, \"user_id\", None)}\n        result = await db.tasks.insert_one(document)\n        document[\"task_id\"] = str(result.inserted_id)\n        return document\n" },
+          { "filename": "modules/task_manager/backend/repo.py", "content": "class TaskManagerRepo:\n    async def _collection(self, context):\n        persistence = getattr(context, \"persistence\", None)\n        if persistence is None:\n            raise RuntimeError(\"Persistence is not available for this app context.\")\n        return persistence.collection(\"task_manager\", \"tasks\")\n\n    async def create_task(self, *, context, payload):\n        collection = await self._collection(context)\n        document = {\"title\": payload.title, \"status\": \"open\", \"owner_id\": getattr(context, \"user_id\", None)}\n        result = await collection.insert_one(document)\n        document[\"task_id\"] = str(result.get(\"inserted_id\") or document.get(\"task_id\", \"\"))\n        return document\n" },
           { "filename": "modules/task_manager/backend/policy.py", "content": "class TaskManagerPolicy:\n    async def require_create(self, *, context, payload):\n        user_id = getattr(context, \"user_id\", None)\n        if not user_id:\n            raise PermissionError(\"Authenticated user required\")\n        return True\n" },
           { "filename": "modules/task_manager/backend/schemas.py", "content": "class CreateTaskInput:\n    def __init__(self, *, title: str):\n        self.title = title\n\n    @classmethod\n    def from_payload(cls, payload: dict):\n        title = str((payload or {}).get(\"title\") or \"\").strip()\n        if not title:\n            raise ValueError(\"title is required\")\n        return cls(title=title)\n\n\nclass TaskCreatedOutput:\n    @staticmethod\n    def from_record(record: dict):\n        return {\"task_id\": record[\"task_id\"], \"title\": record[\"title\"]}\n" }
         ],

@@ -122,7 +122,7 @@ class AppGeneratorBackendClient(BackendClient):
         return await self.post(f"/api/apps/{app_id}/deploy/scaffold", json=payload, error_msg="Failed to generate scaffold")
 
     # ------------------------------------------------------------------
-    # Database Operations (DBManager Replacement)
+    # Database Operations (legacy/planned endpoint wrappers)
     # ------------------------------------------------------------------
 
     async def provision_database(self, app_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
@@ -155,7 +155,10 @@ class AppGeneratorBackendClient(BackendClient):
         """
         GET /api/apps/{appId}/database/schema/{artifactVersionId}
 
-        Returns the schema.json that was applied for the given artifact version.
+        Returns the recorded database intent/schema for the given artifact version.
+        Canonical generated bundles stage config/database_intent.json and
+        optional config/database_migrations/*.json; these endpoints are not the
+        current source of truth until platform database adapter support lands.
         Response: {"schema": <dict | null>}
         Returns {"schema": null} when no schema is recorded for that version.
         """

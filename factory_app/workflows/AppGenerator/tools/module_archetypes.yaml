@@ -18,7 +18,7 @@ archetypes:
         - module.yaml
       optional:
         - events.yaml
-        - subscriptions.yaml
+        - reactions.yaml
         - notifications.yaml
         - settings.yaml
         - admin.yaml
@@ -43,11 +43,10 @@ archetypes:
         - module.yaml
       optional:
         - events.yaml
-        - subscriptions.yaml
+        - reactions.yaml
         - notifications.yaml
         - settings.yaml
         - admin.yaml
-        - channels.yaml
     python_stub_defaults:
       - backend/handler.py
       - backend/service.py
@@ -59,6 +58,7 @@ archetypes:
       - Thread records carry participants and per-member read state.
       - repo.py provides read-state update helpers.
       - Event payloads include delivery metadata needed for real-time routing.
+      - Do not emit channels.yaml; messaging metadata belongs in canonical contracts and backend policy helpers.
 
   workflow:
     summary: Deterministic module that manages a named state machine.
@@ -70,7 +70,7 @@ archetypes:
         - module.yaml
       optional:
         - events.yaml
-        - subscriptions.yaml
+        - reactions.yaml
         - notifications.yaml
         - settings.yaml
         - admin.yaml
@@ -87,7 +87,7 @@ archetypes:
       - Transition events include from_state and to_state when declared.
 
   transactional:
-    summary: Deterministic module for balances, wallets, ledgers, or append-only value tracking.
+    summary: Deterministic module for balances, ledgers, audit trails, or append-only value tracking.
     select_when:
       - The module owns balances, transfers, credits, debits, or double-entry semantics.
       - Append-only or audit-heavy writes are required.
@@ -96,7 +96,7 @@ archetypes:
         - module.yaml
       optional:
         - events.yaml
-        - subscriptions.yaml
+        - reactions.yaml
         - notifications.yaml
         - settings.yaml
         - admin.yaml

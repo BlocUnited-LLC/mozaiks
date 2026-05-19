@@ -21,6 +21,7 @@ _CLIENT_SUFFIX = "_client.py"
 _ALLOWED_TASK_TYPES = {
     "backend_foundation",
     "module_contract",
+    "persistence_contract",
     "data_models",
     "business_services",
     "api_surface",
@@ -32,6 +33,7 @@ _ALLOWED_TASK_TYPES = {
 _CANONICAL_INITIAL_AGENTS = {
     "backend_foundation": "ConfigMiddlewareAgent",
     "module_contract": "ConfigMiddlewareAgent",
+    "persistence_contract": "DatabaseAgent",
     "control_plane_pack": "ControlPlaneAgent",
     "pack_overlay": "ConfigMiddlewareAgent",
     "api_surface": "ControllerAgent",
@@ -339,6 +341,8 @@ def app_build_plan(
     capability_packs = _normalize_object_list(AppBuildPlan.get("capability_packs"))
     external_integrations = _normalize_object_list(AppBuildPlan.get("external_integrations"))
     build_tasks = sorted(_normalize_object_list(AppBuildPlan.get("build_tasks")), key=_task_sort_key)
+    database_intent_bundle = AppBuildPlan.get("database_intent_bundle")
+    pending_schema_migration = AppBuildPlan.get("pending_schema_migration")
     generation_order = _normalize_string_list(AppBuildPlan.get("generation_order"))
     agent_backend_required = bool(AppBuildPlan.get("agent_backend_required", False))
 
@@ -419,6 +423,8 @@ def app_build_plan(
         "external_integrations": external_integrations,
         "agent_backend_required": agent_backend_required,
         "build_tasks": build_tasks,
+        "database_intent_bundle": database_intent_bundle if isinstance(database_intent_bundle, dict) else None,
+        "pending_schema_migration": pending_schema_migration if isinstance(pending_schema_migration, dict) else None,
         "generation_order": generation_order,
     }
 

@@ -3,8 +3,11 @@ Hook: Apply Scope to File Paths
 
 When generation_scope="feature", transforms output file paths to be
 feature-scoped. For example:
-  - backend/models/user.py → backend/features/projects/models/user.py
+  - backend/services/task_service.py → backend/features/projects/services/task_service.py
   - frontend/src/pages/Home.jsx → frontend/src/features/projects/pages/Home.jsx
+
+Canonical app-module generation does not use backend/models.py or
+backend/models/*.py. Typed generated module shapes belong in backend/schemas.py.
 
 This hook runs as process_last_received_message to transform agent output
 before it's stored.
@@ -42,7 +45,6 @@ def _transform_path(filepath: str, feature_name: str) -> str:
     Transform a file path to be feature-scoped.
     
     Backend files:
-      backend/models/user.py → backend/features/{feature}/models/user.py
       backend/services/user_service.py → backend/features/{feature}/services/user_service.py
       backend/controllers/user_controller.py → backend/features/{feature}/controllers/user_controller.py
     
@@ -60,7 +62,6 @@ def _transform_path(filepath: str, feature_name: str) -> str:
     
     # Patterns that should be feature-scoped
     backend_patterns = [
-        (r"^backend/models/", f"backend/features/{feature_name}/models/"),
         (r"^backend/services/", f"backend/features/{feature_name}/services/"),
         (r"^backend/controllers/", f"backend/features/{feature_name}/controllers/"),
         (r"^backend/routes/", f"backend/features/{feature_name}/routes/"),
