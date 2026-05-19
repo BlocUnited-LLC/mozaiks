@@ -28,6 +28,23 @@ export function Button({
   children,
   ...props
 }) {
+  const content = label ?? children;
+
+  if (props.asChild) {
+    return (
+      <BaseButton
+        variant={variant}
+        size={size}
+        disabled={disabled}
+        onClick={onClick}
+        className={cn(className)}
+        {...props}
+      >
+        {content}
+      </BaseButton>
+    );
+  }
+
   return (
     <BaseButton
       variant={variant}
@@ -38,7 +55,7 @@ export function Button({
       {...props}
     >
       {icon && <span className="shrink-0">{icon}</span>}
-      {label ?? children}
+      {content}
     </BaseButton>
   );
 }

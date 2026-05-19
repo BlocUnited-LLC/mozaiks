@@ -45,6 +45,88 @@ Mozaiks has four distinct UI surfaces. Before touching any UI code, identify whi
 - `app/ui/route_manifest.json` declares routes — every page must be listed there and registered in `app/ui/index.js`
 - Use when AppPageSchema primitives cannot express the layout or behavior needed
 - Each route must have exactly one owner — never duplicate a custom-route entry in `app/ui/route_manifest.json` and `app/ui/pages/*.yaml`
+- Every `route_manifest.json` component key must match a registration in `app/ui/index.js`
+- `admin/admin_registry.yaml` declares admin page and panel metadata; it is not the owner of arbitrary full-page custom routes
+- Custom React routes are not auto-discovered; `route_manifest.json`, `ui/pages/custom/*.jsx`, and `ui/index.js` registration must be present together
+- Missing or mismatched custom route registrations are export/download blockers
+
+## Admin UI Two-Tier Model
+
+Mozaiks admin UI has two different extension tiers. Do not collapse them into
+one registry.
+
+- Tier 1: AdminPortal schema panels. Use `admin/admin_registry.yaml` plus
+  `modules/{module}/contracts/admin.yaml` for framework-owned admin shell
+  surfaces.
+- Tier 2: custom operator React pages. Use `ui/route_manifest.json`,
+  `admin/pages/*.jsx`, and `admin/index.js` together for full-page custom admin
+  routes.
+- `admin/admin_registry.yaml` is not a route registry and must not own
+  full-page component registration fields.
+- Tier 2 requires all three files together: route manifest entry, React page,
+  and `admin/index.js` registration.
+- `app/brand/theme_config.json` remains the visual authority for both tiers.
+
+### Custom Route UI Primitive Contract
+
+Custom full-page React must still use the shared Mozaiks UI foundation. It may
+compose domain-specific wrappers, but wrappers must delegate to primitives
+instead of recreating visual systems.
+
+Use shared primitives from `@mozaiks/chat-ui/ui` for:
+
+- actions: `Button`, `ActionButton`, `IconButton`, `LinkButton`
+- state: `StatusPill`, `Alert`, `AlertBanner`
+- surfaces: `SurfaceCard`, `Panel`
+- summaries: `Metric`, `SummaryStrip`, `SegmentedBar`
+- collections: `CollectionToolbar`, `ResourceList`, `ResourceTable`, `DataTable`
+- feedback: `InlineEmptyState`, `LoadingState`, `ErrorState`, `Skeleton`
+
+Allowed:
+
+```jsx
+import { Button, StatusPill, SurfaceCard } from '@mozaiks/chat-ui/ui'
+
+function NotificationCard({ notification }) {
+  return (
+    <SurfaceCard>
+      <StatusPill tone={notification.active ? 'success' : 'default'}>
+        {notification.active ? 'Active' : 'Muted'}
+      </StatusPill>
+      <Button variant="secondary">Review</Button>
+    </SurfaceCard>
+  )
+}
+```
+
+Not allowed:
+
+```jsx
+function StatusPill({ status }) { /* local visual clone */ }
+function MetricTile({ value }) { /* local card clone */ }
+<button className="rounded-xl bg-primary px-4 py-2">Save</button>
+```
+
+`app/brand/theme_config.json` is the visual-token authority. Shared primitives
+must resolve through semantic tokens/classes (`bg-card`, `text-primary`,
+`border-border`, `text-success`, etc.). Do not hardcode brand colors, local
+card shells, or page-specific button systems in generated custom pages.
+Do not hardcode `font-family` values or literal brand font names in generated
+React; use `font-sans`, `font-heading`, and shared primitive typography.
+Do not hardcode hex/rgb/hsl color values in generated React. Use semantic classes
+such as `bg-background`, `bg-card`, `text-foreground`, and
+`text-muted-foreground`.
+Do not create local primitive clones (`StatusPill`, `MetricTile`, `StatCard`,
+`Badge`) or raw primary-styled `<button className="...bg-primary...">` markup
+when shared primitives and semantic variants exist.
+Avoid repeated local rounded card shells; prefer `SurfaceCard`/`Panel` and
+collection primitives.
+Do not define page-local `palette`, `colors`, or `theme` objects in generated
+React; visual values belong in `app/brand/theme_config.json`.
+
+Generated React audit scope note:
+- deterministic generated React audits intentionally skip files under `docs/**`
+  and `tests/**` fixture paths to reduce false positives.
 
 ---
 
@@ -82,6 +164,17 @@ When working in `app/config/`:
 - keep startup and workflow boot behavior in `ai.json`
 - keep shell navigation policy and chrome mode policy in `shell.json`
 - keep branding/theme assets in `app/brand/theme_config.json`
+
+`app/brand/theme_config.json` is the visual identity authority. It owns
+`theme.primary`, `theme.radius`, `theme.font`, `theme.font_heading`,
+`theme.appearance`, `theme.density`, and any expanded `fonts`, `colors`,
+`shadows`, `ui`, or `primitives` values still needed by runtime compatibility
+tokens. `app/config/shell.json` owns behavior and chrome only; it must not
+carry raw visual token values.
+
+Local fonts live under `app/brand/fonts/` and are referenced as `/fonts/...`.
+Google Fonts are declared in `theme_config.json` and loaded by the theme
+loader. Do not copy font binaries into generated artifacts outside `brand/`.
 
 Route-level shell intent belongs on the route, not in ad hoc React wrappers:
 - `app/ui/pages/*.yaml -> shell_mode`

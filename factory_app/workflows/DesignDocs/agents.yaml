@@ -111,109 +111,92 @@ agents:
   - id: ui_schema_doc_format
     heading: '[UI SCHEMA DOCUMENT FORMAT]'
     content: |-
-      The ui_schema document is the current serialized ExperienceSpec: a YAML-formatted
-      description of the persistent app experience. It is the primary input for
-      AppSchemaAgent — be explicit about navigation, layout choices, primitive types,
-      and the intended brand/experience posture.
+      The `experience_spec` output is the typed ExperienceSpec — the machine-readable source of
+      truth for the persistent app experience. It is the primary input for AppPlanAgent and
+      AppSchemaAgent. Be explicit about navigation, layout choices, primitive types, and the
+      intended brand/experience posture. Every field maps directly to the ExperienceSpec
+      structured output model — no freeform prose, no YAML strings.
 
       Available primitives: PageHeader, ResourceTable, SummaryStrip, InlineEmptyState, LoadingState, ErrorState, Panel, SurfaceCard, StatusPill, Metric, SegmentedBar, DataTable, Form, Grid, Button, Modal, Alert, Skeleton, Empty, Timeline, CodeBlock, ProgressTracker, AlertBanner, ActionButton, FileList
       Available layouts: grid, sidebar, full-width, split
 
-      Format:
-      ```yaml
-      experience:
-        navigation_model: top-level routes with shell navigation
-        brand_direction: "brief summary of the desired app feel"
-      surface_map:
-        surfaces:
-          - surface_id: users
-            label: Users
-            surface_kind: module
-            owner: app
-            source_capability_packs: [crud_pack]
-            primary_entities: [User]
-            owned_pages: [Users]
-            owned_mutations: [create_user]
-            events_emitted: [domain.users.user_created]
-            workflow_triggers: [users.welcome]
-            integrations: []
-            notes: null
-      event_model:
-        ui_events: [ui.datatable.refresh, ui.modal.open]
-        module_actions:
-          - module: users
-            action: create_user
-            emits: [domain.users.user_created]
-        workflow_triggers:
-          - event: domain.users.user_created
-            capability_id: users.welcome
-      pages:
-        - name: Dashboard
-          route: /dashboard
-          layout: grid
-          intent: "Landing page showing the most useful app summary and recent activity"
-          sections:
-            - id: summary
-              primitive: SummaryStrip
-              intent: "Compact summary with only decision-critical metrics"
-              items:
-                - label: Total Users
-                  value: 0
-                  detail: Replace with live module data during implementation
-                - label: Monthly Revenue
-                  value: $0
-                  detail: Replace with live module data during implementation
-            - id: activity-table
-              primitive: DataTable
-              intent: "Recent activity log, read-only, no selection needed"
-              columns: [id, action, user, created_at]
-              api_endpoint: /api/activity
-              selection: none
-
-        - name: Users
-          route: /users
-          layout: full-width
-          intent: "Admin user management — list, create, edit, delete"
-          roles: [admin]
-          sections:
-            - id: user-list
-              primitive: DataTable
-              intent: "Paginated sortable user table with row actions"
-              columns: [id, name, email, role, created_at]
-              api_endpoint: /api/users
-              selection: single
-              actions:
-                - label: Add User
-                  action_type: event
-                  event_type: ui.modal.open
-                  payload: { modal_id: create-user-modal }
-            - id: create-user-modal
-              primitive: Modal
-              intent: "Form modal for creating a new user"
-              title: Add User
-              size: medium
+      ExperienceSpec shape (output as the `experience_spec` JSON field):
+      ```json
+      {
+        "navigation_model": "top-level routes with shell navigation",
+        "brand_direction": "brief summary of the desired app feel",
+        "pages": [
+          {
+            "name": "Dashboard",
+            "route": "/dashboard",
+            "layout": "grid",
+            "intent": "Landing page showing the most useful app summary and recent activity",
+            "sections": [
+              {
+                "id": "summary",
+                "primitive": "SummaryStrip",
+                "intent": "Compact summary with only decision-critical metrics",
+                "config_hint": {
+                  "items": [
+                    { "label": "Total Users", "value_key": "total_users" },
+                    { "label": "Monthly Revenue", "value_key": "monthly_revenue" }
+                  ]
+                }
+              },
+              {
+                "id": "activity-table",
+                "primitive": "DataTable",
+                "intent": "Recent activity log, read-only, no selection needed",
+                "config_hint": {
+                  "columns": ["id", "action", "user", "created_at"],
+                  "api_endpoint": "/api/activity",
+                  "selection": "none"
+                }
+              }
+            ]
+          },
+          {
+            "name": "Users",
+            "route": "/users",
+            "layout": "full-width",
+            "intent": "Admin user management — list, create, edit, delete",
+            "sections": [
+              {
+                "id": "user-list",
+                "primitive": "DataTable",
+                "intent": "Paginated sortable user table with row actions",
+                "config_hint": {
+                  "columns": ["id", "name", "email", "role", "created_at"],
+                  "api_endpoint": "/api/users",
+                  "selection": "single"
+                }
+              },
+              {
+                "id": "create-user-modal",
+                "primitive": "Modal",
+                "intent": "Form modal for creating a new user",
+                "config_hint": { "title": "Add User", "size": "medium" }
+              }
+            ]
+          }
+        ]
+      }
       ```
 
       Rules:
-      - Every page in concept_overview must appear in the ui_schema.
-      - Include a short top-level `experience` block describing navigation model, brand direction, and whether primary destinations are global, local, profile, or footer navigation.
-      - Include a required top-level `surface_map` block. This is the UI-facing mirror of the Backend doc's surface realization decisions and should use the same surface ids and surface kinds.
-      - Include a short top-level `event_model` block when the app has mutations, notifications, subscriptions, or workflow reactions.
-      - Keep the YAML deterministic enough to map directly into structured outputs; prefer finite values over freeform taxonomy drift.
-      - Every section must declare a primitive and an intent.
-      - api_endpoint values should match the Backend doc's API surface.
-      - Use `actions` blocks for interactive controls; modal open/close events should target the modal section id.
-      - Prefer `Modal` for secondary create/edit/drill-in interactions when the main page should stay compact and summary-oriented.
-      - Do not describe the same editor twice as both an inline form and a separate modal unless the page truly needs side-by-side editing to complete the workflow.
-      - Use `ui.*` only for live UI reactions. Durable app changes must call module actions that emit declared `domain.*` events.
+      - Every page in concept_overview must appear in experience_spec.pages[].
+      - `navigation_model` describes how primary destinations are navigated (global, local, profile, footer).
+      - `brand_direction` is a compact brand and experience posture summary.
+      - Every page must have `name`, `route`, `layout`, `intent`, and `sections[]`.
+      - Every section must declare `id`, `primitive`, `intent`, and `config_hint`.
+      - `config_hint` must include all required fields for the primitive (see AppPlanAgent's required-fields rules).
+      - `api_endpoint` values in config_hint must match the Backend doc's API surface.
+      - Prefer `Modal` sections for secondary create/edit/drill-in interactions.
+      - Do not describe the same editor twice as both inline form and modal unless the page truly needs side-by-side editing.
       - Do NOT invent capabilities not described in concept_overview.
-      - Keep UI schema workflow-agnostic and declarative: define page intent/primitive composition and navigation intent, not shell implementation details.
-      - Do NOT invent stub-reference fields in ui_schema. If customization must be file-backed, describe that need in prose for downstream generators instead of extending the YAML contract ad hoc.
-      - Do NOT describe custom full-page React files in ui_schema. Those belong to the separate downstream custom route contract (`custom_route_bundle` → `ui/route_manifest.json` + `ui/pages/custom/*.jsx`) and should be called out only as an explicit escape hatch need.
-      - Do NOT define header/profile/notification/footer content objects in ui_schema; shell chrome content belongs to `config/shell.json`, preferably through compact `shortcuts` and app-wide `navigation.policy`.
-      - The same boundary applies to mobile shell chrome such as `mobile.bottomBar`.
-      - Do NOT encode raw visual token values (spacing scales, radius scales, typography families) in ui_schema; those belong to `brand/theme_config.json`.
-      - Do NOT turn ui_schema into a media inventory. Reusable image/icon/video catalog entries belong in `config/asset_manifest.json`.
+      - Do NOT describe custom full-page React in experience_spec — mark those as explicit escape-hatch needs in prose.
+      - Do NOT include header/profile/notification/footer content — those belong in `config/shell.json`.
+      - Do NOT encode raw visual token values — those belong in `brand/theme_config.json`.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -225,7 +208,26 @@ agents:
         "frontend_markdown": "# Frontend Design\n...",
         "backend_markdown": "# Backend Design\n...",
         "database_markdown": "# Database Design\n...",
-        "ui_schema_yaml": "experience:\n  navigation_model: top-level routes\n...",
+        "experience_spec": {
+          "navigation_model": "top-level routes with shell navigation",
+          "brand_direction": "brief summary of the desired app feel",
+          "pages": [
+            {
+              "name": "Dashboard",
+              "route": "/dashboard",
+              "layout": "grid",
+              "intent": "Landing page showing the most useful app summary and recent activity",
+              "sections": [
+                {
+                  "id": "summary",
+                  "primitive": "SummaryStrip",
+                  "intent": "Key metrics at a glance",
+                  "config_hint": { "items": [{ "label": "Total Users", "value_key": "total_users" }] }
+                }
+              ]
+            }
+          ]
+        },
         "surface_map": {
           "surfaces": [
             {
@@ -287,8 +289,8 @@ agents:
 
       Rules:
       - `frontend_markdown`, `backend_markdown`, and `database_markdown` must be complete Markdown documents.
-      - `ui_schema_yaml` must be a complete YAML document string, not a JSON object.
-      - `surface_map` is the parser-enforced source of truth for surface ownership. The saved Backend doc and ui_schema doc must align with it.
+      - `experience_spec` must be a typed JSON object matching ExperienceSpec — not a YAML string.
+      - `surface_map` is the parser-enforced source of truth for surface ownership. The saved Backend doc and experience_spec must align with it.
       - `database_intent_bundle` is the parser-enforced source of truth for durable collections, field contracts, indexes, and migration posture.
       - Output ONLY the raw JSON object. No markdown fences, no commentary.
   max_consecutive_auto_reply: 12

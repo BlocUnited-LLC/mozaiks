@@ -202,15 +202,30 @@ def test_app_generator_page_contract_stays_declarative() -> None:
 def test_ui_docs_define_page_customization_boundary() -> None:
     surface_contract = _read("docs/architecture/frontend/ui-system/generated-frontend-surface-contract.md")
     assembly_contract = _read("docs/architecture/builder/appgenerator-output-assembly-contract.md")
+    app_declaratives = _read("docs/architecture/app/app-bundle-declaratives.md")
+    shell_contract = _read("docs/architecture/frontend/chat-ui/shell-system.md")
+    architecture = _read("ARCHITECTURE.md")
 
     assert "Persistent app UI" in surface_contract
     assert "Bounded custom UI" in surface_contract
     assert "default to declarative page schemas" in surface_contract
     assert "custom_route_bundle" in surface_contract
     assert "workflow UI, transition UI, and bounded custom UI" in surface_contract
+    assert "`app/brand/theme_config.json` is the canonical visual identity source" in surface_contract
+    assert "Generated React and custom routes must not hardcode" in surface_contract
+    assert "hex, RGB, or HSL color literals" in surface_contract
+    assert "literal font-family names" in surface_contract
+    assert "`theme.*` is the compact" in surface_contract
+    assert "expanded compatibility layer" in surface_contract
+    assert "Local fonts live only under `app/brand/fonts/`" in surface_contract
+    assert "Google Fonts are declared in `theme_config.json`" in surface_contract
     assert "theme_config_patch" in assembly_contract
     assert "Theme vs Shell Ownership" in assembly_contract
     assert "config/shell.json" in assembly_contract
+    assert "`app/brand/theme_config.json` is the canonical visual identity source" in app_declaratives
+    assert "Shell config is not a theme file" in shell_contract
+    assert "`app/config/shell.json` must not define" in shell_contract
+    assert "`app/brand/theme_config.json` is the visual authority" in architecture
 
 
 def test_architecture_index_references_appgenerator_output_contract() -> None:
@@ -513,19 +528,29 @@ def test_frontend_prompts_enforce_theme_shell_ownership_boundaries() -> None:
     app_generator = _read("factory_app/workflows/AppGenerator/agents.yaml")
     design_docs = _read("factory_app/workflows/DesignDocs/agents.yaml")
     agent_generator = _read("factory_app/workflows/AgentGenerator/agents.yaml")
+    frontend_rules = _read(".claude/rules/frontend.md")
+    add_page_skill = _read(".claude/skills/add-page/SKILL.md")
 
+    assert "`app/brand/theme_config.json` is the canonical visual identity source for generated apps" in app_generator
     assert "theme_config_patch` owns visual tokens only" in app_generator
+    assert "compact `theme` selectors" in app_generator
+    assert "expanded `fonts`, `colors`, `shadows`, `ui`, and `primitives` layer" in app_generator
     assert "shell_config` owns only app-wide shell behavior" in app_generator
     assert "asset_manifest` owns reusable media inventory metadata" in app_generator
     assert "custom_route_bundle" in app_generator
     assert "use `PageFrame` from `@mozaiks/chat-ui`" in app_generator
     assert "use `useChatUI()` / shipped adapters instead of hardcoded API base URLs" in app_generator
     assert "Do NOT put raw spacing, padding, width, or density tokens in `shell_config`" in app_generator
+    assert "Do NOT put colors, font families, shadows, radius, or page-local palettes in `shell_config`" in app_generator
     assert "Do NOT put header actions, profile menu items, or footer links in `theme_config_patch`" in app_generator
+    assert "never hardcode hex colors, RGB/HSL literals, `font-family` declarations" in app_generator
+    assert "prefer semantic design fields over raw className styling" in app_generator
+    assert "Local fonts must live under `app/brand/fonts/`" in app_generator
+    assert "Google Fonts are declared in `theme_config_patch` / `theme_config.json`" in app_generator
 
-    assert "Do NOT define header/profile/notification/footer content objects in ui_schema" in design_docs
+    assert "Do NOT include header/profile/notification/footer content" in design_docs
     assert "Do NOT encode raw visual token values" in design_docs
-    assert "asset_manifest.json" in design_docs
+    assert "route_manifest.json" in design_docs
     assert "custom_route_bundle" in design_docs
     assert "generic account/profile/preferences as host-owned platform primitives" in design_docs
 
@@ -533,6 +558,12 @@ def test_frontend_prompts_enforce_theme_shell_ownership_boundaries() -> None:
     assert "never hardcode `font-family` names in component code" in agent_generator
     assert "prefer a file-backed transition component exported from `extended_orchestration/ui/index.js`" in agent_generator
     assert "Use `ui.props` only for lightweight built-in fallback tuning" in agent_generator
+
+    assert "`app/brand/theme_config.json` is the visual identity authority" in frontend_rules
+    assert "Do not hardcode `font-family` values" in frontend_rules
+    assert "Local fonts live under `app/brand/fonts/`" in frontend_rules
+    assert "`app/brand/theme_config.json` is the visual identity source of truth" in add_page_skill
+    assert "Do not hardcode hex/rgb/hsl colors, font-family declarations" in add_page_skill
 
 
 def test_agent_generator_primitive_reference_matches_runtime_contract() -> None:

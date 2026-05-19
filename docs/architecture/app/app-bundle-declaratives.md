@@ -45,12 +45,26 @@ Modules are not AI workflows.
 
 Brand assets, fonts, and theme inputs used by the shell.
 
+`app/brand/theme_config.json` is the canonical visual identity source. It owns
+brand token selection and expanded visual values: `theme.primary`,
+`theme.radius`, `theme.font`, `theme.font_heading`, `theme.appearance`,
+`theme.density`, plus expanded `fonts`, `colors`, `shadows`, `ui`, and
+`primitives` values where older shell/chat compatibility still needs them.
+
+Local font files live under `app/brand/fonts/` and are referenced as
+`/fonts/...` from theme config. Generated artifacts must not copy font binaries
+outside `brand/`. Google Fonts are declared in theme config and loaded by the
+frontend theme loader.
+
 ## Rules
 
 - Keep one source of truth for each contract.
 - Prefer explicit validation over runtime fallback branches.
 - Do not encode app-specific behavior in core runtime modules.
 - Do not treat app bundle files as compatibility shims for removed contracts.
+- Keep shell/navigation/chrome behavior in `app/config/shell.json`; keep visual
+  tokens, typography, radius, density, shadows, and brand assets in
+  `app/brand/theme_config.json`.
 
 ## Related Docs
 

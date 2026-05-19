@@ -614,9 +614,15 @@ Only those agents have chat-visible messages and websocket-forwarded outputs ren
 │   │   └── custom/             # Optional hand-authored full-page React routes
 │   └── index.js                # React registration barrel
 └── brand/
-    ├── theme_config.json       # Logo, colors, fonts
+    ├── theme_config.json       # Visual identity tokens: colors, radius, density, typography, assets
     └── assets/
 ```
+
+`app/brand/theme_config.json` is the visual authority for generated apps.
+`app/config/shell.json` owns shell/navigation/chrome behavior only. Generated
+pages and custom route React must consume shared primitives and semantic
+tokens/classes instead of hardcoded colors, literal font families, or
+page-local visual systems.
 
 Every bundle (module, workflow, page) declares a `visibility`: `public` (all users), `internal` (authenticated only), or `admin` (admin only).
 

@@ -216,22 +216,77 @@ For cases the declarative schema cannot express, use the escape hatch:
 ```
 app/ui/pages/custom/<name>.jsx   ← custom React page
 app/ui/route_manifest.json       ← registers the route
+app/ui/index.js                  ← registers the component key used by the route
 ```
 
 ```json
 // app/ui/route_manifest.json
 {
-  "routes": [
+  "pages": [
     {
+      "id": "<name>",
+      "label": "<Name>",
       "path": "/custom/<name>",
       "component": "<Name>Page",
-      "meta": { "requiresAuth": true }
+      "requiresAuth": true,
+      "order": 20,
+      "meta": { "title": "<Name>" },
+      "purpose": "Persistent interaction that cannot be expressed with declarative page primitives."
     }
   ]
 }
 ```
 
+`app/ui/index.js` must export `register(registerComponent)` and call
+`registerComponent("<Name>Page", Component, meta)` for every route component.
+The route `component` string and registration key must match exactly. Prefer the
+AppGenerator `custom_route_bundle` contract for generated apps because it
+creates `route_manifest.json`, `ui/pages/custom/*.jsx`, and `ui/index.js`
+together.
+
+Route/component registration contract:
+
+- `app/ui/route_manifest.json` declares custom full-page routes only.
+- `app/ui/index.js` must register every component referenced by `route_manifest.json`.
+- each custom route must have exactly one matching `app/ui/pages/custom/*.jsx` page file.
+- `admin/admin_registry.yaml` is for admin page and panel metadata, not arbitrary full-page custom route ownership.
+- custom React routes are not auto-discovered; the manifest, page file, and registration barrel must be emitted together.
+- missing or mismatched component registrations must be fixed before export/download.
+
 Use custom routes sparingly. Declarative `app/ui/pages/` is the default.
+
+When a custom route is truly needed, it must still use the shared primitive
+contract. Import shared primitives from `@mozaiks/chat-ui/ui` for actions,
+status, cards/panels, metrics, search/list/table surfaces, loading/error states,
+and empty states. Do not define local visual clones such as `StatusPill`,
+`MetricTile`, `StatCard`, or `Badge`. Do not render raw primary-styled buttons
+such as `<button className="...bg-primary...">` when `Button` exists.
+Use semantic tokens/classes only; visual values come from
+`app/brand/theme_config.json` and the shell/theme token layer.
+Use semantic variants on shared primitives (for example `Button variant`,
+`StatusPill tone`, and panel/card variants) rather than local one-off visual
+systems.
+Do not hardcode hex/rgb/hsl colors or direct `font-family` declarations in custom
+route React.
+Do not define page-local `palette`, `colors`, or `theme` objects in custom
+route React.
+Avoid repeated local rounded card shells; use `SurfaceCard`/`Panel` when that
+surface shape already exists.
+
+Generated React audit scope note:
+- quality-gate audits target generated app route React and intentionally ignore
+  `docs/**` and `tests/**` fixture paths to reduce false positives.
+
+Brand and theme rules:
+
+- `app/brand/theme_config.json` is the visual identity source of truth.
+- `app/config/shell.json` owns shell/navigation/chrome behavior only.
+- Use semantic primitive fields such as button `variant`, status `tone`, card
+  or panel variant, density, and radius.
+- Do not hardcode hex/rgb/hsl colors, font-family declarations, literal brand font
+  names, page-local palettes, or one-off button/card/badge styles.
+- Local fonts belong under `app/brand/fonts/` and are referenced as
+  `/fonts/...`; never copy font binaries elsewhere.
 
 ---
 
@@ -242,6 +297,7 @@ Use custom routes sparingly. Declarative `app/ui/pages/` is the default.
 - `api_endpoint` paths must be `/api/modules/{name}/{action_id}` routes with no query strings or fragments. Put limits in `page_size` and filters/selected-row values in action `payload`, form state, or module action input schemas.
 - Page-owned shell access belongs in the page's `navigation` field. Use `app/config/shell.json -> shortcuts` for built-in chrome and `navigation.policy` for app-wide placement behavior.
 - Page-owned chrome intent belongs in `shell_mode`; use `conversation` for DM/chat routes and `workspace` for dense module/profile/admin-like pages.
+- Custom route component keys must match exactly between `route_manifest.json`, `ui/pages/custom/*.jsx`, and `ui/index.js`.
 
 ---
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from tests.import_utils import import_module_directly
 
-
 ui_primitives = import_module_directly("mozaiksai.core.workflow.ui_primitives")
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_component_and_page_primitive_catalogs_match_runtime_exports() -> None:
@@ -107,3 +109,16 @@ def test_component_primitive_validation_rejects_removed_names() -> None:
     assert "Card" in message
     assert "Stat" in message
     assert "Badge" in message
+
+
+def test_button_primitive_preserves_single_child_for_as_child_slot() -> None:
+    source = (
+        REPO_ROOT / "chat-ui" / "src" / "ui" / "primitives" / "Button.jsx"
+    ).read_text(encoding="utf-8")
+
+    assert "const content = label ?? children;" in source
+    assert "if (props.asChild)" in source
+
+    as_child_branch = source.split("if (props.asChild)", 1)[1].split("return (", 2)[1]
+    assert "{content}" in as_child_branch
+    assert "icon &&" not in as_child_branch

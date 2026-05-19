@@ -64,9 +64,9 @@ export default function MozaiksApp({
   // Config validation overlay (dev-mode in-browser error/warning banner)
   // Replaces console-only logging — founders see issues without opening DevTools
 
-  const moduleInitializer = () => {
+  const moduleInitializer = useCallback(() => {
     initializeWorkflows(registerComponent);
-  };
+  }, []);
 
   return (
     <NavigationProvider>

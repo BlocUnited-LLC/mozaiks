@@ -18,7 +18,21 @@ const registry = new Map();
  * @param {string} options.description - Component description
  */
 export function registerComponent(name, component, options = {}) {
-  if (registry.has(name) && !options.override) {
+  const existing = registry.get(name);
+  const now = Date.now();
+
+  if (existing && !options.override) {
+    if (existing.component === component) {
+      registry.set(name, {
+        ...existing,
+        core: options.core ?? existing.core,
+        description: options.description || existing.description || '',
+        lastRegisteredAt: now,
+        duplicateRegistrations: (existing.duplicateRegistrations || 0) + 1,
+      });
+      return;
+    }
+
     console.warn(`[ComponentRegistry] Component "${name}" already registered. Use override: true to replace.`);
     return;
   }
@@ -27,7 +41,8 @@ export function registerComponent(name, component, options = {}) {
     component,
     core: options.core || false,
     description: options.description || '',
-    registeredAt: Date.now()
+    registeredAt: now,
+    duplicateRegistrations: 0
   });
 
   if (process.env.NODE_ENV === 'development') {

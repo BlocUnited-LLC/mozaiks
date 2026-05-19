@@ -564,10 +564,14 @@ agents:
       5. Default to null (inherit platform brand) when context is ambiguous
 
       **Artifact boundary**:
-      - `theme_config_patch` owns visual tokens only: `theme`, `primitives`, and semantic `ui.chat` / `ui.shell` / `ui.page` spacing, sizing, density, and visual styling.
+      - `app/brand/theme_config.json` is the canonical visual identity source for generated apps.
+      - `app/config/shell.json` is the canonical shell behavior, navigation, and chrome source for generated apps; it is not a visual token file.
+      - `theme_config_patch` owns visual tokens only: compact `theme` selectors (`primary`, `radius`, `font`, `font_heading`, `appearance`, `density`), `primitives`, and semantic `ui.chat` / `ui.shell` / `ui.page` spacing, sizing, density, and visual styling.
+      - The expanded `fonts`, `colors`, `shadows`, `ui`, and `primitives` layer is allowed as runtime compatibility for legacy shell/chat tokens until those tokens fully migrate to `--mz-*`.
       - `shell_config` owns only app-wide shell behavior: `header.logo`, sparse `header.actions`, canonical `shortcuts`, `navigation.policy`, `navigation.items` for non-page-owned entries, and compact `chrome` mode overrides.
       - `asset_manifest` owns reusable media inventory metadata (`asset_id`, source, path/url, alt/provenance, usage). Use it for logos/icons/hero imagery/video references.
       - Do NOT put raw spacing, padding, width, or density tokens in `shell_config`.
+      - Do NOT put colors, font families, shadows, radius, or page-local palettes in `shell_config`.
       - Do NOT put header actions, profile menu items, or footer links in `theme_config_patch`.
       - Do NOT use `theme_config_patch` or `shell_config` as free-form media dumps. Canonical media listings belong in `asset_manifest`.
 
@@ -580,7 +584,7 @@ agents:
         - `profile` for account-owned destinations and settings.
         - `footer` for legal/support links.
       - Use `shell_config.navigation.policy` only when the app needs non-default placement behavior. Recommended default: desktop global `header`, desktop local `sidebar`, mobile global `bottomBar`, mobile local `sheet`, mobile footer `hidden`, `maxMobileItems: 5`.
-      - `shell_config.shortcuts` may only contain `header`, `profile`, `mobile`, `footer`, and `footerHideOnMobile`. Use the exact fields in `AppShellShortcutsPatch`; do not invent alternate shortcut groups or custom shortcut catalogs.
+      - `shell_config.shortcuts` may only contain `header`, `profile`, `mobile`, `footer`, and `footerHideOnMobile`. Use the exact fields in `AppShellShortcutsPatch`; do not invent alternate shortcut groups or custom shortcut catalogs. Never include `admin_portal` in any shortcut list — it is injected automatically by the framework for admin users.
       - Do not duplicate the same route in `shortcuts`, `shell_config.navigation.items`, and `AppPageSchema.navigation`. Put page-owned routes on the page; use shortcuts for built-in profile/footer/mobile chrome; use `navigation.items` only for app-level entries that are not owned by a page schema.
       - Mobile bottom navigation must stay to five or fewer primary items. Extra global items belong in a sheet/more surface or profile menu.
 
@@ -611,6 +615,8 @@ agents:
       - Only set fields that differ meaningfully from the platform default (cyan/dark/rajdhani)
       - If the concept matches the platform default style (techy/dark), set theme_config_patch to null
       - Never invent font key names not in the list above
+      - Local fonts must live under `app/brand/fonts/` and be referenced as `/fonts/...`; never copy font binaries into generated artifacts outside `brand/`
+      - Google Fonts are declared in `theme_config_patch` / `theme_config.json` and injected by the theme loader
       - When genuinely ambiguous, null is the correct answer
 
       **Output contract**:
@@ -628,17 +634,28 @@ agents:
       - Every custom route file must:
         - live under `ui/pages/custom/*.jsx`
         - be mounted only through `ui/route_manifest.json`
-        - use `PageFrame` from `@mozaiks/chat-ui`
+        - have exactly one `custom_route_bundle.page_files` entry for each `route_manifest` entry
+        - set `page_files[*].registry_key` to the exact `route_manifest[*].component` value
+        - default-export the React component imported by the generated `ui/index.js` registry barrel
+        - never rely on implicit custom page discovery; `ui/route_manifest.json`, `ui/pages/custom/*.jsx`, and `ui/index.js` registration must be emitted together
+        - use `PageFrame` from `@mozaiks/chat-ui` — this applies to user-facing custom route pages in `ui/pages/custom/` only; do NOT use `PageFrame` for workspace/app console pages in `admin/pages/`
         - use `useChatUI()` / shipped adapters instead of hardcoded API base URLs
+        - import shared UI primitives from `@mozaiks/chat-ui/ui` for buttons, status pills, cards/panels, metrics/summary strips, collection search, resource lists, loading/error states, and inline empty states
+        - compose thin domain wrappers over shared primitives when needed, but never define local visual clones such as `StatusPill`, `MetricTile`, `StatCard`, or `Badge`
         - avoid shell/header/footer ownership, package manifests, and global side effects
-        - use semantic theme tokens/classes rather than literal brand styling hacks
+        - use semantic theme tokens/classes rather than literal brand styling hacks; visual values must come from `app/brand/theme_config.json` and shell/theme tokens
+        - never hardcode hex colors, RGB/HSL literals, `font-family` declarations, literal brand font names, or page-local brand palettes
+        - prefer semantic design fields over raw className styling: button `variant`, badge/status `tone`, card/panel variant, density, radius, and status tone
+        - use shared `Button` semantic variants (`primary`, `secondary`, `ghost`, etc.) instead of raw primary-styled `<button className="...bg-primary...">` markup
       - Bespoke React is still exceptional. Do not emit it for convenience when primitive composition is sufficient.
 
       **Admin portal rule (hard constraint)**:
       - NEVER generate an admin page schema. The `/admin` route and `AdminPortal` component are platform-owned and registered as the unified admin shell.
       - Do NOT add an admin page to `manifest.pages` or generated page routes. The platform mounts `/admin` automatically based on `admin/admin_registry.yaml` produced by AdminRegistryAgent.
       - App and feature admin surfaces are declared by `modules/{pack_name}/contracts/admin.yaml`. Module panels reference page ids from `admin/admin_registry.yaml` via the `page` field — ConfigMiddlewareAgent handles this.
-      - If a custom admin React component is genuinely needed (renderer: custom_component), its stub path belongs in `admin/pages/` — NOT in `ui/pages/custom/`. Emit it only through `custom_route_bundle.page_files` when the module's admin.yaml declares `renderer: custom_component`. This is the only AppSchemaAgent-owned admin-side file.
+      - Do NOT add full-page custom route ownership fields such as `component`, `registry_key`, or `renderer` to `admin/admin_registry.yaml`. Full-page custom routes belong in `ui/route_manifest.json` + `ui/pages/custom/*.jsx` + `ui/index.js`.
+      - If a custom admin React component is genuinely needed (`renderer: custom_component`), its stub path belongs in a declared module/admin JS stub and must be registered by FrontendStubAgent through `ui/index.js`; it is NOT owned by `custom_route_bundle` and is NOT declared as a full-page route in `admin/admin_registry.yaml`.
+      - Admin console pages in `admin/pages/` are workspace/app console surfaces: they MUST use `WorkspaceLayout` (or `AppConsoleLayout`) from `@mozaiks/chat-ui/workspace` — NEVER `PageFrame`. Using `PageFrame` in an admin console page hides the sidebar and breaks the console layout.
       - Never model admin surfaces as user-facing pages, declarative page schemas, or `manifest.pages` entries.
   - id: instructions
     heading: '[INSTRUCTIONS]'
@@ -667,7 +684,8 @@ agents:
          a. Emit one route_manifest entry per custom page route.
          b. Emit one page_files entry per custom page implementation with complete React source in `content`.
          c. Make each `registry_key` exactly match the owning route entry's `component`.
-         d. Keep declarative `pages` for every route that can still be expressed through the primitive system.
+         d. Use `.jsx` paths only and include a default export in each file's content.
+         e. Keep declarative `pages` for every route that can still be expressed through the primitive system.
       11. Do NOT output any other page-level React files, JSX snippets, CSS bundles, or custom component imports outside custom_route_bundle.page_files.
       12. Output ONLY valid AppSchemaOutput JSON. No markdown, no commentary.
   - id: output_format
@@ -768,7 +786,17 @@ agents:
          footer intended for mobile primary navigation; local/workspace nav placed as
          global nav without an explicit reason; conversation/focused/immersive surfaces
          that keep distracting footer or bottom-bar chrome through custom chrome
-         overrides; extensions with unrecognized slot names.
+         overrides; extensions with unrecognized slot names; custom routes whose
+         `route_manifest[*].component` key is not registered by exactly one matching
+         `custom_route_bundle.page_files[*].registry_key`.
+         For generated/custom React quality warnings, enforce shared primitives and
+         semantic variants, semantic token classes, no hardcoded hex/rgb colors,
+         no direct `font-family` declarations, no local primitive clones
+         (`StatusPill`, `MetricTile`, `StatCard`, `Badge`), no raw primary-styled
+         `<button className="...bg-primary...">`, and no repeated local rounded card
+         shells when `SurfaceCard`/`Panel` already fit.
+         Ignore React snippets under `docs/**` and `tests/**` fixture paths for this
+         deterministic gate to avoid false positives.
       3. Emit the structured review request JSON. The `review_ui_quality` tool
          runs automatically and sets `app_ui_quality_status`.
       4. If status is `passed`, route to AssemblyAgent.

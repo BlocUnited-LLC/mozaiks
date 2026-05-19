@@ -18,6 +18,10 @@ Generated custom-route React lives under `app/ui/pages/custom/*.jsx` through
 the typed `custom_route_bundle.page_files` contract. App-level helper
 components should be introduced only through an explicit future contract, not by
 inventing ad hoc component directories.
+Custom React routes are never discovered implicitly: `app/ui/route_manifest.json`,
+`app/ui/pages/custom/*.jsx`, and `app/ui/index.js` registration must be generated
+together. `admin/admin_registry.yaml` is admin shell metadata, not a route or
+component registry for full-page custom React.
 
 Important distinction:
 
@@ -87,6 +91,9 @@ Avoid these defaults unless the product requirement explicitly calls for them:
 - List pages should show scan-first information: name, status, updated time, primary action.
 - Collection pages should usually offer search or filtering before adding extra insight panels.
 - Resource/index pages should usually start with `PageHeader` + `ResourceTable`, with `SummaryStrip` only when the quick metrics materially improve scanning.
+- Summary metrics must bind to real module action output. Use `trend_key` only
+  when the module computes a real historical comparison; otherwise omit it so
+  the primitive renders no fake percentage change.
 - Detail pages can carry more context, but should still favor progressive disclosure.
 - Use cards only when they improve grouping. Do not wrap every row or every fact in a card.
 - Use metrics only when they are genuinely useful. Do not default to KPI rows.
@@ -121,7 +128,11 @@ React so AppGenerator and AgentGenerator cannot drift into separate UI standards
 
 `save_app_schema` records `app_ui_quality_warnings` in workflow context for
 generated page bundles, including `ui/pages/*.yaml` and optional
-`custom_route_bundle.page_files`. `AppUIQualityAgent` then calls
+`custom_route_bundle.page_files`. For custom routes it also verifies the
+route/component registry contract: every `route_manifest[*].component` must be
+registered by exactly one `page_files[*].registry_key`, every custom route file
+must live under `ui/pages/custom/*.jsx`, and each file must default-export a
+React component. `AppUIQualityAgent` then calls
 `review_ui_quality` and sets `app_ui_quality_status`:
 
 - `passed`: no warnings remain, so AssemblyAgent may assemble the bundle.
@@ -147,6 +158,12 @@ Workflow-local React now follows the same deterministic pattern:
 - `WorkflowUIQualityAgent` calls `review_workflow_ui_quality`
 - AG2 routes by `workflow_ui_quality_status`
 - `generate_and_download` refuses bundle delivery unless `workflow_ui_quality_status == "passed"`
+
+The runtime component registry treats repeat registration of the exact same
+component as idempotent so React StrictMode, hot reload, or a repeated workflow
+initializer does not flood the console. A same-name registration with a different
+component is still a collision and must continue to warn unless the caller uses
+`override: true` intentionally.
 
 For a real-AG2 AppGenerator UI smoke without manual input, seed upstream context
 and start at `AppSchemaAgent`:
@@ -226,6 +243,10 @@ Current warning classes include:
 - nested `Panel`/`SurfaceCard` wrappers
 - placeholder/internal copy such as `placeholder`, `todo`, `posture`, `handoff`, `control room`, or `kpi wall`
 - custom React that imports/renders removed primitives (`Card`, `Stat`, `Badge`)
+- custom route manifests whose route component is not registered by exactly one matching page file
+- custom route React files outside `ui/pages/custom/*.jsx`, or files without a default export
+- custom route React files that rely on implicit discovery instead of matching `ui/route_manifest.json` and `ui/index.js`
+- admin registries that try to own full-page custom React with component, renderer, or registry-key fields
 - custom React that uses brittle deep primitive imports instead of the public `@mozaiks/chat-ui/ui` entrypoint
 - custom React that hardcodes font families, literal brand fonts, raw color values, or non-semantic color utilities
 - custom React that uses `.js` for workflow-local generated React instead of `.jsx`

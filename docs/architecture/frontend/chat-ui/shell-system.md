@@ -18,6 +18,11 @@ Shell behavior is split by owner:
 Do not duplicate a route in page `navigation`, shell `shortcuts`, and
 `navigation.items`. Each route should have one navigation owner.
 
+Shell config is not a theme file. `app/config/shell.json` must not define
+colors, font families, radius scales, spacing scales, shadows, or page-local
+visual palettes. Those values belong in `app/brand/theme_config.json` and flow
+to the shell through semantic tokens.
+
 ## Canonical `shell.json` Shape
 
 Generated apps author only this compact shell surface:
@@ -70,6 +75,10 @@ The shell contract is intentionally small. It describes app chrome, navigation
 placement, and route chrome modes. It does not define reusable UI building
 blocks; those belong to the shared `chat-ui` primitive catalog and are consumed
 by page schemas or bounded custom React.
+
+Generated shell actions should choose semantic variants such as `primary`,
+`secondary`, or `ghost`. They should not carry raw class strings with color or
+font decisions. Visual rendering of those variants is brand-driven.
 
 ## Shell Presets
 
@@ -168,12 +177,13 @@ objects for `/api/shell-config`.
 ```
 
 Common ids include `dashboard`, `create`, `profile`, `messages`,
-`notifications`, `settings`, `admin`, `admin_portal`, `support`, `signout`,
+`notifications`, `settings`, `admin`, `support`, `signout`,
 `signin`, `legal`, `terms`, `cookies`, and `privacy`.
 
-`admin` targets a generated app's framework admin shell. `admin_portal` is
-reserved for the first-party Studio shell and targets the Apps console at
-`/apps`; generated apps should not emit it.
+`admin` targets a generated app's framework admin shell. Do NOT include
+`admin_portal` in any shortcuts list — it is automatically injected by the
+framework into the profile menu for all admin users. App config and generated
+output must never declare it.
 
 Use page `navigation` for page-owned routes. Use `navigation.items` only for
 app-level entries that are not owned by a page schema. Do not define custom

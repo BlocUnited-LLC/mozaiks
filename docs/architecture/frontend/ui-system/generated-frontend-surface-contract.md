@@ -45,6 +45,122 @@ Shared foundations:
 Use the same primitives where possible.
 Do not collapse the producers that use them.
 
+### Brand-driven visual identity
+
+`app/brand/theme_config.json` is the canonical visual identity source for an
+app workspace. Runtime serves it through `/api/theme-config`; the frontend
+theme loader turns it into semantic CSS tokens before generated pages render.
+
+`app/config/shell.json` owns shell behavior: navigation policy, chrome modes,
+header/profile/footer behavior, and compact shortcuts. It must not carry raw
+visual token values such as colors, font stacks, spacing scales, or page-local
+brand palettes.
+
+Generated React and custom routes must use:
+
+- shared primitives
+- semantic primitive variants such as `Button variant`, `StatusPill tone`, card
+  or panel variants, density, radius, and status tone
+- semantic classes and tokens such as `bg-background`, `bg-card`,
+  `text-foreground`, `text-muted-foreground`, `text-primary`, `border-border`,
+  `font-sans`, and `font-heading`
+
+Generated React and custom routes must not hardcode:
+
+- hex, RGB, or HSL color literals
+- literal font-family names or `font-family` declarations
+- page-local brand palettes
+- one-off local button, card, badge, or status styles when a shared primitive
+  exists
+- repeated local rounded card shells when `SurfaceCard` or `Panel` already fits
+
+Brand values flow through the compact selector layer:
+
+- `theme.primary`
+- `theme.radius`
+- `theme.font`
+- `theme.font_heading`
+- `theme.appearance`
+- `theme.density`
+
+They may also flow through the expanded runtime compatibility layer:
+
+- `fonts`
+- `colors`
+- `shadows`
+- `ui`
+- `primitives`
+
+This duplication is intentional during the transition. `theme.*` is the compact
+selector layer for App UI `--mz-*` tokens. `fonts`, `colors`, `shadows`, `ui`,
+and `primitives` are the expanded compatibility layer still needed by older
+shell/chat tokens such as `--color-*`, `--font-*`, and
+`--core-primitive-*`. Both are allowed until legacy shell tokens are fully
+migrated to `--mz-*`.
+
+Local fonts live only under `app/brand/fonts/` and are referenced from theme
+config with `/fonts/...` URLs. Do not copy font binaries into generated
+artifacts outside `brand/`. Google Fonts are declared in `theme_config.json`
+and injected by the theme loader.
+
+### Custom route primitive contract
+
+Bounded custom UI is still part of the shared design system. A custom React
+route may exist because the page needs behavior that YAML cannot express, but
+it must not create a parallel visual system.
+
+Custom route files under `ui/pages/custom/*.jsx` should import shared
+primitives from `@mozaiks/chat-ui/ui` for the common UI shapes:
+
+- `Button`, `ActionButton`, `IconButton`, `LinkButton` for actions
+- `StatusPill`, `Alert`, `AlertBanner` for state and notices
+- `SurfaceCard`, `Panel` for cards and panels
+- `Metric`, `SummaryStrip`, `SegmentedBar` for compact summaries
+- `CollectionToolbar`, `ResourceList`, `ResourceTable`, `DataTable` for search,
+  lists, and tabular records
+- `InlineEmptyState`, `LoadingState`, `ErrorState`, `Skeleton` for feedback
+
+Thin domain wrappers are allowed when they delegate to shared primitives. For
+example, a notifications page can implement `NotificationRow` as a wrapper
+around `ResourceList` cells and `StatusPill`, or a hosted analytics dashboard
+can implement `AnalyticsMetricGroup` as a wrapper around `SummaryStrip`.
+
+Local visual primitive clones are not allowed:
+
+- `function StatusPill(...)`
+- `function MetricTile(...)`
+- `function StatCard(...)`
+- `function Badge(...)`
+- raw primary buttons such as `<button className="...bg-primary...">`
+- repeated local rounded card shells when `SurfaceCard`, `Panel`,
+  `ResourceList`, or `SummaryStrip` already fits
+
+Quality-gate false-positive boundary:
+
+- generated React audits intentionally ignore files under `docs/**` and
+  `tests/**` fixture paths, even when they contain JSX snippets, so examples
+  and test fixtures do not block real generated app output.
+
+Visual values come from the active app brand, not from custom-page constants.
+Generated apps should treat `app/brand/theme_config.json` and the shell/theme
+semantic token layer as the authority for colors, radius, spacing, density, and
+typography. Custom React may use semantic classes such as `bg-card`,
+`text-primary`, `border-border`, `text-success`, and `text-muted-foreground`;
+it must not hardcode hex colors, brand color names, or local font choices.
+
+Custom route ownership has three required pieces and they must stay in sync:
+
+- `ui/route_manifest.json` declares the route path and component key
+- `ui/pages/custom/*.jsx` provides the full-page React component
+- `ui/index.js` registers the same component key with `registerComponent`
+
+`admin/admin_registry.yaml` is not a route registry. It declares admin page ids,
+paths, scope, ordering, and labels for the admin shell. Full-page custom React
+routes must use the route manifest and component registry contract above.
+Module admin panels reference admin page ids from their module-owned
+`contracts/admin.yaml`; they do not add route component keys to
+`admin_registry.yaml`.
+
 ## Persistent app UI
 
 Persistent app UI owns:
@@ -92,6 +208,8 @@ Persistent AppGenerator pages have a deterministic gate before assembly:
 - `AppSchemaAgent` emits `AppSchemaOutput`
 - `save_app_schema` persists `app.json`, `ui/pages/*.yaml`, optional custom route artifacts, and `app_ui_quality_warnings`
 - `factory_app/workflows/_shared/generated_ui_contract.py` audits both declarative page schemas and optional `custom_route_bundle.page_files`
+- the generated React portion of that audit excludes `docs/**` and `tests/**`
+  fixture paths to reduce false positives in documentation and test examples
 - `AppUIQualityAgent` calls `review_ui_quality`
 - `app_ui_quality_status == "passed"` is required before `AssemblyAgent`
 - `needs_revision` routes back to `AppSchemaAgent`; `blocked` routes to user/operator review
