@@ -85,6 +85,7 @@ mozaiks-platform/
 
 # Docs build
 site/
+.mkdocs-tmp/
 
 # Generated artifacts (from brand.json via `python -m mozaiksai.cli generate`)
 infra/keycloak/themes/mozaiks/login/resources/css/login.css
@@ -93,6 +94,7 @@ infra/keycloak/themes/mozaiks/login/resources/img/
 # Misc
 nul
 *.log
+.logs/
 
 # Build artifacts
 tmpdist/

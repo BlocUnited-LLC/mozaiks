@@ -19,6 +19,7 @@ Commands:
     mozaiks studio            Print workspace status (terminal diagnostic)
     mozaiks add <feature>     Add feature to existing project
     mozaiks gen <mode>        Convenience shortcut: generate from a prompt
+    mozaiks migrations status Read-only generated-app migration health
     mozaiks sync-agent-guidance  Sync app-local coding-agent guidance safely
     mozaiks info              Show current config and available presets
 """
@@ -31,6 +32,7 @@ from mozaiks_cli.commands import (
     gen_command,
     info_command,
     init_command,
+    migrations_command,
     onboard_command,
     quickstart_command,
     serve_command,
@@ -388,6 +390,49 @@ def create_parser():
         help="App validation strategy for AppGenerator runs (default: resolved from the current environment)",
     )
 
+    # mozaiks migrations
+    migrations_parser = subparsers.add_parser(
+        "migrations",
+        help="Inspect generated-app migration health",
+        description="Read-only diagnostics for generated-app database migration history.",
+    )
+    migrations_subparsers = migrations_parser.add_subparsers(
+        dest="migrations_action",
+        help="Migration diagnostic actions",
+    )
+    migrations_status_parser = migrations_subparsers.add_parser(
+        "status",
+        help="Show generated-app migration health",
+        description="Read migration history and report failed, in-progress, and unknown migration states.",
+    )
+    migrations_status_parser.add_argument(
+        "--app-id",
+        default=None,
+        help="Filter report to one app_id",
+    )
+    migrations_status_parser.add_argument(
+        "--status",
+        default=None,
+        help="Filter report by migration status, such as applied, in_progress, or failed",
+    )
+    migrations_status_parser.add_argument(
+        "--limit",
+        type=int,
+        default=100,
+        help="Maximum rows to return (default: 100)",
+    )
+    migrations_status_parser.add_argument(
+        "--database-name",
+        default=None,
+        help="Migration history database name override for diagnostics",
+    )
+    migrations_status_parser.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="Emit the exact migration health report as JSON",
+    )
+
     # mozaiks sync-agent-guidance
     sync_parser = subparsers.add_parser(
         "sync-agent-guidance",
@@ -469,6 +514,10 @@ def main():
                 result = gen_command.run_interactive(args)
             else:
                 result = gen_command.run(args)
+            if result:
+                sys.exit(result)
+        elif args.command == "migrations":
+            result = migrations_command.run(args)
             if result:
                 sys.exit(result)
         elif args.command in {"sync-agent-guidance", "sync-guidance"}:

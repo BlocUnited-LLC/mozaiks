@@ -34,6 +34,37 @@ In the canonical orchestration model, database intent revision is routed by the
 builder session loop and executed by scoped refinement workers or targeted
 workflow re-entry. It is not owned by ordinary workflow-local AG2 handoffs.
 
+## Current Implementation Boundary
+
+This contract is implemented today as generator guidance, staged app artifacts,
+runtime `ctx.persistence` injection, database intent loading, index application,
+and additive migration application.
+
+Current truth:
+
+- `database_intent_bundle` is the canonical generated database planning object.
+- `AppGenerator` writes that object to `config/database_intent.json` when it is
+  present.
+- additive refinement plans may be staged under
+  `config/database_migrations/{migration_id}.json`.
+- generated modules use `backend/schemas.py` for typed document/request shapes;
+  `backend/models.py` and `backend/models/*.py` are not canonical outputs.
+- `backend/repo.py` owns persistence operations and should be derived from
+  database intent where possible.
+- the OSS runtime injects `ctx.persistence` into module actions when an `app_id`
+  is available; generated repo code uses
+  `ctx.persistence.collection(module_id, entity_name)`.
+- the OSS runtime loads promoted `config/database_intent.json` as app metadata.
+  It applies declared collection indexes idempotently at platform startup.
+  It loads `config/database_migrations/*.json` and applies only supported
+  additive operations with migration history. Destructive migrations are not
+  supported.
+- the OSS runtime does not inject `ctx.db` into module actions.
+- generated repo code must not require or emit `ctx.db`, import
+  `get_mongo_client()`, or hardcode database names.
+- historical project database managers are reference material only; do not port
+  or copy them into generated apps.
+
 ## What This Contract Covers
 
 This contract covers:
@@ -167,25 +198,25 @@ Minimum shape:
   "artifact_version_id": "art_456",
   "surfaces": [
     {
-      "surface_id": "campaigns",
+      "surface_id": "projects",
       "surface_kind": "module",
       "collections": [
         {
-          "name": "campaigns",
+          "name": "projects",
           "scope": "app",
           "ownership": {
-            "surface_id": "campaigns",
+            "surface_id": "projects",
             "surface_kind": "module"
           },
           "fields": [
-            {"name": "campaign_id", "type": "string", "required": true},
+            {"name": "project_id", "type": "string", "required": true},
             {"name": "app_id", "type": "string", "required": true},
             {"name": "status", "type": "string", "required": true}
           ],
           "indexes": [
-            {"keys": [["app_id", 1], ["campaign_id", 1]], "unique": true}
+            {"keys": [["app_id", 1], ["project_id", 1]], "unique": true}
           ],
-          "search_by": "campaign_id",
+          "search_by": "project_id",
           "lifecycle": {
             "write_mode": "module_action",
             "migration_policy": "additive_only"
@@ -379,14 +410,215 @@ database migration artifact.
 It should:
 
 - load `config/database_intent.json`
-- load any pending `config/database_migrations/*.json`
 - ensure declared indexes exist
+- load any pending `config/database_migrations/*.json`
 - record applied migration ids
 - reject blocked/destructive operations unless explicitly approved by policy
 
+Current implementation status: runtime loads `config/database_intent.json`,
+ensures declared indexes exist, loads `config/database_migrations/*.json`, and
+records migration state in `mozaiksai.AppDatabaseMigrations`. Supported
+migration operations are limited to `ensure_collection` and `ensure_index`.
+Runtime does not mutate existing documents, apply destructive changes, execute
+arbitrary migration code, or support operator-approved destructive migrations
+yet.
+
+Database startup policy is controlled by `MOZAIKS_DATABASE_STARTUP_POLICY`:
+
+- `best_effort` is the default for backward compatibility. Index or migration
+  failures are logged and platform startup continues.
+- `required` is recommended for production persistent generated apps. Index or
+  migration failures fail startup with app id, app root, and original error
+  context.
+
+App business data is stored in the generated-app database selected by:
+
+1. an injected database name when the runtime adapter is constructed
+2. `MOZAIKS_APP_DATABASE_NAME`
+3. `MOZAIKS_APPS_DATABASE`
+4. fallback `mozaiks_apps`
+
+Migration history and locking:
+
+- `mozaiksai.AppDatabaseMigrations` doubles as the migration lock collection.
+- the runtime atomically claims a migration by inserting an `in_progress` record
+  for `(app_id, migration_id)` before operations begin.
+- the history collection has a unique `(app_id, migration_id)` index, so two
+  platform/runtime instances cannot both claim the same app migration.
+- `in_progress`: written before migration operations begin, with `claimed_at`
+  and `lock_owner`.
+- `applied`: written after all operations succeed.
+- `failed`: written when an operation fails, including `error_type`,
+  `error_message`, `failed_operation_index`, and
+  `failed_operation_summary`.
+
+Retry policy is conservative: an existing `applied` record with the same hash is
+skipped; an existing `applied` record with a different hash errors; existing
+`in_progress` or `failed` records error until an operator clears or repairs the
+history record. There is no automatic lock takeover in the first pass.
+`in_progress` means another instance is applying the migration or a prior
+instance crashed after claim. This avoids silently reapplying ambiguous migration
+state.
+
+Operator health inspection is read-only. The runtime helper
+`get_migration_health_report()` returns:
+
+```json
+{
+  "summary": {"total": 12, "applied": 10, "in_progress": 1, "failed": 1, "unknown": 0},
+  "items": [
+    {
+      "app_id": "app_123",
+      "migration_id": "001_projects",
+      "status": "failed",
+      "migration_hash": "...",
+      "failed_at": "...",
+      "error_message": "...",
+      "failed_operation_index": 1,
+      "is_blocker": true,
+      "unknown_status": false
+    }
+  ],
+  "has_blockers": true,
+  "has_unknown_statuses": false
+}
+```
+
+The helper may filter by `app_id` and `status`, and it enforces a result limit.
+It does not mutate history, clear failed records, repair stuck `in_progress`
+records, retry migrations, or take over locks. Repair/clear workflows remain
+future operator tooling.
+
+Operators can inspect the same report from the CLI:
+
+```text
+mozaiks migrations status --app-id app_123
+mozaiks migrations status --status failed --json
+```
+
+The command returns `0` when there are no blockers or unknown statuses, `1` when
+failed/in-progress blockers or unknown statuses exist, and `2` for configuration
+or Mongo/report loading errors. It is read-only and does not print Mongo
+credentials.
+
+## Generated App Persistence Runbook
+
+Generated app persistence is now supported end to end for module-owned business
+data. The canonical generated artifacts are:
+
+```text
+config/database_intent.json
+config/database_migrations/{migration_id}.json
+modules/{module_id}/backend/repo.py
+modules/{module_id}/backend/policy.py
+modules/{module_id}/backend/schemas.py
+```
+
+Generated apps must not use:
+
+```text
+backend/models.py
+backend/models/*.py
+backend/database/schema.json
+backend/database/seed.json
+```
+
+At runtime, `ModuleContext` exposes `ctx.persistence` when the module request has
+an `app_id`. `ctx.db` is not injected and is not canonical. Generated
+`backend/repo.py` is the only generated backend layer that should touch
+persistence, and it should use `ctx.persistence.collection(module_id,
+entity_name)` with values that match `config/database_intent.json`. Generated
+module code must not call `get_mongo_client()` or hardcode database names.
+
+Layer responsibilities:
+
+- `handler.py` dispatches action calls to service methods only.
+- `service.py` owns orchestration, validation, and event emission after state is
+  committed; it calls repo methods for data access.
+- `repo.py` owns persistence access through `ctx.persistence`.
+- `policy.py` builds scope and domain filters.
+- `schemas.py` owns typed document shapes and pure normalization helpers.
+
+Runtime app loading behavior:
+
+- missing `config/database_intent.json` is allowed for non-persistent apps.
+- valid `config/database_intent.json` is loaded and indexed by
+  `(module_id, entity_name)`.
+- invalid JSON or invalid shape fails app load.
+- declared indexes are applied idempotently.
+- additive migration files are loaded from `config/database_migrations/*.json`.
+- migration states are recorded in `mozaiksai.AppDatabaseMigrations`.
+- supported migration operations are `ensure_collection` and `ensure_index`.
+- destructive migrations and arbitrary migration code are not supported.
+- production persistent apps should set
+  `MOZAIKS_DATABASE_STARTUP_POLICY=required`.
+
+Compact neutral example:
+
+```json
+{
+  "version": "1",
+  "surfaces": [
+    {
+      "surface_id": "projects",
+      "surface_kind": "module",
+      "collections": [
+        {
+          "module_id": "projects",
+          "name": "projects",
+          "entity_name": "projects",
+          "indexes": [
+            {
+              "name": "project_owner_created_at",
+              "keys": [
+                {"field": "owner_id", "order": 1},
+                {"field": "created_at", "order": -1}
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+```python
+class ProjectsRepo:
+    async def _collection(self, ctx):
+        persistence = getattr(ctx, "persistence", None)
+        if persistence is None:
+            raise RuntimeError("Persistence is not available for this app context.")
+        return persistence.collection("projects", "projects")
+```
+
+```json
+{
+  "migration_id": "001_projects_tasks_indexes",
+  "version": "1",
+  "operations": [
+    {"type": "ensure_collection", "module_id": "projects", "entity_name": "projects"},
+    {
+      "type": "ensure_index",
+      "module_id": "projects",
+      "entity_name": "projects",
+      "index": {
+        "name": "project_owner_created_at",
+        "keys": [{"field": "owner_id", "order": 1}, {"field": "created_at", "order": -1}]
+      }
+    }
+  ]
+}
+```
+
+Current coverage includes runtime persistence tests, generated app persistence
+smokes, downstream persistent projects generation replay, and live AppPlanAgent
+fixture replay.
+
 ## `data_entity` Contract Upgrade
 
-The existing `data_entity` runtime path is directionally correct but incomplete.
+The existing `data_entity` runtime path is directionally correct but separate
+from generated module repo persistence.
 
 Today it accepts:
 
@@ -394,14 +626,13 @@ Today it accepts:
 - `indexes`
 - `write_strategy`
 
-But it only enforces required fields on insert.
+Current support can validate required fields, create declared indexes, and
+enforce basic types/enums in the workflow data-entity lane. That does not mean
+generated module repos should use `ctx.db`; generated module repos use
+`ctx.persistence` instead.
 
-To match this contract, `DataEntityManager` should be upgraded to:
+To fully match this contract, runtime/platform persistence still needs:
 
-- create declared indexes
-- enforce basic field typing
-- enforce `enum` when declared
-- honor `search_by`
 - support safe deferred flush semantics
 - record applied collection setup state
 
@@ -427,9 +658,10 @@ These are known inconsistencies in the current system:
    from `Concepts`.
 2. Builder metadata is split across `autogen_ai_agents`, `MozaiksAI`, and
    `mozaiks`.
-3. `data_entity` advertises indexes/schema/write strategy more strongly than it
-   currently enforces.
-4. migration file placement still reflects an older backend topology idea.
+3. prompts and tests must not fall back to old `ctx.db`,
+   `backend/database/*`, or `backend/models/*` artifacts.
+4. generated repo guidance must stay aligned with `ctx.persistence` as the
+   runtime-supported persistence boundary.
 
 ## Recommended Implementation Order
 
@@ -440,8 +672,9 @@ These are known inconsistencies in the current system:
 4. Write `config/database_intent.json` during `AppGenerator`.
 5. Move migration output to `config/database_migrations/`.
 6. Persist migration docs to `mozaiksai.DatabaseMigrations`.
-7. Upgrade `DataEntityManager` to enforce indexes/basic schema.
-8. Teach refinement routing to apply the change-class DB rules in this doc.
+7. Keep generated `repo.py` guidance aligned with `ctx.persistence`.
+8. Exercise a persistent generated app smoke test.
+9. Teach refinement routing to apply the change-class DB rules in this doc.
 
 ## Relationship To Other Docs
 

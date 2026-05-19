@@ -81,9 +81,10 @@ Rules:
 
 App-owned product data managed by generated or hosted modules:
 
-- campaigns
-- investors
-- payouts
+- projects
+- tasks
+- audit_logs
+- notifications
 - other module-owned collections
 
 This data is not builder metadata. It belongs to app module boundaries and must
@@ -136,12 +137,121 @@ effect of handler code.
 - `DesignDocs` owns the typed `database_intent_bundle`
 - `AppGenerator` stages `config/database_intent.json`
 - refinement runs may stage `config/database_migrations/{migration_id}.json`
+- generated module repos use `backend/schemas.py` for typed document shapes and
+  `backend/repo.py` for persistence operations
+- the runtime injects `ctx.persistence` into module actions when `app_id` exists;
+  generated repo code uses `ctx.persistence.collection(module_id, entity_name)`
+  and must not require `ctx.db`
+- the runtime loads `config/database_intent.json` during app load; missing
+  intent is allowed for non-persistent apps, while invalid JSON or invalid shape
+  fails app loading
+- the runtime applies declared indexes idempotently and applies only additive
+  migration files from `config/database_migrations/*.json`
+- migration states are recorded in `mozaiksai.AppDatabaseMigrations`
 
 The target contract is:
 
 - additive changes can be applied deterministically
 - destructive changes require explicit review
 - migration history must stay linked to app artifact versions
+
+Supported generated app migration operations today are:
+
+- `ensure_collection`
+- `ensure_index`
+
+The runtime does not execute arbitrary migration code, drop collections, delete
+fields, rename fields, or rewrite documents as part of generated app migrations.
+
+Generated-app database startup policy is controlled by
+`MOZAIKS_DATABASE_STARTUP_POLICY`:
+
+- `best_effort` is the default. Index and migration failures are logged and
+  startup continues.
+- `required` is recommended for production persistent generated apps. Index and
+  migration failures fail startup.
+
+App business data database names are resolved from an injected adapter value,
+then `MOZAIKS_APP_DATABASE_NAME`, then `MOZAIKS_APPS_DATABASE`, then
+`mozaiks_apps`.
+
+Migration history records use `in_progress`, `applied`, and `failed`. The
+`mozaiksai.AppDatabaseMigrations` collection also acts as the migration lock:
+the runtime atomically claims a migration by inserting an `in_progress` record
+for `(app_id, migration_id)` before operations run. The collection has a unique
+index on `(app_id, migration_id)` so concurrent startup instances cannot both
+claim the same migration.
+
+Failed records include error type/message and failed operation details. Existing
+`in_progress` or `failed` records block automatic retry until an operator clears
+or repairs the history record. `in_progress` means another instance is applying
+the migration or a previous instance crashed after claiming it. The first-pass
+runtime does not take over expired locks; operators must inspect the history
+record and repair or clear it deliberately. Production persistent apps should
+run with `MOZAIKS_DATABASE_STARTUP_POLICY=required` so migration lock conflicts
+fail startup instead of being treated as healthy.
+
+Migration health is inspectable through the read-only runtime helper
+`get_migration_health_report()`. The report returns summary counts, migration
+items, `has_blockers`, and `has_unknown_statuses`. `failed` and `in_progress`
+records are operational blockers; `applied` records are healthy; unknown
+statuses are surfaced for operator review. The helper does not repair, clear,
+retry, or mutate migration records. Operators should inspect this report when
+startup logs or required-mode startup failures mention migration application or
+claim failures.
+
+The CLI exposes the same read-only report:
+
+```powershell
+mozaiks migrations status --app-id app_123
+mozaiks migrations status --status failed --json
+```
+
+Options:
+
+- `--app-id`: filter to one app.
+- `--status`: filter to one migration status.
+- `--limit`: maximum rows, default `100`.
+- `--database-name`: migration history database override for diagnostics.
+- `--json`: print the exact report as JSON.
+
+Exit codes:
+
+- `0`: no blockers and no unknown statuses.
+- `1`: failed/in-progress blockers or unknown statuses exist.
+- `2`: configuration, Mongo connection, or report loading error.
+
+The command does not print Mongo connection strings or credentials. It does not
+repair, clear, retry, mutate migration records, or take over locks.
+
+### Real Mongo Smoke
+
+Normal CI does not require MongoDB for generated-app persistence. The real
+Mongo-backed smoke is opt-in and validates the production adapter path:
+
+```powershell
+$env:MONGO_URI="mongodb://localhost:27017"
+$env:MOZAIKS_RUN_REAL_MONGO_TESTS="1"
+python -m pytest tests/test_runtime_persistence_real_mongo.py
+```
+
+The smoke creates a dedicated test app database named
+`mozaiks_persistence_test_{random}` by default and drops it during cleanup. To
+use an explicit test database name, set `MOZAIKS_TEST_APP_DATABASE_NAME` to a
+dedicated database whose name contains `test`. Do not use production
+credentials or production database names for this smoke.
+
+Generated module layering for app business data:
+
+- `handler.py` dispatches only
+- `service.py` orchestrates business logic and calls repo methods
+- `repo.py` uses `ctx.persistence.collection(module_id, entity_name)`
+- `policy.py` builds scope/domain filters
+- `schemas.py` defines typed shapes and pure helpers
+
+Generated modules must not call `get_mongo_client()` directly, use `ctx.db`, or
+hardcode database names. Do not generate `backend/models.py`,
+`backend/database/schema.json`, or `backend/database/seed.json`.
 
 ## Implementation Rules
 
@@ -170,4 +280,4 @@ The target contract is:
 - [App Bundle Declaratives](../../app/app-bundle-declaratives.md)
 - [Event System](event-system.md)
 - [Event Contracts](event-contracts.md)
-- `factory_app/docs/database-intent-and-revision-contract.md`
+- [Database Intent and Revision Contract](../../builder/database-intent-and-revision-contract.md)

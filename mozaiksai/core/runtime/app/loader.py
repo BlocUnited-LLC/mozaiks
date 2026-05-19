@@ -28,6 +28,11 @@ from pydantic import ValidationError
 
 from mozaiksai.core.runtime.app.definition import AppDefinition
 from mozaiksai.core.runtime.app.module_loader import LoadedModule, ModuleLoader
+from mozaiksai.core.runtime.persistence.intent_loader import (
+    DatabaseIntentLoadError,
+    index_database_intent_by_entity,
+    load_database_intent,
+)
 from logs.logging_config import get_workflow_logger
 
 logger = get_workflow_logger("app_loader")
@@ -47,6 +52,8 @@ class AppLoadResult:
     """
     definition: AppDefinition
     modules: List[LoadedModule] = field(default_factory=list)
+    database_intent: Dict[str, Any] | None = None
+    database_entities_by_key: Dict[tuple[str, str], Dict[str, Any]] = field(default_factory=dict)
 
 
 class AppLoader:
@@ -106,6 +113,12 @@ class AppLoader:
         except ValidationError as exc:
             raise AppLoadError(f"Invalid app.json/discovered bundle: {exc}") from exc
 
+        try:
+            database_intent = load_database_intent(base_path)
+            database_entities_by_key = index_database_intent_by_entity(database_intent)
+        except DatabaseIntentLoadError as exc:
+            raise AppLoadError(f"Invalid config/database_intent.json: {exc}") from exc
+
         logger.info(
             f"APP_LOADED: name={app_def.name!r} version={app_def.version!r} "
             f"mode={app_def.execution_mode.value} "
@@ -120,7 +133,12 @@ class AppLoader:
                 f"({[m.name for m in loaded_modules]})"
             )
 
-        return AppLoadResult(definition=app_def, modules=loaded_modules)
+        return AppLoadResult(
+            definition=app_def,
+            modules=loaded_modules,
+            database_intent=database_intent,
+            database_entities_by_key=database_entities_by_key,
+        )
 
     @classmethod
     def _discover_workflow_names(cls, base_path: Path) -> List[str]:

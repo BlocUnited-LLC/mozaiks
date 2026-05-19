@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """ModuleExecutor — dispatches module action requests to loaded module handlers.
 
 Implements the Executor protocol defined in executor_registry.py.
@@ -25,17 +23,21 @@ Example handler:
 Module handlers must NOT import from mozaiksai.core.workflow or any AI layer.
 """
 
+from __future__ import annotations
+
 import inspect
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 import jsonschema
 
-from mozaiksai.core.runtime.composition.executor_registry import Executor, ExecutorType
-from mozaiksai.core.runtime.composition.module_context import ModuleContext
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.runtime.composition.executor_registry import ExecutorType
+from mozaiksai.core.runtime.composition.module_context import ModuleContext
+from mozaiksai.core.runtime.persistence import MongoPersistenceContext
 
 logger = get_workflow_logger("module_executor")
 
@@ -60,19 +62,19 @@ class ModuleRequest:
     """
     module: str
     action: str
-    params: Dict[str, Any] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
 
     # Identity (injected by runtime before dispatch)
     app_id: str = ""
-    user_id: Optional[str] = None
-    tenant_id: Optional[str] = None
-    auth_token: Optional[str] = None
-    correlation_id: Optional[str] = None
+    user_id: str | None = None
+    tenant_id: str | None = None
+    auth_token: str | None = None
+    correlation_id: str | None = None
 
     # Permission ids held by the caller. When None, enforcement is skipped
     # (trusted internal / AI workflow call). When set (even to []), the executor
     # checks that all action-declared permissions are present.
-    granted_permissions: Optional[List[str]] = None
+    granted_permissions: list[str] | None = None
 
 
 @dataclass
@@ -80,15 +82,15 @@ class ModuleResult:
     """Result of a module action execution."""
     success: bool
     data: Any = None
-    error: Optional[str] = None
-    error_code: Optional[str] = None
+    error: str | None = None
+    error_code: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # Schema validation helper
 # ---------------------------------------------------------------------------
 
-def _validate_schema(value: Any, schema: Dict[str, Any]) -> Optional[str]:
+def _validate_schema(value: Any, schema: dict[str, Any]) -> str | None:
     """Validate *value* against a JSON Schema dict.
 
     Returns None on success or a short error string on failure.
@@ -129,13 +131,13 @@ class ModuleExecutor:
     def __init__(
         self,
         *,
-        event_emitter: Optional[Callable[[str, Dict[str, Any]], Awaitable[Any] | Any]] = None,
+        event_emitter: Callable[[str, dict[str, Any]], Awaitable[Any] | Any] | None = None,
     ) -> None:
-        self._modules: Dict[str, Any] = {}
-        self._action_methods: Dict[str, Dict[str, str]] = {}
-        self._settings: Dict[str, Optional[List[Dict[str, Any]]]] = {}
-        self._action_permissions: Dict[str, Dict[str, List[str]]] = {}
-        self._action_schemas: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        self._modules: dict[str, Any] = {}
+        self._action_methods: dict[str, dict[str, str]] = {}
+        self._settings: dict[str, list[dict[str, Any]] | None] = {}
+        self._action_permissions: dict[str, dict[str, list[str]]] = {}
+        self._action_schemas: dict[str, dict[str, dict[str, Any]]] = {}
         self._event_emitter = event_emitter
 
     # ------------------------------------------------------------------
@@ -147,10 +149,10 @@ class ModuleExecutor:
         name: str,
         handler: Any,
         *,
-        action_method_map: Optional[Dict[str, str]] = None,
-        settings: Optional[List[Dict[str, Any]]] = None,
-        action_permissions: Optional[Dict[str, List[str]]] = None,
-        action_schemas: Optional[Dict[str, Dict[str, Any]]] = None,
+        action_method_map: dict[str, str] | None = None,
+        settings: list[dict[str, Any]] | None = None,
+        action_permissions: dict[str, list[str]] | None = None,
+        action_schemas: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         """Register a module handler instance under a name.
 
@@ -172,14 +174,14 @@ class ModuleExecutor:
         self._action_schemas[name] = dict(action_schemas or {})
         logger.info(f"MODULE_REGISTERED: {name} ({type(handler).__name__})")
 
-    def registered_modules(self) -> List[str]:
+    def registered_modules(self) -> list[str]:
         return list(self._modules.keys())
 
     # ------------------------------------------------------------------
     # Executor protocol
     # ------------------------------------------------------------------
 
-    async def execute(self, request: ModuleRequest, context: Optional[ModuleContext] = None) -> ModuleResult:
+    async def execute(self, request: ModuleRequest, context: ModuleContext | None = None) -> ModuleResult:
         """Dispatch a ModuleRequest to the appropriate handler action.
 
         Builds a ModuleContext from the request if one is not supplied.
@@ -243,6 +245,7 @@ class ModuleExecutor:
                 auth_token=request.auth_token,
                 correlation_id=request.correlation_id,
                 settings=self._settings.get(request.module),
+                persistence=self._build_persistence_context(request),
                 _emit=self._build_context_emitter(request),
             )
 
@@ -287,7 +290,7 @@ class ModuleExecutor:
                 error_code="EXECUTION_ERROR",
             )
 
-    async def health(self) -> Dict[str, Any]:
+    async def health(self) -> dict[str, Any]:
         return {
             "executor": "module",
             "modules": self.registered_modules(),
@@ -300,12 +303,12 @@ class ModuleExecutor:
     def _build_context_emitter(
         self,
         request: ModuleRequest,
-    ) -> Optional[Callable[[str, Dict[str, Any]], Awaitable[Any]]]:
+    ) -> Callable[[str, dict[str, Any]], Awaitable[Any]] | None:
         if self._event_emitter is None:
             return None
 
-        async def emit_module_event(event_type: str, payload: Dict[str, Any]) -> None:
-            envelope: Dict[str, Any] = {
+        async def emit_module_event(event_type: str, payload: dict[str, Any]) -> None:
+            envelope: dict[str, Any] = {
                 "id": f"evt_{uuid4().hex}",
                 "type": event_type,
                 "version": 1,
@@ -334,3 +337,16 @@ class ModuleExecutor:
                 await result
 
         return emit_module_event
+
+    def _build_persistence_context(
+        self,
+        request: ModuleRequest,
+    ) -> MongoPersistenceContext | None:
+        app_id = str(request.app_id or "").strip()
+        if not app_id:
+            return None
+        return MongoPersistenceContext(
+            app_id=app_id,
+            tenant_id=request.tenant_id,
+            user_id=request.user_id,
+        )

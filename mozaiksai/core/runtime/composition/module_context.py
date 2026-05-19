@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """ModuleContext — runtime context injected into every module action handler.
 
 Module handlers never reach into the request cycle themselves. The runtime
@@ -7,10 +5,16 @@ builds this context from the incoming request and injects it so that:
   - Handlers are testable with a mock context
   - Auth/tenant info is never pulled from globals
   - Event emission goes through one consistent path
+  - Generated module repos can use ctx.persistence for app-scoped storage
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+from typing import Any
+
+from mozaiksai.core.runtime.persistence.adapter import ModulePersistenceContext
 
 
 @dataclass
@@ -26,25 +30,30 @@ class ModuleContext:
 
     # Tenant identity
     app_id: str
-    user_id: Optional[str] = None
-    tenant_id: Optional[str] = None
+    user_id: str | None = None
+    tenant_id: str | None = None
 
     # Request tracing
-    correlation_id: Optional[str] = None
+    correlation_id: str | None = None
 
     # Auth token forwarded from the incoming request (for external API calls)
-    auth_token: Optional[str] = None
+    auth_token: str | None = None
 
     # Setting definitions declared in settings.yaml for this module.
     # Each entry is a setting definition dict: {id, type, default, label, ...}.
     # Handlers use this to resolve defaults or validate setting-aware logic.
-    settings: Optional[List[Dict[str, Any]]] = None
+    settings: list[dict[str, Any]] | None = None
+
+    # App-scoped generated-module persistence. ModuleExecutor injects this
+    # when app_id is available. It may be None for explicitly constructed test
+    # contexts or legacy trusted calls. ctx.db is intentionally not provided.
+    persistence: ModulePersistenceContext | None = None
 
     # Event emitter — async callable(event_type, payload) -> None
     # Injected by ModuleExecutor; no-op if not wired.
-    _emit: Optional[Callable[[str, Dict[str, Any]], Coroutine]] = field(default=None, repr=False)
+    _emit: Callable[[str, dict[str, Any]], Coroutine] | None = field(default=None, repr=False)
 
-    async def emit(self, event_type: str, payload: Dict[str, Any]) -> None:
+    async def emit(self, event_type: str, payload: dict[str, Any]) -> None:
         """Emit a domain event through the runtime event bus.
 
         Args:

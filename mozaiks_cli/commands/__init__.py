@@ -11,6 +11,7 @@ from mozaiks_cli.commands import sync_agent_guidance as sync_agent_guidance_comm
 from mozaiks_cli.commands import add as add_command
 from mozaiks_cli.commands import info as info_command
 from mozaiks_cli.commands import gen as gen_command
+from mozaiks_cli.commands import migrations as migrations_command
 
 __all__ = [
     "quickstart_command",

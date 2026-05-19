@@ -210,7 +210,7 @@ class {Name}Handler:
         return await self.service.action_name(ctx, param=param)
 ```
 
-Rules: never access `ctx.db` directly, never contain conditional business logic,
+Rules: never access persistence directly, never contain conditional business logic,
 never call `ctx.emit()`. One method per action declared in `module.yaml`.
 
 **`service.py`** — all business logic lives here.
@@ -223,25 +223,22 @@ class {Name}Service:
     async def action_name(self, ctx, *, param: str) -> dict:
         # validate → repo calls → ctx.emit() → return
         record = await self.repo.get(ctx, query={...})
-        await ctx.emit("hosted.{name}.{event}", {...})
+        await ctx.emit("domain.{name}.{event}", {...})
         return {"success": True}
 ```
 
-Rules: never access `ctx.db` directly, delegates all DB operations to repo,
+Rules: never access persistence directly, delegates all DB operations to repo,
 calls `ctx.emit()` only after state is committed.
 
 **`repo.py`** — database access only.
 
 ```python
-COLLECTION = "hosted_{name}_records"
-
 class {Name}Repo:
     async def _collection(self, ctx):
-        db = getattr(ctx, "db", None)
-        if db is not None:
-            return db[COLLECTION]
-        from mozaiksai.core.core_config import get_mongo_client
-        return get_mongo_client()["mozaiks"][COLLECTION]
+        persistence = getattr(ctx, "persistence", None)
+        if persistence is None:
+            raise RuntimeError("Persistence is not available for this app context.")
+        return persistence.collection("{module_id}", "{entity_name}")
 
     async def get(self, ctx, *, query: dict) -> dict | None: ...
     async def insert(self, ctx, *, record: dict) -> None: ...
@@ -251,6 +248,9 @@ class {Name}Repo:
 ```
 
 Rules: no business logic, no event emission, no validation — pure data access.
+Generated repo code uses `ctx.persistence.collection(module_id, entity_name)`
+with values aligned to `config/database_intent.json`. It must not use `ctx.db`,
+call `get_mongo_client()`, or hardcode database names.
 
 **`policy.py`** — multi-tenancy query scoping.
 
@@ -301,6 +301,70 @@ dispatch validation), no I/O, no imports from service or repo.
 Modules are backing capability bundles. The generator should not create module UI unless the module truly exports reusable UI.
 
 Modules do not own page routing by default. Routeable surfaces should be pages.
+
+### `app/config/database_intent.json`
+
+Optional for non-persistent apps. Required when generated modules own business
+collections such as `projects`, `tasks`, `audit_logs`, or `notifications`.
+
+The generator emits `database_intent_bundle` and stages it as
+`app/config/database_intent.json`. The platform runtime loads it with the app,
+indexes entities by `(module_id, entity_name)`, and applies declared indexes
+idempotently. Invalid JSON or invalid shape fails app load.
+
+Example collection intent:
+
+```json
+{
+  "version": "1",
+  "surfaces": [
+    {
+      "surface_id": "tasks",
+      "surface_kind": "module",
+      "collections": [
+        {
+          "module_id": "tasks",
+          "name": "tasks",
+          "entity_name": "tasks",
+          "indexes": [
+            {
+              "name": "task_project_status",
+              "keys": [["project_id", 1], ["status", 1]]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### `app/config/database_migrations/{migration_id}.json`
+
+Optional additive migration files. The runtime loads files under
+`app/config/database_migrations/*.json`, applies them in deterministic filename
+order, and records migration state in `mozaiksai.AppDatabaseMigrations`.
+
+Supported operations:
+
+- `ensure_collection`
+- `ensure_index`
+
+The runtime does not support destructive migrations, document rewrites, or
+arbitrary migration code.
+
+For production persistent generated apps, set
+`MOZAIKS_DATABASE_STARTUP_POLICY=required` so index or migration failures fail
+startup. The default is `best_effort`, which logs failures and continues for
+backward-compatible local/dev behavior. App business data uses
+`MOZAIKS_APP_DATABASE_NAME`, then `MOZAIKS_APPS_DATABASE`, then the fallback
+database name `mozaiks_apps` unless the adapter is constructed with an explicit
+database name.
+
+Migration history states are `in_progress`, `applied`, and `failed`. Failed
+migrations include operation-level error details and are not retried
+automatically; an operator must clear or repair the failed history record before
+retrying.
 
 ### Active app-root frontend extension barrel
 

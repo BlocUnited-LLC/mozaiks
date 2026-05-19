@@ -49,6 +49,13 @@ from mozaiksai.core.runtime.composition.extensions import (
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+from mozaiksai.core.runtime.persistence import (
+    apply_database_indexes,
+    apply_database_migrations,
+    DatabaseStartupPolicyError,
+    get_database_startup_policy,
+    load_database_migrations,
+)
 from mozaiksai.core.session.launcher import create_routed_chat_session, launch_transition, validate_context_for_workflow
 from mozaiksai.core.workflow.paths import resolve_active_app_root
 from mozaiksai.resources import resolve_factory_brand_root
@@ -62,6 +69,10 @@ logger = get_workflow_logger("platform_app")
 executor_registry = ExecutorRegistry()
 app.state.executor_registry = executor_registry
 _runtime_services: list[Any] = []
+
+
+class DatabaseStartupError(RuntimeError):
+    """Raised when required generated-app database startup work fails."""
 
 
 @app.middleware("http")
@@ -162,8 +173,73 @@ async def _platform_startup() -> None:
     global _runtime_services
 
     app_root = resolve_app_root()
+    database_startup_policy = get_database_startup_policy()
+    logger.info("DATABASE_STARTUP_POLICY: policy=%s app_root=%s", database_startup_policy, app_root)
     try:
         load_result = await AppLoader.load(str(app_root))
+        if load_result.database_intent:
+            index_app_id = (
+                load_result.database_intent.get("app_id")
+                or load_result.definition.config.get("appId")
+                or load_result.definition.config.get("app_id")
+                or _resolve_default_app_id()
+            )
+            try:
+                index_count = await apply_database_indexes(load_result.database_intent, app_id=str(index_app_id))
+                if index_count:
+                    logger.info("DATABASE_INDEXES_READY: app_id=%s count=%s", index_app_id, index_count)
+            except Exception as exc:
+                logger.warning(
+                    "DATABASE_INDEXES_NOT_APPLIED: policy=%s app_id=%s app_root=%s error=%s",
+                    database_startup_policy,
+                    index_app_id,
+                    app_root,
+                    exc,
+                )
+                if database_startup_policy == "required":
+                    raise DatabaseStartupError(
+                        f"Database indexes were not applied for app_id={index_app_id!r} "
+                        f"at app_root={str(app_root)!r}: {exc}"
+                    ) from exc
+        try:
+            migrations = load_database_migrations(app_root)
+            if migrations:
+                migration_app_id = (
+                    (load_result.database_intent or {}).get("app_id")
+                    or load_result.definition.config.get("appId")
+                    or load_result.definition.config.get("app_id")
+                    or _resolve_default_app_id()
+                )
+                migration_count = await apply_database_migrations(
+                    app_id=str(migration_app_id),
+                    migrations=migrations,
+                )
+                if migration_count:
+                    logger.info(
+                        "DATABASE_MIGRATIONS_APPLIED: app_id=%s count=%s migrations=%s",
+                        migration_app_id,
+                        migration_count,
+                        [str(migration.get("migration_id") or "") for migration in migrations],
+                    )
+        except Exception as exc:
+            failed_migration_ids = [
+                str(migration.get("migration_id") or "")
+                for migration in locals().get("migrations", [])
+                if isinstance(migration, dict)
+            ]
+            logger.warning(
+                "DATABASE_MIGRATIONS_NOT_APPLIED: policy=%s app_id=%s app_root=%s migrations=%s error=%s",
+                database_startup_policy,
+                locals().get("migration_app_id", _resolve_default_app_id()),
+                app_root,
+                failed_migration_ids,
+                exc,
+            )
+            if database_startup_policy == "required":
+                raise DatabaseStartupError(
+                    f"Database migrations were not applied for app_root={str(app_root)!r} "
+                    f"migrations={failed_migration_ids!r}: {exc}"
+                ) from exc
         if load_result.modules:
             from mozaiksai.core.events import get_event_dispatcher
 
@@ -224,6 +300,10 @@ async def _platform_startup() -> None:
             except Exception as exc:
                 logger.warning("MODULE_EXTENSIONS_SERVICES_NOT_STARTED: %s", exc)
 
+    except DatabaseStartupError:
+        raise
+    except DatabaseStartupPolicyError:
+        raise
     except AppLoadError:
         logger.debug("APP_LOAD_SKIPPED: app.json not found for platform host")
     except Exception as exc:
