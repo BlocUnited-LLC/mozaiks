@@ -295,14 +295,18 @@ def _factory_resolver(classifier=None) -> RefinementTriggerRouteResolver:
     )
 
 
+def _patch_artifact_store(monkeypatch: pytest.MonkeyPatch, stale_families: list) -> None:
+    """Patch ArtifactStore via importlib so the reference is stable across test-suite ordering."""
+    import importlib
+    store_mod = importlib.import_module("mozaiksai.core.artifacts.store")
+    monkeypatch.setattr(store_mod.ArtifactStore, "__init__", lambda self: None)
+    monkeypatch.setattr(store_mod.ArtifactStore, "get_stale_artifact_families", AsyncMock(return_value=stale_families))
+
+
 @pytest.mark.asyncio
 async def test_stale_route_bypasses_llm_and_routes_to_earliest_stale_workflow(monkeypatch: pytest.MonkeyPatch) -> None:
     """When design_docs is stale, route deterministically to DesignDocs via design_revision."""
-    monkeypatch.setattr("mozaiksai.core.artifacts.store.ArtifactStore.__init__", lambda self: None)
-    monkeypatch.setattr(
-        "mozaiksai.core.artifacts.store.ArtifactStore.get_stale_artifact_families",
-        AsyncMock(return_value=["design_docs"]),
-    )
+    _patch_artifact_store(monkeypatch, ["design_docs"])
 
     classifier = _CountingClassifier()
     resolver = _factory_resolver(classifier)
@@ -328,11 +332,7 @@ async def test_stale_route_bypasses_llm_and_routes_to_earliest_stale_workflow(mo
 @pytest.mark.asyncio
 async def test_stale_route_prioritizes_concept_over_downstream_families(monkeypatch: pytest.MonkeyPatch) -> None:
     """When both concept and app_bundle are stale, route to full_rebuild (concept has highest priority)."""
-    monkeypatch.setattr("mozaiksai.core.artifacts.store.ArtifactStore.__init__", lambda self: None)
-    monkeypatch.setattr(
-        "mozaiksai.core.artifacts.store.ArtifactStore.get_stale_artifact_families",
-        AsyncMock(return_value=["app_bundle", "concept"]),
-    )
+    _patch_artifact_store(monkeypatch, ["app_bundle", "concept"])
 
     classifier = _CountingClassifier()
     resolver = _factory_resolver(classifier)
@@ -354,15 +354,7 @@ async def test_stale_route_prioritizes_concept_over_downstream_families(monkeypa
 @pytest.mark.asyncio
 async def test_stale_route_falls_through_to_llm_when_no_stale_families(monkeypatch: pytest.MonkeyPatch) -> None:
     """When no stale families exist, the router falls through to normal LLM classification."""
-    monkeypatch.setattr("mozaiksai.core.artifacts.store.ArtifactStore.__init__", lambda self: None)
-    monkeypatch.setattr(
-        "mozaiksai.core.artifacts.store.ArtifactStore.get_stale_artifact_families",
-        AsyncMock(return_value=[]),
-    )
-
-    classifier = _CountingClassifier()
-    # Override classifier to return a real result so route() completes
-    classifier.call_count = 0
+    _patch_artifact_store(monkeypatch, [])
 
     class _PatchClassifier:
         def __init__(self) -> None:
