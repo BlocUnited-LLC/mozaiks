@@ -16,6 +16,17 @@ Open the Console:
 http://localhost:3000/apps
 ```
 
+## Reopen the Console
+
+`quickstart` creates a `scripts/run-studio.ps1` in your workspace. Use it to
+start the Console on any subsequent run:
+
+```powershell
+cd .\mozaiks-workspace
+.\.venv\Scripts\Activate.ps1
+.\scripts\run-studio.ps1
+```
+
 ## Create Your First App
 
 The Console is the normal Mozaiks starting point.
@@ -60,7 +71,6 @@ Use `ANTHROPIC_API_KEY` instead of `OPENAI_API_KEY` if that is your provider.
 See [User Configuration](user-configuration.md) for the short configuration
 reference.
 
-## Developing Mozaiks Itself
+## Contributing
 
-Use [Local Setup](local-setup.md) only if you are changing the framework,
-factory workflows, or Console source code.
+Want to contribute? See the [Contributing guide](https://docs.mozaiks.ai/contributing/).

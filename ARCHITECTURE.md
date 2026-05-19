@@ -77,7 +77,7 @@ This means:
 - **Workflows are execution primitives**, not the top-level product abstraction
 - **Artifacts are durable, versioned state** — not disposable chat outputs
 - **The control plane is the continuity layer** — it interprets intent against current system state and routes to the correct execution context
-- **factory_app is App Zero** — a Mozaiks app that builds other Mozaiks apps; it does not define the limits of the runtime
+- **`factory_app` is the first-party builder/reference app workspace** — a Mozaiks app workspace that dogfoods the canonical app contract while hosting the builder experience; it does not define the limits of the runtime
 
 Mozaiks is not primarily an app builder, a group-chat framework, or a workflow engine. It is the runtime layer that lets generated systems evolve.
 
@@ -247,7 +247,7 @@ Note: `factory_app/` as a directory co-locates the Factory layer (`workflows/`, 
 - `mozaiksai.hosts.studio`
 - `factory_app/app/` (first-party Studio app bundle — pages, modules, brand, config)
 - `factory_app/app/ui/pages/custom/studio/`
-- `factory_app/app/modules/factory_control_plane/` (identity stub only — no backend)
+- `factory_app/app/modules/factory_control_plane/` (module identity plus a stub backend handler only — no actions, capabilities, or behavior)
 - `chat-ui/src/admin/`
 
 ### 5. Mozaiks App Layer (Hosted Product)
@@ -274,13 +274,15 @@ Shared factory workflows live in `factory_app/workflows/`. A running host resolv
 
 - Studio uses `factory_app/workflows/` as the shared builder workflow root
 - Product/app hosts use `<active app root>/workflows/` when present
-- Hosted product (`mozaiks`) may compose hosted app workflows with shared factory build workflows so hosted product and builder workflows are both available
+- Build is coordinated by `workflow_sequences` in `factory_app/workflows/extended_orchestration/extension_registry.json`; `ValueEngine`, `ThemeCapture`, `DesignDocs`, `AgentGenerator`, and `AppGenerator` are individual workflows inside those sequences
+- `ExistingAppDiscovery` belongs to the brownfield adoption sequence rather than the default greenfield build path
+- Refinement today is checkpoint/control-plane re-entry driven by `app/config/ai.json` plus `factory_app/control_plane/config/control_plane.yaml`, not a dedicated `RefinementWorkflow`
 
 `AppGenerator` and `AgentGenerator` write all output into `MOZAIKS_GENERATED_ARTIFACTS_PATH` (defaults to `generated/`). Promotion is the only path from `generated/` into an active app root.
 
 **Hosted product module direction:**
 
-Hosted product modules are the deterministic business layer of the Mozaiks product — not generic app-project bookkeeping. Examples: `investor_marketplace`, `payouts`. They must not be copied into generated OSS app bundles unless explicitly selected as hosted capability packs.
+Hosted product modules are the deterministic business layer of a hosted product — not generic app-project bookkeeping. They must not be copied into generated OSS app bundles unless explicitly selected as hosted capability packs.
 
 ### 6. CLI / Developer Interface Layer
 
@@ -389,7 +391,7 @@ mozaiksai/control_plane/
 └── context_loader.py    # Aggregates context tool results for classifier prompts
 ```
 
-`factory_app/app/modules/factory_control_plane/` contains only a `module.yaml` identity stub — no `backend/`, no actions. It surfaces the control plane as a named entity in the Studio module list only. Do not add logic there.
+`factory_app/app/modules/factory_control_plane/` contains a module identity plus a stub `backend/handler.py` only — no actions, capabilities, or runtime behavior. It surfaces the control plane as a named entity in the Studio module list only. Do not add logic there.
 
 ### Checkpoints
 
@@ -445,7 +447,7 @@ Registered in `chat-ui/src/registry/coreComponents.js` — every app gets them a
 |-----------|-------|---------|
 | `ChatPage` | `/chat` | Main AI workflow interface |
 | `SchemaPage` | `/{page}` | Renders declarative AppPageSchema from `/api/pages/{name}` |
-| `ProfilePage` | `/profile` | User profile view/edit |
+| `ProfilePage` | `/profile` | User profile view/edit — identity panel (framework), module-declared panels via `contracts/profile.yaml`, app preferences panel |
 
 ### Platform-Management Surfaces
 
@@ -463,7 +465,15 @@ The admin portal and console pages are **not** core `chat-ui` primitives. They a
 
 ### Hosted-Product UI Extensions
 
-Registered via the active app root's `app/ui/index.js` extension barrel. Studio components are inherited automatically; extension components add Mozaiks-App-specific pages on top without forking the Studio layer.
+Registered via the active app root's `app/ui/index.js` extension barrel. Studio components are inherited automatically; extension components add hosted-product-specific pages on top without forking the Studio layer.
+
+#### Platform shell runtime guarantees
+
+**Admin Portal profile-menu injection** — `build_shell_config()` always injects an `admin-portal` entry into the profile menu after the full shell pipeline runs, regardless of which shortcuts the app configures. The entry is inserted before signout when present, appended otherwise, and the injection is idempotent. This is implemented in `mozaiksai/hosts/platform.py::_inject_admin_portal`.
+
+**`appShell` auto-inference** — When a route manifest entry declares `navigation.group`, `build_shell_config()` auto-sets `appShell: true` on that page's meta via `setdefault` so layout-aware components (e.g. `WorkspaceLayout`) can discover the page. An explicit `appShell: false` is never overridden.
+
+**Vite JSX transform for non-`*-platform` workspaces** — `web_shell/vite.config.js` uses a `platformAppDirForward` prefix check (`id.startsWith(platformAppDirForward + '/')`) in addition to the legacy `*-platform` directory regex, so JSX inside `.js` files is correctly transformed for any workspace directory name (e.g. `customer-portal`).
 
 ---
 
@@ -546,6 +556,26 @@ Events are **distributed**, not centralized. No separate `automations/` director
 | Workflow | Events it **emits** | `orchestrator.yaml` → `events.emits` |
 | Workflow | Events that **trigger** it | `orchestrator.yaml` → `triggers` |
 
+### Module Event/Reaction Contract
+
+- `modules/{name}/contracts/events.yaml` declares the events a module may emit.
+  Event types must use a valid namespace owned by the emitting layer such as
+  `domain.*`, `platform.*`, or `hosted.*`. For app modules, emitted events in
+  `module.yaml.actions[].emits` must be declared here and are normally `domain.*`.
+- `modules/{name}/contracts/reactions.yaml` is the canonical reaction contract.
+  It uses `schema_version: mozaiks.reactions.v1`, root key `reactions`,
+  `event_type` for the incoming event, and nested `target.kind` for routing.
+- Reaction targets use one of three canonical target kinds:
+  `handler` via `target.handler_method`, `capability` via
+  `target.capability_id`, or `notification` via `target.notification_id`.
+- `modules/{name}/contracts/notifications.yaml` declares notification rules
+  derived from events. It is separate from `reactions.yaml`; notification rules
+  describe delivery policy, while reactions describe event routing.
+- `modules/{name}/contracts/subscriptions.yaml` is deprecated compatibility
+  only. Do not author new modules with it. Runtime may load it only when
+  `contracts/reactions.yaml` is absent, and new generator/CLI output must use
+  `contracts/reactions.yaml`.
+
 ### CRUD → AI (workflow triggers)
 
 Workflows declare what app events start or resume them. Modules declare the domain events they publish and any app-level reactions they own. The platform host/runtime ingress resolves event facts to workflow triggers; modules do not encode AG2/groupchat semantics directly.
@@ -597,6 +627,7 @@ Only those agents have chat-visible messages and websocket-forwarded outputs ren
 │       │   ├── notifications.yaml   # Notification rules per event
 │       │   ├── settings.yaml        # User/app settings schema
 │       │   ├── admin.yaml           # Admin panels mounted into /admin/*
+│       │   ├── profile.yaml         # User profile page panels (optional)
 │       │   └── entitlements.yaml    # Optional capability gates
 │       ├── backend/
 │       │   ├── handler.py           # Required: thin dispatch, one method per action
@@ -604,6 +635,7 @@ Only those agents have chat-visible messages and websocket-forwarded outputs ren
 │       │   ├── repo.py              # Recommended: MongoDB access layer, no logic
 │       │   ├── policy.py            # Recommended: query scoping for multi-tenancy
 │       │   ├── schemas.py           # Recommended: typed request/response + document shapes
+│       │   ├── {helper_files}.py    # Optional: declared, justified, module-local support
 │       │   ├── settings.py          # Optional: settings hooks
 │       │   └── admin.py             # Optional: admin panel hooks
 │       └── ui/                      # Optional: module-specific UI surfaces
@@ -668,8 +700,13 @@ extensions:
 ```
 
 Two kinds:
-- `api_router` — mounts a FastAPI `APIRouter` at host startup. Required when the module needs unauthenticated or custom-path routes (e.g. webhook receivers from external services like Stripe or Slack).
-- `startup_service` — instantiates and starts a background service that lives for the process lifetime. Required for persistent external connections (WebSocket feeds, polling workers).
+- `api_router` — mounts a FastAPI `APIRouter` at host startup. Use for module-local generic external webhook receivers or custom callback routes.
+- `startup_service` — instantiates and starts a background service that lives for the process lifetime. Use for module-local audit/event subscribers or polling workers.
+
+Entrypoints must be module-local backend files and must be declared in generated
+backend outputs or Python stubs. Do not use runtime extensions for generic
+business logic, persistence, auth/scope helpers, transport infrastructure, or
+workflow orchestration.
 
 The platform loader scans `modules/*/runtime_extensions.yaml` at startup alongside the other module companion manifests. AppGenerator generates this file when a module's capabilities require it.
 
@@ -682,6 +719,7 @@ Backend layer contract:
 - `repo.py` — pure MongoDB access; no logic, no events
 - `policy.py` — pure functions; builds scoped query dicts from ctx
 - `schemas.py` — typed request/response and document shapes plus pure helpers
+- helper files — declared, justified, module-local support imported by canonical layers or referenced by `runtime_extensions.yaml`
 
 ### Page (frontend)
 A UI screen. Declarative pages live in `app/ui/pages/*.yaml` and are rendered by `SchemaPage` via `/api/pages/{name}`. Hand-authored full-page routes live in `app/ui/pages/custom/` with a corresponding entry in `route_manifest.json` and `index.js`.
@@ -753,9 +791,10 @@ These invariants guide every implementation decision in this repo.
 | AppBackendPort | generic contract in `mozaiksai` for AI runtime ↔ app backend communication |
 | app_backend_url | optional base URL for an external/generated app backend when a split topology is used |
 | module | self-contained deterministic capability unit under an app workspace `modules/` root or a generated app bundle |
-| module manifest system | `module.yaml` (required) + optional `contracts/` companion manifests: `events.yaml`, `reactions.yaml`, `notifications.yaml`, `settings.yaml`, `admin.yaml`, `entitlements.yaml` |
+| module manifest system | `module.yaml` (required) + optional `contracts/` companion manifests: `events.yaml`, `reactions.yaml`, `notifications.yaml`, `settings.yaml`, `admin.yaml`, `profile.yaml`, `entitlements.yaml` |
 | module.yaml | handler/action manifest — identity, capabilities, and action definitions; event declarations live in `events.yaml` |
 | admin.yaml (platform) | module admin panels rendered inside unified `/admin` |
+| profile.yaml (platform) | module-contributed panels on the user profile page (`/profile`) — kinds: `metrics`, `list`, `component`; hydrated via `GET /api/me/profile-panels` |
 | runtime ingress | boundary that accepts validated app/domain events and routes them to workflow triggers |
 | triggers | workflow start/resume declarations in `orchestrator.yaml` |
 | AppGenerator | workflow that generates deterministic app bundle artifacts: `app.json`, pages, config, brand patches, module manifest families, and backend code |

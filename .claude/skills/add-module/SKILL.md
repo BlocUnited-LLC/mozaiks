@@ -31,11 +31,28 @@ app/modules/{name}/
     ├── service.py        ← recommended — all business logic and event emission
     ├── repo.py           ← recommended — MongoDB access, no logic
     ├── policy.py         ← recommended — multi-tenancy query scoping
-    └── schemas.py        ← recommended — typed shapes + pure helpers
+    ├── schemas.py        ← recommended — typed shapes + pure helpers
+    └── {helper_files}.py ← optional — declared, justified, module-local support
 ```
 
 Only `module.yaml` and `backend/handler.py` are required. Add companion manifests
 under `contracts/` only when the module needs them.
+
+Use `contracts/reactions.yaml` as the canonical event-reaction contract.
+The runtime still accepts deprecated `contracts/subscriptions.yaml` only as a
+temporary fallback when `contracts/reactions.yaml` is absent, but new
+contributor-facing changes should author `contracts/reactions.yaml` only.
+
+Event/reaction contract summary:
+
+- `contracts/events.yaml` declares the events this module may emit.
+  `module.yaml.actions[].emits` must reference event types declared there.
+- `contracts/reactions.yaml` uses `schema_version: mozaiks.reactions.v1`, root
+  key `reactions`, `event_type`, and nested `target.kind`.
+- Reaction targets use `target.handler_method`, `target.capability_id`, or
+  `target.notification_id` depending on `target.kind`.
+- `contracts/notifications.yaml` declares notification rules derived from
+  events and is separate from reaction routing.
 
 The runtime auto-discovers and registers all modules at startup.
 Module routes are auto-mounted at `/api/modules/{name}/{action_id}`.
@@ -52,6 +69,12 @@ auth, notification, and footer chrome rather than hardcoding menu entries.
 The page also owns chrome intent through `shell_mode`: use `conversation` for
 DM/chat/thread pages so the mobile bottom bar and footer do not compete with the
 composer, and `workspace` for inbox, queue, profile, or management surfaces.
+
+Module runtime output must be production-honest. Do not return sample, demo,
+mock, fake, placeholder, random, or hardcoded KPI data from module actions.
+Summary/stat/metric/count actions must query repo/MongoDB state or return honest
+empty values (`0`, `[]`, `null`). Trend/change fields require a real historical
+comparison or metrics snapshot; otherwise omit them or return `null`.
 
 ---
 
@@ -132,8 +155,10 @@ reactions: []
 #
 # Example:
 #   - id: {name}.on_other_event
-#     event: domain.other_module.something_happened
-#     handler_method: handle_something
+#     event_type: domain.other_module.something_happened
+#     target:
+#       kind: handler
+#       handler_method: handle_something
 ```
 
 ### 4. Write `contracts/notifications.yaml`
@@ -144,13 +169,13 @@ Only needed when this module sends notifications on its events.
 schema_version: mozaiks.notifications.v1
 notifications:
   - id: {name}.record_created.admin
-    event: domain.{name}.record_created
+    event_type: domain.{name}.record_created
     channels: [in_app, email]
-    recipients: [admin]
+    audience:
+      roles: [admin]
     template:
-      subject: "New {name}: {{name}}"
-      body: >
-        A new {name} record has been created by {{owner_id}}.
+      title: "New {name}"
+      body: "{payload.name}"
 ```
 
 ### 5. Write `contracts/settings.yaml`
@@ -187,11 +212,51 @@ hooks: []
 Use one of these section names: `overview`, `users`, `billing`, `usage`,
 `activity`, `operations`, `settings`, `integrations`, or `support`.
 
-### 7. Write `runtime_extensions.yaml`
+### 7. Write `contracts/profile.yaml`
+
+Only needed when this module contributes panels to the user profile page.
+Use this when the module has user-scoped data worth showing on the account/profile
+surface — for example, account activity summaries, notification preference
+sections, or usage stats. Do not add profile.yaml to every module.
+
+Profile panels must bind to module actions declared in `module.yaml`.
+Do not expose admin-only actions or secrets. Do not use `kind: form` (reserved,
+not yet implemented). Profile panels do not replace or override `/api/me` identity.
+
+```yaml
+schema_version: mozaiks.profile.v1
+panels:
+  - id: {name}-summary
+    title: {Display Name} Summary
+    description: Account-level summary for {Display Name}.
+    order: 50                   # 1–998; identity=0, preferences=999
+    kind: metrics               # metrics | list | component
+    action: get_{name}_summary  # module action that hydrates the panel
+    fields:
+      - { id: total, label: Total, type: number }
+      - { id: status, label: Status, type: status }
+```
+
+Supported `kind` values:
+
+| Kind | When to use |
+|------|-------------|
+| `metrics` | Grid of KPI/metric tiles from `fields` |
+| `list` | Key/value list from `fields` |
+| `component` | App-registered React component (use `component:` instead of `fields:`) |
+
+Supported `type` values for `fields`: `string`, `number`, `currency`, `date`, `boolean`, `status`.
+
+The platform calls the declared `action` at `/api/me/profile-panels` request time
+and attaches the result as `data` on the panel. Panel action failures are returned
+as safe error metadata — they do not crash the profile page.
+
+### 8. Write `runtime_extensions.yaml`
 
 Only needed when the module must extend the host lifecycle with a raw webhook
 router or a process-lifetime background service. Entrypoints are module-local;
 do not use `modules.*`, `app.modules.*`, or `mozaiksai.*` import paths.
+Use this only when normal module actions are insufficient.
 
 ```yaml
 schema_version: mozaiks.runtime_extensions.v1
@@ -205,7 +270,37 @@ extensions:
 
 Most modules should omit this file.
 
-### 8. Write `backend/schemas.py`
+Rules:
+
+- `api_router` is for a module-local generic external webhook receiver or callback route.
+- `startup_service` is for a module-local audit/event subscriber or polling worker.
+- The entrypoint file must be declared in generated backend outputs or Python stubs.
+- Do not use runtime extensions for generic business logic, persistence, auth/scope logic, transport infrastructure, or workflow orchestration.
+
+### 8a. Declare helper files only when justified
+
+Helper files are allowed only when they are:
+
+- explicitly declared before generation
+- module-local under `backend/`
+- justified by a specific purpose
+- imported by canonical layers or referenced by `runtime_extensions.yaml`
+
+Allowed generic examples:
+
+- external provider client
+- webhook receiver helper
+- startup service helper
+- audit event subscriber
+- notification delivery client
+- complex pure domain helper that would bloat `service.py`
+
+Do not create helper files for business logic that belongs in `service.py`,
+persistence that belongs in `repo.py`, auth/scope logic that belongs in
+`policy.py`, DTOs that belong in `schemas.py`, transport infrastructure,
+workflow orchestration, or random file splitting.
+
+### 9. Write `backend/schemas.py`
 
 TypedDicts for MongoDB document shapes. Pure helpers. No I/O.
 
@@ -235,7 +330,7 @@ def coerce_limit(value: Any, default: int = 20, maximum: int = 100) -> int:
         return default
 ```
 
-### 9. Write `backend/policy.py`
+### 10. Write `backend/policy.py`
 
 Pure functions that turn `ctx` into scoped MongoDB queries. No DB access.
 
@@ -347,7 +442,7 @@ class {Name}Service:
         return {"success": True, "record": dict(record)}
 ```
 
-### 12. Write `backend/handler.py`
+### 13. Write `backend/handler.py`
 
 Thin dispatch only. One method per action. Delegates everything to service.
 
@@ -370,11 +465,11 @@ class {Name}Handler:
         return await self.service.create_{name}(ctx, name=name)
 ```
 
-### 13. Write `backend/__init__.py`
+### 14. Write `backend/__init__.py`
 
 Empty file — makes `backend/` a Python package.
 
-### 14. Restart the backend
+### 15. Restart the backend
 
 ```bash
 mozaiks serve .
@@ -393,6 +488,7 @@ Modules are loaded at startup. No registration step needed.
 | `repo.py` | MongoDB queries, cursor iteration | Business logic, event emission, validation |
 | `policy.py` | Build query dicts from ctx | DB access, side effects |
 | `schemas.py` | TypedDicts, timestamp_now, coerce_limit | I/O, imports from service/repo |
+| helper files | Declared external clients, runtime extension entrypoints, complex pure helpers | Undeclared logic, persistence, policy, DTOs, transport infrastructure, workflow orchestration |
 
 ---
 
@@ -406,8 +502,10 @@ a workflow, declare it in `contracts/reactions.yaml` and add the handler method:
 schema_version: mozaiks.reactions.v1
 reactions:
   - id: {name}.on_other_event
-    event: domain.other_module.something_happened
-    handler_method: handle_something
+    event_type: domain.other_module.something_happened
+    target:
+      kind: handler
+      handler_method: handle_something
 ```
 
 Add `handle_something` as a method on `{Name}Handler` (delegate to service):

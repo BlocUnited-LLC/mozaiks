@@ -116,6 +116,24 @@ definitions:
       fields:
       - ConceptOverview
       default: null
+  concept_blueprint:
+    type: object
+    description: >
+      Full typed ConceptBlueprint from ValueEngine — the authoritative upstream concept
+      artifact. Contains surface_candidate_hints (coarse realization hints for each
+      likely surface), capability_pack_hints (upstream capability signals),
+      brand_intent (style and experience direction), app_ui_requirements (UI capability
+      needs), core_features, and api_endpoints. DesignDocs uses this as the primary
+      surface and experience signal; concept_overview prose is the fallback when null.
+    source:
+      type: data_reference
+      database_name: mozaiksai
+      collection: BuilderConcepts
+      query_template:
+        app_id: '{{runtime.app_id}}'
+      fields:
+      - Blueprint
+      default: null
   monetization_enabled:
     type: boolean
     description: Flag indicating if monetization features are enabled.
@@ -168,6 +186,7 @@ agents:
     - change_intent
     - impact_set
     - concept_overview
+    - concept_blueprint
     - monetization_enabled
     - coding_participation
     - design_docs_hitl

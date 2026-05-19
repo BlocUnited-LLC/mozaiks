@@ -49,21 +49,7 @@ Then open `http://localhost:3000/apps` and click `Create App`.
 `.\mozaiks-workspace` is the local workspace Mozaiks uses for Console state and
 generated artifacts. The app itself is created from the Console.
 
-Use an editable repo checkout only when developing Mozaiks itself:
-
-```powershell
-git clone https://github.com/BlocUnited-LLC/mozaiks.git
-cd mozaiks
-.\scripts\bootstrap-builder.ps1 -Workspace .\mozaiks-workspace
-```
-
-Framework commands:
-
-- `mozaiks init`
-- `mozaiks studio --dir <workspace> --open`
-- `mozaiks sync-agent-guidance --dir . --check`
-- `mozaiks onboard --full`
-- `mozaiks serve`
+Want to contribute? See the [Contributing guide](https://docs.mozaiks.ai/contributing/).
 
 Main repo layout:
 

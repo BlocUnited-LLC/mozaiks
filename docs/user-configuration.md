@@ -28,7 +28,8 @@ Use `ANTHROPIC_API_KEY` instead of `OPENAI_API_KEY` if that is your provider.
 ## Optional Connector Secrets
 
 Only configure durable connector secret storage when apps need reusable
-third-party credentials such as Stripe, SendGrid, Twilio, or provider API keys.
+third-party credentials such as email, analytics, CRM, storage, payment, webhook,
+or model-provider API keys.
 
 ```env
 MOZAIKS_CONNECTOR_SECRET_BACKEND=auto
@@ -52,9 +53,6 @@ Deployment and shared-hosting environments may also need:
 These are operator settings. They are not required for the first local Console
 run.
 
-## Source Checkout Settings
+## Contributing
 
-Most users should install with `pip install mozaiks`.
-
-Use [Local Setup](local-setup.md) when you are developing Mozaiks itself or need
-editable source code.
+Want to contribute? See the [Contributing guide](https://docs.mozaiks.ai/contributing/).

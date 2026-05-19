@@ -15,12 +15,7 @@ Mozaiks supports four development tiers:
 | **engine** | Headless AI API | Workflows only, no UI |
 | **chat** | Chatbot builders | Workflows + chat UI |
 | **integrated** | SaaS builders | + modules + event bus + auth |
-| **full** | Product builders | + admin portal + subscriptions |
-
-The example Backstage app uses the **full** tier. To create a simpler project:
-```bash
-mozaiks init chat --name my-chatbot
-```
+| **full** | Product builders | + admin portal + full management surfaces |
 
 For more info on tiers: `/init-project` or `/add-feature` skills.
 
@@ -33,6 +28,15 @@ Run these commands and verify versions:
 
 If anything is missing, help them install it first.
 
+## Canonical Local Contributor Path
+
+For this repo, the default local contributor experience is:
+
+- Studio backend on `http://localhost:8000`
+- `web_shell/` frontend on `http://localhost:3000`
+- `factory_app/app` as the first-party builder/reference app bundle when no
+	external app workspace is selected
+
 ## Setup Steps
 
 ### 1. Environment Variables
@@ -43,50 +47,61 @@ cp .env.example .env  # or Copy-Item on Windows
 
 Set `OPENAI_API_KEY=sk-...` in `.env`. If $ARGUMENTS contains an API key, use it.
 
-### 2. Docker Services
-```bash
-docker compose -f infra/compose/docker-compose.yml up -d
-```
-
-Wait 30-60 seconds for Keycloak to initialize. Verify:
-```bash
-docker compose -f infra/compose/docker-compose.yml ps
-```
-
-### 3. Python Backend
+### 2. Python + Repo Dependencies
 ```bash
 python -m venv .venv
 # Activate: .\.venv\Scripts\Activate.ps1 (Windows) or source .venv/bin/activate (Unix)
-pip install -r requirements.txt
-mozaiks serve .
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
 ```
 
-Keep backend running. Verify: `curl http://localhost:8000/api/health`
-
-### 4. Frontend (new terminal)
+### 3. Frontend Dependencies
 ```bash
-cd app
-npm install
-npm run dev
+npm --prefix web_shell install
 ```
+
+### 4. Start the Default Local Dev Stack
+
+Preferred path in this repo:
+
+```powershell
+.\scripts\run-studio.ps1
+```
+
+That starts the Studio backend and the `web_shell` frontend together.
 
 ### 5. Verify
-- Open http://localhost:5173
-- Login: dev / dev
-- Send a message in the chat
+
+- Open `http://localhost:3000/apps`
+- Check backend health at `http://localhost:8000/api/health`
+- Confirm the frontend is loading the first-party builder/reference app bundle
+	from `factory_app/app`
+
+### 6. Optional Split Mode
+
+If the user wants separate backend and frontend terminals:
+
+```powershell
+.\scripts\run-backend.ps1
+.\scripts\run-frontend.ps1
+```
+
+If they are developing against an external app workspace, rerun those scripts
+with `-AppWorkspacePath <path>`.
 
 ## Common Issues
 
 - Port 8080 in use: Another service using Keycloak's port
 - Port 27017 in use: Local MongoDB already running
 - "OPENAI_API_KEY not found": Check .env is in repo root, no spaces around `=`
-- "Authentication Unavailable": Wait for Keycloak, or temporarily set AUTH_ENABLED=false
+- Frontend loads the wrong app bundle: restart with `-AppWorkspacePath <path>` or set `PLATFORM_PATH`
+- Port 3000 or 8000 already in use: rerun `run-studio.ps1`, `run-backend.ps1`, or `run-frontend.ps1` with `-ForceStop`
 
 ## What's Running
 
 | Service | URL |
 |---------|-----|
-| Frontend | http://localhost:5173 |
+| Frontend | http://localhost:3000 |
 | Backend | http://localhost:8000 |
 | Keycloak | http://localhost:8080 |
 | Keycloak Admin | http://localhost:8080/admin (admin/admin) |

@@ -66,5 +66,5 @@ Before tagging a release:
 4. verify `mozaiksai/version.py` matches the planned Git tag
 5. use the changelog entry as the source for GitHub Release notes
 
-Keep proprietary `mozaiks-app` release notes separate from the OSS framework
+Keep private hosted-product release notes separate from the OSS framework
 changelog unless the change is in this repo and affects public Mozaiks users.

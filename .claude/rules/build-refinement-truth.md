@@ -1,0 +1,28 @@
+---
+paths:
+  - "ARCHITECTURE.md"
+  - "docs/**/*.md"
+  - ".claude/**/*.md"
+---
+
+# Build And Refinement Truth Rules
+
+Use these rules when describing the builder lifecycle, workflow routing, or
+refinement behavior.
+
+- Build is workflow-sequence-driven through
+  `factory_app/workflows/extended_orchestration/extension_registry.json`.
+- `AppGenerator` and `AgentGenerator` are individual workflows inside the build
+  sequence, not the build system itself.
+- `ExistingAppDiscovery` is the brownfield/existing-app adoption workflow path,
+  not the default greenfield build flow.
+- Keep these mechanisms distinct: `handoffs.yaml` for workflow-local agent
+  routing, `workflow_sequences[]` for cross-workflow build/revision sequencing,
+  `transitions[]` for routed entry and user choice flows, and MFJ for mid-flight
+  child-workflow orchestration.
+- Current refinement is checkpoint/control-plane re-entry driven by
+  `app/config/ai.json` and the selected `control_plane.yaml` pack. Do not claim
+  a dedicated `RefinementWorkflow` unless the runtime introduces one.
+- If module event/reaction docs differ from the current implementation, direct
+  contributors to inspect the module loader and tests and follow the implemented
+  runtime truth for that change.

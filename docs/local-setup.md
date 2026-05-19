@@ -95,14 +95,22 @@ debugging.
 The repo scripts are for framework development from a source checkout. They are
 not the public package install path.
 
-Terminal 1:
+Single-command start (opens a backend terminal + runs frontend here):
+
+```powershell
+.\scripts\run-studio.ps1
+```
+
+Or start each service manually in separate terminals:
+
+Terminal 1 — backend:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 .\scripts\run-backend.ps1 -ForceStop
 ```
 
-Terminal 2:
+Terminal 2 — frontend:
 
 ```powershell
 .\scripts\run-frontend.ps1 -ForceStop

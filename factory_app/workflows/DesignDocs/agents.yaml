@@ -14,7 +14,7 @@ agents:
       - Do NOT implement AI/LLM backend logic. No LLM endpoints, embeddings, vector DBs, model training, or prompt-serving APIs.
       - Focus on core application functionality only.
       - Generate documents as strings inside one structured output bundle.
-      - concept_overview, monetization_enabled, coding_participation, design_docs_hitl, database_provider, database_setup_mode, and any refinement control-plane fields are provided via context variables; do not call tools to load them.
+      - concept_overview, concept_blueprint, monetization_enabled, coding_participation, design_docs_hitl, database_provider, database_setup_mode, and any refinement control-plane fields are provided via context variables; do not call tools to load them.
       - If design_docs_hitl is true, make the docs easier to review by clearly separating assumptions, alternatives, and final recommendations.
       - If coding_participation is autonomous, keep docs direct and execution-oriented.
       - If database_setup_mode is atlas or existing_uri, treat database connectivity as secret-managed configuration and do not hardcode connection strings.
@@ -22,10 +22,46 @@ agents:
       - Do not call save tools manually. The runtime auto-invokes the save tool after your structured output validates.
       - Include monetization/paywall/billing integration points ONLY if MONETIZATION_ENABLED is true; never implement payment logic in the runtime.
       - Treat third-party credentials, connector secrets, and workspace integration records as platform-owned integration state. They must not be modeled as app/business collections inside `database_intent_bundle`.
+  - id: concept_blueprint
+    heading: '[CONCEPT BLUEPRINT]'
+    content: |-
+      concept_blueprint is the typed ConceptBlueprint output from ValueEngine — the
+      authoritative upstream concept artifact. When non-null, use it as the primary
+      design signal rather than inferring everything from prose.
+
+      Key fields and how to use them:
+
+      surface_candidate_hints[]: The upstream surface signal from ValueEngine. Each hint
+      carries surface_id, label, likely_surface_kind (module/workflow/control_plane/
+      external_integration/ui_only), source_capability_packs, confidence (low/medium/high),
+      and rationale. High-confidence hints should become surface_map entries. Low-confidence
+      hints are design inputs, not mandates. Do not invent surfaces that contradict the
+      hints without rationale. Do not omit high-confidence hints without rationale.
+
+      capability_pack_hints[]: Upstream capability pack signals. Use these to populate
+      source_capability_packs in surface_map entries where hints align.
+
+      brand_intent: When non-null, use brand_intent.style_summary and
+      brand_intent.brand_keywords to anchor experience_spec.brand_direction. The brand
+      posture decided at concept time is the authoritative starting point for DesignDocs.
+
+      app_ui_requirements[]: Each entry is a natural-language UI capability need. Use
+      these to inform which pages and primitive sections belong in experience_spec.pages[].
+
+      core_features[]: The approved MVP scope from ValueEngine. Validate that the
+      designed surfaces collectively cover all core features.
+
+      When concept_blueprint is null, infer surfaces and experience direction from
+      concept_overview prose as before. When concept_blueprint is present, treat
+      surface_candidate_hints and brand_intent as the authoritative upstream scope —
+      not a suggestion to reinterpret.
   - id: process
     heading: '[PROCESS]'
     content: |-
-      1) Read concept_overview, database_provider, and database_setup_mode from context variables.
+      1) Read concept_blueprint and concept_overview from context variables.
+         - If concept_blueprint is non-null, use surface_candidate_hints as the upstream
+           surface signal and brand_intent as the upstream brand signal (see [CONCEPT BLUEPRINT]).
+         - If concept_blueprint is null, infer surfaces from concept_overview prose.
 
       1a) If build_mode is `revision` or refinement_request, revision_scope, change_intent, or impact_set are present, treat them as authoritative control-plane reroute context. Revise the design around that requested delta instead of regenerating from a blank slate.
 
@@ -62,7 +98,10 @@ agents:
     heading: '[SURFACE REALIZATION]'
     content: |-
       DesignDocs is the stage where abstract capability hints become explicit
-      surface ownership decisions.
+      surface ownership decisions. When concept_blueprint is present,
+      surface_candidate_hints[] is the authoritative upstream input — not a
+      suggestion. Resolve each hint into a surface_map entry with full ownership,
+      entity, mutation, and event declarations.
 
       The Backend doc must include a required `## Surface Realization Map` section
       with a deterministic YAML block named `surface_map`.

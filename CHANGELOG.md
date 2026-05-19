@@ -13,6 +13,45 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+No changes yet.
+
+## 0.1.3 - 2026-05-18
+
+### Added
+
+- Added the generated-app persistence runtime path, including `ctx.persistence`,
+  `MongoPersistenceContext`, `database_intent` loading, additive migrations,
+  and database index application.
+- Added migration startup policy, migration history/locking, migration health
+  reporting, and the read-only `mozaiks migrations status` CLI.
+- Added AppGenerator persistence alignment so generated persistent modules use
+  canonical `repo.py`, `schemas.py`, `policy.py`, database intent, and staged
+  migration artifacts.
+- `ExistingAppDiscovery` workflow now detects storage patterns (mongodb, sql, file_store, redis), external connectors, and Mozaiks vocabulary/authorship signals during preload — improving adoption-level recommendations for `native_migration` and `ecosystem` paths.
+- Added `ModuleDecomposerAgent` to `ExistingAppDiscovery`: produces a `ModuleDecompositionPlan` (modules, workflows, pages, adapters) when adoption level is `ecosystem` or `native_migration`.
+- `ExistingAppAugmentationArtifact` now carries `module_decomposition_plan` (serialized JSON); `save_existing_app_artifacts` writes the plan to `generated/existing_app_discovery/{chat_id}/` for downstream AppGenerator consumption.
+- `handoffs.yaml` now routes conditionally: `ecosystem`/`native_migration` goes through `ModuleDecomposerAgent` before the assembler; `embed`/`bridge` skip directly to assembly.
+- Added three generic infrastructure probe adapters to `mozaiksai/core/adapters/`: `dns_probe` (A/AAAA via stdlib, MX/NS/CNAME/TXT via optional dnspython), `tls_probe` (cert expiry, SANs, issuer, protocol via stdlib ssl), and `http_health` (status, latency, redirect chain, content metadata via httpx). All are provider-neutral with no required credentials.
+
+### Changed
+
+- Hardened generated-app persistence docs/tests and kept the default startup
+  policy backward-compatible while documenting production `required` mode.
+- Hardened UI/design-system contracts, shared workflow infrastructure, and
+  route/docs alignment for the OSS factory console.
+- `IntegrationPlannerAgent` no longer defaults to embed/bridge — prefers `native_migration` when `mozaiks_authored_app` is true, storage is file_store, or app is internal tooling.
+- Tightened generated UI quality-gate enforcement for custom React surfaces: docs/tests fixture paths are ignored, semantic token/class usage is covered by dedicated tests, and AppGenerator guidance now explicitly requires semantic Button variants backed by `app/brand/theme_config.json` and shared primitives.
+- Aligned OSS frontend architecture docs, frontend rules, and add-page skill guidance with the generated UI gate: semantic tokens/variants are allowed, hardcoded hex/rgb and direct font-family styling are disallowed, local primitive clones and raw primary buttons are disallowed, and docs/tests fixture paths are excluded from generated React audit scope.
+- Moved the shared generated UI gate into `factory_app/workflows/_shared/` and documented the boundary between factory-owned shared workflow infrastructure and generated workflow-local files.
+- Moved shared platform build lifecycle hooks into `factory_app/workflows/_shared/platform/` and documented the canonical placement rules for factory-owned shared workflow infrastructure versus workflow-local generated files.
+- Updated public contributor docs, setup skills, env/web-shell guidance, and .claude rules to frame `factory_app` as the first-party builder/reference workspace, describe build as workflow-sequence-driven, and document refinement as checkpoint/control-plane re-entry rather than a dedicated workflow.
+- Unified the module event-reaction contract on canonical `contracts/reactions.yaml` across runtime loading/routing, AppGenerator prompts and structured outputs, CLI scaffolds, contributor guidance, and contract tests.
+- Consolidated source-of-truth architecture docs and module-authoring guidance for the canonical event/reaction model, including provider-neutral `tasks` examples and explicit legacy-only framing for deprecated `contracts/subscriptions.yaml`.
+
+### Deprecated
+
+- `contracts/subscriptions.yaml` remains runtime-supported only as a temporary fallback when `contracts/reactions.yaml` is absent; new generated and contributor-authored module work should use `contracts/reactions.yaml` exclusively.
+
 ## 0.1.2 - 2026-05-14
 
 ### Changed

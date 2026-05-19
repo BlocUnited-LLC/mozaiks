@@ -124,6 +124,16 @@ Canonical target:
   `modules/`, `ui/`, and `brand/` together under the active app root
 - hosted product workspaces should consume that same contract from their own repos
 
+## Contributor Guidance Operating System
+
+For nontrivial OSS changes:
+
+- choose the closest task skill from `.claude/skills/README.md` before editing
+- use `.claude/skills/oss-contribution-review` when scope spans layers or the
+  right skill is unclear
+- include the appropriate impact section from `.claude/rules/testing.md` in the
+  final report and always list tests run
+
 ## Module Contract Rule
 
 When working in or generating modules:
@@ -140,6 +150,7 @@ When working in or generating modules:
   │   ├── notifications.yaml          ← notification rules per event
   │   ├── settings.yaml               ← user/app settings schema
   │   ├── admin.yaml                  ← admin panels mounted into /admin/*
+  │   ├── profile.yaml                ← user profile page panels (optional)
   │   └── entitlements.yaml           ← optional capability entitlements
   ├── runtime_extensions.yaml         ← optional: api_router / startup_service
   └── backend/
@@ -148,6 +159,7 @@ When working in or generating modules:
       ├── repo.py                     ← recommended: MongoDB access layer, no logic
       ├── policy.py                   ← recommended: query scoping for multi-tenancy
       ├── schemas.py                  ← recommended: typed request/response + document shapes
+      ├── {helper_files}.py           ← optional: declared, justified, module-local support
       ├── settings.py                 ← optional: settings hooks
       └── admin.py                    ← optional: admin panel hooks
   ```
@@ -155,11 +167,20 @@ When working in or generating modules:
   business logic, no `ctx.db`, no `ctx.emit`.
 - `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and
   `backend/schemas.py` are the canonical support files for any module with database access.
+- Backend helper files are allowed only when declared before generation, kept
+  module-local, justified by a specific purpose, and imported by a canonical
+  layer or referenced by `runtime_extensions.yaml`.
+- `runtime_extensions.yaml` is optional. Use `api_router` only for module-local
+  external callback routes, and `startup_service` only for process-lifetime
+  module services such as audit/event subscribers. Do not use runtime extensions
+  for generic business logic, persistence, auth/scope helpers, transport
+  infrastructure, or workflow orchestration.
 - App modules publish `domain.*` events. Hosted product modules use `hosted.*`.
   Workflow starts/resumes are resolved by runtime/platform trigger contracts, not by
   hardcoded workflow names in module code.
-- AppGenerator produces these files through structured output models. Keep the
-  generated shapes aligned with runtime loaders, docs, and tests.
+- Factory workflows such as `AppGenerator` produce these files through
+  structured output models, and contributors may author them directly. Keep the
+  canonical shapes aligned with runtime loaders, docs, and tests.
 
 ## Generated Persistence Contract
 
@@ -182,7 +203,6 @@ AppGenerator persistence output is intent-first, not runtime-DB-first:
 - `ctx.db` remains absent and non-canonical; generated code must not require or
   emit it.
 
-
 ## Structured-Output-First Contract Rule
 
 When introducing or changing YAML contracts:
@@ -201,7 +221,7 @@ When introducing or changing YAML contracts:
 
 This applies to `module.yaml`, `contracts/events.yaml`, `contracts/reactions.yaml`,
 `contracts/notifications.yaml`, `contracts/settings.yaml`, `contracts/admin.yaml`,
-workflow YAMLs, and page schemas.
+`contracts/profile.yaml`, workflow YAMLs, and page schemas.
 
 ## Contract-Declared Customization Rule
 
@@ -218,6 +238,21 @@ contract.
   shape they are allowed to emit.
 - If a stub reference is optional, the contract must say when it is omitted and
   what the canonical no-customization behavior is.
+
+## Platform Shell Constraints
+
+Do not generate or suggest entries for the following — these are injected by the
+platform runtime and must not be declared manually:
+
+- `admin-portal` shortcuts or navigation items in `shell.json` or `route_manifest.json`
+- `admin-portal` entries in `extension_registry.json` entrypoints
+- Manual `appShell: true` on route manifest entries that already declare `navigation.group`
+  (the runtime auto-infers it; explicit repetition is not wrong but is redundant)
+
+These constraints exist because `build_shell_config()` guarantees Admin Portal injection
+after the full shell pipeline (`_inject_admin_portal`), and `appShell` is auto-set when
+`navigation.group` is present. Generators that emit these fields create duplicates or
+override the runtime guarantee.
 
 ## Generator Output Rule
 

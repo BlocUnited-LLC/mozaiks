@@ -40,7 +40,7 @@ mozaiks init chat --name my-chatbot
 
 ### 3. **integrated** - SaaS Builders
 **For:** Teams building multi-user SaaS products
-**Includes:** AI + chat + operations + event bus + auth
+**Includes:** AI + chat + modules + event bus + auth
 **Use when:** You need deterministic app actions, user management, and event-driven automation
 
 ```bash
@@ -55,7 +55,7 @@ mozaiks init integrated --name my-saas
 
 ### 4. **full** - Product Builders
 **For:** Production products with admin needs
-**Includes:** Everything + admin portal + subscriptions
+**Includes:** Everything + admin portal + full management surfaces
 **Use when:** You need complete product infrastructure
 
 ```bash
@@ -65,7 +65,7 @@ mozaiks init full --name my-product
 **What you get:**
 - Everything from integrated
 - Admin portal with observability
-- Subscription management
+- Full management surfaces
 - Token usage tracking
 
 ## Workflow
@@ -104,7 +104,7 @@ Users can always add more features later:
 
 ```bash
 # Enable individual features
-mozaiks add operations
+mozaiks add modules
 mozaiks add event_bus
 mozaiks add auth
 mozaiks add admin

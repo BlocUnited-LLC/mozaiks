@@ -54,4 +54,5 @@ Before tagging:
 4. verify `mozaiksai/version.py` matches the tag
 5. copy or summarize that version section into the GitHub Release notes
 
-Keep `mozaiks-app` release notes separate from this OSS framework changelog.
+Keep private hosted-product release notes separate from this OSS framework
+changelog unless the change is in this repo and affects public Mozaiks users.

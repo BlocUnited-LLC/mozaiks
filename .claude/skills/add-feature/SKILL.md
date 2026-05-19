@@ -113,9 +113,11 @@ Next steps:
 ### Adding **chat_ui**
 ```
 Next steps:
-1. Start frontend: npm run dev (from web_shell or mozaiks-app root)
-2. Configure branding in app/brand/
-3. Access chat at http://localhost:3000
+1. Install frontend deps once: npm --prefix web_shell install
+2. Start frontend: .\scripts\run-frontend.ps1 (or npm --prefix web_shell run dev -- --host 0.0.0.0 --port 3000 --strictPort)
+3. Configure branding in the active app bundle brand directory
+4. Access chat/UI at http://localhost:3000
+5. By default, web_shell resolves factory_app/app unless PLATFORM_PATH or -AppWorkspacePath is set
 ```
 
 ## When to Use This Skill

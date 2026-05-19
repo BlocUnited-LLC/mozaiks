@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 WORKSPACE = Path(__file__).resolve().parents[1]
 
 
@@ -115,6 +114,37 @@ def test_app_plan_agent_prompt_requires_capability_first_planning() -> None:
     assert '"capability_packs": [' in content
     assert '"capability_pack_id": null' in content
     assert '\n        "workflows": [' in content
+
+
+def test_designdocs_context_exposes_concept_blueprint_as_typed_object() -> None:
+    context_vars = _read_yaml("factory_app/workflows/DesignDocs/context_variables.yaml")
+    definitions = context_vars["definitions"]
+    agents = context_vars["agents"]
+
+    # Typed ConceptBlueprint for DesignDocsAgent — loads the Blueprint field from BuilderConcepts
+    assert "concept_blueprint" in definitions
+    bp_def = definitions["concept_blueprint"]
+    assert bp_def["source"]["collection"] == "BuilderConcepts"
+    assert bp_def["source"]["fields"] == ["Blueprint"]
+    assert "concept_blueprint" in agents["DesignDocsAgent"]["variables"]
+
+    # Prose string fallback still present for backward-compat consumers
+    assert "concept_overview" in definitions
+    assert definitions["concept_overview"]["source"]["collection"] == "BuilderConcepts"
+    assert "concept_overview" in agents["DesignDocsAgent"]["variables"]
+
+
+def test_designdocs_prompt_treats_concept_blueprint_as_authoritative_surface_signal() -> None:
+    source = _read_text("factory_app/workflows/DesignDocs/agents.yaml")
+
+    assert "[CONCEPT BLUEPRINT]" in source
+    assert "surface_candidate_hints" in source
+    assert "capability_pack_hints" in source
+    assert "brand_intent" in source
+    # Key authority rule: high-confidence hints must become surface_map entries
+    assert "High-confidence hints should become surface_map entries" in source
+    # Fallback rule when blueprint is absent
+    assert "concept_blueprint is null" in source
 
 
 def test_appgenerator_context_exposes_experience_spec_as_typed_object() -> None:
