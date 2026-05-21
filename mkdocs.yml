@@ -191,6 +191,10 @@ nav:
       - Overview: contributing/index.md
       - Contributor Guidance Readiness: contributing/contributor-guidance-readiness.md
       - Local Dev Setup: local-setup.md
+      - Manual Smoke Tests:
+          - Integration Readiness: manual-smoke-tests/integration-readiness.md
+          - Refinement Classifier: manual-smoke-tests/refinement-classifier.md
+          - Refinement Dry Run: manual-smoke-tests/refinement-dry-run.md
       - AI Coding Agents:
           - Agent Bootstrap Prompt: agent-bootstrap-prompt.md
       - Release:
