@@ -13,8 +13,42 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+## 0.1.4 - 2026-05-21
+
+### Added
+
+- Added refinement control-plane smoke tooling, including the live classifier
+  smoke harness, fixture replay coverage, and an offline dry-run refinement
+  plan harness for safely previewing classification, routing, impact paths, and
+  profile usage without running workflows or mutating app files.
+- Added deterministic refinement impact mapping for ExperienceSpec UI surfaces,
+  module/backend changes, hosted capability façade paths, external integration
+  readiness, and data model migrations.
+- Added conceptual-replan carry-forward tooling for module inventory,
+  carry-forward candidate discovery, declarative contract reads, preservation
+  resolution, AppGenerator carry-forward decisions, and carry-forward reporting.
+- Added artifact content-store support and workflow artifact persistence
+  hardening so generated app and workflow bundles can be restored, reviewed,
+  invalidated, and promoted more reliably.
+
+### Changed
+
+- Promoted `experience_spec` to a first-class artifact dependency family and
+  aligned staleness propagation, routing docs, sequence impact families, and
+  downstream UI path hints with that contract.
+- Moved control-plane LLM configuration to named profile resolution for
+  classifier, impact analysis, planning/replanning, codegen, review/validation,
+  and architecture-level planning.
+- Updated public contributor guidance, MkDocs navigation, control-plane docs,
+  and task skills for workflow-sequence-driven refinement and factory workflow
+  contribution boundaries.
+
 ### Fixed
 
+- **CI regression after refinement profile changes**: Allowed the declared
+  `architecture` control-plane LLM profile, aligned ExperienceSpec dependency
+  assertions, removed provider-specific refinement examples, and updated
+  responsive smoke expectations for the current Usage UI.
 - **Stuck REVISING state**: Added `SessionRouter.fail_active_revision()` to
   clear `active_revision_id` and set `sequence_status=STALE` when a workflow
   errors during a revision. `handle_user_input_from_api` now calls it via
