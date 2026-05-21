@@ -189,6 +189,12 @@ The canonical artifact is `database_intent_bundle`.
 It should be stored in persistence and also written to the staged app bundle as
 `config/database_intent.json`.
 
+Hosted product/platform workspaces must keep product-owned collection metadata
+outside `app/config/database_intent.json`. That path is reserved for generated
+app persistence intent consumed by the OSS runtime. Do not place hosted
+collection aliases, proprietary hosted collection names, or host-system
+authority records in generated-app database intent.
+
 Minimum shape:
 
 ```json

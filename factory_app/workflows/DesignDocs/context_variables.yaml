@@ -103,6 +103,53 @@ definitions:
     source:
       type: state
       default: null
+  pivot_description:
+    type: string
+    description: >
+      User's original change request text, injected by the control plane when
+      the active workflow_sequence is conceptual_replan. Describes the nature
+      of the concept-level pivot so DesignDocs can align experience_spec to the
+      new concept direction rather than revising from the previous design state.
+    source:
+      type: state
+      default: null
+  existing_concept_ref:
+    type: string
+    description: >
+      Artifact version id of the concept at the time the conceptual_replan was
+      triggered. Null when not available. Advisory context only — carry-forward
+      behavior is future work.
+    source:
+      type: state
+      default: null
+  preserve_families:
+    type: array
+    description: >
+      Artifact families that the conceptual_replan should preserve. Default is
+      ["brand"]. DesignDocs should treat the existing brand direction as a
+      constraint rather than regenerating visual identity from scratch.
+      Carry-forward behavior is future work; this variable is context plumbing only.
+    source:
+      type: state
+      default: []
+  previous_brand_ref:
+    type: string
+    description: >
+      Artifact version id of the brand/theme_config at the time the
+      conceptual_replan was triggered. Null when not available.
+    source:
+      type: state
+      default: null
+  llm_profile:
+    type: string
+    description: >
+      Advisory LLM profile name injected by the control plane when the
+      active workflow_sequence requires stronger reasoning (conceptual_replan
+      or full_rebuild). Maps to a named profile in ai.json llm_profiles.
+      Null for patch, design, and feature routes. Advisory only.
+    source:
+      type: state
+      default: null
   concept_overview:
     type: string
     description: Project description and overview from the BuilderConcepts collection (produced
@@ -204,6 +251,11 @@ agents:
     - screen
     - change_intent
     - impact_set
+    - pivot_description
+    - existing_concept_ref
+    - preserve_families
+    - previous_brand_ref
+    - llm_profile
     - concept_overview
     - concept_blueprint
     - captured_theme_config

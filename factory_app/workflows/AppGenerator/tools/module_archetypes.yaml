@@ -32,6 +32,7 @@ archetypes:
       - Keep backend/handler.py thin.
       - Put business logic in service.py, repo.py, policy.py, and schemas.py.
       - Publish only declared domain events.
+      - list_* service methods must serialize repo records through a _serialize_{entity}_row allowlist helper before returning. Never pass raw repo documents to callers. The allowlist returns only the fields declared in module.yaml output_schema items.properties; unknown or future DB fields are excluded by default. Define the helper in schemas.py.
 
   messaging:
     summary: Deterministic module for real-time or threaded communication.

@@ -13,7 +13,37 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
-No changes yet.
+### Fixed
+
+- **Stuck REVISING state**: Added `SessionRouter.fail_active_revision()` to
+  clear `active_revision_id` and set `sequence_status=STALE` when a workflow
+  errors during a revision. `handle_user_input_from_api` now calls it via
+  `asyncio.create_task()` in its exception handler, preventing the session from
+  remaining stuck in REVISING indefinitely.
+- **Migration schema mismatch**: `generate_migration()` in
+  `factory_app/workflows/AppGenerator/tools/schema_migration.py` now emits the
+  `schema_version` and `operations[]` fields required by the runtime
+  `_validate_migration()` check. New collections are represented as
+  `ensure_collection` operations. Generator output now survives a full
+  generate → inject → load → validate roundtrip without raising
+  `DatabaseMigrationError`.
+- **Permission bypass**: `mozaiksai/hosts/platform.py` now passes
+  `granted_permissions=list(principal.scopes)` (instead of `None`) when
+  dispatching module actions for authenticated HTTP requests. `granted_permissions=None`
+  is preserved only for trusted-internal (unauthenticated) calls. Module-level
+  `action_permissions` declared in `module.yaml` are now correctly enforced for
+  OAuth2-authenticated principals.
+- **DRAFT artifact leaks**: `resolve_latest_artifact_version_refs()` now
+  filters by `lifecycle_status=CURRENT` when resolving canonical input version
+  IDs. DRAFT versions (created during in-flight revisions) can no longer
+  contaminate the `canonical_inputs_version` of downstream artifacts.
+  The parent-version lookup in `persist_summary_artifact()` also filters by
+  CURRENT to avoid linking new artifacts to an in-flight DRAFT parent.
+- **First-run canonical inputs**: When no CURRENT artifact version exists for
+  a requested kind (first run or all versions still in DRAFT/STALE state),
+  `resolve_latest_artifact_version_refs()` now logs a DEBUG message and
+  correctly returns that kind absent from the result dict rather than silently
+  returning a stale or draft version ID.
 
 ## 0.1.3 - 2026-05-18
 

@@ -16,7 +16,15 @@ class _FakeArtifactStore:
     def __init__(self) -> None:
         self.create_calls = []
 
-    async def list_artifact_versions(self, *, app_id: str, artifact_kind: str, artifact_key: str | None = None, limit: int = 1):
+    async def list_artifact_versions(
+        self,
+        *,
+        app_id: str,
+        artifact_kind: str,
+        artifact_key: str | None = None,
+        lifecycle_status: ArtifactLifecycleStatus | None = None,
+        limit: int = 1,
+    ):
         data = {
             ("design_docs", "design_docs"): [
                 ArtifactVersionDoc(
@@ -59,7 +67,11 @@ class _FakeArtifactStore:
                 )
             ],
         }
-        return data.get((artifact_kind, artifact_key), [])
+        rows = data.get((artifact_kind, artifact_key), [])
+        # Honour lifecycle_status filter so tests verify the CURRENT-only contract.
+        if lifecycle_status is not None:
+            rows = [r for r in rows if r.lifecycle_status == lifecycle_status]
+        return rows
 
     async def create_artifact_version(self, **kwargs):
         self.create_calls.append(dict(kwargs))
@@ -117,3 +129,101 @@ async def test_persist_summary_artifact_registers_parent_inputs_and_summary_payl
     assert store.create_calls[0]["lifecycle_status"] == ArtifactLifecycleStatus.DRAFT
     assert store.create_calls[0]["validation_status"] == ArtifactValidationStatus.SKIPPED
     assert extract_summary_payload(artifact) == {"surface_map": {"surfaces": [{"surface_id": "dashboard"}]}}
+
+
+# ── DRAFT suppression and first-run tests ─────────────────────────────────────
+
+
+class _DraftOnlyArtifactStore:
+    """Returns only DRAFT versions — simulates a mid-revision state."""
+
+    def __init__(self) -> None:
+        self.create_calls: list = []
+
+    async def list_artifact_versions(
+        self,
+        *,
+        app_id: str,
+        artifact_kind: str,
+        artifact_key: str | None = None,
+        lifecycle_status: ArtifactLifecycleStatus | None = None,
+        limit: int = 1,
+    ):
+        all_versions = [
+            ArtifactVersionDoc(
+                _id="av_concept_draft_1",
+                app_id=app_id,
+                artifact_kind="concept",
+                artifact_key="concept",
+                version_number=2,
+                lineage_root_id="av_concept_1",
+                parent_version_id="av_concept_1",
+                lifecycle_status=ArtifactLifecycleStatus.DRAFT,
+                validation_status=ArtifactValidationStatus.SKIPPED,
+                commit_metadata={"metadata": {}},
+            )
+        ] if artifact_kind == "concept" else []
+        if lifecycle_status is not None:
+            return [v for v in all_versions if v.lifecycle_status == lifecycle_status]
+        return all_versions
+
+    async def create_artifact_version(self, **kwargs):
+        self.create_calls.append(dict(kwargs))
+        return ArtifactVersionDoc(
+            _id="av_new",
+            app_id=kwargs["app_id"],
+            artifact_kind=kwargs["artifact_kind"],
+            artifact_key=kwargs["artifact_key"],
+            version_number=1,
+            lineage_root_id="av_new",
+            lifecycle_status=kwargs["lifecycle_status"],
+            validation_status=kwargs["validation_status"],
+            commit_metadata=kwargs["commit_metadata"],
+        )
+
+
+class _EmptyArtifactStore(_DraftOnlyArtifactStore):
+    """Returns no versions — simulates first-run state."""
+
+    async def list_artifact_versions(self, **kwargs):
+        return []
+
+
+@pytest.mark.asyncio
+async def test_resolve_latest_artifact_version_refs_excludes_draft_artifacts() -> None:
+    """DRAFT artifacts must not be returned; only CURRENT versions are canonical inputs."""
+    refs = await resolve_latest_artifact_version_refs(
+        app_id="app_1",
+        artifact_kinds=("concept",),
+        artifact_store=_DraftOnlyArtifactStore(),
+    )
+
+    # The draft version must not appear in canonical inputs.
+    assert "concept" not in refs
+
+
+@pytest.mark.asyncio
+async def test_resolve_latest_artifact_version_refs_returns_empty_on_first_run() -> None:
+    """On first run (no prior artifacts) the result is an empty dict, not an error."""
+    refs = await resolve_latest_artifact_version_refs(
+        app_id="app_1",
+        artifact_kinds=("concept", "design_docs"),
+        artifact_store=_EmptyArtifactStore(),
+    )
+
+    assert refs == {}
+
+
+@pytest.mark.asyncio
+async def test_persist_summary_artifact_first_run_has_no_parent() -> None:
+    """On first run the parent lookup returns nothing; parent_version_id must be None."""
+    store = _EmptyArtifactStore()
+
+    await persist_summary_artifact(
+        app_id="app_1",
+        artifact_kind="concept",
+        summary_payload={"name": "My App"},
+        artifact_store=store,
+    )
+
+    assert store.create_calls[0]["parent_version_id"] is None

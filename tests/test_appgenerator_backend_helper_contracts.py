@@ -384,3 +384,141 @@ class TestHelperExamplesProviderNeutral:
         assert "worker" in examples_str.lower() or "event" in examples_str.lower(), (
             "Worker example should use generic naming"
         )
+
+
+class TestListSerializerContracts:
+    """
+    Verifies that AppGenerator enforces allowlist serialization for list_* service methods.
+
+    Rules under test:
+    - module_contract.hard_constraints declares the list_* serializer requirement.
+    - module_contract.hard_constraints declares the explicit items.properties requirement.
+    - ServiceAgent instruction 20a requires allowlist serialization for list_* actions.
+    - The example in ServiceAgent uses a neutral domain (not MozaiksPay/Stripe/wallet/billing).
+    - The example helper name follows the _serialize_{entity}_row pattern.
+    - module_archetypes.yaml standard archetype hard_constraints includes the serializer rule.
+    - Raw repo record pass-through is explicitly prohibited.
+    - The rule references backend/schemas.py as the location for helpers.
+    """
+
+    def test_module_contract_has_list_output_schema_items_constraint(self):
+        data = _load_yaml(_FILE_CONTRACTS)
+        constraints = data["task_contracts"]["module_contract"]["hard_constraints"]
+        constraints_str = "\n".join(str(c) for c in constraints)
+        assert "items.properties" in constraints_str, (
+            "module_contract hard_constraints must require explicit items.properties for list_* output_schema"
+        )
+        assert "list_*" in constraints_str or "list_" in constraints_str, (
+            "module_contract hard_constraints must reference list_* actions"
+        )
+
+    def test_module_contract_has_list_serializer_constraint(self):
+        data = _load_yaml(_FILE_CONTRACTS)
+        constraints = data["task_contracts"]["module_contract"]["hard_constraints"]
+        constraints_str = "\n".join(str(c) for c in constraints)
+        assert "raw repo" in constraints_str.lower() or "_serialize_" in constraints_str, (
+            "module_contract hard_constraints must prohibit raw repo records from list_* service methods"
+        )
+        assert "allowlist" in constraints_str.lower() or "allow list" in constraints_str.lower(), (
+            "module_contract hard_constraints must require an allowlist helper pattern"
+        )
+
+    def test_module_contract_list_serializer_names_schemas_py(self):
+        data = _load_yaml(_FILE_CONTRACTS)
+        constraints = data["task_contracts"]["module_contract"]["hard_constraints"]
+        constraints_str = "\n".join(str(c) for c in constraints)
+        assert "schemas.py" in constraints_str, (
+            "module_contract list_* serializer constraint must name schemas.py as the helper location"
+        )
+
+    def test_service_agent_has_list_serializer_instruction(self):
+        text = _agents_text()
+        assert "_serialize_" in text, (
+            "ServiceAgent instructions must include the _serialize_{entity}_row pattern for list_* methods"
+        )
+        assert "allowlist" in text.lower() or "allow list" in text.lower() or "allowlist" in text, (
+            "ServiceAgent instructions must use the word 'allowlist' for list_* serialization"
+        )
+
+    def test_service_agent_list_serializer_example_is_domain_neutral(self):
+        text = _agents_text()
+        # The example must not use MozaiksPay, Stripe, wallet, billing, or entitlements terms
+        forbidden = ["mozaikspay", "stripe", "wallet", "billing", "entitlement", "payout", "checkout"]
+        lower = text.lower()
+        # Find the 20a instruction block
+        idx = lower.find("20a.")
+        assert idx != -1, "ServiceAgent instruction 20a must exist"
+        block = lower[idx: idx + 1500]
+        for term in forbidden:
+            assert term not in block, (
+                f"ServiceAgent instruction 20a example must not reference '{term}' — use neutral domain names"
+            )
+
+    def test_service_agent_list_serializer_example_uses_neutral_domain(self):
+        text = _agents_text()
+        idx = text.lower().find("20a.")
+        assert idx != -1, "ServiceAgent instruction 20a must exist"
+        block = text[idx: idx + 1500]
+        # Should reference a neutral module like inventory, contacts, projects, etc.
+        neutral_terms = ["inventory", "contact", "project", "report", "analytics", "item", "record"]
+        assert any(t in block.lower() for t in neutral_terms), (
+            "ServiceAgent instruction 20a example must use a neutral domain name "
+            "(e.g. inventory, contacts, projects)"
+        )
+
+    def test_service_agent_list_serializer_prohibits_raw_repo_passthrough(self):
+        text = _agents_text()
+        idx = text.lower().find("20a.")
+        assert idx != -1, "ServiceAgent instruction 20a must exist"
+        block = text[idx: idx + 1500]
+        assert "raw repo" in block.lower() or "never return raw" in block.lower(), (
+            "ServiceAgent instruction 20a must explicitly prohibit returning raw repo documents"
+        )
+
+    def test_module_archetypes_standard_has_list_serializer_constraint(self):
+        archetypes_path = (
+            Path(__file__).parent.parent
+            / "factory_app"
+            / "workflows"
+            / "AppGenerator"
+            / "tools"
+            / "module_archetypes.yaml"
+        )
+        data = _load_yaml(archetypes_path)
+        constraints = data["archetypes"]["standard"]["hard_constraints"]
+        constraints_str = "\n".join(str(c) for c in constraints)
+        assert "list_*" in constraints_str or "list_" in constraints_str, (
+            "standard archetype hard_constraints must reference list_* serializer requirement"
+        )
+        assert "_serialize_" in constraints_str or "allowlist" in constraints_str.lower(), (
+            "standard archetype hard_constraints must name the _serialize_ helper or 'allowlist' pattern"
+        )
+
+    def test_module_archetypes_serializer_constraint_names_schemas_py(self):
+        archetypes_path = (
+            Path(__file__).parent.parent
+            / "factory_app"
+            / "workflows"
+            / "AppGenerator"
+            / "tools"
+            / "module_archetypes.yaml"
+        )
+        data = _load_yaml(archetypes_path)
+        constraints = data["archetypes"]["standard"]["hard_constraints"]
+        constraints_str = "\n".join(str(c) for c in constraints)
+        assert "schemas.py" in constraints_str, (
+            "standard archetype list_* constraint must name schemas.py as the helper location"
+        )
+
+    def test_list_serializer_rules_use_no_proprietary_terms(self):
+        """Serializer rules must be provider-neutral — no MozaiksPay/Stripe/wallet references."""
+        data = _load_yaml(_FILE_CONTRACTS)
+        constraints = data["task_contracts"]["module_contract"]["hard_constraints"]
+        # Find the list_* constraints
+        list_constraints = [c for c in constraints if "list_" in str(c).lower() or "serialize" in str(c).lower()]
+        combined = " ".join(str(c) for c in list_constraints).lower()
+        forbidden = ["stripe", "mozaikspay", "wallet", "billing", "entitlement", "payout", "checkout"]
+        for term in forbidden:
+            assert term not in combined, (
+                f"module_contract list_* constraint must not reference '{term}' — use neutral language"
+            )

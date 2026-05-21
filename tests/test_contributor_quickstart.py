@@ -31,6 +31,7 @@ def test_contributing_quickstart_contains_common_task_map() -> None:
     quickstart = _read("CONTRIBUTING.md")
 
     assert "Runtime or platform change" in quickstart
+    assert "Auth change" in quickstart
     assert "Build workflow sequence change" in quickstart
     assert "AppGenerator-specific change" in quickstart
     assert "AgentGenerator-specific change" in quickstart
@@ -38,7 +39,12 @@ def test_contributing_quickstart_contains_common_task_map() -> None:
     assert "Control-plane or refinement change" in quickstart
     assert "Module contract change" in quickstart
     assert "Page or frontend change" in quickstart
+    assert "Admin UI change" in quickstart
     assert "Persistence change" in quickstart
+    assert "Docs-only change" in quickstart
+    assert "Test-only change" in quickstart
+    assert "CLI change" in quickstart
+    assert "Release/changelog change" in quickstart
     assert "Hosted-pack support change" in quickstart
     assert "Unsure" in quickstart
 
@@ -64,6 +70,10 @@ def test_contributing_quickstart_includes_focused_guidance_validation_command() 
     assert "tests/test_admin_ui_two_tier_contract.py" in quickstart
     assert "tests/test_claude_guidance_operating_system.py" in quickstart
     assert "tests/test_contributor_quickstart.py" in quickstart
+    assert "tests/test_runtime_change_skill.py" in quickstart
+    assert "tests/test_factory_build_workflow_skill.py" in quickstart
+    assert "tests/test_control_plane_refinement_skill.py" in quickstart
+    assert "tests/test_contributor_skill_routing_map.py" in quickstart
 
 
 def test_contributing_quickstart_avoids_private_or_stale_public_framing() -> None:
@@ -88,11 +98,18 @@ def test_skill_index_still_maps_common_tasks_for_quickstart_follow_through() -> 
     skills = _read(".claude/skills/README.md")
 
     assert "Runtime/platform change" in skills
+    assert "Auth change" in skills
     assert "Build sequence / extension registry / journey composition" in skills
     assert "AppGenerator-specific change" in skills
     assert "AgentGenerator-specific change" in skills
     assert "ExistingAppDiscovery change" in skills
     assert "Control-plane / refinement / harness routing" in skills
+    assert "Module contract change" in skills
+    assert "Admin UI change" in skills
     assert "Persistence / database intent / repo contract" in skills
+    assert "Docs-only change" in skills
+    assert "Test-only change" in skills
+    assert "CLI change" in skills
+    assert "Release/changelog change" in skills
     assert "Hosted-pack support" in skills
     assert "If unsure or scope spans layers" in skills

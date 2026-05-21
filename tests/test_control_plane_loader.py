@@ -62,6 +62,7 @@ def test_load_default_factory_control_plane_pack() -> None:
         "get_artifact_workspace_scope",
         "get_artifact_workspace_catalog",
         "get_stale_artifact_families",
+        "get_carry_forward_candidates",
     ]
 
 

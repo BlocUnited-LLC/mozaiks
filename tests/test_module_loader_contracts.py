@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from mozaiksai.core.runtime.app.loader import AppLoader
-from mozaiksai.core.runtime.app.module_loader import ModuleLoadError, ModuleLoader
+from mozaiksai.core.runtime.app.module_loader import ActionDef, ModuleLoadError, ModuleLoader
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
 
@@ -172,6 +172,72 @@ def test_module_loader_loads_canonical_contract(tmp_path: Path) -> None:
     assert loaded.manifests.reactions is not None
     assert loaded.manifests.reactions.reactions[0].id == "task_created_notify"
     assert type(loaded.handler).__name__ == "TasksModule"
+
+
+def test_module_loader_loads_action_api_surface_metadata(tmp_path: Path) -> None:
+    module_dir = _write_canonical_module(tmp_path)
+    module_yaml = module_dir.joinpath("module.yaml")
+    module_yaml.write_text(
+        module_yaml.read_text(encoding="utf-8").replace(
+            "    handler_method: create_task\n",
+            "    handler_method: create_task\n    api_surface: public_readonly\n",
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = ModuleLoader(str(tmp_path)).load("tasks")
+
+    assert loaded.definition.actions[0].api_surface == "public_readonly"
+    assert loaded.action_permissions_map == {"create": ["tasks.write"]}
+
+
+def test_module_loader_loads_without_action_api_surface(tmp_path: Path) -> None:
+    loaded = ModuleLoader(str(tmp_path)).load(_write_canonical_module(tmp_path).name)
+
+    assert loaded.definition.actions[0].api_surface is None
+
+
+@pytest.mark.parametrize("api_surface", ["public", "public_readonly", "internal", "admin_internal"])
+def test_action_api_surface_known_metadata_values_load(api_surface: str) -> None:
+    action = ActionDef(
+        id="list_items",
+        description="List items",
+        handler_method="list_items",
+        api_surface=api_surface,
+    )
+
+    assert action.api_surface == api_surface
+
+
+@pytest.mark.parametrize("api_surface", [123, [], {}])
+def test_action_api_surface_must_be_string(api_surface) -> None:
+    with pytest.raises(ValueError, match="api_surface"):
+        ActionDef(
+            id="list_items",
+            description="List items",
+            handler_method="list_items",
+            api_surface=api_surface,
+        )
+
+
+def test_action_api_surface_must_be_non_empty() -> None:
+    with pytest.raises(ValueError, match="api_surface"):
+        ActionDef(
+            id="list_items",
+            description="List items",
+            handler_method="list_items",
+            api_surface="  ",
+        )
+
+
+def test_action_unknown_extra_field_still_fails_validation() -> None:
+    with pytest.raises(ValueError, match="unexpected_field"):
+        ActionDef(
+            id="list_items",
+            description="List items",
+            handler_method="list_items",
+            unexpected_field=True,
+        )
 
 
 def test_module_loader_loads_legacy_subscriptions_as_reactions(

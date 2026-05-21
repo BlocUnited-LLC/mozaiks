@@ -256,6 +256,7 @@ async def test_scope_proposer_selects_paths_and_materializes_files(tmp_path: Pat
     assert proposal.selected_paths == ["app/ui/pages/Dashboard.jsx"]
     assert files["app/ui/pages/Dashboard.jsx"].startswith("export default function Dashboard")
     assert service.calls[0]["system_prompt"] == "scope selection prompt from pack"
+    assert service.calls[0]["llm_config"] == {"model": "gpt-5.2-codex", "temperature": 0.1}
     assert '"control_plane_context"' in service.calls[0]["user_prompt"]
     assert len(tool_executor.calls) == 3
 

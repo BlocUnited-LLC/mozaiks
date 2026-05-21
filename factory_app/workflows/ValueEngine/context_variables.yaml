@@ -135,6 +135,55 @@ definitions:
     source:
       type: state
       default: null
+  pivot_description:
+    type: string
+    description: >
+      User's original change request text, injected by the control plane when
+      the active workflow_sequence is conceptual_replan. Describes the nature
+      of the concept-level pivot (e.g., "make this a marketplace, not a CRM")
+      so ValueEngine can anchor the new concept to explicit pivot intent rather
+      than treating it as a blank-slate interview.
+    source:
+      type: state
+      default: null
+  existing_concept_ref:
+    type: string
+    description: >
+      Artifact version id of the current/latest concept artifact at the time
+      the conceptual_replan was triggered. Null when not available. Future work
+      will use this to carry forward generic modules; today it is advisory context.
+    source:
+      type: state
+      default: null
+  preserve_families:
+    type: array
+    description: >
+      Artifact families that the conceptual_replan should preserve rather than
+      regenerate from scratch. Default is ["brand"] — ThemeCapture runs but
+      should use the existing brand as a starting point. Carry-forward behavior
+      is future work; this variable is context plumbing only.
+    source:
+      type: state
+      default: []
+  previous_brand_ref:
+    type: string
+    description: >
+      Artifact version id of the current brand/theme_config artifact at the
+      time the conceptual_replan was triggered. Null when not available.
+    source:
+      type: state
+      default: null
+  llm_profile:
+    type: string
+    description: >
+      Advisory LLM profile name injected by the control plane when the
+      active workflow_sequence requires stronger reasoning (conceptual_replan
+      or full_rebuild). Maps to a named profile in ai.json llm_profiles.
+      Null for patch, design, and feature routes. Advisory only — the
+      workflow runner consumes this when a consumer is wired up.
+    source:
+      type: state
+      default: null
   interview_complete:
     type: boolean
     description: True when ValueInterviewAgent signals completion (NEXT).
@@ -228,6 +277,11 @@ agents:
     - screen
     - change_intent
     - impact_set
+    - pivot_description
+    - existing_concept_ref
+    - preserve_families
+    - previous_brand_ref
+    - llm_profile
     - interview_complete
   ResearchAgent:
     variables:
@@ -243,6 +297,11 @@ agents:
     - refinement_request_meta
     - change_intent
     - impact_set
+    - pivot_description
+    - existing_concept_ref
+    - preserve_families
+    - previous_brand_ref
+    - llm_profile
     - interview_complete
     - concept_presented
     - app_type
@@ -260,6 +319,11 @@ agents:
     - refinement_request_meta
     - change_intent
     - impact_set
+    - pivot_description
+    - existing_concept_ref
+    - preserve_families
+    - previous_brand_ref
+    - llm_profile
     - concept_presented
     - concept_blueprint
     - concept_overview

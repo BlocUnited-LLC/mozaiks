@@ -1236,3 +1236,96 @@ async def test_persist_revision_intent_reuses_active_revision_for_follow_up_laun
     assert state.active_change_request_id == "cr_core_1"
     assert state.pending_harness_decision is None
     assert len(state.revision_history) == 1
+
+
+# ── fail_active_revision ───────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_fail_active_revision_clears_revision_state_and_sets_stale(monkeypatch):
+    """fail_active_revision clears active_revision_id and marks sequence STALE."""
+    persistence = _FakePersistence()
+    store = SessionStateStore(persistence)
+    router = SessionRouter(persistence=persistence, store=store)
+    pack = _make_pack()
+    monkeypatch.setattr(_session_router, "load_global_pack_graph", lambda: pack)
+
+    # Seed an active revision via route_trigger so the state is realistic.
+    resolver = get_refinement_trigger_route_resolver()
+    monkeypatch.setattr(
+        resolver,
+        "_classifier",
+        _FakeChangeClassifier(change_class="patch", rationale="minor fix"),
+    )
+    router_with_resolver = SessionRouter(
+        persistence=persistence,
+        store=store,
+        trigger_route_resolver=resolver,
+    )
+    await router_with_resolver.route_trigger(
+        TriggerInput(
+            app_id="app_1",
+            user_id="user_1",
+            trigger_source="refinement",
+            trigger_payload={
+                "refinement_request": {
+                    "artifact_kind": "app_bundle",
+                    "artifact_key": "app_bundle",
+                    "artifact_version_id": "v1",
+                    "raw_user_request": "Fix a label",
+                }
+            },
+        )
+    )
+
+    # Confirm revision is active.
+    state_before = await store.load(app_id="app_1", user_id="user_1")
+    assert state_before is not None
+    assert state_before.active_revision_id is not None
+    assert state_before.sequence_status == _session_model.SequenceStatus.REVISING
+
+    # Simulate workflow failure clearing the revision.
+    await router.fail_active_revision(
+        app_id="app_1",
+        user_id="user_1",
+        workflow_id="AppGenerator",
+    )
+
+    state_after = await store.load(app_id="app_1", user_id="user_1")
+    assert state_after is not None
+    assert state_after.active_revision_id is None
+    assert state_after.active_change_request_id is None
+    assert state_after.current_revision_scope is None
+    assert state_after.sequence_status == _session_model.SequenceStatus.STALE
+
+
+@pytest.mark.asyncio
+async def test_fail_active_revision_is_noop_when_no_active_revision():
+    """fail_active_revision does nothing when no revision is in flight."""
+    persistence = _FakePersistence()
+    store = SessionStateStore(persistence)
+    router = SessionRouter(persistence=persistence, store=store)
+
+    # No prior state — safe to call without any active revision.
+    await router.fail_active_revision(
+        app_id="app_1",
+        user_id="user_1",
+        workflow_id="AppGenerator",
+    )
+
+    state = await store.load(app_id="app_1", user_id="user_1")
+    # No session was created (or it was created fresh with no revision).
+    if state is not None:
+        assert state.active_revision_id is None
+
+
+@pytest.mark.asyncio
+async def test_fail_active_revision_ignores_empty_app_or_user():
+    """fail_active_revision silently returns when app_id or user_id is blank."""
+    persistence = _FakePersistence()
+    store = SessionStateStore(persistence)
+    router = SessionRouter(persistence=persistence, store=store)
+
+    # Should not raise.
+    await router.fail_active_revision(app_id="", user_id="user_1", workflow_id="AppGenerator")
+    await router.fail_active_revision(app_id="app_1", user_id="", workflow_id="AppGenerator")

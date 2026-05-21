@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import io
 import re
 import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Optional
 
+from mozaiksai.core.artifacts.content_store import ArtifactContentStore, ContentNotFoundError
 from mozaiksai.core.artifacts.store import ArtifactStore
 
 _MAX_FILE_BYTES = 80_000
@@ -40,6 +42,7 @@ async def load_artifact_workspace(
     artifact_store: ArtifactStore,
     app_id: str,
     artifact_version_id: str,
+    content_store: Optional[ArtifactContentStore] = None,
 ) -> dict[str, Any]:
     artifact = await artifact_store.get_artifact_version(
         app_id=app_id,
@@ -51,6 +54,8 @@ async def load_artifact_workspace(
     metadata = dict((artifact.commit_metadata.metadata or {})) if artifact.commit_metadata else {}
     workspace_dir = metadata.get("workspace_dir")
     artifact_path = metadata.get("artifact_path")
+    content_ref = metadata.get("content_ref")
+    content_backend = metadata.get("content_backend")
 
     if workspace_dir and Path(str(workspace_dir)).exists():
         file_map = read_workspace_dir(Path(str(workspace_dir)))
@@ -58,6 +63,36 @@ async def load_artifact_workspace(
     elif artifact_path and Path(str(artifact_path)).exists():
         file_map = read_artifact_zip(Path(str(artifact_path)))
         source = "artifact_zip"
+    elif content_ref:
+        if content_store is None:
+            return {
+                "present": False,
+                "reason": "content_store_unavailable",
+                "artifact_version_id": artifact.id,
+                "content_ref": content_ref,
+                "content_backend": content_backend,
+            }
+        try:
+            data = await content_store.get_bundle(content_ref)
+            file_map = read_artifact_zip_bytes(data)
+            source = f"content_store:{content_backend or 'unknown'}"
+        except ContentNotFoundError:
+            return {
+                "present": False,
+                "reason": "content_ref_not_found",
+                "artifact_version_id": artifact.id,
+                "content_ref": content_ref,
+                "content_backend": content_backend,
+            }
+        except Exception as exc:
+            return {
+                "present": False,
+                "reason": "content_store_error",
+                "artifact_version_id": artifact.id,
+                "content_ref": content_ref,
+                "content_backend": content_backend,
+                "error": str(exc),
+            }
     else:
         return {
             "present": False,
@@ -74,6 +109,8 @@ async def load_artifact_workspace(
         "file_map": file_map,
         "workspace_dir": workspace_dir,
         "artifact_path": artifact_path,
+        "content_ref": content_ref,
+        "content_backend": content_backend,
     }
 
 
@@ -94,20 +131,19 @@ def read_workspace_dir(root: Path) -> dict[str, str]:
     return file_map
 
 
-def read_artifact_zip(zip_path: Path) -> dict[str, str]:
+def _read_from_archive(archive: zipfile.ZipFile) -> dict[str, str]:
     raw_entries: list[tuple[str, str]] = []
-    with zipfile.ZipFile(zip_path, "r") as archive:
-        for info in archive.infolist():
-            if info.is_dir() or info.file_size > _MAX_FILE_BYTES:
-                continue
-            safe_name = safe_relpath(info.filename)
-            if safe_name is None:
-                continue
-            try:
-                decoded = archive.read(info.filename).decode("utf-8")
-            except Exception:
-                continue
-            raw_entries.append((safe_name, decoded))
+    for info in archive.infolist():
+        if info.is_dir() or info.file_size > _MAX_FILE_BYTES:
+            continue
+        safe_name = safe_relpath(info.filename)
+        if safe_name is None:
+            continue
+        try:
+            decoded = archive.read(info.filename).decode("utf-8")
+        except Exception:
+            continue
+        raw_entries.append((safe_name, decoded))
 
     if not raw_entries:
         return {}
@@ -118,6 +154,17 @@ def read_artifact_zip(zip_path: Path) -> dict[str, str]:
         if all(parts[0] == first for parts in split_paths):
             return {"/".join(path.split("/")[1:]): content for path, content in raw_entries}
     return dict(raw_entries)
+
+
+def read_artifact_zip(zip_path: Path) -> dict[str, str]:
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        return _read_from_archive(archive)
+
+
+def read_artifact_zip_bytes(data: bytes) -> dict[str, str]:
+    """Read an artifact zip from raw bytes (e.g. retrieved from a content store)."""
+    with zipfile.ZipFile(io.BytesIO(data), "r") as archive:
+        return _read_from_archive(archive)
 
 
 def siblings_for(*, path: str, file_map: dict[str, str], limit: int = 8) -> list[str]:

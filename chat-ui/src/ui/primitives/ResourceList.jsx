@@ -2,8 +2,9 @@ import { cn } from '../lib/cn.js';
 import { InlineEmptyState } from './Surface.jsx';
 
 function normalizeColumns(columns) {
+  // header may be empty string for action-only columns — require only id to be present
   return Array.isArray(columns)
-    ? columns.filter((column) => column && typeof column === 'object' && column.id && column.header)
+    ? columns.filter((column) => column && typeof column === 'object' && column.id && column.header !== undefined)
     : [];
 }
 

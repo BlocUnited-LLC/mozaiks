@@ -35,3 +35,17 @@ tools:
     entrypoint: factory_app.control_plane.tools.get_stale_artifact_families:get_stale_artifact_families
     available_to:
       - request_submitted
+  - id: get_carry_forward_candidates
+    kind: context_tool
+    description: >
+      Inspect the previous app_bundle artifact workspace and return a structured
+      module inventory (ModuleInventoryEntry list) for carry-forward analysis.
+      Read-only — no file writes, no artifact writes, no LLM calls.
+      Returns empty modules + warnings when the previous workspace is missing or
+      unreadable. Registered at route_requested because conceptual_replan routing
+      is determined at that checkpoint; Phase 3 will call this tool
+      programmatically from _build_context_seed() to auto-populate
+      carry_forward_modules without requiring the client to supply it.
+    entrypoint: factory_app.control_plane.tools.get_carry_forward_candidates:get_carry_forward_candidates
+    available_to:
+      - route_requested

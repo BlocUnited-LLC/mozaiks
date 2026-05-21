@@ -316,6 +316,16 @@ async def health_liveness():
     return {"status": "alive", "timestamp": datetime.now(UTC).isoformat()}
 
 
+async def _ping_mongo(client) -> None:
+    """Issue a valid MongoDB ping command.
+
+    Server selection timeouts belong on the Mongo client/URI, not inside the
+    ping command body. Passing serverSelectionTimeoutMS to command("ping", ...)
+    makes MongoDB interpret it as an unknown command field.
+    """
+    await client.admin.command("ping")
+
+
 @app.get("/api/health/ready")
 async def health_readiness():
     """Readiness probe — checks all critical dependencies before accepting traffic."""
@@ -328,7 +338,7 @@ async def health_readiness():
         degraded = True
     else:
         try:
-            await mongo_client.admin.command("ping", serverSelectionTimeoutMS=2000)
+            await _ping_mongo(mongo_client)
             checks["mongodb"] = "ok"
         except Exception as exc:
             checks["mongodb"] = f"error: {exc}"
@@ -359,7 +369,7 @@ async def health_check():
         raise HTTPException(status_code=503, detail="MongoDB client is not initialized")
 
     try:
-        await mongo_client.admin.command("ping", serverSelectionTimeoutMS=2000)
+        await _ping_mongo(mongo_client)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"MongoDB unreachable: {exc}") from exc
 

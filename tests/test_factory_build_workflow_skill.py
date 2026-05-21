@@ -43,13 +43,39 @@ def test_factory_build_workflow_skill_is_routed_from_index_and_quickstart() -> N
     quickstart = _read("CONTRIBUTING.md")
 
     assert "| Build sequence / factory workflow changes | `factory-build-workflow-change` |" in skills
-    assert "AppGenerator-specific change | `factory-build-workflow-change`" in skills
-    assert "AgentGenerator-specific change | `factory-build-workflow-change`" in skills
-    assert "ExistingAppDiscovery change | `factory-build-workflow-change`" in skills
     assert "Build workflow sequence change: use `factory-build-workflow-change`" in quickstart
-    assert "AppGenerator-specific change: use `factory-build-workflow-change`" in quickstart
-    assert "AgentGenerator-specific change: use `factory-build-workflow-change`" in quickstart
-    assert "ExistingAppDiscovery or brownfield change: use `factory-build-workflow-change`" in quickstart
+
+
+def test_factory_build_workflow_skill_stays_sequence_focused_when_appgenerator_has_its_own_skill() -> None:
+    skills = _read(".claude/skills/README.md")
+    quickstart = _read("CONTRIBUTING.md")
+
+    assert "AppGenerator-specific change | `appgenerator-change`" in skills
+    assert "Use `appgenerator-change` for AppGenerator-local changes." in skills
+    assert "Add `factory-build-workflow-change` only when the change also affects `workflow_sequence`" in skills
+    assert "AppGenerator-specific change: use `appgenerator-change`" in quickstart
+    assert "Add `factory-build-workflow-change` as a companion skill only when" in quickstart
+
+
+def test_factory_build_workflow_skill_stays_sequence_focused_when_agentgenerator_has_its_own_skill() -> None:
+    skills = _read(".claude/skills/README.md")
+    quickstart = _read("CONTRIBUTING.md")
+
+    assert "AgentGenerator-specific change | `agentgenerator-change`" in skills
+    assert "Use `agentgenerator-change` for AgentGenerator-local changes." in skills
+    assert "Add `factory-build-workflow-change` only when the change also affects `workflow_sequence`" in skills
+    assert "AgentGenerator-specific change: use `agentgenerator-change`" in quickstart
+    assert "Add `factory-build-workflow-change` as a companion skill only when" in quickstart
+
+
+def test_factory_build_workflow_skill_stays_sequence_focused_when_discovery_has_its_own_skill() -> None:
+    skills = _read(".claude/skills/README.md")
+    quickstart = _read("CONTRIBUTING.md")
+
+    assert "ExistingAppDiscovery change | `existing-app-discovery-change`" in skills
+    assert "Use `existing-app-discovery-change` for ExistingAppDiscovery-local changes." in skills
+    assert "ExistingAppDiscovery or brownfield change: use `existing-app-discovery-change`" in quickstart
+    assert "Add `factory-build-workflow-change` as a companion skill only when" in quickstart
 
 
 def test_factory_build_workflow_guidance_stays_public_safe() -> None:

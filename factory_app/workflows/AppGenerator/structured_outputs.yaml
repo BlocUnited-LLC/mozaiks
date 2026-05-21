@@ -554,6 +554,51 @@ models:
           Third-party connectors this build task expects to need. Agents may
           discover more at execution time with record_integration_need; the
           IntegrationReadinessAgent fans all needs in before validation/download.
+  CarryForwardDecision:
+    type: model
+    fields:
+      module_id:
+        type: str
+        description: >
+          Module directory name from the previous app bundle
+          (e.g. 'notifications', 'billing_portal').
+      decision:
+        type: literal
+        values:
+        - reuse
+        - adapt
+        - regenerate
+        - drop
+        description: >
+          Planning intent for this carry-forward candidate.
+          reuse: preserve the module's role in the new plan (no file copy).
+          adapt: create a new/updated module task inspired by the prior contract.
+          regenerate: include the capability but generate a fresh implementation.
+          drop: module no longer fits the new concept.
+      reason:
+        type: str
+        description: >
+          Human-readable explanation for the decision. Must be non-empty.
+          Reference new-concept fit, classification, or contract inspection
+          findings as appropriate.
+      source:
+        type: literal
+        values:
+        - carry_forward_candidate
+        - human_override
+        - planner
+        description: >
+          What drove this decision.
+          carry_forward_candidate: driven primarily by the carry_forward_classification.
+          human_override: explicit client instruction to reuse/drop this module.
+          planner: AppPlanAgent reasoning beyond the advisory classification.
+      affected_build_tasks:
+        type: optional_list
+        items: str
+        description: >
+          Task ids from build_tasks that are directly related to this decision.
+          Empty when no specific tasks are affected (e.g. for a drop decision).
+
   AppBuildPlan:
     type: model
     fields:
@@ -656,6 +701,14 @@ models:
         - dict
         - 'null'
         description: Optional additive database migration intent for config/database_migrations/{migration_id}.json, or null when no migration is planned.
+      carry_forward_decisions:
+        type: optional_list
+        items: CarryForwardDecision
+        description: >
+          Per-module carry-forward planning decisions recorded during conceptual_replan.
+          Empty (default) for non-conceptual builds. Planning metadata only — does
+          not trigger file copy, merge, or AssemblyAgent preservation behavior.
+          AppPlanAgent records one entry per carry_forward_modules candidate.
       generation_order:
         type: optional_list
         items: str
@@ -3386,6 +3439,17 @@ models:
         - str
         - 'null'
         description: Optional icon id.
+      requiresRole:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: >
+          Optional role gate for navigation visibility (e.g. "admin"). Declaration
+          intent only — shell enforcement for route rendering and sidebar filtering
+          is not yet implemented. Do not rely on this field as a security boundary;
+          module authorization/service/policy remains the authoritative enforcement layer for
+          resource-scoped authorization.
 
   AppCustomPageFile:
     type: model

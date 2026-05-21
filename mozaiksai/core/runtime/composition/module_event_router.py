@@ -12,6 +12,7 @@ This keeps module event meaning above the runtime kernel.
 """
 
 import inspect
+import re
 from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
@@ -258,8 +259,27 @@ class ModuleEventRouter:
         event_type: str,
         envelope: Dict[str, Any],
     ) -> None:
-        payload = envelope.get("payload") if isinstance(envelope.get("payload"), dict) else {}
-        tenant = envelope.get("tenant") if isinstance(envelope.get("tenant"), dict) else {}
+        # Structured envelope: {tenant: {...}, payload: {...}, ...}
+        # Flat envelope (module events): {session_id: ..., app_id: ..., amount: ..., ...}
+        raw_payload = envelope.get("payload")
+        raw_tenant = envelope.get("tenant")
+        payload = raw_payload if isinstance(raw_payload, dict) else {}
+        tenant = raw_tenant if isinstance(raw_tenant, dict) else {}
+
+        # For flat event dicts emitted without tenant/payload nesting, fall back to
+        # using the envelope scalars as the template rendering context and scope source.
+        if not payload:
+            payload = {
+                k: v for k, v in envelope.items()
+                if not isinstance(v, (dict, list))
+                and k not in ("id", "version", "occurred_at", "visibility")
+            }
+        if not tenant and envelope.get("app_id"):
+            tenant = {
+                "app_id": str(envelope.get("app_id") or ""),
+                "tenant_id": str(envelope.get("tenant_id") or ""),
+            }
+
         template = rule.get("template") if isinstance(rule.get("template"), dict) else {}
         record = {
             "notification_id": f"ntf_{uuid4().hex}",
@@ -318,9 +338,52 @@ class ModuleEventRouter:
 
 
 def _render_template(template: str, payload: Dict[str, Any]) -> str:
+    """
+    Render a notification template with payload substitution.
+
+    Supports three syntaxes:
+    - ``{{field}}``           — plain substitution
+    - ``{{field | upper}}``   — field value uppercased
+    - ``{% if field %}...{% endif %}`` — conditional block (rendered when field is truthy)
+    - ``{payload.field}``     — legacy syntax (backward compat)
+
+    Unknown fields are left as-is.
+    """
     rendered = template
+
+    # {% if field %}...{% endif %} conditionals (non-nested)
+    def _replace_conditional(m: re.Match) -> str:
+        field = m.group(1).strip()
+        content = m.group(2)
+        value = payload.get(field)
+        return _render_template(content, payload) if value else ""
+
+    rendered = re.sub(
+        r"\{%\s*if\s+(\w+)\s*%\}(.*?)\{%\s*endif\s*%\}",
+        _replace_conditional,
+        rendered,
+        flags=re.DOTALL,
+    )
+
+    # {{field | upper}} — apply upper filter
+    def _replace_with_upper(m: re.Match) -> str:
+        key = m.group(1).strip()
+        return str(payload.get(key, "")).upper()
+
+    rendered = re.sub(r"\{\{\s*(\w+)\s*\|\s*upper\s*\}\}", _replace_with_upper, rendered)
+
+    # {{field}} — plain substitution (leave intact if key not found)
+    def _replace_plain(m: re.Match) -> str:
+        key = m.group(1).strip()
+        val = payload.get(key)
+        return str(val) if val is not None else m.group(0)
+
+    rendered = re.sub(r"\{\{\s*(\w+)\s*\}\}", _replace_plain, rendered)
+
+    # {payload.field} — legacy syntax
     for key, value in payload.items():
         rendered = rendered.replace("{payload." + str(key) + "}", str(value))
+
     return rendered
 
 

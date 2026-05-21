@@ -127,6 +127,57 @@ definitions:
     source:
       type: state
       default: null
+  pivot_description:
+    type: string
+    description: >
+      User's original change request text, injected by the control plane when
+      the active workflow_sequence is conceptual_replan. Describes the nature
+      of the concept-level pivot so AppPlanAgent can align the new build plan
+      to explicit pivot intent rather than applying incremental revisions.
+    source:
+      type: state
+      default: null
+  preserve_families:
+    type: array
+    description: >
+      Artifact families that the conceptual_replan should preserve. Default is
+      ["brand"]. AppPlanAgent may use this to understand which artifact layers
+      have preservation intent. Carry-forward behavior is future work.
+    source:
+      type: state
+      default: []
+  previous_app_bundle_ref:
+    type: string
+    description: >
+      Artifact version id of the app bundle at the time the conceptual_replan
+      was triggered. Null when not available. Advisory — no file copy or merge
+      occurs from this reference in the current implementation.
+    source:
+      type: state
+      default: null
+  carry_forward_modules:
+    type: array
+    description: >
+      Advisory list of module ids from the previous app bundle that AppPlanAgent
+      may consider reusing during a conceptual_replan. Defaults to [] when not
+      supplied by the workbench. This is a preservation hint only — AppPlanAgent
+      must not blindly re-emit these modules. Each module must still fit the new
+      concept and pass the standard capability-pack derivation. Domain-specific
+      modules that no longer fit should be omitted. No automatic file copy or
+      merge occurs.
+    source:
+      type: state
+      default: []
+  llm_profile:
+    type: string
+    description: >
+      Advisory LLM profile name injected by the control plane when the
+      active workflow_sequence requires stronger reasoning (conceptual_replan
+      or full_rebuild). Maps to a named profile in ai.json llm_profiles.
+      Null for patch, design, and feature routes. Advisory only.
+    source:
+      type: state
+      default: null
   app_type:
     type: string
     description: >
@@ -831,6 +882,11 @@ agents:
     - screen
     - change_intent
     - impact_set
+    - pivot_description
+    - preserve_families
+    - previous_app_bundle_ref
+    - carry_forward_modules
+    - llm_profile
     - app_type
     - concept_overview
     - concept_api_endpoints

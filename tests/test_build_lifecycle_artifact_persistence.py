@@ -1,0 +1,206 @@
+"""Build lifecycle artifact persistence — unit tests.
+
+Verifies that AppGenerator.emit_build_completed and
+AgentGenerator.emit_build_completed call persist_summary_artifact()
+with the correct artifact_kind and revision_mode, and that failures
+in artifact persistence do not propagate (best-effort).
+"""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+
+# ── helpers ────────────────────────────────────────────────────────────────────
+
+def _make_shared_emit(return_value="outbox_1"):
+    return AsyncMock(return_value=return_value)
+
+
+def _make_persist():
+    return AsyncMock(return_value=None)
+
+
+# ── AppGenerator ───────────────────────────────────────────────────────────────
+
+class TestAppGeneratorEmitBuildCompleted:
+    @pytest.mark.asyncio
+    async def test_persists_app_bundle_artifact_on_complete(self) -> None:
+        from factory_app.workflows.AppGenerator.tools.platform import build_lifecycle as mod
+
+        shared_emit = _make_shared_emit("outbox_app_1")
+        persist = _make_persist()
+
+        with (
+            patch.object(mod, "_shared_emit_build_completed", shared_emit),
+            patch.object(mod, "_read_build_mode", AsyncMock(return_value=None)),
+            patch.object(mod, "_persist_app_bundle_artifact", persist),
+        ):
+            result = await mod.emit_build_completed(
+                app_id="app-1",
+                chat_id="chat-1",
+                user_id="user-1",
+                workflow_name="AppGenerator",
+            )
+
+        assert result == "outbox_app_1"
+        shared_emit.assert_awaited_once()
+        persist.assert_awaited_once_with(
+            app_id="app-1",
+            chat_id="chat-1",
+            user_id="user-1",
+            workflow_name="AppGenerator",
+            build_mode=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_passes_revision_mode_to_persist(self) -> None:
+        from factory_app.workflows.AppGenerator.tools.platform import build_lifecycle as mod
+
+        persist = _make_persist()
+
+        with (
+            patch.object(mod, "_shared_emit_build_completed", _make_shared_emit()),
+            patch.object(mod, "_read_build_mode", AsyncMock(return_value="revision")),
+            patch.object(mod, "_persist_app_bundle_artifact", persist),
+        ):
+            await mod.emit_build_completed(
+                app_id="app-1",
+                chat_id="chat-1",
+                user_id="user-1",
+                workflow_name="AppGenerator",
+            )
+
+        persist.assert_awaited_once_with(
+            app_id="app-1",
+            chat_id="chat-1",
+            user_id="user-1",
+            workflow_name="AppGenerator",
+            build_mode="revision",
+        )
+
+    @pytest.mark.asyncio
+    async def test_persist_failure_does_not_propagate(self) -> None:
+        from factory_app.workflows.AppGenerator.tools.platform import build_lifecycle as mod
+
+        with (
+            patch.object(mod, "_shared_emit_build_completed", _make_shared_emit("outbox_2")),
+            patch.object(mod, "_read_build_mode", AsyncMock(return_value=None)),
+            patch.object(mod, "_persist_app_bundle_artifact", AsyncMock(side_effect=RuntimeError("db down"))),
+        ):
+            result = await mod.emit_build_completed(
+                app_id="app-1",
+                chat_id="chat-1",
+                user_id="user-1",
+                workflow_name="AppGenerator",
+            )
+
+        # outbox_event_id still returned — persistence failure is best-effort
+        assert result == "outbox_2"
+
+    @pytest.mark.asyncio
+    async def test_persist_app_bundle_artifact_uses_correct_kind(self) -> None:
+        from factory_app.workflows.AppGenerator.tools.platform.build_lifecycle import (
+            _persist_app_bundle_artifact,
+        )
+
+        captured: dict = {}
+
+        async def _fake_persist(**kwargs):
+            captured.update(kwargs)
+
+        # persist_summary_artifact is imported inside the function body, so patch
+        # it at the source module level.
+        with patch("mozaiksai.core.artifacts.summary_artifacts.persist_summary_artifact", _fake_persist):
+            await _persist_app_bundle_artifact(
+                app_id="app-1",
+                chat_id="chat-1",
+                user_id="user-1",
+                workflow_name="AppGenerator",
+                build_mode=None,
+            )
+
+        assert captured.get("artifact_kind") == "app_bundle"
+        assert captured.get("revision_mode") is False
+        input_kinds = captured.get("input_artifact_kinds") or []
+        assert "design_docs" in input_kinds
+        assert "app_bundle" not in input_kinds  # not a circular self-reference
+
+
+# ── AgentGenerator ─────────────────────────────────────────────────────────────
+
+class TestAgentGeneratorEmitBuildCompleted:
+    @pytest.mark.asyncio
+    async def test_persists_workflow_bundle_artifact_on_complete(self) -> None:
+        from factory_app.workflows.AgentGenerator.tools.platform import build_lifecycle as mod
+
+        shared_emit = _make_shared_emit("outbox_ag_1")
+        persist = _make_persist()
+
+        with (
+            patch.object(mod, "_shared_emit_build_completed", shared_emit),
+            patch.object(mod, "_read_build_mode", AsyncMock(return_value=None)),
+            patch.object(mod, "_persist_workflow_bundle_artifact", persist),
+        ):
+            result = await mod.emit_build_completed(
+                app_id="app-1",
+                chat_id="chat-1",
+                user_id="user-1",
+                workflow_name="AgentGenerator",
+            )
+
+        assert result == "outbox_ag_1"
+        shared_emit.assert_awaited_once()
+        persist.assert_awaited_once_with(
+            app_id="app-1",
+            chat_id="chat-1",
+            user_id="user-1",
+            workflow_name="AgentGenerator",
+            build_mode=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_passes_revision_mode_to_persist(self) -> None:
+        from factory_app.workflows.AgentGenerator.tools.platform import build_lifecycle as mod
+
+        persist = _make_persist()
+
+        with (
+            patch.object(mod, "_shared_emit_build_completed", _make_shared_emit()),
+            patch.object(mod, "_read_build_mode", AsyncMock(return_value="revision")),
+            patch.object(mod, "_persist_workflow_bundle_artifact", persist),
+        ):
+            await mod.emit_build_completed(
+                app_id="app-1",
+                chat_id="chat-1",
+                user_id="user-1",
+                workflow_name="AgentGenerator",
+            )
+
+        persist.assert_awaited_once_with(
+            app_id="app-1",
+            chat_id="chat-1",
+            user_id="user-1",
+            workflow_name="AgentGenerator",
+            build_mode="revision",
+        )
+
+    @pytest.mark.asyncio
+    async def test_persist_failure_does_not_propagate(self) -> None:
+        from factory_app.workflows.AgentGenerator.tools.platform import build_lifecycle as mod
+
+        with (
+            patch.object(mod, "_shared_emit_build_completed", _make_shared_emit("outbox_ag_2")),
+            patch.object(mod, "_read_build_mode", AsyncMock(return_value=None)),
+            patch.object(mod, "_persist_workflow_bundle_artifact", AsyncMock(side_effect=RuntimeError("db down"))),
+        ):
+            result = await mod.emit_build_completed(
+                app_id="app-1",
+                chat_id="chat-1",
+                user_id="user-1",
+                workflow_name="AgentGenerator",
+            )
+
+        assert result == "outbox_ag_2"

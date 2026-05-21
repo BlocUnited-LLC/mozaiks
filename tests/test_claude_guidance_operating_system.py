@@ -85,7 +85,9 @@ def test_skills_readme_maps_requested_task_types() -> None:
     assert "add-module" in readme
     assert "add-page" in readme
     assert "create-workflow" in readme
+    assert "docs-maintenance" in readme
     assert "persistence-change" in readme
+    assert "release-notes" in readme
     assert "hosted-pack-change" in readme
     assert "oss-contribution-review" in readme
     assert "planned" in readme

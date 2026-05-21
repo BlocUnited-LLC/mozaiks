@@ -267,7 +267,15 @@ class WorkflowEntry(BaseModel):
 
     id: str
     description: Optional[str] = None
-    dependencies: List[Union[str, WorkflowDependency]] = Field(default_factory=list)
+    dependencies: List[Union[str, WorkflowDependency]] = Field(
+        default_factory=list,
+        description=(
+            "Workflow execution-gating dependencies. Declares which workflows must "
+            "complete before this one can start. Enforced by the session router at "
+            "route_trigger() time. Distinct from artifact_dependency_graph, which "
+            "propagates artifact staleness after a refinement change — not execution order."
+        ),
+    )
 
     @field_validator("id")
     @classmethod
@@ -440,6 +448,32 @@ class GlobalPackGraph(BaseModel):
         ),
     )
 
+    @field_validator("artifact_dependency_graph")
+    @classmethod
+    def _validate_artifact_dependency_graph(cls, value: Dict[str, List[str]]) -> Dict[str, List[str]]:
+        if not isinstance(value, dict):
+            raise ValueError("artifact_dependency_graph must be an object")
+        normalized: Dict[str, List[str]] = {}
+        for raw_family, raw_dependencies in value.items():
+            family = str(raw_family or "").strip()
+            if not family:
+                raise ValueError("artifact_dependency_graph family ids must be non-empty strings")
+            if not isinstance(raw_dependencies, list):
+                raise ValueError(
+                    f"artifact_dependency_graph family '{family}' dependencies must be a list"
+                )
+            dependencies: List[str] = []
+            for raw_dependency in raw_dependencies:
+                dependency = str(raw_dependency or "").strip()
+                if not dependency:
+                    raise ValueError(
+                        f"artifact_dependency_graph family '{family}' dependencies must be non-empty strings"
+                    )
+                if dependency not in dependencies:
+                    dependencies.append(dependency)
+            normalized[family] = dependencies
+        return normalized
+
     @model_validator(mode="after")
     def _validate_uniqueness_and_refs(self) -> "GlobalPackGraph":
         wf_ids: List[str] = [w.id for w in self.workflows]
@@ -457,6 +491,13 @@ class GlobalPackGraph(BaseModel):
         journey_ids: List[str] = [j.id for j in self.journeys]
         if len(journey_ids) != len(set(journey_ids)):
             raise ValueError("global pack graph contains duplicate journey ids")
+        artifact_families = set(self.artifact_dependency_graph.keys())
+        for family, dependencies in self.artifact_dependency_graph.items():
+            for dependency in dependencies:
+                if dependency not in artifact_families:
+                    raise ValueError(
+                        f"artifact_dependency_graph family '{family}' references unknown family '{dependency}'"
+                    )
         valid_targets = set(wf_ids) | set(transition_ids)
         transition_id_set = set(transition_ids)
         journey_id_set = set(journey_ids)

@@ -7,25 +7,28 @@ Use this index to choose the closest skill before nontrivial work.
 | Change type | Use this skill | Notes |
 | --- | --- | --- |
 | Runtime/platform change | `runtime-change` | Use `runtime-architecture-review` when you only need a pre-change or post-change boundary review. |
+| Auth change | `runtime-change` | Auth is runtime/platform substrate unless the task is purely docs or tests. |
 | Build sequence / factory workflow changes | `factory-build-workflow-change` | Use `build-sequence-change` when you only need a narrow sequence or journey-composition review. |
-| AppGenerator-specific change | `factory-build-workflow-change` | Then inspect `factory_app/workflows/AppGenerator/` and the nearest AppGenerator docs/tests. |
-| AgentGenerator-specific change | `factory-build-workflow-change` | Then inspect `factory_app/workflows/AgentGenerator/` and the nearest AgentGenerator docs/tests. |
-| ExistingAppDiscovery change | `factory-build-workflow-change` | Then inspect `factory_app/workflows/ExistingAppDiscovery/` and the brownfield docs/tests. |
-| Control-plane / refinement / harness routing | `control-plane-refinement-change` | Covers `app/config/ai.json`, `control_plane.yaml`, artifact routing, and checkpoint re-entry. |
-| Add a deterministic backend module | `add-module` | Canonical module contract and module backend structure. |
-| Add a page or custom route | `add-page` | Use for AppPageSchema or route-manifest work. |
+| AppGenerator-specific change | `appgenerator-change` | Use `appgenerator-change` for AppGenerator-local changes. Add `factory-build-workflow-change` only when the change also affects `workflow_sequence`, sequence design, `transitions[]`, `entrypoints[]`, or cross-workflow build ownership. |
+| AgentGenerator-specific change | `agentgenerator-change` | Use `agentgenerator-change` for AgentGenerator-local changes. Add `factory-build-workflow-change` only when the change also affects `workflow_sequence`, sequence design, `transitions[]`, `entrypoints[]`, or cross-workflow build ownership. |
+| ExistingAppDiscovery change | `existing-app-discovery-change` | Use `existing-app-discovery-change` for ExistingAppDiscovery-local changes. Also use for brownfield or `native_migration` discovery changes. Add `factory-build-workflow-change` only when the change also affects `extension_registry.json`, `workflow_sequence`, `transitions[]`, `entrypoints[]`, or cross-workflow sequence composition. |
+| Control-plane / refinement / harness routing | `control-plane-refinement-change` | Covers `app/config/ai.json`, `control_plane.yaml`, artifact routing, and checkpoint re-entry. Add `factory-build-workflow-change` too when `workflow_sequence` composition or `extension_registry.json` routing changes. |
+| Module contract change | `add-module` | Use `runtime-change` when module loader/executor/runtime behavior changes. Use `appgenerator-change` when generated module output changes. |
+| Add a deterministic backend module | `add-module` | Use for authoring or scaffolding a new module in an app workspace. |
+| Page or frontend change | `add-page` | Use for AppPageSchema, route-manifest, or custom route work. |
+| Admin UI change | `add-page` | Pair with the frontend rule. Distinguish AdminPortal schema panels from custom operator/admin React pages; add `runtime-change` when platform/admin shell behavior changes. |
 | Add or author a workflow | `create-workflow` | `add-workflow` is a planned alias. |
-| Persistence / database intent / repo contract | `persistence-change` | Covers `database_intent.json`, migrations, `repo.py`, and `ModuleContext.persistence`. |
-| Hosted-pack support | planned `hosted-pack-change` | Until it exists, start with `oss-contribution-review` and inspect the facade and adapter docs/tests. |
-| Docs or prompt-pack maintenance | `docs-maintenance` | Use for docs-only changes, link fixes, and prompt-pack hygiene. |
+| Persistence / database intent / repo contract | `persistence-change` | Covers `database_intent.json`, migrations, `repo.py`, and `ModuleContext.persistence`. Add `runtime-change` when runtime persistence behavior changes. Add `appgenerator-change` when generated persistence output changes. |
+| Docs-only change | `docs-maintenance` | If the docs change a specific layer contract, also read that layer's rule. |
+| Test-only change | owning surface skill | Use the owning surface skill when obvious. If unclear, start with `oss-contribution-review`. |
+| CLI change | `oss-contribution-review` | No CLI-specific skill exists yet. If CLI scaffolding changes module/page/workflow contracts, also inspect the owning layer rule or skill. |
+| Release/changelog change | `release-notes` | Use for `CHANGELOG.md`, release docs, versioning, or release-impact review. |
+| Hosted-pack support | `oss-contribution-review` | No dedicated `hosted-pack-change` skill exists yet. Pair with the hosted-packs rule; `hosted-pack-change` remains planned. |
 | Setup or local-dev guidance | `setup` | Use for installation, local runtime, and repo setup guidance. |
 | If unsure or scope spans layers | `oss-contribution-review` | Use before or after the change to classify the impact. |
 
 ## Planned Focused Skills
 
-- `appgenerator-change`
-- `agentgenerator-change`
-- `existing-app-discovery-change`
 - `hosted-pack-change`
 - `add-workflow` alias for `create-workflow`
 
@@ -34,9 +37,14 @@ Use this index to choose the closest skill before nontrivial work.
 - Build is `workflow_sequence`-driven.
 - AppGenerator is one workflow inside the build sequence, not the whole build system.
 - AgentGenerator is one workflow inside the build sequence, not the whole build system.
-- `AppGenerator` is one workflow inside the build sequence, not the whole build system.
 - `ExistingAppDiscovery` belongs to the brownfield flow.
+- Use `appgenerator-change` as the primary skill for workflow-local AppGenerator prompts, file contracts, AppBuildPlan validation, app-bundle assembly, generated UI quality gates, and hosted-pack facade planning. Add `factory-build-workflow-change` only when the change also affects `workflow_sequence`, `transitions[]`, `entrypoints[]`, or cross-workflow build ownership.
+- Use `agentgenerator-change` as the primary skill for workflow-local AgentGenerator prompts, workflow-bundle scaffolds, universal prompt hooks, tool-planning contracts, and generated handoff or tool bundle guidance. Add `factory-build-workflow-change` only when the change also affects `workflow_sequence`, `transitions[]`, `entrypoints[]`, or cross-workflow build ownership.
+- Use `existing-app-discovery-change` as the primary skill for workflow-local brownfield discovery, preload detectors, adoption classification, module decomposition outputs, and artifact saving. Add `factory-build-workflow-change` only when the change also affects `extension_registry.json`, `workflow_sequence`, `transitions[]`, `entrypoints[]`, or cross-workflow sequence composition.
 - Use `factory-build-workflow-change` for factory workflow changes that span sequence design, workflow ownership, artifact routing, or brownfield vs greenfield routing.
+- Use `runtime-change` for auth, transport, platform, and other runtime substrate work unless the task is purely docs or tests.
+- For test-only work, use the owning surface skill when obvious; otherwise start with `oss-contribution-review`.
+- Use `oss-contribution-review` plus the hosted-packs rule for hosted-pack work until a dedicated skill exists.
 - Legacy task label note: "Build sequence / extension registry / journey composition" work now routes through `factory-build-workflow-change`.
 - When a planned skill is missing, start with `oss-contribution-review` and
   then inspect the owning files directly.

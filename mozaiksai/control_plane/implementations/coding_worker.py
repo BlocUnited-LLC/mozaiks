@@ -12,6 +12,7 @@ from mozaiksai.core.artifacts import (
     ArtifactValidationStatus,
     get_artifact_store,
 )
+from mozaiksai.core.artifacts.content_store import get_artifact_content_store
 from mozaiksai.core.capabilities import get_general_capability_service
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 from mozaiksai.control_plane.contracts import (
@@ -82,7 +83,7 @@ class ScopedRefinementCodingWorker:
             )
 
         try:
-            llm_config = (self._load_config().coding.llm_config or None)
+            llm_config = self._load_config().resolve_capability_llm_config("coding")
             system_prompt = self._load_system_prompt()
             control_plane_context = await self._load_control_plane_context(request)
             user_prompt = self._build_user_prompt(request=request, control_plane_context=control_plane_context)
@@ -408,8 +409,37 @@ class ScopedRefinementCodingWorker:
         zip_bytes = zip_path.read_bytes()
         zip_sha = hashlib.sha256(zip_bytes).hexdigest()
 
+        # Persist to content store if a non-local backend is configured.
+        commit_content_metadata: dict[str, Any] = {
+            "artifact_path": str(zip_path.resolve()),
+            "workspace_dir": str(workspace_dir.resolve()),
+            "bundle_mode": "workspace_snapshot",
+            "applied_paths": sorted(applied_files.keys()),
+            "validation_strategy": plan.validation_strategy,
+            "validation_status": "",  # placeholder; set after status resolved below
+            "source_surface": request.source_surface,
+        }
+        content_store = get_artifact_content_store()
+        if content_store.backend_name != "local":
+            try:
+                content_ref = await content_store.put_bundle(
+                    zip_bytes,
+                    app_id=request.app_id,
+                    artifact_version_id=f"pending_{zip_sha[:16]}",
+                )
+                commit_content_metadata["content_ref"] = content_ref
+                commit_content_metadata["content_backend"] = content_store.backend_name
+            except Exception as cs_exc:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "Content store put_bundle failed for app %s; falling back to local path: %s",
+                    request.app_id,
+                    cs_exc,
+                )
+
         artifact_store = self._artifact_store or get_artifact_store()
         validation_status = self._artifact_validation_status(validation_result)
+        commit_content_metadata["validation_status"] = validation_status.value
         artifact_version = await artifact_store.create_artifact_version(
             app_id=request.app_id,
             artifact_kind=resolved_artifact_kind,
@@ -430,15 +460,7 @@ class ScopedRefinementCodingWorker:
             commit_metadata={
                 "message": plan.summary,
                 "source_workflow": request.requested_workflow_id or "control_plane_coding",
-                "metadata": {
-                    "artifact_path": str(zip_path.resolve()),
-                    "workspace_dir": str(workspace_dir.resolve()),
-                    "bundle_mode": "workspace_snapshot",
-                    "applied_paths": sorted(applied_files.keys()),
-                    "validation_strategy": plan.validation_strategy,
-                    "validation_status": validation_status.value,
-                    "source_surface": request.source_surface,
-                },
+                "metadata": commit_content_metadata,
             },
         )
         return {

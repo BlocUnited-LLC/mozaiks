@@ -189,6 +189,7 @@ nav:
           - Orchestration and Decomposition: architecture/orchestration-and-decomposition.md
   - Contributing:
       - Overview: contributing/index.md
+      - Contributor Guidance Readiness: contributing/contributor-guidance-readiness.md
       - Local Dev Setup: local-setup.md
       - AI Coding Agents:
           - Agent Bootstrap Prompt: agent-bootstrap-prompt.md

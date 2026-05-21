@@ -1,0 +1,242 @@
+{
+  "cases": [
+    {
+      "allowed_change_classes": [
+        "design",
+        "patch"
+      ],
+      "classifier": {
+        "change_class": "design",
+        "confidence": 0.9,
+        "rationale": "The request to change the dashboard experience to highlight reports first indicates a revision in the visual and UX design of the dashboard without altering the overall product concept.",
+        "signals": [
+          "visual_redesign"
+        ],
+        "source": "llm"
+      },
+      "id": "ui_experience_spec",
+      "impact": {
+        "affected_bundle_paths": [
+          "ui/pages/dashboard.yaml",
+          "ui/pages/reports.yaml",
+          "ui/route_manifest.json"
+        ],
+        "affected_declarative_families": [
+          "experience_spec",
+          "app_bundle"
+        ],
+        "scope_summary": "Reopen structured planning surfaces for the app bundle and rebuild the affected downstream outputs."
+      },
+      "label": "UI / ExperienceSpec",
+      "llm_profile_used": "classifier",
+      "request": "Change the dashboard experience to highlight reports first.",
+      "route": {
+        "affected_workflows": [
+          "DesignDocs",
+          "AppGenerator"
+        ],
+        "sequence_exists": true,
+        "workflow_id": "DesignDocs",
+        "workflow_sequence": "app_surface_revision"
+      },
+      "success": true,
+      "violations": []
+    },
+    {
+      "allowed_change_classes": [
+        "feature",
+        "patch"
+      ],
+      "classifier": {
+        "change_class": "feature",
+        "confidence": 0.9,
+        "rationale": "The request to add an 'archive_project' action to the projects module API introduces a new capability to the existing product without altering its fundamental concept or identity.",
+        "signals": [
+          "new_capability"
+        ],
+        "source": "llm"
+      },
+      "id": "module_backend",
+      "impact": {
+        "affected_bundle_paths": [
+          "modules/projects/module.yaml",
+          "modules/projects/contracts/events.yaml",
+          "modules/projects/contracts/admin.yaml",
+          "modules/projects/backend/handler.py",
+          "modules/projects/backend/service.py",
+          "modules/projects/backend/repo.py",
+          "modules/projects/backend/policy.py",
+          "modules/projects/backend/schemas.py"
+        ],
+        "affected_declarative_families": [
+          "app_bundle"
+        ],
+        "scope_summary": "Extend the existing app bundle within the approved concept using AppGenerator. Data model migration impact detected."
+      },
+      "label": "Module/backend",
+      "llm_profile_used": "classifier",
+      "request": "Add an archive_project action to the projects module API.",
+      "route": {
+        "affected_workflows": [
+          "AppGenerator"
+        ],
+        "sequence_exists": true,
+        "workflow_id": "AppGenerator",
+        "workflow_sequence": "app_revision"
+      },
+      "success": true,
+      "violations": []
+    },
+    {
+      "allowed_change_classes": [
+        "feature",
+        "patch"
+      ],
+      "classifier": {
+        "change_class": "patch",
+        "confidence": 0.9,
+        "rationale": "The request is to change the sync behavior of the analytics_provider connector, which indicates a targeted fix or localized correction within the current artifact boundary without altering the overall product concept.",
+        "signals": [
+          "bug_fix"
+        ],
+        "source": "llm"
+      },
+      "id": "external_integration",
+      "impact": {
+        "affected_bundle_paths": [
+          "backend/integrations/analytics_provider_client.py",
+          "modules/reports/module.yaml",
+          "modules/reports/backend/service.py",
+          "modules/reports/backend/schemas.py",
+          "config/integrations.json",
+          "docs/integrations.md"
+        ],
+        "affected_declarative_families": [
+          "app_bundle"
+        ],
+        "scope_summary": "Apply a local patch to the current app bundle without widening upstream scope. Integration readiness may need to be rechecked. Data model migration impact detected."
+      },
+      "label": "External integration",
+      "llm_profile_used": "classifier",
+      "request": "Change the analytics_provider connector sync behavior.",
+      "route": {
+        "affected_workflows": [
+          "AppGenerator"
+        ],
+        "sequence_exists": true,
+        "workflow_id": "AppGenerator",
+        "workflow_sequence": "app_revision"
+      },
+      "success": true,
+      "violations": []
+    },
+    {
+      "allowed_change_classes": [
+        "feature",
+        "core"
+      ],
+      "classifier": {
+        "change_class": "feature",
+        "confidence": 0.9,
+        "rationale": "The request to add a required project phase field and migrate existing project records introduces new functionality to the app, which aligns with the definition of a feature as an additive capability within the current product direction.",
+        "signals": [
+          "new_capability"
+        ],
+        "source": "llm"
+      },
+      "id": "data_model_migration",
+      "impact": {
+        "affected_bundle_paths": [
+          "config/database_intent.json",
+          "config/database_migrations/001_initial.json",
+          "modules/projects/module.yaml",
+          "modules/projects/contracts/events.yaml",
+          "modules/projects/contracts/admin.yaml",
+          "modules/projects/backend/repo.py",
+          "modules/projects/backend/policy.py",
+          "modules/projects/backend/schemas.py"
+        ],
+        "affected_declarative_families": [
+          "app_bundle"
+        ],
+        "scope_summary": "Extend the existing app bundle within the approved concept using AppGenerator. Data model migration impact detected. Destructive changes require explicit review."
+      },
+      "label": "Data model migration",
+      "llm_profile_used": "classifier",
+      "request": "Add a required project phase field and migrate existing project records.",
+      "route": {
+        "affected_workflows": [
+          "AppGenerator"
+        ],
+        "sequence_exists": true,
+        "workflow_id": "AppGenerator",
+        "workflow_sequence": "app_revision"
+      },
+      "success": true,
+      "violations": []
+    },
+    {
+      "allowed_change_classes": [
+        "design",
+        "feature"
+      ],
+      "classifier": {
+        "change_class": "design",
+        "confidence": 0.9,
+        "rationale": "The request is to change the display of the hosted analytics dashboard, which pertains to visual and UX aspects without altering the product concept.",
+        "signals": [
+          "visual_redesign"
+        ],
+        "source": "llm"
+      },
+      "id": "hosted_capability_facade",
+      "impact": {
+        "affected_bundle_paths": [
+          "ui/pages/analytics.yaml",
+          "ui/route_manifest.json",
+          "backend/integrations/hosted_analytics_client.py",
+          "modules/analytics_dashboard/module.yaml",
+          "modules/analytics_dashboard/contracts/events.yaml",
+          "modules/analytics_dashboard/backend/handler.py",
+          "modules/analytics_dashboard/backend/service.py",
+          "modules/analytics_dashboard/backend/schemas.py"
+        ],
+        "affected_declarative_families": [
+          "experience_spec",
+          "app_bundle"
+        ],
+        "scope_summary": "Reopen structured planning surfaces for the app bundle and rebuild the affected downstream outputs. Integration readiness may need to be rechecked. Data model migration impact detected."
+      },
+      "label": "Hosted capability facade",
+      "llm_profile_used": "classifier",
+      "request": "Change hosted analytics dashboard display.",
+      "route": {
+        "affected_workflows": [
+          "DesignDocs",
+          "AppGenerator"
+        ],
+        "sequence_exists": true,
+        "workflow_id": "DesignDocs",
+        "workflow_sequence": "app_surface_revision"
+      },
+      "success": true,
+      "violations": []
+    }
+  ],
+  "classifier_llm_config": {
+    "model": "gpt-4o-mini",
+    "temperature": 0.0
+  },
+  "control_plane_profile": "default",
+  "generated_files_unchanged": true,
+  "generated_status_after": [],
+  "generated_status_before": [],
+  "llm_profile_used": "classifier",
+  "notes": [
+    "No generated app files are written by this script.",
+    "No refinement workflow is executed by this script."
+  ],
+  "schema_version": "mozaiks.refinement_classifier_smoke.v1",
+  "success": true,
+  "violations": []
+}

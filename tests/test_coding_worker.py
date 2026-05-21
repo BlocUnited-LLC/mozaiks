@@ -190,6 +190,7 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
     assert result.metadata["artifact_version_id"] == "av_child_1"
     assert result.metadata["bundle_mode"] == "workspace_snapshot"
     assert service.calls[0]["system_prompt"] == "coding system prompt from pack"
+    assert service.calls[0]["llm_config"] == {"model": "gpt-5.2-codex", "temperature": 0.1}
     assert '"input_files"' in service.calls[0]["user_prompt"]
     assert '"control_plane_context"' in service.calls[0]["user_prompt"]
     assert len(tool_executor.calls) == 2

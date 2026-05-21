@@ -49,7 +49,7 @@ class ArtifactScopeProposer:
                 f"Selected control-plane profile does not declare a '{_CHECKPOINT_EVENT}' checkpoint with prompt_id"
             )
 
-        llm_config = self._load_config().coding.llm_config or None
+        llm_config = self._load_config().resolve_capability_llm_config("coding")
         temperature = None
         if isinstance(llm_config, dict) and llm_config.get("temperature") is not None:
             try:

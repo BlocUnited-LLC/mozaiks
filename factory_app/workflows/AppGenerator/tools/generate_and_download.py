@@ -298,6 +298,7 @@ async def _register_app_bundle_artifact_version(
             get_artifact_store,
             resolve_latest_artifact_version_refs,
         )
+        from mozaiksai.core.artifacts.content_store import get_artifact_content_store
     except Exception as exc:  # pragma: no cover
         raise RuntimeError(f"Artifact store dependencies unavailable: {exc}") from exc
 
@@ -329,6 +330,37 @@ async def _register_app_bundle_artifact_version(
 
     raw = zip_path.read_bytes()
     sha = hashlib.sha256(raw).hexdigest()
+
+    # Persist to content store if a non-local backend is configured.  The local
+    # backend is skipped because artifact_path already covers that path.
+    bundle_content_metadata: Dict[str, Any] = {
+        "artifact_path": str(zip_path.resolve()),
+        "bundle_name": bundle_name,
+    }
+    # Include the carry-forward preservation report in artifact metadata when present.
+    cf_report = None
+    if context_variables is not None and hasattr(context_variables, "get"):
+        try:
+            cf_report = context_variables.get("carry_forward_report")
+        except Exception:
+            pass
+    if isinstance(cf_report, dict):
+        bundle_content_metadata["carry_forward_report"] = cf_report
+    content_store = get_artifact_content_store()
+    if content_store.backend_name != "local":
+        try:
+            # artifact_version_id is not yet known; use a placeholder key.
+            content_ref = await content_store.put_bundle(
+                raw,
+                app_id=str(app_id),
+                artifact_version_id=f"pending_{sha[:16]}",
+            )
+            bundle_content_metadata["content_ref"] = content_ref
+            bundle_content_metadata["content_backend"] = content_store.backend_name
+        except Exception as cs_exc:
+            wf_logger = get_workflow_logger(workflow_name=workflow_name, app_id=app_id)
+            wf_logger.warning("Content store put_bundle failed; falling back to local path: %s", cs_exc)
+
     artifact_store = get_artifact_store()
     canonical_inputs_version = await resolve_latest_artifact_version_refs(
         app_id=str(app_id),
@@ -358,10 +390,7 @@ async def _register_app_bundle_artifact_version(
             "author_user_id": user_id,
             "source_workflow": workflow_name,
             "source_chat_id": chat_id,
-            "metadata": {
-                "artifact_path": str(zip_path.resolve()),
-                "bundle_name": bundle_name,
-            },
+            "metadata": bundle_content_metadata,
         },
     )
     if context_variables is not None and hasattr(context_variables, "set"):
@@ -437,6 +466,17 @@ async def generate_and_download(
                 pass
     if not files_map:
         return {"status": "error", "message": "No code_files found to bundle."}
+
+    # Merge Phase 7A carry-forward preserved declarative files.
+    # These were written to context["carry_forward_additions"] by the resolver.
+    # Generated output (files_map) wins — only fill paths not already present.
+    carry_forward_additions = _context_get(context_variables, "carry_forward_additions")
+    if isinstance(carry_forward_additions, dict) and carry_forward_additions:
+        for cf_path, cf_content in carry_forward_additions.items():
+            safe_cf = _safe_relpath(cf_path)
+            if safe_cf and safe_cf not in files_map:
+                files_map[safe_cf] = str(cf_content)
+
     await _inject_agent_context_env(files_map=files_map, app_id=str(app_id), context_variables=context_variables)
 
     # Inject requirements.txt if the agents did not produce one.

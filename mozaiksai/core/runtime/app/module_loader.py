@@ -148,6 +148,7 @@ class ActionDef(ModuleContractModel):
     id: str
     description: str
     handler_method: str
+    api_surface: Optional[str] = None
     input_schema: Dict[str, Any] = Field(default_factory=dict)
     output_schema: Dict[str, Any] = Field(default_factory=dict)
     permissions: List[str] = Field(default_factory=list)
@@ -162,6 +163,18 @@ class ActionDef(ModuleContractModel):
     @classmethod
     def _lists(cls, value: Any) -> List[str]:
         return _string_list(value)
+
+    @field_validator("api_surface", mode="before")
+    @classmethod
+    def _api_surface(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("api_surface must be a string")
+        text = value.strip()
+        if not text:
+            raise ValueError("api_surface must be non-empty")
+        return text
 
 
 class ModuleCapability(ModuleContractModel):

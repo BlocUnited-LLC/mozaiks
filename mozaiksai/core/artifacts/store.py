@@ -230,6 +230,7 @@ class ArtifactStore:
         artifact_kind: Optional[str] = None,
         artifact_key: Optional[str] = None,
         lineage_root_id: Optional[str] = None,
+        lifecycle_status: Optional[ArtifactLifecycleStatus] = None,
         limit: int = 50,
     ) -> List[ArtifactVersionDoc]:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
@@ -242,6 +243,8 @@ class ArtifactStore:
             query["artifact_key"] = artifact_key
         if lineage_root_id:
             query["lineage_root_id"] = lineage_root_id
+        if lifecycle_status is not None:
+            query["lifecycle_status"] = lifecycle_status.value
         versions = await self._coll("ArtifactVersions")
         cursor = versions.find(query).sort([("version_number", -1), ("created_at", -1)]).limit(max(1, int(limit)))
         rows = await cursor.to_list(length=max(1, int(limit)))
@@ -675,6 +678,38 @@ class ArtifactStore:
         rows = await cursor.to_list(length=max(1, int(limit)))
         return [RefinementSessionDoc.model_validate(row) for row in rows]
 
+
+    async def get_current_artifact_version_refs(self, *, app_id: str) -> dict[str, str]:
+        """Return a mapping of artifact_kind → artifact_version_id for all CURRENT versions.
+
+        Used to keep SessionState.artifact_version_refs in sync after each workflow
+        completion, so that ArtifactInvalidationService can accurately mark specific
+        version IDs stale when a refinement request arrives.
+
+        Only the highest-numbered CURRENT version per artifact_kind is returned.
+        """
+        resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
+        if not resolved_app_id:
+            return {}
+        await self._ensure_client()
+        versions = await self._coll("ArtifactVersions")
+        try:
+            scope = build_app_scope_filter(resolved_app_id)
+            cursor = versions.find(
+                {**scope, "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value},
+                projection={"artifact_kind": 1, "_id": 1, "version_number": 1},
+            ).sort("version_number", -1)
+            rows = await cursor.to_list(length=200)
+            refs: dict[str, str] = {}
+            for row in rows:
+                kind = str(row.get("artifact_kind") or "").strip()
+                version_id = str(row.get("_id") or "").strip()
+                if kind and version_id and kind not in refs:
+                    refs[kind] = version_id
+            return refs
+        except Exception as exc:
+            logger.warning("get_current_artifact_version_refs failed for app %s: %s", resolved_app_id, exc)
+            return {}
 
     async def get_stale_artifact_families(self, *, app_id: str) -> List[str]:
         """Return artifact family names that are genuinely stale.

@@ -1,8 +1,10 @@
 """Canonical public API for the Mozaiks control-plane subsystem."""
 
 from .config import (
+    ALLOWED_CONTROL_PLANE_LLM_PROFILE_IDS,
     ControlPlaneCapabilityConfig,
     ControlPlaneConfig,
+    ControlPlaneLLMProfileConfig,
     load_ai_config_json,
     load_control_plane_config,
     resolve_ai_config_path,
@@ -92,6 +94,7 @@ __all__ = [
     "ArtifactKind",
     "ArtifactInvalidationService",
     "ArtifactScopeProposer",
+    "ALLOWED_CONTROL_PLANE_LLM_PROFILE_IDS",
     "ChangeClass",
     "ChangeClassifierPort",
     "ChangeClassifierResult",
@@ -109,6 +112,7 @@ __all__ = [
     "ControlPlaneConfig",
     "ControlPlaneHandlerResolutionError",
     "ControlPlaneHarnessManifest",
+    "ControlPlaneLLMProfileConfig",
     "ControlPlaneManifest",
     "ControlPlanePackLoadError",
     "ControlPlanePoliciesManifest",

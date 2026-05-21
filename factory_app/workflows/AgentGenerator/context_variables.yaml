@@ -107,6 +107,16 @@ definitions:
     source:
       type: state
       default: null
+  llm_profile:
+    type: string
+    description: >
+      Advisory LLM profile name injected by the control plane when the
+      active workflow_sequence requires stronger reasoning (conceptual_replan
+      or full_rebuild). Maps to a named profile in ai.json llm_profiles.
+      Null for patch, design, and feature routes. Advisory only.
+    source:
+      type: state
+      default: null
   context_aware:
     type: boolean
     description: Flag indicating if the application is opensource (in which the llm
@@ -419,6 +429,7 @@ agents:
     - screen
     - change_intent
     - impact_set
+    - llm_profile
     - context_aware
     - concept_overview
     - concept_api_endpoints

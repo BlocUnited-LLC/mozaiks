@@ -273,6 +273,10 @@ export default defineConfig(({ mode }) => {
   resolve: {
     // Resolve shared packages from chat-ui/node_modules (where all deps live).
     modules: [chatUiNodeModules, path.resolve(__dirname, 'node_modules'), 'node_modules'],
+    // Deduplicate singleton packages that break hooks if loaded twice.
+    // chat-ui ships its own node_modules/react; dedupe forces the resolver
+    // to always use web_shell's copy, which matches what react-dom uses.
+    dedupe: ['react', 'react-dom', 'react-router-dom', 'react-router'],
     alias: {
       // ── Core aliases (always present) ───────────────────────────────────
       '@mozaiks/chat-ui': chatUiSrcRoot,

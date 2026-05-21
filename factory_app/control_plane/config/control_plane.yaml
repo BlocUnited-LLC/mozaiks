@@ -18,7 +18,7 @@ routing:
         feature:
           workflow_sequence: full_rebuild
         core:
-          workflow_sequence: full_rebuild
+          workflow_sequence: conceptual_replan
     - artifact_kind: design_docs
       label: design docs
       routes:

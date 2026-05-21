@@ -62,7 +62,7 @@ class LLMChangeClassifier:
         if not control_plane.classifier_enabled():
             raise RuntimeError("Control-plane classifier is disabled in app/config/ai.json")
 
-        llm_config = control_plane.classifier.llm_config or None
+        llm_config = control_plane.resolve_capability_llm_config("classifier")
         temperature = None
         if isinstance(llm_config, dict) and llm_config.get("temperature") is not None:
             try:

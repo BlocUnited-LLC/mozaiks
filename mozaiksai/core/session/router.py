@@ -303,6 +303,18 @@ class SessionRouter:
             return None
 
         state = await self._load_or_create_state(app_id=app, user_id=user)
+
+        # Sync artifact_version_refs from ArtifactStore so that
+        # ArtifactInvalidationService has accurate version IDs for future
+        # refinement requests — even after a normal (non-revision) workflow run.
+        try:
+            from mozaiksai.core.artifacts.store import get_artifact_store
+            current_refs = await get_artifact_store().get_current_artifact_version_refs(app_id=app)
+            if current_refs:
+                state.artifact_version_refs.update(current_refs)
+        except Exception as exc:
+            logger.debug("[JOURNEY] artifact_version_refs sync skipped: %s", exc)
+
         journey = self._resolve_active_journey_for_workflow(pack, state, workflow)
         if journey is None:
             return None
@@ -1402,6 +1414,40 @@ class SessionRouter:
         state.revision_origin_workflow = None
         state.restart_from_workflow = None
         state.stale_layers = {}
+
+    async def fail_active_revision(
+        self,
+        *,
+        app_id: str,
+        user_id: str,
+        workflow_id: str,
+    ) -> None:
+        """Clear stuck revision state after a workflow failure.
+
+        Called when a workflow errors during a revision so the session does not
+        remain stuck in REVISING state indefinitely. Sets sequence_status to
+        STALE so the next refinement request can re-classify and route correctly.
+
+        No-op when no revision is active.
+        """
+        app = str(app_id or "").strip()
+        user = str(user_id or "").strip()
+        if not app or not user:
+            return
+
+        state = await self._load_or_create_state(app_id=app, user_id=user)
+        if not state.active_revision_id:
+            return
+
+        self._complete_active_revision(state)
+        state.sequence_status = SequenceStatus.STALE
+        state.updated_at = datetime.now(UTC)
+        await self._store.upsert(state)
+        logger.info(
+            "[JOURNEY] Cleared stuck revision state for app %s after workflow %s failure",
+            app,
+            str(workflow_id or "").strip(),
+        )
 
 
 _router: Optional[SessionRouter] = None

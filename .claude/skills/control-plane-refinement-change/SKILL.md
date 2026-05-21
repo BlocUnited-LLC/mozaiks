@@ -65,6 +65,10 @@ Routing rules:
 - when present, `patch`, `design`, `feature`, and `core` classes must stay
   aligned across config, docs, and tests
 
+Companion routing:
+
+- Add `factory-build-workflow-change` as a companion skill when the change also alters `factory_app/workflows/extended_orchestration/extension_registry.json`, `workflow_sequence` composition, `transitions[]`, `entrypoints[]`, or other cross-workflow routing surfaces.
+
 Do not:
 
 - invent a dedicated `RefinementWorkflow`

@@ -83,6 +83,8 @@ task_contracts:
       - Do not emit backend/database/schema.json or backend/database/seed.json.
       - Do not put DB access in backend/handler.py.
       - Do not put raw persistence logic in backend/service.py.
+      - list_* action output_schema must declare items.properties explicitly. A bare { type: array } with no items or item properties is invalid for list_* action outputs.
+      - backend/service.py must not return raw repo records from list_* methods. Each record must be serialized through a _serialize_{entity}_row or _serialize_{entity}_record allowlist helper declared in backend/schemas.py. The allowlist ensures unknown future DB fields cannot leak into caller responses.
 
   persistence_contract:
     owner_agent: DatabaseAgent

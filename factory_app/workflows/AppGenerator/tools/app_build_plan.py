@@ -6,6 +6,9 @@ from autogen.tools.dependency_injection import Field
 
 _logger = logging.getLogger("tools.app_build_plan")
 
+_CARRY_FORWARD_DECISION_VALUES: frozenset[str] = frozenset({"reuse", "adapt", "regenerate", "drop"})
+_CARRY_FORWARD_SOURCE_VALUES: frozenset[str] = frozenset({"carry_forward_candidate", "human_override", "planner"})
+
 _RAW_FRONTEND_SOURCE_EXTENSIONS = {".css", ".html", ".jsx", ".less", ".sass", ".scss", ".tsx"}
 _FRONTEND_JS_TS_SEGMENTS = (
     "/frontend/",
@@ -310,6 +313,68 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: fr
             )
 
 
+def _validate_carry_forward_decisions(
+    decisions: List[Dict[str, Any]],
+    task_ids: frozenset[str],
+) -> None:
+    """Validate carry_forward_decisions entries.
+
+    Rules:
+    - module_id must be a non-empty string.
+    - decision must be one of: reuse, adapt, regenerate, drop.
+    - reason must be non-empty.
+    - source must be one of: carry_forward_candidate, human_override, planner.
+    - affected_build_tasks entries must reference existing task ids when provided.
+    """
+    for i, decision in enumerate(decisions):
+        if not isinstance(decision, dict):
+            raise ValueError(
+                f"carry_forward_decisions[{i}] must be a dict, got {type(decision).__name__}"
+            )
+        label = f"carry_forward_decisions[{i}]"
+
+        module_id = str(decision.get("module_id") or "").strip()
+        if not module_id:
+            raise ValueError(f"{label}: module_id must be a non-empty string")
+
+        decision_value = str(decision.get("decision") or "").strip()
+        if decision_value not in _CARRY_FORWARD_DECISION_VALUES:
+            allowed = ", ".join(sorted(_CARRY_FORWARD_DECISION_VALUES))
+            raise ValueError(
+                f"{label} (module_id={module_id!r}): decision must be one of [{allowed}], "
+                f"got {decision_value!r}"
+            )
+
+        reason = str(decision.get("reason") or "").strip()
+        if not reason:
+            raise ValueError(
+                f"{label} (module_id={module_id!r}): reason must be a non-empty string"
+            )
+
+        source = str(decision.get("source") or "").strip()
+        if source and source not in _CARRY_FORWARD_SOURCE_VALUES:
+            allowed_src = ", ".join(sorted(_CARRY_FORWARD_SOURCE_VALUES))
+            raise ValueError(
+                f"{label} (module_id={module_id!r}): source must be one of [{allowed_src}], "
+                f"got {source!r}"
+            )
+
+        affected = decision.get("affected_build_tasks")
+        if affected:
+            if not isinstance(affected, list):
+                raise ValueError(
+                    f"{label} (module_id={module_id!r}): "
+                    "affected_build_tasks must be a list when provided"
+                )
+            unknown = [t for t in affected if isinstance(t, str) and t not in task_ids]
+            if unknown:
+                raise ValueError(
+                    f"{label} (module_id={module_id!r}): "
+                    f"affected_build_tasks references unknown task ids: {unknown}. "
+                    "Task ids must exist in build_tasks."
+                )
+
+
 def app_build_plan(
     *,
     AppBuildPlan: Annotated[
@@ -345,6 +410,7 @@ def app_build_plan(
     pending_schema_migration = AppBuildPlan.get("pending_schema_migration")
     generation_order = _normalize_string_list(AppBuildPlan.get("generation_order"))
     agent_backend_required = bool(AppBuildPlan.get("agent_backend_required", False))
+    carry_forward_decisions = _normalize_object_list(AppBuildPlan.get("carry_forward_decisions"))
 
     hosted_pack_ids = frozenset(
         str(p.get("capability_pack_id") or "").strip()
@@ -352,6 +418,12 @@ def app_build_plan(
         if isinstance(p, dict) and p.get("capability_source") == "hosted_pack"
     ) - {""}
     _validate_build_tasks(build_tasks, hosted_pack_ids=hosted_pack_ids)
+
+    task_ids: frozenset[str] = frozenset(
+        str(t.get("task_id") or "") for t in build_tasks if t.get("task_id")
+    )
+    if carry_forward_decisions:
+        _validate_carry_forward_decisions(carry_forward_decisions, task_ids=task_ids)
 
     if not app_kind:
         raise ValueError("AppBuildPlan.app_kind is required")
@@ -426,6 +498,7 @@ def app_build_plan(
         "database_intent_bundle": database_intent_bundle if isinstance(database_intent_bundle, dict) else None,
         "pending_schema_migration": pending_schema_migration if isinstance(pending_schema_migration, dict) else None,
         "generation_order": generation_order,
+        "carry_forward_decisions": carry_forward_decisions,
     }
 
     if context_variables and hasattr(context_variables, "set"):

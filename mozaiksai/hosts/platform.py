@@ -1256,7 +1256,7 @@ async def get_profile_panels(
                     tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
                     auth_token=None,
                     correlation_id=None,
-                    granted_permissions=None,
+                    granted_permissions=list(principal.scopes) if principal else None,
                 )
                 result = await module_executor.execute(req, context=None)
                 if result.success:
@@ -1289,7 +1289,10 @@ def _normalize_shell_page_entry(entry: dict, *, order_fallback: int) -> Optional
         "path": path,
         "label": entry.get("label", ""),
         "order": entry.get("order", order_fallback),
-        "meta": {**meta, "requiresAuth": entry.get("requiresAuth", True)},
+        "meta": {
+            **_normalize_route_requires_role_meta(meta),
+            "requiresAuth": entry.get("requiresAuth", True),
+        },
     }
     shell_mode = _shell_mode_from_entry(entry)
     if shell_mode:
@@ -1313,6 +1316,40 @@ def _normalize_shell_page_entry(entry: dict, *, order_fallback: int) -> Optional
         if isinstance(nav.get("group"), str) and nav["group"].strip():
             page["meta"].setdefault("appShell", True)
     return page
+
+
+def _coerce_requires_role(value: Any) -> Optional[str]:
+    """Normalize route-role metadata without treating it as security enforcement.
+
+    Current shell route metadata is single-role only. If legacy route or page
+    schema content provides a role list, keep the first non-empty role as
+    declaration and visibility intent only. Module policy remains the
+    authoritative security boundary for resource-scoped authorization until
+    frontend role checks and scoped route auth land.
+    """
+
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    if isinstance(value, list):
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            normalized = item.strip()
+            if normalized:
+                return normalized
+    return None
+
+
+def _normalize_route_requires_role_meta(meta: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(meta)
+    requires_role = _coerce_requires_role(normalized.get("requiresRole"))
+    if not requires_role:
+        requires_role = _coerce_requires_role(normalized.get("roles"))
+    normalized.pop("roles", None)
+    if requires_role:
+        normalized["requiresRole"] = requires_role
+    return normalized
 
 
 def _load_ui_route_manifest_pages(app_root: Path) -> List[dict]:
@@ -1360,10 +1397,20 @@ def _load_page_schema_routes(app_root: Path) -> List[dict]:
             continue
         name = str(raw.get("name") or default_name).strip() or default_name
         title = str(raw.get("title") or name).strip()
-        roles = raw.get("roles")
-        meta: dict = {"title": title, "appShell": True, "requiresAuth": True}
-        if isinstance(roles, list) and roles:
-            meta["roles"] = roles
+        raw_meta = raw.get("meta") if isinstance(raw.get("meta"), dict) else {}
+        raw_requires_role = raw_meta.get("requiresRole")
+        if raw_requires_role is None:
+            raw_requires_role = raw_meta.get("roles")
+        if raw_requires_role is None:
+            raw_requires_role = raw.get("roles")
+        meta: dict = _normalize_route_requires_role_meta(
+            {
+                "title": title,
+                "appShell": True,
+                "requiresAuth": True,
+                **({"requiresRole": raw_requires_role} if raw_requires_role is not None else {}),
+            }
+        )
         if isinstance(raw.get("navigation"), dict):
             meta["navigation"] = raw["navigation"]
         shell_mode = _normalize_shell_mode(raw.get("shell_mode")) or _normalize_shell_mode(raw.get("shellMode"))
@@ -1948,10 +1995,11 @@ async def _execute_module_action(
         tenant_id=str(tenant_id) if tenant_id else None,
         auth_token=str(auth_token) if auth_token else None,
         correlation_id=str(correlation_id) if correlation_id else None,
-        # TODO: populate from principal.permissions once the auth permission
-        # resolver is wired. Until then, None bypasses enforcement (trusted
-        # HTTP surface — still protected by require_any_auth at the endpoint).
-        granted_permissions=None,
+        # Use the principal's OAuth2 scopes as the granted permission set so
+        # the executor can enforce action-level permission declarations from
+        # module.yaml.  When no principal is present (unauthenticated /
+        # trusted-internal call path), None bypasses enforcement as before.
+        granted_permissions=list(principal.scopes) if principal else None,
     )
 
     result = await module_executor.execute(module_request, context=None)
@@ -3168,6 +3216,123 @@ def _notification_query_for_principal(principal: UserPrincipal) -> Dict[str, Any
     visibility.append({"audience.roles": {"$exists": False}})
     query["$or"] = visibility
     return query
+
+
+def _notification_visibility_filter(principal: UserPrincipal) -> List[Dict[str, Any]]:
+    """Return the $or visibility filter for platform_notifications queries."""
+    visibility: List[Dict[str, Any]] = [{"actor.id": principal.user_id}]
+    roles = [role for role in principal.roles if role]
+    if roles:
+        visibility.append({"audience.roles": {"$in": roles}})
+    visibility.append({"audience.roles": {"$exists": False}})
+    return visibility
+
+
+# Fields excluded from all notification list responses.
+# source_event stores the full event envelope which may contain provider IDs
+# (e.g. stripe_payment_intent_id). It must never be returned to callers.
+_NOTIFICATION_SAFE_PROJECTION: Dict[str, int] = {
+    "_id": 0,
+    "source_event": 0,   # may contain Stripe/provider IDs — never returned to callers
+    "tenant_id": 0,      # internal platform scope
+    "actor": 0,          # internal actor envelope; not needed for UI display
+    "audience": 0,       # internal routing detail
+}
+
+
+@app.get("/api/notifications")
+async def list_notifications(
+    status: str = "all",
+    limit: int = 50,
+    app_id: Optional[str] = None,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """
+    List platform notifications visible to the authenticated principal.
+
+    Returns notifications from the platform_notifications collection filtered by
+    audience roles and principal app_id scope.
+
+    Safe fields only — source_event (which may contain provider IDs) is excluded.
+
+    Query params:
+        status: "all" | "unread" | "read"  (default: "all")
+        limit:  1–200  (default: 50)
+        app_id: explicit app scope override for operator console use
+    """
+    bounded_limit = max(1, min(int(limit), 200))
+    query: Dict[str, Any] = {}
+    if status in ("unread", "read"):
+        query["status"] = status
+
+    effective_app_id = app_id or (principal.app_id if principal.app_id else None)
+    if effective_app_id:
+        query["app_id"] = effective_app_id
+
+    query["$or"] = _notification_visibility_filter(principal)
+
+    try:
+        from mozaiksai.core.core_config import get_mongo_client
+
+        collection = get_mongo_client()["mozaiks"]["platform_notifications"]
+        cursor = (
+            collection.find(query, _NOTIFICATION_SAFE_PROJECTION)
+            .sort("created_at", -1)
+            .limit(bounded_limit)
+        )
+        notifications = await cursor.to_list(length=bounded_limit)
+        unread_count = sum(1 for n in notifications if n.get("status") == "unread")
+        return {
+            "notifications": notifications,
+            "count": len(notifications),
+            "unread_count": unread_count,
+        }
+    except Exception as exc:
+        logger.debug("NOTIFICATION_LIST_SKIPPED: %s", exc)
+        return {"notifications": [], "count": 0, "unread_count": 0}
+
+
+@app.post("/api/notifications/{notification_id}/read")
+async def mark_notification_read(
+    notification_id: str,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """Mark a single notification as read. Only updates records visible to the principal."""
+    try:
+        from mozaiksai.core.core_config import get_mongo_client
+
+        collection = get_mongo_client()["mozaiks"]["platform_notifications"]
+        match_query: Dict[str, Any] = {
+            "notification_id": notification_id,
+            "$or": _notification_visibility_filter(principal),
+        }
+        result = await collection.update_one(match_query, {"$set": {"status": "read"}})
+        return {"success": result.modified_count > 0, "notification_id": notification_id}
+    except Exception as exc:
+        logger.debug("NOTIFICATION_MARK_READ_SKIPPED: %s", exc)
+        return {"success": False, "notification_id": notification_id}
+
+
+@app.post("/api/notifications/mark-all-read")
+async def mark_all_notifications_read(
+    app_id: Optional[str] = None,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """Mark all visible unread notifications as read for the authenticated principal."""
+    try:
+        from mozaiksai.core.core_config import get_mongo_client
+
+        collection = get_mongo_client()["mozaiks"]["platform_notifications"]
+        query: Dict[str, Any] = {"status": "unread"}
+        effective_app_id = app_id or (principal.app_id if principal.app_id else None)
+        if effective_app_id:
+            query["app_id"] = effective_app_id
+        query["$or"] = _notification_visibility_filter(principal)
+        result = await collection.update_many(query, {"$set": {"status": "read"}})
+        return {"success": True, "marked_count": result.modified_count}
+    except Exception as exc:
+        logger.debug("NOTIFICATION_MARK_ALL_READ_SKIPPED: %s", exc)
+        return {"success": False, "marked_count": 0}
 
 
 @app.get("/api/general_chats/list/{app_id}/{user_id}")

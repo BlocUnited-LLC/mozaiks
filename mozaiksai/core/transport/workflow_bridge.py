@@ -393,6 +393,19 @@ class WorkflowBridgeMixin:
                     )
                 except Exception:
                     pass
+            # Clear stuck REVISING state so the next refinement request can route correctly.
+            if app_id and user_id:
+                try:
+                    from mozaiksai.core.session.router import get_session_router
+                    asyncio.create_task(
+                        get_session_router().fail_active_revision(
+                            app_id=app_id,
+                            user_id=user_id,
+                            workflow_id=workflow_name,
+                        )
+                    )
+                except Exception:
+                    pass
             await self.send_error(
                 error_message=f"An internal error occurred: {e}",
                 error_code="WORKFLOW_EXECUTION_FAILED",

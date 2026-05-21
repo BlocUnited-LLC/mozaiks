@@ -26,6 +26,11 @@ Current persistence truth:
 - `backend/repo.py`, `backend/policy.py`, and `backend/schemas.py` are the
   canonical persistence support files
 
+Companion routing:
+
+- Add `runtime-change` when `ModuleContext.persistence`, runtime persistence injection, or runtime persistence behavior changes.
+- Add `appgenerator-change` when generated `database_intent.json`, `config/database_migrations/{migration_id}.json`, or generated module persistence output changes.
+
 Do not reintroduce:
 
 - `backend/models.py`

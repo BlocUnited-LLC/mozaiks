@@ -475,6 +475,16 @@ Registered via the active app root's `app/ui/index.js` extension barrel. Studio 
 
 **Vite JSX transform for non-`*-platform` workspaces** — `web_shell/vite.config.js` uses a `platformAppDirForward` prefix check (`id.startsWith(platformAppDirForward + '/')`) in addition to the legacy `*-platform` directory regex, so JSX inside `.js` files is correctly transformed for any workspace directory name (e.g. `customer-portal`).
 
+**React/router singleton deduplication** — `web_shell/vite.config.js` declares `resolve.dedupe: ['react', 'react-dom', 'react-router-dom', 'react-router']`. This is required because:
+
+1. `chat-ui/` ships its own `node_modules/` (including React and react-router). When the Vite dev server resolves modules for files served via `@fs/` (active app workspace code or chat-ui source outside the Vite root), it may discover and load the chat-ui copy instead of the shell's copy.
+2. Two distinct React instances in one browser session break all hook state: `useCallback`, `useContext`, and router hooks depend on a shared dispatcher bound to the single `createRoot()` instance.
+3. `resolve.dedupe` forces Vite to always use the web_shell's single copy regardless of which `node_modules` directory is found during resolution.
+
+The companion `resolve.alias` entries (`react`, `react-dom`, `react-router-dom`) are belt-and-suspenders: they pin explicit imports to `web_shell/node_modules/react` so the resolved path is deterministic even outside the pre-bundled dep cache.
+
+App workspaces and generated app output must not bundle their own copies of React, react-dom, or react-router. Those packages are always provided by the shell.
+
 ---
 
 ## Core Runtime and App Backend Boundary

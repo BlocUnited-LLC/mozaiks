@@ -81,7 +81,9 @@ def _merge_raw_registries(registries: List[Dict[str, Any]]) -> Optional[Dict[str
     factory registry while still inheriting all factory workflows, sequences, and
     transitions the overlay doesn't declare.
 
-    List fields deduplicated by 'id'; scalar fields use first non-null value.
+    List fields are deduplicated by 'id'; scalar fields use first non-null
+    value. Artifact dependency graph entries are merged by family, preserving
+    priority order and deduplicating upstream edges.
     """
     if not registries:
         return None
@@ -89,6 +91,7 @@ def _merge_raw_registries(registries: List[Dict[str, Any]]) -> Optional[Dict[str
     list_fields = ("workflows", "entrypoints", "transitions", "journeys", "workflow_sequences")
     merged: Dict[str, Any] = {"version": 3}
     seen_ids: Dict[str, set] = {f: set() for f in list_fields}
+    artifact_dependency_graph: Dict[str, List[str]] = {}
 
     for registry in registries:
         if not merged.get("pack_name"):
@@ -108,6 +111,32 @@ def _merge_raw_registries(registries: List[Dict[str, Any]]) -> Optional[Dict[str
                         continue  # primary (earlier) already claimed this id
                     seen_ids[field].add(entry_id)
                 existing.append(entry)
+
+        graph = registry.get("artifact_dependency_graph")
+        if graph is None:
+            continue
+        if not isinstance(graph, dict):
+            raise ValueError("artifact_dependency_graph must be a JSON object")
+        for family, dependencies in graph.items():
+            family_id = str(family or "").strip()
+            if not family_id:
+                raise ValueError("artifact_dependency_graph family ids must be non-empty strings")
+            if not isinstance(dependencies, list):
+                raise ValueError(
+                    f"artifact_dependency_graph family '{family_id}' dependencies must be a list"
+                )
+            merged_dependencies = artifact_dependency_graph.setdefault(family_id, [])
+            for dependency in dependencies:
+                dependency_id = str(dependency or "").strip()
+                if not dependency_id:
+                    raise ValueError(
+                        f"artifact_dependency_graph family '{family_id}' dependencies must be non-empty strings"
+                    )
+                if dependency_id not in merged_dependencies:
+                    merged_dependencies.append(dependency_id)
+
+    if artifact_dependency_graph:
+        merged["artifact_dependency_graph"] = artifact_dependency_graph
 
     return merged
 

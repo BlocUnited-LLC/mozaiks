@@ -7,8 +7,9 @@
     "concept":         [],
     "brand":           ["concept"],
     "design_docs":     ["concept"],
+    "experience_spec": ["concept", "design_docs"],
     "workflow_bundle": ["design_docs"],
-    "app_bundle":      ["design_docs", "workflow_bundle", "brand"]
+    "app_bundle":      ["design_docs", "experience_spec", "workflow_bundle", "brand"]
   },
 
   "workflows": [
@@ -43,7 +44,7 @@
     {
       "id": "build",
       "description": "Full build pipeline: app path context → value → brand → coding participation → database setup intent → design → generation.",
-      "affected_declarative_families": ["concept", "brand", "design_docs", "workflow_bundle", "app_bundle"],
+      "affected_declarative_families": ["concept", "brand", "design_docs", "experience_spec", "workflow_bundle", "app_bundle"],
       "steps": [
         { "transition": "app_type_selector" },
         { "workflows": ["ValueEngine"] },
@@ -67,7 +68,19 @@
     {
       "id": "full_rebuild",
       "description": "Revision pipeline for concept-level changes that need the full build stack refreshed without onboarding transitions.",
-      "affected_declarative_families": ["concept", "brand", "design_docs", "workflow_bundle", "app_bundle"],
+      "affected_declarative_families": ["concept", "brand", "design_docs", "experience_spec", "workflow_bundle", "app_bundle"],
+      "steps": [
+        { "workflows": ["ValueEngine"] },
+        { "workflows": ["ThemeCapture"] },
+        { "workflows": ["DesignDocs"] },
+        { "workflows": ["AgentGenerator"] },
+        { "workflows": ["AppGenerator"] }
+      ]
+    },
+    {
+      "id": "conceptual_replan",
+      "description": "Concept-level pivot that re-plans from existing app context, preserving brand and reusable generic modules. Runs the same workflow chain as full_rebuild but is semantically distinct so later work can inject preservation context (pivot_description, preserve_families, carry_forward_modules).",
+      "affected_declarative_families": ["concept", "brand", "design_docs", "experience_spec", "workflow_bundle", "app_bundle"],
       "steps": [
         { "workflows": ["ValueEngine"] },
         { "workflows": ["ThemeCapture"] },
@@ -95,7 +108,7 @@
     {
       "id": "design_revision",
       "description": "Design-intent revision that refreshes downstream workflow and app artifacts.",
-      "affected_declarative_families": ["design_docs", "workflow_bundle", "app_bundle"],
+      "affected_declarative_families": ["design_docs", "experience_spec", "workflow_bundle", "app_bundle"],
       "steps": [
         { "workflows": ["DesignDocs"] },
         { "workflows": ["AgentGenerator"] },
@@ -105,7 +118,7 @@
     {
       "id": "app_surface_revision",
       "description": "App-surface revision that reopens DesignDocs and regenerates app artifacts.",
-      "affected_declarative_families": ["design_docs", "app_bundle"],
+      "affected_declarative_families": ["experience_spec", "app_bundle"],
       "steps": [
         { "workflows": ["DesignDocs"] },
         { "workflows": ["AppGenerator"] }

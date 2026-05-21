@@ -100,6 +100,7 @@ actions:
   - id: list_items
     description: List items.
     handler_method: list_items
+    api_surface: public_readonly   # optional metadata; permissions still authorize access
     input_schema: { type: object, properties: { limit: { type: integer } } }
     output_schema: { type: object, required: [items, count] }
     permissions: [my_module.read]
@@ -112,6 +113,13 @@ actions:
     permissions: [my_module.manage]
     emits: [domain.my_module.item_created]
 ```
+
+`actions[].api_surface` is optional descriptive metadata for the intended
+exposure surface of an action. Common values include `public`,
+`public_readonly`, `internal`, and `admin_internal`. The runtime preserves this
+metadata for tooling, generated admin surfaces, and planning, but it does not
+replace authorization. Runtime permission checks continue to use
+`actions[].permissions` and the caller's granted permissions.
 
 ---
 

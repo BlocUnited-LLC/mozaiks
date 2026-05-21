@@ -104,6 +104,19 @@ async def assemble_app_tasks(
             file_map[f["filename"]] = f["content"]
         code_files = [{"filename": k, "content": v} for k, v in sorted(file_map.items())]
 
+    # Write the assembled flat file map to context so the carry-forward
+    # preservation resolver (which runs after AssemblyAgent's turn) can read
+    # the full generated output and detect conflicts correctly.
+    if context_variables and hasattr(context_variables, "set"):
+        try:
+            context_variables.set(
+                "generated_files",
+                {str(f["filename"]): str(f["content"]) for f in code_files},
+            )
+            context_variables.set("assembled_source", "mfj_task_outputs")
+        except Exception:
+            pass
+
     status_note = result.get("message") or "Assembled app task outputs into one bundle."
     if interface_files:
         status_note = f"{status_note} (+{len(interface_files)} module_interface.yaml)"

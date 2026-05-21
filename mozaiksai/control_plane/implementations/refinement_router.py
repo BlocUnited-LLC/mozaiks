@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -15,6 +16,8 @@ from mozaiksai.core.workflow.pack.config import (
     normalize_step_groups,
 )
 
+from ..contracts import ControlPlaneToolContext
+from ..executor import resolve_control_plane_tool_entrypoint
 from ..loader import load_selected_control_plane_pack
 from ..schema import (
     ControlPlaneArtifactRoutingManifest,
@@ -26,16 +29,210 @@ from .change_classifier import get_change_classifier
 _logger = logging.getLogger("mozaiksai.control_plane.implementations.refinement_router")
 
 # Topological order for stale-family priority: earliest dependency restarts first.
-_STALE_PRIORITY: list[str] = ["concept", "brand", "design_docs", "workflow_bundle", "app_bundle"]
+_STALE_PRIORITY: list[str] = [
+    "concept",
+    "brand",
+    "design_docs",
+    "experience_spec",
+    "workflow_bundle",
+    "app_bundle",
+]
 
 # Maps a stale artifact family to the canonical sequence that rebuilds it and its dependents.
 _STALE_SEQUENCE_MAP: dict[str, str] = {
     "concept": "full_rebuild",
     "brand": "theme_revision",
     "design_docs": "design_revision",
+    "experience_spec": "app_surface_revision",
     "workflow_bundle": "workflow_revision",
     "app_bundle": "app_revision",
 }
+
+_EXPERIENCE_NAVIGATION_TERMS = (
+    "navigation",
+    "nav",
+    "shell",
+    "chrome",
+    "header",
+    "footer",
+    "menu",
+    "sidebar",
+    "tabs",
+)
+
+_MODULE_IMPACT_TERMS = (
+    "module",
+    "action",
+    "api",
+    "endpoint",
+    "backend",
+    "database",
+    "schema",
+    "event",
+    "reaction",
+    "notification",
+    "admin panel",
+    "permission",
+    "handler",
+    "service",
+    "repo",
+    "policy",
+)
+
+_MODULE_CONTRACT_ORDER = {
+    "events.yaml": 0,
+    "reactions.yaml": 1,
+    "notifications.yaml": 2,
+    "settings.yaml": 3,
+    "admin.yaml": 4,
+    "profile.yaml": 5,
+}
+
+_MODULE_BACKEND_ORDER = {
+    "handler.py": 0,
+    "service.py": 1,
+    "repo.py": 2,
+    "policy.py": 3,
+    "schemas.py": 4,
+    "settings.py": 5,
+    "admin.py": 6,
+}
+
+_HOSTED_CAPABILITY_TERMS = (
+    "hosted",
+    "hosted capability",
+    "hosted pack",
+    "external adapter",
+    "integration client",
+    "facade module",
+    "façade module",
+    "provider-backed",
+    "managed capability",
+    "external service",
+    "analytics provider",
+    "reporting provider",
+    "audit provider",
+    "notification provider",
+)
+
+_HOSTED_GENERIC_PACK_TOKENS = {
+    "hosted",
+    "pack",
+    "provider",
+    "external",
+    "managed",
+    "capability",
+    "service",
+}
+
+_UI_SURFACE_TERMS = (
+    "display",
+    "dashboard",
+    "page",
+    "screen",
+    "ui",
+    "layout",
+    "view",
+    "panel",
+    "metrics",
+    "form",
+    "table",
+)
+
+_INTEGRATION_IMPACT_TERMS = (
+    "integration",
+    "connector",
+    "external api",
+    "external service",
+    "api key",
+    "credential",
+    "provider",
+    "webhook",
+    "sync",
+    "import",
+    "export",
+    "analytics provider",
+    "reporting provider",
+    "search provider",
+    "email provider",
+    "storage provider",
+    "crm provider",
+)
+
+_INTEGRATION_SECRET_PATH_TERMS = (
+    ".env",
+    "secret",
+    "secrets",
+    "credential",
+    "credentials",
+    "vault",
+    "key",
+    "keys",
+    "token",
+    "tokens",
+    "password",
+)
+
+_DATA_MODEL_IMPACT_TERMS = (
+    "schema",
+    "field",
+    "data model",
+    "model",
+    "database",
+    "migration",
+    "migrate",
+    "collection",
+    "table",
+    "index",
+    "unique",
+    "required field",
+    "optional field",
+    "relation",
+    "reference",
+    "foreign key",
+    "tenant scope",
+    "workspace scope",
+    "owner scope",
+    "delete records",
+    "rename field",
+    "change type",
+    "add column",
+    "remove column",
+    "backfill",
+)
+
+_DATA_MODEL_CONTEXTUAL_TERMS = (
+    "archive",
+    "soft delete",
+)
+
+_DATA_MODEL_CONTEXT_TERMS = (
+    "schema",
+    "field",
+    "model",
+    "database",
+    "migration",
+    "collection",
+    "table",
+    "record",
+    "records",
+    "persistence",
+)
+
+_DATA_MODEL_DESTRUCTIVE_TERMS = (
+    "delete field",
+    "remove field",
+    "drop field",
+    "drop table",
+    "delete records",
+    "purge",
+    "rename field",
+    "change type",
+    "required field",
+    "unique constraint",
+    "irreversible",
+    "destructive",
+)
 
 
 class ChangeClass(str, Enum):
@@ -49,6 +246,7 @@ class ArtifactKind(str, Enum):
     APP_BUNDLE = "app_bundle"
     WORKFLOW_BUNDLE = "workflow_bundle"
     DESIGN_DOCS = "design_docs"
+    EXPERIENCE_SPEC = "experience_spec"
     CONCEPT = "concept"
 
 
@@ -221,6 +419,868 @@ class RefinementTriggerRouteResolver:
     def _affected_workflows_for_route(self, route: ControlPlaneChangeRouteManifest) -> list[str]:
         return self._sequence_workflows(route.workflow_sequence) or [self._route_workflow_id(route)]
 
+    @staticmethod
+    def _dedupe_paths(paths: list[str]) -> list[str]:
+        result: list[str] = []
+        for raw_path in paths:
+            path = str(raw_path or "").strip().replace("\\", "/").lstrip("/")
+            if path and path not in result:
+                result.append(path)
+        return result
+
+    @staticmethod
+    def _manifest_paths_from_extra(extra: dict[str, Any]) -> list[str]:
+        for key in ("files_manifest", "file_manifest", "artifact_files_manifest"):
+            raw_manifest = extra.get(key)
+            if not isinstance(raw_manifest, list):
+                continue
+            paths: list[str] = []
+            for entry in raw_manifest:
+                if isinstance(entry, str):
+                    paths.append(entry)
+                elif isinstance(entry, dict):
+                    paths.append(str(entry.get("path") or ""))
+                else:
+                    path = getattr(entry, "path", None)
+                    if path is not None:
+                        paths.append(str(path))
+            return RefinementTriggerRouteResolver._dedupe_paths(paths)
+        return []
+
+    @staticmethod
+    def _manifest_entries_from_extra(extra: dict[str, Any]) -> list[dict[str, Any]]:
+        for key in ("files_manifest", "file_manifest", "artifact_files_manifest"):
+            raw_manifest = extra.get(key)
+            if not isinstance(raw_manifest, list):
+                continue
+            entries: list[dict[str, Any]] = []
+            for entry in raw_manifest:
+                if isinstance(entry, str):
+                    entries.append({"path": entry})
+                elif isinstance(entry, dict):
+                    path = str(entry.get("path") or "").strip()
+                    if path:
+                        entries.append(dict(entry, path=path))
+                else:
+                    path = getattr(entry, "path", None)
+                    if path is not None:
+                        entries.append({"path": str(path)})
+            return entries
+        return []
+
+    @staticmethod
+    async def _manifest_paths_for_request(request: RefinementRequest) -> list[str]:
+        paths = RefinementTriggerRouteResolver._manifest_paths_from_extra(request.extra)
+        if paths:
+            return paths
+        if not request.app_id or not request.artifact_version_id:
+            return []
+        try:
+            from mozaiksai.core.artifacts.store import ArtifactStore
+
+            artifact = await ArtifactStore().get_artifact_version(
+                app_id=request.app_id,
+                artifact_version_id=request.artifact_version_id,
+            )
+        except Exception:
+            return []
+        if artifact is None:
+            return []
+        return RefinementTriggerRouteResolver._dedupe_paths(
+            [entry.path for entry in getattr(artifact, "files_manifest", [])]
+        )
+
+    @staticmethod
+    def _experience_requires_shell_update(
+        *,
+        request: RefinementRequest,
+        intent: ChangeIntent,
+    ) -> bool:
+        text = RefinementTriggerRouteResolver._request_impact_text(request=request, intent=intent)
+        return any(term in text for term in _EXPERIENCE_NAVIGATION_TERMS)
+
+    @staticmethod
+    def _request_impact_text(
+        *,
+        request: RefinementRequest,
+        intent: ChangeIntent,
+    ) -> str:
+        return " ".join(
+            [
+                str(request.raw_user_request or ""),
+                str(request.source_surface or ""),
+                " ".join(str(signal or "") for signal in intent.signals),
+            ]
+        ).lower()
+
+    @classmethod
+    def _experience_spec_bundle_paths(
+        cls,
+        *,
+        request: RefinementRequest,
+        intent: ChangeIntent,
+        manifest_paths: list[str],
+    ) -> list[str]:
+        if manifest_paths:
+            paths = [
+                path
+                for path in manifest_paths
+                if path.startswith("ui/pages/")
+                and path.endswith((".yaml", ".yml"))
+                and not path.startswith("ui/pages/custom/")
+            ]
+            if "ui/route_manifest.json" in manifest_paths:
+                paths.append("ui/route_manifest.json")
+            if cls._experience_requires_shell_update(request=request, intent=intent) and "config/shell.json" in manifest_paths:
+                paths.append("config/shell.json")
+
+            custom_paths = [
+                path
+                for path in manifest_paths
+                if path.startswith("ui/pages/custom/")
+                and path.endswith((".jsx", ".tsx", ".js", ".ts"))
+            ]
+            if custom_paths:
+                if "ui/index.js" in manifest_paths:
+                    paths.append("ui/index.js")
+                paths.extend(custom_paths)
+            return cls._dedupe_paths(paths)
+
+        paths = ["ui/pages/*.yaml", "ui/route_manifest.json"]
+        if cls._experience_requires_shell_update(request=request, intent=intent):
+            paths.append("config/shell.json")
+        return paths
+
+    @staticmethod
+    def _has_module_impact_signal(
+        *,
+        request: RefinementRequest,
+        intent: ChangeIntent,
+    ) -> bool:
+        text = RefinementTriggerRouteResolver._request_impact_text(request=request, intent=intent)
+        for term in _MODULE_IMPACT_TERMS:
+            variants = {term}
+            if term == "api":
+                variants.add("apis")
+            elif term.endswith("y"):
+                variants.add(f"{term[:-1]}ies")
+            else:
+                variants.add(f"{term}s")
+            for variant in variants:
+                pattern = rf"(?<![a-z0-9]){re.escape(variant)}(?![a-z0-9])"
+                if re.search(pattern, text):
+                    return True
+        return False
+
+    @staticmethod
+    def _module_ids_from_manifest(manifest_paths: list[str]) -> list[str]:
+        module_ids: list[str] = []
+        for path in manifest_paths:
+            parts = path.split("/")
+            if len(parts) >= 3 and parts[0] == "modules" and parts[1] and parts[1] not in {"*", "**"}:
+                module_id = parts[1]
+                if module_id not in module_ids:
+                    module_ids.append(module_id)
+        return module_ids
+
+    @staticmethod
+    def _mentioned_module_ids(
+        *,
+        request: RefinementRequest,
+        intent: ChangeIntent,
+        known_module_ids: list[str],
+    ) -> list[str]:
+        text = RefinementTriggerRouteResolver._request_impact_text(request=request, intent=intent)
+        mentioned: list[str] = []
+        for module_id in known_module_ids:
+            variants = {
+                module_id.lower(),
+                module_id.lower().replace("_", "-"),
+                module_id.lower().replace("_", " "),
+                module_id.lower().replace("-", " "),
+            }
+            if module_id.lower().endswith("s") and len(module_id) > 1:
+                singular = module_id.lower()[:-1]
+                variants.update(
+                    {
+                        singular,
+                        singular.replace("_", "-"),
+                        singular.replace("_", " "),
+                        singular.replace("-", " "),
+                    }
+                )
+            if any(
+                re.search(rf"(?<![a-z0-9]){re.escape(variant)}(?![a-z0-9])", text)
+                for variant in variants
+                if variant
+            ):
+                mentioned.append(module_id)
+        return mentioned
+
+    @staticmethod
+    def _is_canonical_module_manifest_path(path: str, module_id: str) -> bool:
+        prefix = f"modules/{module_id}/"
+        if not path.startswith(prefix):
+            return False
+        relative = path.removeprefix(prefix)
+        parts = relative.split("/")
+        if relative in {"module.yaml", "runtime_extensions.yaml"}:
+            return True
+        if len(parts) == 2 and parts[0] == "contracts" and parts[1].endswith((".yaml", ".yml")):
+            return True
+        return len(parts) == 2 and parts[0] == "backend" and parts[1].endswith(".py")
+
+    @staticmethod
+    def _module_path_sort_key(path: str) -> tuple[str, int, int, str]:
+        parts = path.split("/")
+        module_id = parts[1] if len(parts) > 1 else ""
+        relative = "/".join(parts[2:]) if len(parts) > 2 else ""
+        if relative == "module.yaml":
+            return (module_id, 0, 0, relative)
+        if relative.startswith("contracts/"):
+            filename = relative.split("/", 1)[1]
+            return (module_id, 1, _MODULE_CONTRACT_ORDER.get(filename, 100), relative)
+        if relative.startswith("backend/"):
+            filename = relative.split("/", 1)[1]
+            return (module_id, 2, _MODULE_BACKEND_ORDER.get(filename, 100), relative)
+        if relative == "runtime_extensions.yaml":
+            return (module_id, 3, 0, relative)
+        return (module_id, 100, 0, relative)
+
+    @staticmethod
+    def _pack_ids_from_integration_clients(manifest_paths: list[str]) -> list[str]:
+        pack_ids: list[str] = []
+        for path in manifest_paths:
+            match = re.fullmatch(r"backend/integrations/([A-Za-z0-9_-]+)_client\.py", path)
+            if match:
+                pack_id = match.group(1)
+                if pack_id not in pack_ids:
+                    pack_ids.append(pack_id)
+        return pack_ids
+
+    @staticmethod
+    def _has_integration_impact_signal(
+        *,
+        request: RefinementRequest,
+        intent: ChangeIntent,
+        known_connector_ids: list[str],
+    ) -> bool:
+        text = RefinementTriggerRouteResolver._request_impact_text(request=request, intent=intent)
+        if re.search(r"(?<![a-z0-9])hosted(?![a-z0-9])", text):
+            return False
+        for term in _INTEGRATION_IMPACT_TERMS:
+            variants = {term}
+            if term.endswith("y"):
+                variants.add(f"{term[:-1]}ies")
+            else:
+                variants.add(f"{term}s")
+            for variant in variants:
+                pattern = rf"(?<![a-z0-9]){re.escape(variant)}(?![a-z0-9])"
+                if re.search(pattern, text):
+                    return True
+        return bool(
+            RefinementTriggerRouteResolver._mentioned_ids(
+                request=request,
+                intent=intent,
+                known_ids=known_connector_ids,
+            )
+        )
+
+    @staticmethod
+    def _is_safe_integration_path(path: str) -> bool:
+        normalized = path.lower()
+        return not any(term in normalized for term in _INTEGRATION_SECRET_PATH_TERMS)
+
+    @staticmethod
+    def _is_integration_config_path(path: str) -> bool:
+        return bool(re.fullmatch(r"config/integrations[^/]*\.json", path))
+
+    @staticmethod
+    def _is_integration_doc_path(path: str) -> bool:
+        return bool(re.fullmatch(r"docs/integrations[^/]*\.md", path))
+
+    @staticmethod
+    def _module_integration_content_signals(
+        *,
+        content: str,
+        connector_ids: list[str],
+    ) -> bool:
+        lower_content = content.lower()
+        if "backend.integrations" in lower_content or "connector_id" in lower_content or "integration" in lower_content:
+            return True
+        return any(
+            connector_id.lower() in lower_content
+            or connector_id.lower().replace("_", "-") in lower_content
+            or connector_id.lower().replace("_", " ") in lower_content
+            for connector_id in connector_ids
+        )
+
+    @classmethod
+    def _module_ids_with_integration_content(
+        cls,
+        *,
+        request: RefinementRequest,
+        connector_ids: list[str],
+    ) -> list[str]:
+        module_ids: list[str] = []
+        for entry in cls._manifest_entries_from_extra(request.extra):
+            path = str(entry.get("path") or "").strip().replace("\\", "/").lstrip("/")
+            parts = path.split("/")
+            if len(parts) < 4 or parts[0] != "modules":
+                continue
+            content = cls._page_content_from_manifest_entry(entry)
+            if content and cls._module_integration_content_signals(content=content, connector_ids=connector_ids):
+                module_id = parts[1]
+                if module_id not in module_ids:
+                    module_ids.append(module_id)
+        return module_ids
+
+    @classmethod
+    def _integration_bundle_paths(
+        cls,
+        *,
+        request: RefinementRequest,
+        intent: ChangeIntent,
+        manifest_paths: list[str],
+    ) -> list[str]:
+        known_connector_ids = cls._pack_ids_from_integration_clients(manifest_paths)
+        if not cls._has_integration_impact_signal(
+            request=request,
+            intent=intent,
+            known_connector_ids=known_connector_ids,
+        ):
+            return []
+
+        if not manifest_paths:
+            paths = [
+                "backend/integrations/*_client.py",
+                "modules/*/backend/service.py",
+                "modules/*/backend/schemas.py",
+                "modules/*/module.yaml",
+                "config/integrations*.json",
+                "docs/integrations*.md",
+            ]
+            if cls._is_ui_facing_request(request=request, intent=intent):
+                paths.append("ui/pages/*.yaml")
+            return paths
+
+        mentioned_connector_ids = cls._mentioned_ids(
+            request=request,
+            intent=intent,
+            known_ids=known_connector_ids,
+        )
+        selected_connector_ids = mentioned_connector_ids or known_connector_ids
+
+        paths = [
+            path
+            for path in manifest_paths
+            if cls._is_safe_integration_path(path)
+            and re.fullmatch(r"backend/integrations/[A-Za-z0-9_-]+_client\.py", path)
+            and (
+                not mentioned_connector_ids
+                or path.removeprefix("backend/integrations/").removesuffix("_client.py") in selected_connector_ids
+            )
+        ]
+
+        known_module_ids = cls._module_ids_from_manifest(manifest_paths)
+        module_ids = cls._module_ids_with_integration_content(
+            request=request,
+            connector_ids=selected_connector_ids,
+        )
+        for module_id in cls._mentioned_module_ids(
+            request=request,
+            intent=intent,
+            known_module_ids=known_module_ids,
+        ):
+            if module_id not in module_ids:
+                module_ids.append(module_id)
+
+        module_path_set = {
+            f"modules/{module_id}/module.yaml"
+            for module_id in module_ids
+            if f"modules/{module_id}/module.yaml" in manifest_paths
+        }
+        for module_id in module_ids:
+            for filename in ("service.py", "schemas.py", "policy.py"):
+                path = f"modules/{module_id}/backend/{filename}"
+                if path in manifest_paths:
+                    module_path_set.add(path)
+        paths.extend(sorted(module_path_set, key=cls._module_path_sort_key))
+
+        paths.extend(
+            sorted(
+                path
+                for path in manifest_paths
+                if cls._is_safe_integration_path(path)
+                and (cls._is_integration_config_path(path) or cls._is_integration_doc_path(path))
+            )
+        )
+
+        if cls._is_ui_facing_request(request=request, intent=intent):
+            page_paths = [
+                path
+                for path in manifest_paths
+                if path.startswith("ui/pages/")
+                and path.endswith((".yaml", ".yml"))
+                and not path.startswith("ui/pages/custom/")
+            ]
+            paths.extend(sorted(page_paths))
+
+        return cls._dedupe_paths(paths)
+
+    @staticmethod
+    def _integration_readiness_path_hint_present(paths: list[str]) -> bool:
+        return any(
+            path.startswith("backend/integrations/")
+            or path.startswith("config/integrations")
+            or path.startswith("docs/integrations")
+            for path in paths
+        )
+
+    @staticmethod
+    def _has_data_model_impact_signal(
+        *,
+        request: RefinementRequest,
+        intent: ChangeIntent,
+        known_module_ids: list[str],
+    ) -> bool:
+        text = RefinementTriggerRouteResolver._request_impact_text(request=request, intent=intent)
+        for term in _DATA_MODEL_IMPACT_TERMS:
+            variants = {term}
+            if term.endswith("y"):
+                variants.add(f"{term[:-1]}ies")
+            else:
+                variants.add(f"{term}s")
+            for variant in variants:
+                pattern = rf"(?<![a-z0-9]){re.escape(variant)}(?![a-z0-9])"
+                if re.search(pattern, text):
+                    return True
+        has_context = any(
+            re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text)
+            for term in _DATA_MODEL_CONTEXT_TERMS
+        )
+        if has_context and any(
+            re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text)
+            for term in _DATA_MODEL_CONTEXTUAL_TERMS
+        ):
+            return True
+        return bool(
+            RefinementTriggerRouteResolver._mentioned_module_ids(
+                request=request,
+                intent=intent,
+                known_module_ids=known_module_ids,
+            )
+            and re.search(r"(?<![a-z0-9])(repo|policy|schemas|persistence)(?![a-z0-9])", text)
+        )
+
+    @staticmethod
+    def _has_destructive_data_model_signal(
+        *,
+        request: RefinementRequest,
+        intent: ChangeIntent,
+    ) -> bool:
+        text = RefinementTriggerRouteResolver._request_impact_text(request=request, intent=intent)
+        if any(
+            re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text)
+            for term in _DATA_MODEL_DESTRUCTIVE_TERMS
+        ):
+            return True
+        return bool(re.search(r"(?<![a-z0-9])(required|unique|delete|remove|drop|rename|change type)\b.*\bfield(?![a-z0-9])", text))
+
+    @staticmethod
+    def _is_database_migration_path(path: str) -> bool:
+        return bool(re.fullmatch(r"config/database_migrations/[^/]+\.json", path))
+
+    @classmethod
+    def _data_model_bundle_paths(
+        cls,
+        *,
+        request: RefinementRequest,
+        intent: ChangeIntent,
+        manifest_paths: list[str],
+    ) -> list[str]:
+        known_module_ids = cls._module_ids_from_manifest(manifest_paths)
+        if not cls._has_data_model_impact_signal(
+            request=request,
+            intent=intent,
+            known_module_ids=known_module_ids,
+        ):
+            return []
+
+        if not manifest_paths:
+            paths = [
+                "config/database_intent.json",
+                "config/database_migrations/*.json",
+                "modules/*/backend/schemas.py",
+                "modules/*/backend/repo.py",
+                "modules/*/backend/policy.py",
+                "modules/*/module.yaml",
+            ]
+            if cls._is_ui_facing_request(request=request, intent=intent):
+                paths.append("ui/pages/*.yaml")
+            return paths
+
+        mentioned_module_ids = cls._mentioned_module_ids(
+            request=request,
+            intent=intent,
+            known_module_ids=known_module_ids,
+        )
+
+        paths: list[str] = ["config/database_intent.json"]
+
+        migration_paths = sorted(
+            path
+            for path in manifest_paths
+            if cls._is_database_migration_path(path)
+        )
+        if migration_paths:
+            paths.extend(migration_paths)
+        else:
+            paths.append("config/database_migrations/*.json")
+
+        if mentioned_module_ids:
+            module_paths: list[str] = []
+            for module_id in mentioned_module_ids:
+                for path in (
+                    f"modules/{module_id}/module.yaml",
+                    f"modules/{module_id}/contracts/events.yaml",
+                    f"modules/{module_id}/contracts/admin.yaml",
+                    f"modules/{module_id}/backend/repo.py",
+                    f"modules/{module_id}/backend/policy.py",
+                    f"modules/{module_id}/backend/schemas.py",
+                ):
+                    if path in manifest_paths:
+                        module_paths.append(path)
+            paths.extend(sorted(module_paths, key=cls._module_path_sort_key))
+        else:
+            paths.extend(
+                [
+                    "modules/*/backend/schemas.py",
+                    "modules/*/backend/repo.py",
+                    "modules/*/backend/policy.py",
+                    "modules/*/module.yaml",
+                ]
+            )
+
+        if cls._is_ui_facing_request(request=request, intent=intent):
+            page_paths = [
+                path
+                for path in manifest_paths
+                if path.startswith("ui/pages/")
+                and path.endswith((".yaml", ".yml"))
+                and not path.startswith("ui/pages/custom/")
+            ]
+            paths.extend(sorted(page_paths) or ["ui/pages/*.yaml"])
+
+        if not paths:
+            paths.extend(
+                [
+                    "config/database_intent.json",
+                    "config/database_migrations/*.json",
+                    "modules/*/backend/schemas.py",
+                    "modules/*/backend/repo.py",
+                    "modules/*/backend/policy.py",
+                    "modules/*/module.yaml",
+                ]
+            )
+
+        return cls._dedupe_paths(paths)
+
+    @staticmethod
+    def _data_model_path_hint_present(paths: list[str]) -> bool:
+        return any(
+            path == "config/database_intent.json"
+            or path.startswith("config/database_migrations/")
+            or path.startswith("modules/*/backend/schemas.py")
+            or path.endswith("/backend/schemas.py")
+            or path.endswith("/backend/repo.py")
+            or path.endswith("/backend/policy.py")
+            for path in paths
+        )
+
+    @staticmethod
+    def _mentioned_ids(
+        *,
+        request: RefinementRequest,
+        intent: ChangeIntent,
+        known_ids: list[str],
+    ) -> list[str]:
+        text = RefinementTriggerRouteResolver._request_impact_text(request=request, intent=intent)
+        mentioned: list[str] = []
+        for known_id in known_ids:
+            variants = {
+                known_id.lower(),
+                known_id.lower().replace("_", "-"),
+                known_id.lower().replace("_", " "),
+                known_id.lower().replace("-", " "),
+            }
+            if known_id.lower().endswith("s") and len(known_id) > 1:
+                singular = known_id.lower()[:-1]
+                variants.update(
+                    {
+                        singular,
+                        singular.replace("_", "-"),
+                        singular.replace("_", " "),
+                        singular.replace("-", " "),
+                    }
+                )
+            if any(
+                re.search(rf"(?<![a-z0-9]){re.escape(variant)}(?![a-z0-9])", text)
+                for variant in variants
+                if variant
+            ):
+                mentioned.append(known_id)
+        return mentioned
+
+    @staticmethod
+    def _has_hosted_capability_signal(
+        *,
+        request: RefinementRequest,
+        intent: ChangeIntent,
+        known_pack_ids: list[str],
+    ) -> bool:
+        text = RefinementTriggerRouteResolver._request_impact_text(request=request, intent=intent)
+        for term in _HOSTED_CAPABILITY_TERMS:
+            pattern = rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])"
+            if re.search(pattern, text):
+                return True
+        return bool(
+            RefinementTriggerRouteResolver._mentioned_ids(
+                request=request,
+                intent=intent,
+                known_ids=known_pack_ids,
+            )
+        )
+
+    @staticmethod
+    def _is_ui_facing_request(
+        *,
+        request: RefinementRequest,
+        intent: ChangeIntent,
+    ) -> bool:
+        text = RefinementTriggerRouteResolver._request_impact_text(request=request, intent=intent)
+        return any(re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text) for term in _UI_SURFACE_TERMS)
+
+    @staticmethod
+    def _pack_tokens(pack_ids: list[str]) -> set[str]:
+        tokens: set[str] = set()
+        for pack_id in pack_ids:
+            for token in re.split(r"[_\-\s]+", pack_id.lower()):
+                if token and token not in _HOSTED_GENERIC_PACK_TOKENS:
+                    tokens.add(token)
+        return tokens
+
+    @classmethod
+    def _facade_module_ids_for_hosted_impact(
+        cls,
+        *,
+        request: RefinementRequest,
+        intent: ChangeIntent,
+        manifest_paths: list[str],
+        pack_ids: list[str],
+    ) -> list[str]:
+        known_module_ids = cls._module_ids_from_manifest(manifest_paths)
+        mentioned_module_ids = cls._mentioned_module_ids(
+            request=request,
+            intent=intent,
+            known_module_ids=known_module_ids,
+        )
+        facade_ids: list[str] = []
+        pack_id_set = set(pack_ids)
+        pack_tokens = cls._pack_tokens(pack_ids)
+        for module_id in known_module_ids:
+            if module_id in pack_id_set or module_id.startswith("hosted_") or module_id.startswith("provider_"):
+                continue
+            module_tokens = set(re.split(r"[_\-\s]+", module_id.lower()))
+            if module_id in mentioned_module_ids or (pack_tokens and pack_tokens.intersection(module_tokens)):
+                facade_ids.append(module_id)
+        return facade_ids
+
+    @staticmethod
+    def _page_content_from_manifest_entry(entry: dict[str, Any]) -> str:
+        parts: list[str] = []
+        for key in ("content", "text", "source", "yaml", "json"):
+            value = entry.get(key)
+            if isinstance(value, str):
+                parts.append(value)
+        metadata = entry.get("metadata")
+        if isinstance(metadata, dict):
+            parts.extend(str(value) for value in metadata.values() if isinstance(value, str))
+        return "\n".join(parts)
+
+    @classmethod
+    def _hosted_capability_bundle_paths(
+        cls,
+        *,
+        request: RefinementRequest,
+        intent: ChangeIntent,
+        manifest_paths: list[str],
+    ) -> list[str]:
+        known_pack_ids = cls._pack_ids_from_integration_clients(manifest_paths)
+        if not cls._has_hosted_capability_signal(
+            request=request,
+            intent=intent,
+            known_pack_ids=known_pack_ids,
+        ):
+            return []
+
+        if not manifest_paths:
+            paths = [
+                "backend/integrations/*_client.py",
+                "modules/*/module.yaml",
+                "modules/*/contracts/*.yaml",
+                "modules/*/backend/*.py",
+            ]
+            if cls._is_ui_facing_request(request=request, intent=intent):
+                paths.append("ui/pages/*.yaml")
+            return paths
+
+        mentioned_pack_ids = cls._mentioned_ids(
+            request=request,
+            intent=intent,
+            known_ids=known_pack_ids,
+        )
+        selected_pack_ids = mentioned_pack_ids or known_pack_ids
+        paths = [
+            path
+            for path in manifest_paths
+            if re.fullmatch(r"backend/integrations/[A-Za-z0-9_-]+_client\.py", path)
+            and (
+                not mentioned_pack_ids
+                or path.removeprefix("backend/integrations/").removesuffix("_client.py") in selected_pack_ids
+            )
+        ]
+
+        facade_module_ids = cls._facade_module_ids_for_hosted_impact(
+            request=request,
+            intent=intent,
+            manifest_paths=manifest_paths,
+            pack_ids=selected_pack_ids,
+        )
+        module_paths = [
+            path
+            for module_id in facade_module_ids
+            for path in manifest_paths
+            if cls._is_canonical_module_manifest_path(path, module_id)
+        ]
+        paths.extend(sorted(module_paths, key=cls._module_path_sort_key))
+
+        manifest_entries = cls._manifest_entries_from_extra(request.extra)
+        page_paths: list[str] = []
+        for entry in manifest_entries:
+            page_path = str(entry.get("path") or "").strip().replace("\\", "/").lstrip("/")
+            if not page_path.startswith("ui/pages/") or not page_path.endswith((".yaml", ".yml")):
+                continue
+            content = cls._page_content_from_manifest_entry(entry)
+            if any(f"/api/modules/{module_id}/" in content for module_id in facade_module_ids):
+                page_paths.append(page_path)
+
+        if page_paths:
+            paths.extend(sorted(page_paths))
+        elif cls._is_ui_facing_request(request=request, intent=intent):
+            paths.append("ui/pages/*.yaml")
+
+        return cls._dedupe_paths(paths)
+
+    @classmethod
+    def _module_bundle_paths(
+        cls,
+        *,
+        request: RefinementRequest,
+        intent: ChangeIntent,
+        manifest_paths: list[str],
+    ) -> list[str]:
+        if not cls._has_module_impact_signal(request=request, intent=intent):
+            return []
+
+        known_module_ids = cls._module_ids_from_manifest(manifest_paths)
+        mentioned_module_ids = cls._mentioned_module_ids(
+            request=request,
+            intent=intent,
+            known_module_ids=known_module_ids,
+        )
+
+        if mentioned_module_ids and manifest_paths:
+            paths = [
+                path
+                for module_id in mentioned_module_ids
+                for path in manifest_paths
+                if cls._is_canonical_module_manifest_path(path, module_id)
+            ]
+            return cls._dedupe_paths(sorted(paths, key=cls._module_path_sort_key))
+
+        if mentioned_module_ids:
+            paths: list[str] = []
+            for module_id in mentioned_module_ids:
+                paths.extend(
+                    [
+                        f"modules/{module_id}/module.yaml",
+                        f"modules/{module_id}/contracts/*.yaml",
+                        f"modules/{module_id}/backend/*.py",
+                    ]
+                )
+            return cls._dedupe_paths(paths)
+
+        return [
+            "modules/*/module.yaml",
+            "modules/*/contracts/*.yaml",
+            "modules/*/backend/*.py",
+        ]
+
+    async def _affected_bundle_paths_for_impact(
+        self,
+        *,
+        request: RefinementRequest,
+        intent: ChangeIntent,
+        families: list[str],
+    ) -> list[str]:
+        family_set = set(families)
+        if "experience_spec" not in family_set and "app_bundle" not in family_set:
+            return []
+        manifest_paths = await self._manifest_paths_for_request(request)
+        paths: list[str] = []
+        if "experience_spec" in family_set:
+            paths.extend(
+                self._experience_spec_bundle_paths(
+                    request=request,
+                    intent=intent,
+                    manifest_paths=manifest_paths,
+                )
+            )
+        if "app_bundle" in family_set:
+            integration_paths = self._integration_bundle_paths(
+                request=request,
+                intent=intent,
+                manifest_paths=manifest_paths,
+            )
+            paths.extend(integration_paths)
+            if integration_paths:
+                return self._dedupe_paths(paths)
+            hosted_paths = self._hosted_capability_bundle_paths(
+                request=request,
+                intent=intent,
+                manifest_paths=manifest_paths,
+            )
+            paths.extend(hosted_paths)
+            if hosted_paths:
+                return self._dedupe_paths(paths)
+            data_model_paths = self._data_model_bundle_paths(
+                request=request,
+                intent=intent,
+                manifest_paths=manifest_paths,
+            )
+            paths.extend(data_model_paths)
+            if data_model_paths:
+                return self._dedupe_paths(paths)
+            paths.extend(
+                self._module_bundle_paths(
+                    request=request,
+                    intent=intent,
+                    manifest_paths=manifest_paths,
+                )
+            )
+        return self._dedupe_paths(paths)
+
     async def _stale_route(self, request: RefinementRequest) -> RefinementRoutingDecision | None:
         """Return a deterministic restart decision if upstream artifacts are stale.
 
@@ -269,9 +1329,15 @@ class RefinementTriggerRouteResolver:
             touches_design_docs="design_docs" in families,
             touches_concept="concept" in families,
         )
+        affected_bundle_paths = await self._affected_bundle_paths_for_impact(
+            request=request,
+            intent=intent,
+            families=families,
+        )
         impact = ImpactSet(
             workflow_sequence=sequence_id,
             affected_workflows=affected_workflows,
+            affected_bundle_paths=affected_bundle_paths,
             affected_declarative_families=families,
             requires_replanning=True,
             requires_rebuild=True,
@@ -361,7 +1427,7 @@ class RefinementTriggerRouteResolver:
             touches_concept=touches_concept,
         )
 
-    def _derive_impact_set(self, request: RefinementRequest, intent: ChangeIntent) -> ImpactSet:
+    async def _derive_impact_set(self, request: RefinementRequest, intent: ChangeIntent) -> ImpactSet:
         policy = self._policy_for(request.artifact_kind)
         route = policy.route_for(intent.change_class)
         families = self._families_for_route(route, request.artifact_kind)
@@ -376,9 +1442,21 @@ class RefinementTriggerRouteResolver:
             scope_summary = f"Extend the existing {label} within the approved concept using {workflow_id}."
         else:
             scope_summary = f"Apply a local patch to the current {label} without widening upstream scope."
+        affected_bundle_paths = await self._affected_bundle_paths_for_impact(
+            request=request,
+            intent=intent,
+            families=families,
+        )
+        if self._integration_readiness_path_hint_present(affected_bundle_paths):
+            scope_summary = f"{scope_summary} Integration readiness may need to be rechecked."
+        if self._data_model_path_hint_present(affected_bundle_paths):
+            scope_summary = f"{scope_summary} Data model migration impact detected."
+            if self._has_destructive_data_model_signal(request=request, intent=intent):
+                scope_summary = f"{scope_summary} Destructive changes require explicit review."
         return ImpactSet(
             workflow_sequence=route.workflow_sequence,
             affected_workflows=affected_workflows,
+            affected_bundle_paths=affected_bundle_paths,
             affected_declarative_families=families,
             requires_replanning=intent.change_class != ChangeClass.PATCH,
             requires_rebuild=True,
@@ -441,7 +1519,56 @@ class RefinementTriggerRouteResolver:
             is_full_restart=False,
         )
 
-    def _build_context_seed(
+    async def _auto_carry_forward_resolution(
+        self,
+        *,
+        request: RefinementRequest,
+        previous_app_bundle_ref: str,
+    ) -> tuple[list[str], list[str]]:
+        """Auto-extract carry-forward module ids using the registered tool.
+
+        Calls the ``get_carry_forward_candidates`` control-plane tool via the
+        pack executor mechanism — no direct import from factory_app.
+
+        Returns ``(module_ids, warnings)``. Never raises. Returns
+        ``([], [warning])`` on any failure so the router can degrade gracefully.
+        """
+        try:
+            pack = self._load_pack()
+            tool_def = pack.tool_by_id("get_carry_forward_candidates")
+            if tool_def is None:
+                return [], [
+                    "carry_forward_tool_not_registered: "
+                    "get_carry_forward_candidates is not declared in the pack tools; "
+                    "carry_forward_modules defaults to []"
+                ]
+            fn = resolve_control_plane_tool_entrypoint(tool_def.entrypoint)
+            ctx = ControlPlaneToolContext(
+                checkpoint="route_requested",
+                app_id=request.app_id,
+                extra={"previous_app_bundle_ref": previous_app_bundle_ref},
+            )
+            result = await fn(context=ctx)
+            if not isinstance(result, dict):
+                return [], ["carry_forward_invalid_result: tool returned a non-dict value"]
+            modules: list[Any] = result.get("modules") or []
+            warnings: list[str] = [str(w) for w in (result.get("warnings") or [])]
+            module_ids = [
+                str(m.get("module_id", "")).strip()
+                for m in modules
+                if isinstance(m, dict) and str(m.get("module_id", "")).strip()
+            ]
+            return module_ids, warnings
+        except Exception as exc:
+            _logger.warning(
+                "carry_forward auto-extraction failed for app_id=%s version=%s: %s",
+                request.app_id,
+                previous_app_bundle_ref,
+                exc,
+            )
+            return [], [f"carry_forward_extraction_error: {exc}"]
+
+    async def _build_context_seed(
         self,
         *,
         request: RefinementRequest,
@@ -475,13 +1602,66 @@ class RefinementTriggerRouteResolver:
         parent_theme_config = request.extra.get("parent_theme_config")
         if isinstance(parent_theme_config, dict) and parent_theme_config:
             context_seed["parent_theme_config"] = parent_theme_config
+        # Signal a stronger reasoning model for architecture-level sequences.
+        # This is advisory context plumbing — the runner reads llm_profile and
+        # selects the declared model when a consumer is wired up. The classifier
+        # and coding worker configs are not affected.
+        if impact_set.workflow_sequence in ("conceptual_replan", "full_rebuild"):
+            context_seed["llm_profile"] = "architecture"
+        # Inject conceptual-replan context when the sequence is a concept-level
+        # pivot. These fields let downstream workflows distinguish a pivot from a
+        # blind full_rebuild and carry forward reusable context.
+        if impact_set.workflow_sequence == "conceptual_replan":
+            context_seed["pivot_description"] = request.raw_user_request
+            existing_concept_ref = request.extra.get("existing_concept_ref")
+            if isinstance(existing_concept_ref, str) and existing_concept_ref.strip():
+                context_seed["existing_concept_ref"] = existing_concept_ref.strip()
+            preserve_families = request.extra.get("preserve_families")
+            context_seed["preserve_families"] = (
+                list(preserve_families)
+                if isinstance(preserve_families, list)
+                else ["brand"]
+            )
+            previous_brand_ref = request.extra.get("previous_brand_ref")
+            if isinstance(previous_brand_ref, str) and previous_brand_ref.strip():
+                context_seed["previous_brand_ref"] = previous_brand_ref.strip()
+            # Normalize the previous_app_bundle_ref into a single variable used
+            # both for the context seed and carry-forward extraction.
+            previous_app_bundle_ref_raw = request.extra.get("previous_app_bundle_ref")
+            previous_app_bundle_ref = (
+                previous_app_bundle_ref_raw.strip()
+                if isinstance(previous_app_bundle_ref_raw, str) and previous_app_bundle_ref_raw.strip()
+                else None
+            )
+            if previous_app_bundle_ref:
+                context_seed["previous_app_bundle_ref"] = previous_app_bundle_ref
+            # carry_forward_modules: advisory list of module ids for AppPlanAgent.
+            # Explicit client override always wins. When absent, attempt deterministic
+            # extraction from the previous app_bundle artifact workspace via the
+            # registered get_carry_forward_candidates tool. No file copy or merge
+            # occurs — this is context plumbing only.
+            carry_forward_modules = request.extra.get("carry_forward_modules")
+            if isinstance(carry_forward_modules, list):
+                # Client supplied an explicit list — use as-is, skip extraction.
+                context_seed["carry_forward_modules"] = list(carry_forward_modules)
+            elif previous_app_bundle_ref:
+                # Auto-populate from the previous artifact workspace.
+                module_ids, warnings = await self._auto_carry_forward_resolution(
+                    request=request,
+                    previous_app_bundle_ref=previous_app_bundle_ref,
+                )
+                context_seed["carry_forward_modules"] = module_ids
+                if warnings:
+                    context_seed["carry_forward_warnings"] = warnings
+            else:
+                context_seed["carry_forward_modules"] = []
         return context_seed
 
     async def route(self, request: RefinementRequest) -> RefinementRoutingDecision:
         # Stale-upstream check: bypass LLM if upstream artifacts need rebuilding first.
         stale_decision = await self._stale_route(request)
         if stale_decision is not None:
-            stale_decision.context_seed = self._build_context_seed(
+            stale_decision.context_seed = await self._build_context_seed(
                 request=request,
                 change_intent=stale_decision.change_intent,
                 impact_set=stale_decision.impact_set,
@@ -495,13 +1675,13 @@ class RefinementTriggerRouteResolver:
             return stale_decision
 
         change_intent = await self._derive_change_intent(request)
-        impact_set = self._derive_impact_set(request, change_intent)
+        impact_set = await self._derive_impact_set(request, change_intent)
         decision = self._derive_route(
             request,
             change_intent=change_intent,
             impact_set=impact_set,
         )
-        decision.context_seed = self._build_context_seed(
+        decision.context_seed = await self._build_context_seed(
             request=request,
             change_intent=change_intent,
             impact_set=impact_set,

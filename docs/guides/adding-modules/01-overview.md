@@ -105,6 +105,7 @@ actions:
   - id: list_{name}s
     description: List records.
     handler_method: list_{name}s
+    api_surface: public_readonly
     input_schema:
       type: object
       properties:
@@ -128,6 +129,11 @@ actions:
     permissions: [{name}.manage]
     emits: [domain.{name}.record_created]
 ```
+
+`api_surface` is optional action metadata. Use it to describe the intended
+surface for tooling and generated UI/API documentation, for example `public`,
+`public_readonly`, `internal`, or `admin_internal`. It is not an authorization
+mechanism; backend access remains governed by the action's `permissions`.
 
 ## Events
 

@@ -48,6 +48,20 @@ tools:
     theme preferences, and generation order.
   tool_type: Agent_Tool
   auto_tool_call: true
+- agent: AppPlanAgent
+  file: read_carry_forward_module_contract.py
+  function: read_carry_forward_module_contract
+  description: >
+    Read selected contract files (module.yaml, contracts/*.yaml,
+    runtime_extensions.yaml) from a carry-forward candidate in the previous
+    app_bundle artifact workspace. Allowed only during conceptual_replan
+    when previous_app_bundle_ref is present in context. Read-only — no
+    backend Python source, no file copies, no artifact writes, no LLM calls.
+    Use carry_forward_classification from carry_forward_modules to decide
+    which modules warrant inspection before planning reuse, adaptation, or
+    regeneration.
+  tool_type: Agent_Tool
+  auto_tool_call: false
 - agent: AdminRegistryAgent
   file: save_admin_registry.py
   function: save_admin_registry
@@ -63,6 +77,21 @@ tools:
   description: Merge MFJ child task outputs into one assembled code_files bundle.
   tool_type: Agent_Tool
   auto_tool_call: false
+- agent: AssemblyAgent
+  file: resolve_carry_forward_preservation.py
+  function: resolve_carry_forward_preservation
+  description: >
+    Runs automatically after assemble_app_tasks completes. Copies only Phase 7A
+    allowlisted module contract files (module.yaml and contracts/*.yaml) from
+    the prior app bundle workspace into the assembled output for modules with a
+    reuse carry_forward_decision. Generated output wins all conflicts — the
+    resolver only fills paths not already produced by generation. Backend Python,
+    runtime_extensions.yaml, custom React, route manifests, database artifacts,
+    env files, and all non-declarative files are never copied. No-ops gracefully
+    when prior workspace is unavailable or carry_forward_decisions is absent.
+    Emits carry_forward_report and carry_forward_additions to context_variables.
+  tool_type: Agent_Tool
+  auto_tool_call: true
 - agent: IntegrationReadinessAgent
   file: integration_readiness.py
   function: check_integration_readiness

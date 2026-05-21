@@ -89,6 +89,7 @@ Each layer has one owner. Refinement routing must respect that ownership.
 |---|---|---|
 | Concept intent | `ValueEngine` | `concept_overview`, `value_manifest`, approved scope |
 | Design intent | `DesignDocs` | `frontend_design_document`, `backend_design_document`, `database_design_document`, `ui_schema` |
+| Experience intent | `DesignDocs` | typed `ExperienceSpec` stored with the `ui_schema` document |
 | Workflow bundle | `AgentGenerator` | generated workflow files, graph config, agent/tool contracts |
 | App bundle | `AppGenerator` | generated app files, app schema, build tasks |
 | Sandbox execution | E2B | ephemeral workspace only; never canonical |
@@ -120,6 +121,278 @@ Examples:
 
 Brand changes are **not** automatically `core`.
 They are `design` unless they imply a new target market or value proposition.
+
+### Refinement Lanes
+
+`ChangeClass` remains the compatibility and routing superclass. It is the
+stable value used by current control-plane routes:
+
+- `patch`
+- `design`
+- `feature`
+- `core`
+
+Refinement also needs a second, more precise dimension:
+`refinement_lane`. The lane describes the intent inside the superclass without
+requiring a new workflow route for every product-specific request.
+
+Recommended lanes:
+
+| Lane | Typical superclass | Meaning |
+|---|---|---|
+| `ui_patch` | `patch` | Local UI copy, spacing, styling, or small behavior fix with no upstream intent change |
+| `experience_design` | `design` | Page, navigation, layout, or `ExperienceSpec` change |
+| `feature_addition` | `feature` | New capability within the current app concept |
+| `integration` | `feature` | External connector or API readiness change |
+| `conceptual_reframe` | `core` | Product purpose, audience, or value proposition change |
+| `architecture_replan` | `core` or high-impact `feature` | Module, workflow, data ownership, or tenancy model replan |
+| `hosted_capability_change` | `feature` | Provider-neutral hosted capability pack or façade boundary change |
+| `data_model_migration` | `feature` or `core` | Persistence shape change requiring database intent and migration planning |
+
+Examples:
+
+- "Change button spacing" -> `patch` + `ui_patch`
+- "Replace dashboard experience" -> `design` + `experience_design`
+- "Add external analytics connector" -> `feature` + `integration`
+- "Turn a marketplace into a subscription community" -> `core` + `conceptual_reframe`
+- "Add hosted analytics pack" -> `feature` + `hosted_capability_change`
+- "Change project schema" -> `feature` or `core` + `data_model_migration`
+
+Early implementation may only document or persist `refinement_lane`; routing can
+continue to use `ChangeClass` until lane-aware impact analysis is available.
+Lanes must stay provider-neutral and app-agnostic. Do not encode vendor,
+payment-provider, or hosted product names in the OSS lane taxonomy.
+
+ExperienceSpec is the first-class experience intent artifact. Conceptual or
+experience-level refinements should update ExperienceSpec before page
+regeneration. Page YAML, route manifests, custom React routes, and shell
+navigation are downstream of ExperienceSpec. Small UI patch requests may bypass
+ExperienceSpec only when the request is bounded to existing owned paths and does
+not change product or experience intent.
+
+`ImpactSet.affected_bundle_paths` starts as deterministic path hints. The first
+supported mapping is ExperienceSpec-driven UI impact:
+
+- page intent maps to `ui/pages/*.yaml`, or concrete `ui/pages/{page}.yaml`
+  entries when the current app bundle artifact has a `files_manifest`
+- route ownership maps to `ui/route_manifest.json`
+- navigation, shell, header, footer, or chrome changes map to
+  `config/shell.json` when that file exists in the current manifest, or to the
+  same path hint when no manifest exists
+- custom route React and `ui/index.js` are included only when current artifact
+  metadata already contains custom route files
+
+These are conservative hints for scoping and review, not a replacement for the
+artifact-family graph.
+
+The second supported mapping is module/backend impact for `app_bundle`
+refinements. When the request contains provider-neutral module or backend
+signals such as module, action, API, endpoint, backend, schema, event,
+reaction, notification, admin panel, permission, handler, service, repo, or
+policy:
+
+- known module ids are read from current artifact manifest paths such as
+  `modules/{module_id}/module.yaml`
+- if the request mentions one or more known module ids, impact is scoped to the
+  canonical files already present under those modules
+- module contract files include `module.yaml`, `contracts/*.yaml`,
+  `backend/*.py`, and `runtime_extensions.yaml` only when the current manifest
+  contains that runtime extension file
+- if the request is module/backend-related but exact module ownership is
+  unknown, the router emits conservative glob hints:
+  `modules/*/module.yaml`, `modules/*/contracts/*.yaml`, and
+  `modules/*/backend/*.py`
+
+These module paths are deterministic review and scoping hints. They do not
+replace module contract validation, and they do not yet model database
+migration, hosted capability façade, or integration readiness impact. Future
+slices will add those path families separately.
+
+The third supported mapping is hosted capability façade impact for
+`app_bundle` refinements. Generated apps consume hosted capabilities through an
+app-owned boundary:
+
+```text
+hosted_pack
+  -> backend/integrations/{pack_id}_client.py
+  -> modules/{facade_module_id}/
+  -> ui/pages/*.yaml bound to /api/modules/{facade_module_id}/...
+```
+
+When the request refers to a hosted capability, hosted pack, external adapter,
+integration client, façade module, provider-backed surface, managed capability,
+external service, or neutral provider category such as analytics, reporting,
+audit, or notification, the router can add hosted capability path hints:
+
+- adapter clients under `backend/integrations/*_client.py`
+- app-owned façade module files under `modules/{facade_module_id}/`
+- dependent page YAML files when current manifest metadata shows a page binding
+  to `/api/modules/{facade_module_id}/`
+- `ui/pages/*.yaml` as a conservative hint only when the request is UI-facing
+  and exact page binding is not available
+
+Generated apps must not refine hosted provider internals. Hosted provider
+implementation remains outside the generated app artifact bundle. The app-owned
+façade module and adapter client are the generated app refinement surfaces.
+
+The fourth supported mapping is external integration impact for `app_bundle`
+refinements. External integrations are distinct from hosted capabilities:
+
+```text
+AppBuildPlan.external_integrations / task integration_needs
+  -> IntegrationReadinessAgent
+  -> app-scoped connector metadata and secret storage
+  -> generated adapter/module code references connector ids and capabilities
+```
+
+When the request refers to an integration, connector, external API, external
+service, API key, credential, provider, webhook, sync, import/export, or a
+neutral provider category such as analytics, reporting, search, email, storage,
+or CRM, the router can add integration path hints:
+
+- adapter clients under `backend/integrations/*_client.py`
+- module files that declare or use the integration:
+  `modules/{module_id}/module.yaml`, `backend/service.py`,
+  `backend/schemas.py`, and `backend/policy.py`
+- connector declaration or setup docs such as `config/integrations*.json` and
+  `docs/integrations*.md`
+- `ui/pages/*.yaml` or concrete page YAML files only for UI-facing setup or
+  display requests
+
+If a connector id is known from `backend/integrations/{connector_id}_client.py`
+and the request mentions that id, the router prefers the exact adapter path.
+Without a manifest, it emits conservative hints for adapter, module, config, and
+docs surfaces.
+
+`ImpactSet` currently has no dedicated `integration_readiness_required` flag.
+For this slice, readiness rerun is represented by integration path hints and a
+scope summary note saying that integration readiness may need to be rechecked.
+This does not change connector storage, readiness behavior, or secret handling.
+Refinement scope must never include secret files or secret values; generated
+apps reference connector ids/capabilities, not raw secrets.
+
+The fifth supported mapping is data model migration impact for `app_bundle`
+refinements. Generated app persistence changes stay intent-first:
+
+```text
+database_intent_bundle
+  -> config/database_intent.json
+  -> optional config/database_migrations/{migration_id}.json
+  -> modules/{module_id}/backend/{schemas.py,repo.py,policy.py}
+```
+
+When the request refers to schema, fields, data models, database shape,
+migrations, collections, tables, indexes, uniqueness, required or optional
+fields, relations, references, foreign keys, tenant/workspace/owner scoping,
+record archival, soft deletion, renames, type changes, added or removed columns,
+or backfills, the router can add data-model path hints:
+
+- `config/database_intent.json`
+- exact `config/database_migrations/{migration_id}.json` files when present,
+  otherwise the conservative `config/database_migrations/*.json` hint
+- module persistence contract files:
+  `modules/{module_id}/module.yaml`, `backend/schemas.py`, `backend/repo.py`,
+  and `backend/policy.py`
+- `modules/{module_id}/contracts/events.yaml` when emitted payloads may change
+  and the file exists
+- `modules/{module_id}/contracts/admin.yaml` when admin data-field displays may
+  change and the file exists
+- page YAML only when the request explicitly mentions UI, display, forms,
+  tables, or related surface terms
+
+If a known module id such as `projects`, `orders`, `customers`, `reports`, or
+`tasks` is present in the current file manifest and the request names it, impact
+is scoped to that module's persistence files. If module ownership is unknown,
+the router emits conservative module globs:
+`modules/*/backend/schemas.py`, `modules/*/backend/repo.py`,
+`modules/*/backend/policy.py`, and `modules/*/module.yaml`.
+
+Potentially destructive requests, including deleting or removing fields,
+dropping tables, deleting records, purging data, renaming fields, changing
+types, introducing required fields or unique constraints, or otherwise marking
+a change irreversible/destructive, add a scope-summary warning:
+destructive changes require explicit review. This is a review signal only. This
+slice does not implement migration generation, migration execution, a migration
+review workflow, runtime persistence changes, or `ctx.persistence` changes.
+
+Data model refinements should trigger database intent validation, migration
+plan validation, app validation, and explicit review for destructive migrations
+before promotion. This generated-app persistence contract is separate from
+hosted platform persistence. Refinement scope must never include secret paths
+or secret values.
+
+LLM profile tuning is deliberately out of scope until lanes and graph routing
+stabilize. The profile ids below centralize configuration references, but this
+document does not change model names, temperatures, or per-agent AG2 settings.
+
+### LLM Profile Indirection
+
+Control-plane and refinement agents must reference named LLM profiles instead
+of scattering raw AG2 `llm_config` objects across individual capabilities.
+`app/config/ai.json` owns the profile registry under
+`control_plane.llm_profiles`.
+
+Allowed profile ids:
+
+| Profile | Purpose |
+|---|---|
+| `classifier` | Classify refinement requests into stable `patch`, `design`, `feature`, or `core` classes |
+| `impact_analyzer` | Support artifact impact and routing analysis |
+| `planner_replanner` | Plan or replan higher-scope refinement work after routing |
+| `codegen` | Generate scoped code or artifact patches |
+| `reviewer_validator` | Review generated changes and validate contract conformance |
+
+Capabilities reference profiles by id:
+
+```json
+{
+  "control_plane": {
+    "llm_profiles": {
+      "classifier": {
+        "purpose": "Classify refinement requests.",
+        "default_temperature": 0,
+        "expected_behavior": "deterministic structured classification",
+        "llm_config": {
+          "model": "<configured-model>",
+          "temperature": 0
+        }
+      }
+    },
+    "classifier": {
+      "enabled": true,
+      "llm_profile": "classifier"
+    }
+  }
+}
+```
+
+This is an indirection layer only. It does not tune models, change AG2
+execution semantics, or introduce a new workflow. Existing raw
+`classifier.llm_config` and `coding.llm_config` fallback remains valid for
+workspaces that have not moved to profile references, but new control-plane
+configuration should prefer `llm_profile`.
+
+Rules:
+
+- unknown profile ids fail configuration validation
+- capability references to undeclared profiles fail resolution clearly
+- no per-agent hidden model overrides should be added for control-plane or
+  refinement lanes
+- raw provider/model config may live inside the central profile registry, but
+  code should pass the resolved `llm_config` to AG2/capability services
+- profile tuning and lane-specific model assignment are future empirical work
+
+### Refinement Smoke Coverage
+
+The OSS test suite includes a deterministic refinement control-plane smoke that
+validates routing, impacted declarative families, `affected_bundle_paths`, and
+LLM profile resolution without calling a live LLM and without mutating generated
+app files. The smoke uses neutral app bundle manifests and fake classifier
+outputs so it exercises the control-plane resolver and config contracts only.
+
+This smoke does not execute AppGenerator, run a refinement worker, create
+migration files, or promote artifacts. Live classifier behavior, profile tuning,
+and end-to-end refinement execution remain separate validation layers.
 
 ---
 
@@ -785,7 +1058,7 @@ refinement routing.
 ```python
 from mozaiksai.control_plane import (
     ChangeClass,     # Enum: patch | design | feature | core
-    ArtifactKind,    # Enum: app_bundle | workflow_bundle | design_docs | concept
+    ArtifactKind,    # Enum: app_bundle | workflow_bundle | design_docs | experience_spec | concept
     RefinementRequest,
     RefinementTriggerRouteResolver,
     get_refinement_trigger_route_resolver,
@@ -811,7 +1084,7 @@ decision = await resolver.route(RefinementRequest(
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `artifact_kind` | `ArtifactKind` | Yes | app_bundle / workflow_bundle / design_docs / concept |
+| `artifact_kind` | `ArtifactKind` | Yes | app_bundle / workflow_bundle / design_docs / experience_spec / concept |
 | `artifact_key` | `str` | No | Defaults to the artifact kind when omitted |
 | `artifact_version_id` | `str` | No | Version to load in re-entry workflow |
 | `raw_user_request` | `str` | No | Passed as `refinement_request` context variable |
@@ -846,7 +1119,304 @@ The built-in factory pack covers all four change classes x four artifact kinds:
 | `design/feature` | `design_docs` | `design_revision` | `DesignDocs` | No |
 | `core` | `design_docs` | `full_rebuild` | `ValueEngine` | Yes |
 | `patch` | `concept` | `concept_patch` | `ValueEngine` | No |
-| `design/feature/core` | `concept` | `full_rebuild` | `ValueEngine` | `core` only |
+| `design/feature` | `concept` | `full_rebuild` | `ValueEngine` | Yes |
+| `core` | `concept` | `conceptual_replan` | `ValueEngine` | Yes |
+
+`conceptual_replan` runs the same workflow chain as `full_rebuild`
+(ValueEngine → ThemeCapture → DesignDocs → AgentGenerator → AppGenerator)
+but is semantically distinct so future work can inject preservation context
+(`carry_forward_modules`). Use `full_rebuild` only for a complete reset with
+no preservation intent.
+
+#### conceptual_replan Context Seed
+
+When the router resolves to `conceptual_replan`, it injects additional fields
+into the context seed passed to the launched workflow chain:
+
+| Field | Source | Default | Description |
+|---|---|---|---|
+| `pivot_description` | `raw_user_request` | — | User's change request text verbatim. Always present. |
+| `preserve_families` | `extra.preserve_families` | `["brand"]` | Artifact families to preserve. ThemeCapture should use the existing brand as a starting point rather than regenerating from scratch. |
+| `existing_concept_ref` | `extra.existing_concept_ref` | omitted | Artifact version id of the concept at pivot time. Advisory reference only. |
+| `previous_brand_ref` | `extra.previous_brand_ref` | omitted | Artifact version id of the brand/theme_config at pivot time. |
+| `previous_app_bundle_ref` | `extra.previous_app_bundle_ref` | omitted | Artifact version id of the app bundle at pivot time. Used by `get_carry_forward_candidates` to inspect the previous workspace. |
+| `carry_forward_modules` | `extra.carry_forward_modules` (explicit override) or auto-populated from `previous_app_bundle_ref` | `[]` | Advisory list of module ids from the previous app bundle. Explicit client list always wins. When absent and `previous_app_bundle_ref` is present, the router auto-populates from `get_carry_forward_candidates`. Not a merge instruction — no file copy occurs. |
+
+These fields are declared as state variables in `ValueEngine/context_variables.yaml`,
+`DesignDocs/context_variables.yaml`, and `AppGenerator/context_variables.yaml`.
+`full_rebuild` and all other sequences do not receive these fields.
+
+`carry_forward_modules` reaches `AppPlanAgent` only.  `AssemblyAgent` does not
+receive it directly; carry-forward file preservation is driven instead by
+`carry_forward_decisions` on `AppBuildPlan` through the Phase 7A resolver (see
+[Phase 7A: Declarative Contract Preservation](#phase-7a-declarative-contract-preservation)).
+
+**AppPlanAgent carry_forward_modules semantics:**
+
+- Treat the list as advisory preservation hints, not an inclusion mandate.
+- Preserve a carry-forward module only if it is domain-generic and still fits
+  the new concept (e.g. notifications, files/media, audit/activity,
+  billing_portal when billing still applies).
+- Omit domain-specific modules from the old concept (e.g. old CRM
+  contacts/pipeline, old domain pages, concept-specific workflows). Note the
+  omission in build plan rationale.
+- Do not reference or copy files from `previous_app_bundle_ref` directly in
+  the prompt. File preservation for `reuse` decisions is handled automatically
+  by the Phase 7A resolver after AssemblyAgent runs.
+
+#### Carry-forward module inventory (Phase 2 + Phase 3)
+
+`get_carry_forward_candidates` is a registered read-only control-plane tool at
+`factory_app/control_plane/tools/get_carry_forward_candidates.py`.
+
+It is available at the `route_requested` checkpoint — where `conceptual_replan`
+routing is determined and `_build_context_seed()` runs.
+
+**What it does:**
+
+1. Reads `context.extra["previous_app_bundle_ref"]` to locate the prior artifact.
+2. Calls `load_artifact_workspace()` to read the previous app bundle into a
+   `file_map`.
+3. Calls `extract_module_inventory(file_map)` to produce a structured
+   `ModuleInventoryEntry` list.
+4. Returns `{ modules, count, source_artifact_version_id, warnings }`.
+
+**What it does NOT do:**
+
+- No file writes.
+- No artifact writes.
+- No LLM calls.
+- No carry-forward merge or file copy.
+
+**Failure behavior:** returns empty `modules` list plus a diagnostic `warnings`
+entry on any failure (missing ref, workspace unavailable, load exception). Never
+raises.
+
+**Auto-population behavior (Phase 3):**
+
+`_build_context_seed()` auto-populates `carry_forward_modules` using the
+following priority:
+
+1. **Explicit client list wins.** If `extra.carry_forward_modules` is a list
+   (including an empty list), use it as-is. The tool is not called.
+2. **Auto-extract when ref is present.** If `extra.carry_forward_modules` is
+   absent and `extra.previous_app_bundle_ref` is set, the router calls
+   `get_carry_forward_candidates` via `_auto_carry_forward_resolution()` and
+   populates `carry_forward_modules` with the returned module ids.
+3. **Default to empty.** If neither is present, `carry_forward_modules = []`.
+
+When auto-extraction produces warnings (e.g. workspace unavailable),
+`carry_forward_warnings` is added to the context seed for diagnostic
+traceability. When extraction succeeds without warnings, the key is absent.
+
+`_auto_carry_forward_resolution()` uses the pack executor mechanism
+(`resolve_control_plane_tool_entrypoint`) to call the registered tool at runtime
+without a direct import from `factory_app`. It never raises — returns
+`([], [warning])` on any failure.
+
+**Remaining future work:** Artifact content backfill CLI for artifacts written before Phase D.
+
+#### Per-module carry-forward decisions in AppBuildPlan (Phase 6)
+
+AppPlanAgent records its carry-forward planning intent in a structured field
+`carry_forward_decisions: list[CarryForwardDecision]` on `AppBuildPlan`.
+
+**`CarryForwardDecision` fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `module_id` | `str` | Module directory name from the previous app bundle. |
+| `decision` | `reuse \| adapt \| regenerate \| drop` | Planning intent for this candidate. |
+| `reason` | `str` | Non-empty explanation for the decision. |
+| `source` | `carry_forward_candidate \| human_override \| planner` | What drove the decision. |
+| `affected_build_tasks` | `list[str]` | Task ids from `build_tasks` related to this decision. Empty for `drop`. |
+
+**Decision values:**
+
+| Value | Meaning |
+|---|---|
+| `reuse` | Preserve the module's role in the new plan. Does not copy old files. |
+| `adapt` | Create a new/updated module task inspired by the prior contract. |
+| `regenerate` | Capability still needed; generate a fresh implementation from scratch. |
+| `drop` | Module no longer fits the new concept. |
+
+**Semantics:**
+
+- `carry_forward_decisions` defaults to `[]` for non-conceptual builds.
+- Populated only during `conceptual_replan` or when `carry_forward_modules` is present.
+- Modules with `decision == "reuse"` are eligible for Phase 7A declarative
+  contract preservation by the `resolve_carry_forward_preservation` resolver
+  (see [Phase 7A: Declarative Contract Preservation](#phase-7a-declarative-contract-preservation)).
+  Modules with `decision == "adapt"`, `"regenerate"`, or `"drop"` receive no
+  file preservation.
+- `affected_build_tasks` entries must reference existing `build_tasks` task ids
+  when provided. Empty lists and omitted keys are both valid.
+- AppPlanAgent emits one entry per carry-forward candidate. `source` should be
+  `carry_forward_candidate` when driven by `carry_forward_classification`,
+  `planner` when driven by AppPlanAgent's own reasoning, or `human_override`
+  when the client explicitly instructed reuse or drop.
+
+**Validation** (`factory_app/workflows/AppGenerator/tools/app_build_plan.py`):
+
+- `module_id` must be non-empty.
+- `decision` must be one of `reuse`, `adapt`, `regenerate`, `drop`.
+- `reason` must be non-empty.
+- `source` must be one of `carry_forward_candidate`, `human_override`, `planner`
+  when provided.
+- `affected_build_tasks` entries must exist in `build_tasks` task ids.
+- Plans with no `carry_forward_decisions` key pass unchanged (field defaults to `[]`).
+
+#### Carry-forward module contract read-back (Phase 4)
+
+`read_carry_forward_module_contract` is an AG2 tool registered in
+`factory_app/workflows/AppGenerator/tools.yaml` under AppPlanAgent.
+
+Core implementation lives at
+`factory_app/control_plane/tools/read_carry_forward_module_contract.py`.
+The AppGenerator entry point is a thin wrapper at
+`factory_app/workflows/AppGenerator/tools/read_carry_forward_module_contract.py`.
+
+**What it does:**
+
+AppPlanAgent may call this tool during `conceptual_replan` to inspect specific
+contract files from a carry-forward candidate in the previous app bundle,
+before deciding whether to reuse, adapt, or regenerate a module.
+
+Input parameters (from AppPlanAgent):
+
+| Parameter | Type | Description |
+|---|---|---|
+| `module_id` | `str` | Module directory name to inspect (e.g. `notifications`, `billing_portal`). |
+| `files` | `list[str] \| null` | Contract filenames to read. When `null`, all allowed files present in the workspace are returned. |
+
+Context variables read by the tool:
+
+| Variable | Description |
+|---|---|
+| `app_id` | The app being replanned. |
+| `previous_app_bundle_ref` | Artifact version id of the prior bundle. |
+
+Output:
+
+| Field | Description |
+|---|---|
+| `module_id` | Echoed back. |
+| `files` | `{filename: content}` dict for returned files. |
+| `available_files` | All allowed contract files present in the workspace for this module. |
+| `missing_files` | Requested files not found in the workspace. |
+| `warnings` | Diagnostic messages for missing refs, disallowed paths, or load failures. |
+
+**Allowed files** (relative to `modules/{module_id}/`):
+
+- `module.yaml`
+- `runtime_extensions.yaml`
+- `contracts/events.yaml`
+- `contracts/reactions.yaml`
+- `contracts/notifications.yaml`
+- `contracts/settings.yaml`
+- `contracts/admin.yaml`
+- `contracts/profile.yaml`
+
+**Disallowed:**
+
+- `backend/*.py` — backend Python source is not exposed in this phase.
+- Any path outside `modules/{module_id}/` — path traversal is rejected with a warning.
+- Arbitrary filenames not in the allowed set.
+
+**Read-only semantics:**
+
+- No file writes.
+- No artifact writes.
+- No LLM calls.
+- No file copy or merge.
+- Contract content returned to AppPlanAgent is advisory context only.
+
+**Registration:** AppPlanAgent only (`auto_tool_call: false`). Not registered
+as a control-plane checkpoint tool. Not available to any other workflow agent.
+
+**AppPlanAgent advisory use:**
+
+During `conceptual_replan`, AppPlanAgent receives `carry_forward_modules` as an
+advisory list. Each entry includes `carry_forward_classification` and
+`carry_forward_reasons`. For modules classified `needs_adaptation`, AppPlanAgent
+may call `read_carry_forward_module_contract` to inspect their prior contracts
+before deciding. The agent still does not copy prior module files, does not
+merge content, and does not inspect `backend/*.py` source.
+
+#### Carry-forward compatibility classification (Phase 5)
+
+`ModuleInventoryEntry` includes a deterministic advisory compatibility
+classification for every module returned by `get_carry_forward_candidates`.
+
+**Fields added to `ModuleInventoryEntry`:**
+
+| Field | Type | Description |
+|---|---|---|
+| `carry_forward_classification` | `Literal["safe_carry_forward", "needs_adaptation", "regenerate"]` | Deterministic advisory class. |
+| `carry_forward_reasons` | `list[str]` | Non-empty list of human-readable reasons for the classification. |
+
+**Classification values:**
+
+| Class | Meaning |
+|---|---|
+| `safe_carry_forward` | Module is known to be generic/infrastructure (e.g. settings, notifications, audit, auth, users, organizations, billing_portal). Advisory: carry forward without modification or with minor schema review. |
+| `needs_adaptation` | Module has persistence, admin panels, reactions, runtime extensions, or domain events that may not fit the new concept. Review required before reuse. |
+| `regenerate` | Module id contains a domain-specific fragment (e.g. project, task, order, lead, pipeline, invoice, campaign, booking) strongly implying it was built for the old concept. Prefer regeneration. |
+
+**Classification logic** (`classify_module_carry_forward` in
+`factory_app/control_plane/tools/_module_inventory.py`):
+
+Priority (highest to lowest):
+
+1. **`regenerate`** — `module_id` contains a known domain-specific fragment
+   from `_DOMAIN_FRAGMENTS`. Presence of persistence or heavy CRUD actions
+   reinforces but does not change the class.
+2. **`safe_carry_forward`** — `module_id` matches `_SAFE_MODULE_IDS` (exact
+   lower-case match), OR the module has infrastructure-only signals
+   (settings/notifications/profile with no persistence, no admin, no reactions,
+   no events).
+3. **`needs_adaptation`** — default for everything else. Any persistence,
+   admin, reactions, runtime extensions, events, or CRUD-heavy action mix
+   triggers this class.
+
+**Advisory semantics.** Classification is deterministic and conservative.
+AppPlanAgent remains the final planner and may override any advisory class
+based on the new concept. No file copy, merge, or automatic preservation occurs.
+`carry_forward_classification` is surfaced in the `modules[]` list returned by
+`get_carry_forward_candidates`, available to any consumer that calls `model_dump()`
+on a `ModuleInventoryEntry`.
+
+#### Architecture-level LLM profile signal
+
+When the router resolves to `conceptual_replan` or `full_rebuild`, it injects
+an additional field into the context seed:
+
+| Field | Value | Sequences | Description |
+|---|---|---|---|
+| `llm_profile` | `"architecture"` | `conceptual_replan`, `full_rebuild` | Advisory signal requesting a stronger reasoning model. All other sequences receive no `llm_profile`. |
+
+The `architecture` profile is declared in `factory_app/app/config/ai.json`
+`control_plane.llm_profiles.architecture`. Its `llm_config` names a capable
+general reasoning model at low temperature for planning work.
+
+**Advisory semantics.** The runner does not yet consume `llm_profile`
+automatically. The field is context plumbing — when a runner consumer is wired
+up, it will look up the named profile from `ai.json` and build an appropriate
+LLM config for the launched workflow session.
+
+**What does not change:**
+
+- The classifier uses `llm_profile: classifier` (deterministic,
+  `gpt-4o-mini`). Unchanged.
+- The coding worker uses `llm_profile: codegen`. Unchanged.
+- Tool permissions do not change — no ShellTool or write tools are added to
+  planning agents via this signal.
+- The signal does not automatically promote or demote models for any current
+  agent. It is plumbing for future runner consumption.
+
+This field is declared as a state variable in `ValueEngine/context_variables.yaml`,
+`DesignDocs/context_variables.yaml`, `AgentGenerator/context_variables.yaml`,
+and `AppGenerator/context_variables.yaml`.
 
 ### Declaration Model
 
@@ -980,3 +1550,241 @@ Rules:
 `ValueEngine`, `DesignDocs`, `AgentGenerator`, and `AppGenerator` should all
 consume this same revision contract so re-entry behavior stays consistent
 across the build flow.
+
+---
+
+## Artifact Workspace Durability (Phase D)
+
+### Problem
+
+Before Phase D, artifact workspace content was stored only on the local
+filesystem.  `load_artifact_workspace()` would return `present: False` for any
+artifact version whose `workspace_dir` or `artifact_path` was no longer
+accessible — e.g. after a container replacement, host restart, or distributed
+worker deployment.  This made carry-forward reads and AssemblyAgent preservation
+unreliable in non-trivial deployments.
+
+### Solution: Pluggable `ArtifactContentStore`
+
+`mozaiksai/core/artifacts/content_store.py` introduces a Protocol-based content
+backend.  All existing local-filesystem behaviour is preserved as the default
+backend.
+
+#### `ArtifactContentStore` Protocol
+
+```python
+class ArtifactContentStore(Protocol):
+    backend_name: str
+
+    async def put_bundle(self, data: bytes, *, app_id: str, artifact_version_id: str) -> str: ...
+    async def get_bundle(self, content_ref: str) -> bytes: ...
+    async def exists(self, content_ref: str) -> bool: ...
+    async def verify_checksum(self, content_ref: str, sha256: str) -> bool: ...
+    async def delete(self, content_ref: str) -> bool: ...
+```
+
+`content_ref` is an opaque string whose format is backend-specific.  Callers
+must not parse it.
+
+#### Implementations
+
+| Class | `backend_name` | `content_ref` format |
+|---|---|---|
+| `LocalArtifactContentStore` | `"local"` | Absolute path string of the stored zip. |
+| `GridFSArtifactContentStore` | `"gridfs"` | MongoDB GridFS `_id` rendered as a string. |
+
+`GridFSArtifactContentStore` defers the motor import to its first `_ensure_fs()`
+call.  The class can be instantiated without motor installed.
+
+#### Factory
+
+```python
+from mozaiksai.core.artifacts.content_store import get_artifact_content_store
+store = get_artifact_content_store()
+```
+
+Backend is selected by the `MOZAIKS_ARTIFACT_CONTENT_BACKEND` environment
+variable:
+
+| Value | Backend |
+|---|---|
+| `"local"` (default) | `LocalArtifactContentStore` |
+| `"gridfs"` | `GridFSArtifactContentStore` |
+| *(any other)* | `LocalArtifactContentStore` (fallback) |
+
+The factory returns a process-wide singleton.
+
+### Metadata contract
+
+`ArtifactVersionDoc.commit_metadata.metadata` is a `dict[str, Any]`.  Phase D
+adds two optional keys when a non-local content backend is used:
+
+| Key | Type | Set by | Description |
+|---|---|---|---|
+| `content_ref` | `str` | `generate_and_download`, `coding_worker` | Opaque backend reference. Absent for `"local"` backend. |
+| `content_backend` | `str` | Same | Backend name (`"gridfs"` etc.). Absent for `"local"` backend. |
+| `artifact_path` | `str` | Both writers | Absolute local path (always written, unchanged). |
+| `workspace_dir` | `str` | `coding_worker` | Absolute workspace dir (always written when present). |
+
+The local backend skips writing `content_ref` and `content_backend` because
+`artifact_path` already covers local content retrieval.
+
+No Pydantic schema migration is required — `metadata` is already `dict[str, Any]`.
+
+### Three-branch lookup in `load_artifact_workspace()`
+
+`factory_app/control_plane/tools/_artifact_workspace.py` resolves workspace
+content in this priority order:
+
+1. **`workspace_dir`** — if path exists on disk, read files directly.
+2. **`artifact_path`** — if path exists on disk, read zip from filesystem.
+3. **`content_ref`** via `ArtifactContentStore` — if a `content_ref` key is
+   present in metadata and a `content_store` argument is provided, call
+   `content_store.get_bundle(content_ref)` and read the returned bytes as a zip.
+
+`load_artifact_workspace()` now accepts an optional `content_store` parameter:
+
+```python
+result = await load_artifact_workspace(
+    artifact_store=store,
+    app_id=app_id,
+    artifact_version_id=version_id,
+    content_store=get_artifact_content_store(),  # pass to enable third branch
+)
+```
+
+**`present: False` reasons introduced by Phase D:**
+
+| `reason` | Condition |
+|---|---|
+| `content_store_unavailable` | `content_ref` present in metadata but `content_store=None` passed. |
+| `content_ref_not_found` | `content_store.get_bundle()` raised `ContentNotFoundError`. |
+| `content_store_error` | `content_store.get_bundle()` raised any other exception. |
+
+Existing reasons (`artifact_not_found`, `workspace_unavailable`) are unchanged.
+
+### Where content is written
+
+**`generate_and_download._register_app_bundle_artifact_version()`**
+
+After creating the zip: if `content_store.backend_name != "local"`, calls
+`put_bundle()` and writes `content_ref` + `content_backend` into
+`commit_metadata.metadata`.  Falls back to local path on content store errors.
+
+**`ScopedRefinementCodingWorker._persist_validated_artifact()`**
+
+Same pattern after writing `artifact.zip`.
+
+The `local` backend is intentionally skipped in both writers because
+`artifact_path` is always written and already covers local retrieval.
+
+### Phase 7A relationship
+
+Phase 7A (AssemblyAgent declarative contract preservation) proceeds with
+graceful degradation when workspace content is unavailable (`present: False`).
+Phase D makes non-local deployments production-reliable by ensuring workspace
+content survives container or host replacement.  Phase D is not a hard
+prerequisite for Phase 7A functionality.
+
+**Remaining future work:** Object-storage backend (S3/GCS). CLI backfill for
+artifacts written before Phase D.
+
+---
+
+## Phase 7A: Declarative Contract Preservation
+
+### Problem
+
+Before Phase 7A, `carry_forward_decisions` was planning metadata only — no
+file copy or preservation behavior existed.  Modules with `decision == "reuse"`
+generated fresh contracts that discarded stable, hand-tuned declarations from
+the prior bundle.
+
+### Solution: `resolve_carry_forward_preservation`
+
+After `AssemblyAgent` calls `assemble_app_tasks`, a second tool
+(`resolve_carry_forward_preservation`) runs automatically (`auto_tool_call:
+true`) and copies only allowlisted declarative module contract files from the
+prior app bundle workspace into the assembled output.
+
+**Generated output always wins.** The resolver only fills paths not already
+produced by generation.  It is baseline file injection, not semantic merging.
+
+#### Allowlisted paths (Phase 7A)
+
+For each module with `decision == "reuse"` in `carry_forward_decisions`, the
+resolver may copy exactly these relative paths (under `modules/{module_id}/`):
+
+| Path | Description |
+|---|---|
+| `module.yaml` | Module identity, actions, and capabilities |
+| `contracts/events.yaml` | Domain events emitted by the module |
+| `contracts/reactions.yaml` | Event reactions owned by the module |
+| `contracts/notifications.yaml` | Notification rules per event |
+| `contracts/settings.yaml` | User-facing preferences schema |
+| `contracts/admin.yaml` | Admin panel declarations |
+| `contracts/profile.yaml` | User profile panel declarations |
+
+#### Denylist (never copied regardless of allowlist)
+
+- `runtime_extensions.yaml` — runtime wiring is always regenerated
+- `.env.example`, `requirements.txt`
+- `ui/route_manifest.json`, `ui/index.js` — custom React routing
+- `config/database_intent.json` and `config/database_migrations/*` — persistence intent
+- `ui/pages/custom/*` — custom React pages
+- `backend/integrations/*`, `backend/routes/*` — integration clients and API routes
+- Any path containing `secret`, `credential`, or `password`
+- All `backend/*.py` — backend Python source is never preserved
+
+#### Conflict resolution
+
+When the prior bundle contains an allowlisted path that was also produced by
+generation, the generated output wins and the path is recorded in
+`carry_forward_report.conflicts` with reason `"generated_output_wins"`.
+
+#### Context variables
+
+| Variable | Written by | Description |
+|---|---|---|
+| `generated_files` | `assemble_app_tasks` | Flat `{filename: content}` map of all generated output. Read by the resolver for conflict detection. |
+| `carry_forward_additions` | `resolve_carry_forward_preservation` | Preserved files not already in `generated_files`. Merged by `generate_and_download` with generated-wins semantics. |
+| `carry_forward_report` | `resolve_carry_forward_preservation` | Structured report of preserved paths, conflicts, skipped paths, warnings. Saved into `ArtifactVersionDoc.commit_metadata.metadata` by `generate_and_download`. |
+
+#### `carry_forward_report` shape
+
+```python
+{
+    "previous_app_bundle_ref": str | None,
+    "workspace_available": bool,
+    "workspace_source": str | None,   # "workspace_dir" | "artifact_path" | "content_ref"
+    "preserved_paths": list[str],
+    "skipped_paths": dict[str, str],  # path → denylist reason
+    "conflicts": dict[str, str],      # path → "generated_output_wins"
+    "decisions_processed": list[dict],
+    "reused_modules": list[str],
+    "adapted_modules": list[str],
+    "regenerated_modules": list[str],
+    "dropped_modules": list[str],
+    "warnings": list[str],
+}
+```
+
+#### Graceful degradation
+
+The resolver never raises.  When the prior workspace is unavailable
+(`present: False`) or `carry_forward_decisions` is absent, it no-ops and
+emits a `carry_forward_report` with `workspace_available: False`.  Builds
+that have no `conceptual_replan` carry-forward context are unaffected.
+
+#### Implementation
+
+| File | Role |
+|---|---|
+| `factory_app/control_plane/tools/resolve_carry_forward_preservation.py` | Core resolver |
+| `factory_app/workflows/AppGenerator/tools/resolve_carry_forward_preservation.py` | Thin AG2 wrapper with `Annotated[..., Field(...)]` DI |
+| `factory_app/workflows/AppGenerator/tools.yaml` | `AssemblyAgent` entry, `auto_tool_call: true` |
+| `factory_app/workflows/AppGenerator/tools/assemble_app_tasks.py` | Writes `generated_files` to context on both schema and MFJ paths |
+| `factory_app/workflows/AppGenerator/tools/generate_and_download.py` | Merges `carry_forward_additions`; saves `carry_forward_report` to artifact metadata |
+
+**Remaining future work:** Phase 7B — semantic adaptation merging for modules
+with `decision == "adapt"`.

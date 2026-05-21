@@ -18,15 +18,22 @@ If scope spans layers or the right owner is unclear, start with the
 ## Common Task Map
 
 - Runtime or platform change: use `runtime-change` plus the runtime and architecture-boundary rules. Use `runtime-architecture-review` when you need a review-only scope or boundary pass before or after edits.
+- Auth change: use `runtime-change` unless the task is purely docs or tests.
 - Build workflow sequence change: use `factory-build-workflow-change` plus the factory build workflow rules. Use `build-sequence-change` when you only need a narrow sequence or journey-composition review.
-- AppGenerator-specific change: use `factory-build-workflow-change`, then inspect `factory_app/workflows/AppGenerator/` and the nearest AppGenerator docs/tests.
-- AgentGenerator-specific change: use `factory-build-workflow-change`, then inspect `factory_app/workflows/AgentGenerator/` and the nearest AgentGenerator docs/tests.
-- ExistingAppDiscovery or brownfield change: use `factory-build-workflow-change`, then inspect `factory_app/workflows/ExistingAppDiscovery/` and the brownfield docs/tests.
-- Control-plane or refinement change: use `control-plane-refinement-change` plus the control-plane refinement rule.
-- Module contract change: use the modules rule and related module contract tests.
+- AppGenerator-specific change: use `appgenerator-change`, then inspect `factory_app/workflows/AppGenerator/` and the nearest AppGenerator docs/tests. Add `factory-build-workflow-change` as a companion skill only when the change widens into `extension_registry.json`, sequence design, transitions, entrypoints, or cross-workflow factory composition.
+- AgentGenerator-specific change: use `agentgenerator-change`, then inspect `factory_app/workflows/AgentGenerator/` and the nearest AgentGenerator docs/tests. Add `factory-build-workflow-change` as a companion skill only when the change widens into `extension_registry.json`, sequence design, transitions, entrypoints, or cross-workflow factory composition.
+- ExistingAppDiscovery or brownfield change: use `existing-app-discovery-change`, then inspect `factory_app/workflows/ExistingAppDiscovery/` and the brownfield docs/tests. Add `factory-build-workflow-change` as a companion skill only when the change widens into `extension_registry.json`, sequence design, transitions, entrypoints, or cross-workflow factory composition.
+- Control-plane or refinement change: use `control-plane-refinement-change` plus the control-plane refinement rule. Add `factory-build-workflow-change` too when `workflow_sequence` composition or `extension_registry.json` routing changes.
+- Module contract change: use `add-module` for module authoring or scaffolding changes. Use `runtime-change` if module loader, executor, or runtime behavior changes. Use `appgenerator-change` if generated module output changes.
+- Add a deterministic backend module: use `add-module`.
 - Page or frontend change: use the frontend rule and `add-page` when appropriate.
-- Persistence change: use `persistence-change` plus the persistence rule.
-- Hosted-pack support change: use the hosted-packs rule; if a focused skill is still missing, start with `oss-contribution-review`.
+- Admin UI change: use `add-page` plus the frontend rule for custom operator/admin React pages. Distinguish AdminPortal schema panels from custom operator React routes. If platform/admin shell behavior changes, use `runtime-change` too.
+- Persistence change: use `persistence-change` plus the persistence rule. Add `runtime-change` if `ModuleContext.persistence` or runtime persistence behavior changes. Add `appgenerator-change` if generated database intent or module persistence output changes.
+- Docs-only change: use `docs-maintenance`. If docs change a specific layer contract, also read that layer's rule.
+- Test-only change: use the owning surface skill when obvious. Runtime tests go to `runtime-change`, AppGenerator tests go to `appgenerator-change`, and workflow sequence tests go to `factory-build-workflow-change`. If the owner is unclear, use `oss-contribution-review`.
+- CLI change: use `oss-contribution-review` for now. If CLI scaffolding changes module, page, or workflow contracts, also inspect the owning layer rule or skill.
+- Release/changelog change: use `release-notes`.
+- Hosted-pack support change: use `oss-contribution-review` plus the hosted-packs rule for now; no dedicated `hosted-pack-change` skill exists yet.
 - Unsure: use `oss-contribution-review` first.
 
 ## Build And Refinement Truth
@@ -60,7 +67,7 @@ Prefer the narrowest test slice that matches the layer you changed.
 Focused guidance validation:
 
 ```bash
-python -m pytest tests/test_contributor_guidance_framing.py tests/test_module_reactions_docs_contract.py tests/test_admin_ui_two_tier_contract.py tests/test_claude_guidance_operating_system.py tests/test_contributor_quickstart.py -q
+python -m pytest tests/test_contributor_guidance_framing.py tests/test_module_reactions_docs_contract.py tests/test_admin_ui_two_tier_contract.py tests/test_claude_guidance_operating_system.py tests/test_contributor_quickstart.py tests/test_runtime_change_skill.py tests/test_factory_build_workflow_skill.py tests/test_control_plane_refinement_skill.py tests/test_existing_app_discovery_skill.py tests/test_appgenerator_change_skill.py tests/test_agentgenerator_change_skill.py tests/test_contributor_skill_routing_map.py -q
 ```
 
 ## Boundary Warnings

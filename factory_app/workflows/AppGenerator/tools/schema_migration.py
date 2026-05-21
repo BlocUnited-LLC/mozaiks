@@ -154,6 +154,11 @@ def generate_migration(
     The migration is written to:
       config/database_migrations/migration_{timestamp}.json
 
+    The document is runtime-compatible (passes _validate_migration) and
+    contains an ``operations`` list with ``ensure_collection`` entries for
+    every new collection in the diff. The ``metadata`` field carries the
+    human-readable diff for auditing purposes.
+
     It is NOT applied here — call apply_migration_safe() or pass it to
     apply_schema_migration() in backend_tools.py.
     """
@@ -162,32 +167,71 @@ def generate_migration(
 
     migration: Migration = {
         "migration_id":   migration_id,
-        "app_id":         app_id,
-        "change_class":   change_class or "unknown",
-        "created_at":     now.isoformat(),
-        "safety": {
-            "is_additive_only":    diff["is_additive_only"],
-            "destructive_changes": diff["removed_collections"] + [
-                f"{d['name']}.{f}"
-                for d in diff["modified_collections"]
-                for f in d["removed_fields"]
-            ],
-            "warnings": diff["destructive_warnings"],
-        },
-        "changes": {
-            "new_collections":     _build_new_collection_ops(diff, new_schema),
-            "removed_collections": diff["removed_collections"],
-            "modified_collections": diff["modified_collections"],
+        # schema_version satisfies the runtime _validate_migration check which
+        # requires either "version" or "schema_version" to be present.
+        "schema_version": "mozaiks.migration.v1",
+        # operations is the runtime-executable list; ensure_collection is a
+        # no-op in the current runtime (collections are created lazily) but
+        # the field must be present and be a list.
+        "operations":     _build_ensure_collection_ops(diff, new_schema),
+        # metadata carries the human-readable diff for auditing; it is not
+        # processed by the runtime migration loader.
+        "metadata": {
+            "app_id":        app_id,
+            "change_class":  change_class or "unknown",
+            "created_at":    now.isoformat(),
+            "safety": {
+                "is_additive_only":    diff["is_additive_only"],
+                "destructive_changes": diff["removed_collections"] + [
+                    f"{d['name']}.{f}"
+                    for d in diff["modified_collections"]
+                    for f in d["removed_fields"]
+                ],
+                "warnings": diff["destructive_warnings"],
+            },
+            "changes": {
+                "new_collections":      _new_collection_definitions(diff, new_schema),
+                "removed_collections":  diff["removed_collections"],
+                "modified_collections": diff["modified_collections"],
+            },
         },
     }
     return migration
 
 
-def _build_new_collection_ops(
+def _build_ensure_collection_ops(
     diff: SchemaDiff,
     new_schema: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
-    """Return full collection definitions for collections being added."""
+    """Return ensure_collection runtime operations for every new collection.
+
+    Each operation uses the collection's own ``module_id`` and ``entity_name``
+    fields when present; otherwise it falls back to using the collection name
+    for both. The runtime ``ensure_collection`` op is a no-op today (MongoDB
+    creates collections lazily) but must be present in the operations list.
+    """
+    new_names = set(diff["new_collections"])
+    ops: List[Dict[str, Any]] = []
+    for col in new_schema.get("collections", []):
+        if col.get("name") not in new_names:
+            continue
+        module_id = str(col.get("module_id") or col.get("name") or "").strip()
+        entity_name = str(col.get("entity_name") or col.get("name") or "").strip()
+        if not module_id or not entity_name:
+            continue
+        ops.append({
+            "type": "ensure_collection",
+            "module_id": module_id,
+            "entity_name": entity_name,
+        })
+    return ops
+
+
+def _new_collection_definitions(
+    diff: SchemaDiff,
+    new_schema: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Return full collection definitions for collections being added (metadata only)."""
     new_names = set(diff["new_collections"])
     return [c for c in new_schema.get("collections", []) if c["name"] in new_names]
 

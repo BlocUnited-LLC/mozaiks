@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from tests.import_utils import import_module_directly
 
 _config = import_module_directly("mozaiksai.core.workflow.pack.config")
@@ -130,6 +132,109 @@ def test_list_workflow_sequences_returns_declared_sequences(monkeypatch) -> None
     ]
 
 
+def test_multi_root_registry_merges_artifact_dependency_graph(monkeypatch, tmp_path: Path) -> None:
+    overlay_root = tmp_path / "overlay"
+    base_root = tmp_path / "base"
+    overlay_registry_dir = overlay_root / "extended_orchestration"
+    base_registry_dir = base_root / "extended_orchestration"
+    overlay_registry_dir.mkdir(parents=True)
+    base_registry_dir.mkdir(parents=True)
+
+    (overlay_registry_dir / "extension_registry.json").write_text(
+        json.dumps(
+            {
+                "pack_name": "OverlayPack",
+                "version": 3,
+                "artifact_dependency_graph": {
+                    "app_bundle": ["integration_readiness"],
+                    "experience_spec": ["integration_readiness"],
+                    "integration_readiness": ["design_docs", "design_docs"],
+                },
+                "workflows": [{"id": "OverlayWorkflow"}],
+                "workflow_sequences": [
+                    {
+                        "id": "overlay_sequence",
+                        "affected_declarative_families": ["integration_readiness"],
+                        "steps": [{"workflows": ["OverlayWorkflow"]}],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (base_registry_dir / "extension_registry.json").write_text(
+        json.dumps(
+            {
+                "pack_name": "BasePack",
+                "version": 3,
+                "artifact_dependency_graph": {
+                    "concept": [],
+                    "brand": ["concept"],
+                    "design_docs": ["concept"],
+                    "experience_spec": ["concept"],
+                    "app_bundle": ["design_docs", "experience_spec", "brand"],
+                },
+                "workflows": [{"id": "BaseWorkflow"}],
+                "workflow_sequences": [
+                    {
+                        "id": "base_sequence",
+                        "affected_declarative_families": ["app_bundle"],
+                        "steps": [{"workflows": ["BaseWorkflow"]}],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", f"{overlay_root}{os.pathsep}{base_root}")
+    monkeypatch.delenv("MOZAIKS_WORKFLOW_ROOTS", raising=False)
+    monkeypatch.delenv("PLATFORM_PATH", raising=False)
+    _config._GLOBAL_CACHE = None
+    _config._WORKFLOW_CACHE = {}
+
+    graph = load_global_pack_graph()
+
+    assert graph is not None
+    assert graph.artifact_dependency_graph == {
+        "app_bundle": ["integration_readiness", "design_docs", "experience_spec", "brand"],
+        "experience_spec": ["integration_readiness", "concept"],
+        "integration_readiness": ["design_docs"],
+        "concept": [],
+        "brand": ["concept"],
+        "design_docs": ["concept"],
+    }
+    assert [workflow.id for workflow in graph.workflows] == ["OverlayWorkflow", "BaseWorkflow"]
+    assert [sequence.id for sequence in graph.journeys] == ["overlay_sequence", "base_sequence"]
+
+
+def test_multi_root_registry_rejects_invalid_artifact_dependency_graph(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    workflows_root = tmp_path / "workflows"
+    registry_dir = workflows_root / "extended_orchestration"
+    registry_dir.mkdir(parents=True)
+    (registry_dir / "extension_registry.json").write_text(
+        json.dumps(
+            {
+                "pack_name": "BrokenPack",
+                "version": 3,
+                "artifact_dependency_graph": {
+                    "app_bundle": "design_docs",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(workflows_root))
+    _config._GLOBAL_CACHE = None
+
+    with pytest.raises(ValueError, match="artifact_dependency_graph"):
+        load_global_pack_graph()
+
+
 def test_legacy_multi_root_env_uses_first_declared_root_only(monkeypatch, tmp_path: Path) -> None:
     local_root = tmp_path / "local"
     shared_root = tmp_path / "shared"
@@ -216,3 +321,103 @@ def test_resource_resolution_prefers_repo_assets_over_stale_package_copy(monkeyp
 
     assert _resources.resolve_web_shell_root() == (repo_root / "web_shell").resolve()
     assert _resources.resolve_chat_ui_root() == (repo_root / "chat-ui").resolve()
+
+
+# ── artifact_dependency_graph ──────────────────────────────────────────────────
+
+def test_artifact_dependency_graph_experience_spec_depends_on_design_docs(monkeypatch) -> None:
+    _use_repo_factory_workflows(monkeypatch)
+    graph = load_global_pack_graph()
+    assert graph is not None
+    deps = graph.artifact_dependency_graph
+    assert "design_docs" in deps["experience_spec"]
+    assert "concept" in deps["experience_spec"]
+
+
+def test_artifact_dependency_graph_is_acyclic(monkeypatch) -> None:
+    _use_repo_factory_workflows(monkeypatch)
+    graph = load_global_pack_graph()
+    assert graph is not None
+    deps = graph.artifact_dependency_graph
+
+    # DFS cycle detection (three-colour: unvisited / in-progress / done)
+    colors: dict = {}
+
+    def _dfs(node: str) -> bool:
+        colors[node] = "gray"
+        for upstream in deps.get(node, []):
+            if colors.get(upstream) == "gray":
+                return False  # back-edge → cycle
+            if colors.get(upstream) != "black":
+                if not _dfs(upstream):
+                    return False
+        colors[node] = "black"
+        return True
+
+    for node in deps:
+        if node not in colors:
+            assert _dfs(node), f"Cycle detected in artifact_dependency_graph involving '{node}'"
+
+
+def test_stale_propagation_design_docs_reaches_experience_spec(monkeypatch) -> None:
+    """design_docs is declared as an upstream dependency of experience_spec.
+    When design_docs is written, BFS propagation via ArtifactInvalidationService
+    will mark experience_spec stale. This test verifies the structural edge exists."""
+    _use_repo_factory_workflows(monkeypatch)
+    graph = load_global_pack_graph()
+    assert graph is not None
+    deps = graph.artifact_dependency_graph
+    # experience_spec directly lists design_docs as an upstream dependency
+    assert "design_docs" in deps.get("experience_spec", [])
+    # app_bundle remains downstream of experience_spec
+    assert "experience_spec" in deps.get("app_bundle", [])
+
+
+# ── conceptual_replan sequence ─────────────────────────────────────────────────
+
+def test_conceptual_replan_sequence_exists(monkeypatch) -> None:
+    _use_repo_factory_workflows(monkeypatch)
+    graph = load_global_pack_graph()
+    assert graph is not None
+    sequence_ids = [s.id for s in graph.journeys]
+    assert "conceptual_replan" in sequence_ids
+
+
+def test_conceptual_replan_affected_families_are_complete(monkeypatch) -> None:
+    _use_repo_factory_workflows(monkeypatch)
+    graph = load_global_pack_graph()
+    assert graph is not None
+    replan = next(s for s in graph.journeys if s.id == "conceptual_replan")
+    expected = {"concept", "brand", "design_docs", "experience_spec", "workflow_bundle", "app_bundle"}
+    assert set(replan.affected_declarative_families) == expected
+
+
+def test_conceptual_replan_steps_match_full_rebuild_workflow_order(monkeypatch) -> None:
+    _use_repo_factory_workflows(monkeypatch)
+    graph = load_global_pack_graph()
+    assert graph is not None
+    replan = next(s for s in graph.journeys if s.id == "conceptual_replan")
+    full_rebuild = next(s for s in graph.journeys if s.id == "full_rebuild")
+
+    def _workflow_ids(seq) -> list:
+        return [wf for step in seq.steps for wf in step.workflows]
+
+    assert _workflow_ids(replan) == _workflow_ids(full_rebuild)
+
+
+def test_full_rebuild_sequence_still_valid(monkeypatch) -> None:
+    _use_repo_factory_workflows(monkeypatch)
+    graph = load_global_pack_graph()
+    assert graph is not None
+    full_rebuild = next((s for s in graph.journeys if s.id == "full_rebuild"), None)
+    assert full_rebuild is not None
+    expected_families = {"concept", "brand", "design_docs", "experience_spec", "workflow_bundle", "app_bundle"}
+    assert set(full_rebuild.affected_declarative_families) == expected_families
+
+
+def test_all_factory_sequence_ids_are_unique(monkeypatch) -> None:
+    _use_repo_factory_workflows(monkeypatch)
+    graph = load_global_pack_graph()
+    assert graph is not None
+    ids = [s.id for s in graph.journeys]
+    assert len(ids) == len(set(ids)), f"Duplicate sequence ids: {[x for x in ids if ids.count(x) > 1]}"

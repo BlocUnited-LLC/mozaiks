@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import date, datetime
 from typing import Any, Iterable, Mapping, Optional
 
 from .models import ArtifactLifecycleStatus, ArtifactValidationStatus, ArtifactVersionDoc
 from .store import ArtifactStore, get_artifact_store
+
+logger = logging.getLogger(__name__)
 
 
 def _json_default(value: Any) -> Any:
@@ -72,16 +75,25 @@ async def resolve_latest_artifact_version_refs(
             app_id=resolved_app_id,
             artifact_kind=artifact_kind,
             artifact_key=artifact_key,
+            lifecycle_status=ArtifactLifecycleStatus.CURRENT,
             limit=1,
         )
         if not versions and artifact_key is not None:
             versions = await store.list_artifact_versions(
                 app_id=resolved_app_id,
                 artifact_kind=artifact_kind,
+                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
                 limit=1,
             )
         if versions:
             resolved_refs[artifact_kind] = versions[0].id
+        else:
+            logger.debug(
+                "[ARTIFACTS] No CURRENT version found for kind=%r app=%s — "
+                "canonical input absent (first-run or all versions are DRAFT/STALE).",
+                artifact_kind,
+                resolved_app_id,
+            )
 
     return resolved_refs
 
@@ -119,6 +131,7 @@ async def persist_summary_artifact(
             app_id=resolved_app_id,
             artifact_kind=resolved_artifact_kind,
             artifact_key=resolved_artifact_key,
+            lifecycle_status=ArtifactLifecycleStatus.CURRENT,
             limit=1,
         )
         if prior_versions:

@@ -323,6 +323,52 @@ async def test_get_stale_artifact_families_returns_stale_without_current() -> No
 
 
 @pytest.mark.asyncio
+async def test_get_current_artifact_version_refs_returns_highest_current_per_kind() -> None:
+    """Returns the highest-versioned CURRENT artifact_version_id for each kind."""
+    store = ArtifactStore.__new__(ArtifactStore)
+    versions_coll = MagicMock()
+    cursor = MagicMock()
+    # sort() returns cursor; to_list() returns rows sorted by version_number desc
+    cursor.sort.return_value = cursor
+    cursor.to_list = AsyncMock(
+        return_value=[
+            {"_id": "av_concept_2", "artifact_kind": "concept", "version_number": 2},
+            {"_id": "av_concept_1", "artifact_kind": "concept", "version_number": 1},
+            {"_id": "av_design_1", "artifact_kind": "design_docs", "version_number": 1},
+        ]
+    )
+    versions_coll.find.return_value = cursor
+    store._coll = AsyncMock(return_value=versions_coll)
+    store._ensure_client = AsyncMock()
+
+    refs = await store.get_current_artifact_version_refs(app_id="app-1")
+
+    # concept → highest version (av_concept_2); design_docs → only version
+    assert refs == {"concept": "av_concept_2", "design_docs": "av_design_1"}
+    # confirm only CURRENT versions were queried
+    query = versions_coll.find.call_args.args[0]
+    assert query["lifecycle_status"] == ArtifactLifecycleStatus.CURRENT.value
+    assert query["app_id"] == "app-1"
+
+
+@pytest.mark.asyncio
+async def test_get_current_artifact_version_refs_returns_empty_when_no_current() -> None:
+    """Returns empty dict when no CURRENT artifact versions exist."""
+    store = ArtifactStore.__new__(ArtifactStore)
+    versions_coll = MagicMock()
+    cursor = MagicMock()
+    cursor.sort.return_value = cursor
+    cursor.to_list = AsyncMock(return_value=[])
+    versions_coll.find.return_value = cursor
+    store._coll = AsyncMock(return_value=versions_coll)
+    store._ensure_client = AsyncMock()
+
+    refs = await store.get_current_artifact_version_refs(app_id="app-1")
+
+    assert refs == {}
+
+
+@pytest.mark.asyncio
 async def test_get_stale_artifact_families_clears_when_all_rebuilt() -> None:
     """If every stale family has a CURRENT version, the list is empty."""
     store = ArtifactStore.__new__(ArtifactStore)

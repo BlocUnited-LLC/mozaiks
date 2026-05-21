@@ -369,6 +369,35 @@ def test_save_app_schema_writes_custom_route_bundle(monkeypatch, tmp_path: Path)
     assert context.data["app_schema_ready"] is True
 
 
+def test_save_app_schema_preserves_custom_route_requiresrole_metadata(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    context = _Context()
+    manifest = {
+        "app_name": "Investor Room",
+        "version": "1.0.0",
+        "default_route": "/deal-room",
+        "pages": [],
+        "custom_routes": ["deal-room"],
+    }
+    custom_bundle = _custom_route_bundle()
+    custom_bundle["route_manifest"][0]["meta"]["requiresRole"] = "admin"
+
+    save_app_schema_module.save_app_schema(
+        manifest=manifest,
+        pages=[],
+        custom_route_bundle=custom_bundle,
+        context_variables=context,
+    )
+
+    route_manifest = json.loads((tmp_path / "ui" / "route_manifest.json").read_text(encoding="utf-8"))
+
+    assert route_manifest["pages"][0]["meta"]["requiresRole"] == "admin"
+    assert context.data["app_custom_route_bundle"]["route_manifest"][0]["meta"]["requiresRole"] == "admin"
+
+
+
 def test_save_app_schema_canonicalizes_manifest_page_index(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     context = _Context()
