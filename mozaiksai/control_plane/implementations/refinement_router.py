@@ -149,8 +149,6 @@ _INTEGRATION_IMPACT_TERMS = (
     "provider",
     "webhook",
     "sync",
-    "import",
-    "export",
     "analytics provider",
     "reporting provider",
     "search provider",

@@ -319,7 +319,11 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
             "impact_set": {
                 "workflow_sequence": "app_revision",
                 "affected_workflows": ["AppGenerator"],
-                "affected_bundle_paths": [],
+                "affected_bundle_paths": [
+                    "modules/*/module.yaml",
+                    "modules/*/contracts/*.yaml",
+                    "modules/*/backend/*.py",
+                ],
                 "affected_declarative_families": ["app_bundle"],
                 "requires_replanning": True,
                 "requires_rebuild": True,

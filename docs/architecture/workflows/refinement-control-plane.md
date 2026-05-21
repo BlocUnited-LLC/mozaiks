@@ -1156,7 +1156,7 @@ receive it directly; carry-forward file preservation is driven instead by
 - Treat the list as advisory preservation hints, not an inclusion mandate.
 - Preserve a carry-forward module only if it is domain-generic and still fits
   the new concept (e.g. notifications, files/media, audit/activity,
-  billing_portal when billing still applies).
+  audit_log when audit history still applies).
 - Omit domain-specific modules from the old concept (e.g. old CRM
   contacts/pipeline, old domain pages, concept-specific workflows). Note the
   omission in build plan rationale.
@@ -1286,7 +1286,7 @@ Input parameters (from AppPlanAgent):
 
 | Parameter | Type | Description |
 |---|---|---|
-| `module_id` | `str` | Module directory name to inspect (e.g. `notifications`, `billing_portal`). |
+| `module_id` | `str` | Module directory name to inspect (e.g. `notifications`, `audit_log`). |
 | `files` | `list[str] \| null` | Contract filenames to read. When `null`, all allowed files present in the workspace are returned. |
 
 Context variables read by the tool:
@@ -1359,7 +1359,7 @@ classification for every module returned by `get_carry_forward_candidates`.
 
 | Class | Meaning |
 |---|---|
-| `safe_carry_forward` | Module is known to be generic/infrastructure (e.g. settings, notifications, audit, auth, users, organizations, billing_portal). Advisory: carry forward without modification or with minor schema review. |
+| `safe_carry_forward` | Module is known to be generic/infrastructure (e.g. settings, notifications, audit, auth, users, organizations, audit_log). Advisory: carry forward without modification or with minor schema review. |
 | `needs_adaptation` | Module has persistence, admin panels, reactions, runtime extensions, or domain events that may not fit the new concept. Review required before reuse. |
 | `regenerate` | Module id contains a domain-specific fragment (e.g. project, task, order, lead, pipeline, invoice, campaign, booking) strongly implying it was built for the old concept. Prefer regeneration. |
 

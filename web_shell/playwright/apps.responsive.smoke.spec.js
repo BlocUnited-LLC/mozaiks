@@ -294,6 +294,22 @@ function buildAppConsolePayload(appId = APP_ID) {
   };
 }
 
+function buildWorkspaceRunsPayload() {
+  const runs = appsPayload.apps.flatMap((app) => {
+    const payload = buildAppConsolePayload(app.app_id);
+    return (payload.runs?.runs || []).map((run) => ({
+      ...run,
+      app_id: app.app_id,
+      app_name: app.name,
+    }));
+  });
+
+  return {
+    runs,
+    total: runs.length,
+  };
+}
+
 async function mockConsoleApis(page) {
   await page.route('**/api/shell-config', async (route) => {
     await route.fulfill({
@@ -365,11 +381,12 @@ async function mockConsoleApis(page) {
 
   await page.route('**/api/admin/runs*', async (route) => {
     const url = new URL(route.request().url());
-    const payload = buildAppConsolePayload(url.searchParams.get('app_id') || APP_ID);
+    const appId = url.searchParams.get('app_id');
+    const payload = appId ? buildAppConsolePayload(appId).runs : buildWorkspaceRunsPayload();
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify(payload.runs),
+      body: JSON.stringify(payload),
     });
   });
 
@@ -526,9 +543,9 @@ test('workspace usage route stays responsive across desktop and mobile widths', 
   if (viewport.width < 768) {
     await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeVisible();
   } else {
-    await expect(main.getByRole('columnheader', { name: 'Workflow' })).toBeVisible();
-    await expect(main.getByRole('columnheader', { name: 'Input' })).toBeVisible();
-    await expect(main.getByRole('row', { name: /RevisionOrchestrator Workspace/i }).first()).toBeVisible();
+    await expect(main.getByRole('columnheader', { name: 'App' })).toBeVisible();
+    await expect(main.getByRole('columnheader', { name: 'Input tok.' })).toBeVisible();
+    await expect(main.getByRole('row', { name: /Campaign Revision Workbench/i }).first()).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeHidden();
   }
 });
@@ -772,7 +789,7 @@ test('app usage route stays responsive across desktop and mobile widths', async 
   const main = page.locator('main');
 
   await expect(main.getByRole('heading', { name: 'Usage', exact: true })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Workflow token breakdown' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Workflow breakdown' })).toBeVisible();
   await expect(main.getByRole('button', { name: 'Export CSV' })).toBeVisible();
   await expect(main.getByRole('columnheader', { name: 'Input' })).toBeVisible();
   await expect(main.getByText('RevisionOrchestrator').first()).toBeVisible();
@@ -845,7 +862,7 @@ test('mobile app console navigation keeps route transitions stable', async ({ pa
     {
       href: `/apps/${APP_ID}/usage`,
       heading: 'Usage',
-      detail: async () => expect(main.getByRole('heading', { name: 'Workflow token breakdown' })).toBeVisible(),
+      detail: async () => expect(main.getByRole('heading', { name: 'Workflow breakdown' })).toBeVisible(),
     },
     {
       href: `/apps/${APP_ID}/users`,

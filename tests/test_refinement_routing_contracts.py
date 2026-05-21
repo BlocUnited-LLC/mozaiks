@@ -82,7 +82,7 @@ def test_experience_spec_is_first_class_artifact_graph_family() -> None:
     graph = registry.get("artifact_dependency_graph") or {}
 
     assert "experience_spec" in graph
-    assert graph["experience_spec"] == ["concept"]
+    assert graph["experience_spec"] == ["concept", "design_docs"]
     assert "experience_spec" in graph["app_bundle"]
 
 

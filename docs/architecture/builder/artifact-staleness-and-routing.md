@@ -49,7 +49,7 @@ upstream families:
 concept
   ├── brand          (depends on concept)
   ├── design_docs    (depends on concept)
-  └── experience_spec (depends on concept)
+  └── experience_spec (depends on concept and design_docs)
         └── workflow_bundle  (depends on design_docs)
               └── app_bundle (depends on design_docs, experience_spec, workflow_bundle, brand)
 ```
@@ -95,9 +95,9 @@ does two things:
    classifier or the session to know those families' specific version IDs.
 
 Example: a `concept_patch` writes only `concept`. The invalidation service
-computes its downstream set (`brand`, `design_docs`, `workflow_bundle`,
-`app_bundle`) and marks all of them stale. The next refinement request will see
-all of them as needing resolution.
+computes its downstream set (`brand`, `design_docs`, `experience_spec`,
+`workflow_bundle`, `app_bundle`) and marks all of them stale. The next
+refinement request will see all of them as needing resolution.
 
 ---
 
@@ -175,7 +175,7 @@ factory_app/workflows/extended_orchestration/extension_registry.json
   "concept":         [],
   "brand":           ["concept"],
   "design_docs":     ["concept"],
-  "experience_spec": ["concept"],
+  "experience_spec": ["concept", "design_docs"],
   "workflow_bundle": ["design_docs"],
   "app_bundle":      ["design_docs", "experience_spec", "workflow_bundle", "brand"]
 }

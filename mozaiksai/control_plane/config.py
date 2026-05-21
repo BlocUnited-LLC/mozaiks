@@ -13,6 +13,7 @@ from mozaiksai.core.workflow.paths import resolve_active_app_root
 ControlPlaneLLMProfileId = Literal[
     "classifier",
     "impact_analyzer",
+    "architecture",
     "planner_replanner",
     "codegen",
     "reviewer_validator",
@@ -21,6 +22,7 @@ ControlPlaneLLMProfileId = Literal[
 ALLOWED_CONTROL_PLANE_LLM_PROFILE_IDS: tuple[str, ...] = (
     "classifier",
     "impact_analyzer",
+    "architecture",
     "planner_replanner",
     "codegen",
     "reviewer_validator",

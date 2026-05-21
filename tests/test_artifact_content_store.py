@@ -20,6 +20,7 @@ Total: 22 tests — no real MongoDB required.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import zipfile
@@ -61,6 +62,10 @@ def _make_artifact_version(metadata: dict[str, Any]):
     return artifact
 
 
+def _run_async(awaitable):
+    return asyncio.run(awaitable)
+
+
 # ---------------------------------------------------------------------------
 # TestContentNotFoundError
 # ---------------------------------------------------------------------------
@@ -80,8 +85,7 @@ class TestLocalArtifactContentStore:
     def test_put_returns_absolute_path_string(self, tmp_path):
         store = LocalArtifactContentStore(root=tmp_path)
         data = _make_zip_bytes({"file.txt": "hello"})
-        import asyncio
-        ref = asyncio.get_event_loop().run_until_complete(
+        ref = _run_async(
             store.put_bundle(data, app_id="app1", artifact_version_id="av1")
         )
         assert isinstance(ref, str)
@@ -91,48 +95,39 @@ class TestLocalArtifactContentStore:
     def test_get_returns_stored_bytes(self, tmp_path):
         store = LocalArtifactContentStore(root=tmp_path)
         data = _make_zip_bytes({"a.txt": "content"})
-        import asyncio
-        loop = asyncio.get_event_loop()
-        ref = loop.run_until_complete(store.put_bundle(data, app_id="app1", artifact_version_id="av2"))
-        retrieved = loop.run_until_complete(store.get_bundle(ref))
+        ref = _run_async(store.put_bundle(data, app_id="app1", artifact_version_id="av2"))
+        retrieved = _run_async(store.get_bundle(ref))
         assert retrieved == data
 
     def test_exists_true_after_put(self, tmp_path):
         store = LocalArtifactContentStore(root=tmp_path)
         data = _make_zip_bytes({"x.py": "pass"})
-        import asyncio
-        loop = asyncio.get_event_loop()
-        ref = loop.run_until_complete(store.put_bundle(data, app_id="app1", artifact_version_id="av3"))
-        assert loop.run_until_complete(store.exists(ref)) is True
+        ref = _run_async(store.put_bundle(data, app_id="app1", artifact_version_id="av3"))
+        assert _run_async(store.exists(ref)) is True
 
     def test_exists_false_for_missing(self, tmp_path):
         store = LocalArtifactContentStore(root=tmp_path)
-        import asyncio
-        assert asyncio.get_event_loop().run_until_complete(
+        assert _run_async(
             store.exists(str(tmp_path / "does_not_exist.zip"))
         ) is False
 
     def test_get_raises_content_not_found_for_missing(self, tmp_path):
         store = LocalArtifactContentStore(root=tmp_path)
-        import asyncio
         with pytest.raises(ContentNotFoundError):
-            asyncio.get_event_loop().run_until_complete(
+            _run_async(
                 store.get_bundle(str(tmp_path / "ghost.zip"))
             )
 
     def test_delete_removes_file_returns_true(self, tmp_path):
         store = LocalArtifactContentStore(root=tmp_path)
         data = _make_zip_bytes({"d.txt": "bye"})
-        import asyncio
-        loop = asyncio.get_event_loop()
-        ref = loop.run_until_complete(store.put_bundle(data, app_id="app1", artifact_version_id="av4"))
-        assert loop.run_until_complete(store.delete(ref)) is True
+        ref = _run_async(store.put_bundle(data, app_id="app1", artifact_version_id="av4"))
+        assert _run_async(store.delete(ref)) is True
         assert not Path(ref).exists()
 
     def test_delete_missing_returns_false(self, tmp_path):
         store = LocalArtifactContentStore(root=tmp_path)
-        import asyncio
-        assert asyncio.get_event_loop().run_until_complete(
+        assert _run_async(
             store.delete(str(tmp_path / "absent.zip"))
         ) is False
 
@@ -146,23 +141,18 @@ class TestLocalChecksum:
         store = LocalArtifactContentStore(root=tmp_path)
         data = _make_zip_bytes({"f.txt": "data"})
         sha = hashlib.sha256(data).hexdigest()
-        import asyncio
-        loop = asyncio.get_event_loop()
-        ref = loop.run_until_complete(store.put_bundle(data, app_id="app1", artifact_version_id="av5"))
-        assert loop.run_until_complete(store.verify_checksum(ref, sha)) is True
+        ref = _run_async(store.put_bundle(data, app_id="app1", artifact_version_id="av5"))
+        assert _run_async(store.verify_checksum(ref, sha)) is True
 
     def test_verify_checksum_wrong_hash_returns_false(self, tmp_path):
         store = LocalArtifactContentStore(root=tmp_path)
         data = _make_zip_bytes({"f.txt": "data"})
-        import asyncio
-        loop = asyncio.get_event_loop()
-        ref = loop.run_until_complete(store.put_bundle(data, app_id="app1", artifact_version_id="av6"))
-        assert loop.run_until_complete(store.verify_checksum(ref, "a" * 64)) is False
+        ref = _run_async(store.put_bundle(data, app_id="app1", artifact_version_id="av6"))
+        assert _run_async(store.verify_checksum(ref, "a" * 64)) is False
 
     def test_verify_checksum_missing_ref_returns_false(self, tmp_path):
         store = LocalArtifactContentStore(root=tmp_path)
-        import asyncio
-        assert asyncio.get_event_loop().run_until_complete(
+        assert _run_async(
             store.verify_checksum(str(tmp_path / "missing.zip"), "a" * 64)
         ) is False
 

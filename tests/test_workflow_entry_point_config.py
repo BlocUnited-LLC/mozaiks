@@ -28,6 +28,7 @@ def test_factory_app_control_plane_defaults_are_declared() -> None:
     assert data["control_plane"]["enabled"] is True
     assert data["control_plane"]["profile"] == "default"
     assert sorted(data["control_plane"]["llm_profiles"]) == [
+        "architecture",
         "classifier",
         "codegen",
         "impact_analyzer",
