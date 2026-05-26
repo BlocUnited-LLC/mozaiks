@@ -3,10 +3,11 @@
 import ast
 import json
 import re
-import sys
 import shutil
+import sys
 from pathlib import Path
 
+from mozaiks_cli.workspace import is_framework_repo_root
 from mozaiksai.resources import resolve_factory_brand_root
 
 # Tier definitions
@@ -63,6 +64,11 @@ def run(args):
 
     app_name = _resolve_app_name(args.name, args.directory)
     target_dir = _resolve_target_dir(args.directory, app_name)
+    if is_framework_repo_root(target_dir.resolve()):
+      print(f"Error: refusing to scaffold inside framework repo root: {target_dir.resolve()}")
+      print("Use --dir <workspace> to target an app workspace directory.")
+      return
+
     app_root = target_dir / "app"
     existing_surfaces = _existing_scaffold_surfaces(
         app_root,
@@ -216,8 +222,13 @@ def _create_bundle_scaffold(
 ) -> None:
     app_root = target_dir / "app"
     config_dir = app_root / "config"
+    backend_dir = app_root / "backend"
+    backend_integrations_dir = backend_dir / "integrations"
+    backend_adapters_dir = backend_dir / "adapters"
+    backend_security_dir = backend_dir / "security"
+    backend_routes_dir = backend_dir / "routes"
     modules_dir = app_root / "modules"
-    workflows_dir = app_root / "workflows"
+    workflows_dir = target_dir / "workflows"
     brand_dir = app_root / "brand"
     assets_dir = brand_dir / "assets"
     fonts_dir = brand_dir / "fonts"
@@ -229,6 +240,22 @@ def _create_bundle_scaffold(
     for directory in (
         app_root,
         config_dir,
+        backend_dir,
+        backend_integrations_dir,
+        backend_adapters_dir,
+        backend_security_dir,
+        backend_routes_dir,
+        *(backend_adapters_dir / area for area in (
+            "auth",
+            "source_control",
+            "deployment",
+            "dns",
+            "registrar",
+            "cloud",
+            "storage",
+            "secrets",
+            "payments",
+        )),
         modules_dir,
         workflows_dir,
         brand_dir,
@@ -241,7 +268,7 @@ def _create_bundle_scaffold(
     ):
         directory.mkdir(parents=True, exist_ok=True)
 
-    print("Created scaffold directories: app/config, app/modules, app/workflows, app/ui, app/brand")
+    print("Created scaffold directories: app/config, app/backend, app/modules, workflows, app/ui, app/brand")
 
     features = TIER_PRESETS[preset]
     resolved_admin = admin_email.strip().lower() if isinstance(admin_email, str) and admin_email.strip() else None
@@ -267,6 +294,9 @@ def _create_bundle_scaffold(
 
     _write_json(config_dir / "shell.json", _build_shell_config(app_name))
     print("Created app/config/shell.json")
+
+    _write_backend_support_stubs(backend_dir)
+    print("Created app/backend support stubs")
 
     _copy_default_brand_bundle(brand_dir, app_name)
     print("Created app/brand from factory_app default brand")
@@ -301,7 +331,7 @@ def _create_standard_consumer_files(
     _write_text(target_dir / "README.md", _generated_app_readme(app_name, preset))
     _write_text(scripts_dir / "run-backend.ps1", _run_backend_ps1())
     _write_text(scripts_dir / "run-frontend.ps1", _run_frontend_ps1())
-    _write_text(scripts_dir / "run-studio.ps1", _run_studio_ps1())
+    _write_text(scripts_dir / "run-console.ps1", _run_console_ps1())
     _create_agent_guidance_scaffold(target_dir=target_dir, app_name=app_name, preset=preset)
 
     print("Created root consumer files: requirements.txt, .env.example, README.md, AGENTS.md, CLAUDE.md, scripts/, .claude/")
@@ -385,6 +415,10 @@ __pycache__/
 node_modules/
 dist/
 build/
+!app/backend/
+!app/backend/**
+app/backend/**/__pycache__/
+app/backend/**/*.py[cod]
 logs/
 generated/
 .pytest_cache/
@@ -414,7 +448,7 @@ Set `OPENAI_API_KEY` and `MONGO_URI` in `.env`.
 ## Run
 
 ```powershell
-.\\scripts\\run-studio.ps1 -ForceStop
+.\\scripts\\run-console.ps1 -ForceStop
 ```
 
 Two-terminal mode:
@@ -430,9 +464,12 @@ This repo owns app-specific behavior only:
 
 - `app/app.json` - app identity and runtime flags
 - `app/config/` - AI, shell, and app config
+- `app/config/secrets.yaml` - optional names-only secret management contract; never stores raw values
 - `app/brand/` - app branding assets and theme config
+- `app/backend/` - optional app-owned support code such as thin integrations, provider adapters, security helpers, and app-level routes
 - `app/modules/` - deterministic app capabilities
-- `app/workflows/` - app-local AI workflows
+- `app/config/shared_persistence.json` and `app/shared_persistence/` - optional stable shared/existing database contract helpers
+- `workflows/` - app-local AI workflows
 - `app/ui/` - app pages, route manifest, and custom UI registration
 - `generated/` - staged generator output awaiting review/promotion
 - `scripts/` - local launch wrappers around the installed `mozaiks` package
@@ -444,6 +481,9 @@ not in this app workspace.
 
 - Keep modules deterministic and contract-declared.
 - Keep `backend/handler.py` thin; put business logic in `service.py` and data access in `repo.py`.
+- Put app-owned external API clients in `app/backend/integrations/`, provider-specific implementation boundaries in `app/backend/adapters/`, provider-neutral auth/secret helpers in `app/backend/security/`, and app-level routes in `app/backend/routes/` only when needed. Common adapter areas include `auth/`, `source_control/`, `deployment/`, `dns/`, `registrar/`, `cloud/`, `storage/`, `secrets/`, and `payments/` when the code is provider mechanics rather than product state.
+- Do not put business actions, lifecycle state, emitted events, or persistence authority in app-level backend support code; modules own those behaviors.
+- Use `app/config/secrets.yaml` only as a names-only contract for secret provider/vault policy, env handles, and secret names. Never store raw API keys, tokens, passwords, connection strings, private keys, or webhook secrets in source.
 - Prefer declarative page schemas before custom React.
 - Mount custom React only through `app/ui/route_manifest.json` and `app/ui/index.js`.
 - Keep shell/navigation changes in `app/config/shell.json`.
@@ -465,20 +505,21 @@ Read `AGENTS.md` first. This is a generated Mozaiks app workspace using the
 
 ## Core Principle
 
-Keep app logic inside the app bundle:
+Keep app logic inside the canonical app workspace:
 
 ```text
 app/
   app.json
   config/
   brand/
+  backend/  # optional integrations/adapters/security/routes support code
   modules/
-  workflows/
   ui/
+workflows/
 ```
 
-Use the installed `mozaiks` package for runtime, CLI, Studio host, factory
-bundle, and web shell behavior.
+Use the installed `mozaiks` package for runtime, CLI, the Console host
+(`studio` internally), factory bundle, and web shell behavior.
 
 ## Where To Put Work
 
@@ -486,9 +527,16 @@ bundle, and web shell behavior.
 |------|----------|
 | App identity/config | `app/app.json`, `app/config/` |
 | Shell, navigation, footer, mobile chrome | `app/config/shell.json` |
+| Secret management contract, names only | `app/config/secrets.yaml` |
 | Branding/theme assets | `app/brand/` |
+| App-owned external clients | `app/backend/integrations/<service>_client.py` |
+| App-owned provider adapters | `app/backend/adapters/<area>/<provider>.py` |
+| App-specific auth provider mechanics | `app/backend/adapters/auth/<provider>.py` |
+| Provider-neutral auth/secret helpers | `app/backend/security/` |
+| App-level routes, only when needed | `app/backend/routes/` |
+| Shared persistence helpers, only with `config/shared_persistence.json` | `app/shared_persistence/` |
 | Deterministic app capabilities | `app/modules/<module_id>/` |
-| AI workflow behavior | `app/workflows/<WorkflowName>/` |
+| AI workflow behavior | `workflows/<WorkflowName>/` |
 | Declarative pages | `app/ui/pages/` |
 | Custom React pages/components | `app/ui/pages/custom/`, `app/ui/components/`, `app/ui/index.js` |
 | Staged generated output | `generated/` |
@@ -500,6 +548,9 @@ bundle, and web shell behavior.
 - Do not hardcode workflow names inside module business logic.
 - Do not bypass module contracts with undeclared routes or side channels.
 - Do not put business logic directly in `backend/handler.py`.
+- Do not turn provider adapters into modules or put module business state in `app/backend/`.
+- Do not copy framework runtime auth into the app; generic auth belongs in the installed `mozaiks` package.
+- Do not put raw secret values in `app/config/secrets.yaml`; it is a names-only contract.
 - Do not use custom React when a declarative page schema is sufficient.
 - Do not mutate generated artifacts without review/promotion.
 
@@ -508,7 +559,7 @@ bundle, and web shell behavior.
 For non-trivial changes, run the narrowest practical checks:
 
 ```powershell
-.\\scripts\\run-studio.ps1 -DryRun
+.\\scripts\\run-console.ps1 -DryRun
 .\\scripts\\run-backend.ps1 -DryRun
 .\\scripts\\run-frontend.ps1 -DryRun
 ```
@@ -547,6 +598,8 @@ This workspace is a standalone Mozaiks app that consumes the installed
 - shell, navigation, footer, mobile chrome, shortcuts, and route-level chrome
   behavior belong in `app/config/shell.json`
 - AI startup behavior belongs in `app/config/ai.json`
+- secret requirements and vault/provider policy belong in `app/config/secrets.yaml`
+  when needed; store names and handles only, never raw secret values
 - app identity and auth flags belong in `app/app.json`
 
 Keep config declarative and app-agnostic where possible.
@@ -642,7 +695,7 @@ app/modules/{module_id}/
 def _generated_claude_rule_workflows() -> str:
     return """---
 paths:
-  - "app/workflows/**"
+  - "workflows/**"
 ---
 
 # Workflow Rules
@@ -652,7 +705,7 @@ Workflows are app-local AI behavior.
 Canonical workflow shape:
 
 ```text
-app/workflows/{WorkflowName}/
+workflows/{WorkflowName}/
   orchestrator.yaml
   agents.yaml
   handoffs.yaml
@@ -728,7 +781,7 @@ disable-model-invocation: true
 Complete this workflow task: $ARGUMENTS
 
 1. Read `AGENTS.md` and `.claude/rules/workflows.md`.
-2. Create or update `app/workflows/<WorkflowName>/`.
+2. Create or update `workflows/<WorkflowName>/`.
 3. Keep workflow YAML structured-output-first and deterministic.
 4. Put reasoning in agent prompts and structured outputs.
 5. Keep tools simple: persist, validate, emit events, or call declared APIs.
@@ -769,8 +822,8 @@ Help set up this app workspace.
 2. Run `python -m pip install -r requirements.txt`.
 3. Copy `.env.example` to `.env`.
 4. Set `OPENAI_API_KEY` and `MONGO_URI`.
-5. Run `.\\scripts\\run-studio.ps1 -DryRun`.
-6. Start with `.\\scripts\\run-studio.ps1 -ForceStop`.
+5. Run `.\\scripts\\run-console.ps1 -DryRun`.
+6. Start with `.\\scripts\\run-console.ps1 -ForceStop`.
 7. If needed, run backend/frontend separately with `run-backend.ps1` and `run-frontend.ps1`.
 
 Do not require a sibling checkout of the Mozaiks framework repository.
@@ -794,16 +847,16 @@ Copy-Item .env.example .env
 
 Set `OPENAI_API_KEY` and `MONGO_URI` in `.env` before running real workflows.
 
-## Run Studio
+## Run the Console
 
 ```powershell
-.\\scripts\\run-studio.ps1 -ForceStop
+.\\scripts\\run-console.ps1 -ForceStop
 ```
 
 Equivalent CLI command:
 
 ```powershell
-mozaiks studio --dir . --open
+mozaiks console --dir . --open
 ```
 
 ## Two-Terminal Mode
@@ -1126,10 +1179,10 @@ npm --prefix $webShellRoot run dev -- --host $BindHost --port $Port --strictPort
 """
 
 
-def _run_studio_ps1() -> str:
+def _run_console_ps1() -> str:
     return r"""<#
 .SYNOPSIS
-  Start the full Mozaiks Studio stack for this app workspace.
+  Start the full Mozaiks Console stack for this app workspace.
 #>
 
 param(
@@ -1173,7 +1226,7 @@ function Stop-Listeners {
 
     foreach ($procId in $procIds) {
       if (-not $procId -or $procId -eq 0) { continue }
-      Write-Host "[studio] ForceStop: stopping PID $procId on port $port" -ForegroundColor Yellow
+      Write-Host "[console] ForceStop: stopping PID $procId on port $port" -ForegroundColor Yellow
       Stop-Process -Id ([int]$procId) -Force -ErrorAction Stop
     }
   }
@@ -1190,7 +1243,7 @@ Remove-Item Env:MOZAIKS_CHAT_UI_PATH -ErrorAction SilentlyContinue
 
 $mozaiksCmd = Resolve-Mozaiks
 $argsList = @(
-  "studio",
+  "console",
   "--dir",
   $Workspace,
   "--backend-port",
@@ -1204,8 +1257,8 @@ if ($NoBrowser) {
   $argsList += "--open"
 }
 
-Write-Host "[studio] Workspace: $Workspace" -ForegroundColor DarkCyan
-Write-Host "[studio] Command: $mozaiksCmd $($argsList -join ' ')" -ForegroundColor Cyan
+Write-Host "[console] Workspace: $Workspace" -ForegroundColor DarkCyan
+Write-Host "[console] Command: $mozaiksCmd $($argsList -join ' ')" -ForegroundColor Cyan
 
 if ($DryRun) {
   return
@@ -1308,6 +1361,30 @@ def _copy_default_brand_bundle(brand_dir: Path, app_name: str) -> None:
     _write_json(brand_dir / "theme_config.json", _load_default_brand_theme_config(app_name))
 
 
+def _write_backend_support_stubs(backend_dir: Path) -> None:
+    _write_text(backend_dir / "__init__.py", '"""App-owned backend support code."""')
+    _write_text(backend_dir / "config.py", '"""App-owned backend support configuration."""')
+    for package in (
+        backend_dir / "integrations",
+        backend_dir / "adapters",
+        backend_dir / "security",
+        backend_dir / "routes",
+    ):
+        _write_text(package / "__init__.py", "")
+    for area in (
+        "auth",
+        "source_control",
+        "deployment",
+        "dns",
+        "registrar",
+        "cloud",
+        "storage",
+        "secrets",
+        "payments",
+    ):
+        _write_text(backend_dir / "adapters" / area / "__init__.py", "")
+
+
 def _create_starter_workflow(workflows_dir: Path) -> None:
     """Create an explicit starter workflow for users who ask for example content."""
     workflow_dir = workflows_dir / "HelloWorkflow"
@@ -1394,7 +1471,7 @@ artifact_agents: []
     for filename, content in workflow_files.items():
         _write_text(workflow_dir / filename, content)
 
-    print("Created app/workflows/HelloWorkflow/")
+    print("Created workflows/HelloWorkflow/")
 
 
 def _show_next_steps(target_dir: Path, preset: str, starter: bool) -> None:
@@ -1405,12 +1482,12 @@ def _show_next_steps(target_dir: Path, preset: str, starter: bool) -> None:
     print("  3. .\\.venv\\Scripts\\Activate.ps1")
     print("  4. python -m pip install -r requirements.txt")
     print("  5. Copy-Item .env.example .env, then set OPENAI_API_KEY and MONGO_URI")
-    print("  6. Open Studio: .\\scripts\\run-studio.ps1 -ForceStop")
+    print("  6. Open the Console: .\\scripts\\run-console.ps1 -ForceStop")
     if starter:
-        print("  7. Replace app/workflows/HelloWorkflow only after you confirm the real product behavior")
+        print("  7. Replace workflows/HelloWorkflow only after you confirm the real product behavior")
     else:
-        print("  7. Use Studio to generate the first real workflows/modules instead of hand-populating the scaffold")
-    print("  8. Optional CLI equivalent: mozaiks studio --dir . --open")
+        print("  7. Use the Console to generate the first real workflows/modules instead of hand-populating the scaffold")
+    print("  8. Optional CLI equivalent: mozaiks console --dir . --open")
     if features.get("admin"):
         print("  9. Confirm admin access in app/app.json admins")
 
@@ -1449,7 +1526,7 @@ def _workflows_stub_readme() -> str:
 
 Add AI workflows here once you have real product context.
 
-Each workflow lives under `app/workflows/<WorkflowName>/` and usually includes:
+Each workflow lives under `workflows/<WorkflowName>/` and usually includes:
 
 - `orchestrator.yaml`
 - `agents.yaml`

@@ -76,11 +76,11 @@ def test_setup_and_chat_ui_guidance_use_web_shell_and_factory_app() -> None:
     web_shell_readme = _read("web_shell/README.md")
 
     assert "web_shell" in setup_skill
-    assert "run-studio.ps1" in setup_skill
+    assert "run-console.ps1" in setup_skill
     assert "factory_app/app" in setup_skill
     assert "run-frontend.ps1" in add_feature_skill
     assert "factory_app/app" in add_feature_skill
-    assert "run-studio.ps1" in web_shell_readme
+    assert "run-console.ps1" in web_shell_readme
     assert "factory_app/app" in web_shell_readme
 
 
@@ -91,7 +91,7 @@ def test_module_guidance_uses_canonical_reactions_contract() -> None:
     for text in (add_module_skill, module_guide):
         assert "contracts/reactions.yaml" in text
         assert "Use `contracts/reactions.yaml` as the canonical event-reaction contract." in text
-        assert "deprecated `contracts/subscriptions.yaml`" in text
+        assert "runtime rejects `contracts/subscriptions.yaml`" in text.lower()
         assert "Do not introduce both forms in the same change." not in text
 
 

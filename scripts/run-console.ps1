@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Start Mozaiks Studio — backend + frontend in one command.
+    Start the Mozaiks Console — backend + frontend in one command.
 
 .DESCRIPTION
     Opens a new terminal window for the backend (uvicorn / Studio host) and
@@ -23,13 +23,13 @@
     Skip the Docker Compose infra check (MongoDB) on backend startup.
 
 .EXAMPLE
-    .\scripts\run-studio.ps1
+    .\scripts\run-console.ps1
 
 .EXAMPLE
-    .\scripts\run-studio.ps1 -ForceStop
+    .\scripts\run-console.ps1 -ForceStop
 
 .EXAMPLE
-    .\scripts\run-studio.ps1 -BackendPort 8001 -FrontendPort 3001
+    .\scripts\run-console.ps1 -BackendPort 8001 -FrontendPort 3001
 #>
 
 param(
@@ -47,7 +47,7 @@ if (-not $shellExe) {
     $shellExe = (Get-Command powershell -ErrorAction SilentlyContinue)?.Source
 }
 if (-not $shellExe) {
-    Write-Host "[studio] No PowerShell executable found on PATH." -ForegroundColor Red
+    Write-Host "[console] No PowerShell executable found on PATH." -ForegroundColor Red
     exit 1
 }
 
@@ -56,15 +56,15 @@ $backendCmd = "& '$ScriptDir\run-backend.ps1' -Port $BackendPort"
 if ($ForceStop) { $backendCmd += " -ForceStop" }
 if ($SkipInfra) { $backendCmd += " -SkipInfra" }
 
-Write-Host "[studio] Opening backend terminal (port $BackendPort)..." -ForegroundColor Cyan
+Write-Host "[console] Opening backend terminal (port $BackendPort)..." -ForegroundColor Cyan
 Start-Process -FilePath $shellExe -ArgumentList "-NoExit", "-Command", $backendCmd
 
 # Brief pause so the backend window title appears before frontend output starts
 Start-Sleep -Milliseconds 500
 
-Write-Host "[studio] Starting frontend (port $FrontendPort)..." -ForegroundColor Cyan
-Write-Host "[studio] Console: http://localhost:$FrontendPort/apps" -ForegroundColor Yellow
-Write-Host "[studio] Press Ctrl+C here to stop the frontend." -ForegroundColor DarkGray
+Write-Host "[console] Starting frontend (port $FrontendPort)..." -ForegroundColor Cyan
+Write-Host "[console] Console: http://localhost:$FrontendPort/apps" -ForegroundColor Yellow
+Write-Host "[console] Press Ctrl+C here to stop the frontend." -ForegroundColor DarkGray
 Write-Host ""
 
 $frontendParams = @{ Port = $FrontendPort }

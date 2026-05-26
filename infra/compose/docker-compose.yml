@@ -4,8 +4,8 @@
 #
 #     python -m mozaiksai.cli generate
 #
-# This regenerates:  realm-export.json (from app.json)
-#                    Keycloak login theme CSS (from brand.json)
+# This regenerates:  factory_app/app/brand/realm-export.json (from app.json)
+#                    factory_app/app/brand/login-theme assets (from brand.json)
 # ═══════════════════════════════════════════════════════════════════════════
 
 services:
@@ -47,8 +47,8 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ../../platform/brand/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
-      - ../../platform/brand/login-theme:/opt/keycloak/themes/mozaiks/login:ro
+      - ../../factory_app/app/brand/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+      - ../../factory_app/app/brand/login-theme:/opt/keycloak/themes/mozaiks/login:ro
     depends_on:
       keycloak-db:
         condition: service_healthy

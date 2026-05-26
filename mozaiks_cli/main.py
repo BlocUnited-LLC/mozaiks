@@ -2,21 +2,21 @@
 """
 Mozaiks CLI - Developer interface for the Mozaiks platform.
 
-The CLI is a parallel interface to Studio, not Studio's terminal representation.
-Both CLI and Studio sit on top of the same shared system capabilities (runtime,
-platform, generation). CLI owns filesystem and process concerns; Studio owns the
-management interface.
+The CLI is a parallel interface to the Console, not the Console's terminal
+representation. Both CLI and the internal Console host (`studio`) sit on top of
+the same shared system capabilities (runtime, platform, generation). CLI owns
+filesystem and process concerns; the Console owns the management interface.
 
 CLI commands are developer conveniences and should not expand into a parallel
 project-management surface. The canonical build lifecycle — artifact review,
-diff, run history, promotion, build state — belongs to Studio.
+diff, run history, promotion, build state — belongs to the Console.
 
 Commands:
-    mozaiks quickstart      Minimal first-run path: bootstrap + open Studio
+    mozaiks quickstart      Minimal first-run path: bootstrap + open Console
     mozaiks init <preset>     Create a new app bundle scaffold
     mozaiks serve [path]      Start the Mozaiks runtime for an app workspace
     mozaiks onboard           Guide setup for an existing scaffold
-    mozaiks studio            Print workspace status (terminal diagnostic)
+    mozaiks console         Print workspace status or open the Console
     mozaiks add <feature>     Add feature to existing project
     mozaiks gen <mode>        Convenience shortcut: generate from a prompt
     mozaiks migrations status Read-only generated-app migration health
@@ -29,6 +29,7 @@ import sys
 
 from mozaiks_cli.commands import (
     add_command,
+    console_command,
     gen_command,
     info_command,
     init_command,
@@ -36,7 +37,6 @@ from mozaiks_cli.commands import (
     onboard_command,
     quickstart_command,
     serve_command,
-    studio_command,
     sync_agent_guidance_command,
 )
 from mozaiksai.version import __version__
@@ -46,7 +46,7 @@ def create_parser():
     """Create the argument parser with subcommands."""
     parser = argparse.ArgumentParser(
         prog="mozaiks",
-        description="Mozaiks CLI - Dev/CLI tooling for the runtime, platform, Studio, and product host layers",
+        description="Mozaiks CLI - developer tooling for local workspaces, host processes, and diagnostics",
         epilog="Run 'mozaiks <command> --help' for more info on a command.",
     )
 
@@ -61,10 +61,9 @@ def create_parser():
     # mozaiks quickstart
     quickstart_parser = subparsers.add_parser(
         "quickstart",
-        aliases=["start"],
         help="Minimal first-run path for builders",
         description=(
-            "Bootstrap a workspace with minimal defaults and launch Studio. "
+            "Bootstrap a workspace with minimal defaults and launch the Console. "
             "This is the recommended path for people building apps through the shared "
             "factory_app workflows. Use 'onboard --full' or the lower-level commands "
             "only when you need detailed workspace configuration or framework control."
@@ -91,12 +90,12 @@ def create_parser():
         "--journey",
         choices=["greenfield_app", "brownfield_app"],
         default=None,
-        help="Builder track to store as the initial Studio context",
+        help="Builder track to store as the initial Console context",
     )
     quickstart_parser.add_argument(
         "--goal",
         default=None,
-        help="Optional first goal to seed into Studio context",
+        help="Optional first goal to seed into Console context",
     )
     quickstart_parser.add_argument(
         "--provider",
@@ -113,25 +112,30 @@ def create_parser():
         "--backend-port",
         type=int,
         default=8000,
-        help="Backend port to use when launching Studio (default: 8000)",
+        help="Backend port to use when launching the Console (default: 8000)",
     )
     quickstart_parser.add_argument(
         "--frontend-port",
         type=int,
         default=3000,
-        help="Frontend port to use when launching Studio (default: 3000)",
+        help="Frontend port to use when launching the Console (default: 3000)",
     )
     quickstart_parser.add_argument(
         "--no-browser",
         action="store_true",
-        help="Launch Studio services without opening the browser",
+        help="Launch Console services without opening the browser",
     )
 
     # mozaiks init
     init_parser = subparsers.add_parser(
         "init",
         help="Initialize new Mozaiks project",
-        description="Create a new Mozaiks app-bundle scaffold that can be served through the platform, Studio, or product hosts.",
+        description=(
+            "Create a new Mozaiks app-bundle scaffold that can be served through "
+            "the platform host, the internal Console host (`--host studio`), or "
+            "product hosts. This creates the local workspace shell only; app "
+            "creation still happens in the Console."
+        ),
     )
     init_parser.add_argument(
         "preset",
@@ -163,9 +167,10 @@ def create_parser():
         help="Start the Mozaiks runtime for an app workspace",
         description=(
             "Resolve the app bundle at the given workspace path and start the selected "
-            "host layer. The platform host serves the app without the Studio management "
-            "UI. Use --host studio to include Studio (requires factory_app in the Python "
-            "path, available when running from the Mozaiks repo checkout)."
+            "host layer. The platform host serves the app without the Console management "
+            "UI. Use --host studio for the internal host that powers the Console "
+            "(requires factory_app in the Python path, available when running from the "
+            "Mozaiks repo checkout)."
         ),
     )
     serve_parser.add_argument(
@@ -178,7 +183,7 @@ def create_parser():
         "--host",
         choices=["runtime", "platform", "studio"],
         default="platform",
-        help="Host layer to start (default: platform)",
+        help="Host layer to start (default: platform). Use `studio` for the internal Console host.",
     )
     serve_parser.add_argument(
         "--port",
@@ -200,7 +205,7 @@ def create_parser():
     # mozaiks onboard
     onboard_parser = subparsers.add_parser(
         "onboard",
-        help="Guide first-run setup and open Studio",
+        help="Guide first-run setup and open the Console",
         description="Configure Mozaiks, create a scaffold when missing, and update the canonical app-bundle config surfaces.",
     )
     onboard_parser.add_argument(
@@ -280,68 +285,68 @@ def create_parser():
         help="Collect detailed product, branding, and admin configuration instead of the minimal Console-first setup",
     )
     onboard_parser.add_argument(
-        "--open-studio",
+        "--open-console",
         action="store_true",
-        help="Launch Studio after onboarding completes",
+        help="Launch the Console after onboarding completes",
     )
     onboard_parser.add_argument(
         "--backend-port",
         type=int,
         default=8000,
-        help="Backend port to use when launching Studio (default: 8000)",
+        help="Backend port to use when launching the Console (default: 8000)",
     )
     onboard_parser.add_argument(
         "--frontend-port",
         type=int,
         default=3000,
-        help="Frontend port to use when launching Studio (default: 3000)",
+        help="Frontend port to use when launching the Console (default: 3000)",
     )
     onboard_parser.add_argument(
         "--no-browser",
         action="store_true",
-        help="Launch Studio services without opening the browser",
+        help="Launch Console services without opening the browser",
     )
 
-    # mozaiks studio
-    studio_parser = subparsers.add_parser(
-        "studio",
-        help="Inspect or launch Studio",
-        description="Read the active workspace and print an app overview summary, or launch the full Studio build UI when used with --open.",
+    # mozaiks console
+    console_parser = subparsers.add_parser(
+        "console",
+        help="Inspect or launch the Console",
+        description="Read the active workspace and print an app overview summary, or launch the full Console UI when used with --open.",
     )
-    studio_parser.add_argument(
+    console_parser.add_argument(
         "--dir",
         dest="directory",
         default=".",
         help="Workspace root containing the active app root at app/ (default: current directory)",
     )
-    studio_parser.add_argument(
+    console_parser.add_argument(
         "--json",
         dest="json_output",
         action="store_true",
         help="Emit the app overview summary as JSON",
     )
-    studio_parser.add_argument(
+    console_parser.add_argument(
         "--open",
-        dest="open_studio",
+        dest="open_console",
         action="store_true",
-        help="Launch the backend + frontend Studio stack for this workspace",
+        help="Launch the backend + frontend Console stack for this workspace",
     )
-    studio_parser.add_argument(
+    console_parser.add_argument(
         "--backend-port",
         type=int,
         default=8000,
-        help="Backend port to use when launching Studio (default: 8000)",
+        help="Backend port to use when launching the Console (default: 8000)",
     )
-    studio_parser.add_argument(
+    console_parser.add_argument(
         "--frontend-port",
         type=int,
         default=3000,
-        help="Frontend port to use when launching Studio (default: 3000)",
+        help="Frontend port to use when launching the Console (default: 3000)",
     )
-    studio_parser.add_argument(
+    console_parser.add_argument(
         "--no-browser",
         action="store_true",
-        help="Launch Studio services without opening the browser",
+        help="Launch Console services without opening the browser",
     )
 
     # mozaiks add
@@ -436,7 +441,6 @@ def create_parser():
     # mozaiks sync-agent-guidance
     sync_parser = subparsers.add_parser(
         "sync-agent-guidance",
-        aliases=["sync-guidance"],
         help="Safely sync app-local coding-agent guidance",
         description=(
             "Check or apply the generated AGENTS.md, CLAUDE.md, and .claude guidance "
@@ -498,14 +502,14 @@ def main():
     try:
         if args.command == "init":
             init_command.run(args)
-        elif args.command in {"quickstart", "start"}:
+        elif args.command == "quickstart":
             quickstart_command.run(args)
         elif args.command == "serve":
             serve_command.run(args)
         elif args.command == "onboard":
             onboard_command.run(args)
-        elif args.command == "studio":
-            studio_command.run(args)
+        elif args.command == "console":
+            console_command.run(args)
         elif args.command == "add":
             add_command.run(args)
         elif args.command == "gen":
@@ -520,7 +524,7 @@ def main():
             result = migrations_command.run(args)
             if result:
                 sys.exit(result)
-        elif args.command in {"sync-agent-guidance", "sync-guidance"}:
+        elif args.command == "sync-agent-guidance":
             result = sync_agent_guidance_command.run(args)
             if result:
                 sys.exit(result)

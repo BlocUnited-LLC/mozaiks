@@ -82,7 +82,7 @@ def _show_current_config():
         return
 
     try:
-        with open(app_json_path, "r", encoding="utf-8") as f:
+        with open(app_json_path, encoding="utf-8") as f:
             app_config = json.load(f)
     except Exception as e:
         print(f"Error reading {app_json_path}: {e}")
@@ -99,17 +99,17 @@ def _show_current_config():
     features.update(feature_overrides)
 
     # Display
-    print(f"Current Configuration:\n")
+    print("Current Configuration:\n")
     print(f"  App Name:      {app_name}")
     print(f"  Preset:        {preset}")
     print(f"  Auth Required: {auth_required}")
-    print(f"\nEnabled Features:")
+    print("\nEnabled Features:")
     for feature, enabled in sorted(features.items()):
         status = "✓" if enabled else "✗"
         print(f"    {status} {feature}")
 
     # Show upgrade path if not full
     if preset != "full":
-        print(f"\nTo enable more features, run:")
-        print(f"  mozaiks add <feature>")
-        print(f"  mozaiks add --preset <higher-tier>")
+        print("\nTo enable more features, run:")
+        print("  mozaiks add <feature>")
+        print("  mozaiks add --preset <higher-tier>")

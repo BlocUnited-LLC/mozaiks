@@ -85,7 +85,7 @@ def test_contributing_quickstart_avoids_private_or_stale_public_framing() -> Non
     assert "backend/models.py" in quickstart
     assert "Do not reintroduce `backend/models.py` as canonical" in quickstart
     assert "contracts/subscriptions.yaml" in quickstart
-    assert "Do not reintroduce `contracts/subscriptions.yaml` as the canonical" in quickstart
+    assert "Do not author `contracts/subscriptions.yaml`; use `contracts/reactions.yaml`." in quickstart
     assert "app/capability_packs" in quickstart
     assert "transport.py" in quickstart
     assert "direct hosted internals" in quickstart

@@ -7,20 +7,23 @@ import sys
 import time
 import webbrowser
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 from urllib.error import URLError
 from urllib.request import urlopen
 
+from mozaiks_cli.workspace import resolve_active_app_root
 from mozaiksai.resources import (
     resolve_chat_ui_root,
+    resolve_factory_app_root,
     resolve_web_shell_root,
 )
 
 
-def _workspace_env(workspace_root: Path, *, host: str) -> Dict[str, str]:
+def _workspace_env(workspace_root: Path, *, host: str) -> dict[str, str]:
     env = os.environ.copy()
-    env["MOZAIKS_APP_WORKSPACE_PATH"] = str(workspace_root)
-    env["PLATFORM_PATH"] = str(workspace_root)
+    active_app_root = resolve_active_app_root(workspace_root)
+    env["MOZAIKS_APP_WORKSPACE_PATH"] = str(active_app_root)
+    env["PLATFORM_PATH"] = str(active_app_root)
     env["MOZAIKS_HOST"] = host
     env.setdefault("MOZAIKS_GENERATED_ARTIFACTS_PATH", str((workspace_root / "generated").resolve()))
 
@@ -38,21 +41,21 @@ def _workspace_env(workspace_root: Path, *, host: str) -> Dict[str, str]:
 
     try:
         from dotenv import load_dotenv
+    except ImportError as exc:
+        raise RuntimeError("python-dotenv is required to launch the Console from the CLI.") from exc
 
-        env_file = workspace_root / ".env"
-        env_example = workspace_root / ".env.example"
-        if not env_file.exists() and env_example.exists():
-            shutil.copy(env_example, env_file)
-        if env_file.exists():
-            load_dotenv(dotenv_path=env_file, override=False)
-            for line in env_file.read_text(encoding="utf-8").splitlines():
-                text = line.strip()
-                if not text or text.startswith("#") or "=" not in text:
-                    continue
-                key, value = text.split("=", 1)
-                env.setdefault(key.strip(), value.strip().strip("\"'"))
-    except Exception:
-        pass
+    env_file = workspace_root / ".env"
+    env_example = workspace_root / ".env.example"
+    if not env_file.exists() and env_example.exists():
+        shutil.copy(env_example, env_file)
+    if env_file.exists():
+        load_dotenv(dotenv_path=env_file, override=False)
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            text = line.strip()
+            if not text or text.startswith("#") or "=" not in text:
+                continue
+            key, value = text.split("=", 1)
+            env.setdefault(key.strip(), value.strip().strip("\"'"))
 
     return env
 
@@ -80,9 +83,9 @@ def _spawn_process(
     command: list[str],
     *,
     cwd: Path,
-    env: Dict[str, str],
+    env: dict[str, str],
 ) -> subprocess.Popen[Any]:
-    kwargs: Dict[str, Any] = {
+    kwargs: dict[str, Any] = {
         "cwd": str(cwd),
         "env": env,
     }
@@ -104,7 +107,7 @@ def _resolve_backend_app_module(preferred_host: str) -> str:
     return "mozaiksai.hosts.studio:app"
 
 
-def launch_studio(
+def launch_console(
     *,
     workspace_root: Path,
     backend_port: int = 8000,
@@ -112,7 +115,7 @@ def launch_studio(
     bind_host: str = "0.0.0.0",
     open_browser: bool = True,
     preferred_host: str = "auto",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     web_shell_root = resolve_web_shell_root()
     host_name = "studio" if preferred_host == "auto" else preferred_host
     app_module = _resolve_backend_app_module(host_name)
@@ -120,7 +123,7 @@ def launch_studio(
 
     backend_url = f"http://localhost:{backend_port}/api/health"
     frontend_url = f"http://localhost:{frontend_port}/"
-    studio_url = f"http://localhost:{frontend_port}/apps"
+    console_url = f"http://localhost:{frontend_port}/apps"
 
     backend_process = None
     if not _http_ready(backend_url):
@@ -137,7 +140,7 @@ def launch_studio(
         backend_process = _spawn_process(backend_command, cwd=workspace_root, env=env)
         if not _wait_for_url(backend_url, timeout_seconds=40):
             if backend_process.poll() is not None:
-                raise RuntimeError("Backend failed to start. Check the backend console for details.")
+                raise RuntimeError("Backend failed to start. Check the backend terminal for details.")
             raise RuntimeError("Backend did not become healthy in time.")
 
     frontend_process = None
@@ -145,7 +148,7 @@ def launch_studio(
     if frontend_available and not _http_ready(frontend_url):
         npm_cmd = shutil.which("npm")
         if not npm_cmd:
-            raise RuntimeError("npm is required to launch the Studio frontend.")
+            raise RuntimeError("npm is required to launch the Console frontend.")
 
         assert web_shell_root is not None
         node_modules_dir = web_shell_root / "node_modules"
@@ -173,16 +176,16 @@ def launch_studio(
         frontend_process = _spawn_process(frontend_command, cwd=web_shell_root, env=env)
         if not _wait_for_url(frontend_url, timeout_seconds=50):
             if frontend_process.poll() is not None:
-                raise RuntimeError("Frontend failed to start. Check the frontend console for details.")
+                raise RuntimeError("Frontend failed to start. Check the frontend terminal for details.")
             raise RuntimeError("Frontend did not become ready in time.")
 
     if open_browser and frontend_available:
-        webbrowser.open(studio_url)
+        webbrowser.open(console_url)
 
     return {
         "backend_url": f"http://localhost:{backend_port}",
         "frontend_url": f"http://localhost:{frontend_port}" if frontend_available else None,
-        "studio_url": studio_url if frontend_available else None,
+        "console_url": console_url if frontend_available else None,
         "backend_started": backend_process is not None,
         "frontend_started": frontend_process is not None,
         "backend_pid": backend_process.pid if backend_process is not None else None,

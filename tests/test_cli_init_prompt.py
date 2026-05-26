@@ -45,17 +45,21 @@ def test_init_command_prompts_for_name_when_missing(monkeypatch, tmp_path) -> No
     assert (target_dir / "CLAUDE.md").exists()
     assert (target_dir / ".claude" / "rules" / "modules.md").exists()
     assert (target_dir / ".claude" / "skills" / "add-module" / "SKILL.md").exists()
-    assert (target_dir / "scripts" / "run-studio.ps1").exists()
+    assert (target_dir / "scripts" / "run-console.ps1").exists()
     assert (target_dir / "scripts" / "run-backend.ps1").exists()
     assert (target_dir / "scripts" / "run-frontend.ps1").exists()
     assert (target_dir / "app" / "modules" / "README.md").exists()
-    assert (target_dir / "app" / "workflows" / "README.md").exists()
+    assert (target_dir / "workflows" / "README.md").exists()
+    assert (target_dir / "app" / "backend" / "config.py").exists()
+    assert (target_dir / "app" / "backend" / "security" / "__init__.py").exists()
+    assert (target_dir / "app" / "backend" / "adapters" / "secrets" / "__init__.py").exists()
+    assert (target_dir / "app" / "backend" / "routes" / "__init__.py").exists()
     modules_readme = (target_dir / "app" / "modules" / "README.md").read_text(encoding="utf-8")
     assert "backend/handler.py" in modules_readme
     assert "events.yaml" in modules_readme
     assert "contracts/reactions.yaml" in modules_readme
     assert "subscriptions.yaml" not in modules_readme
-    assert not (target_dir / "app" / "workflows" / "HelloWorkflow").exists()
+    assert not (target_dir / "workflows" / "HelloWorkflow").exists()
 
 
 def test_add_command_module_next_steps_use_reactions_contract(capsys) -> None:
@@ -86,7 +90,7 @@ def test_init_command_starter_scaffold_seeds_entry_workflow(tmp_path) -> None:
     ai_json = _load_json(target_dir / "app" / "config" / "ai.json")
     assert ai_json["chat"]["chat_startup_mode"] == "workflow"
     assert ai_json["workflows"]["entry_point"] == "HelloWorkflow"
-    assert (target_dir / "app" / "workflows" / "HelloWorkflow" / "orchestrator.yaml").exists()
+    assert (target_dir / "workflows" / "HelloWorkflow" / "orchestrator.yaml").exists()
 
 
 def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
@@ -110,20 +114,37 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     assert ".venv/" in gitignore
     assert ".env" in gitignore
     assert "generated/" in gitignore
+    assert "!app/backend/**" in gitignore
+    assert "app/backend/**/*.py[cod]" in gitignore
 
     readme = (target_dir / "README.md").read_text(encoding="utf-8")
     assert "python -m pip install -r requirements.txt" in readme
-    assert "mozaiks studio --dir . --open" in readme
+    assert "mozaiks console --dir . --open" in readme
     assert "installed `mozaiks` package" in readme
     assert "Coding Agent Guidance" in readme
 
     agents_md = (target_dir / "AGENTS.md").read_text(encoding="utf-8")
     assert "Do not assume a sibling checkout" in agents_md
     assert "app/modules/" in agents_md
+    assert "app/backend/" in agents_md
+    assert "app/backend/adapters/" in agents_md
+    assert "app/backend/security/" in agents_md
+    assert "app/config/secrets.yaml" in agents_md
+    assert "Never store raw API keys" in agents_md
+    assert "app/config/shared_persistence.json" in agents_md
+    assert "workflows/" in agents_md
 
     claude_md = (target_dir / "CLAUDE.md").read_text(encoding="utf-8")
     assert "not the Mozaiks framework source repository" in claude_md
     assert ".claude/rules/" in claude_md
+    assert "app/backend/integrations/<service>_client.py" in claude_md
+    assert "app/backend/adapters/<area>/<provider>.py" in claude_md
+    assert "app/backend/adapters/auth/<provider>.py" in claude_md
+    assert "app/backend/security/" in claude_md
+    assert "Secret management contract, names only" in claude_md
+    assert "app/config/secrets.yaml" in claude_md
+    assert "app/shared_persistence/" in claude_md
+    assert "workflows/<WorkflowName>/" in claude_md
 
     expected_rules = {
         "app-bundle.md",
@@ -150,7 +171,7 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
         path.name for path in (target_dir / ".claude" / "skills").iterdir() if path.is_dir()
     }
     setup_skill = (target_dir / ".claude" / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
-    assert "run-studio.ps1" in setup_skill
+    assert "run-console.ps1" in setup_skill
 
     backend_script = (target_dir / "scripts" / "run-backend.ps1").read_text(encoding="utf-8")
     assert "mozaiksai.hosts.platform:app" in backend_script
@@ -160,6 +181,6 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     assert "resolve_web_shell_root" in frontend_script
     assert "npm --prefix" in frontend_script
 
-    studio_script = (target_dir / "scripts" / "run-studio.ps1").read_text(encoding="utf-8")
-    assert '"studio"' in studio_script
-    assert '"--dir"' in studio_script
+    console_script = (target_dir / "scripts" / "run-console.ps1").read_text(encoding="utf-8")
+    assert '"console"' in console_script
+    assert '"--dir"' in console_script

@@ -40,4 +40,10 @@ def test_production_readiness_gate_sets_test_env_defaults() -> None:
     assert env["ENV"] == "test"
     assert env["AUTH_ENABLED"] == "false"
     assert env["RATE_LIMIT_ENABLED"] == "false"
-    assert env["OPENAI_API_KEY"] == "sk-test-placeholder"
+    assert env["OPENAI_API_KEY"] == "sk-test-key"
+
+
+def test_source_hygiene_scan_passes_current_repo() -> None:
+    gate = _load_gate_module()
+
+    assert gate.run_source_hygiene_scan() == []

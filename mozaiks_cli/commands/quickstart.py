@@ -32,7 +32,7 @@ def run(args) -> None:
             host_owned_summary=None,
             non_interactive=True,
             full_setup=False,
-            open_studio=True,
+            open_console=True,
             backend_port=int(getattr(args, "backend_port", 8000)),
             frontend_port=int(getattr(args, "frontend_port", 3000)),
             no_browser=bool(getattr(args, "no_browser", False)),
@@ -43,7 +43,7 @@ def run(args) -> None:
 def _print_intro(workspace_root: Path) -> None:
     print(f"Quickstart workspace: {workspace_root}")
     print("Mode: builder")
-    print("This path bootstraps the workspace with minimal defaults and opens Studio.\n")
+    print("This path bootstraps the workspace with minimal defaults and opens the Console.\n")
 
 
 def _print_environment_warnings(args) -> None:
@@ -52,7 +52,7 @@ def _print_environment_warnings(args) -> None:
 
     if not os.environ.get("MONGO_URI"):
         warnings.append(
-            "MONGO_URI is not set. Studio can still launch, but builds will fail until Mongo is configured."
+            "MONGO_URI is not set. The Console can still launch, but builds will fail until Mongo is configured."
         )
 
     if provider == "openai" and not os.environ.get("OPENAI_API_KEY"):

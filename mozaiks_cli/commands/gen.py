@@ -5,9 +5,9 @@ This is a terminal shortcut for bootstrapping workflows or apps from a prompt.
 It is a convenience, not the canonical build lifecycle.
 
 The canonical build lifecycle — artifact review, diff, run history, promotion,
-and build state management — belongs to Studio. This command should not expand
+and build state management — belongs to the Console. This command should not expand
 to duplicate those surfaces. If you need to review output, compare versions,
-track history, or promote artifacts, use Studio.
+track history, or promote artifacts, use the Console.
 
 Usage:
     mozaiks gen workflow --prompt "description of what you want"
@@ -22,9 +22,10 @@ import sys
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any
 
 import yaml
+
 from mozaiks_cli.workspace import resolve_active_app_root
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     APP_VALIDATION_STRATEGIES,
@@ -36,8 +37,8 @@ from mozaiksai.resources import resolve_factory_workflows_root
 # Rich for nice CLI output
 try:
     from rich.console import Console
-    from rich.progress import Progress, SpinnerColumn, TextColumn
     from rich.panel import Panel
+    from rich.progress import Progress, SpinnerColumn, TextColumn
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
@@ -73,7 +74,7 @@ def _check_api_key() -> bool:
     return False
 
 
-def _find_generator_source() -> Optional[Path]:
+def _find_generator_source() -> Path | None:
     """Locate the AgentGenerator workflow source directory."""
     candidates = [
         resolve_factory_workflows_root(),
@@ -251,7 +252,7 @@ def _adapt_structured_outputs(data: dict) -> dict:
 
 
 def _adapt_python_tool(content: str) -> str:
-    """Fix Python tool files for AG2 compatibility.
+    """Normalize Python tool files for AG2 registration.
 
     AG2 requires all function parameters to have type annotations.
     This patches common patterns like **runtime to **runtime: Any.
@@ -280,9 +281,6 @@ def _adapt_python_tool(content: str) -> str:
         r'(\*\*\w+)(\s*\n\s*\)\s*(?:->|:))',
         re.MULTILINE
     )
-
-    # Single-line pattern: **varname) or **varname,
-    pattern2 = re.compile(r'(\*\*\w+)(\s*[,)])')
 
     def add_type_if_missing(match, pattern_num):
         nonlocal needs_any_import
@@ -377,7 +375,7 @@ def _adapt_python_tool(content: str) -> str:
 def _stage_workflow(source_dir: Path, staging_root: Path, workflow_name: str) -> Path:
     """
     Copy a single workflow into *staging_root*, adapting YAML files
-    to match the runtime schema and fixing Python tools for AG2 compatibility.
+    to match the runtime schema and updating Python tools for AG2 registration.
     """
     src = source_dir / workflow_name
     dst = staging_root / workflow_name
@@ -401,7 +399,7 @@ def _stage_workflow(source_dir: Path, staging_root: Path, workflow_name: str) ->
             else:
                 shutil.copytree(item, dst / item.name, dirs_exist_ok=True)
         elif item.suffix == ".yaml":
-            with open(item, "r", encoding="utf-8") as f:
+            with open(item, encoding="utf-8") as f:
                 raw = yaml.safe_load(f) or {}
 
             if item.name == "orchestrator.yaml":
@@ -431,7 +429,7 @@ def _setup_environment(repo_root: Path, staging_workflows: Path):
 # ── Runner ─────────────────────────────────────────────────────────
 
 def _resolve_workspace_app_id(repo_root: Path) -> str:
-    """Read appId from the active workspace app.json so CLI artifacts share the Studio namespace."""
+    """Read appId from the active workspace app.json so CLI artifacts share the Console namespace."""
     explicit_root = os.environ.get("PLATFORM_PATH")
     workspace_root = Path(explicit_root).resolve() if explicit_root else Path.cwd().resolve()
     app_root = resolve_active_app_root(workspace_root)
@@ -455,7 +453,7 @@ async def _run_generator(
     output_dir: Path,
     validation_strategy: str,
     workflow_name: str = "AgentGenerator",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Run the generator workflow with the user's prompt.
 
@@ -610,7 +608,7 @@ def run(args):
             _print_info("  # Review and customise the generated files")
             if mode == "app":
                 _print_info("  Promote the generated app bundle into an active app root before running it")
-                _print_info("  Run the Studio management host: mozaiks serve . --host studio")
+                _print_info("  Open the Console: mozaiks console --dir . --open")
             return 0
         else:
             _print_error(f"Generation failed: {result.get('error', 'Unknown error')}")
@@ -674,9 +672,9 @@ def run_interactive(args):
 
     default_strategy, default_reason = default_app_validation_strategy()
     _print("\nChoose app validation strategy:", style="bold")
-    _print(f"  1. e2b   - Hosted sandbox validation")
-    _print(f"  2. local - Run validation on this machine")
-    _print(f"  3. skip  - Skip build validation")
+    _print("  1. e2b   - Hosted sandbox validation")
+    _print("  2. local - Run validation on this machine")
+    _print("  3. skip  - Skip build validation")
     _print_info(f"Default: {default_strategy} ({default_reason})")
     strategy_input = input(f"Validation strategy [{default_strategy}]: ").strip().lower()
     if strategy_input:

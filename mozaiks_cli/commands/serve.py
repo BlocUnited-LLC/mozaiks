@@ -6,7 +6,6 @@ import os
 import sys
 from pathlib import Path
 
-
 _HOST_MODULES = {
     "runtime": "mozaiksai.hosts.runtime:app",
     "platform": "mozaiksai.hosts.platform:app",
@@ -32,15 +31,17 @@ def run(args) -> None:
         print(f"Error: unknown host '{host}'. Choices: {', '.join(_HOST_MODULES)}")
         sys.exit(1)
 
-    os.environ["MOZAIKS_APP_WORKSPACE_PATH"] = str(workspace)
+    os.environ["MOZAIKS_APP_WORKSPACE_PATH"] = str(app_root)
+    os.environ["PLATFORM_PATH"] = str(app_root)
     os.environ.setdefault("MOZAIKS_HOST", host)
 
     # Load .env from the workspace directory so the app bundle owns its config,
     # regardless of which directory the CLI is invoked from.
     # If .env doesn't exist but .env.example does, create it automatically.
     try:
-        from dotenv import load_dotenv
         import shutil
+
+        from dotenv import load_dotenv
         env_file = workspace / ".env"
         env_example = workspace / ".env.example"
         if not env_file.exists() and env_example.exists():
@@ -66,6 +67,8 @@ def run(args) -> None:
 
 
 def _resolve_app_root(workspace: Path) -> Path | None:
+    if (workspace / "factory_app" / "app" / "app.json").exists():
+        return workspace / "factory_app" / "app"
     if (workspace / "app" / "app.json").exists():
         return workspace / "app"
     if (workspace / "app.json").exists():
