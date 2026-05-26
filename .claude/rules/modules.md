@@ -30,9 +30,8 @@ Use `contracts/reactions.yaml` as the canonical module event-reaction manifest.
 - `contracts/notifications.yaml` declares notification rules derived from
   events and is not a substitute for `contracts/reactions.yaml`
 
-Do not author `contracts/subscriptions.yaml` in new module work. Runtime legacy
-support for `contracts/subscriptions.yaml` exists only as a temporary fallback
-when `contracts/reactions.yaml` is absent.
+Do not author `contracts/subscriptions.yaml` in module work. Runtime rejects it
+so `contracts/reactions.yaml` remains the single reaction-routing contract.
 
 ## Persistence Contract
 
@@ -73,6 +72,12 @@ shape helpers.
 Backend helper files are allowed only when they are declared before generation,
 module-local under `backend/`, justified by a specific purpose, and imported by a
 canonical layer or referenced by `runtime_extensions.yaml`.
+
+App-level support code is a separate lane. Use `app/backend/integrations/` for
+external or hosted API clients and `app/backend/adapters/` for provider-specific
+implementation boundaries that modules or workflows call. Do not create a module
+just to house a provider adapter, and do not put module business state or actions
+in app-level backend support code.
 
 Allowed generic helper examples:
 

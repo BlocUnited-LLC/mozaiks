@@ -32,7 +32,7 @@ If anything is missing, help them install it first.
 
 For this repo, the default local contributor experience is:
 
-- Studio backend on `http://localhost:8000`
+- Studio host backend on `http://localhost:8000`
 - `web_shell/` frontend on `http://localhost:3000`
 - `factory_app/app` as the first-party builder/reference app bundle when no
 	external app workspace is selected
@@ -65,10 +65,10 @@ npm --prefix web_shell install
 Preferred path in this repo:
 
 ```powershell
-.\scripts\run-studio.ps1
+.\scripts\run-console.ps1
 ```
 
-That starts the Studio backend and the `web_shell` frontend together.
+That starts the Studio host backend and the `web_shell` frontend together.
 
 ### 5. Verify
 
@@ -95,7 +95,7 @@ with `-AppWorkspacePath <path>`.
 - Port 27017 in use: Local MongoDB already running
 - "OPENAI_API_KEY not found": Check .env is in repo root, no spaces around `=`
 - Frontend loads the wrong app bundle: restart with `-AppWorkspacePath <path>` or set `PLATFORM_PATH`
-- Port 3000 or 8000 already in use: rerun `run-studio.ps1`, `run-backend.ps1`, or `run-frontend.ps1` with `-ForceStop`
+- Port 3000 or 8000 already in use: rerun `run-console.ps1`, `run-backend.ps1`, or `run-frontend.ps1` with `-ForceStop`
 
 ## What's Running
 

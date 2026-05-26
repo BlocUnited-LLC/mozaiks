@@ -211,17 +211,17 @@ Avoid unrelated refactors while fixing frontend or config behavior.
 ```
 
 ```jsx
-// BAD — hardcoded or legacy
+// BAD — hardcoded or removed token family
 <div className="bg-gray-800 text-gray-300">       // hardcoded color scale
 <div className="bg-slate-900 border-slate-700">   // hardcoded color scale
-<div className="text-[var(--color-primary)]">      // legacy --color-* token
+<div className="text-[var(--color-primary)]">      // removed --color-* token
 <div className="bg-amber-500/20 text-amber-300">  // hardcoded color scale
 ```
 
 ### Never import from artifactDesignSystem
 
 ```js
-// BAD — legacy system, being removed
+// BAD — removed design-system import
 import { components, colors, fonts } from '../../styles/artifactDesignSystem'
 ```
 

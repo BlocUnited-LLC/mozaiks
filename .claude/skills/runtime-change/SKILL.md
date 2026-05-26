@@ -67,7 +67,7 @@ Runtime change checklist:
 4. Check whether `factory_app/workflows/AppGenerator/tools/file_contracts.yaml` or generated-app fixtures assume the current behavior.
 5. Update loader or host code, docs, and tests together when a contract changes.
 6. Preserve multi-tenant safety, engine-agnostic behavior, observability, runtime events, and token accounting.
-7. Prefer replacement over compatibility shims unless backward compatibility is explicitly requested.
+7. Prefer replacement over retention shims unless the task explicitly asks to preserve an existing app surface.
 
 Common runtime areas:
 

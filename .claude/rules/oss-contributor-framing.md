@@ -21,5 +21,5 @@ shell guidance.
 - Hosted product workspaces are external consumers of that same contract. Mention
   them only as optional or external when relevant.
 - When documenting local UI/dev setup in this repo, prefer the current repo truth:
-  `web_shell/`, `scripts/run-studio.ps1`, `scripts/run-backend.ps1`, and
+  `web_shell/`, `scripts/run-console.ps1`, `scripts/run-backend.ps1`, and
   `scripts/run-frontend.ps1` when those surfaces are the actual implementation.

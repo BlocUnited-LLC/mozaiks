@@ -15,7 +15,12 @@ refinement behavior.
 - `AppGenerator` and `AgentGenerator` are individual workflows inside the build
   sequence, not the build system itself.
 - `ExistingAppDiscovery` is the brownfield/existing-app adoption workflow path,
-  not the default greenfield build flow.
+  not the default greenfield build flow. It produces onboarding artifacts
+  (`ExistingProductSpec`, `CapabilitySpec[]`, `AgentAugmentationPlan`,
+  `module_decomposition_plan`). These are legacy evidence outputs, not canonical
+  `AppContextVersion` artifact kinds. The target canonical substrate for both
+  greenfield and brownfield apps is `AppContextVersion`. See
+  `docs/architecture/foundations/app-context-and-brownfield-adoption.md`.
 - Keep these mechanisms distinct: `handoffs.yaml` for workflow-local agent
   routing, `workflow_sequences[]` for cross-workflow build/revision sequencing,
   `transitions[]` for routed entry and user choice flows, and MFJ for mid-flight

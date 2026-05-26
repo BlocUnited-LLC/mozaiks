@@ -32,7 +32,6 @@ Use one concise bullet under the right section:
 - `Added`
 - `Changed`
 - `Fixed`
-- `Deprecated`
 - `Removed`
 - `Security`
 

@@ -1,6 +1,6 @@
 ---
 name: add-capability
-description: Deprecated. Backend capabilities are now modules. Redirects to add-module.
+description: Backend capabilities are now modules. Redirects to add-module.
 argument-hint: "[capability name or description]"
 ---
 

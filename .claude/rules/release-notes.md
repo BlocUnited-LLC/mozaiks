@@ -50,7 +50,6 @@ Use these subsections when relevant:
 - `Added`
 - `Changed`
 - `Fixed`
-- `Deprecated`
 - `Removed`
 - `Security`
 

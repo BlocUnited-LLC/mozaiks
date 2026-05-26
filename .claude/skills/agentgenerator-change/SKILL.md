@@ -126,7 +126,7 @@ Final report requirements:
 - workflow authoring contract affected
 - universal prompts or hooks affected
 - tests run
-- compatibility risk
+- contract drift risk
 
 Return:
 
@@ -135,4 +135,4 @@ Return:
 3. workflow authoring contract impact
 4. universal prompts or hooks affected
 5. tests required or run
-6. compatibility risk
+6. contract drift risk

@@ -39,9 +39,8 @@ Only `module.yaml` and `backend/handler.py` are required. Add companion manifest
 under `contracts/` only when the module needs them.
 
 Use `contracts/reactions.yaml` as the canonical event-reaction contract.
-The runtime still accepts deprecated `contracts/subscriptions.yaml` only as a
-temporary fallback when `contracts/reactions.yaml` is absent, but new
-contributor-facing changes should author `contracts/reactions.yaml` only.
+The runtime rejects `contracts/subscriptions.yaml`; module changes must author
+`contracts/reactions.yaml`.
 
 Event/reaction contract summary:
 

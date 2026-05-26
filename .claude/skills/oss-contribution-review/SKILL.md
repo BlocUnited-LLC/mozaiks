@@ -1,6 +1,6 @@
 ---
 name: oss-contribution-review
-description: Review a proposed or completed OSS change for layer fit, build workflow impact, docs/tests coverage, and compatibility risk before or after editing.
+description: Review a proposed or completed OSS change for layer fit, build workflow impact, docs/tests coverage, and contract drift risk before or after editing.
 argument-hint: "[change summary or file path]"
 ---
 
@@ -15,7 +15,7 @@ classify:
 4. app workspace impact
 5. tests required
 6. docs, rules, or skills required
-7. compatibility or public-framing risk
+7. contract drift or public-framing risk
 
 Use these anchors when relevant:
 
@@ -36,4 +36,4 @@ Return:
 4. App workspace impact
 5. Tests required/run
 6. Docs required/updated
-7. Compatibility risk
+7. Contract drift risk

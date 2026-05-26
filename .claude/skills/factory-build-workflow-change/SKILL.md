@@ -146,4 +146,4 @@ Return:
 3. artifacts or contracts affected
 4. control-plane or refinement linkage impact
 5. tests required or run
-6. rollback or compatibility risk
+6. rollback or contract drift risk

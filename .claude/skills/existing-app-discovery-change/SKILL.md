@@ -12,7 +12,7 @@ Typical triggers:
 - `brownfield_app_adoption` in `factory_app/workflows/extended_orchestration/extension_registry.json`
 - existing app preload or discovery tools
 - adoption levels or adoption rationale
-- `embed`, `bridge`, `ecosystem`, or `native_migration` decisions
+- `embed`, `bridge`, `ecosystem`, or `gradual_modernization` decisions
 - module decomposition outputs for brownfield adoption
 - storage, connector, auth, or security detection
 - brownfield artifact saving or downstream discovery artifact consumption
@@ -31,7 +31,7 @@ Inspect first:
 - `factory_app/workflows/ExistingAppDiscovery/tools/save_existing_app_artifacts.py`
 - `tests/test_existing_app_discovery_contracts.py`
 - the narrowest matching brownfield routing tests before editing:
-  - `tests/test_existing_app_discovery_native_migration.py`
+  - `tests/test_existing_app_discovery_gradual_modernization.py`
   - `tests/test_session_router.py`
   - `tests/test_session_launcher.py`
   - `tests/test_pack_schema_models.py`
@@ -42,12 +42,20 @@ Core truth:
 - It is not the default greenfield build path.
 - It is not `AppGenerator`.
 - It should analyze an existing app and produce structured adoption, discovery, and decomposition artifacts.
-- It must not copy legacy code directly into generated apps without a conscious adoption strategy.
+- It must not copy existing-app code directly into generated apps without a conscious adoption strategy.
 - Separate docs and stated intent from code truth when evaluating an external app.
 - Code truth wins over docs, screenshots, or product summaries when they conflict.
-- `embed`, `bridge`, `ecosystem`, and `native_migration` are different adoption patterns with different output expectations.
+- `embed`, `bridge`, `ecosystem`, and `gradual_modernization` are current workflow-local adoption labels. They are discovery evidence, not canonical AppContext artifact kinds.
 - `brownfield_app_adoption` currently routes into `ExistingAppDiscovery`; it does not continue through the default greenfield build sequence unless the authored sequence contract changes.
 - Downstream factory workflow consumption should happen through saved artifacts and explicit contracts, not by pretending discovery is already `AppGenerator`.
+
+**AppContext target direction:**
+`ExistingAppDiscovery` currently emits workflow-local outputs including `ExistingProductSpec`,
+`CapabilitySpec[]`, `AgentAugmentationPlan`, and optionally `module_decomposition_plan`. These are
+legacy evidence outputs — they are not canonical `AppContextVersion` artifact kinds and must not
+become control-plane source of truth. The target canonical substrate for both greenfield and
+brownfield apps is `AppContextVersion`. See
+`docs/architecture/foundations/app-context-and-brownfield-adoption.md`.
 
 Boundary rules:
 
@@ -57,8 +65,8 @@ Boundary rules:
 - Code truth wins.
 - Do not copy provider-specific or proprietary implementation into OSS fixtures, examples, or tests.
 - Use neutral fixture apps in tests.
-- Do not copy legacy code directly into generated apps as an implicit migration strategy.
-- If an external app should be rewritten into canonical modules, output a `native_migration` plan, not an embed-only plan.
+- Do not copy existing-app code directly into generated apps as an implicit migration strategy.
+- When old in-flight outputs use `native_migration` adoption level, treat that as retired legacy discovery evidence feeding the `AdoptionPlan` / `AppContextVersion` contracts — not as a canonical artifact kind to preserve or extend.
 - Keep `workflow_sequence`, transition routing, and workflow-local `handoffs.yaml` distinct.
 - Do not assume later factory workflows are part of the brownfield path unless `extension_registry.json` and the saved artifact contracts explicitly say so.
 
@@ -72,7 +80,7 @@ Common change types:
    - keep detection provider-neutral and avoid prose-only inference
 3. Updating storage detection:
    - preserve the meaning of `storage_pattern` and `storage_migration_required`
-   - inspect `tests/test_existing_app_discovery_native_migration.py`
+   - inspect `tests/test_existing_app_discovery_gradual_modernization.py`
 4. Updating connector detection:
    - keep connector classification generic and OSS-safe
    - do not turn discovery fixtures into provider-specific implementation examples
@@ -80,11 +88,12 @@ Common change types:
    - distinguish current auth evidence from recommended migration hardening
    - keep detection grounded in repo, runtime, or OpenAPI evidence
 6. Updating adoption-level classification:
-   - keep `embed`, `bridge`, `ecosystem`, and `native_migration` separate
+   - keep `embed`, `bridge`, `ecosystem`, and `gradual_modernization` separate
    - do not collapse brownfield adoption into a default rebuild recommendation
-7. Updating `native_migration` outputs:
+7. Updating gradual modernization outputs:
    - inspect `structured_outputs.yaml`, `handoffs.yaml`, and the decomposition-related tests
-   - `module_decomposition_plan` belongs to `ecosystem` and `native_migration`, not `embed` or `bridge`
+   - `module_decomposition_plan` is workflow-local evidence for `ecosystem` and `gradual_modernization` adoption levels
+   - treat it as internal evidence feeding `AdoptionPlan` / `AppContextVersion` contracts, not as a canonical artifact kind to extend
 8. Updating artifact saving:
    - inspect `save_existing_app_artifacts.py` and the artifact contract tests
    - preserve canonical saved fields and artifact-based downstream handoff expectations
@@ -98,9 +107,9 @@ Common change types:
 Focused testing guidance:
 
 - ExistingAppDiscovery contract and artifact tests:
-  - `python -m pytest tests/test_existing_app_discovery_contracts.py tests/test_existing_app_discovery_native_migration.py -q`
+  - `python -m pytest tests/test_existing_app_discovery_contracts.py tests/test_existing_app_discovery_gradual_modernization.py -q`
 - preload scanner, storage, connector, and adoption-classification changes:
-  - `python -m pytest tests/test_existing_app_discovery_native_migration.py -q`
+  - `python -m pytest tests/test_existing_app_discovery_gradual_modernization.py -q`
 - brownfield sequence and route binding changes:
   - `python -m pytest tests/test_session_router.py tests/test_session_launcher.py tests/test_pack_schema_models.py -q`
 - docs or contributor-guidance changes for this skill:
@@ -128,4 +137,4 @@ Return:
 3. detectors or preload surfaces affected
 4. artifacts or downstream handoff impact
 5. tests required or run
-6. compatibility risk
+6. adoption risk

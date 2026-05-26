@@ -138,7 +138,7 @@ Final report requirements:
 - generated artifacts affected
 - runtime/platform contracts affected
 - tests run
-- compatibility risk
+- contract drift risk
 
 Return:
 
@@ -147,4 +147,4 @@ Return:
 3. generated artifacts or contracts affected
 4. runtime/platform contract impact
 5. tests required or run
-6. compatibility risk
+6. contract drift risk
