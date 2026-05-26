@@ -19,11 +19,7 @@ const OPTION_VIEW = {
     description:
       'Bring an existing product into Mozaiks for augmentation, workflows, and generated surfaces.',
     image: brownfieldImage,
-    cta: 'Coming Soon',
-    badge: 'Coming Soon',
-    disabled: true,
-    helperText:
-      'Existing-app onboarding is part of our roadmap but will be available soon.',
+    cta: 'Start Discovery',
   },
 };
 
@@ -40,7 +36,7 @@ export default function AppTypeSelector({ transition, onResolve, overlayTitleId,
     <TransitionChoicePanel
       eyebrow="Start Here"
       title="Choose Your App Journey"
-      subtitle="Start a fresh build now, or preview where existing-product onboarding is heading next."
+      subtitle="Start a fresh build or bring an existing app into Mozaiks for augmentation and generation."
       overlayTitleId={overlayTitleId}
       overlayDescriptionId={overlayDescriptionId}
       entered={motion.entered}
