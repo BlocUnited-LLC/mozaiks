@@ -52,7 +52,7 @@ Core truth:
 **AppContext target direction:**
 `ExistingAppDiscovery` currently emits workflow-local outputs including `ExistingProductSpec`,
 `CapabilitySpec[]`, `AgentAugmentationPlan`, and optionally `module_decomposition_plan`. These are
-legacy evidence outputs — they are not canonical `AppContextVersion` artifact kinds and must not
+retired evidence outputs — they are not canonical `AppContextVersion` artifact kinds and must not
 become control-plane source of truth. The target canonical substrate for both greenfield and
 brownfield apps is `AppContextVersion`. See
 `docs/architecture/foundations/app-context-and-brownfield-adoption.md`.
@@ -66,7 +66,7 @@ Boundary rules:
 - Do not copy provider-specific or proprietary implementation into OSS fixtures, examples, or tests.
 - Use neutral fixture apps in tests.
 - Do not copy existing-app code directly into generated apps as an implicit migration strategy.
-- When old in-flight outputs use `native_migration` adoption level, treat that as retired legacy discovery evidence feeding the `AdoptionPlan` / `AppContextVersion` contracts — not as a canonical artifact kind to preserve or extend.
+- When old in-flight outputs use `native_migration` adoption level, treat that as retired historical discovery evidence feeding the `AdoptionPlan` / `AppContextVersion` contracts — not as a canonical artifact kind to preserve or extend.
 - Keep `workflow_sequence`, transition routing, and workflow-local `handoffs.yaml` distinct.
 - Do not assume later factory workflows are part of the brownfield path unless `extension_registry.json` and the saved artifact contracts explicitly say so.
 

@@ -415,7 +415,7 @@ Current `ExistingAppDiscovery` still primarily produces workflow-local discovery
 outputs such as `ExistingProductSpec`, `CapabilitySpec[]`,
 `AgentAugmentationPlan`, and an optional decomposition plan. The save step now
 derives draft app-context artifacts from those outputs where enough evidence
-exists. The legacy outputs remain useful implementation evidence, but they are
+exists. The historical outputs remain useful implementation evidence, but they are
 not the canonical app-context architecture.
 
 ## ExistingAppDiscovery Persistence Target

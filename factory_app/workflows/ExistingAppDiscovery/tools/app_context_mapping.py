@@ -623,21 +623,21 @@ def _ownership_boundaries(
             add_overlay(
                 f"module:{module_id}",
                 AllowedOperation.PROPOSE_MIGRATION,
-                "Modernization candidate from legacy decomposition evidence",
+                "Modernization candidate from historical decomposition evidence",
             )
         for page in _as_list(decomposition_plan.get("proposed_pages")):
             page_id = _as_mapping(page).get("page_id") or _as_mapping(page).get("route")
             add_overlay(
                 f"page:{page_id}",
                 AllowedOperation.GENERATE_OVERLAY,
-                "Overlay candidate from legacy decomposition evidence",
+                "Overlay candidate from historical decomposition evidence",
             )
         for adapter in _as_list(decomposition_plan.get("proposed_adapters")):
             provider_id = _as_mapping(adapter).get("provider_id")
             add_overlay(
                 f"adapter:{provider_id}",
                 AllowedOperation.GENERATE_ADAPTER,
-                "Adapter candidate from legacy decomposition evidence",
+                "Adapter candidate from historical decomposition evidence",
             )
 
     return _dedupe_boundaries(boundaries)
@@ -707,7 +707,7 @@ def _risk_report(
     if unknowns:
         next_steps.append("Resolve high-priority unknowns before promotion or pull request handoff.")
     if _parse_decomposition_plan(_context_get(context_variables, "module_decomposition_plan")):
-        next_steps.append("Treat legacy decomposition output as evidence feeding the adoption plan.")
+        next_steps.append("Treat historical decomposition output as evidence feeding the adoption plan.")
 
     return RiskReport(
         risks=risks,
@@ -756,7 +756,7 @@ def _adoption_plan(
                 phase_id="modernization_candidate",
                 label="Modernization candidate",
                 goals=["Evaluate selective module or page migration candidates."],
-                actions=["Convert legacy decomposition evidence into reviewed migration candidates."],
+                actions=["Convert historical decomposition evidence into reviewed migration candidates."],
                 required_human_decisions=["Approve each transfer of ownership before implementation."],
             )
         )

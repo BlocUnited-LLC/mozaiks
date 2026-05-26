@@ -17,7 +17,7 @@ refinement behavior.
 - `ExistingAppDiscovery` is the brownfield/existing-app adoption workflow path,
   not the default greenfield build flow. It produces onboarding artifacts
   (`ExistingProductSpec`, `CapabilitySpec[]`, `AgentAugmentationPlan`,
-  `module_decomposition_plan`). These are legacy evidence outputs, not canonical
+  `module_decomposition_plan`). These are retired evidence outputs, not canonical
   `AppContextVersion` artifact kinds. The target canonical substrate for both
   greenfield and brownfield apps is `AppContextVersion`. See
   `docs/architecture/foundations/app-context-and-brownfield-adoption.md`.

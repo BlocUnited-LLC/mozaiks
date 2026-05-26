@@ -290,7 +290,7 @@ def test_brownfield_read_only_discovered_graph_returns_ownership_warning() -> No
             _node(
                 "file:legacy_orders_service",
                 GraphNodeType.FILE,
-                label="legacy orders service",
+                label="retired orders service",
                 metadata={
                     "path": "src/orders/service.py",
                     "ownership": "read_only_discovered",
@@ -303,7 +303,7 @@ def test_brownfield_read_only_discovered_graph_returns_ownership_warning() -> No
     hints = derive_app_context_impact_hints(
         app_context_graph=graph,
         app_context_summary=_summary(),
-        request="Change legacy orders service",
+        request="Change retired orders service",
         affected_bundle_paths=[],
         change_class="feature",
     )
