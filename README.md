@@ -44,12 +44,15 @@ python -m pipx ensurepath
 python -m pipx install mozaiks
 ```
 
-Open a new PowerShell so the PATH changes from `ensurepath` are loaded, then
-start the local Console workspace:
+Start the local Console workspace:
 
 ```powershell
 mozaiks quickstart --dir .\mozaiks-workspace
 ```
+
+If Windows says `mozaiks` is not recognized, open a new PowerShell and retry
+the `mozaiks quickstart` command. That just means PowerShell has not loaded the
+PATH update from `ensurepath` yet.
 
 Then open `http://localhost:3000/apps` and click `Create App`.
 

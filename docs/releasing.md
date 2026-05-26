@@ -54,9 +54,11 @@ even if the build and GitHub release steps succeed.
 
 Public install docs should present the pipx-managed CLI path. Use
 `python -m pipx install mozaiks` in first-run instructions because
-`python -m pipx ensurepath` only updates future terminals. Keep
-`pip install mozaiks` inside virtualenv/source-checkout contexts and keep the
-repo checkout path as the framework/developer mode.
+`python -m pipx ensurepath` may not make the `pipx` command visible in the
+current PowerShell session. Keep opening a new PowerShell as troubleshooting
+for `mozaiks` not being recognized, not as a mandatory step. Keep `pip install
+mozaiks` inside virtualenv/source-checkout contexts and keep the repo checkout
+path as the framework/developer mode.
 
 ## Notes
 

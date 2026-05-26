@@ -30,6 +30,7 @@ def test_getting_started_explains_how_to_start_again() -> None:
     assert "`quickstart` opens the Console during first setup." in doc
     assert "python -m pipx install mozaiks" in doc
     assert "mozaiks console --dir .\\mozaiks-workspace --open" in doc
+    assert "If Windows says `mozaiks` is not recognized" in doc
     assert "Local Setup" in normalized
     assert "local-setup.md" in normalized
     assert "source checkout or contributor setup" in normalized
@@ -37,6 +38,7 @@ def test_getting_started_explains_how_to_start_again() -> None:
     assert "python -m venv .venv" not in doc
     assert "python -m pip install mozaiks" not in doc
     assert ".\\scripts\\run-console.ps1" not in doc
+    assert "Then open a new PowerShell before running `mozaiks`" not in doc
 
 
 def test_getting_started_clarifies_workspace_terms() -> None:

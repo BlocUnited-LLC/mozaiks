@@ -18,8 +18,8 @@ python -m pipx ensurepath
 python -m pipx install mozaiks
 ```
 
-`ensurepath` updates future terminals, so use `python -m pipx` for the install
-step above. Then open a new PowerShell before running `mozaiks`.
+Use `python -m pipx` for the install step above so the current terminal does
+not need the `pipx` command on PATH yet.
 
 ## Create Your Workspace
 
@@ -38,6 +38,10 @@ parent folder, run:
 ```powershell
 mozaiks quickstart --dir .\mozaiks-workspace
 ```
+
+If Windows says `mozaiks` is not recognized, open a new PowerShell and retry
+the same `mozaiks quickstart` command. That just means PowerShell has not loaded
+the PATH update from `ensurepath` yet.
 
 `quickstart` creates the workspace folder if it does not already exist and
 opens the local Console. You do not need to create a `.venv` in the parent

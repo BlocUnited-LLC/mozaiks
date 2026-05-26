@@ -14,6 +14,7 @@ def test_readme_uses_plain_tool_framing() -> None:
 
     assert "### Which Tool To Use" in readme
     assert "python -m pipx install mozaiks" in readme
+    assert "If Windows says `mozaiks` is not recognized" in readme
     assert "python -m venv .venv" not in readme
     assert "python -m pip install mozaiks" not in readme
     assert "The **CLI** is just how you set up the" in readme
