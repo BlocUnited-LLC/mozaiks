@@ -359,7 +359,7 @@ async def test_orchestration_control_harness_delegates_refinement_into_session_r
 
 
 @pytest.mark.asyncio
-async def test_session_store_normalizes_legacy_refining_state_to_active():
+async def test_session_store_defaults_unknown_lifecycle_state_to_initial():
     persistence = _FakePersistence()
     store = SessionStateStore(persistence)
     session_coll = await persistence._coll("SessionRouterState")
@@ -367,13 +367,13 @@ async def test_session_store_normalizes_legacy_refining_state_to_active():
         "_id": "session_router::app_1::user_1",
         "app_id": "app_1",
         "user_id": "user_1",
-        "lifecycle_state": "refining",
+        "lifecycle_state": "unknown_state",
     }
 
     state = await store.load(app_id="app_1", user_id="user_1")
 
     assert state is not None
-    assert state.lifecycle_state == _session_model.SessionLifecycle.ACTIVE
+    assert state.lifecycle_state == _session_model.SessionLifecycle.INITIAL
 
 
 @pytest.mark.asyncio

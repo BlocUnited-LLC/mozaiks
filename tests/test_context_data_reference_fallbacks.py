@@ -30,43 +30,43 @@ def _build_plan_for_var(variable_name: str):
     )
 
 
-def test_lookup_data_reference_placeholder_prefers_workflow_scope() -> None:
-    placeholders = {
+def test_lookup_data_reference_fallback_prefers_workflow_scope() -> None:
+    fallbacks = {
         "global": {"concept_overview": "global overview"},
         "workflows": {
             "AgentGenerator": {"concept_overview": "workflow overview"},
         },
     }
 
-    value = _vars_mod._lookup_data_reference_placeholder(placeholders, "AgentGenerator", "concept_overview")
+    value = _vars_mod._lookup_data_reference_fallback(fallbacks, "AgentGenerator", "concept_overview")
     assert value == "workflow overview"
 
 
-def test_lookup_data_reference_placeholder_supports_flat_root() -> None:
-    placeholders = {
+def test_lookup_data_reference_fallback_supports_flat_root() -> None:
+    fallbacks = {
         "concept_overview": "flat overview",
     }
 
-    value = _vars_mod._lookup_data_reference_placeholder(placeholders, "AnyWorkflow", "concept_overview")
+    value = _vars_mod._lookup_data_reference_fallback(fallbacks, "AnyWorkflow", "concept_overview")
     assert value == "flat overview"
 
 
 @pytest.mark.asyncio
-async def test_load_context_uses_placeholder_when_data_reference_missing(
+async def test_load_context_uses_fallback_when_data_reference_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     workflow_name = "AgentGenerator"
     variable_name = "concept_overview"
-    placeholder_value = "Placeholder overview for tests"
+    fallback_value = "Fallback overview for tests"
 
-    placeholder_file = tmp_path / "placeholders.json"
-    placeholder_file.write_text(
+    fallback_file = tmp_path / "fallbacks.json"
+    fallback_file.write_text(
         json.dumps(
             {
                 "workflows": {
                     workflow_name: {
-                        variable_name: placeholder_value,
+                        variable_name: fallback_value,
                     }
                 }
             }
@@ -83,14 +83,14 @@ async def test_load_context_uses_placeholder_when_data_reference_missing(
     monkeypatch.setattr(_vars_mod, "_load_data_reference_value", _missing_data_reference)
     monkeypatch.setenv("CONTEXT_INCLUDE_SCHEMA", "false")
     monkeypatch.setattr(_vars_mod, "_FILE_CONTEXT_ALLOW_OUTSIDE_ROOT", True)
-    monkeypatch.setenv("MOZAIKS_CONTEXT_PLACEHOLDERS_FILE", str(placeholder_file))
+    monkeypatch.setenv("MOZAIKS_CONTEXT_FALLBACKS_FILE", str(fallback_file))
 
     context = await _vars_mod._load_context_async(workflow_name, "app-test")
-    assert context.get(variable_name) == placeholder_value
+    assert context.get(variable_name) == fallback_value
 
 
 @pytest.mark.asyncio
-async def test_load_context_prefers_db_value_over_placeholder(
+async def test_load_context_prefers_db_value_over_fallback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -98,13 +98,13 @@ async def test_load_context_prefers_db_value_over_placeholder(
     variable_name = "concept_overview"
     db_value = "DB overview"
 
-    placeholder_file = tmp_path / "placeholders.json"
-    placeholder_file.write_text(
+    fallback_file = tmp_path / "fallbacks.json"
+    fallback_file.write_text(
         json.dumps(
             {
                 "workflows": {
                     workflow_name: {
-                        variable_name: "placeholder overview",
+                        variable_name: "fallback overview",
                     }
                 }
             }
@@ -121,7 +121,7 @@ async def test_load_context_prefers_db_value_over_placeholder(
     monkeypatch.setattr(_vars_mod, "_load_data_reference_value", _present_data_reference)
     monkeypatch.setenv("CONTEXT_INCLUDE_SCHEMA", "false")
     monkeypatch.setattr(_vars_mod, "_FILE_CONTEXT_ALLOW_OUTSIDE_ROOT", True)
-    monkeypatch.setenv("MOZAIKS_CONTEXT_PLACEHOLDERS_FILE", str(placeholder_file))
+    monkeypatch.setenv("MOZAIKS_CONTEXT_FALLBACKS_FILE", str(fallback_file))
 
     context = await _vars_mod._load_context_async(workflow_name, "app-test")
     assert context.get(variable_name) == db_value

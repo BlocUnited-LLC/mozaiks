@@ -34,8 +34,8 @@ def test_module_reactions_docs_state_canonical_contract() -> None:
 
     assert "contracts/reactions.yaml" in module_system
     assert "schema_version: mozaiks.reactions.v1" in event_system
-    assert "compatibility only" in combined
-    assert "Do not author new modules with `contracts/subscriptions.yaml`." in event_contracts
+    assert "Runtime rejects it" in combined
+    assert "Do not author modules with `contracts/subscriptions.yaml`." in event_contracts
     assert "`contracts/subscriptions.yaml` is the canonical" not in combined
     assert "event_type:" in combined
     assert "target:\n      kind: handler" in combined

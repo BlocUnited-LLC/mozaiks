@@ -369,18 +369,6 @@ class ModuleReactionsManifest(ModuleContractModel):
         return self
 
 
-class ModuleLegacySubscriptionsManifest(ModuleContractModel):
-    schema_version: Literal["mozaiks.subscriptions.v1"] = "mozaiks.subscriptions.v1"
-    subscriptions: List[ModuleReaction] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def _validate_unique_subscriptions(self) -> "ModuleLegacySubscriptionsManifest":
-        reaction_ids = [reaction.id for reaction in self.subscriptions]
-        if len(reaction_ids) != len(set(reaction_ids)):
-            raise ValueError("subscriptions.yaml subscriptions must have unique id values")
-        return self
-
-
 class ModuleNotificationsManifest(ModuleContractModel):
     schema_version: Literal["mozaiks.notifications.v1"] = "mozaiks.notifications.v1"
     notifications: List[Dict[str, Any]] = Field(default_factory=list)
@@ -764,34 +752,18 @@ class ModuleLoader:
         contracts_dir = module_dir / self.CONTRACTS_DIRNAME
 
         reactions_path = contracts_dir / "reactions.yaml"
-        legacy_subscriptions_path = contracts_dir / "subscriptions.yaml"
+        subscriptions_path = contracts_dir / "subscriptions.yaml"
+        if subscriptions_path.exists():
+            raise ModuleLoadError(
+                f"contracts/subscriptions.yaml is not supported for {definition.name!r}; "
+                "use contracts/reactions.yaml"
+            )
+
         if reactions_path.exists():
             try:
                 parsed["reactions"] = ModuleReactionsManifest.model_validate(_load_yaml_file(reactions_path))
             except Exception as exc:
                 raise ModuleLoadError(f"Invalid reactions.yaml for {definition.name!r}: {exc}") from exc
-            if legacy_subscriptions_path.exists():
-                logger.warning(
-                    "MODULE_REACTIONS_LEGACY_IGNORED: %r defines both contracts/reactions.yaml and deprecated contracts/subscriptions.yaml; using reactions.yaml",
-                    definition.name,
-                )
-        elif legacy_subscriptions_path.exists():
-            try:
-                legacy = ModuleLegacySubscriptionsManifest.model_validate(
-                    _load_yaml_file(legacy_subscriptions_path)
-                )
-            except Exception as exc:
-                raise ModuleLoadError(
-                    f"Invalid legacy subscriptions.yaml for {definition.name!r}: {exc}"
-                ) from exc
-            logger.warning(
-                "MODULE_REACTIONS_LEGACY_DEPRECATED: %r uses deprecated contracts/subscriptions.yaml; migrate to contracts/reactions.yaml",
-                definition.name,
-            )
-            parsed["reactions"] = ModuleReactionsManifest(
-                schema_version="mozaiks.reactions.v1",
-                reactions=list(legacy.subscriptions),
-            )
 
         for key, (filename, model) in self.OPTIONAL_MANIFESTS.items():
             if key == "reactions":

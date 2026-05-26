@@ -281,6 +281,20 @@ class ModuleEventRouter:
             }
 
         template = rule.get("template") if isinstance(rule.get("template"), dict) else {}
+
+        # Build structured context from context_fields declared by the rule.
+        # Only keys explicitly listed in context_fields are copied; secret-shaped
+        # keys are stripped as a defence-in-depth guard even if listed.
+        context_fields = rule.get("context_fields")
+        if isinstance(context_fields, list) and context_fields:
+            context: Optional[Dict[str, Any]] = {
+                k: payload[k]
+                for k in context_fields
+                if isinstance(k, str) and k in payload and not _is_secret_context_key(k)
+            } or None
+        else:
+            context = None
+
         record = {
             "notification_id": f"ntf_{uuid4().hex}",
             "rule_id": rule.get("id"),
@@ -298,6 +312,8 @@ class ModuleEventRouter:
             "created_at": _utc_now(),
             "source_event": envelope,
         }
+        if context is not None:
+            record["context"] = context
 
         await self._store_notification(record)
         if self._event_emitter is not None:
@@ -337,6 +353,25 @@ class ModuleEventRouter:
         return result
 
 
+# Substrings that mark a payload key as potentially sensitive.
+# context_fields that match any pattern are silently excluded from context.
+_CONTEXT_SECRET_PATTERNS: tuple[str, ...] = (
+    "_key",
+    "_secret",
+    "_token",
+    "password",
+    "credential",
+    "stripe_",
+    "idempotency_",
+)
+
+
+def _is_secret_context_key(key: str) -> bool:
+    """Return True if *key* looks like a secret and must not be copied into context."""
+    k = key.lower()
+    return any(pat in k for pat in _CONTEXT_SECRET_PATTERNS)
+
+
 def _render_template(template: str, payload: Dict[str, Any]) -> str:
     """
     Render a notification template with payload substitution.
@@ -345,7 +380,6 @@ def _render_template(template: str, payload: Dict[str, Any]) -> str:
     - ``{{field}}``           — plain substitution
     - ``{{field | upper}}``   — field value uppercased
     - ``{% if field %}...{% endif %}`` — conditional block (rendered when field is truthy)
-    - ``{payload.field}``     — legacy syntax (backward compat)
 
     Unknown fields are left as-is.
     """
@@ -379,10 +413,6 @@ def _render_template(template: str, payload: Dict[str, Any]) -> str:
         return str(val) if val is not None else m.group(0)
 
     rendered = re.sub(r"\{\{\s*(\w+)\s*\}\}", _replace_plain, rendered)
-
-    # {payload.field} — legacy syntax
-    for key, value in payload.items():
-        rendered = rendered.replace("{payload." + str(key) + "}", str(value))
 
     return rendered
 

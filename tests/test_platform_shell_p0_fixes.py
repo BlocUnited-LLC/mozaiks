@@ -22,7 +22,7 @@ def test_vite_config_is_product_ui_js_uses_platform_path_prefix() -> None:
     vite_config = (root / "web_shell" / "vite.config.js").read_text(encoding="utf-8")
 
     # The fix introduced a startsWith check on platformAppDirForward.
-    # Confirm it is present alongside the legacy regex fallback.
+    # Confirm it is present alongside the directory-name regex path.
     assert "platformAppDirForward" in vite_config, (
         "vite.config.js must define platformAppDirForward to support non-*-platform workspace dirs"
     )

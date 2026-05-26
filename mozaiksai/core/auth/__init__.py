@@ -116,7 +116,6 @@ from mozaiksai.core.auth.websocket_auth import (
     WS_CLOSE_ACCESS_DENIED,
 )
 
-# Legacy compatibility - keep old config exports
 from mozaiksai.core.auth.config import (
     AuthConfig,
     get_auth_config,
@@ -155,7 +154,7 @@ __all__ = [
     "WS_CLOSE_AUTH_REQUIRED",
     "WS_CLOSE_AUTH_INVALID",
     "WS_CLOSE_ACCESS_DENIED",
-    # Legacy config (for backwards compatibility)
+    # Auth config exports
     "AuthConfig",
     "get_auth_config",
     "clear_auth_config_cache",

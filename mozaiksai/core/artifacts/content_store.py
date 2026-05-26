@@ -56,10 +56,8 @@ class ArtifactContentStore(Protocol):
 class LocalArtifactContentStore:
     """Stores artifact bundle zips on the local filesystem.
 
-    ``content_ref`` is the absolute path string of the stored zip file.  This
-    is structurally identical to the pre-Phase-D ``artifact_path`` metadata
-    field, so the local backend remains fully backward-compatible with
-    artifacts written before Phase D.
+    ``content_ref`` is the absolute path string of the stored zip file. The
+    local backend keeps bundle storage inspectable for development and tests.
 
     The ``put_bundle`` method writes under ``<root>/<app_id>/<artifact_version_id>/artifact.zip``
     and returns the resolved absolute path.

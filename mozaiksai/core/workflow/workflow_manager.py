@@ -7,7 +7,7 @@ import json
 import os
 import yaml
 import importlib
-from typing import Dict, Any, Iterable, List, Optional, Tuple, Callable, Awaitable, Set
+from typing import Dict, Any, List, Optional, Tuple, Callable, Awaitable, Set
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -25,10 +25,9 @@ from .declarative import (
 )
 from .paths import (
     discover_workflow_paths,
-    normalize_workflow_roots,
-    primary_workflows_root,
     resolve_active_app_root,
     resolve_workflow_path,
+    resolve_workflows_root,
 )
 
 logger = get_workflow_logger(workflow_name="unified_workflow_manager")
@@ -71,19 +70,11 @@ class UnifiedWorkflowManager:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, workflows_base_path: Optional[str | Iterable[str]] = None):
+    def __init__(self, workflows_base_path: Optional[str] = None):
         if hasattr(self, "_initialized"):
             return
         # Core caches / registries
-        if workflows_base_path is None:
-            self.workflow_base_paths = normalize_workflow_roots()
-        else:
-            self.workflow_base_paths = normalize_workflow_roots(
-                workflows_base_path
-                if isinstance(workflows_base_path, (list, tuple, set))
-                else [workflows_base_path]
-            )
-        self.workflows_base_path = primary_workflows_root(self.workflow_base_paths)
+        self.workflows_base_path = resolve_workflows_root(workflows_base_path)
         self._ai_config: Dict[str, Any] = {}
         self._workflows: Dict[str, WorkflowInfo] = {}
         self._workflow_paths: Dict[str, Path] = {}
@@ -300,11 +291,11 @@ class UnifiedWorkflowManager:
     
     def discover_workflows(self) -> List[str]:
         """Discover all available workflows in the workflows directory."""
-        if not any(root.exists() for root in self.workflow_base_paths):
-            logger.warning(f"Workflows directories not found: {self.workflow_base_paths}")
+        if not self.workflows_base_path.exists():
+            logger.warning(f"Workflows directory not found: {self.workflows_base_path}")
             return []
 
-        workflows = discover_workflow_paths(self.workflow_base_paths)
+        workflows = discover_workflow_paths(self.workflows_base_path)
         self._workflow_paths = {name.lower(): path for name, path in workflows.items()}
         for name, path in workflows.items():
             logger.debug(f"Discovered workflow (orchestrator.yaml): {name} @ {path}")
@@ -390,7 +381,7 @@ class UnifiedWorkflowManager:
         cached = self._workflow_paths.get(normalized_name)
         if cached and cached.exists():
             return cached
-        resolved = resolve_workflow_path(workflow_name, self.workflow_base_paths)
+        resolved = resolve_workflow_path(workflow_name, self.workflows_base_path)
         if resolved is not None:
             self._workflow_paths[normalized_name] = resolved
         return resolved
@@ -727,7 +718,6 @@ class UnifiedWorkflowManager:
             "tools_loaded_count": tools_loaded_count,
             "workflow_names": [w.name for w in self._workflows.values()],
             "base_path": str(self.workflows_base_path),
-            "base_paths": [str(path) for path in self.workflow_base_paths],
             "summary": f"{loaded_count} loaded, {error_count} errors, {tools_loaded_count} with tools"
         }
     
@@ -1040,15 +1030,15 @@ class UnifiedWorkflowManager:
 # GLOBAL INSTANCE & API
 # ========================================================================
 
-# Single global instance — root driven by MOZAIKS_WORKFLOWS_PATH,
-# the first legacy MOZAIKS_WORKFLOW_ROOTS entry, or the active app root.
-_unified_workflow_manager = UnifiedWorkflowManager(workflows_base_path=normalize_workflow_roots())
+# Single global instance: root is driven by MOZAIKS_WORKFLOWS_PATH,
+# host defaults, or the active app root.
+_unified_workflow_manager = UnifiedWorkflowManager(workflows_base_path=resolve_workflows_root())
 
 def get_workflow_manager() -> UnifiedWorkflowManager:
     """Get the global workflow manager instance"""
     return _unified_workflow_manager
 
-def initialize_workflows(base_path: Optional[str | Iterable[str]] = None) -> Dict[str, Dict[str, Any]]:
+def initialize_workflows(base_path: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
     """Initialize workflows with custom base path"""
     global _unified_workflow_manager, workflow_manager
 

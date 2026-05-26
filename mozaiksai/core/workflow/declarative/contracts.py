@@ -604,7 +604,7 @@ class HooksConfig(DeclarativeModel):
 
 
 class UIConfig(DeclarativeModel):
-    # null means "hide all agents"; [] keeps legacy "no filtering" behavior.
+    # null means "hide all agents"; [] means "no filtering".
     visual_agents: Optional[List[str]] = None
 
     @field_validator("visual_agents")

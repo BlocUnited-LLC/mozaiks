@@ -57,7 +57,7 @@ from mozaiksai.core.runtime.persistence import (
     load_database_migrations,
 )
 from mozaiksai.core.session.launcher import create_routed_chat_session, launch_transition, validate_context_for_workflow
-from mozaiksai.core.workflow.paths import resolve_active_app_root
+from mozaiksai.core.workflow.paths import candidate_app_workflows_roots, resolve_active_app_root
 from mozaiksai.resources import resolve_factory_brand_root
 from mozaiksai.core.admin.registry import load_admin_registry, build_admin_shell_routes
 from mozaiksai.core.profile.discovery import load_profile_panels
@@ -102,11 +102,6 @@ except Exception as exc:  # pragma: no cover
 
 def resolve_app_root() -> Path:
     return resolve_active_app_root()
-
-
-def resolve_platform_path() -> Path:
-    """Backward-compatible alias for resolve_app_root()."""
-    return resolve_app_root()
 
 
 def _resolve_default_brand_root() -> Path:
@@ -1321,8 +1316,8 @@ def _normalize_shell_page_entry(entry: dict, *, order_fallback: int) -> Optional
 def _coerce_requires_role(value: Any) -> Optional[str]:
     """Normalize route-role metadata without treating it as security enforcement.
 
-    Current shell route metadata is single-role only. If legacy route or page
-    schema content provides a role list, keep the first non-empty role as
+    Current shell route metadata is single-role only. If route or page schema
+    content provides a role list, keep the first non-empty role as
     declaration and visibility intent only. Module policy remains the
     authoritative security boundary for resource-scoped authorization until
     frontend role checks and scoped route auth land.
@@ -1691,7 +1686,10 @@ def _load_pack_graph_or_404():
 
 def _load_workflow_capability_routes(app_root: Path) -> Dict[str, List[Dict[str, Any]]]:
     """Index workflow trigger declarations by public capability id."""
-    workflows_dir = app_root / "workflows"
+    workflows_dir = next(
+        (root for root in candidate_app_workflows_roots(app_root) if root.exists()),
+        candidate_app_workflows_roots(app_root)[0],
+    )
     if not workflows_dir.exists():
         return {}
 
@@ -2170,6 +2168,17 @@ async def resolve_transition_route(
     workflow_launch = launch_result.workflow_launch
     if workflow_launch is None:
         raise HTTPException(status_code=500, detail="Workflow transition launch did not start a workflow")
+
+    if launch_result.resolution_type == "chat_session":
+        return {
+            "resolution_type": "chat_session",
+            "chat_id": workflow_launch.chat_id,
+            "workflow_id": workflow_launch.workflow_id,
+            "option_id": launch_result.option_id,
+            "journey_id": workflow_launch.journey_id,
+            "websocket_url": workflow_launch.websocket_url,
+            "context_variables": launch_result.context_variables,
+        }
 
     return {
         "resolution_type": "workflow",

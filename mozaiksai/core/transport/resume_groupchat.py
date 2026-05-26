@@ -215,14 +215,14 @@ class GroupChatResumer:
                 is_marked_initial_message = (
                     seed_kind == "initial_message" or metadata_seed_kind == "initial_message"
                 )
-                is_legacy_initial_message = (
+                is_unmarked_initial_message = (
                     absolute_index == 0
                     and role == "user"
                     and bool(hidden_initial_message)
                     and content.strip() == str(hidden_initial_message).strip()
                     and agent_name in {"", "user", "userproxy", "userproxyagent", "chat_manager", "manager", "agentmanager", "_user"}
                 )
-                if is_marked_initial_message or is_legacy_initial_message:
+                if is_marked_initial_message or is_unmarked_initial_message:
                     self.logger.debug(
                         "[AUTO_RESUME] Skipping initial_message for AgentDriven workflow (index=%d, chat_id=%s)",
                         absolute_index, chat_id

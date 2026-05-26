@@ -3,15 +3,14 @@ Regression tests for platform notification infrastructure.
 
 Covers:
 1.  _render_template supports {{field}}, {{field | upper}}, {% if field %}...{% endif %}
-2.  _render_template backward-compat: legacy {payload.field} still works
-3.  _render_template leaves unknown placeholders intact
-4.  _create_notification falls back to flat envelope for payload + tenant extraction
-5.  GET /api/notifications safe-projection excludes source_event and other internal fields
-6.  GET /api/notifications endpoint declared in platform.py
-7.  POST /api/notifications/{id}/read endpoint declared
-8.  POST /api/notifications/mark-all-read endpoint declared
-9.  _NOTIFICATION_SAFE_PROJECTION strips source_event
-10. platform.py notification listing endpoint strips source_event (projection check)
+2.  _render_template leaves unknown placeholders intact
+3.  _create_notification falls back to flat envelope for payload + tenant extraction
+4.  GET /api/notifications safe-projection excludes source_event and other internal fields
+5.  GET /api/notifications endpoint declared in platform.py
+6.  POST /api/notifications/{id}/read endpoint declared
+7.  POST /api/notifications/mark-all-read endpoint declared
+8.  _NOTIFICATION_SAFE_PROJECTION strips source_event
+9. platform.py notification listing endpoint strips source_event (projection check)
 """
 from __future__ import annotations
 
@@ -93,9 +92,9 @@ class TestRenderTemplate:
         result = self._render(template, {"failure_reason": ""})
         assert result == "A payment failed. "
 
-    def test_legacy_payload_dot_syntax(self):
+    def test_payload_dot_syntax_is_not_rendered(self):
         result = self._render("{payload.amount} {payload.currency}", {"amount": 500, "currency": "gbp"})
-        assert result == "500 gbp"
+        assert result == "{payload.amount} {payload.currency}"
 
     def test_unknown_placeholder_left_intact(self):
         result = self._render("{{unknown}}", {})
@@ -263,3 +262,295 @@ class TestVisibilityFilterHelper:
         assert "audience.roles" in block, (
             "_notification_visibility_filter must filter by audience.roles"
         )
+
+
+# ---------------------------------------------------------------------------
+# context_fields — _is_secret_context_key
+# ---------------------------------------------------------------------------
+
+class TestIsSecretContextKey:
+    """_is_secret_context_key must recognise known secret-shaped key patterns."""
+
+    def _check(self, key: str) -> bool:
+        from mozaiksai.core.runtime.composition.module_event_router import _is_secret_context_key
+        return _is_secret_context_key(key)
+
+    def test_stripe_prefix_is_secret(self):
+        assert self._check("stripe_payment_intent_id") is True
+
+    def test_idempotency_prefix_is_secret(self):
+        assert self._check("idempotency_key") is True
+
+    def test_token_suffix_is_secret(self):
+        assert self._check("access_token") is True
+
+    def test_key_suffix_is_secret(self):
+        assert self._check("api_key") is True
+
+    def test_secret_suffix_is_secret(self):
+        assert self._check("client_secret") is True
+
+    def test_password_is_secret(self):
+        assert self._check("password") is True
+
+    def test_credential_is_secret(self):
+        assert self._check("credential_id") is True
+
+    def test_task_id_not_secret(self):
+        assert self._check("task_id") is False
+
+    def test_approval_id_not_secret(self):
+        assert self._check("approval_id") is False
+
+    def test_record_id_not_secret(self):
+        assert self._check("record_id") is False
+
+    def test_app_id_not_secret(self):
+        assert self._check("app_id") is False
+
+    def test_amount_not_secret(self):
+        assert self._check("amount") is False
+
+
+# ---------------------------------------------------------------------------
+# context_fields — behaviour in _create_notification
+# ---------------------------------------------------------------------------
+
+class TestContextFieldsBehaviour:
+    """
+    Notification rules with context_fields produce notification.context.
+    Rules without context_fields produce no context key.
+    Secret-shaped keys are stripped defensively.
+
+    Neutral examples: task_id, approval_id, record_id — no proprietary names.
+    """
+
+    def _make_router_and_store(self, rule: dict):
+        import asyncio
+        from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
+
+        stored: list[dict] = []
+
+        async def store(record: dict) -> None:
+            stored.append(record)
+
+        # Minimal LoadedModule stub
+        class _Manifests:
+            def __init__(self, notifs):
+                class _R:
+                    reactions = []
+                self.reactions = _R()
+                class _N:
+                    def __init__(self, n):
+                        self.notifications = n
+                self.notifications = _N(notifs)
+
+        class _Mod:
+            def __init__(self, name, notifs):
+                self.name = name
+                self.handler = None
+                self.manifests = _Manifests(notifs)
+
+        router = ModuleEventRouter([_Mod("test_module", [rule])], notification_store=store)
+        return router, stored, asyncio
+
+    def _envelope(self, payload: dict) -> dict:
+        return {
+            "id": "evt_001",
+            "type": "test.event",
+            "version": 1,
+            "occurred_at": "2026-01-01T00:00:00+00:00",
+            "tenant": {"app_id": "app_test", "tenant_id": "ten_test"},
+            "payload": payload,
+            "visibility": "internal",
+        }
+
+    def test_declared_fields_appear_in_context(self):
+        rule = {
+            "id": "task.created.notify",
+            "event_type": "task.created",
+            "context_fields": ["task_id", "record_id"],
+            "template": {"title": "New task", "body": ""},
+        }
+        router, stored, asyncio = self._make_router_and_store(rule)
+        asyncio.get_event_loop().run_until_complete(
+            router.handle_event("task.created", self._envelope(
+                {"task_id": "tsk_abc", "record_id": "rec_123", "extra": "ignore"}
+            ))
+        )
+        ctx = stored[0].get("context")
+        assert ctx is not None
+        assert ctx["task_id"] == "tsk_abc"
+        assert ctx["record_id"] == "rec_123"
+
+    def test_undeclared_fields_absent_from_context(self):
+        rule = {
+            "id": "task.created.notify",
+            "event_type": "task.created",
+            "context_fields": ["task_id"],
+            "template": {"title": "New task", "body": ""},
+        }
+        router, stored, asyncio = self._make_router_and_store(rule)
+        asyncio.get_event_loop().run_until_complete(
+            router.handle_event("task.created", self._envelope(
+                {"task_id": "tsk_abc", "user_name": "alice", "internal_ref": "x"}
+            ))
+        )
+        ctx = stored[0].get("context", {})
+        assert "user_name" not in ctx
+        assert "internal_ref" not in ctx
+
+    def test_secret_keys_stripped_from_context(self):
+        rule = {
+            "id": "approval.created.notify",
+            "event_type": "approval.created",
+            "context_fields": ["approval_id", "stripe_payment_intent_id", "api_key"],
+            "template": {"title": "Approval", "body": ""},
+        }
+        router, stored, asyncio = self._make_router_and_store(rule)
+        asyncio.get_event_loop().run_until_complete(
+            router.handle_event("approval.created", self._envelope({
+                "approval_id": "appr_xyz",
+                "stripe_payment_intent_id": "pi_secret_123",
+                "api_key": "sk_live_abc",
+            }))
+        )
+        ctx = stored[0].get("context", {})
+        assert ctx.get("approval_id") == "appr_xyz"
+        assert "stripe_payment_intent_id" not in ctx
+        assert "api_key" not in ctx
+
+    def test_no_context_fields_means_no_context_key(self):
+        rule = {
+            "id": "record.updated.notify",
+            "event_type": "record.updated",
+            "template": {"title": "Updated", "body": ""},
+        }
+        router, stored, asyncio = self._make_router_and_store(rule)
+        asyncio.get_event_loop().run_until_complete(
+            router.handle_event("record.updated", self._envelope({"record_id": "rec_001"}))
+        )
+        assert "context" not in stored[0] or stored[0].get("context") is None
+
+    def test_empty_context_fields_list_means_no_context_key(self):
+        rule = {
+            "id": "record.updated.notify",
+            "event_type": "record.updated",
+            "context_fields": [],
+            "template": {"title": "Updated", "body": ""},
+        }
+        router, stored, asyncio = self._make_router_and_store(rule)
+        asyncio.get_event_loop().run_until_complete(
+            router.handle_event("record.updated", self._envelope({"record_id": "rec_001"}))
+        )
+        assert not stored[0].get("context")
+
+    def test_all_secret_fields_produces_no_context(self):
+        rule = {
+            "id": "sensitive.notify",
+            "event_type": "sensitive.event",
+            "context_fields": ["stripe_id", "api_key"],
+            "template": {"title": "Sensitive", "body": ""},
+        }
+        router, stored, asyncio = self._make_router_and_store(rule)
+        asyncio.get_event_loop().run_until_complete(
+            router.handle_event("sensitive.event", self._envelope({"stripe_id": "x", "api_key": "y"}))
+        )
+        assert not stored[0].get("context")
+
+    def test_source_event_still_stored_internally(self):
+        rule = {
+            "id": "task.created.notify",
+            "event_type": "task.created",
+            "context_fields": ["task_id"],
+            "template": {"title": "Task created", "body": ""},
+        }
+        router, stored, asyncio = self._make_router_and_store(rule)
+        asyncio.get_event_loop().run_until_complete(
+            router.handle_event("task.created", self._envelope({"task_id": "tsk_abc"}))
+        )
+        assert stored[0].get("source_event") is not None
+
+
+# ---------------------------------------------------------------------------
+# context_fields — platform projection must NOT strip context
+# ---------------------------------------------------------------------------
+
+class TestContextFieldsPlatformProjection:
+    """
+    _NOTIFICATION_SAFE_PROJECTION is an exclusion projection.
+    The 'context' field must NOT be in the exclusion list so it passes through.
+    """
+
+    def test_context_not_in_safe_projection(self):
+        source = _PLATFORM_PY.read_text(encoding="utf-8")
+        proj_start = source.index("_NOTIFICATION_SAFE_PROJECTION")
+        # Find the closing brace of the dict literal
+        proj_block = source[proj_start: proj_start + 600]
+        assert '"context": 0' not in proj_block, (
+            "context must NOT be excluded by _NOTIFICATION_SAFE_PROJECTION — "
+            "it must pass through to callers when present"
+        )
+        assert "'context': 0" not in proj_block, (
+            "context must NOT be excluded by _NOTIFICATION_SAFE_PROJECTION"
+        )
+
+
+# ---------------------------------------------------------------------------
+# context_fields — flat envelope compatibility
+# ---------------------------------------------------------------------------
+
+class TestContextFieldsFlatEnvelope:
+    """context_fields must resolve from flattened scalar payloads (non-nested events)."""
+
+    def test_context_resolved_from_flat_envelope(self):
+        import asyncio
+        from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
+
+        stored: list[dict] = []
+
+        async def store(record: dict) -> None:
+            stored.append(record)
+
+        class _Manifests:
+            def __init__(self, notifs):
+                class _R:
+                    reactions = []
+                self.reactions = _R()
+                class _N:
+                    def __init__(self, n):
+                        self.notifications = n
+                self.notifications = _N(notifs)
+
+        class _Mod:
+            def __init__(self, name, notifs):
+                self.name = name
+                self.handler = None
+                self.manifests = _Manifests(notifs)
+
+        rule = {
+            "id": "order.placed.notify",
+            "event_type": "order.placed",
+            "context_fields": ["record_id", "app_id"],
+            "template": {"title": "Order placed", "body": ""},
+        }
+        router = ModuleEventRouter([_Mod("order_module", [rule])], notification_store=store)
+
+        flat_envelope = {
+            "id": "evt_flat_001",
+            "type": "order.placed",
+            "version": 1,
+            "occurred_at": "2026-01-01T00:00:00+00:00",
+            "record_id": "ord_xyz",
+            "app_id": "app_store",
+            "amount": 99,
+        }
+        asyncio.get_event_loop().run_until_complete(
+            router.handle_event("order.placed", flat_envelope)
+        )
+
+        assert len(stored) == 1
+        ctx = stored[0].get("context")
+        assert ctx is not None
+        assert ctx["record_id"] == "ord_xyz"
+        assert ctx["app_id"] == "app_store"

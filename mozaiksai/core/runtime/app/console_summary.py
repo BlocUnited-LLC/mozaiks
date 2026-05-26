@@ -17,6 +17,7 @@ from mozaiksai.core.workflow.generator_support.connector_service import (
     get_connector_backend_summary,
     list_connectors,
 )
+from mozaiksai.core.workflow.paths import candidate_app_workflows_roots
 from mozaiksai.resources import resolve_factory_brand_root
 
 GENERATOR_WORKFLOW_IDS = [
@@ -361,7 +362,7 @@ async def build_integrations_summary(*, app_id: str | None = None) -> dict:
     auth_jwks_url = os.getenv("AUTH_JWKS_URL", "")
     azure_kv_name = os.getenv("AZURE_KEY_VAULT_NAME", "")
 
-    default_model = os.getenv("DEFAULT_LLM_MODEL", "gpt-4o-mini")
+    default_model = os.getenv("DEFAULT_LLM_MODEL", "gpt-5-nano")
     fallback_models = [model.strip() for model in os.getenv("OPENAI_MODEL_FALLBACK", "").split(",") if model.strip()]
 
     mongo_llm_configured = False
@@ -698,7 +699,10 @@ def _utc_now_iso() -> str:
 
 def _list_workflows(app_root: Path) -> list[str]:
     discovered: list[str] = []
-    workflows_dir = app_root / "workflows"
+    workflows_dir = next(
+        (root for root in candidate_app_workflows_roots(app_root) if root.exists()),
+        candidate_app_workflows_roots(app_root)[0],
+    )
     if workflows_dir.exists():
         for child in workflows_dir.iterdir():
             if child.is_dir() and child.name != "extended_orchestration" and child.name not in discovered:

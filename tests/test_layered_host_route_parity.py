@@ -79,7 +79,7 @@ def test_mozaiks_host_contains_canonical_routes():
     assert CANONICAL_MOZAIKS_ROUTES <= mozaiks_routes
 
 
-def test_mozaiks_host_does_not_restore_removed_legacy_routes():
+def test_mozaiks_host_does_not_restore_removed_routes():
     mozaiks_routes = _public_routes(import_module("mozaiksai.hosts.mozaiks").app)
 
     assert not (REMOVED_LEGACY_ROUTES & mozaiks_routes)

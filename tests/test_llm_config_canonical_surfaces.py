@@ -24,7 +24,7 @@ async def test_canonical_llm_config_has_no_stream_kwarg(monkeypatch: pytest.Monk
     module = import_module_directly("mozaiksai.core.workflow.llm_config")
 
     async def fake_load_raw_config_list():
-        return [{"model": "gpt-4o-mini", "api_key": "test-key"}]
+        return [{"model": "gpt-5-nano", "api_key": "test-key"}]
 
     monkeypatch.setattr(module, "_load_raw_config_list", fake_load_raw_config_list)
     monkeypatch.setattr(module, "_attach_autogen_cache", lambda cfg: None)

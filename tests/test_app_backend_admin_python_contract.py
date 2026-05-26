@@ -53,7 +53,7 @@ def test_python_app_backend_admin_contract_accepts_builtin_and_schema_panels() -
     assert config.panels[1].layout == "full-width"
 
 
-def test_python_app_backend_admin_contract_rejects_legacy_nested_panels_shape() -> None:
+def test_python_app_backend_admin_contract_rejects_removed_nested_panels_shape() -> None:
     with pytest.raises(Exception, match="schema_version"):
         validate_app_backend_admin_config(
             {

@@ -268,7 +268,7 @@ async def authenticate_websocket_with_path_user(
     """
     Authenticate WebSocket AND validate that JWT user matches path user_id.
 
-    This is for backward-compatible routes that have {user_id} in the path.
+    This is for routes that have {user_id} in the path.
     The path user_id MUST match the JWT sub claim.
 
     Args:

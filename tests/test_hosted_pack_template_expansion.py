@@ -10,7 +10,7 @@ Verifies:
  5. No modules/wallet path is generated.
  6. No app/capability_packs path is generated.
  7. Missing template raises HostedPackTemplateError.
- 8. Placeholder pack is not expanded.
+ 8. Inactive pack is not expanded.
  9. Unsafe pack_id (path traversal) raises HostedPackTemplateError.
 10. Template path with ../ in manifest raises HostedPackTemplateError.
 11. OSS code does not import mozaiks-app.
@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -87,7 +86,7 @@ def pack_root(tmp_path: Path) -> Path:
           wallet/
             manifest.yaml   ← backend_templates: [backend_templates/wallet_client.py]
             backend_templates/
-              wallet_client.py  ← placeholder template content
+              wallet_client.py  ← inactive template content
     """
     wallet_dir = tmp_path / "wallet"
     tpl_dir = wallet_dir / "backend_templates"
@@ -310,20 +309,20 @@ class TestMissingTemplate:
 
 
 # ---------------------------------------------------------------------------
-# 8 — Placeholder pack is not expanded
+# 8 — Inactive pack is not expanded
 # ---------------------------------------------------------------------------
 
-class TestPlaceholderPack:
-    def test_placeholder_pack_not_expanded(self, resolver, tmp_path):
+class TestInactivePack:
+    def test_inactive_pack_not_expanded(self, resolver, tmp_path):
         wallet_dir = tmp_path / "mozaikspay"
         tpl_dir = wallet_dir / "backend_templates"
         tpl_dir.mkdir(parents=True)
         manifest = {
-            "pack": {"id": "mozaikspay", "status": "placeholder"},
+            "pack": {"id": "mozaikspay", "status": "inactive"},
             "backend_templates": ["backend_templates/mozaikspay_client.py"],
         }
         (wallet_dir / "manifest.yaml").write_text(yaml.dump(manifest))
-        (tpl_dir / "mozaikspay_client.py").write_text("# placeholder")
+        (tpl_dir / "mozaikspay_client.py").write_text("# inactive")
 
         pack_sources = [{"id": "x", "kind": "filesystem", "path": str(tmp_path)}]
         task = {
@@ -332,7 +331,7 @@ class TestPlaceholderPack:
             "owned_paths": ["backend/integrations/mozaikspay_client.py"],
         }
         result = resolver.resolve_hosted_pack_templates(pack_sources, [task])
-        assert result == [], "Placeholder pack must not produce template files"
+        assert result == [], "Inactive pack must not produce template files"
 
 
 # ---------------------------------------------------------------------------

@@ -9,7 +9,6 @@ import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from logs.logging_config import get_core_logger
@@ -677,13 +676,12 @@ class WorkflowPackCoordinator:
         if not wf:
             return False
         try:
-            from mozaiksai.core.workflow.paths import normalize_workflow_roots
+            from mozaiksai.core.workflow.paths import resolve_workflows_root
             from mozaiksai.resources import resolve_factory_workflows_root
 
-            for root in normalize_workflow_roots():
-                candidate = Path(root) / wf
-                if candidate.exists() and candidate.is_dir():
-                    return True
+            candidate = resolve_workflows_root() / wf
+            if candidate.exists() and candidate.is_dir():
+                return True
             factory_root = resolve_factory_workflows_root()
             if factory_root is not None:
                 candidate = factory_root / wf

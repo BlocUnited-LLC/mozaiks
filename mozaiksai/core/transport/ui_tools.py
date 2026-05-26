@@ -165,7 +165,7 @@ class UIToolsMixin:
 
         # Normalise display_type to the UIDisplayMode enum values.
         # Unknown values fall back to "inline" so the frontend always gets a
-        # valid mode string even if a workflow passes a legacy value.
+        # valid mode string even if a workflow passes an unsupported value.
         _display_norm = str(display_type or "").strip().lower()
         if _display_norm not in (UIDisplayMode.INLINE, UIDisplayMode.ARTIFACT):
             _display_norm = UIDisplayMode.INLINE

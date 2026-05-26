@@ -28,7 +28,7 @@ business_logger = get_workflow_logger("context_variables")
 _TRUE_FLAG_VALUES = {"1", "true", "yes", "on"}
 TRUNCATE_CHARS = int(os.getenv("CONTEXT_SCHEMA_TRUNCATE_CHARS", "4000") or 4000)
 _FILE_CONTEXT_ALLOW_OUTSIDE_ROOT = os.getenv("CONTEXT_FILE_ALLOW_OUTSIDE_ROOT", "false").strip().lower() in _TRUE_FLAG_VALUES
-_DATA_REFERENCE_PLACEHOLDERS_ENV = "MOZAIKS_CONTEXT_PLACEHOLDERS_FILE"
+_DATA_REFERENCE_FALLBACKS_ENV = "MOZAIKS_CONTEXT_FALLBACKS_FILE"
 
 
 def _find_repo_root() -> Path:
@@ -169,10 +169,10 @@ def _resolve_file_source(definition: ContextVariableDefinition) -> Any:
     return _coerce_value(definition, json.loads(raw))
 
 
-def _load_data_reference_placeholders() -> Dict[str, Any]:
-    """Load optional data_reference placeholder values from a JSON file.
+def _load_data_reference_fallbacks() -> Dict[str, Any]:
+    """Load optional data_reference fallback values from a JSON file.
 
-    File path is configured through MOZAIKS_CONTEXT_PLACEHOLDERS_FILE.
+    File path is configured through MOZAIKS_CONTEXT_FALLBACKS_FILE.
     Expected shape:
     {
       "global": { "var_name": <value> },
@@ -182,10 +182,10 @@ def _load_data_reference_placeholders() -> Dict[str, Any]:
     }
 
     For convenience, a flat object without `global/workflows` is treated as
-    global placeholders.
+    global fallbacks.
     """
 
-    raw_path = (os.getenv(_DATA_REFERENCE_PLACEHOLDERS_ENV) or "").strip()
+    raw_path = (os.getenv(_DATA_REFERENCE_FALLBACKS_ENV) or "").strip()
     if not raw_path:
         return {}
 
@@ -197,42 +197,42 @@ def _load_data_reference_placeholders() -> Dict[str, Any]:
     try:
         resolved = path.resolve()
     except Exception as err:
-        business_logger.warning("Invalid %s path '%s': %s", _DATA_REFERENCE_PLACEHOLDERS_ENV, str(path), err)
+        business_logger.warning("Invalid %s path '%s': %s", _DATA_REFERENCE_FALLBACKS_ENV, str(path), err)
         return {}
 
     if not _is_within_root(resolved, repo_root) and not _FILE_CONTEXT_ALLOW_OUTSIDE_ROOT:
         business_logger.warning(
-            "Refusing to load context placeholder file outside repo root (set CONTEXT_FILE_ALLOW_OUTSIDE_ROOT=true to override): %s",
+            "Refusing to load context fallback file outside repo root (set CONTEXT_FILE_ALLOW_OUTSIDE_ROOT=true to override): %s",
             resolved,
         )
         return {}
 
     if not resolved.exists():
-        business_logger.warning("Context placeholder file does not exist: %s", resolved)
+        business_logger.warning("Context fallback file does not exist: %s", resolved)
         return {}
 
     try:
         payload = json.loads(resolved.read_text(encoding="utf-8"))
     except Exception as err:
-        business_logger.warning("Failed parsing context placeholder file %s: %s", resolved, err)
+        business_logger.warning("Failed parsing context fallback file %s: %s", resolved, err)
         return {}
 
     if not isinstance(payload, dict):
-        business_logger.warning("Context placeholder file must contain a JSON object: %s", resolved)
+        business_logger.warning("Context fallback file must contain a JSON object: %s", resolved)
         return {}
 
-    business_logger.info("Loaded context placeholder file: %s", resolved)
+    business_logger.info("Loaded context fallback file: %s", resolved)
     return payload
 
 
-def _lookup_data_reference_placeholder(
-    placeholders: Dict[str, Any],
+def _lookup_data_reference_fallback(
+    fallbacks: Dict[str, Any],
     workflow_name: str,
     variable_name: str,
 ) -> Any:
-    """Return placeholder value for a data_reference variable or None."""
+    """Return fallback value for a data_reference variable or None."""
 
-    if not placeholders or not variable_name:
+    if not fallbacks or not variable_name:
         return None
 
     def _find_workflow_scope(workflows: Any, wf_name: str) -> Dict[str, Any]:
@@ -243,17 +243,17 @@ def _lookup_data_reference_placeholder(
                 return value
         return {}
 
-    workflows_scope = _find_workflow_scope(placeholders.get("workflows"), workflow_name)
+    workflows_scope = _find_workflow_scope(fallbacks.get("workflows"), workflow_name)
     if variable_name in workflows_scope:
         return workflows_scope.get(variable_name)
 
-    global_scope = placeholders.get("global")
+    global_scope = fallbacks.get("global")
     if isinstance(global_scope, dict) and variable_name in global_scope:
         return global_scope.get(variable_name)
 
     # Convenience mode: root object behaves as global map when no wrapper is used.
-    if "global" not in placeholders and "workflows" not in placeholders and variable_name in placeholders:
-        return placeholders.get(variable_name)
+    if "global" not in fallbacks and "workflows" not in fallbacks and variable_name in fallbacks:
+        return fallbacks.get(variable_name)
 
     return None
 
@@ -650,7 +650,7 @@ async def _load_context_async(workflow_name: str, app_id: Optional[str]):
 
     definitions = plan.definitions or {}
     default_db = _database_defaults(raw_context_section)
-    placeholders = _load_data_reference_placeholders()
+    fallbacks = _load_data_reference_fallbacks()
     data_entity_managers: List[DataEntityManager] = []
 
     for name, definition in definitions.items():
@@ -671,11 +671,11 @@ async def _load_context_async(workflow_name: str, app_id: Optional[str]):
                 context=context,
             )
             if value is None:
-                placeholder_value = _lookup_data_reference_placeholder(placeholders, workflow_name, name)
-                if placeholder_value is not None:
-                    value = _coerce_value(definition, placeholder_value)
+                fallback_value = _lookup_data_reference_fallback(fallbacks, workflow_name, name)
+                if fallback_value is not None:
+                    value = _coerce_value(definition, fallback_value)
                     business_logger.info(
-                        "[DATA_REFERENCE] Using placeholder fallback for '%s' in workflow '%s'",
+                        "[DATA_REFERENCE] Using configured fallback for '%s' in workflow '%s'",
                         name,
                         workflow_name,
                     )

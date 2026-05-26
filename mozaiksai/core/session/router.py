@@ -1151,7 +1151,7 @@ class SessionRouter:
             )
 
         transition_type = str(getattr(transition, "transition_type", "") or "").strip()
-        if transition_type in {"silent", "progress_view", "prerequisite_redirect"}:
+        if transition_type in {"silent", "progress_view", "prerequisite_redirect", "chat_session"}:
             target = str(getattr(transition, "route_to", "") or "").strip()
             if not target:
                 raise ValueError(f"Transition '{transition.id}' has no route_to")

@@ -46,7 +46,7 @@ class ModuleContext:
 
     # App-scoped generated-module persistence. ModuleExecutor injects this
     # when app_id is available. It may be None for explicitly constructed test
-    # contexts or legacy trusted calls. ctx.db is intentionally not provided.
+    # contexts or trusted runtime calls. ctx.db is intentionally not provided.
     persistence: ModulePersistenceContext | None = None
 
     # Event emitter — async callable(event_type, payload) -> None

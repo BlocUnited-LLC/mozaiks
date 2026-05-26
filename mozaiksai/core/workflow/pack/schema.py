@@ -127,6 +127,8 @@ class WorkflowTransition(BaseModel):
       silent                — router continues with no UI surface
       progress_view         — optional progress UI before continuing
       prerequisite_redirect — optional UI explaining a prerequisite redirect
+      chat_session          — launches route_to workflow in the current chat surface
+                               with no blocking overlay; user can type freely
 
     UI resolution (shell responsibility):
       1. Look up transition.ui.component in the component registry.
@@ -136,6 +138,12 @@ class WorkflowTransition(BaseModel):
          - transition: the full WorkflowTransition object
          - onResolve: (option_id: str) => void
               fires routing.transition.resolve event, shell executes the routing
+
+    chat_session resolution (shell responsibility):
+      TransitionScreen detects chat_session, calls onResolve(null) immediately
+      without mounting UI. Shell calls /api/transitions/resolve and receives
+      resolution_type: "chat_session" with chat_id, workflow_id, and
+      context_variables. Shell switches active chat session in-place.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -150,6 +158,7 @@ class WorkflowTransition(BaseModel):
         "silent",
         "progress_view",
         "prerequisite_redirect",
+        "chat_session",
     ]
     ui: Optional[TransitionUIBinding] = None
 
@@ -218,6 +227,17 @@ class WorkflowTransition(BaseModel):
         if self.transition_type in {"silent", "progress_view", "prerequisite_redirect"}:
             if not isinstance(self.route_to, str) or not self.route_to.strip():
                 raise ValueError(f"{self.transition_type} transition requires route_to")
+        if self.transition_type == "chat_session":
+            if not isinstance(self.route_to, str) or not self.route_to.strip():
+                raise ValueError("chat_session transition requires route_to pointing to a workflow id")
+            if self.ui is not None:
+                raise ValueError("chat_session transition must not declare a ui block — it never renders an overlay")
+            if self.options:
+                raise ValueError("chat_session transition must not declare options")
+            if self.confirm_route or self.cancel_route:
+                raise ValueError("chat_session transition must not declare confirm_route or cancel_route")
+            if self.context_key or self.routes:
+                raise ValueError("chat_session transition must not declare context_key or routes")
         return self
 
 

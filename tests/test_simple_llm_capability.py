@@ -86,7 +86,7 @@ async def test_generate_json_completion_keeps_chat_completions_for_non_codex_mod
     response = await service.generate_json_completion(
         system_prompt="system prompt",
         user_prompt="user prompt",
-        llm_config={"model": "gpt-4o-mini", "temperature": 0.0},
+        llm_config={"model": "gpt-5-nano", "temperature": 0.0},
         app_id="factory_app",
         user_id="user_1",
     )
@@ -94,7 +94,7 @@ async def test_generate_json_completion_keeps_chat_completions_for_non_codex_mod
     assert response["parsed"]["summary"] == "Classify request."
     assert service._client.calls[0]["url"].endswith("/chat/completions")
     payload = service._client.calls[0]["json"]
-    assert payload["model"] == "gpt-4o-mini"
+    assert payload["model"] == "gpt-5-nano"
     assert payload["temperature"] == 0.0
     assert payload["messages"][0]["role"] == "system"
     assert payload["messages"][1]["role"] == "user"
@@ -102,7 +102,7 @@ async def test_generate_json_completion_keeps_chat_completions_for_non_codex_mod
 
 async def _fake_select_provider(llm_config=None):  # noqa: ANN001
     return {
-        "model": (llm_config or {}).get("model") or "gpt-4o-mini",
+        "model": (llm_config or {}).get("model") or "gpt-5-nano",
         "api_key": "test-key",
         "api_base": "https://api.openai.com/v1",
     }

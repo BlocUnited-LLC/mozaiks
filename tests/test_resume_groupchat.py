@@ -209,7 +209,7 @@ async def test_handle_resume_request_skips_marked_agentdriven_seed_message(monke
 
 
 @pytest.mark.asyncio
-async def test_handle_resume_request_skips_legacy_agentdriven_primer_match(monkeypatch):
+async def test_handle_resume_request_skips_unmarked_agentdriven_primer_match(monkeypatch):
     resumer = GroupChatResumer()
     emitted = []
 
@@ -225,7 +225,7 @@ async def test_handle_resume_request_skips_legacy_agentdriven_primer_match(monke
                 {
                     "role": "user",
                     "agent_name": "user",
-                    "content": "Legacy hidden primer",
+                    "content": "Hidden startup primer",
                 },
                 {"role": "assistant", "agent_name": "InterviewAgent", "content": "Visible follow-up"},
             ],
@@ -244,7 +244,7 @@ async def test_handle_resume_request_skips_legacy_agentdriven_primer_match(monke
     monkeypatch.setattr(
         resumer,
         "_resolve_hidden_initial_message",
-        lambda **_kwargs: "Legacy hidden primer",
+        lambda **_kwargs: "Hidden startup primer",
     )
 
     await resumer.handle_resume_request(

@@ -399,7 +399,7 @@ def build_models_from_config(models_config: Dict[str, Any]) -> Dict[str, type]:
 def load_workflow_structured_outputs(workflow_name: str) -> tuple[Dict[str, type], Dict[str, type]]:
     """Load structured outputs configuration for a workflow."""
     if workflow_name in _workflow_models:
-        # Ensure structured agents cache initialized (backwards compat if previously built before new cache)
+        # Ensure structured agents cache is initialized before returning cached models.
         if workflow_name not in _workflow_structured_agents:
             _workflow_structured_agents[workflow_name] = set(_workflow_registries.get(workflow_name, {}).keys())
         return _workflow_models[workflow_name], _workflow_registries[workflow_name]

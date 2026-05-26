@@ -22,7 +22,7 @@ def test_factory_app_ai_config_enables_control_plane() -> None:
     assert config.classifier.enabled is True
     assert config.classifier.llm_profile == "classifier"
     assert config.resolve_capability_llm_config("classifier") == {
-        "model": "gpt-4o-mini",
+        "model": "gpt-5-nano",
         "temperature": 0.0,
     }
     assert config.coding.enabled is True
@@ -74,13 +74,13 @@ def test_control_plane_capability_llm_config_fallback_remains_supported() -> Non
             "enabled": True,
             "classifier": {
                 "enabled": True,
-                "llm_config": {"model": "gpt-4o-mini", "temperature": 0.0},
+                "llm_config": {"model": "gpt-5-nano", "temperature": 0.0},
             },
         }
     )
 
     assert config.resolve_capability_llm_config("classifier") == {
-        "model": "gpt-4o-mini",
+        "model": "gpt-5-nano",
         "temperature": 0.0,
     }
 

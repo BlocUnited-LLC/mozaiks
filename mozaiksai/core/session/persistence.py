@@ -16,12 +16,6 @@ from .model import (
 )
 
 
-_LEGACY_LIFECYCLE_ALIASES = {
-    "refining": SessionLifecycle.ACTIVE,
-    "awaiting_approval": SessionLifecycle.AWAITING_DECISION,
-}
-
-
 def _coerce_datetime(value: Any, *, fallback: datetime) -> datetime:
     if isinstance(value, datetime):
         return value
@@ -63,7 +57,7 @@ def _coerce_string_list(value: Any) -> list[str]:
     return normalized
 
 
-def _derive_legacy_sequence_status(lifecycle_state: SessionLifecycle) -> SequenceStatus:
+def _default_sequence_status(lifecycle_state: SessionLifecycle) -> SequenceStatus:
     if lifecycle_state == SessionLifecycle.COMPLETED:
         return SequenceStatus.COMPLETED
     if lifecycle_state == SessionLifecycle.STALE:
@@ -195,16 +189,16 @@ class SessionStateStore:
         try:
             lifecycle_state = SessionLifecycle(raw_lifecycle)
         except Exception:
-            lifecycle_state = _LEGACY_LIFECYCLE_ALIASES.get(raw_lifecycle, SessionLifecycle.INITIAL)
+            lifecycle_state = SessionLifecycle.INITIAL
         raw_sequence_status = str(doc.get("sequence_status") or "").strip()
         try:
             sequence_status = (
                 SequenceStatus(raw_sequence_status)
                 if raw_sequence_status
-                else _derive_legacy_sequence_status(lifecycle_state)
+                else _default_sequence_status(lifecycle_state)
             )
         except Exception:
-            sequence_status = _derive_legacy_sequence_status(lifecycle_state)
+            sequence_status = _default_sequence_status(lifecycle_state)
 
         return SessionState(
             session_id=session_id,

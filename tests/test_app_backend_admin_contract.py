@@ -61,7 +61,7 @@ def test_app_backend_admin_contract_accepts_explicit_builtin_and_schema_panels()
     assert result["panels"][1]["layout"] == "full-width"
 
 
-def test_app_backend_admin_contract_rejects_legacy_shapes() -> None:
+def test_app_backend_admin_contract_rejects_removed_shapes() -> None:
     module_uri = (_workspace() / "chat-ui/src/admin/contracts/appAdminContract.js").resolve().as_uri()
     script = f"""
       import {{ parseAppBackendAdminConfig }} from {json.dumps(module_uri)};

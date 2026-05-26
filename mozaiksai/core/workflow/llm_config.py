@@ -12,7 +12,7 @@ Goals
 Environment (optional)
 ----------------------
 LLM_CONFIG_CACHE_TTL   Seconds to keep raw provider list (default 300)
-DEFAULT_LLM_MODEL      Override fallback model name (default gpt-4o-mini)
+DEFAULT_LLM_MODEL      Override fallback model name (default gpt-5-nano)
 OPENAI_MODEL_FALLBACK  Comma-separated list of fallback model names
 
 Public API
@@ -120,7 +120,7 @@ logger.info(f"LLM_CONFIG_DEFAULT_CACHE_SEED_SELECTED seed={_DEFAULT_CACHE_SEED} 
 PRICE_MAP: Dict[str, List[float]] = {
     "o3-mini": [0.0011, 0.0044],
     "gpt-4.1-nano": [0.0001, 0.0004],
-    "gpt-4o-mini": [0.00015, 0.0006],
+    "gpt-5-nano": [0.00015, 0.0006],
 }
 
 
@@ -180,7 +180,7 @@ async def _load_raw_config_list(force: bool = False) -> List[ProviderConfig]:
                 logger.debug(f"[LLM_CONFIG] DB document found: {_redact_mapping(db_doc)}")
             except Exception:
                 logger.debug("[LLM_CONFIG] DB document found (redaction failed to serialize)")
-            # Expect a shape like: { model: 'gpt-4o-mini', price: {...}, ... }
+            # Expect a shape like: { model: 'gpt-5-nano', price: {...}, ... }
             # Support single or list of providers.
             providers = db_doc.get("providers") or db_doc.get("models") or [db_doc]
             if not isinstance(providers, list):
@@ -195,7 +195,7 @@ async def _load_raw_config_list(force: bool = False) -> List[ProviderConfig]:
                 model_lowercase = p.get("model")
                 model_capitalized = p.get("Model")
                 model_name_field = p.get("name")
-                env_default = os.getenv("DEFAULT_LLM_MODEL", "gpt-4o-mini")
+                env_default = os.getenv("DEFAULT_LLM_MODEL", "gpt-5-nano")
                 model_name = model_lowercase or model_capitalized or model_name_field or env_default
                 logger.info(
                     f"[LLM_CONFIG] Model extraction for provider {i}: "
@@ -230,7 +230,7 @@ async def _load_raw_config_list(force: bool = False) -> List[ProviderConfig]:
             if os.getenv("OPENAI_MODEL_FALLBACK"):
                 fallback_models = [m.strip() for m in os.getenv("OPENAI_MODEL_FALLBACK", "").split(",") if m.strip()]
             if not fallback_models:
-                fallback_models = [os.getenv("DEFAULT_LLM_MODEL", "gpt-4o-mini")]
+                fallback_models = [os.getenv("DEFAULT_LLM_MODEL", "gpt-5-nano")]
             for m in fallback_models:
                 entry = {"model": m, "api_key": api_key}
                 if m in PRICE_MAP:

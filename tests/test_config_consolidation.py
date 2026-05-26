@@ -68,7 +68,7 @@ class TestAIConfig:
     def ai(self):
         return _load_app_json("config/ai.json")
 
-    def test_has_no_legacy_engine_block(self, ai):
+    def test_has_no_removed_engine_block(self, ai):
         assert "engine" not in ai
 
     def test_has_workflow_entry_point(self, ai):

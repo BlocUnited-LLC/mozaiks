@@ -116,7 +116,7 @@ def test_build_outbound_event_envelope_marks_hidden_initial_seed_messages() -> N
     envelope = dispatcher.build_outbound_event_envelope(
         raw_event={
             "kind": "text",
-            "content": "ValueInterviewAgent: start a focused interview.",
+            "content": "ValueInterviewAgent: guide the user to a concrete app direction.",
             "agent": "user",
             "role": "user",
             "_mozaiks_seed_kind": "initial_message",
@@ -193,7 +193,7 @@ def test_runtime_context_payload_serializes_context_variables() -> None:
     }
 
 
-def test_artifact_lifecycle_builder_rejects_legacy_alias_names() -> None:
+def test_artifact_lifecycle_builder_rejects_removed_alias_names() -> None:
     with pytest.raises(ValueError, match="Unsupported artifact lifecycle event type"):
         build_artifact_lifecycle_event(
             event_type="runtime.artifact_updated",

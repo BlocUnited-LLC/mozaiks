@@ -40,7 +40,6 @@ def test_mozaiks_platform_has_platform_scoped_ai_config() -> None:
 def test_shell_config_uses_active_platform_path_first() -> None:
     source = _read("mozaiksai/hosts/platform.py")
     assert 'def resolve_app_root() -> Path:' in source
-    assert 'def resolve_platform_path() -> Path:' in source
     assert 'app_root = resolve_app_root()' in source
     assert 'ai_path = app_root / "config" / "ai.json"' in source
     assert 'Path(__file__).parent / "platform" / "config" / "ai.json"' not in source
@@ -100,7 +99,7 @@ def test_mozaiks_platform_workflow_registry_owns_create_route() -> None:
 def test_mozaiks_platform_workflow_registry_uses_shared_base_and_local_overlay() -> None:
     app_root = _product_app_root()
     shared_registry_path = _workspace() / "factory_app" / "workflows" / "extended_orchestration" / "extension_registry.json"
-    overlay_registry_path = app_root / "workflows" / "extended_orchestration" / "extension_registry.json"
+    overlay_registry_path = app_root.parent / "workflows" / "extended_orchestration" / "extension_registry.json"
     shared = json.loads(shared_registry_path.read_text(encoding="utf-8"))
     overlay = json.loads(overlay_registry_path.read_text(encoding="utf-8"))
 

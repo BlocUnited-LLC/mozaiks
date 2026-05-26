@@ -3,13 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from mozaiksai.core.workflow.paths import candidate_app_workflows_roots
 from mozaiksai.resources import resolve_factory_app_root, resolve_factory_workflows_root
-
-
-def _split_roots(raw: str) -> list[str]:
-    if not raw:
-        return []
-    return [part.strip() for part in raw.split(os.pathsep) if part.strip()]
 
 
 def _resolve_app_bundle_dir(path_value: str | os.PathLike[str]) -> Path:
@@ -40,9 +35,8 @@ def configure_repo_host_defaults(host: str) -> None:
     workflows come from the packaged factory_app bundle when that package is
     installed.
 
-    A running host should use one active workflow root, not merge app and
-    factory roots. If callers still provide the legacy MOZAIKS_WORKFLOW_ROOTS,
-    the first entry becomes the selected MOZAIKS_WORKFLOWS_PATH.
+    A running host should resolve its workflow root through MOZAIKS_WORKFLOWS_PATH
+    or through the host-specific app/factory defaults below.
     """
     normalized_host = str(host or "").strip().lower()
     if normalized_host not in {"platform", "studio", "mozaiks"}:
@@ -64,14 +58,10 @@ def configure_repo_host_defaults(host: str) -> None:
     if single_root:
         return
 
-    legacy_roots = _split_roots(str(os.getenv("MOZAIKS_WORKFLOW_ROOTS") or "").strip())
-    if legacy_roots:
-        os.environ["MOZAIKS_WORKFLOWS_PATH"] = legacy_roots[0]
-        return
-
     platform_path = str(os.getenv("PLATFORM_PATH") or "").strip()
     app_root = _resolve_app_bundle_dir(platform_path) if platform_path else None
-    app_workflows_root = (app_root / "workflows").resolve() if app_root else None
+    app_workflow_roots = candidate_app_workflows_roots(app_root) if app_root else ()
+    app_workflows_root = next((root for root in app_workflow_roots if root.is_dir()), None)
     factory_workflows_root = resolve_factory_workflows_root()
 
     if normalized_host == "studio":
@@ -79,22 +69,9 @@ def configure_repo_host_defaults(host: str) -> None:
         if selected_root is not None:
             os.environ["MOZAIKS_WORKFLOWS_PATH"] = str(selected_root)
     elif normalized_host == "mozaiks":
-        # Hosted product host: combine app-specific workflows with factory build workflows
-        # so product features (InvestorMarketplace, etc.) and build flows (AppGenerator, etc.)
-        # are both accessible. App workflows take precedence on name conflicts.
-        #
-        # App workflows may live at either:
-        #   <platform_path>/workflows/           (inside the app bundle)
-        #   <platform_path>/../workflows/        (workspace root, alongside app/)
-        roots: list[str] = []
-        workspace_workflows_root = (app_root.parent / "workflows").resolve() if app_root else None
-        for candidate in (app_workflows_root, workspace_workflows_root):
-            if candidate is not None and candidate.is_dir() and str(candidate) not in roots:
-                roots.append(str(candidate))
-        if factory_workflows_root is not None and str(factory_workflows_root) not in roots:
-            roots.append(str(factory_workflows_root))
-        if roots:
-            os.environ["MOZAIKS_WORKFLOWS_PATH"] = os.pathsep.join(roots)
+        selected_root = app_workflows_root if (app_workflows_root is not None and app_workflows_root.is_dir()) else factory_workflows_root
+        if selected_root is not None:
+            os.environ["MOZAIKS_WORKFLOWS_PATH"] = str(selected_root)
     else:
         selected_root = app_workflows_root if (app_workflows_root is not None and app_workflows_root.is_dir()) else factory_workflows_root
         if selected_root is not None:

@@ -279,3 +279,40 @@ async def test_coding_worker_fails_when_model_edits_outside_scoped_files(tmp_pat
     assert result.eligible is True
     assert result.status == "failed"
     assert "outside the explicit scoped files" in str(result.error)
+
+
+@pytest.mark.asyncio
+async def test_coding_worker_surfaces_artifact_persistence_errors(tmp_path: Path) -> None:
+    class _BrokenArtifactStore:
+        async def create_artifact_version(self, **kwargs):  # noqa: ANN003
+            raise RuntimeError('artifact store unavailable')
+
+    worker = ScopedRefinementCodingWorker(
+        capability_service=_FakeCapabilityService(),
+        config_loader=_enabled_control_plane,
+        pack_loader=_pack,
+        tool_executor=_FakeToolExecutor(),
+        validation_runner=_fake_validation_runner,
+        artifact_store=_BrokenArtifactStore(),
+        output_root=tmp_path,
+    )
+
+    result = await worker.execute(
+        CodingWorkerRequest(
+            app_id="app_1",
+            artifact_kind="app_bundle",
+            artifact_key="app_bundle",
+            artifact_version_id="av_123",
+            requested_workflow_id="AppGenerator",
+            raw_user_request="Fix the dashboard spacing",
+            source_surface="app_build",
+            change_class="patch",
+            files={"app/ui/pages/Dashboard.jsx": "export default function Dashboard() {}"},
+            validation_strategy="local",
+            context_seed={"change_class": "patch"},
+        )
+    )
+
+    assert result.status == "validated"
+    assert result.metadata["artifact_persistence_error"] == "artifact store unavailable"
+

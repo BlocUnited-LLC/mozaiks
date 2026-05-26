@@ -232,7 +232,7 @@ def test_parse_global_pack_graph_accepts_workflow_sequences() -> None:
     assert graph.journeys[0].affected_declarative_families == ["concept", "app_bundle"]
 
 
-def test_parse_global_pack_graph_rejects_legacy_journeys_key() -> None:
+def test_parse_global_pack_graph_rejects_removed_journeys_key() -> None:
     with pytest.raises(ValueError):
         parse_global_pack_graph(
             {
@@ -514,13 +514,13 @@ def test_parse_global_pack_graph_allows_same_phase_optional_dependency() -> None
     assert graph.journeys[0].steps[0].workflows == ["ThemeCapture", "ExistingAppDiscovery"]
 
 
-def test_parse_workflow_pack_graph_rejects_legacy_keys() -> None:
+def test_parse_workflow_pack_graph_rejects_removed_keys() -> None:
     with pytest.raises(ValueError):
         parse_workflow_pack_graph(
             {
                 "version": 3,
                 "mid_flight_journeys": [],
-                "legacy_journeys": [],
+                "removed_journeys": [],
             }
         )
 

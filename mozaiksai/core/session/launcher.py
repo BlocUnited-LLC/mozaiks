@@ -255,6 +255,14 @@ async def launch_transition(
     from .router import get_session_router
 
     router = session_router or get_session_router()
+
+    pack = load_global_pack_graph()
+    source_transition = get_transition(pack, transition_id) if pack is not None else None
+    is_chat_session = (
+        source_transition is not None
+        and getattr(source_transition, "transition_type", None) == "chat_session"
+    )
+
     resolution = await router.resolve_transition(
         app_id=app_id,
         user_id=user_id,
@@ -265,7 +273,6 @@ async def launch_transition(
     )
 
     if resolution.resolution_type == "transition":
-        pack = load_global_pack_graph()
         next_transition = get_transition(pack, resolution.target_id) if pack is not None else None
         if next_transition is None:
             raise ValueError(
@@ -299,8 +306,9 @@ async def launch_transition(
             **(extra_trigger_meta or {}),
         },
     )
+    effective_resolution_type = "chat_session" if is_chat_session else "workflow"
     return TransitionLaunchResult(
-        resolution_type="workflow",
+        resolution_type=effective_resolution_type,
         transition_id=transition_id,
         option_id=resolution.option_id,
         context_variables=dict(resolution.context_seed),

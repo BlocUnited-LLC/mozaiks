@@ -116,7 +116,7 @@ def test_runtime_admin_config_uses_flat_panel_collections() -> None:
     assert '"module_panels"' in source
     assert '"pages"' in source
     assert "load_admin_registry" in source
-    # Legacy constants and helpers are gone
+    # Removed constants and helpers stay absent.
     assert "DEFAULT_ADMIN_SHELL_CONFIG" not in source
     assert "_infer_admin_panel_section" not in source
 

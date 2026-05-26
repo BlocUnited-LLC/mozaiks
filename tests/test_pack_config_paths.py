@@ -22,7 +22,6 @@ def _use_repo_factory_workflows(monkeypatch) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     workflows_root = repo_root / "factory_app" / "workflows"
     monkeypatch.setenv("PLATFORM_PATH", str(repo_root / "__no_active_app__"))
-    monkeypatch.delenv("MOZAIKS_WORKFLOW_ROOTS", raising=False)
     monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(workflows_root))
     _config._GLOBAL_CACHE = None
     _config._WORKFLOW_CACHE = {}
@@ -60,14 +59,31 @@ def test_load_global_pack_graph_uses_canonical_file(monkeypatch) -> None:
         "AgentGenerator",
         "AppGenerator",
         "ExistingAppDiscovery",
+        "AppReview",
     }
+
+
+def test_load_global_pack_graph_review_transition_uses_chat_session_contract(monkeypatch) -> None:
+    _use_repo_factory_workflows(monkeypatch)
+    graph = load_global_pack_graph()
+    assert graph is not None
+
+    review = next((transition for transition in graph.transitions if transition.id == "app_review"), None)
+    assert review is not None
+    assert review.transition_type == "chat_session"
+    assert review.ui is None
+    assert review.route_to == "AppReview"
+    assert review.confirm_route is None
+    assert review.cancel_route is None
 
 
 def test_single_root_registry_path_uses_explicit_override_without_factory_merge(monkeypatch, tmp_path) -> None:
     _use_repo_factory_workflows(monkeypatch)
 
     app_root = tmp_path / "app"
-    registry_dir = app_root / "workflows" / "extended_orchestration"
+    workflows_root = tmp_path / "workflows"
+    registry_dir = workflows_root / "extended_orchestration"
+    app_root.mkdir(parents=True)
     registry_dir.mkdir(parents=True)
     (app_root / "app.json").write_text('{"appName":"test-app"}', encoding="utf-8")
     target_registry = registry_dir / "extension_registry.json"
@@ -84,8 +100,7 @@ def test_single_root_registry_path_uses_explicit_override_without_factory_merge(
         encoding="utf-8",
     )
 
-    monkeypatch.delenv("MOZAIKS_WORKFLOW_ROOTS", raising=False)
-    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(app_root / "workflows"))
+    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(workflows_root))
     _config._GLOBAL_CACHE = None
 
     path = get_global_pack_graph_path()
@@ -132,83 +147,18 @@ def test_list_workflow_sequences_returns_declared_sequences(monkeypatch) -> None
     ]
 
 
-def test_multi_root_registry_merges_artifact_dependency_graph(monkeypatch, tmp_path: Path) -> None:
-    overlay_root = tmp_path / "overlay"
-    base_root = tmp_path / "base"
-    overlay_registry_dir = overlay_root / "extended_orchestration"
-    base_registry_dir = base_root / "extended_orchestration"
-    overlay_registry_dir.mkdir(parents=True)
-    base_registry_dir.mkdir(parents=True)
+def test_workflows_path_rejects_path_lists(monkeypatch, tmp_path: Path) -> None:
+    local_root = tmp_path / "local"
+    shared_root = tmp_path / "shared"
+    local_root.mkdir()
+    shared_root.mkdir()
+    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", f"{local_root}{os.pathsep}{shared_root}")
 
-    (overlay_registry_dir / "extension_registry.json").write_text(
-        json.dumps(
-            {
-                "pack_name": "OverlayPack",
-                "version": 3,
-                "artifact_dependency_graph": {
-                    "app_bundle": ["integration_readiness"],
-                    "experience_spec": ["integration_readiness"],
-                    "integration_readiness": ["design_docs", "design_docs"],
-                },
-                "workflows": [{"id": "OverlayWorkflow"}],
-                "workflow_sequences": [
-                    {
-                        "id": "overlay_sequence",
-                        "affected_declarative_families": ["integration_readiness"],
-                        "steps": [{"workflows": ["OverlayWorkflow"]}],
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    (base_registry_dir / "extension_registry.json").write_text(
-        json.dumps(
-            {
-                "pack_name": "BasePack",
-                "version": 3,
-                "artifact_dependency_graph": {
-                    "concept": [],
-                    "brand": ["concept"],
-                    "design_docs": ["concept"],
-                    "experience_spec": ["concept"],
-                    "app_bundle": ["design_docs", "experience_spec", "brand"],
-                },
-                "workflows": [{"id": "BaseWorkflow"}],
-                "workflow_sequences": [
-                    {
-                        "id": "base_sequence",
-                        "affected_declarative_families": ["app_bundle"],
-                        "steps": [{"workflows": ["BaseWorkflow"]}],
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", f"{overlay_root}{os.pathsep}{base_root}")
-    monkeypatch.delenv("MOZAIKS_WORKFLOW_ROOTS", raising=False)
-    monkeypatch.delenv("PLATFORM_PATH", raising=False)
-    _config._GLOBAL_CACHE = None
-    _config._WORKFLOW_CACHE = {}
-
-    graph = load_global_pack_graph()
-
-    assert graph is not None
-    assert graph.artifact_dependency_graph == {
-        "app_bundle": ["integration_readiness", "design_docs", "experience_spec", "brand"],
-        "experience_spec": ["integration_readiness", "concept"],
-        "integration_readiness": ["design_docs"],
-        "concept": [],
-        "brand": ["concept"],
-        "design_docs": ["concept"],
-    }
-    assert [workflow.id for workflow in graph.workflows] == ["OverlayWorkflow", "BaseWorkflow"]
-    assert [sequence.id for sequence in graph.journeys] == ["overlay_sequence", "base_sequence"]
+    with pytest.raises(ValueError, match="single workflow root"):
+        _paths.resolve_workflows_root()
 
 
-def test_multi_root_registry_rejects_invalid_artifact_dependency_graph(
+def test_single_root_registry_rejects_invalid_artifact_dependency_graph(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -235,57 +185,42 @@ def test_multi_root_registry_rejects_invalid_artifact_dependency_graph(
         load_global_pack_graph()
 
 
-def test_legacy_multi_root_env_uses_first_declared_root_only(monkeypatch, tmp_path: Path) -> None:
+def test_workflows_path_selects_one_root(monkeypatch, tmp_path: Path) -> None:
     local_root = tmp_path / "local"
-    shared_root = tmp_path / "shared"
     local_graph_dir = local_root / "LocalOnly" / "extended_orchestration"
-    shared_graph_dir = shared_root / "SharedOnly" / "extended_orchestration"
     local_graph_dir.mkdir(parents=True)
-    shared_graph_dir.mkdir(parents=True)
 
     local_graph = local_graph_dir / "mfj_extension.json"
     local_graph.write_text(json.dumps({"version": 3, "mid_flight_journeys": []}), encoding="utf-8")
-    (shared_graph_dir / "mfj_extension.json").write_text(
-        json.dumps({"version": 3, "mid_flight_journeys": []}),
-        encoding="utf-8",
-    )
     (local_root / "LocalOnly" / "orchestrator.yaml").write_text("workflow_name: LocalOnly\n", encoding="utf-8")
-    (shared_root / "SharedOnly" / "orchestrator.yaml").write_text("workflow_name: SharedOnly\n", encoding="utf-8")
 
-    monkeypatch.setenv("MOZAIKS_WORKFLOW_ROOTS", f"{local_root}{os.pathsep}{shared_root}")
-    monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(local_root))
     monkeypatch.delenv("PLATFORM_PATH", raising=False)
     _config._GLOBAL_CACHE = None
     _config._WORKFLOW_CACHE = {}
 
-    assert _paths.normalize_workflow_roots() == [local_root.resolve()]
+    assert _paths.resolve_workflows_root() == local_root.resolve()
     assert get_workflow_pack_graph_path("LocalOnly") == local_graph.resolve()
 
 
 def test_single_root_override_does_not_inject_factory_fallback(monkeypatch, tmp_path: Path) -> None:
     local_root = tmp_path / "local-workflows"
     local_root.mkdir(parents=True)
-    monkeypatch.delenv("MOZAIKS_WORKFLOW_ROOTS", raising=False)
     monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(local_root))
 
-    roots = _paths.normalize_workflow_roots()
-    assert roots
-    assert roots[0] == local_root.resolve()
-    assert roots == [local_root.resolve()]
+    assert _paths.resolve_workflows_root() == local_root.resolve()
 
 
 def test_default_roots_use_repo_factory_workflows_when_no_active_app(monkeypatch) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     monkeypatch.chdir(repo_root)
-    monkeypatch.delenv("MOZAIKS_WORKFLOW_ROOTS", raising=False)
     monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
     monkeypatch.delenv("PLATFORM_PATH", raising=False)
 
-    roots = _paths.normalize_workflow_roots()
+    root = _paths.resolve_workflows_root()
 
-    assert roots
-    assert roots == [(repo_root / "factory_app" / "workflows").resolve()]
-    assert all("__no_active_app__" not in str(root) for root in roots)
+    assert root == (repo_root / "factory_app" / "workflows").resolve()
+    assert "__no_active_app__" not in str(root)
 
 
 def test_active_app_root_uses_workspace_env_when_platform_path_missing(monkeypatch, tmp_path: Path) -> None:

@@ -78,7 +78,7 @@ def test_load_selected_control_plane_pack_uses_app_override(tmp_path: Path) -> N
             {
                 "control_plane": {
                     "enabled": True,
-                    "classifier": {"enabled": True, "llm_config": {"model": "gpt-4o-mini"}},
+                    "classifier": {"enabled": True, "llm_config": {"model": "gpt-5-nano"}},
                 }
             }
         ),

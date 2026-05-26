@@ -18,7 +18,6 @@ def _write_canonical_module(
     include_events_manifest: bool = True,
     action_emits: str | None = None,
     reaction_target: str = "notification",
-    reaction_manifest_name: str = "reactions.yaml",
 ) -> Path:
     module_dir = root / "modules" / module_id
     (module_dir / "backend").mkdir(parents=True)
@@ -97,20 +96,13 @@ events:
       notification_id: task_created
 """.rstrip()
 
-    if reaction_manifest_name == "subscriptions.yaml":
-        reactions_yaml = f"""
-schema_version: mozaiks.subscriptions.v1
-subscriptions:
-{reaction_items_yaml}
-""".lstrip()
-    else:
-        reactions_yaml = f"""
+    reactions_yaml = f"""
 schema_version: mozaiks.reactions.v1
 reactions:
 {reaction_items_yaml}
 """.lstrip()
 
-    module_dir.joinpath("contracts", reaction_manifest_name).write_text(
+    module_dir.joinpath("contracts", "reactions.yaml").write_text(
         reactions_yaml,
         encoding="utf-8",
     )
@@ -240,31 +232,33 @@ def test_action_unknown_extra_field_still_fails_validation() -> None:
         )
 
 
-def test_module_loader_loads_legacy_subscriptions_as_reactions(
-    tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    _write_canonical_module(tmp_path, reaction_manifest_name="subscriptions.yaml")
+def test_module_loader_rejects_subscriptions_manifest(tmp_path: Path) -> None:
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("contracts", "reactions.yaml").unlink()
+    module_dir.joinpath("contracts", "subscriptions.yaml").write_text(
+        """
+schema_version: mozaiks.subscriptions.v1
+subscriptions:
+  - id: task_created_notify
+    event_type: domain.tasks.task_created
+    target:
+      kind: notification
+      notification_id: task_created
+""".lstrip(),
+        encoding="utf-8",
+    )
 
-    with caplog.at_level("WARNING"):
-        loaded = ModuleLoader(str(tmp_path)).load("tasks")
-
-    assert loaded.manifests.reactions is not None
-    assert loaded.manifests.reactions.reactions[0].id == "task_created_notify"
-    assert loaded.manifests.reactions.reactions[0].target.kind == "notification"
-    assert "MODULE_REACTIONS_LEGACY_DEPRECATED" in caplog.text
+    with pytest.raises(ModuleLoadError, match="contracts/subscriptions.yaml is not supported"):
+        ModuleLoader(str(tmp_path)).load("tasks")
 
 
-def test_module_loader_prefers_canonical_reactions_when_both_files_exist(
-    tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+def test_module_loader_rejects_subscriptions_manifest_even_when_reactions_exists(tmp_path: Path) -> None:
     module_dir = _write_canonical_module(tmp_path)
     module_dir.joinpath("contracts", "subscriptions.yaml").write_text(
         """
 schema_version: mozaiks.subscriptions.v1
 subscriptions:
-  - id: legacy_task_created_react
+  - id: unsupported_task_created_react
     event_type: domain.tasks.task_created
     target:
       kind: capability
@@ -273,16 +267,11 @@ subscriptions:
         encoding="utf-8",
     )
 
-    with caplog.at_level("WARNING"):
-        loaded = ModuleLoader(str(tmp_path)).load("tasks")
-
-    assert loaded.manifests.reactions is not None
-    assert loaded.manifests.reactions.reactions[0].id == "task_created_notify"
-    assert loaded.manifests.reactions.reactions[0].target.kind == "notification"
-    assert "MODULE_REACTIONS_LEGACY_IGNORED" in caplog.text
+    with pytest.raises(ModuleLoadError, match="contracts/subscriptions.yaml is not supported"):
+        ModuleLoader(str(tmp_path)).load("tasks")
 
 
-def test_module_loader_does_not_fallback_to_legacy_when_canonical_is_invalid(tmp_path: Path) -> None:
+def test_module_loader_rejects_subscriptions_manifest_before_reaction_validation(tmp_path: Path) -> None:
     module_dir = _write_canonical_module(tmp_path)
     module_dir.joinpath("contracts", "reactions.yaml").write_text(
         """
@@ -300,7 +289,7 @@ reactions:
         """
 schema_version: mozaiks.subscriptions.v1
 subscriptions:
-  - id: legacy_task_created_notify
+  - id: unsupported_task_created_notify
     event_type: domain.tasks.task_created
     target:
       kind: notification
@@ -309,7 +298,7 @@ subscriptions:
         encoding="utf-8",
     )
 
-    with pytest.raises(ModuleLoadError, match="Invalid reactions.yaml"):
+    with pytest.raises(ModuleLoadError, match="contracts/subscriptions.yaml is not supported"):
         ModuleLoader(str(tmp_path)).load("tasks")
 
 

@@ -49,10 +49,11 @@ def test_removed_platform_families_stay_removed() -> None:
 
 def test_mozaiks_app_workflows_are_local_and_builder_workflows_are_shared() -> None:
     app_root = active_app_root()
-    if not (app_root / "workflows" / "AppMarketing").is_dir():
+    workflows_root = app_root.parent / "workflows" if app_root.name == "app" else app_root / "workflows"
+    if not (workflows_root / "AppMarketing").is_dir():
         pytest.skip("Product workspace not configured — AppMarketing workflow missing")
-    app_marketing = _load_yaml(app_root, "workflows/AppMarketing/orchestrator.yaml")
-    investor_marketplace = _load_yaml(app_root, "workflows/InvestorMarketplace/orchestrator.yaml")
+    app_marketing = yaml.safe_load((workflows_root / "AppMarketing" / "orchestrator.yaml").read_text(encoding="utf-8"))
+    investor_marketplace = yaml.safe_load((workflows_root / "InvestorMarketplace" / "orchestrator.yaml").read_text(encoding="utf-8"))
 
     assert app_marketing["workflow_name"] == "AppMarketing"
     assert investor_marketplace["workflow_name"] == "InvestorMarketplace"

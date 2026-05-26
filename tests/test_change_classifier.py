@@ -56,7 +56,7 @@ def _enabled_control_plane() -> ControlPlaneConfig:
         classifier=ControlPlaneCapabilityConfig(
             enabled=True,
             llm_config={
-                "model": "gpt-4o-mini",
+                "model": "gpt-5-nano",
                 "temperature": 0.0,
             },
         ),
@@ -148,7 +148,7 @@ async def test_change_classifier_uses_control_plane_llm_config() -> None:
     assert result.signals == ["new_capability"]
     assert len(service.calls) == 1
     assert service.calls[0]["llm_config"] == {
-        "model": "gpt-4o-mini",
+        "model": "gpt-5-nano",
         "temperature": 0.0,
     }
     assert service.calls[0]["temperature"] == 0.0

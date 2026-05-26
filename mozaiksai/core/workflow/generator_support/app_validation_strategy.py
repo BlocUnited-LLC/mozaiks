@@ -14,7 +14,7 @@ _STRATEGY_LABELS = {
 }
 
 _STRATEGY_DESCRIPTIONS = {
-    "e2b": "Run build validation in the hosted sandbox and expose a preview URL when available.",
+    "e2b": "Run pre-deploy build validation in the hosted sandbox and expose a preview URL when available. Not a production hosting runtime.",
     "local": "Run build validation on the current machine without requiring sandbox credentials.",
     "skip": "Do not execute build validation for this run. Integration checks still gate export.",
 }

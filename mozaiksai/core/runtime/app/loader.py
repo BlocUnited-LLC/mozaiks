@@ -33,6 +33,7 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
     index_database_intent_by_entity,
     load_database_intent,
 )
+from mozaiksai.core.workflow.paths import candidate_app_workflows_roots
 from logs.logging_config import get_workflow_logger
 
 logger = get_workflow_logger("app_loader")
@@ -142,7 +143,10 @@ class AppLoader:
 
     @classmethod
     def _discover_workflow_names(cls, base_path: Path) -> List[str]:
-        workflows_dir = base_path / "workflows"
+        workflows_dir = next(
+            (root for root in candidate_app_workflows_roots(base_path) if root.exists()),
+            candidate_app_workflows_roots(base_path)[0],
+        )
         if not workflows_dir.exists():
             return []
         names: List[str] = []

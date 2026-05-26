@@ -18,7 +18,7 @@ from .schema import (
     parse_global_pack_graph,
     parse_workflow_pack_graph,
 )
-from ..paths import normalize_workflow_roots, primary_workflows_root, resolve_workflow_path
+from ..paths import primary_workflows_root, resolve_workflow_path
 
 
 @dataclass
@@ -35,9 +35,8 @@ def _workflows_root() -> Path:
 
     Resolution order:
       1. MOZAIKS_WORKFLOWS_PATH
-      2. First entry in legacy MOZAIKS_WORKFLOW_ROOTS
-      3. active app root workflows
-      4. repo-local factory workflows fallback
+      2. workspace-root workflows for the active app
+      3. repo-local factory workflows fallback
     """
     return primary_workflows_root()
 
@@ -55,7 +54,7 @@ def get_workflow_pack_graph_path(workflow_name: str) -> Path:
     wf = str(workflow_name or "").strip()
     if not wf:
         raise ValueError("workflow_name is required")
-    workflow_dir = resolve_workflow_path(wf, normalize_workflow_roots())
+    workflow_dir = resolve_workflow_path(wf)
     if workflow_dir is not None:
         return (workflow_dir / "extended_orchestration" / "mfj_extension.json").resolve()
     return (_workflows_root() / wf / "extended_orchestration" / "mfj_extension.json").resolve()
@@ -73,106 +72,23 @@ def _load_json_file(path: Path) -> Optional[Dict[str, Any]]:
         raise ValueError(f"Failed loading pack graph {path}: {exc}") from exc
 
 
-def _merge_raw_registries(registries: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Merge multiple raw registry dicts into one.
-
-    Registries are provided in priority order — earlier entries win on ID conflicts.
-    This allows a product overlay (mozaiks-app) to take precedence over the base
-    factory registry while still inheriting all factory workflows, sequences, and
-    transitions the overlay doesn't declare.
-
-    List fields are deduplicated by 'id'; scalar fields use first non-null
-    value. Artifact dependency graph entries are merged by family, preserving
-    priority order and deduplicating upstream edges.
-    """
-    if not registries:
-        return None
-
-    list_fields = ("workflows", "entrypoints", "transitions", "journeys", "workflow_sequences")
-    merged: Dict[str, Any] = {"version": 3}
-    seen_ids: Dict[str, set] = {f: set() for f in list_fields}
-    artifact_dependency_graph: Dict[str, List[str]] = {}
-
-    for registry in registries:
-        if not merged.get("pack_name"):
-            merged["pack_name"] = registry.get("pack_name")
-        if not merged.get("description"):
-            merged["description"] = registry.get("description")
-
-        for field in list_fields:
-            entries = registry.get(field)
-            if not entries:
-                continue
-            existing = merged.setdefault(field, [])
-            for entry in entries:
-                entry_id = entry.get("id") if isinstance(entry, dict) else None
-                if entry_id is not None:
-                    if entry_id in seen_ids[field]:
-                        continue  # primary (earlier) already claimed this id
-                    seen_ids[field].add(entry_id)
-                existing.append(entry)
-
-        graph = registry.get("artifact_dependency_graph")
-        if graph is None:
-            continue
-        if not isinstance(graph, dict):
-            raise ValueError("artifact_dependency_graph must be a JSON object")
-        for family, dependencies in graph.items():
-            family_id = str(family or "").strip()
-            if not family_id:
-                raise ValueError("artifact_dependency_graph family ids must be non-empty strings")
-            if not isinstance(dependencies, list):
-                raise ValueError(
-                    f"artifact_dependency_graph family '{family_id}' dependencies must be a list"
-                )
-            merged_dependencies = artifact_dependency_graph.setdefault(family_id, [])
-            for dependency in dependencies:
-                dependency_id = str(dependency or "").strip()
-                if not dependency_id:
-                    raise ValueError(
-                        f"artifact_dependency_graph family '{family_id}' dependencies must be non-empty strings"
-                    )
-                if dependency_id not in merged_dependencies:
-                    merged_dependencies.append(dependency_id)
-
-    if artifact_dependency_graph:
-        merged["artifact_dependency_graph"] = artifact_dependency_graph
-
-    return merged
-
-
 def load_global_pack_graph() -> Optional[GlobalPackGraph]:
     """Load and validate the canonical global pack graph.
-
-    When multiple workflow roots are configured (e.g. a product overlay on top
-    of the factory build pipeline), all extension_registry.json files are merged.
-    Earlier roots (higher-priority) win on ID conflicts; later roots (base/factory)
-    provide the build sequences and transitions the overlay does not declare.
     """
     global _GLOBAL_CACHE
 
-    roots = normalize_workflow_roots()
-    reg_paths = [
-        (root / "extended_orchestration" / "extension_registry.json").resolve()
-        for root in roots
-    ]
-    existing_paths = [p for p in reg_paths if p.exists()]
-
-    if not existing_paths:
+    path = get_global_pack_graph_path()
+    if not path.exists():
         return None
 
-    signature = tuple((str(p), p.stat().st_mtime) for p in existing_paths)
+    signature = ((str(path), path.stat().st_mtime),)
     cached = _GLOBAL_CACHE
     if cached and cached.source == signature:
         payload = cached.payload
         if isinstance(payload, GlobalPackGraph):
             return payload
 
-    registries = [r for p in existing_paths if (r := _load_json_file(p)) is not None]
-    if not registries:
-        return None
-
-    raw = _merge_raw_registries(registries) if len(registries) > 1 else registries[0]
+    raw = _load_json_file(path)
     if raw is None:
         return None
 

@@ -24,26 +24,24 @@ admin_paths = _load_module("tests.admin_paths", "mozaiksai/core/admin/paths.py")
 email_promotion = _load_module("tests.admin_email_promotion", "mozaiksai/core/admin/email_promotion.py")
 
 
-def test_admin_paths_resolve_platform_root_from_direct_app_root(monkeypatch, tmp_path: Path) -> None:
+def test_admin_paths_resolve_app_root_from_direct_app_root(monkeypatch, tmp_path: Path) -> None:
     app_root = tmp_path / "custom-app"
     _write_json(app_root / "app.json", {"appName": "Custom App"})
     monkeypatch.setenv("PLATFORM_PATH", str(app_root))
 
     assert admin_paths.resolve_admin_app_root() == app_root.resolve()
-    assert admin_paths.resolve_platform_root() == app_root.resolve()
 
 
-def test_admin_paths_resolve_platform_root_from_workspace_root(monkeypatch, tmp_path: Path) -> None:
+def test_admin_paths_resolve_app_root_from_workspace_root(monkeypatch, tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     app_root = workspace_root / "app"
     _write_json(app_root / "app.json", {"appName": "Workspace App"})
     monkeypatch.setenv("PLATFORM_PATH", str(workspace_root))
 
     assert admin_paths.resolve_admin_app_root() == app_root.resolve()
-    assert admin_paths.resolve_platform_root() == app_root.resolve()
 
 
-def test_admin_paths_resolve_platform_root_from_workspace_env(monkeypatch, tmp_path: Path) -> None:
+def test_admin_paths_resolve_app_root_from_workspace_env(monkeypatch, tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace-from-env"
     app_root = workspace_root / "app"
     _write_json(app_root / "app.json", {"appName": "Workspace Env App"})
@@ -51,7 +49,6 @@ def test_admin_paths_resolve_platform_root_from_workspace_env(monkeypatch, tmp_p
     monkeypatch.setenv("MOZAIKS_APP_WORKSPACE_PATH", str(workspace_root))
 
     assert admin_paths.resolve_admin_app_root() == app_root.resolve()
-    assert admin_paths.resolve_platform_root() == app_root.resolve()
 
 
 def test_email_promotion_reads_active_app_admins(monkeypatch, tmp_path: Path) -> None:
