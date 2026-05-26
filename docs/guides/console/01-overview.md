@@ -81,5 +81,4 @@ The App Console is app scope:
 ## Related Docs
 
 - [Getting Started](../../getting-started.md)
-- [Configuration](../../user-configuration.md)
 - [App Shell & Branding](../custom-brand-integration/01-overview.md)

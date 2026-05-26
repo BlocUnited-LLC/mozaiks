@@ -87,7 +87,6 @@ nav:
   - Home: index.md
   - Get Started:
       - Getting Started: getting-started.md
-      - Configuration: user-configuration.md
   - Guides:
       - Use the Console: guides/console/01-overview.md
       - Add Workflows: guides/adding-workflows/01-overview.md

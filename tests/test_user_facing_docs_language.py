@@ -35,6 +35,7 @@ def test_console_overview_uses_plain_product_terms() -> None:
     assert "starts the app build flow" in doc
     assert "list of apps in your workspace" in doc
     assert "page-by-page app builder" in doc
+    assert "[Configuration](../../user-configuration.md)" not in doc
     assert "management surfaces" not in doc
     assert "workflow sequence" not in doc
 

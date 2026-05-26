@@ -78,11 +78,11 @@ you through planning, generation, review, and revision inside the chat.
 
     [:octicons-arrow-right-24: Get Started](getting-started.md)
 
--   :material-tune-variant: **Configure Your Environment**
+-   :material-tune-variant: **Configuration Reference**
 
     ---
 
-    Set one model key and MongoDB. Everything else is optional until you need it.
+    Use this only when you need connector secrets, auth, or deployment settings.
 
     [:octicons-arrow-right-24: Configuration](user-configuration.md)
 

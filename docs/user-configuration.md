@@ -1,9 +1,8 @@
 # User Configuration
 
-Most users need only two settings:
-
-- one LLM provider key
-- one MongoDB connection string
+This is a compact reference page, not part of the main first-run path. Start
+with [Getting Started](getting-started.md) if you are setting up Mozaiks for
+the first time.
 
 ## Minimum Setup
 
@@ -12,7 +11,6 @@ PowerShell:
 ```powershell
 $env:OPENAI_API_KEY="sk-..."
 $env:MONGO_URI="mongodb://localhost:27017/mozaiks"
-mozaiks quickstart --dir .\mozaiks-workspace
 ```
 
 macOS or Linux:
@@ -20,7 +18,6 @@ macOS or Linux:
 ```bash
 export OPENAI_API_KEY="sk-..."
 export MONGO_URI="mongodb://localhost:27017/mozaiks"
-mozaiks quickstart --dir ./mozaiks-workspace
 ```
 
 Use `ANTHROPIC_API_KEY` instead of `OPENAI_API_KEY` if that is your provider.
@@ -52,7 +49,3 @@ Deployment and shared-hosting environments may also need:
 
 These are operator settings. They are not required for the first local Console
 run.
-
-## Contributing
-
-Want to contribute? See the [Contributing guide](https://docs.mozaiks.ai/contributing/).
