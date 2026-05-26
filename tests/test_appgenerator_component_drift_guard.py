@@ -314,7 +314,7 @@ def test_frontend_rules_mention_route_component_registry_drift() -> None:
     assert "Custom React routes are not auto-discovered" in frontend_rules
 
 
-def test_docs_and_prompts_do_not_describe_legacy_custom_route_ownership() -> None:
+def test_docs_and_prompts_do_not_describe_removed_custom_route_ownership() -> None:
     guidance_files = {
         "agents": _read("factory_app/workflows/AppGenerator/agents.yaml"),
         "frontend_rules": _read(".claude/rules/frontend.md"),
@@ -341,7 +341,7 @@ def test_docs_and_prompts_do_not_describe_legacy_custom_route_ownership() -> Non
     for label, content in guidance_files.items():
         lowered = content.lower()
         for phrase in forbidden_phrases:
-            assert phrase not in lowered, f"{label} still contains legacy phrase: {phrase}"
+            assert phrase not in lowered, f"{label} still contains removed route-ownership phrase: {phrase}"
 
 
 def test_docs_and_prompts_state_no_implicit_custom_route_discovery() -> None:

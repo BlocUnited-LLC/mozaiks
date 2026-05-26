@@ -12,7 +12,7 @@ Coverage:
 - registration in tools.yaml at route_requested
 - read-only: no writes, no LLM calls
 - doc hygiene: get_carry_forward_candidates documented; carry_forward_modules
-  advisory; AssemblyAgent merge not implemented
+  advisory; Phase 7A declarative preservation (not backend merge)
 """
 from __future__ import annotations
 
@@ -717,12 +717,10 @@ class TestDocumentation:
         # The doc must confirm merge is not implemented
         assert "no" in doc.lower() or "not" in doc.lower()
 
-    def test_doc_states_auto_population_not_yet_implemented(self) -> None:
-        """Phase 3 (auto-populate carry_forward_modules) is not yet done;
-        docs must not claim it is implemented."""
+    def test_doc_documents_phase_3_auto_population(self) -> None:
+        """Phase 3 (auto-populate carry_forward_modules) is implemented.
+        Docs must mention it."""
         doc = self._load_doc()
-        # The doc should acknowledge Phase 3 is pending
-        # (it should say auto-population is not yet done or is future work for Phase 3)
         assert "phase 3" in doc.lower() or "auto-popul" in doc.lower()
 
     def test_doc_does_not_say_only_manually_supplied(self) -> None:

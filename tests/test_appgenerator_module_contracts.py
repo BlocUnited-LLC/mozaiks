@@ -32,6 +32,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert registry["ControllerAgent"] == "ControllerOutput"
     assert "module_contract" in models["AppBuildTask"]["fields"]["task_type"]["values"]
     assert "platform_config" not in models["AppBuildTask"]["fields"]["task_type"]["values"]
+    assert "provider_adapter" in models["BackendFoundationFile"]["fields"]["kind"]["values"]
 
     for model_name in [
         "ModuleIdentity",
@@ -83,6 +84,17 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "ImplementedJsStub",
         "FrontendStubOutput",
         "ControllerOutput",
+        "DeployTargetRuntime",
+        "DeployTargetEnvironment",
+        "DeployTargetImage",
+        "DeployTargetChecks",
+        "CiSecretRequirement",
+        "CiWorkflowInputRequirement",
+        "CiSecretRequirements",
+        "DeployTargetSpec",
+        "DeploymentHealthcheck",
+        "DeploymentBuildOutput",
+        "DeploymentTemplateManifest",
     ]:
         assert model_name in models
 
@@ -148,6 +160,15 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert models["FrontendStubOutput"]["fields"]["registration_barrel"]["variants"] == ["str", "null"]
     assert models["DatabaseOutput"]["fields"]["database_files"]["items"] == "DatabaseArtifactFile"
     assert models["ModelOutput"]["fields"]["model_files"]["items"] == "ModelFile"
+    assert models["AppBuildPlan"]["fields"]["deployment_targets"]["items"] == "DeployTargetSpec"
+    assert models["AppBuildPlan"]["fields"]["deployment_template_manifest"]["variants"] == ["DeploymentTemplateManifest", "null"]
+    assert models["DeployTargetSpec"]["fields"]["target_kind"]["values"] == ["container", "compose", "external_adapter"]
+    assert models["DeployTargetSpec"]["fields"]["ci_secret_requirements"]["variants"] == ["CiSecretRequirements", "null"]
+    assert models["DeploymentTemplateManifest"]["fields"]["ci_secret_requirements"]["variants"] == ["CiSecretRequirements", "null"]
+    assert models["CiSecretRequirements"]["fields"]["required"]["items"] == "CiSecretRequirement"
+    assert models["CiSecretRequirements"]["fields"]["optional"]["items"] == "CiSecretRequirement"
+    assert models["CiSecretRequirements"]["fields"]["workflow_inputs"]["items"] == "CiWorkflowInputRequirement"
+    assert models["DeploymentTemplateManifest"]["fields"]["validation_status"]["values"] == ["pending", "valid", "invalid"]
     assert models["AppValidation"]["fields"]["validation_strategy"]["values"] == ["e2b", "local", "skip"]
     assert models["AppValidation"]["fields"]["validation_status"]["values"] == ["passed", "failed", "skipped"]
     admin_panel_fields = models["ModuleAdminPanel"]["fields"]
@@ -156,7 +177,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert admin_panel_fields["sections"]["items"] == "AppPageSection"
 
 
-def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations_contract() -> None:
+def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operations_contract() -> None:
     source = _read("factory_app/workflows/AppGenerator/agents.yaml")
     handoffs = _read_yaml("factory_app/workflows/AppGenerator/handoffs.yaml")
     file_contracts = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
@@ -204,6 +225,10 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
     assert "validation_status" in source
     assert "validate_app_build" in source
     assert "passed` or explicit `skipped`" in source
+    assert "provider-neutral outputs from the deployment contract" in source
+    assert "Generated artifacts must never commit secrets" in source
+    assert "ci_secret_requirements" in source
+    assert "pre-deploy validation/preview only" in source
     assert "[FILE CONTRACTS CONTEXT]" in source
     assert "[MODULE ARCHETYPES CONTEXT]" in source
     assert "python_stubs" in source
@@ -240,7 +265,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
     assert "subscription.yaml" not in source
     assert "operation.yaml" not in source
     assert "admin_surfaces" not in source
-    assert "legacy standalone" not in source
+    assert "removed standalone" not in source
     assert "backend/main.py" not in source
     assert "backend/routes/api_router.py" not in source
     assert "RouteAgent" not in source
@@ -269,7 +294,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_legacy_operations
     assert "Exact nested field shapes come from `ControllerOutput` and `AppBackendAdminConfig` in `structured_outputs.yaml`." in source
 
 
-def test_appgenerator_download_tool_does_not_inject_legacy_admin_surfaces() -> None:
+def test_appgenerator_download_tool_does_not_inject_removed_admin_surfaces() -> None:
     source = _read("factory_app/workflows/AppGenerator/tools/generate_and_download.py")
     assembly = _read("factory_app/workflows/AppGenerator/tools/assembly_phase.py")
 

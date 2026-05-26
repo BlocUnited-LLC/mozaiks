@@ -377,20 +377,6 @@ async def _register_greenfield_app_context_for_bundle(
     context_variables: Any | None,
     raise_on_contract_error: bool = False,
 ) -> Any | None:
-    app_id = getattr(app_bundle_artifact, "app_id", None)
-    if not app_id:
-        exc = ValueError("app_id is required")
-        if raise_on_contract_error:
-            raise exc
-        wf_logger = get_workflow_logger(
-            workflow_name=workflow_name,
-            chat_id=chat_id,
-            app_id=getattr(app_bundle_artifact, "app_id", None),
-        )
-        wf_logger.warning("Greenfield app-context registration skipped: %s", exc)
-        _context_set(context_variables, "app_context_registration_warning", str(exc))
-        return None
-
     try:
         registered = await register_greenfield_app_context_version(
             app_bundle_artifact=app_bundle_artifact,
@@ -406,7 +392,7 @@ async def _register_greenfield_app_context_for_bundle(
         wf_logger = get_workflow_logger(
             workflow_name=workflow_name,
             chat_id=chat_id,
-            app_id=app_id,
+            app_id=getattr(app_bundle_artifact, "app_id", None),
         )
         wf_logger.warning("Greenfield app-context registration skipped: %s", exc)
         _context_set(context_variables, "app_context_registration_warning", str(exc))
@@ -415,7 +401,7 @@ async def _register_greenfield_app_context_for_bundle(
         wf_logger = get_workflow_logger(
             workflow_name=workflow_name,
             chat_id=chat_id,
-            app_id=app_id,
+            app_id=getattr(app_bundle_artifact, "app_id", None),
         )
         wf_logger.warning("Greenfield app-context registration failed: %s", exc)
         _context_set(context_variables, "app_context_registration_warning", str(exc))

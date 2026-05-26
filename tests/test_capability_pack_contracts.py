@@ -153,7 +153,7 @@ def test_designdocs_context_exposes_concept_blueprint_as_typed_object() -> None:
     assert bp_def["source"]["fields"] == ["Blueprint"]
     assert "concept_blueprint" in agents["DesignDocsAgent"]["variables"]
 
-    # Prose string fallback still present for backward-compat consumers
+    # Prose string fallback remains present for prompt consumers.
     assert "concept_overview" in definitions
     assert definitions["concept_overview"]["source"]["collection"] == "BuilderConcepts"
     assert "concept_overview" in agents["DesignDocsAgent"]["variables"]
@@ -609,6 +609,69 @@ def test_app_build_plan_tool_rejects_backend_foundation_with_wrong_initial_agent
             },
             context_variables=_Context(),
         )
+
+
+def test_app_build_plan_tool_accepts_backend_foundation_provider_adapter_lane() -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_tool_backend_adapter_accept",
+    )
+    context = _Context()
+
+    module.app_build_plan(
+        AppBuildPlan=_minimal_app_build_plan(
+            {
+                "task_id": "task_search_provider_adapter",
+                "task_type": "backend_foundation",
+                "capability_pack_id": "search_provider",
+                "surface_kind": "external_integration",
+                "execution_target": "AppGenerator",
+                "initial_agent": "ConfigMiddlewareAgent",
+                "description": "Generate app-owned search provider adapter.",
+                "initial_message": "Generate only backend/adapters/search/vector_provider.py.",
+                "owned_paths": ["backend/adapters/search/vector_provider.py"],
+                "depends_on": [],
+                "acceptance_criteria": ["Provider adapter stays business-logic-free"],
+            }
+        ),
+        context_variables=context,
+    )
+
+    task = context.data["app_build_plan"]["build_tasks"][0]
+    assert task["owned_paths"] == ["backend/adapters/search/vector_provider.py"]
+
+
+def test_app_build_plan_tool_rejects_hosted_pack_backend_adapter_lane() -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_tool_hosted_backend_adapter_reject",
+    )
+
+    plan = _minimal_app_build_plan(
+        {
+            "task_id": "task_wallet_provider_adapter",
+            "task_type": "backend_foundation",
+            "capability_pack_id": "wallet",
+            "surface_kind": "external_integration",
+            "execution_target": "AppGenerator",
+            "initial_agent": "ConfigMiddlewareAgent",
+            "description": "Invalid hosted provider adapter.",
+            "initial_message": "Do not do this.",
+            "owned_paths": ["backend/adapters/wallet/provider.py"],
+            "depends_on": [],
+            "acceptance_criteria": ["Rejected"],
+        }
+    )
+    plan["capability_packs"] = [
+        {
+            "capability_pack_id": "wallet",
+            "capability_source": "hosted_pack",
+            "implementation_mode": "external_integration",
+        }
+    ]
+
+    with pytest.raises(ValueError, match="Hosted pack adapters must be thin API clients"):
+        module.app_build_plan(AppBuildPlan=plan, context_variables=_Context())
 
 
 def test_app_build_plan_tool_accepts_control_plane_pack_task() -> None:

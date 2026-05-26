@@ -41,13 +41,13 @@ def test_database_agent_uses_intent_artifacts_not_live_database_tools() -> None:
         assert tool_name not in block
 
     assert "backend/database/seed.json" not in block
-    legacy_schema_refs = [
+    removed_schema_refs = [
         line.strip()
         for line in block.splitlines()
         if "backend/database/schema.json" in line
     ]
-    assert legacy_schema_refs == [
-        "- Do not emit legacy `backend/database/schema.json` or seed files."
+    assert removed_schema_refs == [
+        "- Do not emit removed `backend/database/schema.json` or seed files."
     ]
     assert "ctx.persistence.collection(module_id, entity_name)" in block
     assert "Generated repo code must not assume `ctx.db` exists" not in block
@@ -85,7 +85,7 @@ def test_structured_outputs_align_with_persistence_contract() -> None:
     assert "must not import get_mongo_client" in text
 
 
-def test_file_contracts_define_canonical_persistence_and_ban_legacy_paths() -> None:
+def test_file_contracts_define_canonical_persistence_and_ban_removed_paths() -> None:
     text = _read(APPGEN / "tools" / "file_contracts.yaml")
     data = yaml.safe_load(text)
     persistence = data["task_contracts"]["persistence_contract"]
@@ -282,20 +282,13 @@ def test_module_archetypes_do_not_reference_removed_manifest_or_model_paths() ->
     assert "Include channels.yaml only" not in domain_hook_text
 
 
-def test_database_tools_are_marked_planned_and_not_required_by_prompts() -> None:
+def test_database_endpoint_tools_are_not_registered_or_required_by_prompts() -> None:
     tools = yaml.safe_load(_read(APPGEN / "tools.yaml"))["tools"]
-    database_tools = {
-        item["function"]: item
-        for item in tools
-        if item.get("agent") == "DatabaseAgent"
-    }
-
-    for name in ("provision_database", "apply_database_schema", "seed_database"):
-        assert name in database_tools
-        assert "Legacy/planned backend endpoint wrapper" in database_tools[name]["description"]
+    tool_names = {item["function"] for item in tools}
 
     database_block = _agent_block("DatabaseAgent")
-    for name in database_tools:
+    for name in ("provision_database", "apply_database_schema", "seed_database"):
+        assert name not in tool_names
         assert name not in database_block
 
 

@@ -10,7 +10,7 @@ Validates:
 - Non-conceptual build with empty/absent carry_forward_decisions passes.
 - AppPlanAgent guidance mentions reuse/adapt/regenerate/drop.
 - Guidance states reuse does not copy files.
-- Guidance states AssemblyAgent merge not implemented.
+- Guidance states Phase 7A declarative preservation only; backend Python never copied.
 - Existing AppBuildPlan tests still pass (smoke).
 """
 from __future__ import annotations
@@ -452,15 +452,20 @@ class TestAppPlanAgentGuidance:
             or "not copy" in content.lower()
         )
 
-    def test_guidance_states_assemblyadgent_merge_not_implemented(self) -> None:
+    def test_guidance_states_no_backend_file_copy_only_declarative_preservation(self) -> None:
+        """Phase 7A is implemented: AssemblyAgent preserves declarative contract files only.
+        Backend Python files are never copied. Guidance must reflect this."""
         content = self._load_agents_yaml()
         assert "AssemblyAgent" in content
-        # AssemblyAgent merge behavior must be stated as not implemented
-        assert (
-            "not implemented" in content.lower()
-            or "no merge" in content.lower()
-            or "merge behavior is not" in content.lower()
+        # Guidance must state that backend Python files are not copied.
+        assert "backend" in content.lower() and (
+            "never" in content.lower()
+            or "not copy" in content.lower()
+            or "do not copy" in content.lower()
+            or "does not copy" in content.lower()
         )
+        # Guidance must mention Phase 7A or declarative preservation.
+        assert "phase 7a" in content.lower() or "declarative" in content.lower()
 
     def test_guidance_mentions_carry_forward_decisions(self) -> None:
         content = self._load_agents_yaml()

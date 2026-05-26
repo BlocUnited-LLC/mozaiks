@@ -386,7 +386,7 @@
         "acceptance_criteria": [
           "repo.py uses ctx.persistence",
           "schemas.py is canonical",
-          "legacy model artifacts are absent"
+          "removed model artifacts are absent"
         ]
       },
       {
@@ -414,7 +414,7 @@
         "acceptance_criteria": [
           "repo.py uses ctx.persistence",
           "schemas.py is canonical",
-          "legacy model artifacts are absent"
+          "removed model artifacts are absent"
         ]
       },
       {

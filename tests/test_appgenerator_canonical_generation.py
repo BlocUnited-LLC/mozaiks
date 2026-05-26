@@ -633,7 +633,7 @@ def _canonical_feature_output(
 
 
 def _drifted_feature_output(module_id: str) -> Dict[str, Any]:
-    """Simulate a drifted generator output — flat manifests and legacy paths."""
+    """Simulate a drifted generator output with flat manifests and removed paths."""
     return {
         "code_files": [
             {"filename": f"modules/{module_id}/module.yaml",

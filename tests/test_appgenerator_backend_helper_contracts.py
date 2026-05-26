@@ -241,11 +241,11 @@ class TestAppPlanAgentHelperGuidance:
 
     def test_app_plan_agent_mentions_routes_webhooks_example(self):
         text = _agents_text()
-        assert "routes_webhooks.py" in text or "routes_webhooks" in text
+        assert "backend/routes/webhooks.py" in text
 
     def test_app_plan_agent_mentions_usage_check_example(self):
         text = _agents_text()
-        assert "usage_check.py" in text or "usage_check" in text
+        assert "backend/security/secrets.py" in text
 
     def test_app_plan_agent_helper_rule_is_own_numbered_item(self):
         text = _agents_text()
@@ -314,6 +314,26 @@ class TestFileContractsIntegrity:
         assert "page_bundle" in tc
         assert "backend_foundation" in tc
         assert "api_surface" in tc
+
+    def test_backend_foundation_declares_app_backend_support_lanes(self):
+        data = _load_yaml(_FILE_CONTRACTS)
+        outputs = data["task_contracts"]["backend_foundation"].get("optional_outputs", [])
+        constraints = data["task_contracts"]["backend_foundation"].get("hard_constraints", [])
+        joined_constraints = " ".join(str(item) for item in constraints)
+        assert any("backend/integrations" in str(output) for output in outputs)
+        assert any("backend/adapters" in str(output) for output in outputs)
+        assert any("backend/security" in str(output) for output in outputs)
+        assert any("backend/routes" in str(output) for output in outputs)
+        assert any("config/secrets.yaml" in str(output) for output in outputs)
+        assert "business" in joined_constraints
+        assert "Modules own" in joined_constraints
+        assert "auth" in joined_constraints
+        assert "dns" in joined_constraints
+        assert "registrar" in joined_constraints
+        assert "secrets" in joined_constraints
+        assert "backend/security" in joined_constraints
+        assert "backend/routes" in joined_constraints
+        assert "raw secret values" in joined_constraints
 
     def test_module_contract_canonical_downstream_python_unchanged(self):
         data = _load_yaml(_FILE_CONTRACTS)

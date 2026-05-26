@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -45,7 +44,7 @@ def test_appgenerator_change_skill_requires_workflow_impact_reporting() -> None:
     assert "generated artifacts affected" in skill
     assert "runtime/platform contracts affected" in skill
     assert "tests run" in skill
-    assert "compatibility risk" in skill
+    assert "contract drift risk" in skill
     assert "OSS Change Impact" in skill
 
 
