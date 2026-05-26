@@ -74,12 +74,12 @@ Options:
   --preset <preset>        Scaffold preset when missing (default: chat)
   --name <name>            App name to store in the scaffold
   --journey <journey>      greenfield_app or brownfield_app
-  --goal <text>            Initial Studio goal
+  --goal <text>            Initial Console goal
   --provider <provider>    anthropic, openai, local, or other
   --model <model>          Default model name
   --backend-port <port>    Backend port (default: 8000)
   --frontend-port <port>   Frontend port (default: 3000)
-  --no-browser             Launch Studio without opening the browser
+  --no-browser             Launch the Console without opening the browser
   --no-launch              Stop after venv/install bootstrap
   --skip-install           Skip pip install -e .
 EOF

@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -42,6 +42,60 @@ QUICK_PYTEST_TARGETS = [
     "tests/test_mozaiks_host_smoke.py",
 ]
 
+SOURCE_HYGIENE_SUFFIXES = {
+    ".env",
+    ".example",
+    ".js",
+    ".jsx",
+    ".json",
+    ".md",
+    ".py",
+    ".ts",
+    ".tsx",
+    ".yaml",
+    ".yml",
+}
+SOURCE_HYGIENE_EXCLUDED_DIRS = {
+    ".git",
+    ".mkdocs-tmp",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+    "site",
+    "venv",
+}
+
+
+def _source_hygiene_pattern(*parts: str, flags: int = 0) -> re.Pattern[str]:
+    return re.compile("".join(parts), flags)
+
+
+SOURCE_HYGIENE_FORBIDDEN = [
+    _source_hygiene_pattern(r"\bleg", r"acy\b", flags=re.IGNORECASE),
+    _source_hygiene_pattern(r"\bback", r"wards?\b", flags=re.IGNORECASE),
+    _source_hygiene_pattern(r"\bdepre", r"cated\b", flags=re.IGNORECASE),
+    _source_hygiene_pattern(r"compati", r"bility only", flags=re.IGNORECASE),
+    _source_hygiene_pattern("MOZAIKS_WORKFLOW", "_ROOTS"),
+    _source_hygiene_pattern("MOZAIKS_WORKSPACE", "_APP_PATH"),
+    _source_hygiene_pattern("MOZAIKS_ENABLE", "_ADAPTERS"),
+    _source_hygiene_pattern("MOZAIKS_ENABLED", "_ADAPTERS"),
+    _source_hygiene_pattern("MOZAIKS_CONTEXT", "_PLACEHOLDERS_FILE"),
+    _source_hygiene_pattern("resolve_platform", "_path"),
+    _source_hygiene_pattern("resolve_platform", "_root"),
+    _source_hygiene_pattern("normalize_workflow", "_roots"),
+    _source_hygiene_pattern("workflow_base", "_paths"),
+    _source_hygiene_pattern("seed-placeholder", "-apps"),
+    _source_hygiene_pattern("placeholder ", "fallback", flags=re.IGNORECASE),
+    _source_hygiene_pattern("placeholder ", "pack", flags=re.IGNORECASE),
+    _source_hygiene_pattern("placeholder ", "key", flags=re.IGNORECASE),
+]
+SOURCE_HYGIENE_ALLOWED_SNIPPETS: dict[str, tuple[str, ...]] = {}
+
 
 @dataclass(frozen=True)
 class GateStep:
@@ -55,9 +109,42 @@ def _base_env() -> dict[str, str]:
     env["ENV"] = "test"
     env["AUTH_ENABLED"] = "false"
     env["RATE_LIMIT_ENABLED"] = "false"
-    env["OPENAI_API_KEY"] = "sk-test-placeholder"
+    env["OPENAI_API_KEY"] = "sk-test-key"
     env["MONGO_URI"] = "mongodb://localhost:27017/test_mozaiks"
     return env
+
+
+def _source_hygiene_files() -> list[Path]:
+    files: list[Path] = []
+    for path in REPO_ROOT.rglob("*"):
+        if any(part in SOURCE_HYGIENE_EXCLUDED_DIRS for part in path.parts):
+            continue
+        if not path.is_file():
+            continue
+        if path.relative_to(REPO_ROOT).as_posix() == "scripts/production_readiness_gate.py":
+            continue
+        if path.name == ".env.example" or path.suffix in SOURCE_HYGIENE_SUFFIXES:
+            files.append(path)
+    return files
+
+
+def run_source_hygiene_scan() -> list[str]:
+    violations: list[str] = []
+    for path in _source_hygiene_files():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        relative = path.relative_to(REPO_ROOT).as_posix()
+        allowed_snippets = SOURCE_HYGIENE_ALLOWED_SNIPPETS.get(relative, ())
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            if allowed_snippets and any(snippet in line for snippet in allowed_snippets):
+                continue
+            for pattern in SOURCE_HYGIENE_FORBIDDEN:
+                if pattern.search(line):
+                    violations.append(f"{relative}:{line_number}: {line.strip()}")
+                    break
+    return violations
 
 
 def _build_steps(args: argparse.Namespace) -> list[GateStep]:
@@ -125,9 +212,19 @@ def main(argv: list[str] | None = None) -> int:
 
     steps = _build_steps(args)
     if args.list:
+        print("source hygiene scan: internal")
         for step in steps:
             print(f"{step.name}: {' '.join(step.command)}")
         return 0
+
+    violations = run_source_hygiene_scan()
+    if violations:
+        print("\nSource hygiene scan failed:", file=sys.stderr)
+        for violation in violations[:50]:
+            print(f"  {violation}", file=sys.stderr)
+        if len(violations) > 50:
+            print(f"  ... {len(violations) - 50} more", file=sys.stderr)
+        return 1
 
     for step in steps:
         rc = _run_step(step)

@@ -51,14 +51,14 @@ def _has_workflow_definitions(workflows_root: Path) -> bool:
 
 
 def _resolve_default_workflows_root() -> Path:
-    from mozaiksai.core.workflow.paths import normalize_workflow_roots
+    from mozaiksai.core.workflow.paths import resolve_workflows_root
     from mozaiksai.hosts.bootstrap import configure_repo_host_defaults
 
     configure_repo_host_defaults("studio")
 
-    for candidate in normalize_workflow_roots():
-        if _has_workflow_definitions(candidate):
-            return candidate
+    candidate = resolve_workflows_root()
+    if _has_workflow_definitions(candidate):
+        return candidate
 
     if _has_workflow_definitions(DEFAULT_FACTORY_WORKFLOWS_ROOT):
         return DEFAULT_FACTORY_WORKFLOWS_ROOT.resolve()
@@ -552,18 +552,6 @@ async def _collect_events(
                 if isinstance(pending_input, dict):
                     request_id = str(pending_input.get("request_id") or "").strip()
                     if request_id and request_id not in responded_pending_requests:
-                        synthetic_data = {
-                            "tool_call_id": request_id,
-                            "tool_name": str(pending_input.get("tool_name") or "UserInputRequest"),
-                            "component_type": str(pending_input.get("component_type") or "UserInputRequest"),
-                            "interaction_type": str(pending_input.get("interaction_type") or "input_request"),
-                            "awaiting_response": True,
-                            "payload": {
-                                "interaction_type": str(pending_input.get("interaction_type") or "input_request"),
-                                "component_type": str(pending_input.get("component_type") or "UserInputRequest"),
-                                "prompt": str(pending_input.get("prompt") or ""),
-                            },
-                        }
                         response_payload: Optional[Dict[str, Any]] = None
                         reply_text, used_queue = _peek_input_reply(
                             events=events,
@@ -689,17 +677,6 @@ async def _collect_events(
             completion_grace_deadline = now + 1.0
             continue
 
-        assistant_name = str(data.get("agent") or data.get("sender") or data.get("name") or "").strip()
-        assistant_name_normalized = assistant_name.lower()
-        assistant_content = data.get("full_content") or data.get("content")
-        is_visible_assistant_message = (
-            event_type in {"chat.text", "chat.stream_end"}
-            and assistant_name_normalized not in {"", "user", "userproxy", "chat_manager", "manager"}
-            and isinstance(assistant_content, str)
-            and assistant_content.strip()
-            and str(data.get("ui_visibility") or "").strip().lower() != "trace"
-        )
-
         if event_type == "chat.input_ack" and not reply_queue:
             completion_grace_deadline = max(
                 completion_grace_deadline or 0.0,
@@ -785,7 +762,6 @@ async def run_live_mfj_smoke(
 
     # Force the smoke run to target the intended workflows root regardless of caller env.
     os.environ["MOZAIKS_WORKFLOWS_PATH"] = str(effective_root)
-    os.environ.pop("MOZAIKS_WORKFLOW_ROOTS", None)
     os.environ["WORKFLOW_DIR"] = str(effective_root)
 
     await _verify_mongo_available()

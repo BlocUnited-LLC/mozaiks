@@ -4,7 +4,7 @@ Usage:
     cd mozaiks
     python scripts/smoke_appplan_persistent_projects.py
     python scripts/smoke_appplan_persistent_projects.py --save-fixture
-    python scripts/smoke_appplan_persistent_projects.py --model gpt-4o-mini
+    python scripts/smoke_appplan_persistent_projects.py --model gpt-5-nano
 
 What it does:
     1. Builds AppPlanAgent system prompt from agents.yaml.
@@ -13,7 +13,7 @@ What it does:
     4. Parses the AppBuildPlan JSON output.
     5. Validates with app_build_plan.py.
     6. Checks persistence shape: projects/tasks modules, canonical database
-       intent/migration paths, repo.py/schemas.py paths, and no legacy DB paths.
+       intent/migration paths, repo.py/schemas.py paths, and no removed DB paths.
     7. Reports results. Exits 0 on success, 1 on failure.
 
 --save-fixture  Write output to
@@ -22,7 +22,7 @@ What it does:
 
 Environment:
     OPENAI_API_KEY     Required for live run.
-    DEFAULT_LLM_MODEL  Override model (default: gpt-4o-mini).
+    DEFAULT_LLM_MODEL  Override model (default: gpt-5-nano).
 """
 
 from __future__ import annotations
@@ -264,7 +264,7 @@ def check_plan_shape(plan: dict[str, Any]) -> list[str]:
     )
     for path in owned_paths:
         if any(item in path for item in forbidden_paths):
-            violations.append(f"legacy forbidden path planned: {path}")
+            violations.append(f"removed forbidden path planned: {path}")
 
     forbidden_text = ("ctx.db", "context.db", "get_mongo_client", "pymongo", "motor")
     for token in forbidden_text:
@@ -295,7 +295,7 @@ def check_plan_shape(plan: dict[str, Any]) -> list[str]:
     return violations
 
 
-def run(*, save_fixture: bool = False, model: str = "gpt-4o-mini") -> int:
+def run(*, save_fixture: bool = False, model: str = "gpt-5-nano") -> int:
     print("=" * 72)
     print("AppPlanAgent Persistent Projects Planning Smoke Test")
     print("=" * 72)
@@ -400,8 +400,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--model",
-        default=os.getenv("DEFAULT_LLM_MODEL", "gpt-4o-mini"),
-        help="OpenAI model to use (default: gpt-4o-mini or DEFAULT_LLM_MODEL env var)",
+        default=os.getenv("DEFAULT_LLM_MODEL", "gpt-5-nano"),
+        help="OpenAI model to use (default: gpt-5-nano or DEFAULT_LLM_MODEL env var)",
     )
     args = parser.parse_args()
     return run(save_fixture=args.save_fixture, model=args.model)

@@ -435,7 +435,7 @@ Canonical draft artifact kinds:
 - `brownfield_registration`
 - `app_context_graph`
 
-Legacy discovery fields such as `module_decomposition_plan` remain evidence for
+Prior discovery fields such as `module_decomposition_plan` remain evidence for
 these contracts. They are not canonical artifact kinds and should not become
 control-plane source of truth. Workflow sequence cleanup and brownfield sequence
 renaming remain later work.

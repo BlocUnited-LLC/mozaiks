@@ -22,7 +22,7 @@ What it does:
 
 Environment:
     OPENAI_API_KEY     Required.
-    DEFAULT_LLM_MODEL  Override model (default: gpt-4o-mini).
+    DEFAULT_LLM_MODEL  Override model (default: gpt-5-nano).
 """
 from __future__ import annotations
 
@@ -315,7 +315,7 @@ def _check_plan_shape(plan: Dict[str, Any]) -> List[str]:
 # ---------------------------------------------------------------------------
 
 
-def run(*, save_fixture: bool = False, model: str = "gpt-4o-mini") -> int:
+def run(*, save_fixture: bool = False, model: str = "gpt-5-nano") -> int:
     print("=" * 70)
     print("AppPlanAgent Hosted-Wallet Planning Smoke Test")
     print("=" * 70)
@@ -451,8 +451,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--model",
-        default=os.getenv("DEFAULT_LLM_MODEL", "gpt-4o-mini"),
-        help="OpenAI model to use (default: gpt-4o-mini or DEFAULT_LLM_MODEL env var)",
+        default=os.getenv("DEFAULT_LLM_MODEL", "gpt-5-nano"),
+        help="OpenAI model to use (default: gpt-5-nano or DEFAULT_LLM_MODEL env var)",
     )
     args = parser.parse_args()
     return run(save_fixture=args.save_fixture, model=args.model)
