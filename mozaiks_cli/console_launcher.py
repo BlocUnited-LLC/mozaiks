@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -79,6 +80,76 @@ def _wait_for_url(url: str, *, timeout_seconds: float) -> bool:
     return False
 
 
+def _mongo_uri_from_env(env: dict[str, str]) -> str:
+    for key in ("MONGO_URI", "MONGODB_URI", "MONGO_URL"):
+        value = str(env.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _redact_mongo_uri(uri: str) -> str:
+    return re.sub(r"^(mongodb(?:\+srv)?://)([^/@]+@)", r"\1***@", uri)
+
+
+def _short_error_message(exc: Exception) -> str:
+    message = str(exc).replace("\n", " ")
+    message = re.sub(r"\s*\(configured timeouts:[^)]+\)", "", message)
+    for marker in (", Timeout:", " Timeout:", ", Topology Description:", " Topology Description:"):
+        index = message.find(marker)
+        if index != -1:
+            message = message[:index]
+            break
+    return f"{type(exc).__name__}: {message.strip()}"
+
+
+def _mongo_timeout_ms(env: dict[str, str]) -> int:
+    raw_value = str(env.get("MOZAIKS_MONGO_PREFLIGHT_TIMEOUT_MS") or "").strip()
+    if not raw_value:
+        return 5000
+    try:
+        return max(1000, int(raw_value))
+    except ValueError:
+        return 5000
+
+
+def _ping_mongo_uri(uri: str, *, timeout_ms: int) -> None:
+    from pymongo import MongoClient
+
+    client = MongoClient(uri, serverSelectionTimeoutMS=timeout_ms)
+    try:
+        client.admin.command("ping")
+    finally:
+        client.close()
+
+
+def _assert_mongo_ready(env: dict[str, str], *, workspace_root: Path) -> None:
+    uri = _mongo_uri_from_env(env)
+    rerun_command = f'mozaiks console --dir "{workspace_root}" --open'
+    env_path = workspace_root / ".env"
+
+    if not uri:
+        raise RuntimeError(
+            "MongoDB is required to start the Mozaiks Console.\n"
+            f"Set MONGO_URI in your shell or in {env_path}, then rerun:\n"
+            f"  {rerun_command}\n"
+            "For a local MongoDB server, use: mongodb://localhost:27017/mozaiks"
+        )
+
+    try:
+        _ping_mongo_uri(uri, timeout_ms=_mongo_timeout_ms(env))
+    except Exception as exc:
+        safe_uri = _redact_mongo_uri(uri)
+        raise RuntimeError(
+            "MongoDB is required to start the Mozaiks Console.\n"
+            f"Could not connect to MONGO_URI ({safe_uri}).\n"
+            "Start MongoDB locally, or set MONGO_URI to a reachable MongoDB Atlas/local URI "
+            f"in {env_path}, then rerun:\n"
+            f"  {rerun_command}\n"
+            f"Underlying error: {_short_error_message(exc)}"
+        ) from exc
+
+
 def _spawn_process(
     command: list[str],
     *,
@@ -127,6 +198,7 @@ def launch_console(
 
     backend_process = None
     if not _http_ready(backend_url):
+        _assert_mongo_ready(env, workspace_root=workspace_root)
         backend_command = [
             sys.executable,
             "-m",

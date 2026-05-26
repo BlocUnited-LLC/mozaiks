@@ -1,0 +1,52 @@
+from __future__ import annotations
+
+import pytest
+
+from mozaiks_cli import console_launcher
+
+
+def test_mongo_preflight_requires_mongo_uri(tmp_path) -> None:
+    with pytest.raises(RuntimeError) as exc:
+        console_launcher._assert_mongo_ready({}, workspace_root=tmp_path)
+
+    message = str(exc.value)
+    assert "MongoDB is required to start the Mozaiks Console" in message
+    assert "Set MONGO_URI" in message
+    assert f'mozaiks console --dir "{tmp_path}" --open' in message
+
+
+def test_mongo_preflight_redacts_credentials(monkeypatch, tmp_path) -> None:
+    def fail_ping(uri: str, *, timeout_ms: int) -> None:
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(console_launcher, "_ping_mongo_uri", fail_ping)
+
+    with pytest.raises(RuntimeError) as exc:
+        console_launcher._assert_mongo_ready(
+            {"MONGO_URI": "mongodb://user:password@localhost:27017/mozaiks"},
+            workspace_root=tmp_path,
+        )
+
+    message = str(exc.value)
+    assert "mongodb://***@localhost:27017/mozaiks" in message
+    assert "user:password" not in message
+    assert "network down" in message
+
+
+def test_mongo_preflight_accepts_alias(monkeypatch, tmp_path) -> None:
+    calls: list[tuple[str, int]] = []
+
+    def record_ping(uri: str, *, timeout_ms: int) -> None:
+        calls.append((uri, timeout_ms))
+
+    monkeypatch.setattr(console_launcher, "_ping_mongo_uri", record_ping)
+
+    console_launcher._assert_mongo_ready(
+        {
+            "MONGODB_URI": "mongodb://localhost:27017/mozaiks",
+            "MOZAIKS_MONGO_PREFLIGHT_TIMEOUT_MS": "1500",
+        },
+        workspace_root=tmp_path,
+    )
+
+    assert calls == [("mongodb://localhost:27017/mozaiks", 1500)]

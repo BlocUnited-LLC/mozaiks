@@ -56,7 +56,9 @@ def _print_environment_warnings(args) -> None:
 
     if not os.environ.get("MONGO_URI"):
         warnings.append(
-            "MONGO_URI is not set. The Console can still launch, but builds will fail until Mongo is configured."
+            "MongoDB is required to start the Console. If MONGO_URI is not set, the generated workspace "
+            "uses mongodb://localhost:27017/mozaiks; make sure local MongoDB is running or set MONGO_URI "
+            "to a reachable MongoDB URI."
         )
 
     if provider == "openai" and not os.environ.get("OPENAI_API_KEY"):

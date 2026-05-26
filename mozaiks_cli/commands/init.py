@@ -446,7 +446,7 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Set `OPENAI_API_KEY` and `MONGO_URI` in `.env`.
+Set `MONGO_URI` before running the Console. Set `OPENAI_API_KEY` before running real workflows.
 
 ## Run
 
@@ -851,7 +851,7 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Set `OPENAI_API_KEY` and `MONGO_URI` in `.env` before running real workflows.
+Set `MONGO_URI` before running the Console. Set `OPENAI_API_KEY` before running real workflows.
 
 ## Run the Console
 

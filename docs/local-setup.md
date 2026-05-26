@@ -20,6 +20,9 @@ Do not create a shared `.venv` in the parent folder that contains multiple
 repos. Put the environment in the repo or workspace that owns it, or use `pipx`
 for the public CLI path.
 
+The Console requires MongoDB at startup. Use a local MongoDB server or set
+`MONGO_URI` to a reachable MongoDB Atlas/local URI before launching it.
+
 ## Prerequisites
 
 - Python 3.11+

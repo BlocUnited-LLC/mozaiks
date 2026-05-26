@@ -33,7 +33,10 @@ separate from builder workflows.
 
 ## Quickstart
 
-Install Python 3.11+ and Node.js 18+, then install the Mozaiks CLI:
+Install Python 3.11+, Node.js 18+, and MongoDB. MongoDB must be running
+locally or `MONGO_URI` must point to MongoDB Atlas before the Console can start.
+
+Install the Mozaiks CLI:
 
 ```powershell
 python -m pip install --user pipx

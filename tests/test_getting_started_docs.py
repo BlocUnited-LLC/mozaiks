@@ -45,5 +45,5 @@ def test_getting_started_clarifies_workspace_terms() -> None:
 
     assert "creates the workspace folder if it does not already exist" in doc
     assert "You do not need to create a `.venv` in the parent folder" in normalized
-    assert "MongoDB is not required just to open the Console" in doc
-    assert "builds will fail until" in doc
+    assert "You need MongoDB to open the Console" in doc
+    assert "Mozaiks does not start MongoDB for you" in doc

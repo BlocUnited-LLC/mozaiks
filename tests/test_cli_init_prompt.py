@@ -121,6 +121,7 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     assert "Standalone Workspace Setup" in readme
     assert "The `.venv` belongs inside this workspace." in readme
     assert "python -m pip install -r requirements.txt" in readme
+    assert "Set `MONGO_URI` before running the Console." in readme
     assert "mozaiks console --dir . --open" in readme
     assert "installed `mozaiks` package" in readme
     assert "Coding Agent Guidance" in readme

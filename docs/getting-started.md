@@ -2,7 +2,11 @@
 
 ## Prerequisites
 
-Install Python 3.11+ and Node.js 18+ before starting.
+Install these before starting:
+
+- Python 3.11+
+- Node.js 18+
+- MongoDB running locally, or a MongoDB Atlas connection string
 
 ## Install Mozaiks
 
@@ -19,6 +23,15 @@ step above. Then open a new PowerShell before running `mozaiks`.
 
 ## Create Your Workspace
 
+Mozaiks does not start MongoDB for you. If you use local MongoDB, start it
+before running `quickstart`; the generated workspace uses this default URI:
+
+```powershell
+$env:MONGO_URI="mongodb://localhost:27017/mozaiks"
+```
+
+If you use Atlas instead, set `MONGO_URI` to your Atlas connection string.
+
 Choose where the workspace folder should live on your computer. From that
 parent folder, run:
 
@@ -34,6 +47,12 @@ folder or inside the workspace for the normal Console path.
 
 `quickstart` opens the Console during first setup.
 
+Open the Console at:
+
+```text
+http://localhost:3000/
+```
+
 To reopen the same workspace later, run:
 
 ```powershell
@@ -42,18 +61,10 @@ mozaiks console --dir .\mozaiks-workspace --open
 
 For source checkout or contributor setup, use [Local Setup](local-setup.md).
 
-Open the Console at:
-
-```text
-http://localhost:3000/
-```
-
 ## Minimum Config For Real Builds
 
-You need an LLM API key and MongoDB before running real builds.
-
-MongoDB is not required just to open the Console, but builds will fail until
-`MONGO_URI` is configured.
+You need MongoDB to open the Console. You also need an LLM API key before
+running real builds.
 
 PowerShell:
 
@@ -77,6 +88,6 @@ use `Continue Build`.
 
 ## Configuration
 
-You only need a model key and MongoDB for real builds. If you need the short
-reference for connector secrets, auth, or deployment-only settings, see [User
-Configuration](user-configuration.md).
+After MongoDB is configured, you usually only need a model key for real builds.
+If you need the short reference for connector secrets, auth, or deployment-only
+settings, see [User Configuration](user-configuration.md).
