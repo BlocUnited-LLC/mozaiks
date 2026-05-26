@@ -1,7 +1,7 @@
 # ExistingAppDiscovery Handoff Rules
 #
 # Pipeline:
-#   Host → Mapper → Planner → (ecosystem/native_migration) ModuleDecomposer → Assembler → user
+#   Host → Mapper → Planner → (ecosystem/gradual_modernization) ModuleDecomposer → Assembler → user
 #                           → (embed/bridge) Assembler → user
 #
 # Each conversational agent reverts to user between turns,
@@ -47,12 +47,12 @@ handoff_rules:
   handoff_type: after_work
   transition_target: RevertToUserTarget
 
-# ecosystem or native_migration → ModuleDecomposerAgent for capability decomposition
+# ecosystem or gradual_modernization → ModuleDecomposerAgent for capability decomposition
 - source_agent: IntegrationPlannerAgent
   target_agent: ModuleDecomposerAgent
   handoff_type: condition
   condition_type: expression
-  condition: ${plan_complete} == True and ${adoption_level} in ["ecosystem", "native_migration"]
+  condition: ${plan_complete} == True and ${adoption_level} in ["ecosystem", "gradual_modernization"]
   transition_target: AgentTarget
 
 # embed or bridge → skip decomposition, go straight to assembler
@@ -64,7 +64,7 @@ handoff_rules:
   transition_target: AgentTarget
 
 # ---------------------------------------------------------------------------
-# ModuleDecomposerAgent (ecosystem / native_migration only)
+# ModuleDecomposerAgent (ecosystem / gradual_modernization only)
 # ---------------------------------------------------------------------------
 - source_agent: ModuleDecomposerAgent
   target_agent: user
@@ -120,7 +120,7 @@ handoff_rules:
     capabilities are AI-accessible, or revise auth delegation settings.
   transition_target: AgentTarget
 
-# Back to module decomposition (only relevant for ecosystem/native_migration)
+# Back to module decomposition (only relevant for ecosystem/gradual_modernization)
 - source_agent: user
   target_agent: ModuleDecomposerAgent
   handoff_type: condition

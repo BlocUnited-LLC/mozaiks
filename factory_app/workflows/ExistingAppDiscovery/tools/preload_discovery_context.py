@@ -24,8 +24,9 @@ import logging
 import os
 import tomllib
 import xml.etree.ElementTree as ET
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 
 import httpx
 import yaml
@@ -35,7 +36,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Storage pattern detection signals
 # ---------------------------------------------------------------------------
-_STORAGE_PACKAGE_SIGNALS: Dict[str, List[str]] = {
+_STORAGE_PACKAGE_SIGNALS: dict[str, list[str]] = {
     "mongodb": ["mongoose", "motor", "pymongo", "mongodb", "@mongodb-js"],
     "sql": [
         "sqlalchemy", "prisma", "sequelize", "pg", "mysql2", "typeorm",
@@ -44,7 +45,7 @@ _STORAGE_PACKAGE_SIGNALS: Dict[str, List[str]] = {
     "redis": ["ioredis", "redis", "aioredis", "valkey", "upstash-redis"],
 }
 
-_STORAGE_SOURCE_PATTERNS: Dict[str, List[str]] = {
+_STORAGE_SOURCE_PATTERNS: dict[str, list[str]] = {
     "mongodb": ["MongoClient(", "mongoose.connect(", "motor.motor_asyncio", "AsyncIOMotorClient"],
     "sql": [
         "create_engine(", "DataSource({", "PrismaClient(", "new Sequelize(",
@@ -69,7 +70,7 @@ _STORAGE_SOURCE_PATTERNS: Dict[str, List[str]] = {
 # ---------------------------------------------------------------------------
 # Connector detection signals
 # ---------------------------------------------------------------------------
-_CONNECTOR_SIGNALS: List[Dict[str, Any]] = [
+_CONNECTOR_SIGNALS: list[dict[str, Any]] = [
     {
         "provider_id": "azure",
         "packages": ["@azure/", "azure-sdk", "azure-mgmt-", "azure-identity", "@azure/identity"],
@@ -182,13 +183,13 @@ _CONNECTOR_SIGNALS: List[Dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 # Mozaiks vocabulary detection signals
 # ---------------------------------------------------------------------------
-_MOZAIKS_VOCAB_PATTERNS: List[str] = [
+_MOZAIKS_VOCAB_PATTERNS: list[str] = [
     "contractKind",
     "module-action",
     "workflow-preparation",
 ]
 
-_MOZAIKS_STRUCTURE_GLOB_CHECKS: List[str] = [
+_MOZAIKS_STRUCTURE_GLOB_CHECKS: list[str] = [
     "**/module.yaml",
     "**/contracts/reactions.yaml",
 ]
@@ -269,7 +270,7 @@ def _ctx_set(context_variables: Any, key: str, value: Any) -> None:
         setattr(store, key, value)
 
 
-def _coerce_mapping(value: Any) -> Dict[str, Any]:
+def _coerce_mapping(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
     if isinstance(value, dict):
@@ -284,7 +285,7 @@ def _coerce_mapping(value: Any) -> Dict[str, Any]:
     return {}
 
 
-def _first_nonempty(*values: Any) -> Optional[Any]:
+def _first_nonempty(*values: Any) -> Any | None:
     for value in values:
         if value is None:
             continue
@@ -294,18 +295,18 @@ def _first_nonempty(*values: Any) -> Optional[Any]:
     return None
 
 
-def _append_unique(items: List[str], value: Optional[str]) -> None:
+def _append_unique(items: list[str], value: str | None) -> None:
     if value and value not in items:
         items.append(value)
 
 
-def _normalise_base_url(value: Optional[str]) -> Optional[str]:
+def _normalise_base_url(value: str | None) -> str | None:
     if not value or not isinstance(value, str):
         return None
     return value.rstrip("/")
 
 
-def _first_existing_dir(*candidates: Optional[Path]) -> Optional[Path]:
+def _first_existing_dir(*candidates: Path | None) -> Path | None:
     for candidate in candidates:
         if candidate is None:
             continue
@@ -322,18 +323,14 @@ def _workspace_root() -> Path:
     return here.parents[-1]
 
 
-def _default_workspace_app_inputs() -> Dict[str, Any]:
-    workspace = _workspace_root()
-    sibling_root = workspace.parent
-
-    configured_repo = os.getenv("MOZAIKS_WORKSPACE_APP_PATH")
+def _default_workspace_app_inputs() -> dict[str, Any]:
+    configured_repo = os.getenv("MOZAIKS_APP_WORKSPACE_PATH")
     configured_repo_path = Path(configured_repo).expanduser() if configured_repo else None
     workspace_app_repo = _first_existing_dir(
         configured_repo_path,
-        sibling_root / "mozaiks-app",
     )
 
-    data: Dict[str, Any] = {
+    data: dict[str, Any] = {
         "repo_path": str(workspace_app_repo) if workspace_app_repo else None,
         "discovery_mode": "guided",
     }
@@ -348,7 +345,7 @@ def _default_workspace_app_inputs() -> Dict[str, Any]:
     return {key: value for key, value in data.items() if value}
 
 
-def _resolve_host_app_source_inputs(host_app_source: Optional[str]) -> Dict[str, Any]:
+def _resolve_host_app_source_inputs(host_app_source: str | None) -> dict[str, Any]:
     source = str(host_app_source or "").strip()
     if not source:
         return {}
@@ -367,7 +364,7 @@ def _load_theme_capture_preloader():
     return module
 
 
-def _find_theme_config_path(repo_path: Optional[str]) -> Optional[str]:
+def _find_theme_config_path(repo_path: str | None) -> str | None:
     if not repo_path:
         return None
     root = Path(repo_path).expanduser().resolve()
@@ -380,7 +377,7 @@ def _find_theme_config_path(repo_path: Optional[str]) -> Optional[str]:
     return None
 
 
-def _find_shell_config_path(repo_path: Optional[str]) -> Optional[str]:
+def _find_shell_config_path(repo_path: str | None) -> str | None:
     if not repo_path:
         return None
     root = Path(repo_path).expanduser().resolve()
@@ -393,14 +390,14 @@ def _find_shell_config_path(repo_path: Optional[str]) -> Optional[str]:
     return None
 
 
-def _collect_theme_css_snapshot(repo_path: Optional[str], max_chars: int = 24000) -> Optional[str]:
+def _collect_theme_css_snapshot(repo_path: str | None, max_chars: int = 24000) -> str | None:
     if not repo_path:
         return None
     root = Path(repo_path).expanduser().resolve()
     if not root.exists() or not root.is_dir():
         return None
 
-    ordered_files: List[Path] = []
+    ordered_files: list[Path] = []
     seen: set[Path] = set()
     for relative in _THEME_SNAPSHOT_RELATIVE_CANDIDATES:
         candidate = root / relative
@@ -421,7 +418,7 @@ def _collect_theme_css_snapshot(repo_path: Optional[str], max_chars: int = 24000
     if not ordered_files:
         return None
 
-    chunks: List[str] = []
+    chunks: list[str] = []
     total_chars = 0
     for path in ordered_files:
         try:
@@ -447,7 +444,7 @@ def _collect_theme_css_snapshot(repo_path: Optional[str], max_chars: int = 24000
     return "\n".join(chunks) if chunks else None
 
 
-def _summarize_theme_evidence(theme_evidence: Dict[str, Any]) -> Optional[str]:
+def _summarize_theme_evidence(theme_evidence: dict[str, Any]) -> str | None:
     if not theme_evidence:
         return None
     appearance = theme_evidence.get("appearance")
@@ -455,7 +452,7 @@ def _summarize_theme_evidence(theme_evidence: Dict[str, Any]) -> Optional[str]:
     fonts = [str(item) for item in (theme_evidence.get("fonts") or [])[:4] if item]
     layout_hints = [str(item) for item in (theme_evidence.get("layout_hints") or [])[:4] if item]
 
-    parts: List[str] = []
+    parts: list[str] = []
     if appearance:
         parts.append(f"{appearance} appearance")
     if colors:
@@ -483,7 +480,7 @@ def _iter_repo_files(repo_root: Path, limit: int = 5000) -> Iterable[Path]:
             break
 
 
-def _infer_stack_from_signals(languages: List[str], frameworks: List[str]) -> str:
+def _infer_stack_from_signals(languages: list[str], frameworks: list[str]) -> str:
     parts = []
     for item in languages + frameworks:
         if item not in parts:
@@ -491,7 +488,7 @@ def _infer_stack_from_signals(languages: List[str], frameworks: List[str]) -> st
     return ", ".join(parts)
 
 
-def _parse_package_json(raw_text: str, frameworks: List[str], languages: List[str]) -> None:
+def _parse_package_json(raw_text: str, frameworks: list[str], languages: list[str]) -> None:
     try:
         data = json.loads(raw_text)
     except Exception:
@@ -511,7 +508,7 @@ def _parse_package_json(raw_text: str, frameworks: List[str], languages: List[st
         _append_unique(frameworks, "Vue")
 
 
-def _parse_pyproject(raw_bytes: bytes, frameworks: List[str], languages: List[str]) -> None:
+def _parse_pyproject(raw_bytes: bytes, frameworks: list[str], languages: list[str]) -> None:
     try:
         data = tomllib.loads(raw_bytes.decode("utf-8"))
     except Exception:
@@ -529,8 +526,8 @@ def _parse_pyproject(raw_bytes: bytes, frameworks: List[str], languages: List[st
         _append_unique(frameworks, "Flask")
 
 
-def _parse_csproj(raw_text: str, frameworks: List[str], languages: List[str]) -> List[str]:
-    target_frameworks: List[str] = []
+def _parse_csproj(raw_text: str, frameworks: list[str], languages: list[str]) -> list[str]:
+    target_frameworks: list[str] = []
     try:
         root = ET.fromstring(raw_text)
     except Exception:
@@ -552,13 +549,13 @@ def _parse_csproj(raw_text: str, frameworks: List[str], languages: List[str]) ->
     return target_frameworks
 
 
-def _summarise_file_tree(file_paths: Iterable[str]) -> Dict[str, Any]:
-    extension_counts: Dict[str, int] = {}
-    manifest_paths: List[str] = []
-    csproj_paths: List[str] = []
-    route_files: List[str] = []
-    service_entrypoints: List[str] = []
-    hub_files: List[str] = []
+def _summarise_file_tree(file_paths: Iterable[str]) -> dict[str, Any]:
+    extension_counts: dict[str, int] = {}
+    manifest_paths: list[str] = []
+    csproj_paths: list[str] = []
+    route_files: list[str] = []
+    service_entrypoints: list[str] = []
+    hub_files: list[str] = []
     total_files = 0
 
     for rel_path in file_paths:
@@ -586,8 +583,8 @@ def _summarise_file_tree(file_paths: Iterable[str]) -> Dict[str, Any]:
         if name.endswith("hub.cs"):
             hub_files.append(rel_path)
 
-    languages: List[str] = []
-    frameworks: List[str] = []
+    languages: list[str] = []
+    frameworks: list[str] = []
     if extension_counts.get(".py"):
         _append_unique(languages, "Python")
     if extension_counts.get(".js") or extension_counts.get(".jsx") or extension_counts.get(".ts") or extension_counts.get(".tsx"):
@@ -609,8 +606,8 @@ def _summarise_file_tree(file_paths: Iterable[str]) -> Dict[str, Any]:
     }
 
 
-def _infer_service_surfaces(repo_summary: Dict[str, Any], api_inventory: Dict[str, Any], runtime_observations: Dict[str, Any]) -> List[Dict[str, Any]]:
-    surfaces: List[Dict[str, Any]] = []
+def _infer_service_surfaces(repo_summary: dict[str, Any], api_inventory: dict[str, Any], runtime_observations: dict[str, Any]) -> list[dict[str, Any]]:
+    surfaces: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
 
     for rel_path in repo_summary.get("service_entrypoints") or []:
@@ -677,8 +674,8 @@ def _infer_service_surfaces(repo_summary: Dict[str, Any], api_inventory: Dict[st
     return surfaces
 
 
-def _infer_route_surfaces(repo_summary: Dict[str, Any]) -> List[Dict[str, Any]]:
-    surfaces: List[Dict[str, Any]] = []
+def _infer_route_surfaces(repo_summary: dict[str, Any]) -> list[dict[str, Any]]:
+    surfaces: list[dict[str, Any]] = []
     seen: set[str] = set()
 
     for rel_path in repo_summary.get("route_files") or []:
@@ -697,7 +694,7 @@ def _infer_route_surfaces(repo_summary: Dict[str, Any]) -> List[Dict[str, Any]]:
     return surfaces
 
 
-def _scan_local_repo(repo_path: str) -> Dict[str, Any]:
+def _scan_local_repo(repo_path: str) -> dict[str, Any]:
     root = Path(repo_path).expanduser().resolve()
     if not root.exists() or not root.is_dir():
         return {"success": False, "error": f"Repo path does not exist: {root}"}
@@ -707,7 +704,7 @@ def _scan_local_repo(repo_path: str) -> Dict[str, Any]:
     summary = _summarise_file_tree(relative_paths)
     languages = list(summary["languages"])
     frameworks = list(summary["frameworks"])
-    target_frameworks: List[str] = []
+    target_frameworks: list[str] = []
 
     for rel_path in summary["manifest_paths"][:20]:
         full_path = root / rel_path
@@ -738,7 +735,7 @@ def _scan_local_repo(repo_path: str) -> Dict[str, Any]:
     return summary
 
 
-async def _github_request(url: str, token: Optional[str]) -> httpx.Response:
+async def _github_request(url: str, token: str | None) -> httpx.Response:
     headers = {"Accept": "application/vnd.github+json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -746,7 +743,7 @@ async def _github_request(url: str, token: Optional[str]) -> httpx.Response:
         return await client.get(url, headers=headers)
 
 
-async def _fetch_github_file(owner: str, repo: str, path: str, ref: str, token: Optional[str]) -> Optional[bytes]:
+async def _fetch_github_file(owner: str, repo: str, path: str, ref: str, token: str | None) -> bytes | None:
     url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={ref}"
     resp = await _github_request(url, token)
     if resp.status_code != 200:
@@ -762,7 +759,7 @@ async def _fetch_github_file(owner: str, repo: str, path: str, ref: str, token: 
     return None
 
 
-async def _scan_github_repo(github_repo: str, github_ref: Optional[str]) -> Dict[str, Any]:
+async def _scan_github_repo(github_repo: str, github_ref: str | None) -> dict[str, Any]:
     if "/" not in github_repo:
         return {"success": False, "error": f"Invalid github_repo '{github_repo}'"}
 
@@ -792,7 +789,7 @@ async def _scan_github_repo(github_repo: str, github_ref: Optional[str]) -> Dict
     summary = _summarise_file_tree(file_paths)
     languages = list(summary["languages"])
     frameworks = list(summary["frameworks"])
-    target_frameworks: List[str] = []
+    target_frameworks: list[str] = []
 
     for rel_path in summary["manifest_paths"][:10]:
         raw_bytes = await _fetch_github_file(owner, repo, rel_path, ref, token)
@@ -827,7 +824,7 @@ async def _scan_github_repo(github_repo: str, github_ref: Optional[str]) -> Dict
     return summary
 
 
-async def _scan_repo_source(local_repo_path: Optional[str], github_repo: Optional[str], github_ref: Optional[str]) -> Dict[str, Any]:
+async def _scan_repo_source(local_repo_path: str | None, github_repo: str | None, github_ref: str | None) -> dict[str, Any]:
     if local_repo_path:
         return _scan_local_repo(str(local_repo_path))
     if github_repo:
@@ -835,18 +832,18 @@ async def _scan_repo_source(local_repo_path: Optional[str], github_repo: Optiona
     return {}
 
 
-def _combine_repo_summaries(*summaries: Dict[str, Any]) -> Dict[str, Any]:
+def _combine_repo_summaries(*summaries: dict[str, Any]) -> dict[str, Any]:
     valid = [item for item in summaries if item and item.get("success")]
     if not valid:
         return {}
 
     repo_names = [item.get("repo_name") for item in valid if item.get("repo_name")]
-    languages: List[str] = []
-    frameworks: List[str] = []
-    target_frameworks: List[str] = []
-    route_files: List[str] = []
-    service_entrypoints: List[str] = []
-    hub_files: List[str] = []
+    languages: list[str] = []
+    frameworks: list[str] = []
+    target_frameworks: list[str] = []
+    route_files: list[str] = []
+    service_entrypoints: list[str] = []
+    hub_files: list[str] = []
     total_files_scanned = 0
 
     for summary in valid:
@@ -880,7 +877,7 @@ def _combine_repo_summaries(*summaries: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _load_spec_from_file(path_value: str) -> Optional[Dict[str, Any]]:
+def _load_spec_from_file(path_value: str) -> dict[str, Any] | None:
     path = Path(path_value).expanduser().resolve()
     if not path.exists() or not path.is_file():
         return None
@@ -897,7 +894,7 @@ def _load_spec_from_file(path_value: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-async def _load_spec_from_url(url: str) -> Optional[Dict[str, Any]]:
+async def _load_spec_from_url(url: str) -> dict[str, Any] | None:
     async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=10.0)) as client:
         resp = await client.get(url)
     if resp.status_code != 200:
@@ -914,10 +911,10 @@ async def _load_spec_from_url(url: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _auth_summary_from_security_schemes(security_schemes: Dict[str, Any]) -> str:
+def _auth_summary_from_security_schemes(security_schemes: dict[str, Any]) -> str:
     if not security_schemes:
         return "unknown"
-    auth_kinds: List[str] = []
+    auth_kinds: list[str] = []
     for scheme in security_schemes.values():
         if not isinstance(scheme, dict):
             continue
@@ -933,7 +930,7 @@ def _auth_summary_from_security_schemes(security_schemes: Dict[str, Any]) -> str
     return ", ".join(auth_kinds) if auth_kinds else "unknown"
 
 
-def _summarise_openapi_spec(spec: Dict[str, Any], source: str) -> Dict[str, Any]:
+def _summarise_openapi_spec(spec: dict[str, Any], source: str) -> dict[str, Any]:
     paths = spec.get("paths", {}) if isinstance(spec, dict) else {}
     methods = set()
     for item in paths.values():
@@ -955,7 +952,7 @@ def _summarise_openapi_spec(spec: Dict[str, Any], source: str) -> Dict[str, Any]
     }
 
 
-async def _collect_openapi(openapi_url: Optional[str], backend_base_url: Optional[str], uploaded_openapi_path: Optional[str]) -> Dict[str, Any]:
+async def _collect_openapi(openapi_url: str | None, backend_base_url: str | None, uploaded_openapi_path: str | None) -> dict[str, Any]:
     if uploaded_openapi_path:
         spec = _load_spec_from_file(uploaded_openapi_path)
         if spec:
@@ -985,7 +982,7 @@ async def _collect_openapi(openapi_url: Optional[str], backend_base_url: Optiona
     return {"success": False, "error": "OpenAPI spec not found from configured sources"}
 
 
-async def _probe_backend(backend_base_url: Optional[str]) -> Dict[str, Any]:
+async def _probe_backend(backend_base_url: str | None) -> dict[str, Any]:
     base_url = _normalise_base_url(backend_base_url)
     if not base_url:
         return {"success": False, "error": "No backend_base_url provided"}
@@ -1001,7 +998,7 @@ async def _probe_backend(backend_base_url: Optional[str]) -> Dict[str, Any]:
                 continue
             if resp.status_code >= 400:
                 continue
-            details: Dict[str, Any]
+            details: dict[str, Any]
             try:
                 details = resp.json()
             except Exception:
@@ -1025,9 +1022,9 @@ def _check_mozaiks_adapter_exists(provider_id: str) -> bool:
     return any(True for _ in adapters_root.glob(f"*{needle}*"))
 
 
-def _collect_package_names_from_root(repo_root: Path) -> List[str]:
+def _collect_package_names_from_root(repo_root: Path) -> list[str]:
     """Read package.json, pyproject.toml, and requirements.txt for dependency names."""
-    names: List[str] = []
+    names: list[str] = []
 
     # package.json — search repo root and one level deep (monorepos)
     pkg_candidates = [repo_root / "package.json"] + list(repo_root.glob("*/package.json"))[:3]
@@ -1036,7 +1033,7 @@ def _collect_package_names_from_root(repo_root: Path) -> List[str]:
             continue
         try:
             pkg_data = json.loads(pkg_path.read_text(encoding="utf-8"))
-            deps: Dict[str, Any] = {}
+            deps: dict[str, Any] = {}
             deps.update(pkg_data.get("dependencies", {}) or {})
             deps.update(pkg_data.get("devDependencies", {}) or {})
             names.extend(list(deps.keys()))
@@ -1073,7 +1070,7 @@ def _collect_package_names_from_root(repo_root: Path) -> List[str]:
 
 
 def _detect_storage_pattern(
-    package_names: List[str],
+    package_names: list[str],
     source_sample: str,
 ) -> str:
     """
@@ -1099,23 +1096,23 @@ def _detect_storage_pattern(
 
 
 def _detect_connectors(
-    package_names: List[str],
+    package_names: list[str],
     source_sample: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Detect external service connectors from package names and sampled source.
 
     Returns a list of ConnectorSpec dicts (without actual secrets).
     """
     pkg_blob = " ".join(package_names).lower()
-    detected: List[Dict[str, Any]] = []
+    detected: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
 
     for signal in _CONNECTOR_SIGNALS:
         provider_id = signal["provider_id"]
-        found_pkg: Optional[str] = None
-        found_import: Optional[str] = None
-        source_files: List[str] = []
+        found_pkg: str | None = None
+        found_import: str | None = None
+        source_files: list[str] = []
         confidence = "unverified"
 
         # Package detection (confirmed)
@@ -1165,7 +1162,7 @@ def _detect_connectors(
 def _detect_mozaiks_vocabulary(
     repo_root: Path,
     source_sample: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Detect Mozaiks-specific vocabulary and structural indicators.
 
@@ -1175,8 +1172,8 @@ def _detect_mozaiks_vocabulary(
         vocab_terms_found: list[str]
         structure_indicators_found: list[str]
     """
-    vocab_found: List[str] = []
-    structure_found: List[str] = []
+    vocab_found: list[str] = []
+    structure_found: list[str] = []
 
     # Vocabulary in sampled source text
     for term in _MOZAIKS_VOCAB_PATTERNS:
@@ -1191,7 +1188,7 @@ def _detect_mozaiks_vocabulary(
         try:
             for path in repo_root.glob(glob_pattern):
                 if not any(part in _EXCLUDED_DIRS for part in path.parts):
-                    indicator = glob_pattern.lstrip("**/")
+                    indicator = glob_pattern.removeprefix("**/")
                     if indicator not in structure_found:
                         structure_found.append(indicator)
                     break
@@ -1232,7 +1229,7 @@ def _sample_source_text(repo_root: Path, max_files: int = 120, max_chars_per_fil
     Limits total output to avoid excessive memory use.
     """
     _SOURCE_EXTENSIONS = {".py", ".ts", ".js", ".tsx", ".jsx", ".yaml", ".yml", ".json"}
-    parts: List[str] = []
+    parts: list[str] = []
     total_chars = 0
     max_total = max_files * max_chars_per_file
 
@@ -1252,13 +1249,13 @@ def _sample_source_text(repo_root: Path, max_files: int = 120, max_chars_per_fil
     return "\n".join(parts)
 
 
-def _merge_unresolved(existing: List[Dict[str, Any]], question: str, context: str, priority: str = "medium") -> None:
+def _merge_unresolved(existing: list[dict[str, Any]], question: str, context: str, priority: str = "medium") -> None:
     if any(item.get("question") == question for item in existing):
         return
     existing.append({"question": question, "context": context, "priority": priority})
 
 
-async def collect_prechat_discovery_context(context_variables: Optional[Any] = None) -> Dict[str, Any]:
+async def collect_prechat_discovery_context(context_variables: Any | None = None) -> dict[str, Any]:
     """Populate discovery context from deterministic pre-chat sources."""
     ctx = context_variables or {}
     discovery_inputs = _coerce_mapping(_ctx_get(ctx, "discovery_inputs", {}))
@@ -1288,18 +1285,18 @@ async def collect_prechat_discovery_context(context_variables: Optional[Any] = N
     openapi_url = _first_nonempty(_ctx_get(ctx, "openapi_url"), discovery_inputs.get("openapi_url"))
     uploaded_openapi_path = _first_nonempty(_ctx_get(ctx, "uploaded_openapi_path"), discovery_inputs.get("uploaded_openapi_path"))
 
-    evidence_sources: List[Dict[str, Any]] = []
-    unresolved_questions: List[Dict[str, Any]] = list(_ctx_get(ctx, "unresolved_questions", []) or [])
-    repo_summary: Dict[str, Any] = {}
-    frontend_repo_summary: Dict[str, Any] = {}
-    backend_repo_summary: Dict[str, Any] = {}
-    api_inventory: Dict[str, Any] = {}
-    runtime_observations: Dict[str, Any] = {}
-    auth_hypothesis: Dict[str, Any] = {}
+    evidence_sources: list[dict[str, Any]] = []
+    unresolved_questions: list[dict[str, Any]] = list(_ctx_get(ctx, "unresolved_questions", []) or [])
+    repo_summary: dict[str, Any] = {}
+    frontend_repo_summary: dict[str, Any] = {}
+    backend_repo_summary: dict[str, Any] = {}
+    api_inventory: dict[str, Any] = {}
+    runtime_observations: dict[str, Any] = {}
+    auth_hypothesis: dict[str, Any] = {}
     theme_capture_ready = False
     theme_capture_status = "none"
-    theme_capture_summary: Optional[str] = None
-    theme_capture_evidence: Dict[str, Any] = {}
+    theme_capture_summary: str | None = None
+    theme_capture_evidence: dict[str, Any] = {}
 
     if frontend_repo_path or frontend_github_repo:
         frontend_repo_summary = await _scan_repo_source(frontend_repo_path, frontend_github_repo, github_ref)
@@ -1457,7 +1454,7 @@ async def collect_prechat_discovery_context(context_variables: Optional[Any] = N
     if theme_seed_available:
         try:
             theme_module = _load_theme_capture_preloader()
-            theme_context: Dict[str, Any] = {
+            theme_context: dict[str, Any] = {
                 "app_url": theme_app_url,
                 "parent_theme_config": frontend_theme_path,
                 "parent_shell_config": frontend_shell_path,
@@ -1497,11 +1494,11 @@ async def collect_prechat_discovery_context(context_variables: Optional[Any] = N
     # -----------------------------------------------------------------------
     storage_pattern = "unknown"
     storage_migration_required = False
-    detected_connectors: List[Dict[str, Any]] = []
+    detected_connectors: list[dict[str, Any]] = []
     mozaiks_vocabulary_detected = False
     mozaiks_authored_app = False
 
-    active_repo_root: Optional[Path] = None
+    active_repo_root: Path | None = None
     for candidate_path in [repo_path, frontend_repo_path, backend_repo_path]:
         if candidate_path:
             candidate = Path(str(candidate_path)).expanduser().resolve()

@@ -6,7 +6,6 @@ from pathlib import Path
 
 import yaml
 
-
 WORKSPACE = Path(__file__).resolve().parents[1]
 
 
@@ -88,7 +87,7 @@ def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> N
     assert "Embed" in agents
     assert "Bridge" in agents
     assert "Ecosystem" in agents
-    assert "Native Migration" in agents
+    assert "Gradual Modernization" in agents
     assert "ExistingProductSpec" in agents
     assert "AgentAugmentationPlan" in agents
     assert "discovery_mode" in agents
@@ -190,17 +189,17 @@ def test_existing_app_preload_supports_workspace_app_preset() -> None:
     def _fake_host_source_inputs(host_app_source: str | None) -> dict:
         if host_app_source == "workspace_app":
             return {
-                "repo_path": "C:/workspace/mozaiks-app",
+                "repo_path": "C:/workspace/sample-existing-app",
                 "discovery_mode": "guided",
             }
         return {}
 
     async def _fake_scan(local_repo_path: str | None, github_repo: str | None, github_ref: str | None) -> dict:
-        if local_repo_path == "C:/workspace/mozaiks-app":
+        if local_repo_path == "C:/workspace/sample-existing-app":
             return {
                 "success": True,
                 "source": "local_repo",
-                "repo_name": "mozaiks-app",
+                "repo_name": "sample-existing-app",
                 "languages": ["JavaScript/TypeScript", "Python"],
                 "frameworks": ["React", "FastAPI"],
                 "target_frameworks": [],
@@ -213,11 +212,11 @@ def test_existing_app_preload_supports_workspace_app_preset() -> None:
         return {"success": False, "error": "unexpected repo path"}
 
     def _fake_scan_local_repo(repo_path: str) -> dict:
-        if repo_path == "C:/workspace/mozaiks-app":
+        if repo_path == "C:/workspace/sample-existing-app":
             return {
                 "success": True,
                 "source": "local_repo",
-                "repo_name": "mozaiks-app",
+                "repo_name": "sample-existing-app",
                 "languages": ["JavaScript/TypeScript", "Python"],
                 "frameworks": ["React", "FastAPI"],
                 "target_frameworks": [],
@@ -281,9 +280,9 @@ def test_existing_app_preload_supports_workspace_app_preset() -> None:
     assert result["success"] is True
     assert context["discovery_mode"] == "guided"
     assert context["host_app_source"] == "workspace_app"
-    assert context["app_name"] == "mozaiks-app"
+    assert context["app_name"] == "sample-existing-app"
     assert context["repo_summary"]["source"] == "local_repo"
-    assert context["repo_summary"]["repo_name"] == "mozaiks-app"
+    assert context["repo_summary"]["repo_name"] == "sample-existing-app"
     assert context["service_surfaces"][0]["kind"] == "rest_api"
     assert context["route_surfaces"][0]["module"] == "src"
     assert context["existing_experience_summary"].startswith("Current experience appears to be organized around route/module surfaces")
@@ -314,7 +313,7 @@ def test_existing_app_artifact_saver_persists_canonical_fields() -> None:
         structured_output={
             "request_intent": "brownfield_app",
             "existing_product_spec": {
-                "app_name": "mozaiks-app",
+                "app_name": "existing-product-host",
                 "app_description": "Existing product host app",
                 "tech_stack": "React, .NET, MongoDB",
                 "auth_model": "OIDC JWT",
@@ -357,7 +356,7 @@ def test_existing_app_artifact_saver_persists_canonical_fields() -> None:
     result = asyncio.run(module.save_existing_app_artifacts(context_variables=context))
 
     assert result["success"] is True
-    assert context["existing_product_spec"]["app_name"] == "mozaiks-app"
+    assert context["existing_product_spec"]["app_name"] == "existing-product-host"
     assert context["capability_specs"][0]["capability_id"] == "direct_messaging"
     assert context["agent_augmentation_plan"]["adoption_level"] == "bridge"
     assert context["existing_app_discovery_artifact"]["request_intent"] == "brownfield_app"
@@ -380,7 +379,7 @@ def test_existing_app_strategy_docs_are_indexed() -> None:
     assert "Builder and Generation" in index_text
     assert "ExistingAppDiscovery" in session_router
     assert "Embed" in discovery_agents
-    assert "Native Migration" in discovery_agents
+    assert "Gradual Modernization" in discovery_agents
     assert "host_app_source = \"workspace_app\"" in discovery_agents
     assert "guided" in discovery_context
     assert "workspace_app" in discovery_context
@@ -395,5 +394,6 @@ def test_existing_app_docs_describe_workspace_app_preset() -> None:
 
     assert "host_app_source = \"workspace_app\"" in discovery_agents
     assert "`workspace_app` means preload the current workspace's known local app repo" in discovery_context
-    assert "mozaiks-app" in preload_tool
+    assert "MOZAIKS_APP_WORKSPACE_PATH" in preload_tool
+    assert "mozaiks-app" not in preload_tool
     assert "ThemeCapture" in preload_tool

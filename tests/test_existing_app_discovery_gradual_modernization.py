@@ -1,11 +1,11 @@
-"""Tests for ExistingAppDiscovery native_migration and ecosystem improvements.
+"""Tests for ExistingAppDiscovery gradual_modernization and ecosystem improvements.
 
 Covers:
 - Storage-pattern detection from package names and source text
 - Connector detection from package manifests and imports
 - Mozaiks vocabulary and authorship detection
 - Structured-output models for new fields
-- save_existing_app_artifacts native_migration disk write
+- save_existing_app_artifacts retirement of persisted decomposition output
 - embed/bridge behavior is unchanged
 """
 
@@ -18,7 +18,6 @@ import tempfile
 from pathlib import Path
 
 import yaml
-
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 
@@ -258,20 +257,19 @@ def test_detected_connectors_populate_new_adapters_required() -> None:
     assert "mozaiks_adapter_exists" in connector_fields
 
 
-def test_native_migration_artifact_has_module_decomposition_plan() -> None:
-    """ExistingAppAugmentationArtifact has module_decomposition_plan optional field."""
+def test_gradual_modernization_artifact_keeps_decomposition_internal_only() -> None:
+    """ModuleDecompositionPlan remains declared but is not a top-level artifact field."""
     data = _read_yaml("factory_app/workflows/ExistingAppDiscovery/structured_outputs.yaml")
     models = data["models"]
 
     artifact_fields = models["ExistingAppAugmentationArtifact"]["fields"]
-    assert "module_decomposition_plan" in artifact_fields, (
-        "ExistingAppAugmentationArtifact must have module_decomposition_plan"
-    )
-    mdp = artifact_fields["module_decomposition_plan"]
-    assert mdp["type"] in ("optional_str", "str"), f"Expected optional_str, got {mdp['type']}"
+    assert "module_decomposition_plan" not in artifact_fields
 
     # ModuleDecompositionPlan model must also be declared
     assert "ModuleDecompositionPlan" in models, "ModuleDecompositionPlan model must exist"
+    mdp_description = models["ModuleDecompositionPlan"]["description"]
+    assert "workflow-local" in mdp_description
+    assert "not a canonical top-level AppContext artifact" in mdp_description
     mdp_fields = models["ModuleDecompositionPlan"]["fields"]
     assert "proposed_modules" in mdp_fields
     assert "proposed_workflows" in mdp_fields
@@ -287,7 +285,7 @@ def test_native_migration_artifact_has_module_decomposition_plan() -> None:
 def _make_save_module():
     return _load_module(
         "factory_app/workflows/ExistingAppDiscovery/tools/save_existing_app_artifacts.py",
-        "tests.save_artifacts_native",
+        "tests.save_artifacts_gradual",
     )
 
 
@@ -332,8 +330,8 @@ def _fake_decomposition_plan() -> dict:
     }
 
 
-def test_save_artifacts_writes_decomposition_plan_for_native_migration(tmp_path) -> None:
-    """save_existing_app_artifacts writes module_decomposition_plan.json for native_migration."""
+def test_save_artifacts_keeps_decomposition_context_evidence_without_disk_persistence(tmp_path) -> None:
+    """save_existing_app_artifacts no longer persists module_decomposition_plan.json."""
     module = _make_save_module()
 
     emitted = {}
@@ -342,12 +340,12 @@ def test_save_artifacts_writes_decomposition_plan_for_native_migration(tmp_path)
         emitted["payload"] = payload
 
     module.emit_ui_surface = _fake_emit
-    module._generated_root = lambda: tmp_path
 
     plan = _fake_decomposition_plan()
 
     context = _Context(
-        chat_id="chat_native_001",
+        chat_id="chat_gradual_001",
+        module_decomposition_plan=json.dumps(plan),
         structured_output={
             "request_intent": "brownfield_app",
             "existing_product_spec": {
@@ -387,7 +385,7 @@ def test_save_artifacts_writes_decomposition_plan_for_native_migration(tmp_path)
                 }
             ],
             "agent_augmentation_plan": {
-                "adoption_level": "native_migration",
+                "adoption_level": "gradual_modernization",
                 "migration_complexity": "full_rewrite",
                 "adoption_rationale": "TypeScript backend requires full rewrite to Python FastAPI modules.",
                 "storage_migration_required": True,
@@ -400,8 +398,7 @@ def test_save_artifacts_writes_decomposition_plan_for_native_migration(tmp_path)
                 "theme_adaptation_strategy": "Full Mozaiks shell replaces host chrome.",
                 "embed_theme_ready": False,
             },
-            "module_decomposition_plan": json.dumps(plan),
-            "discovery_brief": "Full native migration of DNS management tooling.",
+            "discovery_brief": "Gradual modernization of DNS management tooling.",
             "artifact_version": "1.0",
         },
     )
@@ -410,22 +407,20 @@ def test_save_artifacts_writes_decomposition_plan_for_native_migration(tmp_path)
 
     assert result["success"] is True
 
-    # Check disk write
-    written = tmp_path / "existing_app_discovery" / "chat_native_001" / "module_decomposition_plan.json"
-    assert written.exists(), f"Expected file at {written}"
-    parsed = json.loads(written.read_text(encoding="utf-8"))
-    assert "proposed_modules" in parsed
-    assert parsed["proposed_modules"][0]["module_id"] == "dns_zone_manager"
+    # No decomposition plan file is written; context evidence is preserved.
+    written = tmp_path / "existing_app_discovery" / "chat_gradual_001" / "module_decomposition_plan.json"
+    assert not written.exists()
 
-    # Check context updated
     assert context["module_decomposition_plan"] == json.dumps(plan)
+    assert "module_decomposition_plan" not in context["existing_app_discovery_artifact"]
 
     # Check UI payload has new fields
-    assert emitted["payload"]["adoption_level"] == "native_migration"
+    assert emitted["payload"]["adoption_level"] == "gradual_modernization"
     assert emitted["payload"]["migration_complexity"] == "full_rewrite"
     assert emitted["payload"]["storage_pattern"] == "file_store"
     assert emitted["payload"]["storage_migration_required"] is True
-    assert emitted["payload"]["has_decomposition_plan"] is True
+    assert emitted["payload"]["adoption_plan_available"] is True
+    assert "has_decomposition_plan" not in emitted["payload"]
     assert len(emitted["payload"]["detected_connectors"]) == 1
     assert emitted["payload"]["detected_connectors"][0]["provider_id"] == "cloudflare"
     assert emitted["payload"]["capabilities"][0]["migration_priority"] == "p1_critical"
@@ -441,7 +436,6 @@ def test_save_artifacts_embed_bridge_behavior_unchanged(tmp_path) -> None:
         emitted["payload"] = payload
 
     module.emit_ui_surface = _fake_emit
-    module._generated_root = lambda: tmp_path
 
     context = _Context(
         chat_id="chat_bridge_001",
@@ -485,7 +479,6 @@ def test_save_artifacts_embed_bridge_behavior_unchanged(tmp_path) -> None:
                 "theme_adaptation_strategy": "Apply captured tokens to Mozaiks side panel.",
                 "embed_theme_ready": True,
             },
-            "module_decomposition_plan": None,
             "discovery_brief": "Bridge the partner portal API for agentic access.",
             "artifact_version": "1.0",
         },
@@ -507,7 +500,8 @@ def test_save_artifacts_embed_bridge_behavior_unchanged(tmp_path) -> None:
     # UI payload still emitted correctly for bridge
     assert emitted["payload"]["adoption_level"] == "bridge"
     assert emitted["payload"]["embed_theme_ready"] is True
-    assert emitted["payload"]["has_decomposition_plan"] is False
+    assert emitted["payload"]["adoption_plan_available"] is True
+    assert "has_decomposition_plan" not in emitted["payload"]
     assert emitted["payload"]["service_surface_count"] == 1
 
 

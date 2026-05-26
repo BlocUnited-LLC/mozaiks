@@ -47,14 +47,14 @@ export default function DiscoveryBriefCard({ payload = {} }) {
     embed: 'Embed',
     bridge: 'Bridge',
     ecosystem: 'Ecosystem',
-    native_migration: 'Native Migration',
+    gradual_modernization: 'Gradual Modernization',
   };
 
   const levelDescriptions = {
     embed: 'Add Mozaiks surfaces to the host app without bridging backend capabilities yet.',
     bridge: 'AI surface + backend capability bridge for read/write access.',
     ecosystem: 'Bridge the host app and attach selected Mozaiks ecosystem modules.',
-    native_migration: 'Selectively rebuild chosen surfaces into Mozaiks-native artifacts over time.',
+    gradual_modernization: 'Move approved surfaces toward Mozaiks-owned modules or overlays over time.',
   };
 
   const confidenceColors = {

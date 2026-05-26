@@ -1,29 +1,114 @@
 """Persist the ExistingAppDiscovery augmentation artifacts and emit a review card."""
 
+import hashlib
 import json
-import os
-from pathlib import Path
-from typing import Annotated, Any, Dict, Optional
 import logging
+from datetime import UTC, datetime
+from typing import Annotated, Any
 
+from factory_app.workflows.ExistingAppDiscovery.tools.app_context_mapping import (
+    APP_CONTEXT_ARTIFACT_KINDS,
+    build_existing_app_context_artifacts,
+)
+from mozaiksai.core.app_context.store import (
+    build_brownfield_app_context_version,
+    register_app_context_version,
+)
+from mozaiksai.core.artifacts.models import ArtifactLifecycleStatus, ArtifactValidationStatus
+from mozaiksai.core.artifacts.store import get_artifact_store
 from mozaiksai.core.workflow.ui_tools import emit_ui_surface
-
 
 logger = logging.getLogger(__name__)
 
-_DECOMPOSITION_ADOPTION_LEVELS = {"native_migration", "ecosystem"}
 
-_DEFAULT_GENERATED_ROOT = Path("generated")
+def _json_bytes(payload: Any) -> bytes:
+    return json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        default=str,
+    ).encode("utf-8")
 
 
-def _generated_root() -> Path:
-    env = os.environ.get("MOZAIKS_GENERATED_ARTIFACTS_PATH")
-    return Path(env) if env else _DEFAULT_GENERATED_ROOT
+def _set_context_value(context_variables: Any, key: str, value: Any) -> None:
+    try:
+        if hasattr(context_variables, "set"):
+            context_variables.set(key, value)
+            return
+    except Exception:
+        pass
+    try:
+        context_variables[key] = value
+    except Exception:
+        return
+
+
+def _artifact_version_id(version_doc: Any) -> str | None:
+    if hasattr(version_doc, "id"):
+        return str(version_doc.id)
+    if isinstance(version_doc, dict):
+        raw_id = version_doc.get("id") or version_doc.get("_id")
+        return str(raw_id) if raw_id else None
+    return None
+
+
+async def _persist_app_context_artifact_drafts(
+    *,
+    app_id: str,
+    chat_id: Any,
+    artifact_payloads: dict[str, Any],
+    artifact_store: Any | None = None,
+) -> dict[str, str]:
+    store = artifact_store or get_artifact_store()
+    persisted_refs: dict[str, str] = {}
+    generated_at = datetime.now(UTC).isoformat()
+
+    for artifact_kind in APP_CONTEXT_ARTIFACT_KINDS:
+        payload = artifact_payloads.get(artifact_kind)
+        if payload is None:
+            continue
+
+        raw = _json_bytes(payload)
+        version_doc = await store.create_artifact_version(
+            app_id=str(app_id),
+            artifact_kind=artifact_kind,
+            artifact_key=artifact_kind,
+            files_manifest=[
+                {
+                    "path": f"existing_app_discovery/{artifact_kind}.json",
+                    "sha256": hashlib.sha256(raw).hexdigest(),
+                    "size_bytes": len(raw),
+                    "content_type": "application/json",
+                }
+            ],
+            source_workflow="ExistingAppDiscovery",
+            source_chat_id=str(chat_id) if chat_id else None,
+            lifecycle_status=ArtifactLifecycleStatus.DRAFT,
+            validation_status=ArtifactValidationStatus.PENDING,
+            commit_metadata={
+                "message": f"ExistingAppDiscovery: {artifact_kind}",
+                "source_workflow": "ExistingAppDiscovery",
+                "source_chat_id": str(chat_id) if chat_id else None,
+                "metadata": {
+                    "summary_payload": payload,
+                    "summary_format": "json",
+                    "artifact_contract": "mozaiksai/core/app_context/models.py",
+                    "generated_at": generated_at,
+                    "source_workflow": "ExistingAppDiscovery",
+                },
+            },
+        )
+        version_id = _artifact_version_id(version_doc)
+        if version_id:
+            persisted_refs[artifact_kind] = version_id
+
+    return persisted_refs
 
 
 async def save_existing_app_artifacts(
-    context_variables: Annotated[Optional[Any], "Runtime context"] = None,
-) -> Dict[str, Any]:
+    context_variables: Annotated[Any | None, "Runtime context"] = None,
+) -> dict[str, Any]:
     """Persist the canonical existing-app discovery artifacts and emit a UI summary."""
     if not context_variables:
         return {"success": False, "error": "No context provided"}
@@ -39,7 +124,6 @@ async def save_existing_app_artifacts(
     capability_specs = data.get("capability_specs") or []
     augmentation_plan = data.get("agent_augmentation_plan") or {}
     ai_caps = augmentation_plan.get("ai_accessible_capabilities") or []
-    module_decomposition_plan = data.get("module_decomposition_plan")
     chat_id = context_variables.get("chat_id")
 
     adoption_level = augmentation_plan.get("adoption_level", "embed")
@@ -70,7 +154,7 @@ async def save_existing_app_artifacts(
         "ai_accessible_count": len(ai_caps),
         "service_surface_count": len(product_spec.get("service_surfaces") or []),
         "route_surface_count": len(product_spec.get("route_surfaces") or []),
-        "has_decomposition_plan": bool(module_decomposition_plan),
+        "adoption_plan_available": bool(augmentation_plan),
         "capabilities": [
             {
                 "name": cap.get("label", cap.get("capability_id", "")),
@@ -112,45 +196,111 @@ async def save_existing_app_artifacts(
     context_variables["capability_specs"] = capability_specs
     context_variables["agent_augmentation_plan"] = augmentation_plan
     context_variables["existing_app_discovery_artifact"] = data
-    if module_decomposition_plan is not None:
-        context_variables["module_decomposition_plan"] = module_decomposition_plan
 
     # ------------------------------------------------------------------
-    # Write ModuleDecompositionPlan to generated/ for native_migration and ecosystem
+    # Derive canonical app-context contract drafts for future control-plane use.
+    # Existing workflow outputs remain unchanged; these drafts are additive.
     # ------------------------------------------------------------------
-    plan_path_written: Optional[str] = None
-    if adoption_level in _DECOMPOSITION_ADOPTION_LEVELS and module_decomposition_plan:
+    try:
+        app_context_artifacts = build_existing_app_context_artifacts(
+            data,
+            context_variables=context_variables,
+        )
+        app_context_payloads = app_context_artifacts.as_artifact_payloads()
+        _set_context_value(context_variables, "application_inventory", app_context_payloads["application_inventory"])
+        _set_context_value(context_variables, "ownership_boundary", app_context_payloads["ownership_boundary"])
+        _set_context_value(
+            context_variables,
+            "integration_inventory",
+            app_context_payloads["integration_inventory"],
+        )
+        _set_context_value(context_variables, "risk_report", app_context_payloads["risk_report"])
+        _set_context_value(context_variables, "adoption_plan", app_context_payloads["adoption_plan"])
+        _set_context_value(
+            context_variables,
+            "brownfield_registration",
+            app_context_payloads["brownfield_registration"],
+        )
+        if "app_context_graph" in app_context_payloads:
+            _set_context_value(
+                context_variables,
+                "app_context_graph",
+                app_context_payloads["app_context_graph"],
+            )
+        _set_context_value(
+            context_variables,
+            "brownfield_app_context_artifacts",
+            app_context_payloads,
+        )
+
         try:
-            safe_chat_id = str(chat_id) if chat_id else "unknown"
-            out_dir = _generated_root() / "existing_app_discovery" / safe_chat_id
-            out_dir.mkdir(parents=True, exist_ok=True)
-            plan_path = out_dir / "module_decomposition_plan.json"
+            artifact_store = get_artifact_store()
+            persisted_refs = await _persist_app_context_artifact_drafts(
+                app_id=app_context_artifacts.app_id,
+                chat_id=chat_id,
+                artifact_payloads=app_context_payloads,
+                artifact_store=artifact_store,
+            )
+            _set_context_value(
+                context_variables,
+                "brownfield_app_context_artifact_version_refs",
+                persisted_refs,
+            )
 
-            # module_decomposition_plan may arrive as a serialized JSON string or dict
-            if isinstance(module_decomposition_plan, str):
-                parsed = json.loads(module_decomposition_plan)
-            else:
-                parsed = module_decomposition_plan
-
-            plan_path.write_text(json.dumps(parsed, indent=2), encoding="utf-8")
-            plan_path_written = str(plan_path)
-            logger.info(
-                "[ExistingAppDiscovery] ModuleDecompositionPlan written to %s",
-                plan_path_written,
+            app_context_version = build_brownfield_app_context_version(
+                app_id=app_context_artifacts.app_id,
+                artifact_version_refs=persisted_refs,
+                source_refs=app_context_artifacts.application_inventory.source_refs,
+                ownership_boundaries=app_context_artifacts.ownership_boundaries,
+                application_inventory=app_context_artifacts.application_inventory,
+                context_version_id=app_context_artifacts.brownfield_registration.context_version_id,
+            )
+            registered_context = await register_app_context_version(
+                app_context_version,
+                artifact_store=artifact_store,
+                source_workflow="ExistingAppDiscovery",
+                source_chat_id=str(chat_id) if chat_id else None,
+                make_current=True,
+            )
+            app_context_version_payload = registered_context.context_version.model_dump(mode="json")
+            _set_context_value(
+                context_variables,
+                "app_context_version",
+                app_context_version_payload,
+            )
+            _set_context_value(
+                context_variables,
+                "app_context_version_artifact_version_id",
+                registered_context.artifact_version.id,
+            )
+            _set_context_value(
+                context_variables,
+                "current_app_context_version_id",
+                registered_context.context_version.context_version_id,
             )
         except Exception as exc:
             logger.warning(
-                "[ExistingAppDiscovery] Could not write module_decomposition_plan: %s", exc
+                "[ExistingAppDiscovery] Draft app-context ArtifactVersion persistence failed: %s",
+                exc,
             )
+            _set_context_value(
+                context_variables,
+                "brownfield_app_context_artifact_persistence_error",
+                str(exc),
+            )
+    except Exception as exc:
+        logger.warning(
+            "[ExistingAppDiscovery] Could not derive app-context contract drafts: %s",
+            exc,
+        )
 
     logger.info(
         "[ExistingAppDiscovery] Artifacts saved for '%s' — capabilities=%s "
-        "adoption_level=%s migration_complexity=%s decomposition_plan=%s",
+        "adoption_level=%s migration_complexity=%s",
         product_spec.get("app_name", "unknown"),
         len(capability_specs),
         adoption_level,
         migration_complexity or "n/a",
-        "yes" if plan_path_written else "no",
     )
 
     summary_parts = [
@@ -159,9 +309,6 @@ async def save_existing_app_artifacts(
         f"{len(capability_specs)} capabilities mapped, "
         f"{len(ai_caps)} approved for initial AI access."
     ]
-    if plan_path_written:
-        summary_parts.append(f" Module decomposition plan written to {plan_path_written}.")
-
     return {
         "success": True,
         "message": "".join(summary_parts),

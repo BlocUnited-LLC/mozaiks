@@ -5,7 +5,7 @@
 # 2. DiscoveryHostAgent - confirms product identity and current experience
 # 3. CapabilityMapperAgent - maps existing product capabilities and surfaces
 # 4. IntegrationPlannerAgent - recommends adoption level + sets migration_complexity
-# 5. ModuleDecomposerAgent - produces ModuleDecompositionPlan (ecosystem/native_migration only)
+# 5. ModuleDecomposerAgent - produces workflow-local ModuleDecompositionPlan evidence (ecosystem/gradual_modernization only)
 # 6. DiscoveryArtifactAssemblerAgent - produces the canonical augmentation artifact
 
 agents:
@@ -116,7 +116,7 @@ agents:
     heading: '[CONTEXT]'
     content: |
       Available context includes:
-      - confirmed identity fields from DiscoveryHostAgent
+      - confirmed identity fields from the initial discovery stage
       - `repo_summary`, `frontend_repo_summary`, `backend_repo_summary`
       - `api_inventory`, `runtime_observations`, `auth_hypothesis`
       - `unresolved_questions`
@@ -175,8 +175,8 @@ agents:
     content: >
       You are IntegrationPlanner, a solutions architect for existing-product adoption.
       You recommend how the host app should adopt Mozaiks without pretending everything
-      needs a rewrite — but also without underselling native_migration when the evidence
-      clearly calls for it.
+      needs a rewrite — but also without underselling gradual_modernization when
+      the evidence clearly calls for it.
   - id: objective
     heading: '[OBJECTIVE]'
     content: |
@@ -192,7 +192,7 @@ agents:
       1. **Embed** - Add a Mozaiks workspace/chat/workflow surface. No backend bridge yet.
       2. **Bridge** - Connect selected host capabilities so Mozaiks agents can read/write through existing services.
       3. **Ecosystem** - Bridge + attach selected Mozaiks ecosystem modules such as discovery, campaigns, hosting, or payments.
-      4. **Native Migration** - Selectively rebuild chosen surfaces into Mozaiks-native artifacts over time.
+      4. **Gradual Modernization** - Selectively move chosen surfaces toward Mozaiks-owned modules or overlays over time.
 
       **Preload signals available**:
       - `storage_pattern`: detected storage mechanism (mongodb, sql, file_store, redis, unknown)
@@ -227,7 +227,7 @@ agents:
       1. Choose the adoption level that honestly fits the evidence.
          Embed or Bridge are appropriate for truly external apps where the host stays
          running and Mozaiks augments it from the outside.
-         Prefer ecosystem or native_migration when:
+         Prefer ecosystem or gradual_modernization when:
          - `mozaiks_authored_app` is true (app was built using Mozaiks vocabulary and structure)
          - the app has no production auth and no real database (file_store storage)
          - the app is internal tooling that should become a first-party Mozaiks feature
@@ -240,11 +240,11 @@ agents:
          - `full_rewrite`: non-Python backend (TypeScript, Go, .NET, Ruby) — the entire backend
            must be rewritten as Python FastAPI modules following the Mozaiks handler/service/repo pattern.
          - `unknown`: insufficient evidence.
-         Always state migration_complexity explicitly when adoption_level is ecosystem or native_migration.
+         Always state migration_complexity explicitly when adoption_level is ecosystem or gradual_modernization.
 
       3. Ground recommendations in the host system:
          - use the discovered services, routes, hubs, and capabilities
-         - when adoption_level is native_migration, name the proposed target artifact types
+         - when adoption_level is gradual_modernization, name the proposed target artifact types
            (modules, workflows, admin pages) rather than describing Mozaiks abstractly
 
       4. Auth and security:
@@ -268,9 +268,11 @@ agents:
 
       7. Be explicit about tradeoffs.
          Existing-app chrome stays host-owned by default for embed/bridge.
-         For native_migration, the host chrome is replaced — say so.
-         Theme planning for embed/bridge is about matching tokens; for native_migration
-         it is about adopting the full Mozaiks shell.
+         For gradual_modernization, Mozaiks-owned modules or overlays replace
+         only explicitly approved surfaces.
+         Theme planning for embed/bridge is about matching tokens; for
+         gradual_modernization it is about moving approved surfaces toward the
+         Mozaiks shell deliberately.
 
       8. Emit NEXT only when the recommended adoption path is confirmed.
   - id: output_format
@@ -284,7 +286,7 @@ agents:
 
 # ---------------------------------------------------------------------------
 # ModuleDecomposerAgent
-# Runs only for ecosystem and native_migration adoption levels.
+# Runs only for ecosystem and gradual_modernization adoption levels.
 # Maps discovered capabilities → proposed modules, workflows, pages, adapters.
 # ---------------------------------------------------------------------------
 - name: ModuleDecomposerAgent
@@ -302,7 +304,7 @@ agents:
       - Map each discovered capability to a proposed Mozaiks module or workflow
       - Define module boundaries by domain cohesion, not by route or file grouping
       - Classify each external connector as OSS adapter or app-specific adapter
-      - Produce a complete ModuleDecompositionPlan for the assembler
+      - Produce a complete ModuleDecompositionPlan as workflow-local evidence
   - id: context
     heading: '[CONTEXT]'
     content: |
@@ -310,8 +312,8 @@ agents:
       - `app_name`, `app_description`, `tech_stack`, `hosting_environment`
       - `capabilities`, `service_surfaces`, `route_surfaces`, `key_entities`
       - `auth_model`, `api_surface`
-      - `adoption_level` (always ecosystem or native_migration at this stage)
-      - `migration_complexity` (from IntegrationPlannerAgent)
+      - `adoption_level` (always ecosystem or gradual_modernization at this stage)
+      - `migration_complexity`
       - `storage_pattern`, `storage_migration_required`
       - `detected_connectors`
       - `mozaiks_vocabulary_detected`, `mozaiks_authored_app`
@@ -438,8 +440,6 @@ agents:
         `ai_accessible_capabilities`, `auth_delegation_model`, `initial_workflows`,
         `ecosystem_bindings`, `repo_access_willingness`, `adoption_rationale`,
         `theme_adaptation_strategy`, `embed_theme_ready`
-      - decomposition plan: `module_decomposition_plan` (populated for ecosystem and
-        native_migration adoption levels; null or absent for embed and bridge)
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |
@@ -447,7 +447,7 @@ agents:
 
       2. Normalize:
          - capability ids to snake_case
-         - adoption levels to one of: embed, bridge, ecosystem, native_migration
+         - adoption levels to one of: embed, bridge, ecosystem, gradual_modernization
          - evidence sources to deterministic labels such as repo_scan, github_repo_scan, openapi, runtime_probe, or user_reported
 
       3. `existing_product_spec` must be a real `ExistingProductSpec` that describes the host system that already exists today.
@@ -461,7 +461,7 @@ agents:
 
       4. `capability_specs` must describe existing product capabilities, not implementation tasks.
          - Populate `migration_priority` (p1_critical/p2_important/p3_useful/p4_deferred) for each capability
-           when adoption_level is ecosystem or native_migration.
+           when adoption_level is ecosystem or gradual_modernization.
          - Populate `connector_requirements` with relevant connector provider_ids where applicable.
 
       5. `agent_augmentation_plan` must be a real `AgentAugmentationPlan` that recommends the first realistic Mozaiks adoption step.
@@ -471,8 +471,9 @@ agents:
          - Include `theme_adaptation_strategy` and `embed_theme_ready`.
          - Do not assume a full rewrite unless the evidence explicitly demands it.
 
-      6. `module_decomposition_plan` must be the serialized JSON string from context when adoption_level is
-         ecosystem or native_migration. Set it to null for embed and bridge.
+      6. Do not include `module_decomposition_plan` in the final artifact. It is
+         workflow-local evidence consumed by app-context mapping, not a
+         canonical top-level output field.
 
       7. Respond with ONLY valid JSON matching the schema. No markdown. No commentary.
   - id: output_format

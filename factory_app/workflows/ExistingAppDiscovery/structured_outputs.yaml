@@ -3,13 +3,10 @@
 # Only DiscoveryArtifactAssemblerAgent produces structured output.
 # The conversational agents (including ModuleDecomposerAgent) remain free-form.
 #
-# For adoption_level embed or bridge:
-#   ExistingAppAugmentationArtifact.module_decomposition_plan is null.
-#
-# For adoption_level ecosystem or native_migration:
-#   ExistingAppAugmentationArtifact.module_decomposition_plan is populated.
-#   save_existing_app_artifacts also writes module_decomposition_plan to
-#   the generated artifact path for downstream AppGenerator consumption.
+# ModuleDecomposerAgent may write module_decomposition_plan as workflow-local
+# evidence for ecosystem or gradual_modernization. It is not a canonical
+# top-level ExistingAppAugmentationArtifact field and is not persisted as an
+# AppContext artifact.
 
 registry:
   DiscoveryHostAgent: null
@@ -182,13 +179,13 @@ models:
         description: >
           Whether the capability is technically ready for agent access without
           deeper migration. Most meaningful for embed and bridge adoption levels.
-          For native_migration, consult migration_priority instead.
+          For gradual_modernization, consult migration_priority instead.
       migration_priority:
         type: optional_str
         description: >
           Priority for porting this capability when adoption_level is
-          native_migration or ecosystem. One of: p1_critical, p2_important,
-          p3_useful, p4_deferred. Null for embed and bridge.
+          gradual_modernization or ecosystem. One of: p1_critical,
+          p2_important, p3_useful, p4_deferred. Null for embed and bridge.
       connector_requirements:
         type: optional_list
         items: str
@@ -255,7 +252,7 @@ models:
         type: list
         items: str
         description: Known constraints that shape the adoption path.
-      # --- New fields for native_migration and improved discovery ---
+      # --- New fields for gradual modernization and improved discovery ---
       storage_pattern:
         type: str
         description: >
@@ -284,7 +281,7 @@ models:
         description: >
           True when both Mozaiks vocabulary AND Mozaiks structural indicators
           (module.yaml, contracts/reactions.yaml, app/modules/ layout) are
-          present. Strong signal for native_migration adoption level.
+          present. Strong signal for gradual_modernization or ecosystem adoption.
 
   # ---------------------------------------------------------------------------
   # AgentAugmentationPlan — Mozaiks adoption plan
@@ -295,7 +292,7 @@ models:
     fields:
       adoption_level:
         type: str
-        description: Recommended starting level - "embed", "bridge", "ecosystem", or "native_migration".
+        description: Recommended starting level - "embed", "bridge", "ecosystem", or "gradual_modernization".
       adoption_rationale:
         type: str
         description: Why this level is the right first move for the app.
@@ -330,7 +327,7 @@ models:
       migration_complexity:
         type: str
         description: >
-          Overall complexity of native_migration or ecosystem adoption.
+          Overall complexity of gradual_modernization or ecosystem adoption.
           One of: none, low, moderate, full_rewrite, unknown.
           - none: embed only, no migration needed.
           - low: same tech stack as Mozaiks modules (Python/FastAPI), compatible storage.
@@ -353,7 +350,7 @@ models:
           mozaiks_adapter_exists == false. Null for embed and bridge.
 
   # ---------------------------------------------------------------------------
-  # ModuleDecompositionPlan — produced for ecosystem and native_migration
+  # ModuleDecompositionPlan — internal workflow evidence for ecosystem and gradual_modernization
   # ---------------------------------------------------------------------------
   ProposedAction:
     type: model
@@ -495,7 +492,8 @@ models:
     type: model
     description: >
       An external provider adapter proposed for the implementation.
-      Adapters are provider-specific clients — they must not appear in OSS.
+      Provider-specific app adapters belong under backend/adapters/ in the app
+      workspace. Generic provider-neutral utilities may belong in OSS runtime.
     fields:
       provider_id:
         type: str
@@ -527,9 +525,10 @@ models:
   ModuleDecompositionPlan:
     type: model
     description: >
-      Canonical decomposition of an existing app into Mozaiks modules, workflows,
-      pages, and adapters. Produced when adoption_level is native_migration or
-      ecosystem. Null for embed and bridge.
+      Internal workflow-local decomposition evidence for an existing app's
+      possible Mozaiks modules, workflows, pages, and adapters. Produced by
+      ModuleDecomposerAgent when adoption_level is gradual_modernization or
+      ecosystem. This is not a canonical top-level AppContext artifact.
     fields:
       adoption_level:
         type: str
@@ -605,12 +604,6 @@ models:
       agent_augmentation_plan:
         type: AgentAugmentationPlan
         description: Recommended Mozaiks adoption and augmentation plan.
-      module_decomposition_plan:
-        type: optional_str
-        description: >
-          Populated with the serialized ModuleDecompositionPlan JSON string when
-          adoption_level is native_migration or ecosystem. Null for embed and
-          bridge. The saver tool deserializes this and writes it to generated/.
       discovery_brief:
         type: str
         description: Human-readable discovery summary for operator review.

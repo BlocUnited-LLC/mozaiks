@@ -5,7 +5,7 @@
 # 1. product identity + existing experience
 # 2. current capabilities + service/route surfaces
 # 3. Mozaiks adoption plan + migration_complexity
-# 4. module decomposition (ecosystem/native_migration only)
+# 4. module decomposition (ecosystem/gradual_modernization only)
 # 5. canonical artifact assembly
 
 definitions:
@@ -267,7 +267,7 @@ definitions:
     description: >
       True when strong structural signals confirm the app was built using
       Mozaiks authoring patterns (module.yaml, contracts/, backend/ layout).
-      Implies native_migration or ecosystem is the natural adoption path.
+      Implies gradual_modernization or ecosystem is the natural adoption path.
     source:
       type: state
       default: false
@@ -424,7 +424,7 @@ definitions:
 
   adoption_level:
     type: string
-    description: Recommended adoption level - embed, bridge, ecosystem, or native_migration.
+    description: Recommended adoption level - embed, bridge, ecosystem, or gradual_modernization.
     source:
       type: state
       default: null
@@ -518,7 +518,7 @@ definitions:
             equals: NEXT
 
   # ---------------------------------------------------------------------------
-  # Module decomposition stage (ecosystem / native_migration only)
+  # Module decomposition stage (ecosystem / gradual_modernization only)
   # ---------------------------------------------------------------------------
 
   module_decomposition_plan:
@@ -526,8 +526,9 @@ definitions:
     description: >
       Serialized JSON string containing the ModuleDecompositionPlan produced by
       ModuleDecomposerAgent. Null for embed and bridge adoption levels.
-      Consumed by DiscoveryArtifactAssemblerAgent and written to disk by
-      save_existing_app_artifacts when adoption_level is ecosystem or native_migration.
+      Workflow-local evidence consumed by app-context mapping to preserve
+      candidate module/page/adapter detail. It is not emitted as a top-level
+      ExistingAppAugmentationArtifact field and is not written to disk.
     source:
       type: state
       default: null
@@ -582,6 +583,12 @@ agents:
     variables:
       - app_type
       - discovery_inputs
+      - context_refresh_request
+      - current_context_version_id
+      - source_refs
+      - refresh_scope
+      - refresh_reason
+      - expected_artifacts
       - host_app_source
       - discovery_mode
       - repo_path
@@ -716,6 +723,12 @@ agents:
   DiscoveryArtifactAssemblerAgent:
     variables:
       - discovery_inputs
+      - context_refresh_request
+      - current_context_version_id
+      - source_refs
+      - refresh_scope
+      - refresh_reason
+      - expected_artifacts
       - host_app_source
       - discovery_mode
       - evidence_sources
@@ -764,7 +777,6 @@ agents:
       - adoption_rationale
       - theme_adaptation_strategy
       - embed_theme_ready
-      - module_decomposition_plan
       - existing_product_spec
       - capability_specs
       - agent_augmentation_plan
