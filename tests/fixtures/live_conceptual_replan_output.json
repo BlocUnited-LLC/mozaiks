@@ -1,0 +1,171 @@
+{
+  "schema_version": "mozaiks.live_conceptual_replan_benchmark.v1",
+  "success": true,
+  "model": "gpt-4o-mini",
+  "assertions": {
+    "total": 17,
+    "passed": 17,
+    "failed": 0
+  },
+  "approach": {
+    "live": [
+      "RefinementTriggerRouteResolver with real control-plane pack",
+      "AppPlanAgent via OpenAI (gpt-4o-mini) with full conceptual_replan context",
+      "resolve_carry_forward_preservation Phase 7A with real LLM decisions"
+    ],
+    "stubbed": [
+      "_DeterministicChangeClassifier(change_class='core')",
+      "ArtifactStore.get_artifact_version -- synthetic CRM doc + temp dir"
+    ],
+    "note": "Single-agent live benchmark. Not a full workflow sequence run. Tests AppPlanAgent reasoning and Phase 7A preservation integrity."
+  },
+  "scenario": {
+    "app_id": "smoke-crm-marketplace-live-001",
+    "previous_artifact": "av_crm_live_smoke_v1",
+    "pivot_request": "Actually, let's turn this into a marketplace where sellers can list products and buyers can browse and purchase them. Keep preferences and notifications.",
+    "carry_forward_candidates": [
+      "settings",
+      "notifications",
+      "contacts",
+      "pipeline"
+    ]
+  },
+  "routing": {
+    "route": "conceptual_replan",
+    "change_class": "core",
+    "context_seed": {
+      "pivot_description": "Actually, let's turn this into a marketplace where sellers can list products and buyers can browse and purchase them. Keep preferences and notifications.",
+      "preserve_families": [
+        "brand"
+      ],
+      "previous_app_bundle_ref": "av_crm_live_smoke_v1",
+      "carry_forward_modules": [
+        "settings",
+        "notifications",
+        "contacts",
+        "pipeline"
+      ],
+      "workflow_sequence": "conceptual_replan",
+      "llm_profile": "architecture"
+    }
+  },
+  "appplan_agent": {
+    "carry_forward_decisions": [
+      {
+        "module_id": "settings",
+        "decision": "reuse",
+        "reason": "Universal user preference management -- concept-agnostic",
+        "source": "carry_forward_candidate",
+        "affected_build_tasks": []
+      },
+      {
+        "module_id": "notifications",
+        "decision": "reuse",
+        "reason": "Notification primitives are concept-agnostic",
+        "source": "carry_forward_candidate",
+        "affected_build_tasks": []
+      },
+      {
+        "module_id": "contacts",
+        "decision": "drop",
+        "reason": "CRM contact management is not relevant in a marketplace context",
+        "source": "carry_forward_candidate",
+        "affected_build_tasks": []
+      },
+      {
+        "module_id": "pipeline",
+        "decision": "regenerate",
+        "reason": "Sales pipeline functionality is replaced by marketplace orders and transactions, requiring a fresh implementation",
+        "source": "carry_forward_candidate",
+        "affected_build_tasks": []
+      }
+    ],
+    "capability_packs": [],
+    "pages_count": 0,
+    "build_tasks_count": 0,
+    "plan": {
+      "carry_forward_decisions": [
+        {
+          "module_id": "settings",
+          "decision": "reuse",
+          "reason": "Universal user preference management -- concept-agnostic",
+          "source": "carry_forward_candidate",
+          "affected_build_tasks": []
+        },
+        {
+          "module_id": "notifications",
+          "decision": "reuse",
+          "reason": "Notification primitives are concept-agnostic",
+          "source": "carry_forward_candidate",
+          "affected_build_tasks": []
+        },
+        {
+          "module_id": "contacts",
+          "decision": "drop",
+          "reason": "CRM contact management is not relevant in a marketplace context",
+          "source": "carry_forward_candidate",
+          "affected_build_tasks": []
+        },
+        {
+          "module_id": "pipeline",
+          "decision": "regenerate",
+          "reason": "Sales pipeline functionality is replaced by marketplace orders and transactions, requiring a fresh implementation",
+          "source": "carry_forward_candidate",
+          "affected_build_tasks": []
+        }
+      ]
+    }
+  },
+  "carry_forward_report": {
+    "previous_app_bundle_ref": "av_crm_live_smoke_v1",
+    "workspace_available": true,
+    "workspace_source": "workspace_dir",
+    "preserved_paths": [
+      "modules/settings/contracts/events.yaml",
+      "modules/settings/contracts/settings.yaml",
+      "modules/settings/module.yaml",
+      "modules/notifications/contracts/events.yaml",
+      "modules/notifications/contracts/notifications.yaml",
+      "modules/notifications/module.yaml"
+    ],
+    "skipped_paths": {},
+    "conflicts": {},
+    "decisions_processed": [
+      {
+        "module_id": "settings",
+        "decision": "reuse",
+        "outcome": "preserved",
+        "preserved_count": 3
+      },
+      {
+        "module_id": "notifications",
+        "decision": "reuse",
+        "outcome": "preserved",
+        "preserved_count": 3
+      },
+      {
+        "module_id": "contacts",
+        "decision": "drop",
+        "outcome": "no_files_copied"
+      },
+      {
+        "module_id": "pipeline",
+        "decision": "regenerate",
+        "outcome": "no_files_copied"
+      }
+    ],
+    "reused_modules": [
+      "settings",
+      "notifications"
+    ],
+    "adapted_modules": [],
+    "regenerated_modules": [
+      "pipeline"
+    ],
+    "dropped_modules": [
+      "contacts"
+    ],
+    "warnings": []
+  },
+  "failures": []
+}

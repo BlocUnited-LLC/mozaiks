@@ -1,0 +1,204 @@
+{
+  "approach": {
+    "live": [
+      "RefinementTriggerRouteResolver with real control-plane pack",
+      "get_carry_forward_candidates (auto variant only)",
+      "load_artifact_workspace with real temp dir",
+      "resolve_carry_forward_preservation Phase 7A tool"
+    ],
+    "stubbed": [
+      "_DeterministicChangeClassifier(change_class='core')",
+      "ArtifactStore.get_artifact_version -> synthetic CRM doc + temp dir",
+      "carry_forward_decisions fixture (settings/notifications=reuse, contacts/pipeline=drop)"
+    ]
+  },
+  "carry_forward_decisions": [
+    {
+      "decision": "reuse",
+      "module_id": "settings",
+      "reason": "Universal preference management -- unchanged across concept."
+    },
+    {
+      "decision": "reuse",
+      "module_id": "notifications",
+      "reason": "Notification primitives are concept-agnostic."
+    },
+    {
+      "decision": "drop",
+      "module_id": "contacts",
+      "reason": "CRM contact management -- not relevant to a marketplace."
+    },
+    {
+      "decision": "drop",
+      "module_id": "pipeline",
+      "reason": "CRM sales pipeline -- replaced by marketplace orders."
+    }
+  ],
+  "mode": "both",
+  "scenario": {
+    "expected_sequence": "conceptual_replan",
+    "initial_app": "CRM (contacts, pipeline, settings, notifications)",
+    "refinement_request": "Actually this should be a marketplace for sellers and buyers, not a CRM."
+  },
+  "schema_version": "mozaiks.conceptual_replan_carry_forward_smoke.v2",
+  "studio_ui": {
+    "panel_renders": true,
+    "report_shape_valid": true
+  },
+  "success": true,
+  "variants": {
+    "auto": {
+      "auto_populated": true,
+      "behavior_note": "Auto-extraction returns all module IDs found in the prior workspace. No reuse/drop filtering at route time -- that is AppPlanAgent's job.",
+      "candidates_tool_called": true,
+      "carry_forward_modules_source": "get_carry_forward_candidates",
+      "carry_forward_report": {
+        "adapted_modules": [],
+        "conflicts": {},
+        "decisions_processed": [
+          {
+            "decision": "reuse",
+            "module_id": "settings",
+            "outcome": "preserved",
+            "preserved_count": 3
+          },
+          {
+            "decision": "reuse",
+            "module_id": "notifications",
+            "outcome": "preserved",
+            "preserved_count": 3
+          },
+          {
+            "decision": "drop",
+            "module_id": "contacts",
+            "outcome": "no_files_copied"
+          },
+          {
+            "decision": "drop",
+            "module_id": "pipeline",
+            "outcome": "no_files_copied"
+          }
+        ],
+        "dropped_modules": [
+          "contacts",
+          "pipeline"
+        ],
+        "preserved_paths": [
+          "modules/settings/contracts/events.yaml",
+          "modules/settings/contracts/settings.yaml",
+          "modules/settings/module.yaml",
+          "modules/notifications/contracts/events.yaml",
+          "modules/notifications/contracts/notifications.yaml",
+          "modules/notifications/module.yaml"
+        ],
+        "previous_app_bundle_ref": "av_crm_smoke_conceptual_v1",
+        "regenerated_modules": [],
+        "reused_modules": [
+          "settings",
+          "notifications"
+        ],
+        "skipped_paths": {},
+        "warnings": [],
+        "workspace_available": true,
+        "workspace_source": "workspace_dir"
+      },
+      "carry_forward_warnings": [],
+      "context_seed": {
+        "carry_forward_modules": [
+          "contacts",
+          "notifications",
+          "pipeline",
+          "settings"
+        ],
+        "llm_profile": "architecture",
+        "pivot_description": "Actually this should be a marketplace for sellers and buyers, not a CRM.",
+        "preserve_families": [
+          "brand"
+        ],
+        "previous_app_bundle_ref": "av_crm_smoke_conceptual_v1",
+        "workflow_sequence": "conceptual_replan"
+      },
+      "description": "carry_forward_modules auto-populated via get_carry_forward_candidates",
+      "explicit_override_used": false,
+      "routing": {
+        "change_class": "core",
+        "workflow_sequence": "conceptual_replan"
+      }
+    },
+    "explicit": {
+      "auto_populated": false,
+      "carry_forward_modules_source": "explicit_override",
+      "carry_forward_report": {
+        "adapted_modules": [],
+        "conflicts": {},
+        "decisions_processed": [
+          {
+            "decision": "reuse",
+            "module_id": "settings",
+            "outcome": "preserved",
+            "preserved_count": 3
+          },
+          {
+            "decision": "reuse",
+            "module_id": "notifications",
+            "outcome": "preserved",
+            "preserved_count": 3
+          },
+          {
+            "decision": "drop",
+            "module_id": "contacts",
+            "outcome": "no_files_copied"
+          },
+          {
+            "decision": "drop",
+            "module_id": "pipeline",
+            "outcome": "no_files_copied"
+          }
+        ],
+        "dropped_modules": [
+          "contacts",
+          "pipeline"
+        ],
+        "preserved_paths": [
+          "modules/settings/contracts/events.yaml",
+          "modules/settings/contracts/settings.yaml",
+          "modules/settings/module.yaml",
+          "modules/notifications/contracts/events.yaml",
+          "modules/notifications/contracts/notifications.yaml",
+          "modules/notifications/module.yaml"
+        ],
+        "previous_app_bundle_ref": "av_crm_smoke_conceptual_v1",
+        "regenerated_modules": [],
+        "reused_modules": [
+          "settings",
+          "notifications"
+        ],
+        "skipped_paths": {},
+        "warnings": [],
+        "workspace_available": true,
+        "workspace_source": "workspace_dir"
+      },
+      "carry_forward_warnings": [],
+      "context_seed": {
+        "carry_forward_modules": [
+          "settings",
+          "notifications"
+        ],
+        "llm_profile": "architecture",
+        "pivot_description": "Actually this should be a marketplace for sellers and buyers, not a CRM.",
+        "preserve_families": [
+          "brand"
+        ],
+        "previous_app_bundle_ref": "av_crm_smoke_conceptual_v1",
+        "workflow_sequence": "conceptual_replan"
+      },
+      "description": "carry_forward_modules explicitly provided in request.extra",
+      "explicit_override_used": true,
+      "routing": {
+        "change_class": "core",
+        "workflow_sequence": "conceptual_replan"
+      }
+    }
+  },
+  "violations": []
+}
