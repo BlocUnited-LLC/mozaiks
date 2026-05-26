@@ -7,11 +7,50 @@ This project follows a practical pre-1.0 changelog format:
 - `Added` for new capabilities
 - `Changed` for behavior, docs, packaging, or workflow changes
 - `Fixed` for bug fixes
-- `Deprecated` for supported behavior that will be removed later
 - `Removed` for removed behavior
 - `Security` for vulnerability or hardening work
 
 ## Unreleased
+
+### Added
+
+- Added brownfield app adoption continuation path. After `ExistingAppDiscovery`
+  completes, the journey now advances to a `brownfield_path_selector` transition
+  that routes into one of two downstream build sequences:
+  - `brownfield_overlay_generation` (light integration): AgentGenerator → AppGenerator → app_review
+  - `brownfield_module_generation` (full migration): DesignDocs → AgentGenerator → AppGenerator → app_review
+- Added `BrownfieldPathSelector` transition component for the post-discovery
+  build-path choice screen.
+- Enabled the `brownfield_app` option in `AppTypeSelector` — existing-app
+  onboarding is now a live, routable path from the `/create` entry point.
+
+- Added `chat_session` transition type to the workflow routing system. A
+  `chat_session` transition launches a target workflow in the current chat
+  surface without a blocking overlay, allowing the user to interact
+  conversationally. Declared with `route_to` only — `ui`, `options`,
+  `confirm_route`, and `cancel_route` are not permitted.
+- Added `AppReview` workflow: a lightweight AG2 session launched by the
+  `app_review` chat_session transition after AppGenerator completes. ReviewAgent
+  presents an `AppReviewSummary` in-chat artifact and manages the
+  promote-or-revise HITL decision without blocking chat input.
+- Added revision loop: when the user requests changes inside AppReview,
+  `submit_revision_request` emits a `chat.revision_requested` WebSocket event
+  carrying the request text. `ChatPage` handles the event by calling
+  `POST /api/workflows/trigger` with `trigger_source="refinement"`, routing
+  through the control plane into the appropriate revision workflow sequence
+  (e.g. `app_surface_revision`) and switching the chat session in-place.
+
+### Changed
+
+- Changed `app_review` transition from `confirm` (blocking overlay using
+  `AppReviewScreen`) to `chat_session` (launches `AppReview` workflow in-place).
+  The review step now lives in the chat surface so users can type revision
+  requests without modal interruption.
+
+### Removed
+
+- Removed `AppReviewScreen.js` transition overlay component — replaced by the
+  `AppReviewSummary` agentic UI artifact in the `AppReview` workflow.
 
 ## 0.1.4 - 2026-05-21
 
@@ -99,8 +138,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
-- Hardened generated-app persistence docs/tests and kept the default startup
-  policy backward-compatible while documenting production `required` mode.
+- Hardened generated-app persistence docs/tests and documented production
+  `required` startup mode.
 - Hardened UI/design-system contracts, shared workflow infrastructure, and
   route/docs alignment for the OSS factory console.
 - `IntegrationPlannerAgent` no longer defaults to embed/bridge — prefers `native_migration` when `mozaiks_authored_app` is true, storage is file_store, or app is internal tooling.
@@ -110,24 +149,20 @@ This project follows a practical pre-1.0 changelog format:
 - Moved shared platform build lifecycle hooks into `factory_app/workflows/_shared/platform/` and documented the canonical placement rules for factory-owned shared workflow infrastructure versus workflow-local generated files.
 - Updated public contributor docs, setup skills, env/web-shell guidance, and .claude rules to frame `factory_app` as the first-party builder/reference workspace, describe build as workflow-sequence-driven, and document refinement as checkpoint/control-plane re-entry rather than a dedicated workflow.
 - Unified the module event-reaction contract on canonical `contracts/reactions.yaml` across runtime loading/routing, AppGenerator prompts and structured outputs, CLI scaffolds, contributor guidance, and contract tests.
-- Consolidated source-of-truth architecture docs and module-authoring guidance for the canonical event/reaction model, including provider-neutral `tasks` examples and explicit legacy-only framing for deprecated `contracts/subscriptions.yaml`.
-
-### Deprecated
-
-- `contracts/subscriptions.yaml` remains runtime-supported only as a temporary fallback when `contracts/reactions.yaml` is absent; new generated and contributor-authored module work should use `contracts/reactions.yaml` exclusively.
+- Consolidated source-of-truth architecture docs and module-authoring guidance for the canonical event/reaction model, including provider-neutral `tasks` examples and explicit rejection of `contracts/subscriptions.yaml`.
 
 ## 0.1.2 - 2026-05-14
 
 ### Changed
 
-- Consolidated first-party console ownership under `factory_app/app/admin/pages/` and `factory_app/app/admin/index.js`, removing the legacy duplicate console surface path.
+- Consolidated first-party console ownership under `factory_app/app/admin/pages/` and `factory_app/app/admin/index.js`, removing the duplicate console surface path.
 - Updated workspace console navigation to derive from route-manifest metadata (`meta.navigation.group`, `meta.navigation.icon`) instead of hardcoded sidebar arrays in `WorkspaceLayout`.
 - Aligned route manifest contracts so workspace and app console routes declare explicit navigation inclusion/grouping semantics.
 
 ### Fixed
 
 - Fixed active admin console page imports to resolve shared `ConsoleShared` primitives from the canonical `factory_app/app/ui/components/` location.
-- Regenerated packaging manifest metadata (`mozaiks.egg-info/SOURCES.txt`) to remove stale references to deleted legacy console paths.
+- Regenerated packaging manifest metadata (`mozaiks.egg-info/SOURCES.txt`) to remove stale references to deleted console paths.
 
 ## 0.1.1 - 2026-05-14
 

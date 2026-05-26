@@ -1,6 +1,6 @@
 ---
 title: Workflow Routing Transitions
-status: Authoritative - Pre-Production, No Backward Compat
+status: Authoritative - Pre-Production
 created: 2026-04-13
 updated: 2026-04-20
 depends_on: ../frontend/ui-system/generated-frontend-surface-contract.md, session-router.md
@@ -107,6 +107,55 @@ factory_app/workflows/extended_orchestration/ui/index.js
 The registry owns routing and context semantics (`transition_type`, single-route
 `route_to`, `options[].route_to`, and `options[].context_variables`).
 
+### `chat_session` Transition Type
+
+`chat_session` launches a workflow in the current chat surface without mounting
+a blocking overlay. It is the correct type for any post-generation review or
+revision interaction where the user must be able to type freely in the chat.
+
+**Declaration:**
+
+```json
+{
+  "id": "app_review",
+  "transition_type": "chat_session",
+  "route_to": "AppReview"
+}
+```
+
+**Rules:**
+
+- `route_to` is required and must point to a registered workflow id.
+- `chat_session` transitions must NOT declare a `ui` block — they never render
+  an overlay component.
+- `confirm_route`, `cancel_route`, `options`, `context_key`, and `routes` are
+  not valid on `chat_session` transitions.
+
+**Runtime behavior:**
+
+1. The sequence auto-advances to the `chat_session` transition after the
+   preceding workflow completes.
+2. `TransitionScreen` receives the transition, detects `chat_session`, and
+   immediately calls `onResolve(null)` without mounting any UI.
+3. The shell calls `/api/transitions/resolve` and receives
+   `resolution_type: "chat_session"` with `chat_id`, `workflow_id`, and the
+   filtered `context_variables` from the active journey.
+4. The shell switches the active chat session in-place to the launched
+   workflow — no navigation away, no overlay, no blocked input.
+5. The target workflow receives the accumulated journey `context_variables`
+   filtered against its own `context_variables.yaml` declarations.
+
+**When to use:**
+
+Use `chat_session` when the interaction after transition must happen
+conversationally — the user can type revision requests, the agent can respond,
+and the flow can conclude through agent-authored completion signals rather than
+a button-driven confirm/cancel overlay.
+
+The canonical example is `app_review`, which launches the `AppReview` workflow
+so the ReviewAgent can present a build summary artifact in chat and the user
+can type revision requests or click Promote without a blocking screen.
+
 ## Dependencies
 
 Dependencies are hard prerequisites and belong on workflow entries:
@@ -155,6 +204,35 @@ Rules:
 - If `B` depends on `A`, author the sequence as `A` in an earlier step and `B` in a later step.
 - Do not list the same workflow more than once in a sequence.
 - Entry UI belongs to `extension_registry.json -> entrypoints[]` via `transition`. The sequence may include the same transition as its first step so the journey contract remains fully ordered.
+
+### Brownfield Context Refresh
+
+`brownfield_discovery_refresh` is the canonical sequence for resolving a
+control-plane `ContextRefreshPlan` after stale brownfield context blocks a risky
+refinement. It reruns `ExistingAppDiscovery` only.
+
+`ContextRefreshPlan` creation is planning-only. It does not start this sequence
+from stale-context policy evaluation, dry-run, or refinement routing. The
+sequence starts only when an operator or caller explicitly invokes
+`launch_context_refresh_plan`, which resolves the registered sequence and starts
+`ExistingAppDiscovery` through the normal workflow launch path.
+
+This sequence is non-mutating by shape:
+
+- it contains no `AppGenerator` or `AgentGenerator` step
+- it creates no staged patch and no generated overlay
+- it does not promote or mutate source repositories
+- it refreshes app-context artifact families and registers a new
+  `AppContextVersion` through `ExistingAppDiscovery` persistence
+
+After workflow completion, the control plane can call `complete_context_refresh`
+to compare the previous context version with the new current
+`AppContextVersion` and produce a `ContextRefreshResult`. That result records
+whether stale context was actually resolved. It does not relaunch workflows,
+mutate source repositories, or retry the blocked refinement automatically.
+
+Brownfield generation/build sequences remain separate and should be cleaned up
+in a later architecture slice.
 
 ## Navigation Entry
 
@@ -228,32 +306,3 @@ to workflow-local `ui/` plus Python tools. If AgentGenerator emits a transition,
 it must keep routing/context deterministic and bind `ui.component` to a
 registered transition component key. Product-specific copy/images/layout belong
 in the React stub.
-
-### Brownfield Context Refresh
-
-`brownfield_discovery_refresh` is the canonical sequence for resolving a
-control-plane `ContextRefreshPlan` after stale brownfield context blocks a risky
-refinement. It reruns `ExistingAppDiscovery` only.
-
-`ContextRefreshPlan` creation is planning-only. It does not start this sequence
-from stale-context policy evaluation, dry-run, or refinement routing. The
-sequence starts only when an operator or caller explicitly invokes
-`launch_context_refresh_plan`, which resolves the registered sequence and starts
-`ExistingAppDiscovery` through the normal workflow launch path.
-
-This sequence is non-mutating by shape:
-
-- it contains no `AppGenerator` or `AgentGenerator` step
-- it creates no staged patch and no generated overlay
-- it does not promote or mutate source repositories
-- it refreshes app-context artifact families and registers a new
-  `AppContextVersion` through `ExistingAppDiscovery` persistence
-
-After workflow completion, the control plane can call `complete_context_refresh`
-to compare the previous context version with the new current
-`AppContextVersion` and produce a `ContextRefreshResult`. That result records
-whether stale context was actually resolved. It does not relaunch workflows,
-mutate source repositories, or retry the blocked refinement automatically.
-
-Brownfield generation/build sequences remain separate and should be cleaned up
-in a later architecture slice.

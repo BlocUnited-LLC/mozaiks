@@ -1,6 +1,6 @@
 ---
 title: Refinement Control Plane
-status: Authoritative - Pre-Production, No Backward Compat
+status: Authoritative - Pre-Production, Canonical Contract
 created: 2026-04-13
 depends_on: workflow-routing-transitions.md, event-system.md, ../../architecture/mozaiksai/universal-orchestrator.md, ../builder/database-intent-and-revision-contract.md
 ---
@@ -23,7 +23,8 @@ The refinement control plane is enabled and configured at the app level through
 `app/config/ai.json -> control_plane`. The classifier and coding worker do not
 read workflow-local AG2 config for this.
 
-This is a pre-production design. There is no backward-compatibility requirement.
+This is a pre-production design. Use the canonical contract instead of retaining
+outdated refinement paths.
 
 ---
 
@@ -56,7 +57,7 @@ Do **not** treat global refinement routing as just another AG2 handoff graph.
 - No mixed "sometimes re-interview, sometimes patch, sometimes guess" behavior.
 - No direct natural-language routing through ordinary AG2 handoffs after delivery.
 - No local-browser-only edits as the primary refinement path.
-- No backward-compat shims for the current pre-production loops.
+- No obsolete shims for the current pre-production loops.
 
 ---
 
@@ -124,8 +125,8 @@ They are `design` unless they imply a new target market or value proposition.
 
 ### Refinement Lanes
 
-`ChangeClass` remains the compatibility and routing superclass. It is the
-stable value used by current control-plane routes:
+`ChangeClass` is the high-level routing superclass used by current
+control-plane routes:
 
 - `patch`
 - `design`
@@ -509,7 +510,7 @@ Current app-level config contract:
     "classifier": {
       "enabled": true,
       "llm_config": {
-        "model": "gpt-4o-mini",
+        "model": "gpt-5-nano",
         "temperature": 0.0
       }
     },
@@ -713,9 +714,354 @@ This is intentionally different from the older `code_context` subsystem under
 
 ---
 
+## Staged Execution Plan
+
+Classification, routing, and impact analysis do not mutate app artifacts. Their
+first executable output is a `RefinementExecutionPlan`: a control-plane plan
+that names the request, app, artifact kind, `ChangeClass`, `refinement_lane`,
+workflow sequence, affected declarative families, affected bundle paths, named
+LLM profiles, validation checks, warnings, and review gates.
+
+Initial execution plans are non-mutating by default:
+
+- `execution_mode: dry_run`
+- `mutation_allowed: false`
+- no workflow execution
+- no `AppGenerator` rebuild
+- no source app bundle writes
+- no promotion of refined output
+
+`execution_mode: staged` may be materialized through the control-plane staging
+helper. The helper creates an isolated staging workspace at the plan's
+`staging_area`/`output_workspace` path, or `.refinement_staging/{request_id}`
+when no explicit path exists. It writes a plan snapshot, affected-path status
+manifest, and README. When an explicit `source_bundle_path` is supplied, it may
+copy existing affected files into `workspace/{relative_app_path}` for review.
+
+Staging still does not execute workflows, call a live model, apply patches,
+rewrite app files, or promote refined output. The future progression is:
+dry-run plan -> staged artifact workspace -> validation -> human approval ->
+accept/promote. Human approval is required before applying destructive, data
+model, or core changes.
+
+Staging safety rules:
+
+- source bundle files are read-only inputs
+- writes are confined to the staging workspace
+- affected paths must stay relative to the app bundle
+- path traversal, absolute paths, and drive-qualified paths are skipped
+- glob paths are recorded but not expanded
+- secret-sensitive paths are skipped
+- `mutation_allowed` remains `false`
+
+### Staged Review Lifecycle
+
+The staged workspace is separate from review state. A staged workspace can have a
+`refinement_review.json` metadata record with this shape:
+
+```json
+{
+  "request_id": "...",
+  "status": "review_pending",
+  "reviewer": null,
+  "reviewed_at": null,
+  "decision": null,
+  "notes": null,
+  "promotion_allowed": false,
+  "source_bundle_path": "...",
+  "staging_area": "...",
+  "affected_bundle_paths": [],
+  "mutation_allowed": false
+}
+```
+
+Allowed review states are:
+
+- `staged`
+- `review_pending`
+- `approved`
+- `rejected`
+- `promotion_ready`
+- `promoted`
+
+Current implemented transitions:
+
+| From | To | Meaning |
+|---|---|---|
+| `staged` | `review_pending` | Workspace is ready for human/operator review |
+| `review_pending` | `approved` | Reviewer accepted the staged result metadata |
+| `review_pending` | `rejected` | Reviewer rejected the staged result metadata |
+| `approved` | `promotion_ready` | Future promotion is allowed, but not executed |
+| `promotion_ready` | `promoted` | Guarded source promotion applied the staged output |
+
+Approval is not promotion. Rejection does not delete the staged workspace.
+`promotion_ready` is the guard signal required for the explicit promotion step.
+The current review helpers never copy staged files back to the source bundle,
+never run workflows, never call live models, and never set `mutation_allowed`
+to true. The `promoted` state is set only by guarded promotion after an
+explicit confirmation gate.
+
+The lifecycle is:
+
+```text
+dry_run -> staged workspace -> review_pending -> approved | rejected
+approved -> promotion_ready -> promoted
+```
+
+### Scoped Execution Into Staging
+
+Scoped refinement execution is the first mutation step, but its mutation scope is
+only the staging workspace. The executor accepts explicit proposed changes in
+the form `path -> new_content`, validates each path against the execution plan,
+and writes only under:
+
+```text
+{staging_area}/workspace/{relative_app_path}
+```
+
+It also writes `execution_result.json` in the staging workspace. The result
+records changed files, skipped files, `execution_mode: scoped_staging`,
+`source_mutated: false`, and `mutation_scope: staging_only`.
+
+Scoped execution is intentionally narrower than a coding worker:
+
+- no live model call
+- no workflow execution
+- no full `AppGenerator` run
+- no patch application to the source app bundle
+- no promotion of staged changes
+- no writes outside the staging workspace
+
+For the first slice, scoped execution updates only staged files that already
+exist in the workspace mirror and whose relative path is present in
+`affected_bundle_paths`. Paths outside the impact set, missing staged files,
+secret-sensitive paths, absolute paths, drive-qualified paths, globs, traversal
+paths, and symlinks are skipped. Future work may replace the explicit change
+provider with a real coding worker, but the same staging-only boundary must
+remain.
+
+### Coding Worker Into Staging
+
+The coding worker does not write files directly. It produces structured change
+records and those records are converted into `ScopedRefinementChange` objects
+before they reach `apply_scoped_refinement_changes(...)`. That means the coding
+worker can suggest edits, but the scoped execution helper still owns the only
+write path into the staging workspace.
+
+Current first-slice behavior is deterministic/test-only:
+
+- explicit `path -> new_content` worker output is accepted
+- the worker result must carry the same `request_id` as the plan and staging
+  workspace
+- all writes still go through scoped execution
+- no source bundle writes are allowed
+- no validation, review, acceptance, or artifact promotion happens here
+
+Live/manual worker support is a future follow-up. When it exists, it must still
+emit the same structured change records and feed them through the same staging
+boundary.
+
+### Guarded Promotion To Source Bundle
+
+Promotion is the first source-mutation step and it stays separate from review
+approval. The `promote_refinement_staging(...)` contract only applies when:
+
+- the review record is `promotion_ready`
+- `review.promotion_allowed` is `true`
+- the caller passes `confirm=true`
+- `dry_run=false`
+
+`dry_run=true` validates and reports the files that would be promoted without
+mutating the source bundle. When promotion is actually applied, backups are
+written under:
+
+```text
+{staging_area}/backups/{relative_app_path}
+```
+
+Promotion only considers staged files that were copied into the workspace and
+then updated by scoped execution. New files remain skipped in this slice, and
+secret-sensitive, glob, traversal, absolute, and symlinked paths remain
+blocked. Promotion is source mutation, so it must remain separate from review
+approval, workflow execution, and runtime routing. The canonical hosted/studio
+path now snapshots the staged workspace into a draft `app_bundle`
+`ArtifactVersion` before any later accept/promote step. Direct filesystem
+promotion remains the local/dev fallback, not the canonical hosted path.
+
+### Draft App Bundle Artifact Version From Staged Refinement
+
+`create_draft_app_bundle_from_staged_refinement(...)` packages the staged
+workspace into a bundle zip, stores it as a draft `app_bundle`
+`ArtifactVersion`, and threads lineage plus refinement metadata into
+`commit_metadata.metadata`. The artifact uses:
+
+- `artifact_kind="app_bundle"`
+- `artifact_key="app_bundle"`
+- `lifecycle_status="draft"`
+- `parent_version_id` pointing at the source/current app bundle version when
+  available
+
+Patch-ness stays in metadata, not in a separate artifact kind. The staged
+refinement snapshot carries:
+
+- `request_id`
+- `change_class`
+- `refinement_lane`
+- `workflow_sequence`
+- `affected_declarative_families`
+- `affected_bundle_paths`
+- `validation_evidence`
+- review metadata
+- scoped execution metadata
+- promotion policy decisions
+
+The staged bundle is still not current until the staged-refinement acceptance
+helper calls `ArtifactStore.accept_artifact_version(...)`. For staged
+refinement drafts, the guarded path is
+`accept_staged_refinement_artifact_version(...)`, which verifies
+`promotion_ready` + `promotion_allowed=true` before calling
+`ArtifactStore.accept_artifact_version(...)`. Acceptance marks the draft
+`app_bundle` CURRENT and records safe audit metadata, but it still does not
+restore the runnable root.
+
+After acceptance, Studio `promote` restores the bundle zip into the runnable
+app root. The promote path is app-bundle-only, verifies that the accepted
+artifact is still `CURRENT`, requires a non-empty file manifest, and uses safe
+bundle extraction that rejects path traversal, absolute paths, drive-qualified
+paths, and symlinked entries while skipping staging metadata files and backup
+trees (`refinement_plan.json`, `affected_paths.json`, `refinement_review.json`,
+`execution_result.json`, and `backups/`). That preserves the split between
+review, artifact lineage, and source mutation. `mark_refinement_promoted(...)`
+remains reserved for that later source-promotion step.
+
+### Promotion Policy Gate
+
+Filesystem safety is not enough on its own. After a staged file passes path and
+workspace checks, `promotion.py` consults a lane-aware promotion policy before
+copying anything back into the source bundle. That policy decides whether a
+path may be promoted directly, must be regenerated from an upstream artifact,
+or is blocked until a replan or validation step happens.
+
+The policy modes are:
+
+- `direct_leaf_patch`
+- `staged_generated_artifact`
+- `artifact_version_promotion_required`
+- `blocked_requires_replan`
+- `blocked_requires_validation`
+- `blocked_requires_upstream_artifact`
+
+Current lane rules are:
+
+- `ui_patch` can directly promote narrow UI leaf files when the scope stays UI
+  only.
+- `experience_design` requires ExperienceSpec evidence before page, route, or
+  shell changes can be promoted directly.
+- `data_model_migration` requires database intent or migration artifact
+  evidence before `repo.py`, `schemas.py`, or `policy.py` can be promoted.
+- `conceptual_reframe` and `architecture_replan` block direct file promotion
+  and require a replan.
+- `hosted_capability_change` only permits app-owned adapter, facade, or page
+  paths; hosted/provider internals are blocked.
+- `integration` permits adapter/client and app-owned module files, but never
+  secrets or credential material.
+
+`dry_run=true` reports the policy decisions without mutating anything. Actual
+promotion copies only the files whose policy decision is `allowed=true`; blocked
+files remain listed with a policy reason.
+
+The validation plan is derived from `ImpactSet.affected_bundle_paths` and the
+selected lane. Current validation item ids are:
+
+| Validation item | Required when |
+|---|---|
+| `route_component_validation` | UI pages, route manifest, shell config, or experience surfaces are in scope |
+| `ui_theme_primitive_validation` | UI schema, theme, primitive, or design surfaces are in scope |
+| `experience_spec_update` | Experience-level changes require upstream ExperienceSpec evidence |
+| `app_bundle_validation` | Experience and bundle-level promotion requires bundle validation evidence |
+| `module_contract_validation` | Module manifests, contracts, or backend handlers are in scope |
+| `integration_readiness_validation` | Connector, adapter, or integration files are in scope |
+| `database_intent_validation` | Database intent artifacts are in scope |
+| `migration_plan_validation` | Migration plan artifacts or destructive database changes are in scope |
+| `hosted_facade_boundary_validation` | Hosted capability adapter, facade module, or page paths are in scope |
+
+### Validation Evidence
+
+Validation checks run outside the promotion step. Promotion consumes explicit
+validation evidence, but it does not execute validators automatically and it
+does not treat empty placeholders as proof of success.
+
+The current validation evidence shape is:
+
+- `completed`
+- `failed`
+- `warnings`
+- `artifacts`
+- `checked_at`
+- `source`
+
+`completed` and `failed` are matched against the lane-aware validation
+requirements above. `artifacts` carries the upstream artifact evidence the
+policy needs to distinguish direct leaf patching from upstream regeneration.
+If required evidence is missing, `dry_run=true` reports the missing validation
+set and actual promotion blocks the apply.
+
+### Validation Runner Orchestration
+
+Staged refinement workspaces can be checked by
+`run_refinement_validations(plan, staging_result, scoped_result=None, *, selected=None)`.
+That runner inspects the staged workspace and emits explicit
+`ValidationEvidence` for promotion. It is deterministic and source-level only:
+it reads staged files, runs the static contract audits that already exist, and
+records skipped validators without pretending they passed.
+
+Key rules:
+
+- validation runs happen before promotion
+- skipped validators do not count as completed
+- failed validators are recorded explicitly in `failed`
+- promotion consumes evidence but does not execute validators
+- validators that are not implemented yet remain warnings or skipped results
+- the runner does not mutate source files, staged files, workflows, or app-generator state
+- this runner belongs to the staged patch promotion lane; conceptual_replan carry-forward preservation stays in the generated-artifact lane and does not feed this validator path
+
+The runner currently emits `experience_spec_validation`; the promotion policy
+accepts that as an alias for the older `experience_spec_update` validation name
+until the contract is fully renamed across the stack.
+
+### Deterministic Staged Patch Smoke
+
+The staged patch lane can be exercised end to end without live models or
+workflow execution:
+
+```text
+request
+-> RefinementExecutionPlan
+-> staging workspace
+-> scoped execution into staging
+-> validation evidence
+-> review_pending / approved / promotion_ready
+-> draft app_bundle ArtifactVersion
+-> accept CURRENT
+-> Studio restore runnable root
+```
+
+This smoke stays entirely in the staged patch promotion lane. It does not use
+`conceptual_replan`, carry-forward preservation, AppGenerator execution, or
+live workflow routing. The source bundle remains the source of truth until the
+accepted `CURRENT` `app_bundle` is explicitly restored into the runnable app
+root.
+
+The plan is a handoff contract between the control plane and later execution
+layers. It is not runtime authority and does not replace workflow routing,
+module dispatch, event routing, permissions, connector storage, or generated app
+database access.
+
+---
+
 ## Current Typed Control-Plane Contracts
 
-The control plane should operate on five typed artifacts:
+The control plane should operate on six typed artifacts:
 
 | Contract | Purpose |
 |---|---|
@@ -724,6 +1070,7 @@ The control plane should operate on five typed artifacts:
 | `ImpactSet` | Typed downstream scope summary: affected workflows, declarative families, restart point, replanning/rebuild flags |
 | `RefinementRoutingDecision` | Deterministic re-entry decision plus workflow seed context |
 | `HarnessDecision` | Typed builder-surface continuation result: auto-run, clarify, fallback, or confirm before launch |
+| `RefinementExecutionPlan` | Non-mutating dry-run/staged handoff plan with profiles, affected paths, validation checks, warnings, and review gates |
 
 These contracts live above workflow-local AG2 handoffs.
 
@@ -1214,6 +1561,31 @@ traceability. When extraction succeeds without warnings, the key is absent.
 without a direct import from `factory_app`. It never raises — returns
 `([], [warning])` on any failure.
 
+**Module id validation (auto-extracted ids only):**
+
+After extraction, every module id returned by `get_carry_forward_candidates` is
+validated and sanitized by `_sanitize_carry_forward_module_ids()` before being
+placed in `carry_forward_modules`. Explicit override lists (`extra.carry_forward_modules`)
+are used as-is and are not validated.
+
+Validation rules applied to each auto-extracted id:
+
+| Rule | Rejected examples |
+|---|---|
+| Must not be empty | `""` |
+| Must not be `"."` or `".."` | `"."`, `".."` |
+| Must not contain `"/"` or `"\\"` | `"modules/settings"`, `"modules\\settings"` |
+| Must match `^[a-zA-Z0-9_-]+$` | `"my module"`, `"mod@ule"` |
+| Must not exceed 80 characters | Any id longer than 80 chars |
+
+Each rejected id:
+
+- is excluded from `carry_forward_modules`
+- adds a `"carry_forward_invalid_module_id: ..."` string to `carry_forward_warnings`
+- is logged at `WARNING` level
+
+Duplicates are removed while preserving insertion order (first occurrence kept).
+
 **Remaining future work:** Artifact content backfill CLI for artifacts written before Phase D.
 
 #### Per-module carry-forward decisions in AppBuildPlan (Phase 6)
@@ -1343,9 +1715,9 @@ may call `read_carry_forward_module_contract` to inspect their prior contracts
 before deciding. The agent still does not copy prior module files, does not
 merge content, and does not inspect `backend/*.py` source.
 
-#### Carry-forward compatibility classification (Phase 5)
+#### Carry-forward reuse-fit classification (Phase 5)
 
-`ModuleInventoryEntry` includes a deterministic advisory compatibility
+`ModuleInventoryEntry` includes a deterministic advisory reuse-fit
 classification for every module returned by `get_carry_forward_candidates`.
 
 **Fields added to `ModuleInventoryEntry`:**
@@ -1407,7 +1779,7 @@ LLM config for the launched workflow session.
 **What does not change:**
 
 - The classifier uses `llm_profile: classifier` (deterministic,
-  `gpt-4o-mini`). Unchanged.
+  `gpt-5-nano`). Unchanged.
 - The coding worker uses `llm_profile: codegen`. Unchanged.
 - Tool permissions do not change — no ShellTool or write tools are added to
   planning agents via this signal.
@@ -1621,10 +1993,10 @@ adds two optional keys when a non-local content backend is used:
 
 | Key | Type | Set by | Description |
 |---|---|---|---|
-| `content_ref` | `str` | `generate_and_download`, `coding_worker` | Opaque backend reference. Absent for `"local"` backend. |
+| `content_ref` | `str` | `generate_and_download`, `coding_worker`, `create_draft_app_bundle_from_staged_refinement` | Opaque backend reference. Absent for `"local"` backend. |
 | `content_backend` | `str` | Same | Backend name (`"gridfs"` etc.). Absent for `"local"` backend. |
-| `artifact_path` | `str` | Both writers | Absolute local path (always written, unchanged). |
-| `workspace_dir` | `str` | `coding_worker` | Absolute workspace dir (always written when present). |
+| `artifact_path` | `str` | AppGenerator, AgentGenerator, coding worker, staged refinement draft helper | Absolute local path (always written, unchanged). |
+| `workspace_dir` | `str` | `coding_worker`, staged refinement draft helper | Absolute workspace dir (always written when present). |
 
 The local backend skips writing `content_ref` and `content_backend` because
 `artifact_path` already covers local content retrieval.
@@ -1674,6 +2046,15 @@ After creating the zip: if `content_store.backend_name != "local"`, calls
 **`ScopedRefinementCodingWorker._persist_validated_artifact()`**
 
 Same pattern after writing `artifact.zip`.
+
+**`create_draft_app_bundle_from_staged_refinement()`**
+
+Packages the staged workspace into a draft `app_bundle` artifact version and
+writes the bundle path into `artifact_path`. When a non-local content backend
+is configured, it also stores the bundle bytes through the content store and
+records `content_ref` / `content_backend`. This is the canonical hosted/studio
+path for staged patch promotion. Direct filesystem promotion remains a local
+development fallback.
 
 The `local` backend is intentionally skipped in both writers because
 `artifact_path` is always written and already covers local retrieval.
@@ -1785,6 +2166,178 @@ that have no `conceptual_replan` carry-forward context are unaffected.
 | `factory_app/workflows/AppGenerator/tools.yaml` | `AssemblyAgent` entry, `auto_tool_call: true` |
 | `factory_app/workflows/AppGenerator/tools/assemble_app_tasks.py` | Writes `generated_files` to context on both schema and MFJ paths |
 | `factory_app/workflows/AppGenerator/tools/generate_and_download.py` | Merges `carry_forward_additions`; saves `carry_forward_report` to artifact metadata |
+| `factory_app/app/admin/pages/CarryForwardReportPanel.jsx` | Studio app overview — full audit panel from `commit_metadata.metadata.carry_forward_report` |
+| `factory_app/app/admin/pages/AppOverviewPage.jsx` | Mounts `CarryForwardReportPanel` when the latest artifact contains a `carry_forward_report` |
+| `factory_app/app/admin/pages/CarryForwardReportSummary.jsx` | Compact collapsible carry-forward summary for build history entries |
+| `factory_app/app/admin/pages/AppBuildHistoryPage.jsx` | Build History (Activity) page — artifact version list with inline `CarryForwardReportSummary` per entry |
+
+**Tests:**
+
+| Test file | Coverage |
+|---|---|
+| `tests/test_carry_forward_preservation.py` | 28 tests — Phase 7A resolver logic, allowlist enforcement, context key writes |
+| `tests/test_carry_forward_report_persistence.py` | 12 tests — full persistence path from context to `ArtifactVersionDoc.commit_metadata.metadata` and Studio build history `model_dump()` |
+
+Run:
+```bash
+python -m pytest tests/test_carry_forward_preservation.py tests/test_carry_forward_report_persistence.py -v
+```
+
+#### Studio operator display
+
+`carry_forward_report` is surfaced in two Studio locations:
+
+**App Overview (`AppOverviewPage`):** Full audit panel (`CarryForwardReportPanel`) below the
+build and runtime panels. Hidden when no report is present.
+
+**Build History (`AppBuildHistoryPage`, `/apps/:appId/activity`):** Compact collapsible
+`CarryForwardReportSummary` inline in each artifact version entry. All entries in the
+history list that carry a report show it; entries without a report show a
+"No carry-forward preservation" notice. Both components read
+`artifact.commit_metadata.metadata.carry_forward_report` — no schema or API change required.
+
+Both surfaces display:
+
+- Reused, adapted, regenerated, and dropped module lists
+- Preserved declarative contract count
+- Conflict count (paths where generated output overwrote a preserved candidate)
+- Workspace availability (warning when `workspace_available: false`)
+- Diagnostic warnings
+
+**Operator-facing guarantees:**
+
+- The report is an audit trail only — it does not affect build behavior.
+- Backend Python source is never carried forward in Phase 7A.  Both components
+  explicitly state this.
+- Paths containing "secret", "credential", or "password" are redacted in
+  the display (belt-and-suspenders; the resolver already filters them out).
+- Both components return null when no report is present; callers do not need
+  to guard before rendering.
 
 **Remaining future work:** Phase 7B — semantic adaptation merging for modules
 with `decision == "adapt"`.
+
+---
+
+## Smoke Runbook: conceptual_replan carry-forward
+
+The following script validates the full CRM → Marketplace carry-forward
+pipeline without a live LLM or MongoDB instance.
+
+```bash
+# Run both variants and display results
+python scripts/smoke_conceptual_replan_carry_forward.py --mode both
+
+# Run only the explicit override variant
+python scripts/smoke_conceptual_replan_carry_forward.py --mode explicit
+
+# Run only the auto-populated variant
+python scripts/smoke_conceptual_replan_carry_forward.py --mode auto
+
+# Save fixture for pytest replay (runs both variants)
+python scripts/smoke_conceptual_replan_carry_forward.py --mode both --save-fixture
+
+# Run all fixture-replay tests (requires saved fixture)
+python -m pytest tests/test_live_conceptual_replan_carry_forward.py -q
+
+# Run always-on safety tests only (no fixture needed)
+python -m pytest tests/test_live_conceptual_replan_carry_forward.py -q -k TestPipelineSafety
+```
+
+**Two smoke variants:**
+
+| Variant | `carry_forward_modules` source | `get_carry_forward_candidates` called |
+|---|---|---|
+| `explicit` | `request.extra.carry_forward_modules` override | No |
+| `auto` | `get_carry_forward_candidates` auto-extraction | Yes |
+
+The auto variant returns all module IDs from the prior workspace at route time
+(unfiltered). Reuse/drop filtering is AppPlanAgent's job at plan time, not the
+router's. This is current truthful behavior, documented by the smoke.
+
+**What is live (real code exercised):**
+
+- `RefinementTriggerRouteResolver` with the real control-plane pack
+- `get_carry_forward_candidates` control-plane tool (auto variant only)
+- `load_artifact_workspace` with a real temp dir
+- `resolve_carry_forward_preservation` Phase 7A tool
+
+**What is stubbed:**
+
+- Change classifier — `_DeterministicChangeClassifier(change_class="core")`
+- `ArtifactStore` — returns a synthetic CRM artifact doc pointing to the temp dir
+- `carry_forward_decisions` — fixture (settings/notifications=reuse, contacts/pipeline=drop)
+
+**Distinction from full live LLM benchmark:** this smoke does not call any
+language model. It validates the routing, context seeding, auto-extraction, and
+preservation pipeline deterministically. For live AppPlanAgent quality
+validation, see the live benchmark below.
+
+---
+
+## Live LLM Conceptual Replan Benchmark
+
+A single-agent live benchmark that validates end-to-end AppPlanAgent reasoning
+for a conceptual_replan scenario using a real OpenAI model.
+
+**What is live:**
+
+- `RefinementTriggerRouteResolver` with real control-plane pack (routing deterministic, no LLM)
+- `AppPlanAgent` called directly via OpenAI with conceptual_replan context injected
+- `resolve_carry_forward_preservation` Phase 7A with the LLM's actual `carry_forward_decisions`
+
+**What is stubbed:**
+
+- Change classifier — `_DeterministicChangeClassifier(change_class="core")`
+- `ArtifactStore.get_artifact_version` — synthetic CRM artifact + temp dir
+
+This is a single-agent benchmark, not a full `ValueEngine → AppGenerator` workflow sequence run.
+
+**Scenario:** CRM → Marketplace pivot. Prior modules: contacts, pipeline, settings, notifications.
+The LLM must not blindly reuse all candidates — domain-generic modules (settings, notifications)
+should be reused; CRM-specific modules (contacts, pipeline) should be dropped or regenerated.
+
+**17 required assertions:**
+
+| # | Assertion |
+|---|-----------|
+| 1 | route == `conceptual_replan` |
+| 2 | `pivot_description` present in context_seed |
+| 3 | `previous_app_bundle_ref` present in context_seed |
+| 4 | `carry_forward_modules` non-empty in context_seed |
+| 5 | `carry_forward_decisions` is non-empty list |
+| 6 | All decision values valid: `reuse/adapt/regenerate/drop` |
+| 7 | `settings` → `reuse` or `adapt` (domain-generic) |
+| 8 | `notifications` → `reuse` or `adapt` (domain-generic) |
+| 9 | `contacts` → `drop` or `regenerate` (CRM-specific) |
+| 10 | `pipeline` → `drop` or `regenerate` (CRM-specific) |
+| 11 | Marketplace-oriented modules appear in capability_packs |
+| 12 | `carry_forward_report` exists (Phase 7A ran) |
+| 13 | `preserved_paths` only Phase 7A allowlisted files |
+| 14 | No backend Python in `preserved_paths` |
+| 15 | No `runtime_extensions.yaml` in `preserved_paths` |
+| 16 | No custom React in `preserved_paths` |
+| 17 | `carry_forward_report` shape valid |
+
+**Running the live benchmark:**
+
+```bash
+# Requires OPENAI_API_KEY (funded account)
+python scripts/smoke_live_conceptual_replan.py
+python scripts/smoke_live_conceptual_replan.py --save-fixture
+python scripts/smoke_live_conceptual_replan.py --model gpt-5-nano
+```
+
+**Running the fixture replay tests (no API key required):**
+
+```bash
+python -m pytest tests/test_live_conceptual_replan_benchmark.py -v
+```
+
+**Common failure modes:**
+
+- `carry_forward_decisions is NoneType` — model ignored the requirement; check prompt injection
+- `settings not in carry_forward_decisions` — model renamed the module_id; prompt must list exact IDs
+- `contacts decision=reuse` — model blindly reused; check carry_forward_classification hints in prompt
+- `preserved_paths contains backend Python` — Phase 7A allowlist is too permissive; inspect `_PHASE_7A_MODULE_ALLOWLIST`
+- `OPENAI_API_KEY quota exceeded` — fund the account or use a different API key
