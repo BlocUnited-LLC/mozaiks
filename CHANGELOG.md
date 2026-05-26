@@ -12,6 +12,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+## 0.1.5 - 2026-05-26
+
 ### Added
 
 - Added brownfield app adoption continuation path. After `ExistingAppDiscovery`
@@ -23,7 +25,6 @@ This project follows a practical pre-1.0 changelog format:
   build-path choice screen.
 - Enabled the `brownfield_app` option in `AppTypeSelector` — existing-app
   onboarding is now a live, routable path from the `/create` entry point.
-
 - Added `chat_session` transition type to the workflow routing system. A
   `chat_session` transition launches a target workflow in the current chat
   surface without a blocking overlay, allowing the user to interact
@@ -39,6 +40,24 @@ This project follows a practical pre-1.0 changelog format:
   `POST /api/workflows/trigger` with `trigger_source="refinement"`, routing
   through the control plane into the appropriate revision workflow sequence
   (e.g. `app_surface_revision`) and switching the chat session in-place.
+- Added build history page and carry-forward audit panel in the admin console.
+  Each artifact entry renders a `CarryForwardReportSummary`; the full panel is
+  accessible at `/apps/:id/activity`.
+- Added `promote_build` action to the `app_registry` module: validates
+  `lifecycle_state == "review"`, transitions to `"active"`, and emits
+  `domain.app_registry.app_promoted`.
+- Added provider-neutral deployment artifact generation (`deployment_contract.py`):
+  produces Dockerfile, CI workflow, and compose scaffold from the app bundle.
+- Added `generated_bundle_scanner.py`: detects Stripe SDK usage, refund API
+  calls, and secret key literals in generated bundles before promotion.
+- Added canonical `ui/lib/moduleApi.js` template (`module_api_template.py`)
+  with structured error fields for generated frontend module clients.
+- Added AppGenerator shared-persistence contracts and adapter path support.
+- Added conceptual-replan carry-forward smoke harness and saved fixture replay
+  tests covering Levels A–E (inventory, context seed, AppBuildPlan,
+  preservation, conflict resolution).
+- Added Keycloak realm export and login theme assets under
+  `factory_app/app/brand/`.
 
 ### Changed
 
@@ -46,6 +65,13 @@ This project follows a practical pre-1.0 changelog format:
   `AppReviewScreen`) to `chat_session` (launches `AppReview` workflow in-place).
   The review step now lives in the chat surface so users can type revision
   requests without modal interruption.
+- Enforced single workflow root: `normalize_workflow_roots()` (multi-root list)
+  replaced by `resolve_workflows_root()` (single `Path`); `MOZAIKS_WORKFLOW_ROOTS`
+  compatibility removed.
+- Renamed `MOZAIKS_CONTEXT_PLACEHOLDERS_FILE` to `MOZAIKS_CONTEXT_FALLBACKS_FILE`.
+- Updated default control-plane LLM model from `gpt-4o-mini` to `gpt-5-nano`.
+- `subscriptions.yaml` now raises `ModuleLoadError` immediately on load;
+  `ModuleLegacySubscriptionsManifest` removed.
 
 ### Removed
 
