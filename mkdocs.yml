@@ -86,10 +86,10 @@ validation:
 nav:
   - Home: index.md
   - Get Started:
-      - Quickstart: getting-started.md
+      - Getting Started: getting-started.md
       - Configuration: user-configuration.md
   - Guides:
-      - Use The Console: guides/console/01-overview.md
+      - Use the Console: guides/console/01-overview.md
       - Add Workflows: guides/adding-workflows/01-overview.md
       - Add a Module: guides/adding-modules/01-overview.md
       - Add a Page: guides/adding-pages/01-overview.md
@@ -192,7 +192,7 @@ nav:
   - Contributing:
       - Overview: contributing/index.md
       - Contributor Guidance Readiness: contributing/contributor-guidance-readiness.md
-      - Local Dev Setup: local-setup.md
+      - Local Setup: local-setup.md
       - Manual Smoke Tests:
           - Integration Readiness: manual-smoke-tests/integration-readiness.md
           - Refinement Classifier: manual-smoke-tests/refinement-classifier.md

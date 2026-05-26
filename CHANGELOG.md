@@ -65,10 +65,9 @@ This project follows a practical pre-1.0 changelog format:
   `AppReviewScreen`) to `chat_session` (launches `AppReview` workflow in-place).
   The review step now lives in the chat surface so users can type revision
   requests without modal interruption.
-- Enforced single workflow root: `normalize_workflow_roots()` (multi-root list)
-  replaced by `resolve_workflows_root()` (single `Path`); `MOZAIKS_WORKFLOW_ROOTS`
-  compatibility removed.
-- Renamed `MOZAIKS_CONTEXT_PLACEHOLDERS_FILE` to `MOZAIKS_CONTEXT_FALLBACKS_FILE`.
+- Enforced single workflow root selection: the previous multi-root helper was
+  replaced by `resolve_workflows_root()` (single `Path`).
+- Renamed the context placeholder file to the context fallbacks file.
 - Updated default control-plane LLM model from `gpt-4o-mini` to `gpt-5-nano`.
 - `subscriptions.yaml` now raises `ModuleLoadError` immediately on load;
   `ModuleLegacySubscriptionsManifest` removed.

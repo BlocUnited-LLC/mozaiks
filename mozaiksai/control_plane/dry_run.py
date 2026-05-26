@@ -571,7 +571,7 @@ def build_refinement_execution_plan_from_route(
         raise ValueError("execution_mode must be 'dry_run' or 'staged'.")
 
     resolved_workflow_sequence = str(workflow_sequence or "").strip()
-    paths = _dedupe([str(path or "").replace("\\", "/").lstrip("/") for path in affected_bundle_paths or []])
+    paths = _dedupe([str(path or "").replace("\\", "/") for path in affected_bundle_paths or []])
     families = _dedupe(list(affected_declarative_families or []))
     workflows = _dedupe(list(affected_workflows or []))
     refinement_lane = infer_refinement_lane(

@@ -39,7 +39,7 @@ cd mozaiks
 ```
 
 The bootstrap script creates `.venv` when needed, installs the local package in
-editable mode, starts the builder stack, and opens the Mozaiks Console.
+editable mode, starts the local Mozaiks services, and opens the Console.
 
 ## Manual Editable Setup
 
@@ -77,11 +77,11 @@ Open:
 http://localhost:3000/apps
 ```
 
-## CLI vs Console
+## Which Tool To Use Here
 
 Use the CLI for local-machine tasks:
 
-- create the workspace shell when it does not exist yet
+- create the local workspace when it does not exist yet
 - start or reopen the backend/frontend processes
 - inspect status or run diagnostics
 
@@ -90,10 +90,10 @@ Use the Console for product tasks:
 - create apps
 - continue builds
 - review staged artifacts
-- open app-specific management surfaces
+- open app-specific pages and tools
 
-The Console does not replace local bootstrap. It runs against the workspace the
-CLI or repo scripts prepared for it.
+The CLI gets the local install running. The Console is where you actually use
+Mozaiks after that.
 
 ## Useful Commands
 
@@ -141,7 +141,7 @@ the Console stack.
 
 ## Runtime-Only Path
 
-If you only want the app runtime and not the Console-driven builder:
+If you only want the app runtime and not the Console setup flow:
 
 ```powershell
 mozaiks init chat --name my-app --dir .\my-app
@@ -152,14 +152,14 @@ Most new users should use the Console path instead.
 
 ## Generated Output
 
-Mozaiks stages generated output before it touches an active app workspace:
+Mozaiks writes generated output here before it is copied into an app:
 
 ```text
 generated/apps/{app_id}/{build_id}/app
 ```
 
-Promotion is the explicit step that moves validated artifacts into an active app
-root.
+Promotion is the explicit step that copies approved generated files into the
+app.
 
 ## Troubleshooting
 

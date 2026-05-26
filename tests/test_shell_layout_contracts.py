@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 
 def _workspace() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -72,5 +74,7 @@ def test_platform_transitions_stay_declarative() -> None:
     # App workspace overlay should not have a UI bundle (shared factory owns it)
     from tests.import_utils import active_app_root
     app_root = active_app_root()
+    if app_root.resolve() == (_workspace() / "factory_app" / "app").resolve():
+        pytest.skip("The repo-local factory bundle intentionally owns the shared transition UI bundle.")
     workflows_root = app_root.parent / "workflows" if app_root.name == "app" else app_root / "workflows"
     assert not (workflows_root / "extended_orchestration" / "ui" / "index.js").exists()

@@ -3,7 +3,6 @@ import { useParams } from 'react-router-dom'
 
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
-  ActionButton,
   ConsoleErrorState,
   ConsoleInlineEmptyState,
   ConsoleLoadingState,
@@ -146,6 +145,14 @@ export default function AppUsagePage() {
   const totalTokens = Number(snapshot.usageRecord?.tokens_used || 0) || totalInputTokens + totalOutputTokens
   const totalRuns = snapshot.runs.length || snapshot.stats.tracked_chats || 0
   const workflowGroups = buildWorkflowGroups(snapshot.runs)
+  const handleExportCsv = () => {
+    exportBreakdownCsv(appId, workflowGroups)
+  }
+  const handleHeaderAction = (actionId) => {
+    if (actionId === 'export-csv') {
+      handleExportCsv()
+    }
+  }
   const costDrivers = snapshot.runs
     .slice()
     .sort((left, right) => Number(right.cost || 0) - Number(left.cost || 0))
@@ -172,6 +179,8 @@ export default function AppUsagePage() {
           title="Usage"
           currentSection="Usage"
           subtitle="Review tokens, cost, workflow runs, and usage drivers."
+          actions={[{ id: 'export-csv', label: 'Export CSV' }]}
+          onAction={handleHeaderAction}
           summaryItems={summaryItems}
         />
 

@@ -1,7 +1,8 @@
 # Add a Module
 
-A module is deterministic backend logic — CRUD actions, domain data, business
-rules. It runs without AI. For AI-driven behavior, use a workflow instead.
+A module is backend application logic such as CRUD actions, domain data, and
+business rules. It runs without AI. For AI-driven behavior, use a workflow
+instead.
 
 Modules and workflows complement each other: modules provide the action surface
 that AI agents call.
@@ -47,10 +48,10 @@ Use `contracts/reactions.yaml` as the canonical event-reaction contract.
 The runtime rejects `contracts/subscriptions.yaml`; contributor-facing changes
 must author `contracts/reactions.yaml`.
 
-The runtime auto-discovers and registers all modules at startup. No registration
-step is needed. Routes are auto-mounted at `/api/modules/{name}/{action_id}`.
+Mozaiks loads modules automatically at startup. No manual registration step is
+needed. Routes appear at `/api/modules/{name}/{action_id}`.
 
-## Layer Rules
+## Backend File Responsibilities
 
 | Layer | Do | Don't |
 |-------|-----|-------|

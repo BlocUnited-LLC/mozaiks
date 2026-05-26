@@ -22,20 +22,19 @@
 Mozaiks is an open-source AI app factory for building, running, and iterating on
 AI-native software products.
 
-It combines four pieces that usually live in separate tools:
+It brings together four things that usually live in separate tools:
 
-- **Mozaiks Console** for creating apps, continuing builds, and managing app
-  workspaces.
-- **AG2 workflow orchestration** for multi-agent planning, tool use, human
-  review, and mid-flight decomposition.
-- **A generated app workspace contract** with modules, pages, workflows,
-  config, and brand assets.
-- **Production-readiness gates** for generated UI, workflow artifacts, package
-  assembly, and runtime validation.
+- **Mozaiks Console** for creating apps, continuing builds, and managing them.
+- **AI workflow orchestration powered by AG2** for planning, tool use, human
+  review, and generation.
+- **Generated app files** with modules, pages, workflows, config, and brand
+  assets.
+- **Validation checks** that review the generated output before it becomes the
+  active app.
 
-The goal is not to generate a throwaway demo. Mozaiks stages production-shaped
-artifacts, validates them against strict contracts, and keeps runtime concerns
-separate from builder workflows.
+The goal is not to generate a throwaway demo. Mozaiks creates production-shaped
+output, validates it, and keeps the app-building flow separate from the app
+runtime.
 
 ---
 
@@ -66,8 +65,8 @@ separate from builder workflows.
 
 ## Where to Start
 
-Install Mozaiks, open the Console, and click `Create App`. The builder walks you
-through planning, generation, review, and refinement inside the chat experience.
+Install Mozaiks, open the Console, and click `Create App`. Mozaiks then guides
+you through planning, generation, review, and revision inside the chat.
 
 <div class="grid cards" markdown>
 

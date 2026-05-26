@@ -81,6 +81,10 @@ def _resolve_inside(parent: Path, child: Path) -> Path:
     return child_resolved
 
 
+def _contains_symlink_component(path: Path) -> bool:
+    return any(part.is_symlink() for part in (path, *path.parents))
+
+
 def _normalize_change_path(path: str) -> tuple[str | None, ScopedRefinementFileStatus | None, str | None]:
     raw = str(path or "").strip()
     if not raw:
@@ -134,7 +138,7 @@ def _change_is_in_scope(
 
 
 def _stage_file_path(staging_area: Path, relative_path: str) -> Path:
-    return _resolve_inside(staging_area, staging_area / WORKSPACE_DIRNAME / relative_path)
+    return staging_area / WORKSPACE_DIRNAME / relative_path
 
 
 def _apply_change(
@@ -163,21 +167,22 @@ def _apply_change(
         )
 
     target = _stage_file_path(staging_area, relative_path)
-    if not target.exists() or not target.is_file():
+    if _contains_symlink_component(target):
+        return ScopedRefinementChangedFile(path=relative_path, status="skipped_unsafe", reason="Symlinks are not updated.")
+    resolved_target = _resolve_inside(staging_area, target)
+    if not resolved_target.exists() or not resolved_target.is_file():
         return ScopedRefinementChangedFile(
             path=relative_path,
             status="skipped_missing",
             reason="Staged file does not exist; this first scoped execution slice updates existing staged files only.",
         )
-    if target.is_symlink():
-        return ScopedRefinementChangedFile(path=relative_path, status="skipped_unsafe", reason="Symlinks are not updated.")
 
-    target.write_text(change.new_content, encoding="utf-8")
+    resolved_target.write_text(change.new_content, encoding="utf-8")
     return ScopedRefinementChangedFile(
         path=relative_path,
         status="updated",
         reason=change.reason or "Scoped refinement change applied to staging workspace.",
-        staged_path=target.as_posix(),
+        staged_path=resolved_target.as_posix(),
     )
 
 

@@ -1,7 +1,7 @@
 # Add a Page
 
-Pages in Mozaiks are declared as YAML schemas — not raw React. The platform shell
-renders them automatically using pre-built primitives.
+Pages in Mozaiks are usually declared as YAML schemas instead of raw React. The
+platform renders them automatically using pre-built UI primitives.
 
 Use the declarative path by default. Only reach for a custom React route when the
 available primitives genuinely can't cover the use case.
@@ -61,7 +61,7 @@ registration step needed.
 
 ## Shell Mode
 
-Controls the chrome that wraps the page:
+This controls the layout chrome around the page:
 
 | Mode | Use for |
 |------|---------|
@@ -192,9 +192,9 @@ const MyPage = lazy(() => import('./pages/custom/MyPage.jsx'))
 registerComponent('MyPage', MyPage)
 ```
 
-There is no implicit discovery for custom React routes. A route is valid only
-when `app/ui/route_manifest.json`, `app/ui/pages/custom/{Name}.jsx`, and
-`app/ui/index.js` all agree on the same component key. `admin/admin_registry.yaml`
+There is no implicit discovery for custom React routes. A route works only when
+`app/ui/route_manifest.json`, `app/ui/pages/custom/{Name}.jsx`, and
+`app/ui/index.js` all use the same component key. `admin/admin_registry.yaml`
 is not a route registry and must not own full-page custom React components.
 
 Use custom routes sparingly. Extend an existing primitive before reaching for a

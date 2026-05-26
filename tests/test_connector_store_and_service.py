@@ -3,6 +3,7 @@ from __future__ import annotations
 # ruff: noqa: I001
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 
 from mozaiksai.core.workflow.generator_support.connector_service import (
     compute_connector_health,
@@ -15,6 +16,10 @@ from mozaiksai.core.workflow.generator_support.connector_service import (
 from mozaiksai.core.data.persistence.connector_store import AppConnectorStore
 
 SECRET_VALUE = "secret-payment-provider-value"
+
+
+def _future_expiry(days: int = 30) -> str:
+    return (datetime.now(UTC) + timedelta(days=days)).isoformat()
 
 
 class _FakeCursor:
@@ -155,7 +160,7 @@ class _FakeVaultBackend:
             "success": True,
             "provider": "fake_vault",
             "secret_name": f"fake-{app_id}-{service}",
-            "expires_at": "2026-06-01T00:00:00+00:00",
+            "expires_at": _future_expiry(),
             "secret_available": True,
         }
 
@@ -167,7 +172,7 @@ class _FakeVaultBackend:
             "provider": "fake_vault",
             "secret_name": f"fake-{app_id}-{service}",
             "secret_value": value,
-            "expires_at": "2026-06-01T00:00:00+00:00" if value is not None else None,
+            "expires_at": _future_expiry() if value is not None else None,
             "error": None if value is not None else "missing",
         }
 

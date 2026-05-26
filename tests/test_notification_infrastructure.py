@@ -373,7 +373,7 @@ class TestContextFieldsBehaviour:
             "template": {"title": "New task", "body": ""},
         }
         router, stored, asyncio = self._make_router_and_store(rule)
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             router.handle_event("task.created", self._envelope(
                 {"task_id": "tsk_abc", "record_id": "rec_123", "extra": "ignore"}
             ))
@@ -391,7 +391,7 @@ class TestContextFieldsBehaviour:
             "template": {"title": "New task", "body": ""},
         }
         router, stored, asyncio = self._make_router_and_store(rule)
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             router.handle_event("task.created", self._envelope(
                 {"task_id": "tsk_abc", "user_name": "alice", "internal_ref": "x"}
             ))
@@ -408,7 +408,7 @@ class TestContextFieldsBehaviour:
             "template": {"title": "Approval", "body": ""},
         }
         router, stored, asyncio = self._make_router_and_store(rule)
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             router.handle_event("approval.created", self._envelope({
                 "approval_id": "appr_xyz",
                 "stripe_payment_intent_id": "pi_secret_123",
@@ -427,7 +427,7 @@ class TestContextFieldsBehaviour:
             "template": {"title": "Updated", "body": ""},
         }
         router, stored, asyncio = self._make_router_and_store(rule)
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             router.handle_event("record.updated", self._envelope({"record_id": "rec_001"}))
         )
         assert "context" not in stored[0] or stored[0].get("context") is None
@@ -440,7 +440,7 @@ class TestContextFieldsBehaviour:
             "template": {"title": "Updated", "body": ""},
         }
         router, stored, asyncio = self._make_router_and_store(rule)
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             router.handle_event("record.updated", self._envelope({"record_id": "rec_001"}))
         )
         assert not stored[0].get("context")
@@ -453,7 +453,7 @@ class TestContextFieldsBehaviour:
             "template": {"title": "Sensitive", "body": ""},
         }
         router, stored, asyncio = self._make_router_and_store(rule)
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             router.handle_event("sensitive.event", self._envelope({"stripe_id": "x", "api_key": "y"}))
         )
         assert not stored[0].get("context")
@@ -466,7 +466,7 @@ class TestContextFieldsBehaviour:
             "template": {"title": "Task created", "body": ""},
         }
         router, stored, asyncio = self._make_router_and_store(rule)
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             router.handle_event("task.created", self._envelope({"task_id": "tsk_abc"}))
         )
         assert stored[0].get("source_event") is not None
@@ -545,7 +545,7 @@ class TestContextFieldsFlatEnvelope:
             "app_id": "app_store",
             "amount": 99,
         }
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             router.handle_event("order.placed", flat_envelope)
         )
 

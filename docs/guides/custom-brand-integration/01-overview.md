@@ -1,7 +1,7 @@
 # App Shell And Branding
 
 Use this guide when you need to change the visible shell identity of a Mozaiks
-app without changing framework-owned runtime code.
+app without changing core runtime code.
 
 ## What Branding Owns
 
@@ -13,17 +13,17 @@ Branding is split across a few app-owned files:
 - `app/config/shell.json` for shell content and navigation chrome
 - `app/app.json` for startup route and auth intent, not raw theme tokens
 
-In this repo, the first-party Studio bundle follows the same contract under
+In this repo, the first-party Console bundle follows the same contract under
 `factory_app/app/`.
 
-## What Branding Does Not Own
+## What Branding Does Not Control
 
 Do not put these concerns into branding files:
 
 - workflow logic
 - module business rules
-- runtime host wiring
-- admin shell ownership
+- runtime startup wiring
+- admin ownership and behavior
 
 ## Typical Changes
 

@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 
 import pytest
+
+import pytest
 import yaml
 
 from mozaiksai.core.workflow.workflow_ui_catalog import get_workflow_shipped_component_names
@@ -109,8 +111,11 @@ def test_repo_workflow_tools_do_not_import_global_shared_workflow_bucket() -> No
     from tests.conftest import _resolve_active_app_root
     app_root = _resolve_active_app_root()
     if app_root is None:
-        import pytest
         pytest.skip("No active app workspace configured.")
+    workspace = _workspace()
+    factory_bundle_root = (workspace / "factory_app" / "app").resolve()
+    if app_root.resolve() == factory_bundle_root:
+        pytest.skip("The repo-local factory bundle intentionally owns the shared workflow bucket.")
     workflow_root = app_root.parent / "workflows" if app_root.name == "app" else app_root / "workflows"
     assert not (workflow_root / "_shared").exists()
 

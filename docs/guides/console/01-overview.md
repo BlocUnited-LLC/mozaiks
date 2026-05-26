@@ -1,10 +1,10 @@
 # Use The Console
 
 The Mozaiks Console is the normal starting point after install. It is where you
-create apps, continue builds, and open app-specific management surfaces.
+create apps, continue builds, and open app-specific pages and tools.
 
 The CLI or repo bootstrap scripts get you to this point by creating the local
-workspace shell and starting the processes. The Console then creates apps
+workspace folder and starting the processes. The Console then creates apps
 inside that workspace; it does not replace local machine setup.
 
 Open it at:
@@ -22,12 +22,12 @@ http://localhost:3000/apps
 5. Review generated artifacts before promotion.
 6. Return to `Apps` to continue drafts or open app consoles.
 
-The build itself happens inside the chat workflow. The Console starts and tracks
-that workflow; it is not a separate page-based app builder.
+Most of the planning and build work happens in the chat. You are not expected
+to click through a separate page-by-page app builder.
 
 ## Apps
 
-`Apps` is the workspace-level portfolio view.
+`Apps` is the list of apps in your workspace.
 
 Use it to:
 
@@ -42,7 +42,7 @@ finished in one session.
 
 ## Create App
 
-`Create App` starts the build workflow sequence. The workflow asks for the
+`Create App` starts the app build flow. The workflow asks for the
 product intent, gathers requirements, plans the app, and generates staged
 artifacts.
 
@@ -60,7 +60,7 @@ starting from scratch.
 
 Use `Open App Console` for an app-specific view. The app console is where a
 single app exposes its setup, usage, users, deployment, integrations, and admin
-surfaces as those capabilities become available.
+pages as those capabilities become available.
 
 ## Workspace vs App Scope
 

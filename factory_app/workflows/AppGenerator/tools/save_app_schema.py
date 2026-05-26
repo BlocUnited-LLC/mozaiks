@@ -584,6 +584,15 @@ def _validate_shared_persistence_contract(shared_persistence_contract: Any) -> N
         if not _is_non_empty_string(alias.get("owner_module")):
             raise ValueError(f"{path}.owner_module is required")
 
+    shared_collections = shared_persistence_contract.get("shared_collections")
+    if shared_collections is None:
+        shared_collections = []
+    if not isinstance(shared_collections, list):
+        raise ValueError("shared_persistence_contract.shared_collections must be a list when provided")
+    for index, collection in enumerate(shared_collections):
+        if not _is_non_empty_string(collection):
+            raise ValueError(f"shared_persistence_contract.shared_collections[{index}] is required")
+
 
 def _validate_custom_route_bundle(custom_route_bundle: Any) -> None:
     if custom_route_bundle is None:

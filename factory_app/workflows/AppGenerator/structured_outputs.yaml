@@ -709,7 +709,7 @@ models:
       shared_persistence_contract:
         type: union
         variants:
-        - dict
+        - SharedPersistenceContract
         - 'null'
         default: null
         description: >
@@ -4656,7 +4656,7 @@ models:
       shared_persistence_contract:
         type: union
         variants:
-        - dict
+        - SharedPersistenceContract
         - 'null'
         default: null
         description: >
@@ -4667,6 +4667,52 @@ models:
           database contract, and keep any helper naming generic under
           shared_persistence/. Do not emit app/shared or hosted-product helper
           names.
+
+  SharedPersistenceAlias:
+    type: model
+    fields:
+      alias:
+        type: str
+        description: Namespaced alias for the shared collection or lifecycle path.
+      collection:
+        type: str
+        description: Canonical collection name referenced by the alias.
+      owner_module:
+        type: str
+        description: Module that owns the shared collection or lifecycle contract.
+      access:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional access label such as lifecycle_update.
+      description:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional human-readable rationale for the alias.
+
+  SharedPersistenceContract:
+    type: model
+    fields:
+      version:
+        type: str
+        description: Contract version string.
+      mode:
+        type: literal
+        values:
+        - app_shared_contracts
+        - external_existing_db
+        description: Shared persistence mode selected for the app.
+      aliases:
+        type: list
+        items: SharedPersistenceAlias
+        description: Declared shared collection aliases and ownership boundaries.
+      shared_collections:
+        type: list
+        items: str
+        description: Explicit shared collection names that the app may own or reference.
 
   ControllerOutput:
     type: model

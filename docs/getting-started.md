@@ -16,10 +16,16 @@ Open the Console:
 http://localhost:3000/apps
 ```
 
-## Reopen the Console
+## Start The Console Again
 
 `quickstart` creates a `scripts/run-console.ps1` in your workspace. Use it to
-start the Console on any subsequent run:
+start the Console again any time you come back later.
+
+This just means: if you close your terminal, restart your computer, or stop
+Mozaiks for the day, run the launch script again to open the same local Console
+workspace.
+
+From your workspace root:
 
 ```powershell
 cd .\mozaiks-workspace
@@ -27,25 +33,24 @@ cd .\mozaiks-workspace
 .\scripts\run-console.ps1
 ```
 
-## Console, Studio, And CLI
+## Which Tool To Use
 
 The browser product is the **Mozaiks Console**. Use it to create apps, continue
 builds, review generated artifacts, and manage app workspaces.
 
-`Studio` is the internal host name for the management server that powers the
-Console. You may still see `studio` in architecture docs or host flags such as
-`--host studio`; it is not a separate user-facing app.
+If you see the word `Studio`, treat it as an internal technical name for the
+server behind the Console. It is not a second app you need to learn.
 
-The CLI is only the local developer entrypoint. It creates workspaces, starts
-processes, runs diagnostics, and opens the Console. Product workflows belong in
-the Console, not in terminal commands.
+The CLI is just how you set things up locally. It creates the workspace, starts
+the local processes, and opens the Console. The normal product experience
+happens in the Console, not in terminal commands.
 
-## Two-Step Mental Model
+## Your Workspace vs Your App
 
-There are two separate setup steps:
+There are two things Mozaiks creates, and they are not the same:
 
-1. The CLI creates and runs the local workspace shell.
-2. The Console creates and manages apps inside that workspace.
+1. First, `quickstart` creates a local workspace folder such as `./mozaiks-workspace`.
+2. Then, inside the Console, you create the actual app you want to build.
 
 Think of `./mozaiks-workspace` as the local container for Console state,
 generated artifacts, config, and launch scripts. It is not the app itself. The
@@ -65,8 +70,8 @@ Draft and in-progress apps stay visible in `Apps`, so you can return later and
 use `Continue Build`.
 
 The `--dir` value is your local Mozaiks workspace. It is not the app you are
-creating. The actual app is created from the Console after you click
-`Create App`.
+creating. The app itself is created later from inside the Console after you
+click `Create App`.
 
 ## What The Console Does
 

@@ -85,6 +85,49 @@ export default function WorkspaceUsagePage() {
   const totalTokens = totalInputTokens + totalOutputTokens
   const totalCost = Number(workspaceStats.total_cost || 0)
   const totalRuns = Number(workspaceStats.tracked_chats || workspaceRuns.length || 0)
+  const handleExportCsv = () => {
+    const headers = [
+      'app',
+      'runs',
+      'input_tokens',
+      'output_tokens',
+      'total_tokens',
+      'avg_tokens',
+      'cost',
+      'avg_cost',
+      'errors',
+      'workflows',
+    ]
+    const lines = [
+      headers.join(','),
+      ...visibleRows.map((row) => [
+        JSON.stringify(row.label),
+        row.runs,
+        row.inputTokens,
+        row.outputTokens,
+        row.totalTokens,
+        Math.round(row.avgTokens),
+        Number(row.cost).toFixed(4),
+        Number(row.avgCost).toFixed(4),
+        row.errors,
+        JSON.stringify(row.workflowLabel),
+      ].join(',')),
+    ]
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'workspace-usage.csv'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+  const handleHeaderAction = (actionId) => {
+    if (actionId === 'export-csv') {
+      handleExportCsv()
+    }
+  }
   const summaryItems = [
     { id: 'tokens', label: 'Tokens Used', value: formatCompactNumber(totalTokens, 'Pending'), detail: 'Input + output' },
     { id: 'cost', label: 'LLM Cost', value: formatCurrencyValue(totalCost, 'Pending'), detail: 'Observed spend' },
@@ -169,6 +212,8 @@ export default function WorkspaceUsagePage() {
         <WorkspaceConsoleHero
           title="Usage"
           subtitle="Track workspace metering, model spend, and workflow activity."
+          actions={[{ id: 'export-csv', label: 'Export CSV' }]}
+          onAction={handleHeaderAction}
           summaryItems={summaryItems}
         />
 

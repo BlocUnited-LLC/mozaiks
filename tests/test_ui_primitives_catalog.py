@@ -41,8 +41,11 @@ def test_component_and_page_primitive_catalogs_match_runtime_exports() -> None:
             set(expected_page)
             | {
                 "CollectionToolbar",
+                "AnalyticsSummaryStrip",
+                "ContentRail",
                 "IconButton",
                 "LinkButton",
+                "PerformanceTileGrid",
                 "ResourceList",
                 "SegmentedControl",
                 "SlideOver",

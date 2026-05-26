@@ -125,6 +125,7 @@ def test_save_app_schema_writes_shared_persistence_from_context(monkeypatch, tmp
         ({"version": "1", "mode": "generated_scoped", "aliases": []}, "mode"),
         ({"version": "1", "mode": "app_shared_contracts", "aliases": [{"alias": "x"}]}, "collection"),
         ({"version": "1", "mode": "app_shared_contracts", "aliases": [{"alias": "x", "collection": "c"}]}, "owner_module"),
+        ({"version": "1", "mode": "app_shared_contracts", "aliases": [], "shared_collections": "orders"}, "shared_collections"),
     ],
 )
 def test_shared_persistence_contract_validation_rejects_invalid_shapes(contract: dict, match: str) -> None:
@@ -138,6 +139,7 @@ def test_structured_outputs_expose_shared_persistence_contract() -> None:
     ).read_text(encoding="utf-8")
 
     assert "shared_persistence_contract" in structured_outputs
+    assert "shared_collections" in structured_outputs
     assert "config/shared_persistence.json" in structured_outputs
     assert "shared_persistence_json" in structured_outputs
     assert "app/shared" in structured_outputs

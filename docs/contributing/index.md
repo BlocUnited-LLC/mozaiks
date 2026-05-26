@@ -9,7 +9,7 @@ Start with [Getting Started](../getting-started.md) instead.
 
 ## Where to start
 
-- **[Local Dev Setup](../local-setup.md)** — source checkout, editable install, and how to run the builder stack from repo
+- **[Local Setup](../local-setup.md)** — source checkout, editable install, and how to run the builder stack from repo
 - **[Architecture](../architecture/index.md)** — how the runtime, app bundle contract, module system, workflows, and frontend fit together
 - **[Agent Bootstrap Prompt](../agent-bootstrap-prompt.md)** — hand a task to Claude Code, Cursor, or Copilot with the repo-aware bootstrap prompt
 - **[Contributor Guidance Readiness](contributor-guidance-readiness.md)** — current skill coverage, routing map, deferrals, and guidance validation tests

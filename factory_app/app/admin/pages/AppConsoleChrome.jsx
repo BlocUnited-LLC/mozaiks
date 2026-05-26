@@ -33,12 +33,13 @@ export function AppConsoleHero({
   title,
   subtitle,
   actions = null,
+  onAction = null,
   summaryItems = [],
   children,
 }) {
   return (
     <div className="space-y-4">
-      <PageHeader title={title} subtitle={subtitle} actions={actions} className="px-1" />
+      <PageHeader title={title} subtitle={subtitle} actions={actions} onAction={onAction} className="px-1" />
 
       {summaryItems.length > 0 ? <SummaryStrip items={summaryItems} /> : null}
       {children ? <div>{children}</div> : null}

@@ -3,9 +3,11 @@
 Most users should start in the Console with `Create App`. Add a workflow
 directly only when you are extending Mozaiks or adding an app-owned workflow.
 
-## Workflow Authoring Model
+## Before You Start
 
-A Mozaiks workflow is a deterministic state machine around AG2 agents.
+A Mozaiks workflow is the AI-driven flow behind a task, assistant, or build step.
+It usually coordinates AG2 agents, data passed between them, and optional UI
+artifacts shown in chat.
 
 Before writing files, define:
 
@@ -13,9 +15,9 @@ Before writing files, define:
 - the agents needed to interview, reason, and generate structured output
 - the data contracts that must be persisted or shown to the user
 - the UI artifacts, if any, that should appear in the chat stream
-- whether the workflow is standalone or triggered mid-flight by a parent workflow
+- whether the workflow runs on its own or is started by another workflow
 
-## Choose The Owner
+## Where It Lives
 
 Use `factory_app/workflows/{WorkflowName}/` for shared builder workflows such as
 app generation, workflow generation, and refinement journeys.
@@ -23,7 +25,7 @@ app generation, workflow generation, and refinement journeys.
 Use `app/workflows/{WorkflowName}/` for workflows that belong to one generated
 app workspace.
 
-## Canonical File Set
+## File Set
 
 ```text
 workflows/{WorkflowName}/
@@ -47,7 +49,7 @@ workflows/{WorkflowName}/
 `hooks.yaml`, `extended_orchestration/`, workflow tools, and workflow UI are
 included only when the workflow needs them.
 
-## Authoring Order
+## Recommended Order
 
 1. Define `orchestrator.yaml`: entry agent, startup mode, turn limits, and human review.
 2. Define `context_variables.yaml`: shared state and parent-injected values.

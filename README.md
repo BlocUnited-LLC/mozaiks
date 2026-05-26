@@ -19,14 +19,13 @@
 Mozaiks is an open-source AI app factory for building, running, and iterating on
 AI-native software products.
 
-It combines three pieces that usually live in separate tools:
+It brings together three things that usually live in separate tools:
 
-- **Mozaiks Console** for creating apps, reviewing builds, and managing app
-  workspaces.
-- **AG2 workflow orchestration** for multi-agent planning, tool use, human
-  review, and mid-flight decomposition.
-- **A generated app workspace contract** with modules, pages, workflows, config,
-  and brand assets that can be validated before promotion.
+- **Mozaiks Console** for creating apps, continuing builds, and managing them.
+- **AI workflow orchestration powered by AG2** for planning, tool use, human
+  review, and generation.
+- **Generated app files** with modules, pages, workflows, config, and brand
+  assets that Mozaiks validates before making active.
 
 The goal is not to generate a throwaway demo. Mozaiks stages production-shaped
 artifacts, validates them against strict contracts, and keeps runtime concerns
@@ -46,19 +45,18 @@ mozaiks quickstart --dir .\mozaiks-workspace
 
 Then open `http://localhost:3000/apps` and click `Create App`.
 
-`.\mozaiks-workspace` is the local workspace Mozaiks uses for Console state and
-generated artifacts. The app itself is created from the Console.
+`.\mozaiks-workspace` is the local workspace folder Mozaiks uses for generated
+output, config, and launch scripts. It is not the app itself. The app is
+created later from inside the Console.
 
-### Console vs CLI
+### Which Tool To Use
 
 The **Console** is the browser product for creating apps, continuing builds,
-reviewing artifacts, and managing app workspaces. The **CLI** is the local
-developer entrypoint for creating a workspace, starting processes, running
-diagnostics, and opening the Console.
+reviewing artifacts, and managing apps. The **CLI** is just how you set up the
+local workspace, start processes, run diagnostics, and open the Console.
 
-`Studio` is the internal host name for the management server behind the
-Console. You may see `studio` in architecture docs or host flags such as
-`--host studio`, but users should start from the Console.
+If you see `studio`, it is just the internal server name behind the Console.
+Most users can ignore it and start from the Console.
 
 Want to contribute? See the [Contributing guide](https://docs.mozaiks.ai/contributing/).
 
