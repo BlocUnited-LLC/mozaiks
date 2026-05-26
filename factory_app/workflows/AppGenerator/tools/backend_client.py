@@ -97,54 +97,50 @@ class AppGeneratorBackendClient(BackendClient):
         }
         return await self.post(f"/api/apps/{app_id}/deploy/repo/pull-requests", json=payload, error_msg="Failed to create PR")
 
-    async def generate_template(self, app_id: str, tech_stack: Dict[str, Any], include_workflow: bool = True, include_dockerfiles: bool = True, user_id: Optional[str] = None) -> Dict[str, Any]:
+    async def generate_template(
+        self,
+        app_id: str,
+        tech_stack: Dict[str, Any],
+        include_workflow: bool = True,
+        include_dockerfiles: bool = True,
+        deployment_profile: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """POST /api/apps/{appId}/deploy/templates/generate"""
         payload = {
             "userId": user_id,
             "techStack": tech_stack,
             "includeWorkflow": include_workflow,
             "includeDockerfiles": include_dockerfiles,
+            "deploymentProfile": deployment_profile,
             "outputFormat": "files"
         }
         return await self.post(f"/api/apps/{app_id}/deploy/templates/generate", json=payload, error_msg="Failed to generate templates")
 
-    async def generate_scaffold(self, app_id: str, dependencies: Dict[str, List[str]], tech_stack_override: Optional[Dict[str, Any]] = None, user_id: Optional[str] = None) -> Dict[str, Any]:
+    async def generate_scaffold(
+        self,
+        app_id: str,
+        dependencies: Dict[str, List[str]],
+        tech_stack_override: Optional[Dict[str, Any]] = None,
+        include_dockerfiles: bool = True,
+        include_workflow: bool = True,
+        include_compose: bool = False,
+        deployment_profile: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """POST /api/apps/{appId}/deploy/scaffold"""
         payload = {
             "userId": user_id,
             "dependencies": dependencies,
-            "includeDockerfiles": True,
-            "includeWorkflow": True,
+            "includeDockerfiles": include_dockerfiles,
+            "includeWorkflow": include_workflow,
+            "includeCompose": include_compose,
+            "deploymentProfile": deployment_profile,
             "includeBoilerplate": True,
             "includeInitFiles": True,
             "techStackOverride": tech_stack_override
         }
         return await self.post(f"/api/apps/{app_id}/deploy/scaffold", json=payload, error_msg="Failed to generate scaffold")
-
-    # ------------------------------------------------------------------
-    # Database Operations (legacy/planned endpoint wrappers)
-    # ------------------------------------------------------------------
-
-    async def provision_database(self, app_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
-        """POST /api/apps/{appId}/database/provision"""
-        payload = {"userId": user_id or "mozaiksai"}
-        return await self.post(f"/api/apps/{app_id}/database/provision", json=payload, error_msg="Failed to provision database")
-
-    async def apply_database_schema(self, app_id: str, schema: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
-        """POST /api/apps/{appId}/database/schema"""
-        payload = {
-            "userId": user_id or "mozaiksai",
-            "schema": schema
-        }
-        return await self.post(f"/api/apps/{app_id}/database/schema", json=payload, error_msg="Failed to apply database schema")
-
-    async def seed_database(self, app_id: str, seed_data: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
-        """POST /api/apps/{appId}/database/seed"""
-        payload = {
-            "userId": user_id or "mozaiksai",
-            "seedData": seed_data
-        }
-        return await self.post(f"/api/apps/{app_id}/database/seed", json=payload, error_msg="Failed to seed database")
 
     async def get_database_status(self, app_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
         """GET /api/apps/{appId}/database/status"""

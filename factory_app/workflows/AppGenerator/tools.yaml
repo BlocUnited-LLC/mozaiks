@@ -244,35 +244,6 @@ tools:
     the backend.
   tool_type: Agent_Tool
   auto_tool_call: false
-- agent: DatabaseAgent
-  file: backend_tools.py
-  function: provision_database
-  description: >
-    Legacy/planned backend endpoint wrapper. The current canonical AppGenerator
-    persistence flow stages config/database_intent.json and optional
-    config/database_migrations/*.json; DatabaseAgent prompts must not depend on
-    this tool until runtime/platform database provisioning endpoints are
-    explicitly implemented.
-  tool_type: Agent_Tool
-  auto_tool_call: false
-- agent: DatabaseAgent
-  file: backend_tools.py
-  function: apply_database_schema
-  description: >
-    Legacy/planned backend endpoint wrapper. The current canonical AppGenerator
-    persistence flow stages database_intent_bundle artifacts and does not apply
-    schemas through this tool until runtime/platform support exists.
-  tool_type: Agent_Tool
-  auto_tool_call: false
-- agent: DatabaseAgent
-  file: backend_tools.py
-  function: seed_database
-  description: >
-    Legacy/planned backend endpoint wrapper. Seed files are not canonical
-    generated app artifacts; prompts must not call this tool as part of the
-    current persistence flow.
-  tool_type: Agent_Tool
-  auto_tool_call: false
 lifecycle_tools:
 - trigger: on_start
   agent: null

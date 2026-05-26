@@ -20,6 +20,7 @@ _FRONTEND_JS_TS_SEGMENTS = (
 _OBSOLETE_HOST_ADMIN_CONFIG_PATH = "app/config/admin.json"
 _APP_BACKEND_ADMIN_PATHS = {"backend/admin_config.py", "backend/routes/admin.py"}
 _INTEGRATIONS_PREFIX = "backend/integrations/"
+_ADAPTERS_PREFIX = "backend/adapters/"
 _CLIENT_SUFFIX = "_client.py"
 _ALLOWED_TASK_TYPES = {
     "backend_foundation",
@@ -43,7 +44,7 @@ _CANONICAL_INITIAL_AGENTS = {
     "page_bundle": "AppSchemaAgent",
 }
 _SURFACE_KIND_ALLOWED_TASK_TYPES: dict[str, frozenset[str]] = {
-    "external_integration": frozenset({"api_surface"}),
+    "external_integration": frozenset({"api_surface", "backend_foundation", "agent_backend_integration"}),
     "control_plane": frozenset({"control_plane_pack"}),
     "ui_only": frozenset({"page_bundle"}),
     "framework_pack": frozenset({"pack_overlay"}),
@@ -141,6 +142,18 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: fr
                     "Build task "
                     f"'{task_id}' owns '{hosted_module_prefix}' for hosted pack "
                     f"'{normalized_capability_pack_id}'. Hosted pack adapters must live under backend/integrations/."
+                )
+            if any(path.replace("\\", "/").startswith(_ADAPTERS_PREFIX) for path in owned_paths):
+                raise ValueError(
+                    "Build task "
+                    f"'{task_id}' owns backend/adapters/ for hosted pack "
+                    f"'{normalized_capability_pack_id}'. Hosted pack adapters must be thin API clients under backend/integrations/."
+                )
+            if task_type == "backend_foundation":
+                raise ValueError(
+                    "Build task "
+                    f"'{task_id}' uses backend_foundation for hosted pack "
+                    f"'{normalized_capability_pack_id}'. Hosted packs must use api_surface adapters under backend/integrations/."
                 )
             if task_type == "api_surface" and surface_kind_raw and surface_kind_raw != "external_integration":
                 raise ValueError(
@@ -375,6 +388,42 @@ def _validate_carry_forward_decisions(
                 )
 
 
+def _validate_task_dependencies(
+    build_tasks: List[Dict[str, Any]],
+    task_ids: frozenset[str],
+) -> None:
+    """Validate depends_on references on build tasks.
+
+    Rules:
+    - depends_on must be a list when provided.
+    - Every entry in depends_on must reference a task_id that exists in
+      build_tasks. Unknown references indicate typos or missing tasks and
+      will produce broken generation ordering at runtime.
+    """
+    for task in build_tasks:
+        task_id = str(task.get("task_id") or "<unknown>")
+        depends_on = task.get("depends_on")
+
+        if depends_on is None:
+            continue
+
+        if not isinstance(depends_on, list):
+            raise ValueError(
+                f"Build task '{task_id}': depends_on must be a list when provided."
+            )
+
+        unknown = [
+            d for d in depends_on
+            if isinstance(d, str) and d not in task_ids
+        ]
+        if unknown:
+            raise ValueError(
+                f"Build task '{task_id}': depends_on references unknown task "
+                f"ids: {unknown}. All depends_on entries must reference "
+                "task_ids declared in build_tasks."
+            )
+
+
 def app_build_plan(
     *,
     AppBuildPlan: Annotated[
@@ -422,6 +471,7 @@ def app_build_plan(
     task_ids: frozenset[str] = frozenset(
         str(t.get("task_id") or "") for t in build_tasks if t.get("task_id")
     )
+    _validate_task_dependencies(build_tasks, task_ids=task_ids)
     if carry_forward_decisions:
         _validate_carry_forward_decisions(carry_forward_decisions, task_ids=task_ids)
 

@@ -19,8 +19,6 @@ from typing import Any, Annotated, Dict, List, Optional
 
 from autogen.tools.dependency_injection import Field
 from mozaiksai.core.app_context.store import register_greenfield_app_context_version
-from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
-from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.workflow.generator_support.agent_endpoints import (
     resolve_agent_api_url,
     resolve_agent_websocket_url,
@@ -38,14 +36,44 @@ from factory_app.workflows.AppGenerator.tools.export_app_code import (
     resolve_export_gate,
 )
 from factory_app.workflows.AppGenerator.tools.requirements_scanner import scan_requirements
+from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
+from factory_app.workflows.AppGenerator.tools.module_api_template import get_module_api_template
 from factory_app.workflows.AppGenerator.tools.update_app_record import update_build_status
 from factory_app.workflows.AppGenerator.tools.schema_migration import inject_migration_into_bundle
+from factory_app.workflows.AppGenerator.tools.deployment_contract import (
+    generate_deployment_artifacts,
+)
 
 try:
     from logs.tools_logs import get_tool_logger as _get_tool_logger, log_tool_event as _log_tool_event  # type: ignore
 except Exception:  # pragma: no cover
     _get_tool_logger = None  # type: ignore
     _log_tool_event = None  # type: ignore
+
+BuilderArtifactStore = None
+AG2PersistenceManager = None
+
+
+def _builder_artifact_store():
+    global BuilderArtifactStore
+    if BuilderArtifactStore is None:
+        from mozaiksai.core.data.persistence.artifact_store import (
+            BuilderArtifactStore as _BuilderArtifactStore,
+        )
+
+        BuilderArtifactStore = _BuilderArtifactStore
+    return BuilderArtifactStore()
+
+
+def _ag2_persistence_manager():
+    global AG2PersistenceManager
+    if AG2PersistenceManager is None:
+        from mozaiksai.core.data.persistence.persistence_manager import (
+            AG2PersistenceManager as _AG2PersistenceManager,
+        )
+
+        AG2PersistenceManager = _AG2PersistenceManager
+    return AG2PersistenceManager()
 
 
 def _safe_relpath(raw: str) -> Optional[str]:
@@ -176,29 +204,16 @@ def _build_generated_files_manifest(
         if not file_path.exists() or not file_path.is_file():
             continue
         raw = file_path.read_bytes()
+        manifest_path = safe.replace("\\", "/")
         entries.append(
             {
-                "path": f"{bundle_name}/{safe}",
+                "path": f"{bundle_name}/{manifest_path}",
                 "sha256": hashlib.sha256(raw).hexdigest(),
                 "size_bytes": len(raw),
                 "content_type": _content_type_for_path(safe),
             }
         )
     return entries
-
-
-def _format_bytes(num: int) -> str:
-    try:
-        value: float = float(num)
-        for unit in ["bytes", "KB", "MB", "GB", "TB"]:
-            if value < 1024 or unit == "TB":
-                if unit == "bytes":
-                    return f"{int(value)} bytes"
-                return f"{value:.1f} {unit}"
-            value /= 1024.0
-    except Exception:
-        return f"{num} bytes"
-    return f"{num} bytes"
 
 
 def _ensure_env_line(lines: List[str], key: str, value: str) -> List[str]:
@@ -328,7 +343,7 @@ async def _persist_pending_schema_migration(
             artifact_version_id = None
             change_class = None
 
-    store = BuilderArtifactStore()
+    store = _builder_artifact_store()
     record = await store.save_database_migration(
         app_id=str(app_id),
         build_id=str(build_id),
@@ -501,7 +516,7 @@ async def _register_app_bundle_artifact_version(
     content_store = get_artifact_content_store()
     if content_store.backend_name != "local":
         try:
-            # artifact_version_id is not yet known; use a placeholder key.
+            # artifact_version_id is assigned after persistence; use a deterministic pending key.
             content_ref = await content_store.put_bundle(
                 raw,
                 app_id=str(app_id),
@@ -525,14 +540,7 @@ async def _register_app_bundle_artifact_version(
         artifact_key="app_bundle",
         parent_version_id=str(parent_version_id) if parent_version_id else None,
         canonical_inputs_version=canonical_inputs_version,
-        files_manifest=[
-            {
-                "path": f"{bundle_name}/{zip_path.name}",
-                "sha256": sha,
-                "size_bytes": zip_path.stat().st_size,
-                "content_type": "application/zip",
-            }
-        ],
+        files_manifest=files_manifest,
         source_workflow=workflow_name,
         source_chat_id=chat_id,
         lifecycle_status=lifecycle_status,
@@ -578,6 +586,10 @@ async def generate_and_download(
     confirmation_only = bool((DownloadRequest or {}).get("confirmation_only", False))
     storage_backend = (DownloadRequest or {}).get("storage_backend", "none")
     description = (DownloadRequest or {}).get("description")
+    include_dockerfiles = _is_truthy((DownloadRequest or {}).get("include_dockerfiles"))
+    include_workflow = _is_truthy((DownloadRequest or {}).get("include_workflow"))
+    include_compose = _is_truthy((DownloadRequest or {}).get("include_compose"))
+    deployment_profile = str((DownloadRequest or {}).get("deployment_profile") or "").strip() or None
 
     chat_id: Optional[str] = None
     app_id: Optional[str] = None
@@ -610,7 +622,7 @@ async def generate_and_download(
     if not chat_id or not app_id:
         return {"status": "error", "message": "chat_id and app_id are required"}
 
-    pm = AG2PersistenceManager()
+    pm = _ag2_persistence_manager()
     collected = await pm.gather_latest_agent_jsons(chat_id=chat_id, app_id=app_id)
     files_map = _discover_code_files(collected)
     if not files_map:
@@ -629,7 +641,7 @@ async def generate_and_download(
 
     # Merge Phase 7A carry-forward preserved declarative files.
     # These were written to context["carry_forward_additions"] by the resolver.
-    # Generated output (files_map) wins â€” only fill paths not already present.
+    # Generated output (files_map) wins — only fill paths not already present.
     carry_forward_additions = _context_get(context_variables, "carry_forward_additions")
     if isinstance(carry_forward_additions, dict) and carry_forward_additions:
         for cf_path, cf_content in carry_forward_additions.items():
@@ -643,6 +655,28 @@ async def generate_and_download(
     if "requirements.txt" not in files_map:
         files_map["requirements.txt"] = scan_requirements(files_map)
 
+    # Inject the canonical moduleApi.js helper if the agents did not produce one.
+    # Custom-route JSX files import moduleAction from this path. The template
+    # includes structured error body parsing so callers can branch on error_code.
+    if "ui/lib/moduleApi.js" not in files_map:
+        files_map["ui/lib/moduleApi.js"] = get_module_api_template()
+
+    # Scan for forbidden patterns before the bundle is written to disk.
+    # Blocks delivery if the generated app contains direct Stripe SDK usage,
+    # Stripe Refunds API calls, or embedded secret key literals.
+    bundle_scan_errors = scan_generated_bundle(files_map)
+    if bundle_scan_errors:
+        for _scan_err in bundle_scan_errors:
+            wf_logger.error("Generated bundle forbidden pattern: %s", _scan_err)
+        return {
+            "status": "error",
+            "message": (
+                "Generated bundle contains forbidden patterns. "
+                "Fix the errors below and regenerate."
+            ),
+            "bundle_errors": bundle_scan_errors,
+        }
+
     # Inject any pending migration file produced by DatabaseAgent during refinement.
     pending_migration: Optional[Dict[str, Any]] = None
     if context_variables is not None and hasattr(context_variables, "get"):
@@ -652,6 +686,36 @@ async def generate_and_download(
             pending_migration = None
     if isinstance(pending_migration, dict) and pending_migration.get("migration_id"):
         inject_migration_into_bundle(files_map, pending_migration)
+
+    # Optional deterministic deployment scaffold outputs.
+    # These remain provider-neutral and contain non-secret example env values only.
+    if context_variables is not None and hasattr(context_variables, "get"):
+        try:
+            include_dockerfiles = include_dockerfiles or _is_truthy(context_variables.get("includeDockerfiles"))
+            include_workflow = include_workflow or _is_truthy(context_variables.get("includeWorkflow"))
+            include_compose = include_compose or _is_truthy(context_variables.get("includeCompose"))
+            deployment_profile = deployment_profile or context_variables.get("deployment_profile")
+        except Exception:
+            pass
+    deployment_profile = str(deployment_profile or "generic_container")
+    if include_dockerfiles or include_workflow or include_compose:
+        deployment_contract = generate_deployment_artifacts(
+            app_id=str(app_id),
+            deployment_profile=deployment_profile,
+            include_dockerfiles=include_dockerfiles,
+            include_workflow=include_workflow,
+            include_compose=include_compose,
+        )
+        deployment_files = deployment_contract.get("artifacts") if isinstance(deployment_contract, dict) else {}
+        if isinstance(deployment_files, dict):
+            files_map.update({k: str(v) for k, v in deployment_files.items()})
+        if context_variables is not None and hasattr(context_variables, "set"):
+            try:
+                context_variables.set("deploy_target_spec", deployment_contract.get("deploy_target_spec"))
+                context_variables.set("deployment_template_manifest", deployment_contract.get("deployment_manifest"))
+                context_variables.set("deployment_contract_validation_errors", deployment_contract.get("bundle_errors") or [])
+            except Exception:
+                pass
 
     bundle_name = "GeneratedApp"
     try:
@@ -700,11 +764,21 @@ async def generate_and_download(
         wf_logger.warning("Failed to persist pending schema migration: %s", exc)
 
     # Update the app lifecycle record to 'review' now that files are on disk.
+    resolved_bundle_path = str(app_dir.resolve())
     await update_build_status(
         build_registry_id=build_registry_id or "",
         status="review",
-        bundle_path=str(app_dir.resolve()),
+        bundle_path=resolved_bundle_path,
     )
+    # Persist lifecycle_state and bundle_path into context_variables so the
+    # refinement router can read them when the user submits a revision request
+    # from the app_review transition without the bundle having been promoted yet.
+    if context_variables is not None and hasattr(context_variables, "set"):
+        try:
+            context_variables.set("lifecycle_state", "review")
+            context_variables.set("bundle_path", resolved_bundle_path)
+        except Exception:
+            pass
 
     zip_path = base_dir / f"{bundle_name}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
@@ -756,6 +830,16 @@ async def generate_and_download(
         # Workbench context (best-effort): allow ChatUI to render file tree + editor + preview.
         "generated_files": files_map,
     }
+    if include_dockerfiles or include_workflow or include_compose:
+        ui_payload["deployment_profile"] = deployment_profile
+        ui_payload["deployment_artifacts_included"] = True
+        if context_variables is not None and hasattr(context_variables, "get"):
+            try:
+                ui_payload["deploy_target_spec"] = context_variables.get("deploy_target_spec")
+                ui_payload["deployment_template_manifest"] = context_variables.get("deployment_template_manifest")
+                ui_payload["deployment_contract_validation_errors"] = context_variables.get("deployment_contract_validation_errors")
+            except Exception:
+                pass
     if migration_record:
         ui_payload["database_migration"] = migration_record
     # Best-effort: include validation/integration context for the AppWorkbench.

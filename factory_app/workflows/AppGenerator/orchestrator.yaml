@@ -4,7 +4,6 @@ human_in_the_loop: true
 workflow_startup_mode: AgentDriven
 orchestration_pattern: DefaultPattern
 initial_message_to_user: null
-initial_message: 'InterviewAgent: Greet the user, clarify the non-AI app scope,
-  and gather any missing CRUD/page/auth/integration requirements before code generation
-  begins.'
+initial_message: 'InterviewAgent: read the existing brief, guide the user through only the missing deterministic
+  app-scope details, and avoid re-interviewing from scratch before code generation begins.'
 initial_agent: InterviewAgent

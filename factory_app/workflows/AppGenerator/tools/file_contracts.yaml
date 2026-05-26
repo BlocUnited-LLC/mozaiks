@@ -18,6 +18,7 @@ task_contracts:
       - ui/route_manifest.json
       - ui/pages/custom/*.jsx
       - ui/index.js
+      - ui/lib/moduleApi.js
       - brand/theme_config.json
       - config/shell.json
       - config/asset_manifest.json
@@ -33,6 +34,11 @@ task_contracts:
       - Use explicit shell arrays only when labels, icons, role gates, or custom paths differ from the shortcut catalog.
       - Durable page mutations bind through declared api_endpoint values or canonical module actions.
       - Do not emit raw frontend source outside the bounded custom route bundle.
+      - Pages that require reading URL query params on mount, polling an endpoint until state changes, or rendering conditional sections based on API response value must use custom_route_bundle; they cannot be expressed as declarative AppPageSchema.
+      - A post-redirect confirmation page must not display confirmed/success state from the redirect URL alone. Confirmation must come from querying an app-owned module action after the backend has processed the event.
+      - The api_endpoint field on a page section is a POST path only — no query strings, fragments, or dynamic path segments. Page-level filters, pagination limits, and record identifiers must go in payload or the module action input schema.
+      - Custom route JSX must call module actions through moduleAction() imported from ui/lib/moduleApi.js. This file is always present in the generated bundle. Do not write raw fetch() calls to /api/modules/** directly in page components.
+      - Custom route error handling must use err.error_code (and err.code) from the caught error object to branch on backend states. The generated moduleApi.js preserves structured error fields on thrown errors. Do not parse raw response text or HTTP status codes to infer error state.
 
   module_contract:
     owner_agent: ConfigMiddlewareAgent
@@ -93,6 +99,11 @@ task_contracts:
       - config/database_intent.json
     optional_outputs:
       - config/database_migrations/{migration_id}.json
+      - config/shared_persistence.json
+      - shared_persistence/contracts.py
+      - shared_persistence/persistence.py
+      - shared_persistence/indexes.py
+      - shared_persistence/proposals.py
     downstream_python_defaults:
       - modules/{module_id}/backend/repo.py
       - modules/{module_id}/backend/policy.py
@@ -101,10 +112,16 @@ task_contracts:
       - database_intent_bundle is the canonical source of truth for durable generated app collections.
       - config/database_intent.json is the exported app artifact for that bundle.
       - config/database_migrations/{migration_id}.json is the exported additive migration artifact.
+      - config/shared_persistence.json is opt-in only. Generate it only when the app plan explicitly needs stable shared collections, cross-module aggregate ownership, or an external existing database contract that ordinary generated-scoped persistence cannot represent.
+      - Default generated apps must omit config/shared_persistence.json and use generated-scoped ctx.persistence.
+      - Shared persistence contracts are generic app infrastructure, not hosted-product special cases. Do not emit ad hoc folders or host-internal names such as app/shared, platform_persistence, host_system, hosted_database_metadata.json, or HostSystemPersistence for normal generated apps.
+      - If helper code is explicitly needed for a shared persistence contract, place it under shared_persistence/ using generic names such as contracts.py, persistence.py, indexes.py, or proposals.py. Do not create a runtime module for this helper and do not put it under modules/ or backend/.
+      - Shared collection access must be declared before module repo code uses it. Cross-module reads, lifecycle updates, or shared aggregate ownership must be explicit in config/shared_persistence.json.
       - backend/schemas.py replaces backend model files.
       - backend/repo.py is derived from database intent and owns persistence operations only.
       - backend/policy.py owns tenant/app/user scope query helpers.
       - Generated repo.py must use ctx.persistence.collection(module_id, entity_name) for generated module persistence.
+      - Generated repo.py may use shared persistence helpers only when its module/action is explicitly declared in config/shared_persistence.json.
       - module_id/entity_name in repo.py must match database_intent_bundle surfaces and collections.
       - Generated repo.py must not use ctx.db.
       - Generated repo.py must not import or call get_mongo_client().
@@ -119,14 +136,27 @@ task_contracts:
 
   backend_foundation:
     owner_agent: ConfigMiddlewareAgent
-    summary: App-level backend glue and scaffold files for the active app host.
+    summary: App-level backend support code and scaffold files for the active app host.
     required_outputs: []
     optional_outputs:
-      - task-owned backend glue files
+      - backend/config.py
+      - config/secrets.yaml
+      - backend/integrations/*.py
+      - backend/security/*.py
+      - backend/routes/*.py
+      - backend/adapters/**/*.py
+      - task-owned backend support files
     hard_constraints:
       - Stay within current_build_task.owned_paths.
-      - Emit integration glue only.
+      - Emit integration glue or provider adapter support only.
       - Do not generate a standalone platform or alternate host.
+      - App-owned support code belongs under backend/integrations/ for external or hosted API clients, backend/adapters/ for provider-specific implementation boundaries, backend/security/ for provider-neutral auth/secret helpers, and backend/routes/ for app-level routes only when needed.
+      - If app-owned runtime secrets are required, emit config/secrets.yaml as a names-only contract for provider/vault policy, env handles, and secret names. Never emit raw secret values.
+      - Common backend/adapters/ areas include auth, source_control, deployment, dns, registrar, cloud, storage, secrets, and payments when the code is provider mechanics rather than product state.
+      - backend/adapters/ and backend/integrations/ must not own business actions, product lifecycle, user-facing actions, emitted domain events, or persistence authority. Modules own those behaviors.
+      - Deployment artifacts generated from this lane must follow the provider-neutral deployment contract.
+      - Deployment artifacts must never include real secrets or provider-tenant identifiers.
+      - Generated CI workflow secret references must stay names-only and be declared through ci_secret_requirements; never emit secret values.
 
   control_plane_pack:
     owner_agent: ControlPlaneAgent
@@ -169,6 +199,7 @@ task_contracts:
       - For hosted-pack adapter tasks (owned_paths under backend/integrations/), generate thin client wrappers only — no hosted business logic, no proprietary pack internals in generated files.
       - Hosted adapter clients must target the stable hosted API contract supplied by the deployment host (e.g. POST {MOZAIKS_APP_URL}/api/modules/{module_id}/{action_id}). Do not embed host-specific secrets or provider credentials in generated files.
       - Pages must not bind directly to /api/modules/{hosted_pack_id}/{action}. When hosted-pack data must appear on a persistent page, AppGenerator generates an app-owned façade module (generated_module) whose service calls the hosted adapter client. Pages bind to /api/modules/{facade_module_id}/{action} using the standard page→module convention.
+      - Provider implementation adapters that are not hosted-pack API clients belong in backend/adapters/ through backend_foundation, not under modules/ and not in backend/integrations/.
 
   agent_backend_integration:
     owner_agent: AppPlanAgent
@@ -187,6 +218,9 @@ backend_helper_files:
     Rules for backend/{helper_name}.py files generated under app/modules/{module_id}/backend/.
     Helper files are explicit build outputs — they must be declared before generation.
     They are not a catch-all for logic that does not fit canonical layers.
+    App-level support code under backend/integrations/ or backend/adapters/ is governed by
+    task_contracts.backend_foundation or task_contracts.api_surface, not by this module-local
+    helper contract.
 
   canonical_layers:
     - backend/handler.py   # thin dispatch only — one method per declared action

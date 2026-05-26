@@ -1,21 +1,19 @@
 """
 Code Context Workflow Tools
 
-Four tools for AppGenerator/AgentGenerator workflows:
+Three tools for AppGenerator/AgentGenerator workflows:
 1. index_codebase: Index files (full or incremental)
-2. get_code_context: Retrieve formatted context by intent (legacy)
-3. get_code_context_for_agent: Retrieve formatted context for specific agent
-4. get_code_diff: Compare versions and get detailed changes
+2. get_code_context_for_agent: Retrieve formatted context for specific agent
+3. get_code_diff: Compare versions and get detailed changes
 
 All tools are multi-tenant safe (scoped by app_id) and compatible with AG2 tool registration.
 """
 
 import logging
 from typing import Dict, Any, List, Optional, Annotated
-import os
 
 from .extractor import TreeSitterChunker, extract_codebase, TREE_SITTER_AVAILABLE
-from .formatter import AgentContextFormatter, ContextFormatter, DEFAULT_INTENTS
+from .formatter import AgentContextFormatter
 from .persistence import CodeContextPersistence
 
 logger = logging.getLogger(__name__)
@@ -23,33 +21,24 @@ logger = logging.getLogger(__name__)
 # Lazy-initialized globals (set by workflow runtime)
 _db_client = None
 _persistence = None
-_formatter = None
 _chunker = None
 
 
-def initialize_code_context_tools(db_client, intent_config: Optional[Dict[str, Any]] = None):
+def initialize_code_context_tools(db_client):
     """
-    Initialize code context tools with database connection and intent config.
+    Initialize code context tools with database connection.
     Called once by the runtime during workflow setup.
     
     Args:
         db_client: MongoDB database client
-        intent_config: Optional intent definitions (uses defaults if not provided)
     """
-    global _db_client, _persistence, _formatter, _chunker
+    global _db_client, _persistence, _chunker
     
     _db_client = db_client
     _persistence = CodeContextPersistence(db_client)
-    
-    # Merge provided intent config with defaults
-    intents = dict(DEFAULT_INTENTS)
-    if intent_config:
-        intents.update(intent_config)
-    
-    _formatter = ContextFormatter(intents)
     _chunker = TreeSitterChunker()
     
-    logger.info(f"Code context tools initialized with {len(intents)} intents")
+    logger.info("Code context tools initialized")
     logger.info(f"Tree-sitter available: {TREE_SITTER_AVAILABLE}")
 
 
@@ -132,78 +121,6 @@ def index_codebase(
         return {
             "success": False,
             "message": f"Indexing failed: {str(e)}"
-        }
-
-
-def get_code_context(
-    app_id: Annotated[str, "Application ID"],
-    workspace_id: Annotated[str, "Workspace identifier"],
-    intent: Annotated[str, "Intent name (e.g., 'backend_service_generation', 'api_routes_generation')"],
-    scope: Annotated[Optional[List[str]], "Optional: filter to specific file paths"] = None,
-    version_hash: Annotated[Optional[str], "Optional: specific version (defaults to latest)"] = None,
-    max_tokens: Annotated[Optional[int], "Optional: token budget override"] = None
-) -> Dict[str, Any]:
-    """
-    Retrieve formatted code context for a specific intent.
-    
-    Intents define what context to include (imports, symbols, exports, etc.) 
-    and how to format it for agent consumption.
-    
-    Common intents:
-    - backend_service_generation: imports + class/function symbols + framework hints
-    - api_routes_generation: imports + function/class exports + routing patterns
-    - frontend_components_generation: imports + component symbols
-    - imports_check: just import statements
-    - symbols_overview: just symbol names and types
-    
-    Returns:
-    {
-        "success": bool,
-        "context": str,  # formatted context string ready for agent prompt
-        "version_hash": str,
-        "file_count": int,
-        "message": str
-    }
-    """
-    if not _persistence or not _formatter:
-        return {
-            "success": False,
-            "context": "",
-            "message": "Code context tools not initialized"
-        }
-    
-    try:
-        # Retrieve stored context
-        contexts = _persistence.get_context(app_id, workspace_id, version_hash)
-        
-        if contexts is None:
-            return {
-                "success": False,
-                "context": "",
-                "message": f"No indexed context found for workspace '{workspace_id}'"
-            }
-        
-        # Get version hash if not provided
-        if not version_hash:
-            version_hash = _persistence.get_version_hash(app_id, workspace_id)
-        
-        # Format context for intent
-        formatted = _formatter.format(intent, contexts, scope, max_tokens)
-        
-        return {
-            "success": True,
-            "context": formatted,
-            "version_hash": version_hash,
-            "file_count": len(contexts),
-            "message": f"Retrieved context for intent '{intent}' ({len(contexts)} files)"
-        }
-    
-    except Exception as e:
-        logger.error(f"get_code_context failed: {e}", exc_info=True)
-        return {
-            "success": False,
-            "context": "",
-            "message": f"Context retrieval failed: {str(e)}"
         }
 
 
@@ -398,8 +315,7 @@ def get_code_diff(
 # Tool registry for AG2 integration
 CODE_CONTEXT_TOOLS = [
     index_codebase,
-    get_code_context,             # Legacy: intent-based
-    get_code_context_for_agent,   # Preferred: agent-based
+    get_code_context_for_agent,
     get_code_diff
 ]
 
@@ -407,7 +323,6 @@ CODE_CONTEXT_TOOLS = [
 __all__ = [
     "initialize_code_context_tools",
     "index_codebase",
-    "get_code_context",
     "get_code_context_for_agent",
     "get_code_diff",
     "CODE_CONTEXT_TOOLS",

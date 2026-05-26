@@ -20,6 +20,22 @@ async def generate_scaffold(
         Optional[Dict[str, Any]],
         Field(description="Optional tech stack override."),
     ] = None,
+    include_dockerfiles: Annotated[
+        bool,
+        Field(description="Whether scaffold output should include deterministic Dockerfile artifacts."),
+    ] = True,
+    include_workflow: Annotated[
+        bool,
+        Field(description="Whether scaffold output should include deterministic CI workflow artifacts."),
+    ] = True,
+    include_compose: Annotated[
+        bool,
+        Field(description="Whether scaffold output should include docker-compose artifact."),
+    ] = False,
+    deployment_profile: Annotated[
+        Optional[str],
+        Field(description="Optional provider-neutral deployment profile id."),
+    ] = None,
     user_id: Annotated[Optional[str], Field(description="User ID.")] = None
 ) -> Dict[str, Any]:
     """
@@ -32,6 +48,10 @@ async def generate_scaffold(
             app_id=app_id,
             dependencies=dependencies,
             tech_stack_override=tech_stack_override,
+            include_dockerfiles=include_dockerfiles,
+            include_workflow=include_workflow,
+            include_compose=include_compose,
+            deployment_profile=deployment_profile,
             user_id=user_id
         )
         return result
@@ -39,78 +59,14 @@ async def generate_scaffold(
         logger.error(f"Failed to generate scaffold: {e}")
         return {"error": str(e)}
 
-async def provision_database(
-    app_id: Annotated[str, Field(description="Application ID.")],
-    user_id: Annotated[Optional[str], Field(description="User ID.")] = None
-) -> Dict[str, Any]:
-    """
-    Legacy/planned endpoint wrapper.
-
-    The canonical current flow stages database_intent_bundle artifacts instead
-    of provisioning runtime databases from AppGenerator.
-    """
-    logger.info(f"Provisioning database for app {app_id}")
-    try:
-        result = await app_gen_backend_client.provision_database(app_id=app_id, user_id=user_id)
-        return result
-    except Exception as e:
-        logger.error(f"Failed to provision database: {e}")
-        return {"error": str(e)}
-
-async def apply_database_schema(
-    app_id: Annotated[str, Field(description="Application ID.")],
-    database_schema: Annotated[Dict[str, Any], Field(description="Database schema definition.")],
-    user_id: Annotated[Optional[str], Field(description="User ID.")] = None
-) -> Dict[str, Any]:
-    """
-    Legacy/planned endpoint wrapper.
-
-    The canonical current flow writes config/database_intent.json and optional
-    config/database_migrations/*.json; it does not apply schemas here.
-    """
-    logger.info(f"Applying schema for app {app_id}")
-    try:
-        result = await app_gen_backend_client.apply_database_schema(
-            app_id=app_id,
-            schema=database_schema,
-            user_id=user_id
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Failed to apply schema: {e}")
-        return {"error": str(e)}
-
-async def seed_database(
-    app_id: Annotated[str, Field(description="Application ID.")],
-    seed_data: Annotated[Dict[str, Any], Field(description="Seed data to insert.")],
-    user_id: Annotated[Optional[str], Field(description="User ID.")] = None
-) -> Dict[str, Any]:
-    """
-    Legacy/planned endpoint wrapper.
-
-    Seed files are not canonical AppGenerator persistence artifacts.
-    """
-    logger.info(f"Seeding database for app {app_id}")
-    try:
-        result = await app_gen_backend_client.seed_database(
-            app_id=app_id,
-            seed_data=seed_data,
-            user_id=user_id
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Failed to seed database: {e}")
-        return {"error": str(e)}
-
-
 async def fetch_current_schema(
     app_id: Annotated[str, Field(description="Application ID.")],
     artifact_version_id: Annotated[Optional[str], Field(description="Artifact version ID of the bundle being refined. If null, returns null.")] = None,
 ) -> Dict[str, Any]:
     """
     Fetch the prior database intent that was recorded for an existing app bundle
-    artifact. Returns {"schema": <dict>} for legacy callers, or {"schema": null}
-    if no prior intent is available. DatabaseAgent prompts should prefer
+    artifact. Returns {"schema": <dict>} when prior intent exists, or
+    {"schema": null} when no prior intent is available. DatabaseAgent prompts should prefer
     database_intent_bundle context and staged migration artifacts.
     """
     if not artifact_version_id:

@@ -138,6 +138,7 @@ models:
         - split_view
         - settings
         - landing
+        - checkout_success
         - 'null'
         description: >
           Structural page archetype hint for AppSchemaAgent. Drives which primitives
@@ -147,7 +148,9 @@ models:
           chronological event/notification/audit surfaces; gallery for visual grid and
           marketplace/catalog listings; wizard for multi-step flows (onboarding, checkout,
           setup); split_view for simultaneous list+detail (inbox, file explorer, chat);
-          settings for categorized settings/preferences; landing for public/marketing pages.
+          settings for categorized settings/preferences; landing for public/marketing pages;
+          checkout_success for post-redirect checkout/payment confirmation routes that
+          must use custom_route_bundle.
           Do not default everything to record_list — match the page purpose to the right
           archetype.
       sections_hint:
@@ -485,11 +488,19 @@ models:
           Explicit build-task type used for downstream execution planning. Persistent
           app pages use the declarative AppSchemaAgent path. `page_bundle` means a
           declarative page/schema bundle and must be paired with AppSchemaAgent.
+          `backend_foundation` emits app-level backend support code such as
+          backend/integrations/ clients, backend/adapters/ provider boundaries,
+          backend/security/ helpers, and backend/routes/ route files.
+          These files are not runtime modules and must not own business actions,
+          events, lifecycle state, or persistence authority.
           `control_plane_pack` is required for surface_kind=control_plane tasks and
           emits an optional app-local control_plane/ harness pack. It must start
           at ControlPlaneAgent — do NOT use backend_foundation, api_surface, or
           module_contract for control_plane surfaces.
-          `api_surface` is the only valid task_type for surface_kind=external_integration.
+          surface_kind=external_integration may use `api_surface` for thin
+          clients, `backend_foundation` for provider adapters under
+          backend/adapters/, backend/security/, or backend/routes/, or
+          `agent_backend_integration` for workflow touchpoints.
           `page_bundle` is the only valid task_type for surface_kind=ui_only.
           `pack_overlay` generates ONLY the app-specific wiring for a selected framework_pack
           (subscriptions/event-flow bindings, facade module actions, page composition overlays).
@@ -695,12 +706,37 @@ models:
         - dict
         - 'null'
         description: Canonical generated database planning object for persistent app modules. It is written to config/database_intent.json by DatabaseAgent.
+      shared_persistence_contract:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        default: null
+        description: >
+          Optional opt-in app infrastructure contract for stable shared collections,
+          cross-module aggregate ownership, or external existing database integration.
+          Ordinary generated apps should set this to null and use generated-scoped
+          ctx.persistence plus database_intent_bundle. When present it is written to
+          config/shared_persistence.json and must use generic shared_persistence
+          naming, not ad hoc app/shared helpers or host-internal
+          names such as platform_persistence, host_system,
+          hosted_database_metadata.json, or HostSystemPersistence.
       pending_schema_migration:
         type: union
         variants:
         - dict
         - 'null'
         description: Optional additive database migration intent for config/database_migrations/{migration_id}.json, or null when no migration is planned.
+      deployment_targets:
+        type: optional_list
+        items: DeployTargetSpec
+        description: Optional provider-neutral deployment target specs associated with this app build plan.
+      deployment_template_manifest:
+        type: union
+        variants:
+        - DeploymentTemplateManifest
+        - 'null'
+        description: Optional deterministic deployment manifest describing generated deployment outputs.
       carry_forward_decisions:
         type: optional_list
         items: CarryForwardDecision
@@ -743,6 +779,299 @@ models:
       AppBuildPlan:
         type: AppBuildPlan
         description: Canonical app build plan persisted for downstream agents.
+  DeployTargetRuntime:
+    type: model
+    fields:
+      container_port:
+        type: int
+        description: Runtime container port exposed by the generated app.
+      health_path:
+        type: str
+        description: HTTP path used for health checks.
+      start_command:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional explicit start command override.
+  DeployTargetEnvironment:
+    type: model
+    fields:
+      required_variables:
+        type: optional_list
+        items: str
+        description: Variables that must be configured before runtime.
+      optional_variables:
+        type: optional_list
+        items: str
+        description: Variables that are optional for this target.
+      secret_variables:
+        type: optional_list
+        items: str
+        description: Variable names treated as secrets and injected by adapters, never committed.
+      public_variables:
+        type: optional_list
+        items: str
+        description: Safe client-facing variables.
+  DeployTargetImage:
+    type: model
+    fields:
+      image_name:
+        type: str
+        description: Provider-neutral image name hint.
+      tag_strategy:
+        type: literal
+        values:
+        - commit_sha
+        - timestamp
+        - manual
+        description: Generic tag strategy for build outputs.
+  DeployTargetChecks:
+    type: model
+    fields:
+      build:
+        type: bool
+        description: Whether build checks are required.
+      smoke:
+        type: bool
+        description: Whether smoke checks are required.
+      health:
+        type: bool
+        description: Whether health checks are required.
+  CiSecretRequirement:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Provider-neutral CI secret name. Names only, never values.
+      purpose:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional human-readable purpose for the secret name.
+      used_by:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional generic workflow identifier such as build_workflow.
+  CiWorkflowInputRequirement:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Names-only workflow input identifier.
+      required:
+        type: bool
+        description: Whether the workflow input is required when the workflow is manually dispatched.
+      purpose:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional human-readable purpose for the workflow input.
+  CiSecretRequirements:
+    type: model
+    fields:
+      required:
+        type: optional_list
+        items: CiSecretRequirement
+        description: Required CI secret names for the generated workflow. Names only, no values.
+      optional:
+        type: optional_list
+        items: CiSecretRequirement
+        description: Optional CI secret names for the generated workflow. Names only, no values.
+      workflow_inputs:
+        type: optional_list
+        items: CiWorkflowInputRequirement
+        description: Names-only workflow input requirements used by the generated CI workflow.
+  DeployTargetSpec:
+    type: model
+    fields:
+      target_id:
+        type: str
+        description: Stable deployment target identifier.
+      target_kind:
+        type: literal
+        values:
+        - container
+        - compose
+        - external_adapter
+        description: Provider-neutral target classification.
+      runtime:
+        type: DeployTargetRuntime
+        description: Runtime contract for the deployment target.
+      artifact_outputs:
+        type: optional_list
+        items: str
+        description: Deployment artifact paths emitted for this target.
+      environment:
+        type: DeployTargetEnvironment
+        description: Environment variable contract for this target.
+      image:
+        type: DeployTargetImage
+        description: Generic container image naming strategy.
+      checks:
+        type: DeployTargetChecks
+        description: Build/smoke/health checks required for this target.
+      provider_profile:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: Optional provider profile metadata. Keep generic by default.
+      deployment_profile:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional named deployment profile such as generic_container or local_compose.
+      ci_secret_requirements:
+        type: union
+        variants:
+        - CiSecretRequirements
+        - 'null'
+        description: Optional names-only CI secret and workflow input contract for generated workflows.
+  DeploymentHealthcheck:
+    type: model
+    fields:
+      path:
+        type: str
+        description: Health endpoint path used by deployment checks.
+      port:
+        type: int
+        description: Port associated with the health endpoint.
+  DeploymentBuildOutput:
+    type: model
+    fields:
+      repo_url:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional repository URL where export/build artifacts are tracked.
+      commit_sha:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional source revision identifier for the build output.
+      build_status:
+        type: literal
+        values:
+        - pending
+        - running
+        - succeeded
+        - failed
+        description: Provider-neutral build handoff status.
+      image_ref:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Container image reference when available (required for succeeded in validator helpers).
+      artifact_digest:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: "Optional immutable artifact digest using sha256: prefix."
+      workflow_run_url:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional generic workflow execution URL from the build/export system.
+      logs_url:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional generic build/export logs URL.
+      safe_details:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        description: Optional non-secret metadata for hosts/adapters.
+      error_code:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional provider-neutral error code when build_status is failed.
+  DeploymentTemplateManifest:
+    type: model
+    fields:
+      schema_version:
+        type: str
+        description: Manifest schema identifier.
+      app_id:
+        type: str
+        description: Application id this manifest belongs to.
+      deployment_profile:
+        type: str
+        description: Named deployment profile used for generation.
+      generated_files:
+        type: optional_list
+        items: str
+        description: Files emitted by deployment template generation.
+      required_env:
+        type: optional_list
+        items: str
+        description: Required env variable names.
+      secret_env:
+        type: optional_list
+        items: str
+        description: Secret env variable names (names only, no values).
+      exposed_ports:
+        type: optional_list
+        items: int
+        description: Exposed runtime ports.
+      healthcheck:
+        type: DeploymentHealthcheck
+        description: Health check contract.
+      ci_workflow:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional CI workflow artifact path.
+      ci_secret_requirements:
+        type: union
+        variants:
+        - CiSecretRequirements
+        - 'null'
+        description: Concrete names-only CI secret and workflow input requirements for the generated workflow artifact.
+      dockerfile:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional Dockerfile artifact path.
+      compose:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional docker-compose artifact path.
+      validation_status:
+        type: literal
+        values:
+        - pending
+        - valid
+        - invalid
+        description: Deployment manifest validation status.
+      deploy_target_spec:
+        type: DeployTargetSpec
+        description: Source deployment target spec used to generate this manifest.
+      build_output_contract:
+        type: union
+        variants:
+        - DeploymentBuildOutput
+        - 'null'
+        description: Optional provider-neutral build output handoff contract reference.
       workflows:
         type: list
         items: AppChildWorkflowSpec
@@ -780,6 +1109,7 @@ models:
         values:
         - database_intent_json
         - database_migration_json
+        - shared_persistence_json
         description: Deterministic database artifact kind.
       purpose:
         type: str
@@ -832,6 +1162,24 @@ models:
         - str
         - 'null'
         description: Optional description text (reserved).
+      deployment_profile:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional provider-neutral deployment profile id.
+      include_dockerfiles:
+        type: bool
+        description: Include deterministic Dockerfile output from deployment contract.
+        default: false
+      include_workflow:
+        type: bool
+        description: Include deterministic CI workflow output from deployment contract.
+        default: false
+      include_compose:
+        type: bool
+        description: Include deterministic docker-compose output from deployment contract.
+        default: false
   DownloadRequestCall:
     type: model
     fields:
@@ -945,7 +1293,7 @@ models:
     fields:
       path:
         type: str
-        description: Concrete backend foundation file path such as backend/config.py.
+        description: Concrete backend foundation file path such as backend/config.py, config/secrets.yaml, backend/integrations/provider_client.py, backend/security/secrets.py, backend/routes/webhooks.py, or backend/adapters/secrets/vault_provider.py.
       kind:
         type: literal
         values:
@@ -954,6 +1302,7 @@ models:
         - database_connection
         - middleware
         - integration_helper
+        - provider_adapter
         - tooling
         description: Backend foundation file family.
       purpose:
@@ -3232,6 +3581,7 @@ models:
         - split_view
         - settings
         - landing
+        - checkout_success
         description: >
           Structural page archetype. Carries the intended structural pattern so
           coding agents implement the right UI without guessing from field names.
@@ -3244,7 +3594,9 @@ models:
           wizard: multi-step flow (onboarding, checkout, setup);
           split_view: simultaneous list+detail (inbox, file explorer, thread list);
           settings: categorized settings/preferences forms;
-          landing: public/marketing/unauthenticated pages.
+          landing: public/marketing/unauthenticated pages;
+          checkout_success: post-redirect checkout/payment confirmation route
+          that must be implemented through custom_route_bundle.
       layout:
         type: literal
         values:
@@ -4301,6 +4653,20 @@ models:
           Optional asset inventory persisted as config/asset_manifest.json. Use this
           for non-token media metadata (logos/icons/hero imagery) and asset
           provenance; do not use theme_config_patch or shell_config as a media dump.
+      shared_persistence_contract:
+        type: union
+        variants:
+        - dict
+        - 'null'
+        default: null
+        description: >
+          Optional opt-in shared persistence contract persisted as
+          config/shared_persistence.json. Leave null for default generated-scoped
+          persistence. Use only when the build plan explicitly requires stable shared
+          collections, cross-module aggregate ownership, or an external existing
+          database contract, and keep any helper naming generic under
+          shared_persistence/. Do not emit app/shared or hosted-product helper
+          names.
 
   ControllerOutput:
     type: model

@@ -120,12 +120,16 @@ def _format_pack_surfaces(packs: List[Any]) -> str | None:
             hint = surface.get("generation_hint") or {}
             facade_module_id = hint.get("facade_module_id") or ""
             pages = hint.get("pages") or []
+            page_routes = hint.get("page_routes") or {}
             line = f"  - {surface_id} ({surface_label}) [{status}]"
             if facade_module_id:
                 line += f" → facade_module: {facade_module_id}"
             if pages:
                 line += f" | pages: {', '.join(str(p) for p in pages)}"
             surface_lines.append(line)
+            if page_routes and isinstance(page_routes, dict):
+                for page_name, route in page_routes.items():
+                    surface_lines.append(f"      route: {page_name} → {route}")
     if not surface_lines:
         return None
     return "Pack surfaces:\n" + "\n".join(surface_lines)

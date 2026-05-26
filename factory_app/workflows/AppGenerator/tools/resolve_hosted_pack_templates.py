@@ -17,7 +17,7 @@ Template resolution rules:
 5. pack_id must be a safe identifier (no slashes, no .., non-empty).
 6. Template paths within the manifest are resolved relative to the pack directory
    and must not escape it (path traversal prevention).
-7. Packs with status: placeholder are skipped silently.
+7. Packs with status other than active are skipped.
 8. Missing template → HostedPackTemplateError with clear message.
 9. Owned path with no matching template → HostedPackTemplateError.
 """
@@ -134,8 +134,8 @@ def resolve_templates_for_task(
 
     pack_section = manifest.get("pack") or {}
     status = pack_section.get("status", "active")
-    if status == "placeholder":
-        logger.info("Skipping template expansion for placeholder pack '%s'", pack_id)
+    if status != "active":
+        logger.info("Skipping template expansion for inactive pack '%s' (status=%s)", pack_id, status)
         return []
 
     backend_templates = manifest.get("backend_templates") or []

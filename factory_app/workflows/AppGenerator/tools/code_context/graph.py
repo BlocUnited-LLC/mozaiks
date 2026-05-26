@@ -1,11 +1,15 @@
 """
-Code Context Knowledge Graph (FalkorDB)
+Experimental code-context knowledge graph mirror.
 
-Stores extracted code context in a graph to enable semantic relationships
-between files, symbols, and model dependencies.
+This file is a quarantined prototype for a future optional read-only FalkorDB
+mirror of the Mongo-backed code context index. It is not imported by
+AppGenerator startup, the active code-context hooks, workflow routing, or
+runtime execution paths.
 
-This is optional and best-effort. If FalkorDB isn't available or configured,
-all operations are no-ops.
+FalkorDB is not an installed dependency and is not a source of truth for
+request routing, workflow execution, module dispatch, event routing, connector
+secrets, generated app persistence, or UI route rendering. If this prototype is
+revived, it must remain a derived index behind an explicit KG contract.
 """
 from __future__ import annotations
 

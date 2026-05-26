@@ -1142,7 +1142,7 @@ class TreeSitterChunker:
 
 
 # =========================================================================
-# Public API (backwards compatible with old interface)
+# Public API
 # =========================================================================
 
 def extract_codebase(

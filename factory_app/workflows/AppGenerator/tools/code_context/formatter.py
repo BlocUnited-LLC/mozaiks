@@ -12,8 +12,7 @@ Ported from project-aid-v2 code_context_formatter.py
 """
 
 import logging
-import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -435,134 +434,7 @@ class AgentContextFormatter:
         return "\n".join(sections)
 
 
-# =========================================================================
-# Legacy Compatibility (for existing tools.py)
-# =========================================================================
-
-class ContextFormatter:
-    """
-    Legacy compatibility wrapper.
-    Maps intent-based formatting to agent-based formatting.
-    """
-    
-    INTENT_TO_AGENT_MAP = {
-        "backend_service_generation": "ServiceAgent",
-        "api_routes_generation": "ControllerAgent",
-        "imports_check": None,  # Generic
-        "symbols_overview": None,  # Generic
-    }
-    
-    def __init__(self, intent_config: Dict[str, Any] = None):
-        self.intent_config = intent_config or {}
-    
-    def format(
-        self,
-        intent: str,
-        contexts: Dict[str, Dict[str, Any]],
-        scope: Optional[List[str]] = None,
-        max_tokens: Optional[int] = None
-    ) -> str:
-        """
-        Format extracted contexts for a specific intent.
-        Maps intent to agent and uses AgentContextFormatter.
-        """
-        # Convert file-keyed contexts to context_type-keyed
-        aggregated = {}
-        for file_path, ctx in contexts.items():
-            ctx_type = ctx.get("context_type", "raw_context")
-            if ctx_type not in aggregated:
-                aggregated[ctx_type] = []
-            aggregated[ctx_type].append(ctx)
-        
-        # Map intent to agent
-        agent_name = self.INTENT_TO_AGENT_MAP.get(intent)
-        if agent_name:
-            formatter = AgentContextFormatter(aggregated)
-            return formatter.format_for_agent(agent_name)
-        
-        # Fallback to generic formatting
-        return self._format_generic(contexts, intent, max_tokens)
-    
-    def _format_generic(
-        self,
-        contexts: Dict[str, Dict[str, Any]],
-        intent: str,
-        max_tokens: Optional[int]
-    ) -> str:
-        """Generic formatting for unmapped intents."""
-        sections = [f"### Code Context ({intent}) ###\n\n"]
-        
-        for file_path, context in sorted(contexts.items()):
-            sections.append(f"**{file_path}** ({context.get('language', 'unknown')})\n")
-            
-            if context.get("imports"):
-                sections.append("  Imports:\n")
-                for imp in context["imports"][:10]:
-                    if isinstance(imp, dict):
-                        sections.append(f"    - {imp.get('module', imp)}\n")
-                    else:
-                        sections.append(f"    - {imp}\n")
-            
-            if context.get("classes"):
-                sections.append("  Classes:\n")
-                for cls in context["classes"][:10]:
-                    name = cls.get("name", "Unknown") if isinstance(cls, dict) else str(cls)
-                    sections.append(f"    - {name}\n")
-            
-            if context.get("functions"):
-                sections.append("  Functions:\n")
-                for func in context["functions"][:10]:
-                    name = func.get("name", "Unknown") if isinstance(func, dict) else str(func)
-                    sections.append(f"    - {name}\n")
-            
-            sections.append("\n")
-        
-        result = "".join(sections)
-        
-        if max_tokens:
-            max_chars = max_tokens * 4
-            if len(result) > max_chars:
-                result = result[:max_chars] + "\n\n... (truncated)"
-        
-        return result
-
-
-# Default intent definitions (legacy compatibility)
-DEFAULT_INTENTS = {
-    "backend_service_generation": {
-        "includes": ["imports", "symbols", "framework_hints"],
-        "symbol_types": ["class", "function"],
-        "max_tokens": 8000,
-        "format": "structured"
-    },
-    "api_routes_generation": {
-        "includes": ["imports", "symbols", "exports"],
-        "symbol_types": ["function", "class"],
-        "max_tokens": 6000,
-        "format": "structured"
-    },
-    "frontend_components_generation": {
-        "includes": ["imports", "symbols", "exports"],
-        "symbol_types": ["component", "function"],
-        "max_tokens": 6000,
-        "format": "structured"
-    },
-    "imports_check": {
-        "includes": ["imports"],
-        "max_tokens": 2000,
-        "format": "imports_only"
-    },
-    "symbols_overview": {
-        "includes": ["symbols"],
-        "max_tokens": 4000,
-        "format": "symbols_only"
-    }
-}
-
-
 # Export main classes
 __all__ = [
     "AgentContextFormatter",
-    "ContextFormatter",  # Legacy
-    "DEFAULT_INTENTS"    # Legacy
 ]

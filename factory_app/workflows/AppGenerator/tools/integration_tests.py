@@ -1,5 +1,5 @@
 """
-integration_tests - Lightweight compatibility checks between AppGenerator output and AgentGenerator output.
+integration_tests - Lightweight contract checks between AppGenerator output and AgentGenerator output.
 
 This tool is intentionally best-effort and offline:
 - It validates that the generated frontend code references the expected env vars for agent endpoints.

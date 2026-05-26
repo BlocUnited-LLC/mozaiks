@@ -25,7 +25,8 @@ from mozaiksai.core.workflow.ui_primitives import (
 
 _logger = logging.getLogger("tools.save_app_schema")
 
-PROMOTABLE_APP_ENTRIES = ("app.json", "ui", "brand", "config")
+PROMOTABLE_APP_ENTRIES = ("app.json", "ui", "brand", "config", "shared_persistence")
+VALID_SHARED_PERSISTENCE_MODES = {"app_shared_contracts", "external_existing_db"}
 
 
 def _repo_root() -> Path:
@@ -544,6 +545,44 @@ def _validate_database_intent_bundle(database_intent_bundle: Any) -> None:
             raise ValueError(f"{path}.surface_kind is required")
         if not isinstance(surface.get("collections"), list):
             raise ValueError(f"{path}.collections must be a list")
+
+
+def _validate_shared_persistence_contract(shared_persistence_contract: Any) -> None:
+    if shared_persistence_contract is None:
+        return
+    if not isinstance(shared_persistence_contract, dict):
+        raise ValueError("shared_persistence_contract must be an object")
+    if not _is_non_empty_string(shared_persistence_contract.get("version")):
+        raise ValueError("shared_persistence_contract.version is required")
+
+    mode = shared_persistence_contract.get("mode")
+    if mode not in VALID_SHARED_PERSISTENCE_MODES:
+        raise ValueError(
+            "shared_persistence_contract.mode must be one of "
+            f"{sorted(VALID_SHARED_PERSISTENCE_MODES)}"
+        )
+
+    aliases = shared_persistence_contract.get("aliases")
+    if aliases is None:
+        aliases = []
+    if not isinstance(aliases, list):
+        raise ValueError("shared_persistence_contract.aliases must be a list when provided")
+
+    seen_aliases: set[str] = set()
+    for index, alias in enumerate(aliases):
+        path = f"shared_persistence_contract.aliases[{index}]"
+        if not isinstance(alias, dict):
+            raise ValueError(f"{path} must be an object")
+        alias_id = alias.get("alias")
+        if not _is_non_empty_string(alias_id):
+            raise ValueError(f"{path}.alias is required")
+        if alias_id in seen_aliases:
+            raise ValueError(f"{path}.alias must be unique")
+        seen_aliases.add(alias_id)
+        if not _is_non_empty_string(alias.get("collection")):
+            raise ValueError(f"{path}.collection is required")
+        if not _is_non_empty_string(alias.get("owner_module")):
+            raise ValueError(f"{path}.owner_module is required")
 
 
 def _validate_custom_route_bundle(custom_route_bundle: Any) -> None:
@@ -1346,6 +1385,7 @@ def _persist_to_filesystem(
     shell_config: Optional[Dict[str, Any]],
     asset_manifest: Optional[Dict[str, Any]],
     database_intent_bundle: Optional[Dict[str, Any]],
+    shared_persistence_contract: Optional[Dict[str, Any]],
     custom_route_bundle: Optional[Dict[str, Any]],
 ) -> List[str]:
     """Write app.json, ui/pages/*.yaml, optional custom route artifacts, and optional config artifacts.
@@ -1449,6 +1489,15 @@ def _persist_to_filesystem(
         )
         written.append("config/database_intent.json")
 
+    if shared_persistence_contract and isinstance(shared_persistence_contract, dict):
+        shared_persistence_path = output_dir / "config" / "shared_persistence.json"
+        shared_persistence_path.parent.mkdir(parents=True, exist_ok=True)
+        shared_persistence_path.write_text(
+            json.dumps(shared_persistence_contract, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        written.append("config/shared_persistence.json")
+
     return written
 
 
@@ -1520,6 +1569,10 @@ def save_app_schema(
         Optional[Dict[str, Any]],
         Field(description="Optional canonical database intent bundle persisted to config/database_intent.json. None to skip."),
     ] = None,
+    shared_persistence_contract: Annotated[
+        Optional[Dict[str, Any]],
+        Field(description="Optional opt-in shared/existing persistence contract persisted to config/shared_persistence.json. None for default generated-scoped persistence."),
+    ] = None,
     custom_route_bundle: Annotated[
         Optional[Dict[str, Any]],
         Field(description="Optional bounded custom full-page React route bundle persisted to ui/route_manifest.json and ui/pages/custom/*.jsx."),
@@ -1542,10 +1595,12 @@ def save_app_schema(
       - config/shell.json (merge)        → shell_config when set
       - config/asset_manifest.json       → asset_manifest when set
       - config/database_intent.json      → database_intent_bundle when set or available in context
+      - config/shared_persistence.json   → shared_persistence_contract when explicitly set or available in context
 
     Stores in context_variables:
       - app_manifest, app_pages, app_theme_config_patch, app_shell_config,
-        app_asset_manifest, app_database_intent_bundle, app_custom_route_bundle, app_schema_ready
+        app_asset_manifest, app_database_intent_bundle, app_shared_persistence_contract,
+        app_custom_route_bundle, app_schema_ready
 
     Tools are dumb — no reasoning, no transformation. AppSchemaAgent already
     produced correct typed output; this tool just persists it.
@@ -1566,6 +1621,7 @@ def save_app_schema(
     shell_config = _normalize_shell_config(shell_config)
     asset_manifest = _strip_none(_to_plain(asset_manifest))
     database_intent_bundle = _strip_none(_to_plain(database_intent_bundle))
+    shared_persistence_contract = _strip_none(_to_plain(shared_persistence_contract))
     custom_route_bundle = _normalize_custom_route_bundle(custom_route_bundle)
 
     for page in page_list:
@@ -1614,6 +1670,10 @@ def save_app_schema(
     if resolved_database_intent_bundle is None:
         resolved_database_intent_bundle = _context_get(context_variables, "database_intent_bundle")
     _validate_database_intent_bundle(resolved_database_intent_bundle)
+    resolved_shared_persistence_contract = shared_persistence_contract
+    if resolved_shared_persistence_contract is None:
+        resolved_shared_persistence_contract = _context_get(context_variables, "shared_persistence_contract")
+    _validate_shared_persistence_contract(resolved_shared_persistence_contract)
     app_ui_quality_warnings = dedupe(
         audit_page_schemas(page_list)
         + audit_custom_route_bundle_integrity(
@@ -1641,6 +1701,7 @@ def save_app_schema(
             context_variables.set("app_shell_config", shell_config)
             context_variables.set("app_asset_manifest", asset_manifest)
             context_variables.set("app_database_intent_bundle", resolved_database_intent_bundle)
+            context_variables.set("app_shared_persistence_contract", resolved_shared_persistence_contract)
             context_variables.set("app_custom_route_bundle", custom_route_bundle)
             context_variables.set("app_schema_ready", True)
             context_variables.set("available_page_primitives", list(get_page_ui_primitive_names()))
@@ -1666,6 +1727,7 @@ def save_app_schema(
             shell_config,
             asset_manifest,
             resolved_database_intent_bundle,
+            resolved_shared_persistence_contract,
             custom_route_bundle,
         )
         _logger.info(
@@ -1690,6 +1752,7 @@ def save_app_schema(
         f"Shell config: {'yes' if shell_config else 'no'}\n"
         f"Asset manifest: {'yes' if asset_manifest else 'no'}\n"
         f"Database intent: {'yes' if resolved_database_intent_bundle else 'no'}"
+        f"\nShared persistence: {'yes' if resolved_shared_persistence_contract else 'no'}"
         f"{files_written}"
     )
 
