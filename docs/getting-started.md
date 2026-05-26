@@ -39,8 +39,7 @@ To reopen the same workspace later, run:
 mozaiks console --dir .\mozaiks-workspace --open
 ```
 
-If you are contributing to Mozaiks itself or need to run generated workspace
-scripts directly, use [Local Setup](local-setup.md).
+For source checkout or contributor setup, use [Local Setup](local-setup.md).
 
 Open the Console at:
 

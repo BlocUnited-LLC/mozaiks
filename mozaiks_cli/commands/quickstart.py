@@ -43,7 +43,11 @@ def run(args) -> None:
 def _print_intro(workspace_root: Path) -> None:
     print(f"Quickstart workspace: {workspace_root}")
     print("Mode: builder")
-    print("This path bootstraps the workspace with minimal defaults and opens the Console.\n")
+    print("Install mode: CLI-managed")
+    print(
+        "This path bootstraps the workspace with minimal defaults and opens the Console. "
+        "No workspace .venv is required for the normal Console path.\n"
+    )
 
 
 def _print_environment_warnings(args) -> None:

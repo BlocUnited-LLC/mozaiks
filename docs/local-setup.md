@@ -6,6 +6,20 @@ need to debug a local run or work from a repo checkout.
 If you only want to create your first app, start with
 [Getting Started](getting-started.md) instead.
 
+## Choose The Right Setup Path
+
+Use one setup path at a time:
+
+| Path | Use When | Environment |
+| --- | --- | --- |
+| Public CLI install | You want to create and use local Mozaiks workspaces | `pipx` owns the hidden CLI environment; run `mozaiks quickstart` and `mozaiks console` |
+| Repo contributor setup | You are changing Mozaiks itself | `.venv` lives inside the `mozaiks/` repo; run repo scripts like `.\scripts\run-console.ps1` |
+| Standalone workspace setup | A generated app workspace is being developed as its own repo | `.venv` lives inside that app workspace; run that workspace's `.\scripts\run-console.ps1` |
+
+Do not create a shared `.venv` in the parent folder that contains multiple
+repos. Put the environment in the repo or workspace that owns it, or use `pipx`
+for the public CLI path.
+
 ## Prerequisites
 
 - Python 3.11+
@@ -22,7 +36,8 @@ node --version
 
 ## Source Checkout Bootstrap
 
-Use this path when you are changing Mozaiks itself:
+Use this path when you are changing Mozaiks itself. The bootstrap script creates
+`.venv` inside the cloned `mozaiks/` repo:
 
 ```powershell
 git clone https://github.com/BlocUnited-LLC/mozaiks.git
@@ -38,12 +53,13 @@ cd mozaiks
 ./scripts/bootstrap-builder.sh --workspace ./mozaiks-workspace
 ```
 
-The bootstrap script creates `.venv` when needed, installs the local package in
-editable mode, starts the local Mozaiks services, and opens the Console.
+It installs the local package in editable mode, starts the local Mozaiks
+services, and opens the Console.
 
 ## Manual Editable Setup
 
-Use this only when you need to run each step yourself:
+Use this only when you need to run each step yourself from a cloned `mozaiks/`
+repo:
 
 ```powershell
 python -m venv .venv
@@ -65,10 +81,10 @@ Use Anthropic instead of OpenAI if preferred:
 $env:ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-Start the local builder:
+Start the repo development Console:
 
 ```powershell
-mozaiks quickstart --dir .\mozaiks-workspace
+.\scripts\run-console.ps1
 ```
 
 Open:

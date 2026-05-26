@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -26,8 +25,13 @@ def test_readme_uses_plain_tool_framing() -> None:
 def test_local_setup_avoids_internal_workspace_shell_language() -> None:
     doc = _read("docs/local-setup.md")
 
+    assert "## Choose The Right Setup Path" in doc
+    assert "Public CLI install" in doc
+    assert "Repo contributor setup" in doc
+    assert "Standalone workspace setup" in doc
     assert "## Which Tool To Use Here" in doc
     assert "The CLI gets the local install running." in doc
+    assert "Do not create a shared `.venv` in the parent folder" in doc
     assert "workspace shell" not in doc
     assert "management surfaces" not in doc
 

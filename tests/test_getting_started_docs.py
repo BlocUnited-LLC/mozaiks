@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -33,7 +32,7 @@ def test_getting_started_explains_how_to_start_again() -> None:
     assert "mozaiks console --dir .\\mozaiks-workspace --open" in doc
     assert "Local Setup" in normalized
     assert "local-setup.md" in normalized
-    assert "run generated workspace scripts directly" in normalized
+    assert "source checkout or contributor setup" in normalized
     assert "http://localhost:3000/" in doc
     assert "python -m venv .venv" not in doc
     assert "python -m pip install mozaiks" not in doc

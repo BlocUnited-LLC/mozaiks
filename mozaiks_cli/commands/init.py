@@ -434,7 +434,10 @@ This is a standalone Mozaiks app workspace created with the `{preset}` preset.
 It consumes the published `mozaiks` framework package from `requirements.txt`.
 Do not assume a sibling checkout of the Mozaiks framework repository exists.
 
-## Local Setup
+## Standalone Workspace Setup
+
+Use this setup when this app workspace is being developed as its own repo.
+The `.venv` belongs inside this workspace.
 
 ```powershell
 python -m venv .venv
@@ -818,7 +821,7 @@ disable-model-invocation: true
 
 Help set up this app workspace.
 
-1. Create and activate `.venv`.
+1. Create and activate a workspace-local `.venv`.
 2. Run `python -m pip install -r requirements.txt`.
 3. Copy `.env.example` to `.env`.
 4. Set `OPENAI_API_KEY` and `MONGO_URI`.
@@ -835,7 +838,10 @@ def _generated_app_readme(app_name: str, preset: str) -> str:
 
 This app was created with Mozaiks using the `{preset}` preset.
 
-## Local Setup
+## Standalone Workspace Setup
+
+Use this setup when this app workspace is being developed as its own repo.
+The `.venv` belongs inside this workspace.
 
 ```powershell
 python -m venv .venv
@@ -1477,6 +1483,7 @@ artifact_agents: []
 def _show_next_steps(target_dir: Path, preset: str, starter: bool) -> None:
     features = TIER_PRESETS[preset]
     print("\nNext Steps:")
+    print("Standalone workspace setup:")
     print(f"  1. cd {target_dir}")
     print("  2. python -m venv .venv")
     print("  3. .\\.venv\\Scripts\\Activate.ps1")

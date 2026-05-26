@@ -71,6 +71,8 @@ def test_quickstart_bootstraps_workspace_and_launches_console(monkeypatch, tmp_p
     ai_json = _load_json(target_dir / "app" / "config" / "ai.json")
 
     assert "Mode: builder" in captured.out
+    assert "Install mode: CLI-managed" in captured.out
+    assert "No workspace .venv is required" in captured.out
     assert app_json["appName"] == "Quickstart Atlas"
     assert app_json["onboarding"]["journey"] == "greenfield_app"
     assert ai_json["llm"]["provider"] == "openai"

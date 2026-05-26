@@ -118,12 +118,15 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     assert "app/backend/**/*.py[cod]" in gitignore
 
     readme = (target_dir / "README.md").read_text(encoding="utf-8")
+    assert "Standalone Workspace Setup" in readme
+    assert "The `.venv` belongs inside this workspace." in readme
     assert "python -m pip install -r requirements.txt" in readme
     assert "mozaiks console --dir . --open" in readme
     assert "installed `mozaiks` package" in readme
     assert "Coding Agent Guidance" in readme
 
     agents_md = (target_dir / "AGENTS.md").read_text(encoding="utf-8")
+    assert "Standalone Workspace Setup" in agents_md
     assert "Do not assume a sibling checkout" in agents_md
     assert "app/modules/" in agents_md
     assert "app/backend/" in agents_md
@@ -171,6 +174,7 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
         path.name for path in (target_dir / ".claude" / "skills").iterdir() if path.is_dir()
     }
     setup_skill = (target_dir / ".claude" / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
+    assert "workspace-local `.venv`" in setup_skill
     assert "run-console.ps1" in setup_skill
 
     backend_script = (target_dir / "scripts" / "run-backend.ps1").read_text(encoding="utf-8")
