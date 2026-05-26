@@ -38,11 +38,11 @@ Install Python 3.11+ and Node.js 18+, then install the Mozaiks CLI:
 ```powershell
 python -m pip install --user pipx
 python -m pipx ensurepath
-pipx install mozaiks
+python -m pipx install mozaiks
 ```
 
-Open a new PowerShell if `mozaiks` is not found after `ensurepath`, then start
-the local Console workspace:
+Open a new PowerShell so the PATH changes from `ensurepath` are loaded, then
+start the local Console workspace:
 
 ```powershell
 mozaiks quickstart --dir .\mozaiks-workspace

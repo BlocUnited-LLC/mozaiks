@@ -11,10 +11,11 @@ Install Mozaiks as a CLI so it stays separate from the workspaces you create.
 ```powershell
 python -m pip install --user pipx
 python -m pipx ensurepath
-pipx install mozaiks
+python -m pipx install mozaiks
 ```
 
-Open a new PowerShell if `mozaiks` is not found after `ensurepath`.
+`ensurepath` updates future terminals, so use `python -m pipx` for the install
+step above. Then open a new PowerShell before running `mozaiks`.
 
 ## Create Your Workspace
 

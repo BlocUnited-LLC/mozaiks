@@ -28,7 +28,7 @@ def test_getting_started_explains_how_to_start_again() -> None:
     normalized = " ".join(doc.split())
 
     assert "`quickstart` opens the Console during first setup." in doc
-    assert "pipx install mozaiks" in doc
+    assert "python -m pipx install mozaiks" in doc
     assert "mozaiks console --dir .\\mozaiks-workspace --open" in doc
     assert "Local Setup" in normalized
     assert "local-setup.md" in normalized
