@@ -18,6 +18,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Annotated, Dict, List, Optional
 
 from autogen.tools.dependency_injection import Field
+from mozaiksai.core.app_context.store import register_greenfield_app_context_version
 from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.workflow.generator_support.agent_endpoints import (
@@ -95,6 +96,15 @@ def _context_get(context_variables: Optional[Any], key: str) -> Optional[Any]:
     return None
 
 
+def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
+    if context_variables is None or not hasattr(context_variables, "set"):
+        return
+    try:
+        context_variables.set(key, value)
+    except Exception:
+        return
+
+
 def _is_truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -113,6 +123,68 @@ def _discover_context_files(context_variables: Optional[Any]) -> Dict[str, str]:
         if safe:
             out[safe] = str(content)
     return out
+
+
+def _format_bytes(num: int) -> str:
+    try:
+        value: float = float(num)
+        for unit in ["bytes", "KB", "MB", "GB", "TB"]:
+            if value < 1024 or unit == "TB":
+                if unit == "bytes":
+                    return f"{int(value)} bytes"
+                return f"{value:.1f} {unit}"
+            value /= 1024.0
+    except Exception:
+        return f"{num} bytes"
+    return f"{num} bytes"
+
+
+def _content_type_for_path(path: str) -> str:
+    suffix = Path(path).suffix.lower()
+    return {
+        ".css": "text/css",
+        ".html": "text/html",
+        ".js": "text/javascript",
+        ".json": "application/json",
+        ".jsx": "text/javascript",
+        ".md": "text/markdown",
+        ".py": "text/x-python",
+        ".ts": "text/typescript",
+        ".tsx": "text/typescript",
+        ".txt": "text/plain",
+        ".yaml": "application/yaml",
+        ".yml": "application/yaml",
+    }.get(suffix, "application/octet-stream")
+
+
+def _build_generated_files_manifest(
+    *,
+    bundle_name: str,
+    app_dir: Path,
+    written_paths: list[str],
+) -> list[dict[str, Any]]:
+    import hashlib
+
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_path in sorted(written_paths):
+        safe = _safe_relpath(raw_path)
+        if not safe or safe in seen:
+            continue
+        seen.add(safe)
+        file_path = app_dir / safe
+        if not file_path.exists() or not file_path.is_file():
+            continue
+        raw = file_path.read_bytes()
+        entries.append(
+            {
+                "path": f"{bundle_name}/{safe}",
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "size_bytes": len(raw),
+                "content_type": _content_type_for_path(safe),
+            }
+        )
+    return entries
 
 
 def _format_bytes(num: int) -> str:
@@ -280,6 +352,66 @@ async def _persist_pending_schema_migration(
     return record
 
 
+async def _register_greenfield_app_context_for_bundle(
+    *,
+    app_bundle_artifact: Any,
+    artifact_store: Any,
+    files_manifest: list[dict[str, Any]],
+    workflow_name: str,
+    chat_id: str | None,
+    context_variables: Any | None,
+    raise_on_contract_error: bool = False,
+) -> Any | None:
+    app_id = getattr(app_bundle_artifact, "app_id", None)
+    if not app_id:
+        exc = ValueError("app_id is required")
+        if raise_on_contract_error:
+            raise exc
+        wf_logger = get_workflow_logger(
+            workflow_name=workflow_name,
+            chat_id=chat_id,
+            app_id=getattr(app_bundle_artifact, "app_id", None),
+        )
+        wf_logger.warning("Greenfield app-context registration skipped: %s", exc)
+        _context_set(context_variables, "app_context_registration_warning", str(exc))
+        return None
+
+    try:
+        registered = await register_greenfield_app_context_version(
+            app_bundle_artifact=app_bundle_artifact,
+            artifact_store=artifact_store,
+            files_manifest=files_manifest,
+            source_workflow=workflow_name,
+            source_chat_id=chat_id,
+            make_current=True,
+        )
+    except (TypeError, ValueError) as exc:
+        if raise_on_contract_error:
+            raise
+        wf_logger = get_workflow_logger(
+            workflow_name=workflow_name,
+            chat_id=chat_id,
+            app_id=app_id,
+        )
+        wf_logger.warning("Greenfield app-context registration skipped: %s", exc)
+        _context_set(context_variables, "app_context_registration_warning", str(exc))
+        return None
+    except Exception as exc:
+        wf_logger = get_workflow_logger(
+            workflow_name=workflow_name,
+            chat_id=chat_id,
+            app_id=app_id,
+        )
+        wf_logger.warning("Greenfield app-context registration failed: %s", exc)
+        _context_set(context_variables, "app_context_registration_warning", str(exc))
+        return None
+
+    _context_set(context_variables, "app_context_version_id", registered.context_version.context_version_id)
+    _context_set(context_variables, "app_context_artifact_version_id", registered.artifact_version.id)
+    _context_set(context_variables, "greenfield_app_context_registered", True)
+    return registered
+
+
 async def _register_app_bundle_artifact_version(
     *,
     app_id: str,
@@ -288,6 +420,8 @@ async def _register_app_bundle_artifact_version(
     chat_id: Optional[str],
     bundle_name: str,
     zip_path: Path,
+    app_dir: Path | None = None,
+    written_paths: list[str] | None = None,
     context_variables: Optional[Any],
 ):
     try:
@@ -330,6 +464,24 @@ async def _register_app_bundle_artifact_version(
 
     raw = zip_path.read_bytes()
     sha = hashlib.sha256(raw).hexdigest()
+    generated_files_manifest = (
+        _build_generated_files_manifest(
+            bundle_name=bundle_name,
+            app_dir=app_dir,
+            written_paths=written_paths or [],
+        )
+        if app_dir is not None and written_paths
+        else []
+    )
+    files_manifest = [
+        {
+            "path": f"{bundle_name}/{zip_path.name}",
+            "sha256": sha,
+            "size_bytes": zip_path.stat().st_size,
+            "content_type": "application/zip",
+        },
+        *generated_files_manifest,
+    ]
 
     # Persist to content store if a non-local backend is configured.  The local
     # backend is skipped because artifact_path already covers that path.
@@ -398,6 +550,14 @@ async def _register_app_bundle_artifact_version(
             context_variables.set("artifact_version_id", artifact_version.id)
         except Exception:
             pass
+    await _register_greenfield_app_context_for_bundle(
+        app_bundle_artifact=artifact_version,
+        artifact_store=artifact_store,
+        files_manifest=files_manifest,
+        workflow_name=workflow_name,
+        chat_id=chat_id,
+        context_variables=context_variables,
+    )
     return artifact_version
 
 
@@ -469,7 +629,7 @@ async def generate_and_download(
 
     # Merge Phase 7A carry-forward preserved declarative files.
     # These were written to context["carry_forward_additions"] by the resolver.
-    # Generated output (files_map) wins — only fill paths not already present.
+    # Generated output (files_map) wins â€” only fill paths not already present.
     carry_forward_additions = _context_get(context_variables, "carry_forward_additions")
     if isinstance(carry_forward_additions, dict) and carry_forward_additions:
         for cf_path, cf_content in carry_forward_additions.items():
@@ -563,6 +723,8 @@ async def generate_and_download(
             chat_id=chat_id,
             bundle_name=bundle_name,
             zip_path=zip_path,
+            app_dir=app_dir,
+            written_paths=written_paths,
             context_variables=context_variables,
         )
     except Exception as artifact_err:
