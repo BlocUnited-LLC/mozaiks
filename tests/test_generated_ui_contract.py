@@ -525,7 +525,7 @@ def test_generated_ui_contract_blocks_noisy_page_schema() -> None:
                         },
                     },
                     {
-                        "id": "legacy",
+                        "id": "removed",
                         "primitive": "Card",
                         "config": {"title": "Old card"},
                     },
@@ -539,6 +539,131 @@ def test_generated_ui_contract_blocks_noisy_page_schema() -> None:
     assert any("uses removed primitive 'Card'" in warning for warning in warnings)
     assert any("nests SurfaceCard inside Panel" in warning for warning in warnings)
     assert any("uses 2 SummaryStrip sections" in warning for warning in warnings)
+
+
+def test_wizard_page_with_form_passes_quality_gate() -> None:
+    """A wizard page with at least one Form section must produce no warnings."""
+    warnings = audit_page_schemas(
+        [
+            {
+                "name": "Enroll",
+                "route": "/enroll",
+                "title": "Enroll",
+                "page_type": "wizard",
+                "extensions": None,
+                "sections": [
+                    {
+                        "id": "enroll-progress",
+                        "primitive": "ProgressTracker",
+                        "config": {
+                            "stages": [
+                                {"id": "details", "label": "Details", "state": "active"},
+                                {"id": "confirm", "label": "Confirm", "state": "pending"},
+                            ]
+                        },
+                    },
+                    {
+                        "id": "enroll-form",
+                        "primitive": "Form",
+                        "config": {
+                            "submit_action": "/api/modules/enrollment/submit_enrollment",
+                            "fields": [{"id": "name", "label": "Name", "type": "text"}],
+                        },
+                    },
+                    {
+                        "id": "enroll-nav",
+                        "primitive": "ActionButton",
+                        "config": {"label": "Next", "action": "next_step"},
+                    },
+                ],
+            }
+        ]
+    )
+
+    assert warnings == [], f"Unexpected wizard quality gate warnings: {warnings}"
+
+
+def test_wizard_page_without_form_is_flagged() -> None:
+    """A wizard page with sections but no Form section must be flagged."""
+    warnings = audit_page_schemas(
+        [
+            {
+                "name": "Enroll",
+                "route": "/enroll",
+                "title": "Enroll",
+                "page_type": "wizard",
+                "extensions": None,
+                "sections": [
+                    {
+                        "id": "enroll-progress",
+                        "primitive": "ProgressTracker",
+                        "config": {
+                            "stages": [
+                                {"id": "step1", "label": "Step 1", "state": "active"},
+                            ]
+                        },
+                    },
+                    {
+                        "id": "enroll-nav",
+                        "primitive": "ActionButton",
+                        "config": {"label": "Next", "action": "next_step"},
+                    },
+                ],
+            }
+        ]
+    )
+
+    assert any("no Form section" in w for w in warnings), (
+        f"Expected Form-missing warning for wizard page, got: {warnings}"
+    )
+
+
+def test_wizard_page_form_warning_is_descriptive() -> None:
+    """The Form-missing warning must reference submit_action and module action."""
+    warnings = audit_page_schemas(
+        [
+            {
+                "name": "Setup",
+                "route": "/setup",
+                "title": "Setup",
+                "page_type": "wizard",
+                "extensions": None,
+                "sections": [
+                    {
+                        "id": "setup-tracker",
+                        "primitive": "ProgressTracker",
+                        "config": {"stages": [{"id": "s1", "label": "Step", "state": "active"}]},
+                    },
+                ],
+            }
+        ]
+    )
+
+    form_warnings = [w for w in warnings if "no Form section" in w]
+    assert len(form_warnings) == 1
+    warning = form_warnings[0]
+    assert "submit_action" in warning, f"Warning must mention submit_action: {warning}"
+    assert "module action" in warning, f"Warning must mention module action: {warning}"
+
+
+def test_wizard_page_empty_sections_does_not_trigger_form_warning() -> None:
+    """A wizard with no sections at all is a stub schema — the Form check must not fire."""
+    warnings = audit_page_schemas(
+        [
+            {
+                "name": "Onboard",
+                "route": "/onboard",
+                "title": "Onboard",
+                "page_type": "wizard",
+                "extensions": None,
+                "sections": [],
+            }
+        ]
+    )
+
+    assert not any("no Form section" in w for w in warnings), (
+        f"Form check must not fire for empty sections wizard: {warnings}"
+    )
 
 
 @pytest.mark.parametrize("page_type", sorted(VALID_PAGE_TYPES))
@@ -563,3 +688,124 @@ def test_generated_ui_contract_accepts_minimal_schema_for_each_page_type(
     assert warnings == [], (
         f"page_type '{page_type}' produced unexpected quality gate warnings: {warnings}"
     )
+
+
+# ---------------------------------------------------------------------------
+# checkout_success page type enforcement (Gap 4 from App Zero audit)
+# ---------------------------------------------------------------------------
+
+def test_checkout_success_with_sections_triggers_custom_route_warning() -> None:
+    """checkout_success pages must be custom React routes, not YAML-primitive pages.
+    Any checkout_success page that declares sections must be flagged."""
+    warnings = audit_page_schemas(
+        [
+            {
+                "name": "payment_confirmed",
+                "page_type": "checkout_success",
+                "sections": [{"primitive": "Panel"}],
+            }
+        ]
+    )
+    assert any("custom_route_bundle" in w for w in warnings), (
+        f"Expected custom_route_bundle warning for checkout_success with sections, got: {warnings}"
+    )
+
+
+def test_checkout_success_without_sections_is_clean() -> None:
+    """checkout_success with no sections or empty sections is not flagged.
+    This represents the correct pattern: no declarative sections, custom route handles rendering."""
+    for sections in (None, []):
+        page: dict = {"name": "payment_confirmed", "page_type": "checkout_success"}
+        if sections is not None:
+            page["sections"] = sections
+        warnings = audit_page_schemas([page])
+        custom_route_warnings = [w for w in warnings if "custom_route_bundle" in w]
+        assert custom_route_warnings == [], (
+            f"checkout_success with sections={sections!r} should not warn: {warnings}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# api_endpoint format validation (Gap 3 from App Zero audit)
+# ---------------------------------------------------------------------------
+
+def test_api_endpoint_correct_format_no_warning() -> None:
+    """Well-formed /api/modules/{module}/{action} endpoints produce no format warning."""
+    warnings = audit_page_schemas(
+        [
+            {
+                "name": "orders",
+                "page_type": "record_list",
+                "sections": [
+                    {
+                        "primitive": "DataTable",
+                        "api_endpoint": "/api/modules/checkout/list_orders",
+                    }
+                ],
+            }
+        ]
+    )
+    ep_warnings = [w for w in warnings if "api_endpoint" in w and "pattern" in w]
+    assert ep_warnings == [], f"Clean endpoint triggered format warning: {ep_warnings}"
+
+
+def test_api_endpoint_with_query_string_is_flagged() -> None:
+    """api_endpoint values with query strings violate the /api/modules/{m}/{a} contract."""
+    warnings = audit_page_schemas(
+        [
+            {
+                "name": "orders",
+                "page_type": "record_list",
+                "sections": [
+                    {
+                        "primitive": "DataTable",
+                        "api_endpoint": "/api/modules/checkout/list_orders?status=paid",
+                    }
+                ],
+            }
+        ]
+    )
+    ep_warnings = [w for w in warnings if "api_endpoint" in w]
+    assert ep_warnings, "Query string endpoint must be flagged"
+
+
+def test_api_endpoint_with_extra_path_segment_is_flagged() -> None:
+    """api_endpoint with extra path segments beyond /api/modules/{m}/{a} must be flagged."""
+    warnings = audit_page_schemas(
+        [
+            {
+                "name": "order_detail",
+                "page_type": "record_detail",
+                "sections": [
+                    {
+                        "primitive": "DataTable",
+                        "api_endpoint": "/api/modules/checkout/get_order/123",
+                    }
+                ],
+            }
+        ]
+    )
+    ep_warnings = [w for w in warnings if "api_endpoint" in w]
+    assert ep_warnings, "Extra path segment must be flagged"
+
+
+def test_api_endpoint_config_field_also_checked() -> None:
+    """Format check applies to api_endpoint inside section.config as well."""
+    warnings = audit_page_schemas(
+        [
+            {
+                "name": "orders",
+                "page_type": "record_list",
+                "sections": [
+                    {
+                        "primitive": "DataTable",
+                        "config": {
+                            "api_endpoint": "/api/modules/checkout/list_orders?filter=recent"
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    ep_warnings = [w for w in warnings if "api_endpoint" in w]
+    assert ep_warnings, "config.api_endpoint with query string must be flagged"

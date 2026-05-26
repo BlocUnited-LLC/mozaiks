@@ -411,7 +411,7 @@ export class DynamicUIHandler {
     this.notifyUIUpdate({ type: UI_DISMISS, tool_call_id: toolCallId });
   }
 
-  // ─── legacy chat.tool_call handler ────────────────────────────────────────
+  // ─── chat.tool_call handler ───────────────────────────────────────────────
 
   /**
    * Handle workflow UI tool_call events

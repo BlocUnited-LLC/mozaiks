@@ -44,8 +44,7 @@ export function createAppConfig(options = {}) {
 }
 
 /**
- * Resolve app manifest from raw config (backwards compatible)
- * For new integrations, use createAppConfig instead
+ * Resolve app manifest from raw config.
  */
 export function resolveAppManifest(rawManifest = {}, options = {}) {
   const appId = rawManifest.appId || options.appId || 'default';

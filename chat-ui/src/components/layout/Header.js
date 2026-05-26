@@ -11,6 +11,7 @@ import {
   resolveShellActions,
 } from "../../navigation/shellActions";
 import { useChatUI } from "../../context/ChatUIContext";
+import { useAppEventBus } from "../../ui/hooks/useAppEventBus.js";
 import "./header-styles.css";
 
 const ICON_FILE_RE = /\.(svg|png|jpe?g|gif|webp|ico)$/i;
@@ -279,6 +280,18 @@ const Header = ({
       controller.abort();
     };
   }, [notificationsConfig.show]);
+
+  useAppEventBus('notification.count_changed', () => {
+    if (notificationsConfig.show === false) return;
+    fetch('/api/notifications/count', { headers: { Accept: 'application/json' } })
+      .then((r) => r.ok ? r.json() : null)
+      .then((payload) => {
+        if (!payload) return;
+        const count = Number(payload?.unread_count ?? payload?.count ?? 0);
+        if (Number.isFinite(count)) setNotificationCount(Math.max(0, count));
+      })
+      .catch(() => {});
+  });
 
   const executeAction = async (action) => {
     if (!action) return;

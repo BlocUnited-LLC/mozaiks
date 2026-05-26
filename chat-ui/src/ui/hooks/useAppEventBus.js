@@ -14,6 +14,10 @@
  *    { type: "routing.transition.show",    payload: { transition_id: string } }
  *    { type: "routing.transition.resolve", payload: { transition_id: string, option_id: string, context_variables?: object } }
  *
+ * 3. notification.* — platform notification signals (pushed via WebSocket, no content)
+ *    { type: "notification.count_changed" }
+ *    Shell components subscribe to refresh the unread badge count without a full page reload.
+ *
  * Primitives use useAppEvent(eventType, componentId, handler).
  * Transition components use useAppEventBus(eventType, handler) (no component id needed).
  * The shell subscribes to routing.transition.resolve to execute navigation.
@@ -134,7 +138,7 @@ export function emitAppEvent(eventType, payload = {}) {
 export function ingestEvent(msg) {
   if (typeof msg?.type !== 'string') return;
   const t = msg.type;
-  if (!t.startsWith('ui.') && !t.startsWith('routing.')) return;
+  if (!t.startsWith('ui.') && !t.startsWith('routing.') && !t.startsWith('notification.')) return;
   const payload = msg.payload ?? {};
   publish(t, payload);
   if (payload.component_id) publish(`${t}:${payload.component_id}`, payload);

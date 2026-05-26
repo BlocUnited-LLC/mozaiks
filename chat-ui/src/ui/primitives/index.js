@@ -21,9 +21,12 @@
 export { DataTable }       from './DataTable.jsx';
 export { Form }            from './Form.jsx';
 export { Grid }            from './Grid.jsx';
+export { AnalyticsSummaryStrip } from './AnalyticsSummaryStrip.jsx';
+export { PerformanceTileGrid } from './PerformanceTileGrid.jsx';
 export { Button }          from './Button.jsx';
 export { Modal }           from './Modal.jsx';
 export { Alert }           from './Alert.jsx';
+export { ContentRail }     from './ContentRail.jsx';
 export { Skeleton, Empty } from './Skeleton.jsx';
 export { Timeline }        from './Timeline.jsx';
 export { CodeBlock }       from './CodeBlock.jsx';

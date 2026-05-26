@@ -3324,6 +3324,60 @@ const ChatPage = () => {
         }]);
         return;
       }
+      case 'chat.revision_requested': {
+        // Emitted by AppReview's submit_revision_request tool when the user
+        // requests changes. Route into the refinement control plane and switch
+        // the active chat session to the new workflow in-place.
+        const detail = data.data || data;
+        const revisionText = detail.refinement_request || '';
+        const artifactKind = detail.artifact_kind || 'app_bundle';
+        if (!revisionText) return;
+        const resolvedAppId = (
+          appId ||
+          user?.app_id ||
+          config?.chat?.defaultAppId ||
+          config?.appId ||
+          config?.app_id ||
+          'default'
+        );
+        const resolvedUserId = user?.id || user?.user_id || user?.email || null;
+        fetch('/api/workflows/trigger', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            trigger_source: 'refinement',
+            app_id: resolvedAppId,
+            user_id: resolvedUserId,
+            trigger_payload: {
+              refinement_request: {
+                raw_user_request: revisionText,
+                artifact_kind: artifactKind,
+              },
+            },
+          }),
+        })
+          .then(async (res) => {
+            if (!res.ok) {
+              console.error('[ChatPage] revision trigger failed:', res.status);
+              return;
+            }
+            const triggerData = await res.json();
+            if (triggerData.execution_mode === 'workflow' && triggerData.chat_id && triggerData.workflow_id) {
+              setCurrentChatId(triggerData.chat_id);
+              setActiveChatId(triggerData.chat_id);
+              setCurrentWorkflowName(triggerData.workflow_id);
+              setActiveWorkflowName(triggerData.workflow_id);
+              setConversationMode('workflow');
+              setWorkflowCompleted(false);
+            }
+            // harness_decision and coding_worker modes surface through the
+            // existing refinement decision UI — no in-place session switch needed.
+          })
+          .catch((err) => {
+            console.error('[ChatPage] revision trigger error:', err);
+          });
+        return;
+      }
       case 'error': {
         setPendingWorkflowReply(null);
         const errorMsg = data.message || data.data?.message || 'Unknown error';
@@ -3939,7 +3993,7 @@ useEffect(() => {
           return;
         }
 
-        // tool_call (legacy InputRequestEvent path) and ui.render (L2 typed path)
+        // tool_call (InputRequestEvent path) and ui.render (typed UI path)
         if (update.type === 'tool_call' || update.type === 'ui.render') {
           setPendingWorkflowReply(null);
           if (dispatchSurfaceEvent) {
@@ -4857,33 +4911,7 @@ useEffect(() => {
           };
         }
       } catch (err) {
-        if (err?.status !== 404) {
-          console.warn('Failed to resolve oldest workflow session:', describeApiError(err));
-          return null;
-        }
-        // Backward fallback for runtimes without /sessions/oldest.
-        try {
-          const listed = await api.get(`/api/sessions/list/${currentAppId}/${currentUserId}`);
-          const sessions = Array.isArray(listed?.sessions) ? [...listed.sessions] : [];
-          if (sessions.length === 0) {
-            return null;
-          }
-          sessions.sort((a, b) => {
-            const aTs = Date.parse(a?.created_at || '') || Number.MAX_SAFE_INTEGER;
-            const bTs = Date.parse(b?.created_at || '') || Number.MAX_SAFE_INTEGER;
-            return aTs - bTs;
-          });
-          const first = sessions[0];
-          if (first?.chat_id) {
-            return {
-              strategy: 'oldest',
-              chat_id: first.chat_id,
-              workflow_name: first.workflow_name || fallbackWorkflowName || null,
-            };
-          }
-        } catch (fallbackErr) {
-          console.warn('Failed to resolve oldest session from list fallback:', describeApiError(fallbackErr));
-        }
+        console.warn('Failed to resolve oldest workflow session:', describeApiError(err));
       }
       return null;
     }
@@ -5968,6 +5996,17 @@ useEffect(() => {
           return;
         }
 
+        if (data.resolution_type === 'chat_session' && data.chat_id && data.workflow_id) {
+          setPendingTransitionId(null);
+          setPendingTransitionContext({});
+          setCurrentChatId(data.chat_id);
+          setActiveChatId(data.chat_id);
+          setCurrentWorkflowName(data.workflow_id);
+          setActiveWorkflowName(data.workflow_id);
+          setConversationMode('workflow');
+          return;
+        }
+
         throw new Error('Transition resolution returned an unsupported response');
       } catch (err) {
         console.error('[ChatPage] transition resolution failed:', err);
@@ -6097,6 +6136,7 @@ useEffect(() => {
         <TransitionScreen
           transitionId={pendingTransitionId}
           onNavigate={handlePendingTransitionNavigate}
+          context={pendingTransitionContext}
         />
       )}
       <img

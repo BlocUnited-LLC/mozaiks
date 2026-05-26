@@ -137,7 +137,16 @@ def test_factory_app_console_routes_are_all_covered_by_smoke() -> None:
     for title in smoke_titles_by_component.values():
         assert title in smoke_source
 
-    assert console_components == route_components | {"AppConsoleChrome", "CreateAppRedirectPage", "RefinementControls"}
+    assert console_components == route_components | {
+        "AppConsoleChrome",
+        "CreateAppRedirectPage",
+        "RefinementControls",
+        # ConsolePage-routed pages (no component: in admin_registry; routed via path matching)
+        "AppBuildHistoryPage",
+        # Sub-components used by route-backed pages (not directly route-backed)
+        "CarryForwardReportSummary",
+        "CarryForwardReportPanel",
+    }
 
 
 def test_factory_app_react_files_are_classified() -> None:
@@ -155,9 +164,16 @@ def test_factory_app_react_files_are_classified() -> None:
         "factory_app/app/admin/pages/AppConsoleChrome.jsx",
         "factory_app/app/admin/pages/CreateAppRedirectPage.jsx",
         "factory_app/app/admin/pages/RefinementControls.jsx",
+        # ConsolePage-routed pages (no component: in admin_registry; routed via path matching)
+        "factory_app/app/admin/pages/AppBuildHistoryPage.jsx",
+        # Carry-forward display sub-components (used by route-backed pages)
+        "factory_app/app/admin/pages/CarryForwardReportSummary.jsx",
+        "factory_app/app/admin/pages/CarryForwardReportPanel.jsx",
         "factory_app/app/ui/components/ConsoleShared.jsx",
         "factory_app/app/ui/components/HarnessDecisionCard.jsx",
         "factory_app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",
+        # AppReview workflow agentic UI artifact — emitted by present_review_summary auto-tool
+        "factory_app/workflows/AppReview/ui/AppReview/AppReviewSummary.jsx",
     }
 
     assert react_files == route_backed_files | support_files

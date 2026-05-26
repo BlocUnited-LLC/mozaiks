@@ -28,7 +28,7 @@ def _workflow_manifest_paths() -> list[Path]:
     roots = ["factory_app/workflows"]
     app_root = _resolve_active_app_root()
     if app_root is not None:
-        roots.insert(0, str(app_root / "workflows"))
+        roots.insert(0, str(app_root.parent / "workflows" if app_root.name == "app" else app_root / "workflows"))
     paths: list[Path] = []
     for root in roots:
         workflow_root = workspace / root if not (Path(root).is_absolute()) else Path(root)
@@ -81,7 +81,7 @@ def test_repo_owned_interactive_ui_tools_use_canonical_helper_import() -> None:
         "factory_app/workflows/AppGenerator/tools/generate_and_download.py",
         "factory_app/workflows/AgentGenerator/tools/generate_and_download.py",
         "factory_app/workflows/AgentGenerator/tools/request_api_key.py",
-        "factory_app/workflows/WorkflowPrimitiveAcceptance/tools/request_acceptance_approval.py",
+        "factory_app/workflows/RuntimeUIPrimitiveSmoke/tools/request_acceptance_approval.py",
     ]
 
     for relative_path in files:
@@ -111,7 +111,7 @@ def test_repo_workflow_tools_do_not_import_global_shared_workflow_bucket() -> No
     if app_root is None:
         import pytest
         pytest.skip("No active app workspace configured.")
-    workflow_root = app_root / "workflows"
+    workflow_root = app_root.parent / "workflows" if app_root.name == "app" else app_root / "workflows"
     assert not (workflow_root / "_shared").exists()
 
     offenders = []
@@ -220,7 +220,7 @@ def test_ui_docs_define_page_customization_boundary() -> None:
     assert "hex, RGB, or HSL color literals" in surface_contract
     assert "literal font-family names" in surface_contract
     assert "`theme.*` is the compact" in surface_contract
-    assert "expanded compatibility layer" in surface_contract
+    assert "expanded runtime shell token layer" in surface_contract
     assert "Local fonts live only under `app/brand/fonts/`" in surface_contract
     assert "Google Fonts are declared in `theme_config.json`" in surface_contract
     assert "theme_config_patch" in assembly_contract
@@ -312,7 +312,7 @@ def test_repo_owned_one_way_ui_emitters_use_canonical_surface_helper() -> None:
         "factory_app/workflows/AgentGenerator/tools/mermaid_sequence_diagram.py",
         "factory_app/workflows/ValueEngine/tools/manifest.py",
         "factory_app/workflows/ExistingAppDiscovery/tools/save_existing_app_artifacts.py",
-        "factory_app/workflows/WorkflowPrimitiveAcceptance/tools/show_acceptance_diagram.py",
+        "factory_app/workflows/RuntimeUIPrimitiveSmoke/tools/show_acceptance_diagram.py",
     ]
 
     for relative_path in files:
@@ -337,7 +337,7 @@ def test_workflow_manifests_use_explicit_ui_surface_types() -> None:
         "factory_app/workflows/DesignDocs/tools.yaml",
         "factory_app/workflows/RuntimeToolCallSmoke/tools.yaml",
         "factory_app/workflows/ValueEngine/tools.yaml",
-        "factory_app/workflows/WorkflowPrimitiveAcceptance/tools.yaml",
+        "factory_app/workflows/RuntimeUIPrimitiveSmoke/tools.yaml",
     ]
 
     for relative_path in files:
@@ -363,9 +363,9 @@ def test_workflow_manifests_use_explicit_ui_surface_types() -> None:
                     assert isinstance(ui_contract.get("actions_schema"), list)
 
 
-def test_workflow_primitive_acceptance_exports_expected_ui_surfaces() -> None:
-    manifest = _read_yaml("factory_app/workflows/WorkflowPrimitiveAcceptance/tools.yaml")
-    response_fixture = _read_yaml("factory_app/workflows/WorkflowPrimitiveAcceptance/smoke_responses.json")
+def test_runtime_ui_primitive_smoke_exports_expected_ui_surfaces() -> None:
+    manifest = _read_yaml("factory_app/workflows/RuntimeUIPrimitiveSmoke/tools.yaml")
+    response_fixture = _read_yaml("factory_app/workflows/RuntimeUIPrimitiveSmoke/smoke_responses.json")
     shipped_components = set(get_workflow_shipped_component_names())
 
     assert [tool["ui"]["component"] for tool in manifest["tools"]] == [

@@ -1,5 +1,5 @@
 /**
- * Stable style bridge for legacy workflow UI components outside chat-ui.
+ * Stable style bridge for workflow UI components outside chat-ui.
  *
  * New workflow UIs should prefer semantic --mz-* Tailwind tokens directly.
  * This bridge exists to keep existing workflow components off orchestration-

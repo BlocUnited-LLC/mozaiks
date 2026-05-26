@@ -562,7 +562,7 @@ function resolveThemeFontPreset(fontKey, fallbackKey = 'system') {
   };
 }
 
-function buildSchemaLegacyTheme(config, basePath) {
+function buildSchemaChatTheme(config, basePath) {
   const fallback = BARE_FALLBACK_THEME;
   const themeConfig = config?.theme || {};
   const ui = config?.ui || {};
@@ -750,8 +750,8 @@ function themeConfigToTheme(config, basePath) {
     },
     // Shell chrome (header, profile, notifications, footer) defaults are
     // provided by NavigationProvider. theme_config.json only carries visual
-    // shell/page/chat tokens, not shell content. Fallback stubs remain here for
-    // backward-compat with useTheme consumers.
+    // shell/page/chat tokens, not shell content. Static shell defaults remain
+    // here for useTheme consumers.
     primitives: resolvedSurfaceTokens.primitives,
     profile:       fallback.profile,
     notifications: fallback.notifications,
@@ -808,8 +808,8 @@ async function applyAppThemeTokens(themeConfig) {
  *
  * When the response contains a `theme` key (schema-driven format), the
  * --mz-* CSS token set is applied immediately for the App UI system.
- * The existing --color-* / --core-primitive-* variables are set via
- * the legacy themeConfigToTheme path for chat UI compatibility.
+ * The --color-* / --core-primitive-* variables are set via the
+ * themeConfigToTheme path for chat UI.
  */
 async function loadThemeFromConfig() {
   const assetsPath = '/assets';
@@ -823,14 +823,15 @@ async function loadThemeFromConfig() {
 
     const config = await res.json();
 
-    // Unified format: 'theme' key (v2 App UI --mz-* tokens) coexists with legacy keys.
-    // Apply --mz-* tokens first, then continue to process legacy keys for chat UI.
+    // Unified format: 'theme' key (App UI --mz-* tokens) coexists with
+    // top-level chat-shell tokens.
+    // Apply --mz-* tokens first, then continue to process chat-shell tokens.
     if (config.theme && typeof config.theme === 'object') {
       await applyAppThemeTokens(config.theme);
     }
 
-    // Legacy format (identity/assets/fonts/colors/shadows) — drives --color-* / --core-primitive-*
-    // Present in unified configs (both formats) and standalone legacy configs.
+    // Top-level format (identity/assets/fonts/colors/shadows) drives
+    // --color-* / --core-primitive-* tokens for chat UI.
     if (config.identity || config.colors || config.fonts) {
       const theme = themeConfigToTheme(config, assetsPath);
       const src = config.theme ? 'unified' : 'config';
@@ -838,9 +839,9 @@ async function loadThemeFromConfig() {
       return { theme, meta: { source: src, appId: 'default' } };
     }
 
-    // Schema-only format (no legacy keys) — chat UI falls back to bare defaults
+    // Schema-only format without top-level chat-shell tokens.
     if (config.theme) {
-      const theme = buildSchemaLegacyTheme(config, assetsPath);
+      const theme = buildSchemaChatTheme(config, assetsPath);
       console.log(`🎨 [THEME] Derived chat shell theme from schema config: ${theme.branding?.name || 'default'}`);
       return { theme, meta: { source: 'app-theme-bridge', appId: 'default' } };
     }
@@ -920,7 +921,7 @@ function isSchemaThemeOverride(theme) {
 }
 
 function buildSchemaOverrideTheme(themeOverride, currentTheme) {
-  return buildSchemaLegacyTheme(
+  return buildSchemaChatTheme(
     {
       theme: themeOverride,
       identity: {

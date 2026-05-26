@@ -112,7 +112,7 @@ export default {
         sans:    ['var(--mz-font-sans)',    'system-ui', 'sans-serif'],
         heading: ['var(--mz-font-heading)', 'var(--mz-font-sans)', 'system-ui', 'sans-serif'],
         mono:    ['var(--mz-font-mono)',    'monospace'],
-        // Legacy chat UI fonts — used by chat shell components (--font-* vars)
+        // Chat shell fonts — resolved from --font-* vars
         'chat-body':    ['var(--font-body,Rajdhani)',          'ui-sans-serif', 'system-ui', 'sans-serif'],
         'chat-heading': ['var(--font-heading,Orbitron)',        'ui-sans-serif', 'system-ui', 'sans-serif'],
         logo:           ['var(--font-logo,Fagrak Inline)',      'ui-sans-serif', 'system-ui', 'sans-serif'],

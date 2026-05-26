@@ -14,8 +14,12 @@
  * Subscribes to routing.transition.resolve bus for mid-flight transition chaining.
  *
  * Props:
- *   transitionId {string}  Transition id to fetch and render
+ *   transitionId {string}   Transition id to fetch and render
  *   onNavigate   {Function} (option_id?: string|null, runtime_context?: object) => void
+ *   context      {object}   Optional live runtime context (AG2 context_variables) merged
+ *                           into transition.context before the component receives it.
+ *                           Used by components like AppReviewScreen to read build_registry_id,
+ *                           preview_url, validation results, and lifecycle_state.
  */
 
 import { useState, useEffect, useCallback, useId } from 'react';
@@ -59,7 +63,7 @@ const TransitionError = ({ message, onRetry }) => (
 // TransitionScreen
 // ---------------------------------------------------------------------------
 
-export function TransitionScreen({ transitionId, onNavigate }) {
+export function TransitionScreen({ transitionId, onNavigate, context }) {
   const [transition, setTransition] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -93,7 +97,7 @@ export function TransitionScreen({ transitionId, onNavigate }) {
     if (!transition) return;
 
     if (
-      ['silent', 'progress_view', 'prerequisite_redirect'].includes(transition.transition_type)
+      ['silent', 'progress_view', 'prerequisite_redirect', 'chat_session'].includes(transition.transition_type)
     ) {
       const t = setTimeout(() => {
         onNavigate?.(null);
@@ -143,19 +147,26 @@ export function TransitionScreen({ transitionId, onNavigate }) {
   if (!transition) return null;
 
   if (
-    ['condition', 'silent', 'progress_view', 'prerequisite_redirect'].includes(transition.transition_type)
+    ['condition', 'silent', 'progress_view', 'prerequisite_redirect', 'chat_session'].includes(transition.transition_type)
   ) {
     return null;
   }
 
   let body = null;
 
+  // Merge live runtime context (from AG2 context_variables) into the static
+  // transition definition so components like AppReviewScreen can read values
+  // such as build_registry_id, preview_url, and validation results.
+  const transitionWithContext = (context && typeof context === 'object' && Object.keys(context).length > 0)
+    ? { ...transition, context }
+    : transition;
+
   const componentName = transition.ui?.component;
   if (componentName && hasComponent(componentName)) {
     const TransitionComponent = getComponent(componentName);
     body = (
       <TransitionComponent
-        transition={transition}
+        transition={transitionWithContext}
         onResolve={onResolve}
         overlayTitleId={titleId}
         overlayDescriptionId={descriptionId}
@@ -164,7 +175,7 @@ export function TransitionScreen({ transitionId, onNavigate }) {
   } else if (transition.transition_type === 'confirm') {
     body = (
       <ConfirmScreen
-        transition={transition}
+        transition={transitionWithContext}
         onResolve={onResolve}
         overlayTitleId={titleId}
         overlayDescriptionId={descriptionId}
@@ -173,7 +184,7 @@ export function TransitionScreen({ transitionId, onNavigate }) {
   } else {
     body = (
       <LauncherScreen
-        transition={transition}
+        transition={transitionWithContext}
         onResolve={onResolve}
         overlayTitleId={titleId}
         overlayDescriptionId={descriptionId}

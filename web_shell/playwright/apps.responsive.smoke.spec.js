@@ -429,6 +429,7 @@ async function mockConsoleApis(page) {
       body: JSON.stringify(payload.integrations),
     });
   });
+
 }
 
 async function expectNoHorizontalOverflow(page) {

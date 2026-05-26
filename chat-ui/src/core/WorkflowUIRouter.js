@@ -262,6 +262,6 @@ export default WorkflowUIRouter;
  *    };
  * 
  * ✨ Deterministic resolution: workflow-scoped key first (`Workflow:Component`)
- * ✨ No legacy per-workflow dynamic import paths required.
+ * No per-workflow dynamic import paths required.
  * ✨ Fully modular: each workflow is self-contained behind `ui/index.js`.
  */

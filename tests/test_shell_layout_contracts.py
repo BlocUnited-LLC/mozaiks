@@ -45,6 +45,18 @@ def test_platform_transitions_stay_declarative() -> None:
         assert "config" not in transition
         assert "description" not in transition
         assert "context" not in transition
+        assert "actions" not in transition
+        assert transition["transition_type"] in {
+            "user_choice",
+            "user_choice_context",
+            "user_choice_route",
+            "confirm",
+            "condition",
+            "silent",
+            "progress_view",
+            "prerequisite_redirect",
+            "chat_session",
+        }
         if transition["transition_type"] in {"user_choice", "user_choice_context", "user_choice_route", "confirm"}:
             assert transition.get("ui", {}).get("component")
         if transition["transition_type"] in {"user_choice", "user_choice_context", "user_choice_route"}:
@@ -60,4 +72,5 @@ def test_platform_transitions_stay_declarative() -> None:
     # App workspace overlay should not have a UI bundle (shared factory owns it)
     from tests.import_utils import active_app_root
     app_root = active_app_root()
-    assert not (app_root / "workflows" / "extended_orchestration" / "ui" / "index.js").exists()
+    workflows_root = app_root.parent / "workflows" if app_root.name == "app" else app_root / "workflows"
+    assert not (workflows_root / "extended_orchestration" / "ui" / "index.js").exists()

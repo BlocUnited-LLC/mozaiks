@@ -12,8 +12,8 @@ const require   = createRequire(import.meta.url);
 // PLATFORM_PATH (from root .env) may point to either:
 // - an app bundle directory that contains app.json (e.g. factory_app/app)
 // - a workspace root that contains ./app/app.json
-// MOZAIKS_APP_WORKSPACE_PATH is a convenience alias for an external app
-// workspace/repo root when PLATFORM_PATH is not set.
+// MOZAIKS_APP_WORKSPACE_PATH selects an external app workspace/repo root when
+// PLATFORM_PATH is not set.
 //
 // When unset, it defaults to the first-party builder/reference app bundle at ./factory_app/app.
 const projectRoot = path.resolve(__dirname, '..');
@@ -64,7 +64,7 @@ function hasWorkflowDefinitions(candidate) {
   }
 }
 
-function resolveWorkflowRoot(platformAppDir, platformInputPath, workflowRootsEnv, workflowsEnvPath, factoryWorkflowsRoot, chatUiSrcRoot) {
+function resolveWorkflowRoot(platformAppDir, platformInputPath, workflowsEnvPath, factoryWorkflowsRoot, chatUiSrcRoot) {
   const stubRoot = path.resolve(chatUiSrcRoot, 'workflows_stub');
   const resolveCandidate = (candidate) => {
     if (!candidate) return '';
@@ -75,16 +75,6 @@ function resolveWorkflowRoot(platformAppDir, platformInputPath, workflowRootsEnv
 
   if (workflowsEnvPath) {
     return resolveCandidate(workflowsEnvPath);
-  }
-
-  if (workflowRootsEnv) {
-    const firstLegacyRoot = workflowRootsEnv
-      .split(path.delimiter)
-      .map((value) => value.trim())
-      .filter(Boolean)[0];
-    if (firstLegacyRoot) {
-      return resolveCandidate(firstLegacyRoot);
-    }
   }
 
   const appWorkflowRoot = path.resolve(platformAppDir, 'workflows');
@@ -172,16 +162,9 @@ export default defineConfig(({ mode }) => {
     process.env.VITE_MOZAIKS_WORKFLOWS_PATH ||
     rootEnv.VITE_MOZAIKS_WORKFLOWS_PATH ||
     '';
-  const workflowRootsEnv =
-    process.env.MOZAIKS_WORKFLOW_ROOTS ||
-    rootEnv.MOZAIKS_WORKFLOW_ROOTS ||
-    process.env.VITE_MOZAIKS_WORKFLOW_ROOTS ||
-    rootEnv.VITE_MOZAIKS_WORKFLOW_ROOTS ||
-    '';
   const platformWorkflowRoot = resolveWorkflowRoot(
     platformAppDir,
     platformInputPath,
-    workflowRootsEnv,
     workflowsEnv,
     factoryWorkflowsRoot,
     chatUiSrcRoot,
@@ -302,7 +285,7 @@ export default defineConfig(({ mode }) => {
   },
 
   define: {
-    // Shim process.env for legacy CRA-style env reads in chat-ui/src.
+    // Provide process.env for chat-ui modules that read Node-style env fields.
     'process.env': JSON.stringify({}),
     'import.meta.env.MOZAIKS_HOST': JSON.stringify(hostMode),
   },

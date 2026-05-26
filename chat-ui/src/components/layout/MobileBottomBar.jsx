@@ -4,6 +4,7 @@ import { useNavigation } from "../../providers/NavigationProvider";
 import { useNavigationActions } from "../../navigation/useNavigationActions";
 import { deriveShellActionContext, resolveShellActions } from "../../navigation/shellActions";
 import { useChatUI } from "../../context/ChatUIContext";
+import { useAppEventBus } from "../../ui/hooks/useAppEventBus.js";
 import "./header-styles.css";
 
 const isVisible = (item) => item && item.visible !== false;
@@ -105,6 +106,18 @@ const MobileBottomBar = ({ route = null, shellMode = null }) => {
       controller.abort();
     };
   }, [notifications?.show]);
+
+  useAppEventBus('notification.count_changed', () => {
+    if (notifications?.show === false) return;
+    fetch('/api/notifications/count', { headers: { Accept: 'application/json' } })
+      .then((r) => r.ok ? r.json() : null)
+      .then((payload) => {
+        if (!payload) return;
+        const count = Number(payload?.unread_count ?? payload?.count ?? 0);
+        if (Number.isFinite(count)) setNotificationCount(Math.max(0, count));
+      })
+      .catch(() => {});
+  });
 
   const bottomBar = mobile?.bottomBar || {};
   const configuredItems = Array.isArray(bottomBar.items) ? bottomBar.items.filter(isVisible) : [];

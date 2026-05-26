@@ -21,7 +21,7 @@ export const UI_UPDATE = 'ui.update';
 export const UI_DISMISS = 'ui.dismiss';
 
 // ---------------------------------------------------------------------------
-// Inbound event types (frontend → backend) — unchanged from the legacy protocol
+// Inbound event types (frontend → backend)
 // ---------------------------------------------------------------------------
 
 /** User interaction response, correlated to a ui.render event by tool_call_id. */

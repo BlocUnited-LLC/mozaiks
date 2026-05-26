@@ -20,12 +20,12 @@ From the repo root:
 
 ```powershell
 npm --prefix web_shell install
-.\scripts\run-studio.ps1
+.\scripts\run-console.ps1
 ```
 
 That starts:
 
-- the Studio backend on `http://localhost:8000`
+- the Studio host backend on `http://localhost:8000`
 - the Vite frontend on `http://localhost:3000/apps`
 
 ## Other Dev Modes
