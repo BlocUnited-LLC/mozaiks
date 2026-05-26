@@ -24,6 +24,28 @@ configure_repo_host_defaults("studio")
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.control_plane import get_orchestration_control_harness
+from mozaiksai.control_plane.app_context import get_current_app_context_summary
+from mozaiksai.control_plane.app_context_override import (
+    AppContextPolicyOverrideDecision,
+    apply_app_context_policy_override,
+    create_app_context_policy_override,
+)
+from mozaiksai.control_plane.app_context_policy import (
+    AppContextPolicyDecision,
+    AppContextPolicyResult,
+)
+from mozaiksai.control_plane.app_context_refresh import (
+    build_context_refresh_plan,
+    build_context_refresh_request,
+)
+from mozaiksai.control_plane.app_context_refresh_execution import (
+    ContextRefreshLaunchResult,
+    complete_context_refresh,
+    launch_context_refresh_plan,
+)
+from mozaiksai.control_plane.dry_run import RefinementDryRunPlan, RefinementExecutionPlan
+from mozaiksai.core.app_context.models import SourceRef
+from mozaiksai.core.app_context.refresh import ContextRefreshPlan, ContextRefreshScope
 from mozaiksai.core.artifacts import (
     ArtifactLifecycleStatus,
     ArtifactValidationStatus,
@@ -462,6 +484,44 @@ IntegrationConnectorPatchRequest.model_rebuild()
 IntegrationConnectorCreateRequest.model_rebuild()
 
 
+class AppContextRefreshPlanRequest(BaseModel):
+    reason: str = Field(..., min_length=1)
+    refresh_scope: ContextRefreshScope = ContextRefreshScope.DISCOVERY_INDEXING
+    source_refs: list[SourceRef] | None = None
+    current_context_version_id: Optional[str] = None
+    requested_by: Optional[str] = None
+
+
+class AppContextRefreshLaunchRequest(BaseModel):
+    plan: ContextRefreshPlan
+    confirm_launch: bool = False
+    reason: Optional[str] = None
+    refresh_scope: ContextRefreshScope = ContextRefreshScope.DISCOVERY_INDEXING
+    request_id: Optional[str] = None
+
+
+class AppContextRefreshCompleteRequest(BaseModel):
+    plan: ContextRefreshPlan
+    previous_context_version_id: Optional[str] = None
+    launch_result: Optional[ContextRefreshLaunchResult] = None
+    workflow_context_variables: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AppContextPolicyOverrideRequest(BaseModel):
+    request_id: str = Field(..., min_length=1)
+    context_version_id: Optional[str] = None
+    original_policy_decision: AppContextPolicyDecision
+    override_decision: AppContextPolicyOverrideDecision
+    reason: str = Field(..., min_length=1)
+    reviewer: str = Field(..., min_length=1)
+    applies_to_paths: list[str] = Field(default_factory=list)
+    change_class: Optional[str] = None
+    refinement_lane: Optional[str] = None
+    policy_result: Optional[AppContextPolicyResult] = None
+    apply_to_plan: bool = False
+    plan: Optional[Dict[str, Any]] = None
+
+
 _SECRET_RESPONSE_KEYS = {"secret_value", "secret", "api_key", "apikey", "token", "password"}
 
 
@@ -492,6 +552,215 @@ def _redact_secret_result(result: Optional[Dict[str, Any]]) -> Optional[Dict[str
         return None
     return _redact_secret_fields(result)
 
+
+def _context_refresh_policy(reason: str, warnings: list[str] | None = None) -> AppContextPolicyResult:
+    return AppContextPolicyResult(
+        decision=AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH,
+        allowed=False,
+        blocking=True,
+        risk_level="high",
+        reasons=[reason],
+        warnings=list(warnings or []),
+        requires_context_refresh=True,
+    )
+
+
+def _plan_from_operator_payload(payload: Dict[str, Any]) -> RefinementExecutionPlan | RefinementDryRunPlan:
+    try:
+        return RefinementExecutionPlan.model_validate(payload)
+    except ValidationError:
+        return RefinementDryRunPlan.model_validate(payload)
+
+_SECRET_RESPONSE_KEYS = {"secret_value", "secret", "api_key", "apikey", "token", "password"}
+
+
+def _redact_secret_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        redacted: Dict[str, Any] = {}
+        for key, item in value.items():
+            if str(key).strip().lower() in _SECRET_RESPONSE_KEYS:
+                continue
+            redacted[key] = _redact_secret_fields(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_secret_fields(item) for item in value]
+    return value
+
+
+def _redact_connector_record(record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(record, dict):
+        return None
+    enriched = dict(record)
+    if not isinstance(enriched.get("health"), dict):
+        enriched["health"] = compute_connector_health(enriched, checked_by="manual")
+    return _redact_secret_fields(enriched)
+
+
+def _redact_secret_result(result: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(result, dict):
+        return None
+    return _redact_secret_fields(result)
+
+
+@app.get("/api/studio/apps/{app_id}/context")
+async def get_studio_app_context_status(
+    app_id: str,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    summary = await get_current_app_context_summary(
+        app_id=resolved_app_id,
+        artifact_store=get_artifact_store(),
+    )
+    return _redact_secret_fields(
+        {
+            "app_id": resolved_app_id,
+            "app_context_summary": summary.model_dump(mode="json"),
+            "stale_status": summary.stale_status,
+            "warnings": list(summary.warnings),
+            "artifact_refs": [ref.model_dump(mode="json") for ref in summary.artifact_refs],
+            "ownership": summary.ownership.model_dump(mode="json"),
+        }
+    )
+
+
+@app.post("/api/studio/apps/{app_id}/context/refresh-plan")
+async def create_studio_app_context_refresh_plan(
+    app_id: str,
+    body: AppContextRefreshPlanRequest,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    summary = await get_current_app_context_summary(
+        app_id=resolved_app_id,
+        artifact_store=get_artifact_store(),
+    )
+    if body.current_context_version_id is not None:
+        summary = summary.model_copy(update={"context_version_id": body.current_context_version_id})
+    try:
+        request = build_context_refresh_request(
+            app_id=resolved_app_id,
+            app_context_summary=summary,
+            policy_result=_context_refresh_policy(body.reason, summary.warnings),
+            reason=body.reason,
+            source_refs=body.source_refs,
+            requested_by=body.requested_by or user_id,
+            refresh_scope=body.refresh_scope,
+        )
+        plan = build_context_refresh_plan(
+            policy_result=_context_refresh_policy(body.reason, summary.warnings),
+            app_context_summary=summary,
+            request=request,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _redact_secret_fields(
+        {
+            "app_id": resolved_app_id,
+            "context_refresh_request": request.model_dump(mode="json"),
+            "context_refresh_plan": plan.model_dump(mode="json"),
+            "launched": False,
+        }
+    )
+
+
+@app.post("/api/studio/apps/{app_id}/context/refresh-launch")
+async def launch_studio_app_context_refresh(
+    app_id: str,
+    body: AppContextRefreshLaunchRequest,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    if not body.confirm_launch:
+        raise HTTPException(status_code=400, detail="confirm_launch=true is required to launch context refresh.")
+    resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    try:
+        result = await launch_context_refresh_plan(
+            body.plan,
+            app_id=resolved_app_id,
+            user_id=user_id,
+            refresh_scope=body.refresh_scope,
+            reason=body.reason,
+            request_id=body.request_id,
+            session_router=get_session_router(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _redact_secret_fields(
+        {
+            "app_id": resolved_app_id,
+            "context_refresh_launch": result.model_dump(mode="json"),
+        }
+    )
+
+
+@app.post("/api/studio/apps/{app_id}/context/refresh-complete")
+async def complete_studio_app_context_refresh(
+    app_id: str,
+    body: AppContextRefreshCompleteRequest,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    try:
+        result = await complete_context_refresh(
+            body.plan,
+            app_id=resolved_app_id,
+            artifact_store=get_artifact_store(),
+            previous_context_version_id=body.previous_context_version_id,
+            launch_result=body.launch_result,
+            workflow_context_variables=dict(body.workflow_context_variables or {}),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _redact_secret_fields(
+        {
+            "app_id": resolved_app_id,
+            "context_refresh_result": result.model_dump(mode="json"),
+        }
+    )
+
+
+@app.post("/api/studio/apps/{app_id}/context/override")
+async def create_studio_app_context_policy_override(
+    app_id: str,
+    body: AppContextPolicyOverrideRequest,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    policy_result = body.policy_result or AppContextPolicyResult(
+        decision=body.original_policy_decision,
+        allowed=False,
+        blocking=True,
+    )
+    try:
+        override = create_app_context_policy_override(
+            policy_result=policy_result,
+            app_id=resolved_app_id,
+            request_id=body.request_id,
+            context_version_id=body.context_version_id,
+            override_decision=body.override_decision,
+            reason=body.reason,
+            reviewer=body.reviewer,
+            applies_to_paths=body.applies_to_paths,
+            applies_to_change_class=body.change_class,
+            applies_to_refinement_lane=body.refinement_lane,
+        )
+        applied_plan = None
+        if body.apply_to_plan:
+            if body.plan is None:
+                raise ValueError("plan is required when apply_to_plan=true")
+            applied_plan = apply_app_context_policy_override(
+                _plan_from_operator_payload(body.plan),
+                override,
+            )
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return _redact_secret_fields(
+        {
+            "app_id": resolved_app_id,
+            "app_context_policy_override": override.model_dump(mode="json"),
+            "applied_plan": applied_plan.model_dump(mode="json") if applied_plan is not None else None,
+            "mutation_allowed": False,
 
 @app.post("/api/studio/integrations/connectors")
 async def create_or_update_integration_connector(
@@ -720,7 +989,7 @@ async def get_build_artifact_bundle(
         "generated_files": generated_files,
         "skipped_files": skipped_files,
         "workbench": {
-            "title": f"Artifact Workbench · {version.artifact_key} v{version.version_number}",
+            "title": f"Artifact Workbench Â· {version.artifact_key} v{version.version_number}",
             "description": "Inspect a persisted artifact bundle and launch scoped coding refinement from explicit file scope.",
             "artifact_version_id": version.id,
             "artifact_kind": version.artifact_kind,
