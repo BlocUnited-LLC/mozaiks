@@ -95,6 +95,7 @@ infra/keycloak/themes/mozaiks/login/resources/img/
 nul
 *.log
 .logs/
+*_debug.txt
 
 # Build artifacts
 tmpdist/
