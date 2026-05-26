@@ -15,34 +15,6 @@ import { WorkspaceConsoleHero, formatCompactNumber, formatCurrencyValue } from '
 import { useWorkspaceConsoleData } from './useWorkspaceConsoleData.js'
 
 
-function exportUsageCsv(rows) {
-  const headers = ['app', 'workflows', 'runs', 'input_tokens', 'output_tokens', 'total_tokens', 'avg_tokens_per_run', 'cost', 'avg_cost_per_run', 'errors']
-  const lines = [
-    headers.join(','),
-    ...rows.map((row) => [
-      JSON.stringify(row.label),
-      JSON.stringify(row.workflowLabel),
-      JSON.stringify(row.runs),
-      JSON.stringify(row.inputTokens),
-      JSON.stringify(row.outputTokens),
-      JSON.stringify(row.totalTokens),
-      JSON.stringify(Math.round(row.avgTokens)),
-      JSON.stringify(row.cost),
-      JSON.stringify(row.avgCost),
-      JSON.stringify(row.errors),
-    ].join(',')),
-  ]
-  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = 'workspace-usage.csv'
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
-}
-
 function buildAppRows(runs, appNameMap) {
   const groups = new Map()
 
@@ -197,10 +169,6 @@ export default function WorkspaceUsagePage() {
         <WorkspaceConsoleHero
           title="Usage"
           subtitle="Track workspace metering, model spend, and workflow activity."
-          actions={[
-            { id: 'export', label: 'Export CSV', variant: 'outline' },
-          ]}
-          onAction={() => exportUsageCsv(visibleRows)}
           summaryItems={summaryItems}
         />
 

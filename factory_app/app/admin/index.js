@@ -22,6 +22,7 @@ const AppOverviewPage    = lazy(() => import('./pages/AppOverviewPage.jsx'))
 const AppHealthPage      = lazy(() => import('./pages/AppHealthPage.jsx'))
 const AppUsersPage       = lazy(() => import('./pages/AppUsersPage.jsx'))
 const AppUsagePage       = lazy(() => import('./pages/AppUsagePage.jsx'))
+const AppBuildHistoryPage = lazy(() => import('./pages/AppBuildHistoryPage.jsx'))
 const AppIntegrationsPage = lazy(() => import('./pages/AppIntegrationsPage.jsx'))
 
 export function registerAdminComponents(registerComponent) {
@@ -65,5 +66,9 @@ export function registerAdminComponents(registerComponent) {
 
   registerComponent('AppIntegrationsPage', AppIntegrationsPage, {
     description: 'Integrations surface — focused third-party connector inventory and CRUD controls for app-scoped integrations.',
+  })
+
+  registerComponent('AppBuildHistoryPage', AppBuildHistoryPage, {
+    description: 'Build history surface — artifact versions with carry-forward preservation audit per revision.',
   })
 }

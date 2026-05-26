@@ -91,6 +91,30 @@ class AppRegistryService:
             app = await self.repo.get_by_app_id(app_id=normalized_app_id)
         return {"app": app}
 
+    async def promote_build(
+        self,
+        *,
+        build_registry_id: str,
+        promoted_by: str,
+    ) -> Dict[str, Any]:
+        normalized_record_id = normalize_optional_text(build_registry_id)
+        if not normalized_record_id:
+            raise ValueError("build_registry_id is required")
+        record = await self.repo.get_by_build_registry_id(build_registry_id=normalized_record_id)
+        if not record:
+            raise ValueError(f"App record not found: {normalized_record_id}")
+        current_state = record.get("lifecycle_state", "")
+        if current_state != "review":
+            raise ValueError(
+                f"Cannot promote app from '{current_state}' state. App must be in 'review' to promote."
+            )
+        app = await self.repo.update_lifecycle_state(
+            build_registry_id=normalized_record_id,
+            lifecycle_state="active",
+            bundle_path=record.get("bundle_path"),
+        )
+        return {"success": app is not None, "app": app}
+
     async def ensure_status_for_app(
         self,
         *,

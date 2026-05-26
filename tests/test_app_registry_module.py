@@ -20,7 +20,7 @@ def test_app_registry_module_contract_is_present() -> None:
 
     assert manifest["module"]["id"] == "app_registry"
     assert manifest["module"]["handler"] == "backend.handler:AppRegistryModule"
-    assert {"create_app_record", "update_build_status", "list_apps", "get_app_record"} == actions
+    assert {"create_app_record", "update_build_status", "list_apps", "get_app_record", "promote_build"} == actions
     assert contracts_dir.exists()
     assert (contracts_dir / "events.yaml").exists()
     assert (module_root / "backend" / "handler.py").exists()

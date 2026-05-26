@@ -20,3 +20,16 @@ events:
         - build_registry_id
         - app_id
         - lifecycle_state
+  - type: domain.app_registry.app_promoted
+    version: 1
+    description: Emitted when a reviewed app bundle is promoted to active status.
+    producer: app_registry
+    payload_schema:
+      type: object
+      required:
+        - build_registry_id
+        - app_id
+        - lifecycle_state
+      properties:
+        bundle_path:
+          type: string

@@ -19,7 +19,7 @@
         "default_temperature": 0.0,
         "expected_behavior": "deterministic structured classification",
         "llm_config": {
-          "model": "gpt-4o-mini",
+          "model": "gpt-5-nano",
           "temperature": 0.0
         }
       },
@@ -28,7 +28,7 @@
         "default_temperature": 0.0,
         "expected_behavior": "deterministic structured impact analysis",
         "llm_config": {
-          "model": "gpt-4o-mini",
+          "model": "gpt-5-nano",
           "temperature": 0.0
         }
       },

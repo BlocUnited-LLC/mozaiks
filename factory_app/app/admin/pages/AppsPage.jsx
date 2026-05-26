@@ -202,11 +202,6 @@ function AppsTable({ rows, onOpen }) {
       empty={{
         title: 'No apps match this search',
         description: 'Adjust the search term or export the current directory snapshot for review.',
-        action: (
-          <ActionButton variant="secondary" onClick={() => exportAppsCsv(rows)}>
-            Export CSV
-          </ActionButton>
-        ),
       }}
     />
   )
@@ -326,11 +321,6 @@ export default function AppsPage() {
             <InlineEmptyState
               title="No apps match this search"
               description="Adjust the search term or export the current directory snapshot for review."
-              action={(
-                <ActionButton variant="secondary" onClick={() => exportAppsCsv(portfolio.rows)}>
-                  Export CSV
-                </ActionButton>
-              )}
             />
           )}
         </section>

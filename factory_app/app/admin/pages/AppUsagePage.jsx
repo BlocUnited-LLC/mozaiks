@@ -178,16 +178,6 @@ export default function AppUsagePage() {
         <Panel
           title="Workflow breakdown"
           subtitle="Expand a workflow to see individual sessions."
-          action={(
-            <ActionButton
-              variant="secondary"
-              size="sm"
-              disabled={workflowGroups.length === 0}
-              onClick={() => exportBreakdownCsv(appId, workflowGroups)}
-            >
-              Export CSV
-            </ActionButton>
-          )}
         >
           {workflowGroups.length > 0 ? (
             <div className="overflow-hidden rounded-2xl border border-border/42">

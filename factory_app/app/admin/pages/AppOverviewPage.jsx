@@ -8,6 +8,7 @@ import {
   Panel,
   StatusPill,
 } from '../../ui/components/ConsoleShared.jsx'
+import CarryForwardReportPanel from './CarryForwardReportPanel.jsx'
 import AppConsoleHero, {
   formatCompactNumber,
   formatCurrencyValue,
@@ -47,6 +48,7 @@ export default function AppOverviewPage() {
 
   const build = data.buildState?.build || {}
   const latestArtifact = snapshot.buildHistory[0] || null
+  const cfReport = latestArtifact?.commit_metadata?.metadata?.carry_forward_report || null
   const latestRun = snapshot.runs[0] || null
   const workflowNames = getWorkflowNames(snapshot)
   const nextStep = snapshot.summary?.next_step || 'Continue from the highest-priority build or runtime signal.'
@@ -189,6 +191,8 @@ export default function AppOverviewPage() {
             </div>
           </Panel>
         </div>
+
+        {cfReport && <CarryForwardReportPanel report={cfReport} />}
       </div>
     </WorkspaceLayout>
   )

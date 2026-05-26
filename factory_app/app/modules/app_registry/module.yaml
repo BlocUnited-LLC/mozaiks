@@ -115,6 +115,27 @@ actions:
           type: object
     permissions:
       - app_registry.read
+  - id: promote_build
+    description: Promote a reviewed app bundle from 'review' to 'active'. Only valid when lifecycle state is 'review'.
+    handler_method: promote_build
+    input_schema:
+      type: object
+      required:
+        - build_registry_id
+      properties:
+        build_registry_id:
+          type: string
+    output_schema:
+      type: object
+      properties:
+        success:
+          type: boolean
+        app:
+          type: object
+    permissions:
+      - app_registry.write
+    emits:
+      - domain.app_registry.app_promoted
 capabilities:
   - capability_id: app_registry.list
     kind: action

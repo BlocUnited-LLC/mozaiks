@@ -4,7 +4,7 @@ Deterministic module inventory extractor and carry-forward classifier.
 This utility is **read-only**. It consumes a ``file_map`` as returned by
 :func:`factory_app.control_plane.tools._artifact_workspace.load_artifact_workspace`
 and produces structured inventory entries for every module found in the map,
-including an advisory carry-forward compatibility classification.
+including an advisory carry-forward reuse-fit classification.
 
 Intended use:
 - ``conceptual_replan`` carry-forward analysis.
@@ -135,7 +135,7 @@ class ModuleInventoryEntry(BaseModel):
     backend_files: list[str] = Field(default_factory=list, description=".py files under modules/{id}/backend/.")
     contract_files: list[str] = Field(default_factory=list, description=".yaml files under modules/{id}/contracts/.")
 
-    # Carry-forward compatibility classification (deterministic, advisory)
+    # Carry-forward reuse-fit classification (deterministic, advisory)
     carry_forward_classification: Literal["safe_carry_forward", "needs_adaptation", "regenerate"] = Field(
         default="needs_adaptation",
         description=(
@@ -280,7 +280,7 @@ def classify_module_carry_forward(entry: ModuleInventoryEntry) -> tuple[str, lis
         if entry.has_persistence:
             reasons.append(
                 "has_persistence=True: state exists but module is known-safe; "
-                "review schema compatibility if concept data model changes significantly"
+                "review schema fit if concept data model changes significantly"
             )
         return "safe_carry_forward", reasons
 

@@ -1,5 +1,5 @@
 class FactoryControlPlaneModule:
-    """Dynamic-module stub only.
+    """Zero-action identity module for Studio module discovery.
 
     The real control-plane harness does not live under
     `app/modules/factory_control_plane/backend/`.
@@ -10,5 +10,3 @@ class FactoryControlPlaneModule:
     - `factory_app/control_plane/prompts/*`
     - `factory_app/control_plane/tools/*`
     """
-
-    pass

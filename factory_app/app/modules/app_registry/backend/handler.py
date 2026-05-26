@@ -77,3 +77,26 @@ class AppRegistryModule:
             app_id=app_id or ctx.app_id,
             build_registry_id=build_registry_id,
         )
+
+    async def promote_build(
+        self,
+        ctx: ModuleContext,
+        *,
+        build_registry_id: str,
+    ) -> dict:
+        result = await self.service.promote_build(
+            build_registry_id=build_registry_id,
+            promoted_by=ctx.user_id or "anonymous",
+        )
+        app = result.get("app") or {}
+        if app:
+            await ctx.emit(
+                "domain.app_registry.app_promoted",
+                {
+                    "build_registry_id": app.get("build_registry_id"),
+                    "app_id": app.get("app_id"),
+                    "lifecycle_state": app.get("lifecycle_state"),
+                    "bundle_path": app.get("bundle_path"),
+                },
+            )
+        return result

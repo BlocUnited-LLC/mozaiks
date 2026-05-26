@@ -61,7 +61,7 @@ const DEMO_RUNTIME_SUMMARY = {
       label: 'LLM Provider',
       kind: 'llm',
       configured: true,
-      primary_model: 'gpt-4o-mini',
+      primary_model: 'gpt-5-nano',
     },
     database: {
       label: 'MongoDB',
@@ -499,7 +499,7 @@ export function buildConsoleDemoAppSummary(appId) {
     },
     ai: {
       provider: 'openai',
-      model: 'gpt-4o-mini',
+      model: 'gpt-5-nano',
     },
     theme: {
       primary: 'cyan',

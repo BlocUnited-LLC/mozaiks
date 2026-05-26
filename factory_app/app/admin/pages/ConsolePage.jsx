@@ -9,6 +9,7 @@ import { Navigate, useLocation } from 'react-router-dom'
 
 import AppsPage from './AppsPage.jsx'
 import AppOverviewPage from './AppOverviewPage.jsx'
+import AppBuildHistoryPage from './AppBuildHistoryPage.jsx'
 import AppIntegrationsPage from './AppIntegrationsPage.jsx'
 import CreateAppRedirectPage from './CreateAppRedirectPage.jsx'
 
@@ -26,6 +27,8 @@ export default function ConsolePage() {
     Section = AppsPage
   } else if (location.pathname === '/apps/new') {
     Section = CreateAppRedirectPage
+  } else if (/^\/apps\/[^/]+\/activity$/.test(location.pathname)) {
+    Section = AppBuildHistoryPage
   } else if (/^\/apps\/[^/]+\/integrations$/.test(location.pathname)) {
     Section = AppIntegrationsPage
   } else if (/^\/apps\/[^/]+\/overview$/.test(location.pathname)) {
