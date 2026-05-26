@@ -381,16 +381,16 @@ notifications:
       roles: [owner, admin]
     template:
       title: "Task completed"
-      body: "{payload.task_id}"
+      body: "{{task_id}}"
 ```
 
-### Legacy Compatibility
+### Removed Subscription Contract
 
-`contracts/subscriptions.yaml` is deprecated compatibility only.
+`contracts/subscriptions.yaml` is not a supported module contract.
 
-- Do not author new modules with `contracts/subscriptions.yaml`.
-- Runtime may load it only when `contracts/reactions.yaml` is absent.
-- New generator and CLI output must use `contracts/reactions.yaml`.
+- Do not author modules with `contracts/subscriptions.yaml`.
+- Runtime rejects it so reaction routing has one source of truth.
+- Generator and CLI output must use `contracts/reactions.yaml`.
 
 ### `orchestrator.yaml`
 
@@ -465,7 +465,7 @@ Key rules:
 
 - `component_type` selects the workflow UI component
 - `tool_call_id` is the primary UI interaction identifier
-- `corr` remains the compatibility alias for existing consumers
+- `corr` is the wire-level response correlation key
 - `workflow_name` should be available at the envelope level and inside `payload`
 - `interaction_type` distinguishes `ui_tool`, `ui_surface`, `auto_tool`, and `input_request`
 - `display` controls whether the surface is `composer`, `inline`, `artifact`, or `view`

@@ -76,8 +76,8 @@ remains registered and active regardless.
 `chat.input_request` is not emitted to browser clients for runtime-managed
 interactive input.
 
-AG2's generic "Please give feedback to chat_manager..." compatibility prompt is
-still the actual response handoff signal. The runtime suppresses that raw prompt
+AG2's generic "Please give feedback to chat_manager..." handoff prompt is the
+actual response handoff signal. The runtime suppresses that raw prompt
 text. If AG2 emits it immediately after a real user reply and there is no new
 assistant question to show, the runtime now auto-resumes internally instead of
 surfacing a second fake pending interaction. Otherwise the pending input request
@@ -169,7 +169,7 @@ Current rules:
 
 - `component_type` is required for workflow UI rendering
 - `tool_call_id` is the primary UI interaction id
-- `corr` remains the compatibility alias for existing consumers
+- `corr` is the wire-level response correlation key
 - `workflow_name` should be available at the top level and in `payload`
 - `workflow_primitive` should be copied from the manifest into `payload`
 - `ui_contract` should be copied from the manifest into `payload` for response-bearing workflow UI

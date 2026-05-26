@@ -35,6 +35,22 @@ not appear as primary customer-facing product language:
 - `workflow_sequence`
 - `extension_registry`
 
+## Console, Studio Host, And CLI
+
+The **Mozaiks Console** is the browser product. It owns app creation, build
+continuation, artifact review, app workspace status, usage, health, users, and
+integrations.
+
+The **Studio host** is the internal FastAPI composition layer that serves the
+Console and mounts the factory builder/control-plane capabilities. Keep
+`studio` in host names, environment values, and architecture docs where it
+describes runtime composition.
+
+The **CLI** is a local developer interface. It creates workspaces, starts host
+processes, prints diagnostics, and opens the Console. It must not grow separate
+product workflows for app creation, artifact review, promotion, run history, or
+build lifecycle management.
+
 ## Route Model
 
 Workspace-level routes:
@@ -60,7 +76,7 @@ Primary app navigation is:
 - Integrations
 - Usage
 
-The Console route model is canonical. Do not add compatibility aliases for
+The Console route model is canonical. Do not add route aliases for
 retired customer-facing terms such as `Hub`, `Studio`, `Treasury`, `Adapters`,
 `Deploy`, `Operations`, `Settings`, or `Admin`.
 
@@ -120,11 +136,11 @@ Behavior expectations:
 - integrations
 - usage
 
-## Deprecated Terms
+## Non-Canonical Terms
 
 Replace these in customer-facing UX:
 
-| Deprecated term | Replacement | Customer-facing/internal-only | Notes |
+| Non-canonical term | Replacement | Customer-facing/internal-only | Notes |
 | --- | --- | --- | --- |
 | `Hub` | `Apps` | Customer-facing | No longer presented as a product or shell name |
 | `Studio` | none in console IA | Customer-facing | Keep `studio` only for host/runtime internals |

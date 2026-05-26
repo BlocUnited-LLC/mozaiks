@@ -1,0 +1,225 @@
+# Generated App Deployment Contract
+
+## Purpose
+
+This document defines the provider-neutral deployment artifact contract for generated apps.
+
+The OSS `mozaiks` repo owns this contract.
+Hosted-product policy, approvals, provider adapters, and secret orchestration remain outside this repo.
+
+## Production Boundary
+
+Generated apps use a repo-per-app (workspace-per-app) boundary.
+
+```text
+one generated app == one repository/workspace
+```
+
+This keeps deployment ownership, environments, CI history, and secret boundaries isolated per app.
+
+## Contract Models
+
+The contract is represented by two typed models in AppGenerator structured outputs.
+
+1. `DeployTargetSpec`
+2. `DeploymentTemplateManifest`
+3. `DeploymentBuildOutput`
+
+### DeployTargetSpec
+
+Provider-neutral target definition.
+
+Required shape:
+
+- `target_id`
+- `target_kind`: `container | compose | external_adapter`
+- `runtime`
+  - `container_port`
+  - `health_path`
+  - `start_command` (optional)
+- `artifact_outputs`
+  - `Dockerfile` (optional)
+  - `docker-compose.yml` (optional)
+  - `.github/workflows/deploy.yml` (optional)
+  - `env.example`
+  - `deployment.manifest.json`
+- `environment`
+  - `required_variables`
+  - `optional_variables`
+  - `secret_variables`
+  - `public_variables`
+- `image`
+  - `image_name`
+  - `tag_strategy`
+- `checks`
+  - `build`
+  - `smoke`
+  - `health`
+- `provider_profile`
+  - generic metadata only in OSS
+
+Optional shape:
+
+- `ci_secret_requirements`
+  - `required`
+  - `optional`
+  - `workflow_inputs`
+
+### DeploymentTemplateManifest
+
+Deterministic output manifest for generated deployment artifacts.
+
+Required shape:
+
+- `schema_version`
+- `app_id`
+- `deployment_profile`
+- `generated_files`
+- `required_env`
+- `secret_env`
+- `exposed_ports`
+- `healthcheck`
+- `ci_workflow`
+- `ci_secret_requirements` (optional)
+- `dockerfile`
+- `compose`
+- `validation_status`
+- `deploy_target_spec`
+- `build_output_contract` (optional)
+
+### CI Workflow Secret Requirements
+
+Generated deployment workflows may declare a names-only CI contract under
+`ci_secret_requirements`.
+
+Suggested shape:
+
+- `required`
+  - `name`
+  - `purpose` (optional)
+  - `used_by` (optional)
+- `optional`
+  - `name`
+  - `purpose` (optional)
+  - `used_by` (optional)
+- `workflow_inputs`
+  - `name`
+  - `required`
+  - `purpose` (optional)
+
+Rules:
+
+1. Entries carry names only, never values.
+2. Secret names must use safe identifiers.
+3. Workflow input names must use safe identifiers.
+4. Generated workflow files may reference those names, for example
+   `${{ secrets.NAME }}` or `${{ inputs.name }}`, but must never embed secret
+   values.
+5. Hosts and adapters provision real secret values outside generated artifacts.
+   The generated app bundle only describes expected names.
+
+### Build Output Contract
+
+`DeploymentBuildOutput` is the provider-neutral handoff contract from
+repo/export/build systems to deployment providers/hosts.
+
+It carries build/export output metadata and does not execute builds.
+
+Suggested shape:
+
+- `repo_url` (optional)
+- `commit_sha` (optional)
+- `build_status`: `pending | running | succeeded | failed`
+- `image_ref` (required when status is `succeeded`)
+- `artifact_digest` (optional, `sha256:` prefix)
+- `workflow_run_url` (optional)
+- `logs_url` (optional)
+- `safe_details` (optional, non-secret metadata only)
+- `error_code` (optional)
+
+Provider-neutral examples:
+
+- `repo_url`: `https://repo.example.invalid/demo-app`
+- `image_ref`: `registry.example.invalid/demo-app:abc123`
+- `artifact_digest`: `sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef`
+
+Validation rules:
+
+1. `build_status` must be one of pending/running/succeeded/failed.
+2. `image_ref` is required when `build_status` is succeeded.
+3. `artifact_digest`, if present, uses `sha256:` prefix.
+4. URL fields are URL-shaped when present.
+5. Raw secrets and secret-shaped keys are not allowed in `safe_details`.
+6. No provider-specific required fields.
+
+## Artifact Contract
+
+When deployment artifacts are requested by scaffold/export flags, AppGenerator emits deterministic outputs from the provider-neutral contract:
+
+- `Dockerfile` (optional)
+- `docker-compose.yml` (optional)
+- `.github/workflows/deploy.yml` (optional)
+- `env.example`
+- `deployment.manifest.json`
+
+When `.github/workflows/deploy.yml` is emitted, the manifest may also carry a
+concrete `ci_secret_requirements` section describing the names-only secret and
+workflow-input contract used by that generated workflow.
+
+## Env and Secrets Rules
+
+1. `env.example` may include variable names and placeholders only.
+2. Secret variables are declared by name only and must not contain real values.
+3. `ci_secret_requirements` is names-only and must not contain real values.
+4. Generated workflow files may reference secret names but never secret values.
+3. Generated artifacts must not include:
+   - cloud tenant ids
+   - provider credentials
+   - registry passwords
+   - GitHub tokens
+   - hosted-product policy secrets
+5. Real secrets are injected by deployment adapters (CI secret stores / cloud secret stores), not committed in app repos.
+
+## AppGenerator and Adapter Split
+
+OSS AppGenerator emits and validates:
+
+- deployment contract schema
+- deterministic artifact rendering
+- artifact validation rules
+- provider-neutral build output handoff contract
+- names-only CI workflow secret requirements contract
+
+Adapter layers outside AppGenerator handle:
+
+- provider-specific deployment execution
+- hosted policy/approval gates
+- hosted lifecycle state transitions
+- secret delivery and rotation
+- persistence of build outputs in host deployment records
+- mapping names-only CI secret requirements to provider-specific secret stores
+
+## E2B Role
+
+E2B in AppGenerator is pre-deploy validation/preview only.
+
+It is not a production runtime or hosting target.
+
+## Self-Host Mode
+
+This contract supports self-hosting through the same generic artifact outputs:
+
+- local Docker
+- local Compose
+- generic container platform deployment
+
+Self-host users consume generated artifacts and provide their own infrastructure and secret stores.
+
+## Hosted Product Handoff
+
+Hosted products (for example `mozaiks-app`) consume this contract but own hosted-specific behavior:
+
+- Host With Us UX
+- policy/approval gates
+- provider adapters and defaults
+- deployment status and operations surfaces

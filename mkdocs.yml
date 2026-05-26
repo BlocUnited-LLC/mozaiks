@@ -102,6 +102,8 @@ nav:
           - Platform Terminology: architecture/foundations/platform-terminology-and-brand-language.md
           - Platform Information Architecture: architecture/foundations/platform-information-architecture.md
           - Core vs Product vs App Bundle: architecture/foundations/core-product-app-bundle-boundary.md
+          - Graph Authority Boundaries: architecture/foundations/graph-authority-boundaries.md
+          - App Context and Brownfield Adoption: architecture/foundations/app-context-and-brownfield-adoption.md
       - App Architecture:
           - Overview: architecture/app/index.md
           - Generated App Lifecycle: architecture/app/generated-app-lifecycle-model.md

@@ -83,7 +83,7 @@ Brand values flow through the compact selector layer:
 - `theme.appearance`
 - `theme.density`
 
-They may also flow through the expanded runtime compatibility layer:
+They may also flow through the expanded runtime shell token layer:
 
 - `fonts`
 - `colors`
@@ -91,12 +91,10 @@ They may also flow through the expanded runtime compatibility layer:
 - `ui`
 - `primitives`
 
-This duplication is intentional during the transition. `theme.*` is the compact
-selector layer for App UI `--mz-*` tokens. `fonts`, `colors`, `shadows`, `ui`,
-and `primitives` are the expanded compatibility layer still needed by older
-shell/chat tokens such as `--color-*`, `--font-*`, and
-`--core-primitive-*`. Both are allowed until legacy shell tokens are fully
-migrated to `--mz-*`.
+`theme.*` is the compact selector layer for App UI `--mz-*` tokens. `fonts`,
+`colors`, `shadows`, `ui`, and `primitives` are the expanded shell/chat token
+layer for `--color-*`, `--font-*`, and `--core-primitive-*`. Both surfaces are
+part of the current theme contract until all shell tokens move to `--mz-*`.
 
 Local fonts live only under `app/brand/fonts/` and are referenced from theme
 config with `/fonts/...` URLs. Do not copy font binaries into generated
@@ -331,8 +329,8 @@ Rules:
 - workflow-local wrappers around shipped components should stay thin and intentional
 - if `ui.component` already equals the canonical shipped component name, no
   workflow-local React file should be generated or saved for that checkpoint
-- the first deterministic regression target for this contract is
-  `factory_app/workflows/WorkflowPrimitiveAcceptance`
+- the first deterministic smoke target for this contract is described in the
+  live smoke workflows alongside `RuntimeSmoke` and `RuntimeToolCallSmoke`
 - the stable real-AG2 regression target is
   `factory_app/workflows/AgentGenerator` with the workflow-owned smoke pair:
   `factory_app/workflows/AgentGenerator/smoke_prompt.txt` and

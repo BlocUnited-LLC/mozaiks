@@ -77,7 +77,7 @@ python -m pytest tests/test_contributor_guidance_framing.py tests/test_module_re
 - Do not treat `AppGenerator` as the whole build system.
 - Do not treat `workflow_sequence` as HITL handoff routing.
 - Do not reintroduce `backend/models.py` as canonical persistence structure.
-- Do not reintroduce `contracts/subscriptions.yaml` as the canonical module reaction contract.
+- Do not author `contracts/subscriptions.yaml`; use `contracts/reactions.yaml`.
 - Do not route contributors toward `app/capability_packs`, `transport.py`, or direct hosted internals as current canonical extension points.
 
 ## Development Setup

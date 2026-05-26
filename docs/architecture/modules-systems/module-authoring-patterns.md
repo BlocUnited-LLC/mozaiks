@@ -56,6 +56,25 @@ Use for:
 
 The external system remains external.
 
+Use the app-level backend support lane when the support code is not module
+business behavior:
+
+```text
+backend/integrations/{service}_client.py      # external or hosted API client
+backend/adapters/{area}/{provider}.py         # provider implementation boundary
+modules/{module}/backend/service.py           # business action calls the client/adapter
+```
+
+Typical adapter areas include auth, source_control, deployment, dns, registrar,
+cloud, storage, search, email, and payments. Keep generic runtime auth in the
+framework; use `backend/adapters/auth/` only for app-specific provider
+mechanics.
+
+Do not put provider implementation boundaries under `modules/` unless they are
+module-local helper files declared for that module. Do not turn an adapter into
+a module just to give it a place in the tree. Modules own actions, events,
+lifecycle state, authorization, and persistence; adapters do not.
+
 ### Hosted-pack facade pattern
 
 Use for host-provided capabilities that should appear in generated apps without
@@ -115,8 +134,8 @@ Prohibited uses:
 
 - Do not model workflows as modules.
 - Do not put persistent pages in module backend directories.
-- Do not use legacy transport companion files as canonical module authoring outputs.
-- Do not use legacy state-machine companion files as canonical module files.
+- Do not use removed transport companion files as canonical module authoring outputs.
+- Do not use removed state-machine companion files as canonical module files.
 - Use `schemas.py` as the canonical typed-shape file.
 - Do not use helper files as a new default layer. Only add a helper file when
   it is explicitly justified, module-local, and imported by a canonical backend

@@ -291,7 +291,7 @@ Hosted product modules are the deterministic business layer of a hosted product 
 **Owns:**
 - Scaffold generation: `mozaiks init`, `mozaiks onboard`, `mozaiks add`
 - Process management: starting/stopping the local server
-- Workspace diagnostics: `mozaiks studio`
+- Workspace diagnostics: `mozaiks console`
 - Offline generation: `mozaiks gen` — a developer convenience, not the canonical build lifecycle
 
 **Must not own:**
@@ -473,7 +473,7 @@ Registered via the active app root's `app/ui/index.js` extension barrel. Studio 
 
 **`appShell` auto-inference** — When a route manifest entry declares `navigation.group`, `build_shell_config()` auto-sets `appShell: true` on that page's meta via `setdefault` so layout-aware components (e.g. `WorkspaceLayout`) can discover the page. An explicit `appShell: false` is never overridden.
 
-**Vite JSX transform for non-`*-platform` workspaces** — `web_shell/vite.config.js` uses a `platformAppDirForward` prefix check (`id.startsWith(platformAppDirForward + '/')`) in addition to the legacy `*-platform` directory regex, so JSX inside `.js` files is correctly transformed for any workspace directory name (e.g. `customer-portal`).
+**Vite JSX transform for active app workspaces** — `web_shell/vite.config.js` uses a `platformAppDirForward` prefix check (`id.startsWith(platformAppDirForward + '/')`) so JSX inside `.js` files is correctly transformed for any workspace directory name (e.g. `customer-portal`).
 
 **React/router singleton deduplication** — `web_shell/vite.config.js` declares `resolve.dedupe: ['react', 'react-dom', 'react-router-dom', 'react-router']`. This is required because:
 
@@ -581,10 +581,8 @@ Events are **distributed**, not centralized. No separate `automations/` director
 - `modules/{name}/contracts/notifications.yaml` declares notification rules
   derived from events. It is separate from `reactions.yaml`; notification rules
   describe delivery policy, while reactions describe event routing.
-- `modules/{name}/contracts/subscriptions.yaml` is deprecated compatibility
-  only. Do not author new modules with it. Runtime may load it only when
-  `contracts/reactions.yaml` is absent, and new generator/CLI output must use
-  `contracts/reactions.yaml`.
+- `modules/{name}/contracts/subscriptions.yaml` is not supported. Runtime
+  rejects it so modules have one reaction-routing source of truth.
 
 ### CRUD → AI (workflow triggers)
 
@@ -610,6 +608,9 @@ app/
 ├── config/
 │   ├── ai.json                 # LLM provider, model, temperature, optional control_plane key
 │   └── shell.json              # Header/footer/profile/notification chrome
+├── backend/
+│   ├── integrations/           # Thin external or hosted API clients
+│   └── adapters/               # Provider-specific implementation boundaries
 ├── workflows/
 │   └── {WorkflowName}/
 │       ├── orchestrator.yaml   # Config + triggers + events.emits
@@ -665,6 +666,15 @@ Only those agents have chat-visible messages and websocket-forwarded outputs ren
 pages and custom route React must consume shared primitives and semantic
 tokens/classes instead of hardcoded colors, literal font families, or
 page-local visual systems.
+
+`app/backend/` is optional app-owned support code. `backend/integrations/`
+contains thin clients for external or hosted APIs. `backend/adapters/` contains
+provider-specific implementation boundaries such as auth/OIDC/OAuth,
+source-control, deployment, DNS, registrar, cloud, storage, search, email, or
+payment provider mechanics. These files are not modules: they must not own
+runtime actions, lifecycle state, emitted events, permissions, or persistence
+authority. Modules own business behavior and may call these support files.
+Generic runtime auth adapters remain framework code under `mozaiksai/core/auth/`.
 
 Every bundle (module, workflow, page) declares a `visibility`: `public` (all users), `internal` (authenticated only), or `admin` (admin only).
 

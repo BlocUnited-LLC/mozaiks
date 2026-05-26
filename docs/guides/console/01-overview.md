@@ -3,6 +3,10 @@
 The Mozaiks Console is the normal starting point after install. It is where you
 create apps, continue builds, and open app-specific management surfaces.
 
+The CLI or repo bootstrap scripts get you to this point by creating the local
+workspace shell and starting the processes. The Console then creates apps
+inside that workspace; it does not replace local machine setup.
+
 Open it at:
 
 ```text

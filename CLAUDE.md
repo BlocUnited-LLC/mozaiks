@@ -39,8 +39,8 @@ Canonical target:
 
 - generated/customer apps become standalone workspaces/repositories
 - shared generation core lives outside app workspaces
-- app workspaces are self-contained and keep `config/`, `ui/pages/`, `workflows/`,
-  `modules/`, `ui/`, and `brand/` together
+- app workspaces keep app bundle files under `app/` and app-local workflows at
+  the workspace root under `workflows/`
 - hosted product workspaces should consume that same contract from their own repos
 
 Working modes:
@@ -62,14 +62,14 @@ For nontrivial OSS changes:
 
 ## Pre-Production Cleanup Policy
 
-This repo is **not in production**. Optimize for the cleanest canonical implementation, not for legacy preservation.
+This repo is **not in production**. Optimize for the cleanest canonical implementation, not for preserving outdated behavior.
 
 - Replace outdated logic instead of layering new branches on top of it.
 - Remove stale prompts, docs, tests, schema fields, and dead code paths when contracts change.
-- Do **not** add backward-compatibility shims, aliases, wrappers, or fallback behavior unless the task explicitly requires it.
+- Do **not** add shims, aliases, wrappers, or fallback behavior unless the task explicitly requires it.
 - When a contract changes, update the runtime, generators, docs, and tests together.
 
-If you see a conflict between "keep old behavior around" and "make the architecture clean," prefer the clean replacement unless the user explicitly asks for compatibility.
+If a stale implementation conflicts with a clean architecture, prefer the clean replacement unless the user explicitly asks for preserving an existing app contract.
 
 ## Release Hold
 
@@ -151,11 +151,20 @@ Deterministic app behavior belongs in generated app/module contracts hosted by `
 
 | If you're adding... | Put it in... |
 |---------------------|--------------|
-| AI workflow logic | `factory_app/workflows/{name}/` |
+| Shared/factory AI workflow logic | `factory_app/workflows/{name}/` |
+| App-local AI workflow logic | `workflows/{name}/` beside the active `app/` root |
 | Deterministic module (CRUD/actions) | `app/modules/{name}/` in an app workspace |
-| Multi-module page | `app/ui/ui/pages/{name}.yaml` in an app workspace |
+| App-owned external client | `app/backend/integrations/{service}_client.py` in an app workspace |
+| App-owned provider adapter | `app/backend/adapters/{area}/{provider}.py` in an app workspace |
+| App-specific auth provider mechanic | `app/backend/adapters/auth/{provider}.py` in an app workspace |
+| Provider-neutral auth/secret helper | `app/backend/security/` in an app workspace |
+| App-specific secret manager adapter | `app/backend/adapters/secrets/{provider}.py` in an app workspace |
+| Secret management contract, names only | `app/config/secrets.yaml` in an app workspace |
+| Shared persistence helper | `app/shared_persistence/` when declared by `app/config/shared_persistence.json` |
+| Multi-module page | `app/ui/pages/{name}.yaml` in an app workspace |
 | Runtime infrastructure | `mozaiksai/core/` |
-| Backend adapter | `mozaiksai/core/adapters/` |
+| Framework backend adapter | `mozaiksai/core/adapters/` |
+| Framework/runtime auth adapter | `mozaiksai/core/auth/` |
 | Port / contract | `mozaiksai/core/ports/` |
 | AG2 tool function | `mozaiksai/core/workflow/` |
 | First-party Studio bundle | `factory_app/app/` |
@@ -236,7 +245,8 @@ outputs into active runtime paths.
 Workflow resolution is single-root by default. A running host binds to one
 workflow root via `MOZAIKS_WORKFLOWS_PATH` rather than auto-merging app and
 factory roots. Studio defaults to `factory_app/workflows/`; app/product hosts
-use the active app root's `workflows/` when present.
+prefer the workspace root's `workflows/` and tolerate legacy
+`<active app root>/workflows/` only as a transition path.
 
 Use `MOZAIKS_GENERATED_ARTIFACTS_PATH`, defaulting to:
 
@@ -296,8 +306,12 @@ contract, not an escape hatch from it.
 
 ### File Structure
 
+For shared/factory workflows, use `factory_app/workflows/{WorkflowName}/`.
+For app-local workflow overlays, use `workflows/{WorkflowName}/` beside the
+active `app/` root.
+
 ```
-factory_app/workflows/{WorkflowName}/
+workflows/{WorkflowName}/
 ├── orchestrator.yaml       # Workflow bootstrap config
 ├── agents.yaml             # Agent roster and prompts
 ├── handoffs.yaml           # Agent-to-agent routing
@@ -401,7 +415,7 @@ The tool receives already-reasoned data and just persists/emits it.
 - Hardcode workflow behavior in the runtime
 - Hardcode backend API paths in ports or adapters
 - Add duplicate interfaces or aliases (make canonical changes)
-- Preserve legacy logic "just in case" when making non-production changes
+- Preserve only behavior that still belongs in the current contract when making non-production changes
 - Bake app-specific logic into the AI runtime
 - Write inference/heuristic logic in tools (let LLMs reason instead)
 

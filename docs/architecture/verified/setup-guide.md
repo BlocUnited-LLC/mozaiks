@@ -36,8 +36,8 @@ host files:
 # Builder path
 mozaiks quickstart --dir ./mozaiks-workspace
 
-# Or launch Studio against an existing workspace
-mozaiks studio --dir ./mozaiks-workspace --open
+# Or launch the Console against an existing workspace
+mozaiks console --dir ./mozaiks-workspace --open
 ``` 
 
 Use this mode when you want the layered repo architecture as-is.

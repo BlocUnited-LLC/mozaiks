@@ -431,8 +431,8 @@ yet.
 
 Database startup policy is controlled by `MOZAIKS_DATABASE_STARTUP_POLICY`:
 
-- `best_effort` is the default for backward compatibility. Index or migration
-  failures are logged and platform startup continues.
+- `best_effort` is the default for generated apps and existing app setups.
+  Index or migration failures are logged and platform startup continues.
 - `required` is recommended for production persistent generated apps. Index or
   migration failures fail startup with app id, app root, and original error
   context.

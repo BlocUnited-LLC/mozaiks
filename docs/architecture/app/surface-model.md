@@ -89,8 +89,8 @@ Use a workflow when the value comes from:
 
 Question a workflow answers: **what run is happening**
 
-Canonically, app-owned workflow definitions live under `app/workflows/*`.
-The shared generation core lives under `factory_app/workflows/*`.
+Canonically, app-owned workflow definitions live under `workflows/*`.
+The shared generation core lives under `factory_workflows/*`.
 
 ## 3. Module
 
@@ -133,7 +133,7 @@ Pages can launch workflows.
 Pages can also display workflow results.
 
 But the workflow definition still lives under the app workspace's
-`app/workflows/*`, or under the shared generation core for builder workflows.
+`workflows/*`, or under the shared generation core for builder workflows.
 
 ## Current Examples
 

@@ -21,6 +21,8 @@ the peer architecture sections for details:
 | [Platform Terminology and Brand Language](platform-terminology-and-brand-language.md) | Customer-facing and internal vocabulary |
 | [Platform Information Architecture](platform-information-architecture.md) | Console and app-level IA contracts |
 | [Core, Product, and App Bundle Boundary](core-product-app-bundle-boundary.md) | Ownership boundaries between runtime, product, and app bundle |
+| [Graph Authority Boundaries](graph-authority-boundaries.md) | Source-of-truth boundaries for config, runtime, DB, and derived graph indexes |
+| [App Context and Brownfield Adoption](app-context-and-brownfield-adoption.md) | Unified app context, brownfield onboarding, and control-plane ownership boundaries |
 
 ## Events and Data
 

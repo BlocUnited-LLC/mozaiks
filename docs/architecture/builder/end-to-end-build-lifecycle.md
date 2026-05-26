@@ -5,7 +5,7 @@
 This document defines the canonical lifecycle across:
 
 - Mozaiks CLI
-- the Studio host, its visible workspace console, and the workflow-owned build sequence
+- the internal Studio host, its visible workspace console, and the workflow-owned build sequence
 - `factory_app`
 - the active app workspace
 - generated artifacts
@@ -13,7 +13,8 @@ This document defines the canonical lifecycle across:
 
 Terminology note:
 
-- `Studio` remains the current internal host and command name
+- `Studio` remains the current internal host name
+- `mozaiks console` is the current public CLI command for opening the Console
 - customer-facing UX should prefer `Apps`, `Usage`, `Health`, and
   `Integrations` for the OSS factory console; hosted deployments may add their
   own provider-owned billing or hosting sections
@@ -52,6 +53,10 @@ generated artifact bundle
 promotion
   -> explicit copy of approved artifacts into a runnable app root
 ```
+
+In current code, the CLI creates the workspace scaffold and launches the
+Console. The Console creates apps and manages build/review work inside that
+workspace.
 
 The generator should stage first and promote second.
 
@@ -114,7 +119,7 @@ This phase starts the host and opens the management UI.
 Owned by:
 
 - CLI for process launch
-- Studio for lifecycle management UI
+- Console for lifecycle management UI
 
 Responsibilities:
 
@@ -125,9 +130,9 @@ Responsibilities:
 
 Recommended command:
 
-- `mozaiks studio --open`
+- `mozaiks console --open`
 
-This remains the current command path. Customer-facing UX should normalize to
+This is the current user-facing command path. Customer-facing UX should normalize to
 `Apps` as the landing surface and route build/refinement through the
 workflow-owned agent sequence rather than a persistent `Build` page.
 
@@ -219,11 +224,16 @@ This phase may write:
 - `config/database_intent.json`
 - optional `config/database_migrations/*.json`
 - generated module files
+- provider-neutral deployment artifacts (optional): `Dockerfile`,
+  `docker-compose.yml`, `.github/workflows/deploy.yml`, `env.example`, and
+  `deployment.manifest.json`
 
 Important rule:
 
 - generation should never mutate the live app root by default
 - the staged bundle is the reviewable build artifact
+- deployment artifacts are deterministic outputs from the provider-neutral
+  generated-app deployment contract and must not contain real secrets
 - workflow UI code generation should stay deterministic: shared shipped workflow
   primitives do not produce workflow-local React files, while genuine
   workflow-local components are staged under the workflow `ui/` tree and get a
@@ -231,52 +241,58 @@ Important rule:
 
 ## Phase 6: Review And Validation
 
-This phase determines whether staged artifacts are acceptable.
+This phase pauses the build sequence for user review before promotion.
 
 Owned by:
 
-- the Studio host, app console summaries, and the workflow-owned build review
-  sequence
-- validation tools
-- optionally CLI for terminal-oriented users
+- the `app_review` transition in `extension_registry.json` (build sequence terminal step)
+- `AppReviewScreen` UI component
+- `app_registry` module (`promote_build` action)
+- refinement control plane (revision path)
 
 Responsibilities:
 
-- show build output summary
-- show generated files and diffs
-- run validation strategy
-- expose build status
-- allow approval, rejection, or refinement
-- run the workflow/frontend acceptance smoke when generator or workflow UI
-  contracts changed
+- surface build output summary, validation strategy used, and integration check results
+- show sandbox preview URL when E2B or local npm validation ran
+- present Promote and Revise paths to the user
+- on Promote: call `app_registry.promote_build`, transition `lifecycle_state` from `review` to `active`
+- on Revise: accept user revision request via chat, route through the refinement
+  control plane, operate on the staged `generated/` bundle path (not the active workspace)
 
-Review state transitions:
+How the pause works:
 
-- newly generated refinement children are persisted as `draft`
-- `draft` children are reviewed in the workflow-owned build sequence with:
-  - changed-file diffs
-  - selected refinement scope
-  - validation outcome
-  - coding-worker rationale when applicable
-- `accept` promotes a validated `draft` child into the new `current` artifact
-  version for that artifact family and supersedes the prior current version;
-  downstream artifact families that were marked `stale` as a result of this
-  change request are automatically resolved once each rebuilds a new `current`
-  version — see [Artifact Staleness and Routing](artifact-staleness-and-routing.md)
-- `reject` archives the `draft` child without changing the active artifact
-- refinement sessions move in parallel through `validated -> accepted |
-  rejected | promoted`
+- `AppGenerator` terminates its AG2 session after writing the bundle and calling `update_build_status(status="review")`
+- `AppGenerator` sets `lifecycle_state=review` and `bundle_path` in AG2 context_variables before terminating
+- the build sequence advances to the `app_review` transition, which renders `AppReviewScreen`
+- `AppReviewScreen` is the HITL boundary — the user decides to promote or request revisions
+- revision requests re-enter the refinement router with `artifact_root` set to the staged bundle path
+
+App lifecycle state:
+
+- `building` — generation in progress
+- `review` — bundle staged, awaiting user decision (promote or revise)
+- `active` — bundle promoted; this is the runnable state
+
+Canonical frontend/workflow UI smoke targets:
+
+- `factory_app/workflows/RuntimeUIPrimitiveSmoke`
+- `factory_app/workflows/AgentGenerator`
 
 Important rule:
 
-- `mozaiks gen` may remain a convenience path
-- but canonical review/history/diff/promotion must live in the workspace
-  console and the workflow-owned build sequence
+- canonical review/promotion must flow through the `app_review` transition and
+  `app_registry.promote_build`, not through ad hoc CLI commands or side effects
+- revision requests from `app_review` operate on the staged `generated/` bundle,
+  not the active workspace; `artifact_root` in the context seed is the guard for this
 
-Canonical frontend/workflow UI validation targets:
+Canonical frontend/workflow UI smoke targets:
 
-- `factory_app/workflows/WorkflowPrimitiveAcceptance`
+- `factory_app/workflows/RuntimeUIPrimitiveSmoke`
 - `factory_app/workflows/AgentGenerator`
+
+Deployment contract reference:
+
+- [../deployment/generated-app-deployment-contract.md](../deployment/generated-app-deployment-contract.md)
 
 Use it when validating changes to:
 
@@ -291,9 +307,9 @@ Recommended smoke command:
 
 ```bash
 python scripts/run_live_mfj_smoke.py \
-  --workflow WorkflowPrimitiveAcceptance \
+  --workflow RuntimeUIPrimitiveSmoke \
   --workflows-root factory_app/workflows \
-  --tool-response-file factory_app/workflows/WorkflowPrimitiveAcceptance/smoke_responses.json
+  --tool-response-file factory_app/workflows/RuntimeUIPrimitiveSmoke/smoke_responses.json
 
 python scripts/run_live_mfj_smoke.py \
   --workflow AgentGenerator \
@@ -322,17 +338,18 @@ Promotion target:
 - export workspace
 - hosted deployment bundle
 
-Current implementation concept:
+Current implementation:
 
-- `promote_generated_app(source_dir, target_root)`
+- `app_registry.promote_build` module action — enforces `review → active` state guard,
+  emits `domain.app_registry.app_promoted`
+- called by `AppReviewScreen` when the user clicks Promote
 
 Important rule:
 
-- promotion is explicit
-- it is not an incidental side effect of generation
-- promotion only runs against an accepted/current artifact version
-- promotion is the step that mutates the runnable app root; acceptance alone
-  only updates artifact lineage
+- promotion is explicit — it is not an incidental side effect of generation
+- promotion only runs when `lifecycle_state == "review"`
+- promotion is the step that transitions `lifecycle_state` to `active`; generation alone
+  does not make an app runnable
 
 ## Phase 8: Runtime / Deployment
 
@@ -392,7 +409,7 @@ The CLI should expose two different paths.
 For most users:
 
 1. `mozaiks onboard`
-2. `mozaiks studio --open`
+2. `mozaiks console --open`
 3. launch the build workflow sequence from the workspace or app console
 4. review staged artifacts
 5. promote/export/deploy
@@ -426,7 +443,7 @@ Should:
 Should not:
 
 - imply that generation already happened
-- launch Studio automatically unless explicitly requested by a flag
+- launch the Console automatically unless explicitly requested by a flag
 
 ### `mozaiks onboard`
 
@@ -434,9 +451,9 @@ Should:
 
 - configure environment and product intent defaults
 - create a scaffold when missing
-- optionally offer to open Studio immediately
+- optionally offer to open the Console immediately
 
-### `mozaiks studio`
+### `mozaiks console`
 
 Should:
 
@@ -468,13 +485,13 @@ These are the remaining lifecycle gaps.
    around it are not yet the dominant UX.
 4. External hosted product workspaces should consume the same staged
   build/promotion lifecycle instead of inventing a second builder path.
-5. `mozaiks gen`, `mozaiks onboard`, and `mozaiks studio` still need one
+5. `mozaiks gen`, `mozaiks onboard`, and `mozaiks console` still need one
    coherent story rather than three adjacent tools.
 
 ## Recommended Next Changes
 
 1. Make `mozaiks onboard` the primary first-run command.
-2. Add `mozaiks studio --open` as the standard builder launch command.
+2. Add `mozaiks console --open` as the standard builder launch command.
 3. Teach onboarding and Apps/Build status surfaces to explain:
    - scaffold
    - staged build

@@ -123,7 +123,7 @@ Assessment:
 Recommendation:
 
 - Keep `chat.*` as the transport namespace if desired, but make it a thin
-  compatibility shell over AG-UI event semantics instead of a second event
+  wrapper over AG-UI event semantics instead of a second event
   model.
 
 ### 1b. Generated app surface scope

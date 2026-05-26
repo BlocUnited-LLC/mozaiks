@@ -153,7 +153,7 @@ the shared smoke workflows under `factory_app/workflows/`:
 - `RuntimeSmoke` validates base orchestration, streaming, persistence, and structured output.
 - `RuntimeToolCallSmoke` validates the response-required workflow UI lane:
   `chat.tool_call -> tool_call_response`.
-- `WorkflowPrimitiveAcceptance` validates the three canonical generated-workflow
+- `RuntimeUIPrimitiveSmoke` validates the three canonical generated-workflow
   UI lanes together:
   - composer reply
   - structured inline workflow primitive
@@ -167,7 +167,7 @@ Run them through the live harness:
 ```bash
 python scripts/run_live_mfj_smoke.py --workflow RuntimeSmoke --workflows-root factory_app/workflows
 python scripts/run_live_mfj_smoke.py --workflow RuntimeToolCallSmoke --workflows-root factory_app/workflows --tool-response-text approved
-python scripts/run_live_mfj_smoke.py --workflow WorkflowPrimitiveAcceptance --workflows-root factory_app/workflows --tool-response-file factory_app/workflows/WorkflowPrimitiveAcceptance/smoke_responses.json
+python scripts/run_live_mfj_smoke.py --workflow RuntimeUIPrimitiveSmoke --workflows-root factory_app/workflows --tool-response-file factory_app/workflows/RuntimeUIPrimitiveSmoke/smoke_responses.json
 python scripts/run_live_mfj_smoke.py --workflow AgentGenerator --workflows-root factory_app/workflows --prompt-file factory_app/workflows/AgentGenerator/smoke_prompt.txt --tool-response-file factory_app/workflows/AgentGenerator/smoke_responses.json --timeout-seconds 300
 ```
 
@@ -187,7 +187,7 @@ python scripts/run_live_mfj_smoke.py --workflow ValueEngine --workflows-root fac
 `interaction_type=input_request` and by `chat.awaiting_reply` / non-terminal
 `chat.run_complete` workflow pauses that hand control back to the composer
 without an explicit UI tool. They do not send speculative free-form workflow
-chat messages. AG2 compatibility prompts such as
+chat messages. AG2 handoff prompts such as
 `Please give feedback to chat_manager...` still use the pending input-request
 lane; the runtime suppresses the raw prompt text. If AG2 emits a bare generic
 feedback prompt immediately after a real user reply, the runtime auto-resumes

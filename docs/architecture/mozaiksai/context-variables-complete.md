@@ -146,19 +146,19 @@ They are injected by `core/workflow/context/variables.py` when `CONTEXT_INCLUDE_
 
 ## Local Testing Without Seeded DB Data
 
-When your `data_reference` values (for example `concept_overview`) do not exist yet, runtime can load placeholder fallbacks from a JSON file.
+When your `data_reference` values (for example `concept_overview`) do not exist yet, runtime can load explicit fallback values from a JSON file.
 
 Environment variable:
 
-- `MOZAIKS_CONTEXT_PLACEHOLDERS_FILE`
+- `MOZAIKS_CONTEXT_FALLBACKS_FILE`
 
 Example:
 
 ```env
-MOZAIKS_CONTEXT_PLACEHOLDERS_FILE=
+MOZAIKS_CONTEXT_FALLBACKS_FILE=
 ```
 
-Placeholder file shape:
+Fallback file shape:
 
 ```json
 {
@@ -177,8 +177,8 @@ Placeholder file shape:
 
 Resolution order for `data_reference` variables when DB result is `None`:
 
-1. workflow-scoped placeholder (`workflows.<workflow_name>.<variable>`)
-2. global placeholder (`global.<variable>`)
+1. workflow-scoped fallback (`workflows.<workflow_name>.<variable>`)
+2. global fallback (`global.<variable>`)
 3. convenience flat root object (`<variable>`) when no `global/workflows` wrapper exists
 
 ## Agent Exposure

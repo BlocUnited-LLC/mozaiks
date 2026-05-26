@@ -49,6 +49,17 @@ Then open `http://localhost:3000/apps` and click `Create App`.
 `.\mozaiks-workspace` is the local workspace Mozaiks uses for Console state and
 generated artifacts. The app itself is created from the Console.
 
+### Console vs CLI
+
+The **Console** is the browser product for creating apps, continuing builds,
+reviewing artifacts, and managing app workspaces. The **CLI** is the local
+developer entrypoint for creating a workspace, starting processes, running
+diagnostics, and opening the Console.
+
+`Studio` is the internal host name for the management server behind the
+Console. You may see `studio` in architecture docs or host flags such as
+`--host studio`, but users should start from the Console.
+
 Want to contribute? See the [Contributing guide](https://docs.mozaiks.ai/contributing/).
 
 Main repo layout:

@@ -105,7 +105,7 @@ Workflow files live under:
 - `factory_app/workflows/*` — shared factory workflows owned by the builder system, not by individual app workspaces
 - `factory_app/workflows/_shared/*.py` — factory-owned shared Python infrastructure consumed by multiple factory workflows; not part of generated workflow bundles
 - `factory_app/workflows/extended_orchestration/` — shared build launcher, journeys, and transition UI
-- `<active app root>/workflows/extended_orchestration/extension_registry.json` — optional product/app overlay on top of that shared routing layer
+- `<active app root>/workflows/extended_orchestration/extension_registry.json` — optional app-local registry used when that app workflow root is selected
 
 For the factory dogfood workspace specifically, `factory_app/app/workflows/*`
 is only an app-local overlay path. It is not the canonical location for shared
@@ -125,10 +125,6 @@ platform/studio execution. That is the composition contract between an active
 app workspace and `factory_app`: a given host/session executes one selected
 workflow root, and `factory_app/workflows/` remains the shared builder layer
 for Studio/builder execution.
-
-Hosted product exception:
-
-- the `mozaiks` host may compose hosted app workflow roots with `factory_app/workflows/` so hosted product workflows and shared builder workflows are both available.
 
 Builder workflows may generate new workflow bundles, but generated output is
 staged under `MOZAIKS_GENERATED_ARTIFACTS_PATH` and is not runtime-loaded until

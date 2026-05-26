@@ -204,14 +204,14 @@ The runtime and shell own:
 
 These are not AppGenerator responsibilities.
 
-### 6. Acceptance Harness
+### 6. Runtime UI Primitive Smoke
 
 Before treating the primitive catalog as stable for generated workflows, the repo
-should prove one deterministic path that exercises the canonical lanes together.
+should prove one deterministic smoke path that exercises the canonical lanes together.
 
-That first-party target now lives at:
+That first-party smoke target now lives at:
 
-- `factory_app/workflows/WorkflowPrimitiveAcceptance`
+- `factory_app/workflows/RuntimeUIPrimitiveSmoke`
 
 It intentionally validates:
 
@@ -223,12 +223,12 @@ Canonical smoke command:
 
 ```bash
 python scripts/run_live_mfj_smoke.py \
-  --workflow WorkflowPrimitiveAcceptance \
+  --workflow RuntimeUIPrimitiveSmoke \
   --workflows-root factory_app/workflows \
-  --tool-response-file factory_app/workflows/WorkflowPrimitiveAcceptance/smoke_responses.json
+  --tool-response-file factory_app/workflows/RuntimeUIPrimitiveSmoke/smoke_responses.json
 ```
 
-This acceptance workflow belongs in the generator/frontend validation loop, not
+This runtime smoke belongs in the generator/frontend validation loop, not
 in the live app bundle. When AgentGenerator prompt, manifest, or runtime
 contracts change, this workflow should keep passing before those changes are
 considered promotion-ready.
@@ -262,13 +262,13 @@ python scripts/run_live_mfj_smoke.py \
 
 AppGenerator should not generate workflow UI primitives directly.
 
-AppGenerator owns:
+AppGenerator is responsible for app-bundle artifacts that declare:
 
 - persistent page schemas
 - `workflow_touchpoints`
 - page actions with `action_type: workflow`
 
-AgentGenerator owns:
+AgentGenerator produces workflow/agent artifacts for:
 
 - workflow-local interactive UI
 - workflow-local artifact UI

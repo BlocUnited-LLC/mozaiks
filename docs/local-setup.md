@@ -77,16 +77,34 @@ Open:
 http://localhost:3000/apps
 ```
 
+## CLI vs Console
+
+Use the CLI for local-machine tasks:
+
+- create the workspace shell when it does not exist yet
+- start or reopen the backend/frontend processes
+- inspect status or run diagnostics
+
+Use the Console for product tasks:
+
+- create apps
+- continue builds
+- review staged artifacts
+- open app-specific management surfaces
+
+The Console does not replace local bootstrap. It runs against the workspace the
+CLI or repo scripts prepared for it.
+
 ## Useful Commands
 
 ```powershell
 mozaiks quickstart --dir .\mozaiks-workspace
-mozaiks studio --dir .\mozaiks-workspace --open
-mozaiks studio --dir .\mozaiks-workspace --json
+mozaiks console --dir .\mozaiks-workspace --open
+mozaiks console --dir .\mozaiks-workspace --json
 mozaiks onboard --dir .\mozaiks-workspace --full
 ```
 
-`quickstart` is the preferred local command. The lower-level `studio` command is
+`quickstart` is the preferred local command. The lower-level `console` command is
 mainly useful when you need explicit ports, JSON status output, or process
 debugging.
 
@@ -98,7 +116,7 @@ not the public package install path.
 Single-command start (opens a backend terminal + runs frontend here):
 
 ```powershell
-.\scripts\run-studio.ps1
+.\scripts\run-console.ps1
 ```
 
 Or start each service manually in separate terminals:
@@ -170,7 +188,7 @@ Set the provider key matching the model/provider you selected:
 Use a different backend/frontend port:
 
 ```powershell
-mozaiks studio --dir .\mozaiks-workspace --open --backend-port 8001 --frontend-port 3001
+mozaiks console --dir .\mozaiks-workspace --open --backend-port 8001 --frontend-port 3001
 ```
 
 Or stop the existing local process before restarting.

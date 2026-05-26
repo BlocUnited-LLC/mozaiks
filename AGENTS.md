@@ -38,12 +38,12 @@ factory workflows.
 
 This codebase is **not in production**.
 
-That means optimization goals are different from a legacy enterprise codebase:
+That means optimization goals are different from a typical enterprise codebase:
 
 - Prefer the cleanest canonical implementation.
 - Prefer replacement over preservation.
 - Remove stale logic when a better contract or architecture is introduced.
-- Do not keep compatibility shims, aliases, wrappers, fallback branches, or duplicate schemas unless explicitly requested.
+- Do not keep shims, aliases, wrappers, fallback branches, or duplicate schemas unless explicitly requested.
 
 ## Release Hold
 
@@ -65,8 +65,8 @@ When adjusting behavior:
 
 - Replace outdated logic instead of layering new logic on top of it.
 - Delete obsolete prompt guidance, docs, tests, config fields, and dead code paths that no longer match the current contract.
-- Do not leave "temporary" legacy branches behind.
-- Do not preserve old shapes "just in case" unless the user explicitly asks for backward compatibility.
+- Do not leave temporary outdated branches behind.
+- Do not preserve outdated shapes without an explicit current contract reason.
 
 If a new contract is introduced, update all affected layers together:
 
@@ -83,7 +83,7 @@ Avoid "AI slop":
 
 - no speculative abstractions
 - no duplicate helpers with overlapping purpose
-- no verbose compatibility code for non-production paths
+- no verbose fallback code for non-production paths
 - no stale comments describing removed behavior
 - no split source of truth when one canonical source will do
 
@@ -111,7 +111,7 @@ Canonical ownership:
 | `factory_app/app/` | Studio first-party app bundle — pages, modules, brand, config loaded by the Studio host; not a synonym for the Factory layer |
 | `factory_app/app/ui/pages/custom/studio/` | Studio management UI components |
 | `factory_app/app/admin/` | Admin portal layer — `admin_registry.yaml` declares pages, `admin/index.js` registers components, `admin/pages/` holds custom admin page React files |
-| `factory_app/app/modules/factory_control_plane/` | Studio identity stub only — no backend, no actions |
+| `factory_app/app/modules/factory_control_plane/` | Studio identity module only — no backend actions |
 | `chat-ui/src/admin/` | Platform-management surfaces — registered by Studio, inherited by Mozaiks App |
 | `platform/` | Repo-local infrastructure assets only — not an app workspace |
 | `generated/` | Generator output awaiting validation/promotion |
@@ -120,8 +120,8 @@ Canonical target:
 
 - generated/customer apps become standalone workspaces/repositories
 - shared generation core lives outside any individual app workspace
-- app workspaces are self-contained and keep `config/`, `ui/pages/`, `workflows/`,
-  `modules/`, `ui/`, and `brand/` together under the active app root
+- app workspaces keep app bundle files under `app/` and app-local workflows at
+  the workspace root under `workflows/`
 - hosted product workspaces should consume that same contract from their own repos
 
 ## Contributor Guidance Operating System
@@ -182,6 +182,20 @@ When working in or generating modules:
   structured output models, and contributors may author them directly. Keep the
   canonical shapes aligned with runtime loaders, docs, and tests.
 
+## Generated Secret Contract
+
+App-owned runtime secret output is names-first, not value-first:
+
+- `config/secrets.yaml` is the optional canonical generated contract for
+  app-owned secret provider/vault policy, env handles, and secret names.
+- It must never contain raw API keys, tokens, passwords, connection strings,
+  private keys, webhook secrets, or other credential values.
+- Provider-neutral secret resolution belongs in `backend/security/`; provider
+  secret manager mechanics belong in `backend/adapters/secrets/`.
+- Connector/API-key collection during workflows must store raw credential values
+  only through the configured secret backend. App artifacts should carry safe
+  metadata and secret references, not raw values.
+
 ## Generated Persistence Contract
 
 AppGenerator persistence output is intent-first, not runtime-DB-first:
@@ -200,6 +214,13 @@ AppGenerator persistence output is intent-first, not runtime-DB-first:
 - Runtime injects `ctx.persistence` into `ModuleContext` when `app_id` exists.
   Generated `backend/repo.py` must use
   `ctx.persistence.collection(module_id, entity_name)`.
+- `config/shared_persistence.json` is the explicit opt-in escape hatch for apps
+  that need stable shared collections, cross-module aggregate ownership, or
+  external existing database integration. Normal generated apps should omit it.
+- Optional shared persistence helper code belongs under `shared_persistence/`
+  with generic names. Do not generate app-specific hosted names such as
+  `platform_persistence`, `host_system`, `hosted_database_metadata.json`, or
+  `HostSystemPersistence` for customer apps.
 - `ctx.db` remains absent and non-canonical; generated code must not require or
   emit it.
 
@@ -262,11 +283,11 @@ not land directly in active runtime paths.
 Workflow resolution is single-root by contract. A running host binds to one
 workflow root via `MOZAIKS_WORKFLOWS_PATH` rather than auto-merging app and
 factory roots. Studio defaults to `factory_app/workflows/`; product/app hosts
-use the active app root's `workflows/` when present. The first-party
-`factory_app/app` bundle should not check in `factory_app/app/workflows/`
-until it owns a real app-local workflow. External hosted product workspaces may
-define their own app-local workflows under their active app root, but those are
-not canonical source code for this repo.
+prefer the workspace root's `workflows/` and tolerate legacy
+`<active app root>/workflows/` only as a transition path. The first-party
+`factory_app/app` bundle should not check in `factory_app/app/workflows/`.
+External hosted product workspaces define app-local workflows under
+`workflows/`, beside `app/`.
 
 Use `MOZAIKS_GENERATED_ARTIFACTS_PATH`, defaulting to:
 

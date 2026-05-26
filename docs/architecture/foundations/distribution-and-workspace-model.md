@@ -205,6 +205,15 @@ The hosted product runs the same app-workspace contract, but Mozaiks owns:
 Hosted is a deployment and product context difference, not a different app
 bundle contract.
 
+## Deployment Contract
+
+Generated app deployment artifacts are standardized by a provider-neutral
+contract in OSS.
+
+See:
+
+- [../deployment/generated-app-deployment-contract.md](../deployment/generated-app-deployment-contract.md)
+
 ## What This Means For The Current Repo
 
 The current repo contains the canonical runtime, shell, CLI, and first-party
@@ -237,5 +246,6 @@ These are the decisions the rest of the docs should follow.
 
 - [../app/canonical-app-structure.md](../app/canonical-app-structure.md)
 - [workflow-architecture.md](../workflows/workflow-architecture.md)
+- [../deployment/generated-app-deployment-contract.md](../deployment/generated-app-deployment-contract.md)
 - [Architecture Overview](../mozaiksai/index.md)
 - repo-root `ARCHITECTURE.md`

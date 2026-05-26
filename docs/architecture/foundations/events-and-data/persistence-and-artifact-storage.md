@@ -270,7 +270,7 @@ hardcode database names. Do not generate `backend/models.py`,
   artifact collections.
 - Do fail fast when the Studio host or the builder is launched without durable
   persistence configured.
-- Do not teach workflows or docs that legacy database names are canonical.
+- Do not teach workflows or docs that removed database names are canonical.
 - Do not treat persistence as optional for the builder journey.
 
 ## Related Contracts

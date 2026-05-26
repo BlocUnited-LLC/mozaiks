@@ -142,10 +142,8 @@ replace authorization. Runtime permission checks continue to use
 4. `contracts/notifications.yaml` declares notification rules derived from
   events. It is not a reaction file and should not be confused with
   `contracts/reactions.yaml`.
-5. `contracts/subscriptions.yaml` is deprecated compatibility only.
-  Do not author new modules with it. Runtime may load it only when
-  `contracts/reactions.yaml` is absent, and new generator/CLI output must use
-  `contracts/reactions.yaml`.
+5. `contracts/subscriptions.yaml` is not supported. Runtime rejects it so
+  modules have one reaction-routing source of truth.
 
 #### Canonical Example
 
@@ -228,7 +226,7 @@ notifications:
       roles: [admin]
     template:
       title: "New item"
-      body: "{payload.name}"
+      body: "{{name}}"
 ```
 
 ### `contracts/settings.yaml`

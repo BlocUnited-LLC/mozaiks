@@ -40,5 +40,5 @@ Key boundaries:
 
 - **Structured-output-first** — every canonical YAML contract must be representable as a strict typed model
 - **Declarative-first runtime** — no hardcoded workflow behavior in the runtime
-- **No backward-compatibility shims** — this repo is pre-production; replace outdated logic cleanly
-- **Pre-production cleanup policy** — optimize for the cleanest canonical implementation, not legacy preservation
+- **No obsolete shims** — this repo is pre-production; replace outdated logic cleanly
+- **Pre-production cleanup policy** — optimize for the cleanest canonical implementation, not stale-behavior preservation

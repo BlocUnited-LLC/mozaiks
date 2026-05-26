@@ -1,6 +1,6 @@
 ---
 title: SessionRouter
-status: Authoritative - Pre-Production, No Backward Compat
+status: Authoritative - Pre-Production
 created: 2026-04-13
 depends_on:
   - refinement-control-plane.md
@@ -542,15 +542,13 @@ The current `JourneyOrchestrator` embeds session position in individual chat doc
 (`journey_id`, `journey_key`, `journey_step_index`). This is the bootstrapping state
 that SessionRouter formalizes.
 
-Migration is **additive**, not a rewrite:
+SessionRouter is the canonical routing state layer:
 
-1. SessionRouter is introduced as a new layer in `mozaiksai/core/session/`.
-2. `JourneyOrchestrator.handle_run_complete` is wrapped — it reports to SessionRouter
-   before/after its current logic.
-3. `/api/workflows/trigger` routes all incoming triggers through SessionRouter.
-4. The legacy `journey_id` / `journey_step_index` fields on chat docs are kept as
-   fallback until Session records are fully backfilled.
-5. Once Session records are the canonical source, the legacy fields can be cleaned up.
+1. SessionRouter lives in `mozaiksai/core/session/`.
+2. `JourneyOrchestrator.handle_run_complete` reports run completion into SessionRouter.
+3. `/api/workflows/trigger` routes incoming triggers through SessionRouter.
+4. Chat-level `journey_id` / `journey_step_index` fields are execution metadata,
+   not the routing source of truth.
 
 ---
 

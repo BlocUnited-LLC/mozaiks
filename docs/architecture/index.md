@@ -24,6 +24,8 @@ Use this section as the web navigation layer for that architecture.
 - [Platform Terminology and Brand Language](foundations/platform-terminology-and-brand-language.md)
 - [Platform Information Architecture](foundations/platform-information-architecture.md)
 - [Core, Product, and App Bundle Boundary](foundations/core-product-app-bundle-boundary.md)
+- [Graph Authority Boundaries](foundations/graph-authority-boundaries.md)
+- [App Context and Brownfield Adoption](foundations/app-context-and-brownfield-adoption.md)
 - [Event System](foundations/events-and-data/event-system.md)
 - [Event Contracts](foundations/events-and-data/event-contracts.md)
 - [Persistence and Artifact Storage](foundations/events-and-data/persistence-and-artifact-storage.md)
@@ -36,6 +38,7 @@ Use this section as the web navigation layer for that architecture.
 - [App Bundle Declaratives](app/app-bundle-declaratives.md)
 - [Platform Authoring](app/platform-authoring.md)
 - [Account, Admin, and Platform Services](app/account-admin-and-platform-services.md)
+- [Generated App Deployment Contract](deployment/generated-app-deployment-contract.md)
 
 ## Runtime Authoring Contracts
 

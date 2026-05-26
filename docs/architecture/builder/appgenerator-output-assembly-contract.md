@@ -7,7 +7,7 @@
 
 ## Owned Artifacts
 
-AppGenerator owns the deterministic product bundle artifacts for persistent app UI:
+AppGenerator emits deterministic app-bundle artifacts for persistent app UI:
 
 - `app.json`
 - `admin/admin_registry.yaml`
@@ -16,7 +16,7 @@ AppGenerator owns the deterministic product bundle artifacts for persistent app 
 - `config/shell.json`
 - `config/asset_manifest.json`
 
-The ownership split is strict:
+The artifact split is strict:
 
 - `app.json` defines app identity, targets, auth intent, and startup behavior such as `startup.landing_spot`.
 - `admin/admin_registry.yaml` declares all admin portal pages for the app's operator console. Module panels reference these page ids via the `page` field in `modules/{module}/contracts/admin.yaml`.
@@ -25,14 +25,18 @@ The ownership split is strict:
 - `config/shell.json` defines compact app-wide shell behavior: header logo/actions, canonical shortcuts, navigation policy, non-page-owned navigation items, and chrome mode defaults.
 - `config/asset_manifest.json` defines reusable media inventory metadata for non-token assets (icons/images/video), including source/provenance and usage hints.
 
-AppGenerator does not own agent workflows, agent UI tools, or workflow transition surfaces. Those belong to AgentGenerator and the workflow UI contracts.
+AppGenerator does not own the full build lifecycle, agent workflows, agent UI
+tools, or workflow transition surfaces. AgentGenerator produces workflow/agent
+artifacts, and the control plane governs AppContextVersion selection,
+validation, review, and ArtifactVersion acceptance/promotion. Generated bundle
+files become source of truth only through artifact acceptance and promotion.
 
 When AppGenerator assembles module artifacts into the app workspace, companion
 manifests stay under `modules/{module}/contracts/`. Canonical event files are
 `contracts/events.yaml`, `contracts/reactions.yaml`, and
 `contracts/notifications.yaml`; do not flatten them to the module root or emit
-deprecated `contracts/subscriptions.yaml` for new output. Persistent module
-backends use `backend/schemas.py`, not `backend/models.py`.
+`contracts/subscriptions.yaml`. Persistent module backends use
+`backend/schemas.py`, not `backend/models.py`.
 
 ---
 

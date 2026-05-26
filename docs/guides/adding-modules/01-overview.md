@@ -44,9 +44,8 @@ Only `module.yaml` and `backend/handler.py` are required. Add contracts and
 backend files only when the module needs them.
 
 Use `contracts/reactions.yaml` as the canonical event-reaction contract.
-The runtime still accepts deprecated `contracts/subscriptions.yaml` only as a
-temporary fallback when `contracts/reactions.yaml` is absent, but new
-contributor-facing changes should author `contracts/reactions.yaml` only.
+The runtime rejects `contracts/subscriptions.yaml`; contributor-facing changes
+must author `contracts/reactions.yaml`.
 
 The runtime auto-discovers and registers all modules at startup. No registration
 step is needed. Routes are auto-mounted at `/api/modules/{name}/{action_id}`.

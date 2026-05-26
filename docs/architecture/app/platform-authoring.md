@@ -37,8 +37,8 @@ Current repo note:
 | --- | --- | --- |
 | App manifest | Small app identity and target manifest | `app/app.json` |
 | Pages | Normal app screens | `app/ui/pages/*` |
-| Workflows | Agentic execution | `app/workflows/*` |
-| Workflow triggers | App event to workflow rules | `app/workflows/*/orchestrator.yaml` |
+| Workflows | Agentic execution | `workflows/*` |
+| Workflow triggers | App event to workflow rules | `workflows/*/orchestrator.yaml` |
 
 ## Support Family
 
@@ -142,7 +142,7 @@ Optional:
 Shared page-level UI should live under `app/ui/pages/_shared/`, not inside a
 module by default.
 
-### `app/workflows/{workflow}/`
+### `workflows/{workflow}/`
 
 Required:
 
@@ -163,7 +163,7 @@ Optional but common:
 - `extended_orchestration/mfj_extension.json`
 
 Event routing and workflow triggers are configured via:
-- `app/workflows/{workflow}/orchestrator.yaml` - `triggers` declare which app events start or resume a workflow
+- `workflows/{workflow}/orchestrator.yaml` - `triggers` declare which app events start or resume a workflow
 - app hosts/backends emit domain events through the runtime ingress boundary; there is no separate app-owned automations catalog file
 
 ### `app/modules/{module}/`
@@ -356,7 +356,7 @@ arbitrary migration code.
 For production persistent generated apps, set
 `MOZAIKS_DATABASE_STARTUP_POLICY=required` so index or migration failures fail
 startup. The default is `best_effort`, which logs failures and continues for
-backward-compatible local/dev behavior. App business data uses
+local/dev iteration. App business data uses
 `MOZAIKS_APP_DATABASE_NAME`, then `MOZAIKS_APPS_DATABASE`, then the fallback
 database name `mozaiks_apps` unless the adapter is constructed with an explicit
 database name.

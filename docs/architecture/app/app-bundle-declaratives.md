@@ -21,13 +21,15 @@ hardcoded app-specific branches.
 ### `app/config/`
 
 Runtime-facing app configuration, including AI provider settings, shell config,
-admin config, and theme config.
+admin config, and theme config. When an app needs durable runtime secrets,
+`app/config/secrets.yaml` declares the secret provider/vault policy, env
+handles, and secret names only. It must never contain raw credential values.
 
 ### `app/ui/pages/`
 
 Schema-driven app pages rendered by the app UI surface.
 
-### `app/workflows/`
+### `workflows/`
 
 Declarative workflow definitions for agentic execution. A workflow owns its
 orchestrator config, agents, handoffs, tools, structured outputs, context
@@ -48,7 +50,7 @@ Canonical module companion manifests live under
 - `contracts/reactions.yaml` is the canonical event-reaction contract.
 - `contracts/notifications.yaml` declares notification rules derived from
   events.
-- New app bundles should not author deprecated `contracts/subscriptions.yaml`.
+- App bundles must not author `contracts/subscriptions.yaml`.
 - Persistent module backends use `backend/schemas.py`, not `backend/models.py`.
 
 ### `app/brand/`
@@ -59,7 +61,7 @@ Brand assets, fonts, and theme inputs used by the shell.
 brand token selection and expanded visual values: `theme.primary`,
 `theme.radius`, `theme.font`, `theme.font_heading`, `theme.appearance`,
 `theme.density`, plus expanded `fonts`, `colors`, `shadows`, `ui`, and
-`primitives` values where older shell/chat compatibility still needs them.
+`primitives` values consumed by shared shell/chat surfaces.
 
 Local font files live under `app/brand/fonts/` and are referenced as
 `/fonts/...` from theme config. Generated artifacts must not copy font binaries
@@ -71,10 +73,14 @@ frontend theme loader.
 - Keep one source of truth for each contract.
 - Prefer explicit validation over runtime fallback branches.
 - Do not encode app-specific behavior in core runtime modules.
-- Do not treat app bundle files as compatibility shims for removed contracts.
+- Do not treat app bundle files as adapters for removed contracts.
 - Keep shell/navigation/chrome behavior in `app/config/shell.json`; keep visual
   tokens, typography, radius, density, shadows, and brand assets in
   `app/brand/theme_config.json`.
+- Keep secret requirements and vault/provider policy in `app/config/secrets.yaml`
+  when needed; generated app bundles must carry names and handles only, never
+  raw API keys, tokens, passwords, connection strings, private keys, or webhook
+  secrets.
 
 ## Related Docs
 

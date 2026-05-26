@@ -9,7 +9,7 @@ The bundle should describe the app, not the platform internals.
 That means the main authoring folders should focus on:
 
 - what screens exist (`ui/pages/`)
-- what workflows exist (`workflows/`)
+- what workflows exist (`workflows/`, beside `app/`)
 - what modules provide business logic (`modules/`)
 - what events connect them (declared in `events.yaml` and `orchestrator.yaml`)
 
@@ -21,74 +21,119 @@ The canonical target is a self-contained app workspace whose active root is
 `app/`.
 
 ```text
-app/
-├── app.json
-├── config/
-│   ├── ai.json
-│   └── shell.json
-├── admin/                      # admin portal — pages, registry, and custom admin UI
-│   ├── admin_registry.yaml     # declares admin portal pages (page ids, paths, scope)
-│   ├── index.js                # registers admin page components
-│   └── pages/                  # custom React components for admin portal pages
-│       └── *.{js,jsx}          # one file per admin page (e.g. OrdersAdminPage.jsx)
-├── ui/
-│   ├── index.js                # registers user-facing custom components; imports admin/index.js
-│   ├── route_manifest.json     # user-facing full-page React route declarations
-│   ├── pages/                  # declarative user-facing page schemas
-│   │   ├── {page_name}.yaml
-│   │   └── {page_name}/
-│   │       └── page.yaml
-│   └── pages/custom/
-│       └── *.{js,jsx}          # optional custom full-page React routes (escape hatch for ui only)
-├── workflows/
-│   └── {workflow_name}/
-│       ├── orchestrator.yaml   # includes triggers (no separate automations/)
-│       ├── agents.yaml
-│       ├── handoffs.yaml
-│       ├── context_variables.yaml
-│       ├── structured_outputs.yaml
-│       ├── tools.yaml
-│       ├── ui_config.yaml
-│       ├── hooks.yaml
-│       ├── tools/
-│       │   └── *.py
-│       └── ui/                 # optional, main user-facing UI
-│           ├── index.js
-│           └── *.{js,jsx}
-├── modules/
-│   └── {module_name}/
-│       ├── module.yaml              # required — identity, actions, capabilities
-│       ├── contracts/               # optional companion manifests
-│       │   ├── events.yaml          # domain events this module may publish
-│       │   ├── reactions.yaml       # event reactions owned by this module
-│       │   ├── notifications.yaml   # notification rules per event
-│       │   ├── settings.yaml        # user/app settings schema
-│       │   ├── admin.yaml           # optional feature panels for the framework admin shell
-│       │   └── entitlements.yaml    # optional capability entitlements
-│       ├── runtime_extensions.yaml  # optional — api_router / startup_service
-│       ├── backend/
-│       │   ├── __init__.py
-│       │   ├── handler.py           # required — thin dispatch, one method per declared action
-│       │   ├── service.py           # recommended — all business logic and event emission
-│       │   ├── repo.py              # recommended — MongoDB access layer, no logic
-│       │   ├── policy.py            # recommended — query scoping for multi-tenancy
-│       │   ├── schemas.py           # recommended — TypedDict shapes + helper functions
-│       │   ├── settings.py          # optional — settings hooks
-│       │   └── admin.py             # optional — admin panel hooks
-│       └── ui/                      # optional module-specific UI surfaces
-│           └── index.js
-└── brand/                      # colocated brand/theme assets
-    ├── assets/
-    ├── fonts/
-    └── theme_config.json
+workspace/
+├── app/
+│   ├── app.json
+│   ├── config/
+│   │   ├── ai.json
+│   │   ├── shell.json
+│   │   ├── database_intent.json
+│   │   ├── secrets.yaml             # optional — names-only secret management contract
+│   │   └── shared_persistence.json  # optional — opt-in shared/existing DB contract
+│   ├── backend/                    # optional — app-owned support code, not modules
+│   │   ├── config.py
+│   │   ├── integrations/           # thin external or hosted API clients
+│   │   │   └── *_client.py
+│   │   ├── adapters/               # provider-specific implementation boundaries
+│   │   │   ├── auth/
+│   │   │   ├── source_control/
+│   │   │   ├── deployment/
+│   │   │   ├── dns/
+│   │   │   ├── registrar/
+│   │   │   ├── cloud/
+│   │   │   ├── storage/
+│   │   │   ├── secrets/
+│   │   │   └── payments/
+│   │   ├── security/               # provider-neutral auth/secret helpers
+│   │   └── routes/                 # app-level routes only when needed
+│   ├── admin/                      # admin portal — pages, registry, and custom admin UI
+│   │   ├── admin_registry.yaml     # declares admin portal pages (page ids, paths, scope)
+│   │   ├── index.js                # registers admin page components
+│   │   └── pages/                  # custom React components for admin portal pages
+│   │       └── *.{js,jsx}          # one file per admin page (e.g. OrdersAdminPage.jsx)
+│   ├── ui/
+│   │   ├── index.js                # registers user-facing custom components; imports admin/index.js
+│   │   ├── route_manifest.json     # user-facing full-page React route declarations
+│   │   ├── pages/                  # declarative user-facing page schemas
+│   │   │   ├── {page_name}.yaml
+│   │   │   └── {page_name}/
+│   │   │       └── page.yaml
+│   │   └── pages/custom/
+│   │       └── *.{js,jsx}          # optional custom full-page React routes
+│   ├── modules/
+│   │   └── {module_name}/
+│   │       ├── module.yaml              # required — identity, actions, capabilities
+│   │       ├── contracts/               # optional companion manifests
+│   │       │   ├── events.yaml          # domain events this module may publish
+│   │       │   ├── reactions.yaml       # event reactions owned by this module
+│   │       │   ├── notifications.yaml   # notification rules per event
+│   │       │   ├── settings.yaml        # user/app settings schema
+│   │       │   ├── admin.yaml           # optional feature panels
+│   │       │   └── entitlements.yaml    # optional capability entitlements
+│   │       ├── runtime_extensions.yaml  # optional — api_router / startup_service
+│   │       ├── backend/
+│   │       │   ├── __init__.py
+│   │       │   ├── handler.py           # required — thin dispatch
+│   │       │   ├── service.py           # recommended — business logic/events
+│   │       │   ├── repo.py              # recommended — MongoDB access layer
+│   │       │   ├── policy.py            # recommended — scoping
+│   │       │   ├── schemas.py           # recommended — typed shapes
+│   │       │   ├── settings.py          # optional — settings hooks
+│   │       │   └── admin.py             # optional — admin panel hooks
+│   │       └── ui/                      # optional module-specific UI surfaces
+│   │           └── index.js
+│   ├── shared_persistence/         # optional helper code for shared_persistence.json
+│   │   ├── contracts.py
+│   │   ├── persistence.py
+│   │   ├── indexes.py
+│   │   └── proposals.py
+│   └── brand/                      # colocated brand/theme assets
+│       ├── assets/
+│       ├── fonts/
+│       └── theme_config.json
+└── workflows/                      # app-local workflow bundles live beside app/
+    └── {workflow_name}/
+        ├── orchestrator.yaml       # includes triggers (no separate automations/)
+        ├── agents.yaml
+        ├── handoffs.yaml
+        ├── context_variables.yaml
+        ├── structured_outputs.yaml
+        ├── tools.yaml
+        ├── ui_config.yaml
+        ├── hooks.yaml
+        ├── tools/
+        │   └── *.py
+        └── ui/                     # optional workflow artifact UI
+            ├── index.js
+            └── *.{js,jsx}
 ```
 
 Canonical rule:
 
-- `config/`, `ui/pages/`, `workflows/`, `modules/`, `ui/`, and `brand/` belong
-  together under the active app root
+- `config/`, `backend/`, `modules/`, `ui/`, `brand/`, and optional
+  `shared_persistence/` belong under the active app root
+- app-local workflow bundles belong under workspace-root `workflows/`, beside
+  `app/`
 - generated/customer app workspaces should be self-contained
 - sibling `ui/` and `brand/` folders outside the app root are not canonical
+- app-owned support code belongs in `backend/integrations/` for external or
+  hosted API clients and `backend/adapters/` for provider-specific
+  implementation boundaries
+- provider-neutral auth/secret helpers belong in `backend/security/`; provider
+  secret manager mechanics belong in `backend/adapters/secrets/`
+- app-owned runtime secret requirements and vault policy belong in
+  `config/secrets.yaml` when needed. This file is a names-only contract and
+  must never contain raw secret values.
+- app-level backend routes belong in `backend/routes/` only when a module
+  runtime extension or platform API contract explicitly needs them
+- `backend/` support code does not create runtime actions, own lifecycle state,
+  publish events, or own persistence; modules own those behaviors and call
+  support code as an implementation detail
+- generated app modules use `ctx.persistence` and `config/database_intent.json`
+  by default
+- `config/shared_persistence.json` and `shared_persistence/` are opt-in only for
+  stable shared collections, cross-module aggregate ownership, or existing
+  database integration; normal apps should omit them
 
 ## Factory App Workspace
 
@@ -99,16 +144,14 @@ It follows the same top-level active app root contract:
 - `app.json`
 - `config/`
 - `ui/`
-- optional `workflows/` overlay root when the app owns local workflows
+- optional workspace-root `workflows/` overlay when the app owns local workflows
 - `modules/`
 - `brand/`
 
-Inside that workspace contract, `<active app root>/workflows/` is reserved for
+Inside that workspace contract, `<workspace>/workflows/` is reserved for
 app-local overlays only. Shared generation-core workflows do not live there;
 they live under `factory_app/workflows/`. The first-party `factory_app/app`
-bundle currently owns no app-local workflow overlays, so
-`factory_app/app/workflows/` should be absent rather than kept around as an
-empty checked-in seam.
+bundle should not carry `factory_app/app/workflows/`.
 
 That is deliberate. The factory workspace is the first-party dogfood app for the
 builder/control-plane layer, so it should stay close to the same workspace
@@ -127,9 +170,8 @@ would not own:
 - factory control-plane modules such as `factory_app/app/modules/factory_control_plane/`
 - framework-owned admin APIs and panel rendering through `AdminPortal`
 
-That means `factory_app/app/workflows/` should be read as an optional overlay
-root for the dogfood app workspace, not as the home of shared factory builder
-implementations.
+That means `factory_app/workflows/` is the factory builder layer, while a
+separate workspace-root `workflows/` directory is the app-local overlay shape.
 
 Use this distinction when reasoning about changes:
 
@@ -151,12 +193,13 @@ hosted-product/
 └── app/                        # active app root read by mozaiksai/hosts/platform.py
     ├── app.json
     ├── config/
+    ├── backend/                # optional support code: integrations/adapters/security/routes
     ├── modules/
     ├── ui/
-    ├── workflows/
-    │   └── extended_orchestration/
-    │       └── extension_registry.json
     └── brand/
+└── workflows/
+    └── extended_orchestration/
+        └── extension_registry.json
 ```
 
 The product workspace's local `workflows/` directory is primarily an overlay
@@ -164,27 +207,21 @@ surface. The shared generator implementations the product consumes resolve from
 the shared generation core, while
 `factory_app/workflows/extended_orchestration/extension_registry.json`
 defines the shared build journeys and entrypoints and
-`app/workflows/extended_orchestration/extension_registry.json`
+`workflows/extended_orchestration/extension_registry.json`
 adds product-specific workflow overlays.
 
-The same boundary applies to `factory_app/app/workflows/`: it is an app-local
-overlay surface that should only exist once the factory app owns a workflow
-that is not part of the shared builder layer.
+The same boundary applies to `factory_app/app/`: it is the app bundle, while
+`factory_app/workflows/` is the shared builder workflow layer.
 
 Runtime workflow loading is single-root by default. A running host selects one active
 workflow root:
 
 1. Studio defaults to `factory_app/workflows/`
-2. app/product hosts use `<active app root>/workflows` when that directory is
-  present
+2. app/product hosts use `<workspace>/workflows` when that directory is present
 3. `MOZAIKS_WORKFLOWS_PATH` may override the selected root explicitly
 
 The runtime does not auto-merge app and factory workflow roots in normal
-platform/studio execution.
-
-Hosted product exception:
-
-- the `mozaiks` host may compose hosted app workflow roots with `factory_app/workflows/` so hosted product workflows and shared builder workflows are both available.
+platform/studio/hosted-product execution.
 
 For generated OSS-style bundles, bounded frontend customization lives inside the
 active app root at `app/ui/index.js`. That file is the app-owned extension
@@ -278,7 +315,7 @@ Use workflows for:
 **Event triggers are declared in `orchestrator.yaml`:**
 
 ```yaml
-# app/workflows/WritersRoom/orchestrator.yaml
+# workflows/WritersRoom/orchestrator.yaml
 triggers:
   - event: set.brief_confirmed
     action: run
@@ -309,6 +346,36 @@ At runtime, `mozaiksai/hosts/platform.py` registers `ModuleEventRouter` for load
 manifests. That router consumes `contracts/reactions.yaml` and `contracts/notifications.yaml`
 and derives platform reactions such as `notification.created`.
 
+### `backend/*`
+
+App-level backend support code is optional and deliberately narrower than a
+module.
+
+Use:
+
+- `backend/integrations/` for thin clients that call hosted or external APIs
+- `backend/adapters/` for provider-specific implementation boundaries, such as
+  auth/OIDC/OAuth, source control, deployment, DNS, registrar, cloud, storage,
+  secrets, or payment provider adapters
+- `backend/security/` for provider-neutral auth and secret helper code
+- `backend/routes/` for app-level routes only when explicitly needed
+
+Do not use `backend/` to own product facts. If a behavior has durable state,
+user-facing actions, authorization, emitted events, lifecycle transitions, or
+persistence authority, put that behavior in a module and have the module call
+the integration/adapter.
+
+Generic runtime auth adapters are framework code under `mozaiksai/core/auth/`.
+Only app-specific auth provider mechanics belong under `backend/adapters/auth/`.
+Provider-specific secret manager mechanics belong under
+`backend/adapters/secrets/`; generic secret resolution belongs under
+`backend/security/`.
+
+`config/secrets.yaml` is the declarative app-owned secret contract. Use it to
+declare provider type, vault/config handles, secret env names, and secret names.
+Do not store API keys, tokens, passwords, connection strings, private keys, or
+webhook secrets in that file.
+
 ### `config/*`
 
 Runtime-facing generated or platform-owned config.
@@ -326,10 +393,12 @@ For most new apps:
 1. Create `app/app.json`
 2. Create shell brand config only if the app needs custom identity
 3. Create app pages in `app/ui/pages/`
-4. Create workflow definitions in `app/workflows/` (with triggers in `orchestrator.yaml`)
+4. Create workflow definitions in `workflows/` (with triggers in `orchestrator.yaml`)
 5. Create modules in `app/modules/` (with actions in `module.yaml` and events in `events.yaml`)
 6. Add companion manifests under `contracts/` (`reactions.yaml`, `notifications.yaml`,
    `settings.yaml`, `admin.yaml`) as needed
+7. Add `backend/integrations/` or `backend/adapters/` only for declared
+   non-module support code that modules or workflows call
 
 ## CRUD Minimalism
 

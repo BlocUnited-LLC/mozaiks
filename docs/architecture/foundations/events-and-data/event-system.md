@@ -119,9 +119,8 @@ Current implementation:
   and nested `target.kind`.
 - `contracts/notifications.yaml` declares notification rules derived from
   events; it is not a reaction-routing file.
-- `contracts/subscriptions.yaml` is deprecated compatibility only. Runtime may
-  load it only when `contracts/reactions.yaml` is absent. New modules,
-  generator output, and CLI guidance should use `contracts/reactions.yaml`.
+- `contracts/subscriptions.yaml` is not supported. Runtime rejects it so
+  modules have one reaction-routing source of truth.
 
 ### Reaction target reference
 

@@ -152,7 +152,7 @@ The app-level switch lives in `app/config/ai.json`:
     "classifier": {
       "enabled": true,
       "llm_config": {
-        "model": "gpt-4o-mini",
+        "model": "gpt-5-nano",
         "temperature": 0.0
       }
     },
@@ -469,7 +469,7 @@ That means:
 Host-aware gating still matters, but the canonical runtime ownership is now
 correct.
 
-## Module Stub
+## Identity Module
 
 This path still exists:
 
@@ -477,7 +477,7 @@ This path still exists:
 factory_app/app/modules/factory_control_plane/backend/
 ```
 
-It is only the dynamic-module stub.
+It is only the zero-action Studio identity module.
 
 It is not the harness runtime.
 
@@ -493,9 +493,6 @@ Use these paths as source of truth:
 Do not treat these as canonical:
 
 - `factory_app/app/modules/factory_control_plane/backend/*`
-- any removed bridge-era `profiles/default/*` layout
-- any removed bridge-era `implementations/default/*` layout
-- old root-level `factory_app/control_plane/*.py` runtime handlers
 
 ## Guidance
 
@@ -509,5 +506,5 @@ If you are changing the first-party builder pack:
 - edit `factory_app/control_plane/prompts/*`
 - edit `factory_app/control_plane/tools/*`
 
-If you are looking at the module stub under `app/modules/...`, you are not in
-the live harness runtime.
+If you are looking at the identity module under `app/modules/...`, you are not
+in the live harness runtime.
