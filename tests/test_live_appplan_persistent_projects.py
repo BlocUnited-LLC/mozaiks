@@ -189,7 +189,7 @@ class TestAppPlanPersistentProjectsFixtureReplay:
             assert f"modules/{module_id}/backend/repo.py" in self.paths
             assert f"modules/{module_id}/backend/schemas.py" in self.paths
 
-    def test_legacy_paths_and_db_guidance_are_absent(self) -> None:
+    def test_removed_paths_and_db_guidance_are_absent(self) -> None:
         all_text = json.dumps(self.plan)
         assert "backend/models.py" not in all_text
         assert "backend/models/" not in all_text

@@ -192,7 +192,7 @@ def test_save_design_docs_bundle_persists_surface_map_and_database_intent(monkey
     # Typed ExperienceSpec must be set on context as a structured object
     assert context.data["experience_spec"]["navigation_model"] == "top-level routes with shell navigation"
     assert context.data["experience_spec"]["pages"][0]["name"] == "Users"
-    # Human-readable YAML string must still be set for backward-compat consumers
+    # Human-readable YAML string remains available for prompt consumers.
     assert "navigation_model" in context.data["experience_spec_document"]
     assert len(design_docs_collection.updates) >= 4
     assert any(

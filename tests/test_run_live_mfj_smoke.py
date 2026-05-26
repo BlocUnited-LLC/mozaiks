@@ -65,7 +65,6 @@ def test_resolve_assistant_message_falls_back_to_structured_output() -> None:
 def test_resolve_default_workflows_root_uses_repo_factory_workflows(monkeypatch) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     monkeypatch.chdir(repo_root)
-    monkeypatch.delenv("MOZAIKS_WORKFLOW_ROOTS", raising=False)
     monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
     monkeypatch.delenv("PLATFORM_PATH", raising=False)
     monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
