@@ -146,6 +146,7 @@ def test_existing_app_entry_routes_into_discovery_with_context() -> None:
     adoption_journey = next(item for item in workflow_sequences if item["id"] == "brownfield_app_adoption")
     assert adoption_journey["steps"][0]["transition"] == "app_type_selector"
     assert adoption_journey["steps"][1]["workflows"] == ["ExistingAppDiscovery"]
+    assert adoption_journey["steps"][2]["transition"] == "brownfield_path_selector"
 
     app_type_selector = transition_map["app_type_selector"]
     existing_app_option = next(item for item in app_type_selector["options"] if item["id"] == "brownfield_app")
@@ -178,6 +179,60 @@ def test_existing_app_entry_routes_into_discovery_with_context() -> None:
         "database_provider": "mongodb",
         "database_setup_mode": "skip",
     }
+
+
+def test_brownfield_path_selector_routes_to_downstream_sequences() -> None:
+    registry = _read_yaml("factory_app/workflows/extended_orchestration/extension_registry.json")
+    transition_map = {item["id"]: item for item in registry["transitions"]}
+    sequence_map = {item["id"]: item for item in registry.get("workflow_sequences") or []}
+
+    # Transition declaration
+    selector = transition_map["brownfield_path_selector"]
+    assert selector["transition_type"] == "user_choice_context"
+    assert selector["ui"]["component"] == "BrownfieldPathSelector"
+    assert selector["ui"]["shell_mode"] == "focused"
+
+    options = {opt["id"]: opt for opt in selector["options"]}
+
+    # Light path option keeps its user-choice id but routes to overlay generation.
+    assert options["light_integration"]["route_to"] == "AgentGenerator"
+    assert options["light_integration"]["sequence"] == "brownfield_overlay_generation"
+    assert options["light_integration"]["context_variables"]["brownfield_build_path"] == "light_integration"
+
+    # Full path option keeps its user-choice id but routes to module generation.
+    assert options["full_migration"]["route_to"] == "DesignDocs"
+    assert options["full_migration"]["sequence"] == "brownfield_module_generation"
+    assert options["full_migration"]["context_variables"]["brownfield_build_path"] == "full_migration"
+
+    legacy_light_sequence = "brownfield_" + "build_light"
+    legacy_full_sequence = "brownfield_" + "build_full"
+    assert legacy_light_sequence not in sequence_map
+    assert legacy_full_sequence not in sequence_map
+
+    # brownfield_overlay_generation sequence
+    light = sequence_map["brownfield_overlay_generation"]
+    light_workflows = [s.get("workflows", [s.get("transition")]) for s in light["steps"]]
+    assert ["AgentGenerator"] in light_workflows
+    assert ["AppGenerator"] in light_workflows
+    assert any(s.get("transition") == "app_review" for s in light["steps"])
+    # DesignDocs should NOT be in the light path
+    assert not any("DesignDocs" in s.get("workflows", []) for s in light["steps"])
+
+    # brownfield_module_generation sequence
+    full = sequence_map["brownfield_module_generation"]
+    full_workflow_steps = [s.get("workflows", []) for s in full["steps"] if "workflows" in s]
+    assert ["DesignDocs"] in full_workflow_steps
+    assert ["AgentGenerator"] in full_workflow_steps
+    assert ["AppGenerator"] in full_workflow_steps
+    assert any(s.get("transition") == "app_review" for s in full["steps"])
+    # DesignDocs must come before AgentGenerator
+    full_workflow_names = [s["workflows"][0] for s in full["steps"] if "workflows" in s]
+    assert full_workflow_names.index("DesignDocs") < full_workflow_names.index("AgentGenerator")
+    assert full_workflow_names.index("AgentGenerator") < full_workflow_names.index("AppGenerator")
+
+    # BrownfieldPathSelector must be registered in ui/index.js
+    index_text = _read_text("factory_app/workflows/extended_orchestration/ui/index.js")
+    assert "BrownfieldPathSelector" in index_text
 
 
 def test_existing_app_preload_supports_workspace_app_preset() -> None:

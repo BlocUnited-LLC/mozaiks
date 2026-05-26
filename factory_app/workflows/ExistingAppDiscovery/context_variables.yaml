@@ -38,6 +38,48 @@ definitions:
       type: state
       default: {}
 
+  context_refresh_request:
+    type: object
+    description: Optional ContextRefreshRequest payload used when brownfield_discovery_refresh reruns discovery/indexing.
+    source:
+      type: state
+      default: {}
+
+  current_context_version_id:
+    type: string
+    description: Optional current AppContextVersion id preserved when refreshing stale brownfield context.
+    source:
+      type: state
+      default: null
+
+  source_refs:
+    type: array
+    description: Optional SourceRef list from the current AppContextVersion or ContextRefreshRequest.
+    source:
+      type: state
+      default: []
+
+  refresh_scope:
+    type: string
+    description: Optional context refresh scope such as discovery_indexing, source_ref_rescan, ownership_recheck, or integration_recheck.
+    source:
+      type: state
+      default: null
+
+  refresh_reason:
+    type: string
+    description: Optional reason emitted by the stale-context policy before launching brownfield_discovery_refresh.
+    source:
+      type: state
+      default: null
+
+  expected_artifacts:
+    type: array
+    description: Optional canonical app-context artifact kinds expected from a context refresh run.
+    source:
+      type: state
+      default: []
+
   discovery_mode:
     type: string
     description: Guided or advanced discovery mode.

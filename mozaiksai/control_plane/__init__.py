@@ -1,5 +1,25 @@
 """Canonical public API for the Mozaiks control-plane subsystem."""
 
+from .app_context_override import (
+    AppContextPolicyOverride,
+    AppContextPolicyOverrideDecision,
+    apply_app_context_policy_override,
+    create_app_context_policy_override,
+)
+from .app_context_refresh_execution import (
+    ContextRefreshLaunchResult,
+    ContextRefreshLaunchStatus,
+    complete_context_refresh,
+    launch_context_refresh_plan,
+)
+from .artifact_promotion import (
+    AcceptedStagedAppBundleArtifactVersionError,
+    AcceptedStagedAppBundleArtifactVersionResult,
+    DraftAppBundleArtifactVersionError,
+    DraftAppBundleArtifactVersionResult,
+    accept_staged_refinement_artifact_version,
+    create_draft_app_bundle_from_staged_refinement,
+)
 from .config import (
     ALLOWED_CONTROL_PLANE_LLM_PROFILE_IDS,
     ControlPlaneCapabilityConfig,
@@ -26,7 +46,6 @@ from .executor import (
     ControlPlaneToolExecutor,
     resolve_control_plane_tool_entrypoint,
 )
-from .invalidation import ArtifactInvalidationService, get_artifact_invalidation_service
 from .implementations import (
     ArtifactKind,
     ArtifactScopeProposer,
@@ -48,6 +67,7 @@ from .implementations import (
     get_refinement_trigger_route_resolver,
     get_scope_proposer,
 )
+from .invalidation import ArtifactInvalidationService, get_artifact_invalidation_service
 from .loader import (
     ControlPlanePackLoadError,
     load_control_plane_pack,
@@ -64,6 +84,7 @@ from .ports import (
     RoutingPolicyPort,
     ScopeProposalPort,
 )
+from .revision_context import assemble_revision_context
 from .runtime import (
     ControlPlaneCheckpointRuntime,
     ControlPlaneHandlerResolutionError,
@@ -71,7 +92,6 @@ from .runtime import (
     instantiate_control_plane_handler,
     resolve_control_plane_handler_entrypoint,
 )
-from .revision_context import assemble_revision_context
 from .schema import (
     ControlPlaneArtifactChangeRoutesManifest,
     ControlPlaneArtifactRoutingManifest,
@@ -88,6 +108,14 @@ from .schema import (
     ControlPlaneToolsManifest,
     LoadedControlPlanePack,
 )
+from .staged_coding_worker import (
+    StagedCodingWorkerChange,
+    StagedCodingWorkerResult,
+    build_scoped_changes_from_worker_result,
+    run_deterministic_staged_coding_worker,
+    run_live_staged_coding_worker,
+    select_staged_coding_worker_reason,
+)
 from .tools import get_revision_context
 
 __all__ = [
@@ -95,6 +123,12 @@ __all__ = [
     "ArtifactInvalidationService",
     "ArtifactScopeProposer",
     "ALLOWED_CONTROL_PLANE_LLM_PROFILE_IDS",
+    "AcceptedStagedAppBundleArtifactVersionError",
+    "AcceptedStagedAppBundleArtifactVersionResult",
+    "AppContextPolicyOverride",
+    "AppContextPolicyOverrideDecision",
+    "DraftAppBundleArtifactVersionError",
+    "DraftAppBundleArtifactVersionResult",
     "ChangeClass",
     "ChangeClassifierPort",
     "ChangeClassifierResult",
@@ -129,6 +163,8 @@ __all__ = [
     "ControlPlaneToolExecutorPort",
     "ControlPlaneToolResult",
     "ControlPlaneToolsManifest",
+    "ContextRefreshLaunchResult",
+    "ContextRefreshLaunchStatus",
     "FirstPartyHarnessDecisionPolicy",
     "HarnessDecision",
     "HarnessDecisionAction",
@@ -146,6 +182,16 @@ __all__ = [
     "ScopedRefinementCodingWorker",
     "build_selected_control_plane_harness",
     "assemble_revision_context",
+    "accept_staged_refinement_artifact_version",
+    "apply_app_context_policy_override",
+    "create_draft_app_bundle_from_staged_refinement",
+    "create_app_context_policy_override",
+    "StagedCodingWorkerChange",
+    "StagedCodingWorkerResult",
+    "build_scoped_changes_from_worker_result",
+    "run_deterministic_staged_coding_worker",
+    "run_live_staged_coding_worker",
+    "select_staged_coding_worker_reason",
     "get_artifact_invalidation_service",
     "get_change_classifier",
     "get_coding_worker",
@@ -155,6 +201,8 @@ __all__ = [
     "get_refinement_trigger_route_resolver",
     "get_scope_proposer",
     "instantiate_control_plane_handler",
+    "complete_context_refresh",
+    "launch_context_refresh_plan",
     "load_ai_config_json",
     "load_control_plane_config",
     "load_control_plane_pack",

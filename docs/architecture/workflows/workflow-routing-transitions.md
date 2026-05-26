@@ -228,3 +228,32 @@ to workflow-local `ui/` plus Python tools. If AgentGenerator emits a transition,
 it must keep routing/context deterministic and bind `ui.component` to a
 registered transition component key. Product-specific copy/images/layout belong
 in the React stub.
+
+### Brownfield Context Refresh
+
+`brownfield_discovery_refresh` is the canonical sequence for resolving a
+control-plane `ContextRefreshPlan` after stale brownfield context blocks a risky
+refinement. It reruns `ExistingAppDiscovery` only.
+
+`ContextRefreshPlan` creation is planning-only. It does not start this sequence
+from stale-context policy evaluation, dry-run, or refinement routing. The
+sequence starts only when an operator or caller explicitly invokes
+`launch_context_refresh_plan`, which resolves the registered sequence and starts
+`ExistingAppDiscovery` through the normal workflow launch path.
+
+This sequence is non-mutating by shape:
+
+- it contains no `AppGenerator` or `AgentGenerator` step
+- it creates no staged patch and no generated overlay
+- it does not promote or mutate source repositories
+- it refreshes app-context artifact families and registers a new
+  `AppContextVersion` through `ExistingAppDiscovery` persistence
+
+After workflow completion, the control plane can call `complete_context_refresh`
+to compare the previous context version with the new current
+`AppContextVersion` and produce a `ContextRefreshResult`. That result records
+whether stale context was actually resolved. It does not relaunch workflows,
+mutate source repositories, or retry the blocked refinement automatically.
+
+Brownfield generation/build sequences remain separate and should be cleaned up
+in a later architecture slice.
