@@ -1,0 +1,11 @@
+{
+  "realm": "mozaiks",
+  "enabled": true,
+  "displayName": "Mozaiks",
+  "registrationAllowed": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": true,
+  "sslRequired": "external"
+}

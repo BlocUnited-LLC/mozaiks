@@ -3,9 +3,9 @@ Tool logging utilities with rotating file output and redaction for workflow tool
 """
 
 import logging
-from pathlib import Path
 from logging.handlers import RotatingFileHandler
-from typing import Optional, Dict, Any
+from pathlib import Path
+from typing import Any
 
 try:
     # Prefer project workflow logger if present
@@ -16,9 +16,9 @@ except Exception:  # pragma: no cover
 SENSITIVE_KEYS = {"api_key", "apikey", "authorization", "auth", "secret", "password", "token"}
 
 
-def _redact_extras(extras: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _redact_extras(extras: dict[str, Any] | None) -> dict[str, Any]:
     data = extras or {}
-    out: Dict[str, Any] = {}
+    out: dict[str, Any] = {}
     for k, v in data.items():
         if any(s in k.lower() for s in SENSITIVE_KEYS):
             out[k] = "***"
@@ -85,19 +85,19 @@ def _ensure_tools_file_handler() -> None:
 def get_tool_logger(
     *,
     tool_name: str,
-    chat_id: Optional[str] = None,
-    app_id: Optional[str] = None,
-    workflow_name: Optional[str] = None,
-    agent_message_id: Optional[str] = None,
-    ui_event_id: Optional[str] = None,
-    base_logger: Optional[logging.Logger] = None,
+    chat_id: str | None = None,
+    app_id: str | None = None,
+    workflow_name: str | None = None,
+    agent_message_id: str | None = None,
+    ui_event_id: str | None = None,
+    base_logger: logging.Logger | None = None,
 ) -> ToolLoggerAdapter:
     # Ensure dedicated tools file logging is attached once
     _ensure_tools_file_handler()
     name = f"core.tools.{tool_name}"
     
-    # Always use standard logger for tools, not ContextLogger
-    # This ensures compatibility with ToolLoggerAdapter
+    # Always use standard logger for tools, not ContextLogger.
+    # This matches the ToolLoggerAdapter interface.
     logger = base_logger if base_logger is not None else logging.getLogger(name)
 
     extra = {
@@ -117,7 +117,7 @@ def log_tool_event(
     *,
     action: str,
     status: str = "info",
-    message: Optional[str] = None,
+    message: str | None = None,
     level: int = logging.INFO,
     **fields: Any,
 ) -> None:

@@ -108,7 +108,7 @@ function Is-Running-In-VSCode {
 }
 
 # Start frontend helper: when inside VS Code try to run in the same terminal or -NoNewWindow;
-# otherwise fall back to starting a shell process (legacy behavior).
+# otherwise start a shell process.
 function Start-FrontendProcess {
     param(
         [switch]$Background
@@ -131,7 +131,7 @@ function Start-FrontendProcess {
         Pop-Location
         return
     } else {
-        # Not running in VS Code: preserve legacy behavior (spawn external shell window)
+        # Not running in VS Code: spawn an external shell window.
         $shellExe = Get-ShellExe
         if ($shellExe) {
             if ($Background) {
