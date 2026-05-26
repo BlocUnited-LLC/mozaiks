@@ -5,15 +5,9 @@ import json
 import uuid
 import zipfile
 from pathlib import Path, PurePosixPath
-from typing import Any, Optional
+from typing import Any
 
-from mozaiksai.core.artifacts import (
-    ArtifactLifecycleStatus,
-    ArtifactValidationStatus,
-    get_artifact_store,
-)
-from mozaiksai.core.artifacts.content_store import get_artifact_content_store
-from mozaiksai.core.capabilities import get_general_capability_service
+from factory_app.workflows.AppGenerator.tools.app_validation import validate_app_build
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 from mozaiksai.control_plane.contracts import (
     CodingWorkerPlan,
@@ -25,8 +19,13 @@ from mozaiksai.control_plane.contracts import (
 from mozaiksai.control_plane.executor import ControlPlaneToolExecutor
 from mozaiksai.control_plane.loader import load_selected_control_plane_pack
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
-
-from factory_app.workflows.AppGenerator.tools.app_validation import validate_app_build
+from mozaiksai.core.artifacts import (
+    ArtifactLifecycleStatus,
+    ArtifactValidationStatus,
+    get_artifact_store,
+)
+from mozaiksai.core.artifacts.content_store import get_artifact_content_store
+from mozaiksai.core.capabilities import get_general_capability_service
 
 _ELIGIBLE_CHANGE_CLASSES = {"patch"}
 _ELIGIBLE_ARTIFACT_KINDS = {"app_bundle", "workflow_bundle", "theme_config"}
@@ -293,7 +292,7 @@ class ScopedRefinementCodingWorker:
         return {path: str(content) for path, content in plan.updated_files.items()}
 
     @staticmethod
-    def _resolve_temperature(llm_config: Optional[dict[str, Any]]) -> Optional[float]:
+    def _resolve_temperature(llm_config: dict[str, Any] | None) -> float | None:
         if not isinstance(llm_config, dict):
             return None
         value = llm_config.get("temperature")
@@ -310,7 +309,7 @@ class ScopedRefinementCodingWorker:
         return normalized if normalized in _VALIDATION_STRATEGIES else "skip"
 
     @staticmethod
-    def _check_eligibility(request: CodingWorkerRequest) -> tuple[bool, Optional[str]]:
+    def _check_eligibility(request: CodingWorkerRequest) -> tuple[bool, str | None]:
         if not str(request.app_id or "").strip():
             return False, "app_id is required"
         if str(request.change_class or "").strip().lower() not in _ELIGIBLE_CHANGE_CLASSES:
@@ -324,7 +323,7 @@ class ScopedRefinementCodingWorker:
         return True, None
 
     @staticmethod
-    def _safe_relpath(raw: Any) -> Optional[str]:
+    def _safe_relpath(raw: Any) -> str | None:
         if not isinstance(raw, str):
             return None
         normalized = raw.replace("\\", "/").strip()
@@ -416,7 +415,7 @@ class ScopedRefinementCodingWorker:
             "bundle_mode": "workspace_snapshot",
             "applied_paths": sorted(applied_files.keys()),
             "validation_strategy": plan.validation_strategy,
-            "validation_status": "",  # placeholder; set after status resolved below
+            "validation_status": "",  # filled after status is resolved below
             "source_surface": request.source_surface,
         }
         content_store = get_artifact_content_store()
@@ -482,7 +481,7 @@ class ScopedRefinementCodingWorker:
         return ArtifactValidationStatus.PENDING
 
 
-_coding_worker: Optional[ScopedRefinementCodingWorker] = None
+_coding_worker: ScopedRefinementCodingWorker | None = None
 
 
 def get_coding_worker() -> ScopedRefinementCodingWorker:

@@ -698,6 +698,18 @@ class RefinementTriggerRouteResolver:
         return bool(re.fullmatch(r"docs/integrations[^/]*\.md", path))
 
     @staticmethod
+    def _adapter_path_matches_connector(path: str, connector_id: str) -> bool:
+        adapter_scope = path.removeprefix("backend/adapters/").lower().replace("-", "_")
+        normalized_id = str(connector_id or "").lower().replace("-", "_")
+        candidates = {normalized_id, normalized_id.replace("_", "")}
+        candidates.update(
+            token
+            for token in normalized_id.split("_")
+            if token and token not in {"api", "adapter", "client", "provider", "service"}
+        )
+        return any(candidate and candidate in adapter_scope for candidate in candidates)
+
+    @staticmethod
     def _module_integration_content_signals(
         *,
         content: str,
@@ -752,6 +764,7 @@ class RefinementTriggerRouteResolver:
         if not manifest_paths:
             paths = [
                 "backend/integrations/*_client.py",
+                "backend/adapters/**/*.py",
                 "modules/*/backend/service.py",
                 "modules/*/backend/schemas.py",
                 "modules/*/module.yaml",
@@ -773,9 +786,19 @@ class RefinementTriggerRouteResolver:
             path
             for path in manifest_paths
             if cls._is_safe_integration_path(path)
-            and re.fullmatch(r"backend/integrations/[A-Za-z0-9_-]+_client\.py", path)
+            and (
+                re.fullmatch(r"backend/integrations/[A-Za-z0-9_-]+_client\.py", path)
+                or path.startswith("backend/adapters/")
+            )
             and (
                 not mentioned_connector_ids
+                or (
+                    path.startswith("backend/adapters/")
+                    and any(
+                        cls._adapter_path_matches_connector(path, connector_id)
+                        for connector_id in selected_connector_ids
+                    )
+                )
                 or path.removeprefix("backend/integrations/").removesuffix("_client.py") in selected_connector_ids
             )
         ]
@@ -830,6 +853,7 @@ class RefinementTriggerRouteResolver:
     def _integration_readiness_path_hint_present(paths: list[str]) -> bool:
         return any(
             path.startswith("backend/integrations/")
+            or path.startswith("backend/adapters/")
             or path.startswith("config/integrations")
             or path.startswith("docs/integrations")
             for path in paths
@@ -1517,6 +1541,59 @@ class RefinementTriggerRouteResolver:
             is_full_restart=False,
         )
 
+    # Validation: alphanumeric, underscore, hyphen only; max 80 chars; no path components.
+    _MODULE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+    _MODULE_ID_MAX_LEN = 80
+
+    @staticmethod
+    def _validate_carry_forward_module_id(module_id: str) -> tuple[bool, str]:
+        """Return ``(is_valid, reason)`` for a single auto-extracted module id.
+
+        Rejects:
+        - empty string
+        - "." or ".."
+        - contains "/" or "\\"
+        - contains any character outside ``[a-zA-Z0-9_-]``
+        - length > 80 characters
+        """
+        if not module_id:
+            return False, "empty"
+        if module_id in (".", ".."):
+            return False, f"reserved name {module_id!r}"
+        if "/" in module_id or "\\" in module_id:
+            return False, "contains path separator"
+        if len(module_id) > RefinementTriggerRouteResolver._MODULE_ID_MAX_LEN:
+            return False, f"exceeds {RefinementTriggerRouteResolver._MODULE_ID_MAX_LEN} characters"
+        if not RefinementTriggerRouteResolver._MODULE_ID_RE.match(module_id):
+            return False, "contains disallowed characters (only a-z, A-Z, 0-9, _, - permitted)"
+        return True, ""
+
+    @staticmethod
+    def _sanitize_carry_forward_module_ids(
+        module_ids: list[str],
+    ) -> tuple[list[str], list[str]]:
+        """Validate and deduplicate auto-extracted module ids.
+
+        Returns ``(valid_ids, rejection_warnings)``. Order is preserved;
+        duplicates are removed keeping the first occurrence. Each rejected id
+        produces one warning string logged by the caller.
+        """
+        valid: list[str] = []
+        seen: set[str] = set()
+        rejection_warnings: list[str] = []
+        for mid in module_ids:
+            is_valid, reason = RefinementTriggerRouteResolver._validate_carry_forward_module_id(mid)
+            if not is_valid:
+                msg = f"carry_forward_invalid_module_id: {mid!r} rejected ({reason})"
+                rejection_warnings.append(msg)
+                _logger.warning("carry_forward module_id rejected for auto-extraction: %s", msg)
+                continue
+            if mid in seen:
+                continue
+            seen.add(mid)
+            valid.append(mid)
+        return valid, rejection_warnings
+
     async def _auto_carry_forward_resolution(
         self,
         *,
@@ -1551,11 +1628,13 @@ class RefinementTriggerRouteResolver:
                 return [], ["carry_forward_invalid_result: tool returned a non-dict value"]
             modules: list[Any] = result.get("modules") or []
             warnings: list[str] = [str(w) for w in (result.get("warnings") or [])]
-            module_ids = [
+            raw_ids = [
                 str(m.get("module_id", "")).strip()
                 for m in modules
                 if isinstance(m, dict) and str(m.get("module_id", "")).strip()
             ]
+            module_ids, rejection_warnings = self._sanitize_carry_forward_module_ids(raw_ids)
+            warnings.extend(rejection_warnings)
             return module_ids, warnings
         except Exception as exc:
             _logger.warning(
@@ -1586,6 +1665,13 @@ class RefinementTriggerRouteResolver:
         }
         if request.artifact_version_id:
             context_seed["artifact_version_id"] = request.artifact_version_id
+        # When the app is in 'review' (pre-promotion), revisions must operate on
+        # the generated bundle path rather than the active workspace root.
+        lifecycle_state = request.extra.get("lifecycle_state")
+        bundle_path = request.extra.get("bundle_path")
+        if lifecycle_state == "review" and isinstance(bundle_path, str) and bundle_path.strip():
+            context_seed["artifact_root"] = bundle_path.strip()
+            context_seed["lifecycle_state"] = "review"
         if impact_set.workflow_sequence:
             context_seed["workflow_sequence"] = impact_set.workflow_sequence
         change_request_id = request.extra.get("change_request_id")
@@ -1741,8 +1827,20 @@ class RefinementTriggerRouteResolver:
         screen = trigger.context_variables.get("screen")
         if isinstance(screen, str) and screen.strip():
             default_source_surface = screen.strip()
+        payload = dict(trigger.trigger_payload or {})
+        # Forward lifecycle state + bundle path from context_variables so
+        # _build_context_seed can set artifact_root when the app is pre-promotion.
+        payload.setdefault("extra", {})
+        if not isinstance(payload["extra"], dict):
+            payload["extra"] = {}
+        lifecycle_state = trigger.context_variables.get("lifecycle_state")
+        if isinstance(lifecycle_state, str) and lifecycle_state.strip():
+            payload["extra"].setdefault("lifecycle_state", lifecycle_state.strip())
+        bundle_path = trigger.context_variables.get("bundle_path")
+        if isinstance(bundle_path, str) and bundle_path.strip():
+            payload["extra"].setdefault("bundle_path", bundle_path.strip())
         return self.request_from_payload(
-            payload=dict(trigger.trigger_payload or {}),
+            payload=payload,
             app_id=trigger.app_id,
             user_id=trigger.user_id,
             requested_workflow_id=trigger.workflow_id,

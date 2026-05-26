@@ -185,6 +185,16 @@ This field is part of `GlobalPackGraph` (`mozaiksai/core/workflow/pack/schema.py
 It must stay in sync with the actual workflow sequence ownership declared in
 `affected_declarative_families` on each sequence.
 
+Staged refinement promotion also snapshots into draft `app_bundle`
+`ArtifactVersion` records using the same `app_bundle` family and lifecycle.
+Patch-ness stays in metadata; it is not a separate artifact kind or family.
+Those drafts become `CURRENT` only through the staged refinement acceptance
+helper, not by introducing a new artifact family.
+After acceptance, Studio promotes the accepted `CURRENT` `app_bundle` back
+into the runnable app root using safe extraction that skips staging metadata
+files and backup trees and rejects unsafe archive paths. The accepted bundle
+must carry a non-empty `files_manifest` before Studio restore can proceed.
+
 ---
 
 ## Artifact Persistence Per Workflow

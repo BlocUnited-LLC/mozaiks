@@ -684,7 +684,7 @@ async def test_module_impact_uses_glob_hints_when_module_id_is_unknown() -> None
 
 
 @pytest.mark.asyncio
-async def test_visual_app_bundle_patch_does_not_trigger_module_paths() -> None:
+async def test_visual_ui_patch_does_not_trigger_module_paths() -> None:
     resolver = _factory_resolver(
         _FakeChangeClassifier(
             change_class="patch",
@@ -1020,6 +1020,42 @@ async def test_hosted_capability_impact_includes_adapter_facade_and_dependent_pa
 
 
 @pytest.mark.asyncio
+async def test_integration_impact_includes_app_backend_provider_adapters() -> None:
+    resolver = _factory_resolver(
+        _FakeChangeClassifier(
+            change_class="patch",
+            rationale="Provider adapter behavior needs a scoped revision.",
+        )
+    )
+    request = resolver.request_from_payload(
+        payload={
+            "refinement_request": {
+                "artifact_kind": "app_bundle",
+                "raw_user_request": "Update the search provider adapter retry behavior.",
+                "extra": {
+                    "files_manifest": [
+                        {"path": "backend/adapters/search/vector_provider.py"},
+                        {"path": "backend/integrations/search_provider_client.py"},
+                        {"path": "backend/adapters/billing/payment_provider.py"},
+                        {"path": "modules/search/backend/service.py"},
+                        {"path": "modules/search/module.yaml"},
+                    ]
+                },
+            }
+        },
+        app_id="app_1",
+        requested_workflow_id="AppGenerator",
+    )
+
+    assert request is not None
+    decision = await resolver.route(request)
+
+    assert "backend/adapters/search/vector_provider.py" in decision.impact_set.affected_bundle_paths
+    assert "backend/integrations/search_provider_client.py" in decision.impact_set.affected_bundle_paths
+    assert "backend/adapters/billing/payment_provider.py" not in decision.impact_set.affected_bundle_paths
+
+
+@pytest.mark.asyncio
 async def test_hosted_capability_non_ui_request_does_not_force_page_paths() -> None:
     resolver = _factory_resolver(
         _FakeChangeClassifier(
@@ -1230,6 +1266,7 @@ async def test_integration_impact_without_manifest_uses_conservative_hints() -> 
 
     assert decision.impact_set.affected_bundle_paths == [
         "backend/integrations/*_client.py",
+        "backend/adapters/**/*.py",
         "modules/*/backend/service.py",
         "modules/*/backend/schemas.py",
         "modules/*/module.yaml",
@@ -2341,6 +2378,151 @@ async def test_conceptual_replan_explicit_empty_list_skips_extraction() -> None:
     assert decision.workflow_sequence == "conceptual_replan"
     assert decision.context_seed["carry_forward_modules"] == []
     mock_extractor.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Module-id sanitization tests (12 tests)
+# ---------------------------------------------------------------------------
+
+
+def test_sanitize_valid_module_ids_pass_through() -> None:
+    """[S1] Valid module ids are returned unchanged."""
+    ids = ["settings", "contacts", "my-module", "module_v2"]
+    valid, warnings = RefinementTriggerRouteResolver._sanitize_carry_forward_module_ids(ids)
+    assert valid == ids
+    assert warnings == []
+
+
+def test_sanitize_rejects_empty_string() -> None:
+    """[S2] Empty string is rejected."""
+    valid, warnings = RefinementTriggerRouteResolver._sanitize_carry_forward_module_ids([""])
+    assert valid == []
+    assert len(warnings) == 1
+    assert "empty" in warnings[0]
+
+
+def test_sanitize_rejects_dot() -> None:
+    """[S3] '.' is rejected as a reserved name."""
+    valid, warnings = RefinementTriggerRouteResolver._sanitize_carry_forward_module_ids(["."])
+    assert valid == []
+    assert any("reserved" in w for w in warnings)
+
+
+def test_sanitize_rejects_dotdot() -> None:
+    """[S4] '..' is rejected as a reserved name."""
+    valid, warnings = RefinementTriggerRouteResolver._sanitize_carry_forward_module_ids([".."])
+    assert valid == []
+    assert any("reserved" in w for w in warnings)
+
+
+def test_sanitize_rejects_forward_slash() -> None:
+    """[S5] Module id containing '/' is rejected."""
+    valid, warnings = RefinementTriggerRouteResolver._sanitize_carry_forward_module_ids(
+        ["modules/settings"]
+    )
+    assert valid == []
+    assert any("path separator" in w for w in warnings)
+
+
+def test_sanitize_rejects_backslash() -> None:
+    """[S6] Module id containing '\\' is rejected."""
+    valid, warnings = RefinementTriggerRouteResolver._sanitize_carry_forward_module_ids(
+        ["modules\\settings"]
+    )
+    assert valid == []
+    assert any("path separator" in w for w in warnings)
+
+
+def test_sanitize_rejects_disallowed_characters() -> None:
+    """[S7] Module id with characters outside [a-zA-Z0-9_-] is rejected."""
+    bad_ids = ["my module", "mod@ule", "mod!ule", "mod;ule"]
+    for bad_id in bad_ids:
+        valid, warnings = RefinementTriggerRouteResolver._sanitize_carry_forward_module_ids([bad_id])
+        assert valid == [], f"expected {bad_id!r} to be rejected"
+        assert any("disallowed" in w for w in warnings)
+
+
+def test_sanitize_rejects_id_exceeding_max_length() -> None:
+    """[S8] Module id longer than 80 characters is rejected."""
+    long_id = "a" * 81
+    valid, warnings = RefinementTriggerRouteResolver._sanitize_carry_forward_module_ids([long_id])
+    assert valid == []
+    assert any("exceeds" in w for w in warnings)
+
+
+def test_sanitize_accepts_id_at_max_length() -> None:
+    """[S9] Module id exactly 80 characters is accepted."""
+    max_id = "a" * 80
+    valid, warnings = RefinementTriggerRouteResolver._sanitize_carry_forward_module_ids([max_id])
+    assert valid == [max_id]
+    assert warnings == []
+
+
+def test_sanitize_deduplicates_preserving_order() -> None:
+    """[S10] Duplicate valid ids are deduplicated; first occurrence is kept."""
+    ids = ["alpha", "beta", "alpha", "gamma", "beta"]
+    valid, warnings = RefinementTriggerRouteResolver._sanitize_carry_forward_module_ids(ids)
+    assert valid == ["alpha", "beta", "gamma"]
+    assert warnings == []
+
+
+def test_sanitize_mixed_valid_and_invalid() -> None:
+    """[S11] Valid ids are kept; invalid ids produce warnings; both in same input."""
+    ids = ["good_module", "../etc/passwd", "also-good", "bad/path"]
+    valid, warnings = RefinementTriggerRouteResolver._sanitize_carry_forward_module_ids(ids)
+    assert valid == ["good_module", "also-good"]
+    assert len(warnings) == 2
+    assert all("carry_forward_invalid_module_id" in w for w in warnings)
+
+
+@pytest.mark.asyncio
+async def test_auto_carry_forward_resolution_rejects_unsafe_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """[S12] _auto_carry_forward_resolution sanitizes unsafe module ids returned by the tool."""
+    _write_business_plan_registry(tmp_path, monkeypatch)
+    resolver = RefinementTriggerRouteResolver(
+        classifier=_FakeChangeClassifier(change_class="patch", rationale="test"),
+        pack_loader=_pack,
+    )
+
+    # Create the request before patching _load_pack so request_from_payload uses the real pack.
+    request = resolver.request_from_payload(
+        payload={"refinement_request": {"raw_user_request": "test"}},
+        app_id="app_s12",
+        requested_workflow_id="FinalMemoAssembly",
+    )
+
+    unsafe_modules = [
+        {"module_id": "good_module"},
+        {"module_id": "../etc/passwd"},
+        {"module_id": "also-good"},
+        {"module_id": "bad/path"},
+    ]
+
+    async def _fake_tool(context=None):
+        return {"modules": unsafe_modules, "warnings": []}
+
+    mock_tool_def = type("T", (), {"entrypoint": "fake.entry:fn"})()
+    mock_loaded_pack = type(
+        "P", (), {"tool_by_id": lambda self, _: mock_tool_def}
+    )()
+
+    with patch.object(resolver, "_load_pack", return_value=mock_loaded_pack), patch(
+        "mozaiksai.control_plane.implementations.refinement_router"
+        ".resolve_control_plane_tool_entrypoint",
+        return_value=_fake_tool,
+    ):
+        module_ids, warnings = await resolver._auto_carry_forward_resolution(
+            request=request,
+            previous_app_bundle_ref="av_s12",
+        )
+
+    assert "good_module" in module_ids
+    assert "also-good" in module_ids
+    assert "../etc/passwd" not in module_ids
+    assert "bad/path" not in module_ids
+    assert any("carry_forward_invalid_module_id" in w for w in warnings)
 
 
 def test_docs_mention_phase_3_auto_population() -> None:

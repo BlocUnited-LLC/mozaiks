@@ -1,0 +1,1173 @@
+{
+  "coding_llm_config": {
+    "model": "gpt-5.2-codex",
+    "temperature": 0.1
+  },
+  "failed_count": 0,
+  "overall_status": "success",
+  "scenario_count": 5,
+  "scenarios": [
+    {
+      "app_id": "refinement-live-worker-smoke",
+      "artifact_store": {
+        "attempted": true,
+        "backend": "smoke_local_in_memory",
+        "created_version_count": 1,
+        "created_version_id": "av_refinement_live_worker_smoke_persisted"
+      },
+      "coding_llm_config": {
+        "model": "gpt-5.2-codex",
+        "temperature": 0.1
+      },
+      "coding_worker_result": {
+        "applied_files": {
+          "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Reports Dashboard\n"
+        },
+        "blocked_reason": null,
+        "eligible": true,
+        "error": null,
+        "execution_mode": "coding_worker",
+        "metadata": {
+          "applied_file_count": 1,
+          "applied_paths": [
+            "ui/pages/dashboard.yaml"
+          ],
+          "artifact_kind": "app_bundle",
+          "artifact_path": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmpkde7yz1n\\generated_refinements\\refinement-live-worker-smoke\\app_bundle\\app_bundle\\6769c39149dc\\artifact.zip",
+          "artifact_version_id": "av_refinement_live_worker_smoke_persisted",
+          "bundle_mode": "workspace_snapshot",
+          "change_class": "patch",
+          "selected_file_paths": [],
+          "tool_context_loaded": true,
+          "workspace_dir": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmpkde7yz1n\\generated_refinements\\refinement-live-worker-smoke\\app_bundle\\app_bundle\\6769c39149dc\\workspace"
+        },
+        "plan": {
+          "needs_human_review": false,
+          "owned_paths": [
+            "ui/pages/dashboard.yaml"
+          ],
+          "rationale": "Single text update in specified dashboard YAML to match requested title.",
+          "start_preview": false,
+          "summary": "Updated dashboard title to Reports Dashboard.",
+          "updated_files": {
+            "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Reports Dashboard\n"
+          },
+          "validation_commands": [],
+          "validation_strategy": "skip"
+        },
+        "provider": "control_plane_coding",
+        "status": "validated",
+        "validation_result": {
+          "errors": [],
+          "preview_url": null,
+          "success": true,
+          "validation_status": "skipped",
+          "validation_strategy": "skip",
+          "warnings": [
+            "manual live smoke skips persistent validation output; replay fixture captures the staged result"
+          ]
+        }
+      },
+      "expected_changed_paths": [
+        "ui/pages/dashboard.yaml"
+      ],
+      "failure_category": null,
+      "failure_detail": null,
+      "name": "ui_patch",
+      "plan": {
+        "affected_bundle_paths": [
+          "ui/pages/dashboard.yaml"
+        ],
+        "affected_declarative_families": [
+          "app_bundle"
+        ],
+        "affected_workflows": [
+          "smoke_workflow"
+        ],
+        "app_id": "refinement-live-worker-smoke",
+        "artifact_kind": "app_bundle",
+        "change_class": "patch",
+        "execution_mode": "staged",
+        "generated_files_changed": false,
+        "human_review_required": false,
+        "mutation_allowed": false,
+        "next_step": "scoped_patch_candidate",
+        "output_workspace": "C:/Users/mbari/AppData/Local/Temp/tmpkde7yz1n/.refinement_staging/refinement-live-worker-smoke/req_refinement_live_worker_001",
+        "profiles": {
+          "classifier": "raw_llm_config",
+          "codegen": null,
+          "planner_replanner": null,
+          "reviewer_validator": null
+        },
+        "refinement_lane": "ui_patch",
+        "request": "Change the dashboard title to Reports Dashboard.",
+        "request_id": "req_refinement_live_worker_001",
+        "scope_summary": "Manual live smoke for a dashboard title patch.",
+        "staging_area": "C:/Users/mbari/AppData/Local/Temp/tmpkde7yz1n/.refinement_staging/refinement-live-worker-smoke/req_refinement_live_worker_001",
+        "target_workflow": "smoke_workflow",
+        "validation_plan": {
+          "items": [
+            {
+              "id": "route_component_validation",
+              "label": "Route/component validation",
+              "reason": "Required when refinement touches UI routes, pages, or experience surfaces.",
+              "required": true
+            },
+            {
+              "id": "ui_theme_primitive_validation",
+              "label": "UI theme/primitive validation",
+              "reason": "Required when refinement touches page schema, route manifest, or design surfaces.",
+              "required": true
+            },
+            {
+              "id": "module_contract_validation",
+              "label": "Module contract validation",
+              "reason": "Required when refinement touches module manifests, contracts, or backend handlers.",
+              "required": false
+            }
+          ]
+        },
+        "warnings": [
+          "Staged mode reserves a metadata path only; no app files are copied or mutated."
+        ],
+        "workflow_id": "smoke_workflow",
+        "workflow_sequence": "app_revision"
+      },
+      "request": "Change the dashboard title to Reports Dashboard.",
+      "request_id": "req_refinement_live_worker_001",
+      "source_file_unchanged": true,
+      "source_snapshot": {
+        "after": {
+          "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
+          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
+          "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
+          "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
+          "modules/projects/module.yaml": "schema_version: mozaiks.module.v1\nmodule:\n  id: projects\n  display_name: Projects\n  version: 1.0.0\n  description: Projects module.\n  handler: backend.handler:ProjectsModule\npermissions: []\nactions: []\ncapabilities: []\n",
+          "ui/index.js": "import DashboardPage from './pages/custom/DashboardPage.jsx';\n\nexport function register(registerComponent) {\n  registerComponent('DashboardPage', DashboardPage);\n}\n",
+          "ui/pages/custom/DashboardPage.jsx": "export default function DashboardPage() {\n  return <main><h1>Dashboard</h1></main>;\n}\n",
+          "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Dashboard\n",
+          "ui/route_manifest.json": "{\n  \"pages\": [\n    {\n      \"component\": \"DashboardPage\",\n      \"id\": \"dashboard\",\n      \"label\": \"Dashboard\",\n      \"path\": \"/dashboard\",\n      \"requiresAuth\": true\n    }\n  ]\n}\n"
+        },
+        "before": {
+          "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
+          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
+          "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
+          "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
+          "modules/projects/module.yaml": "schema_version: mozaiks.module.v1\nmodule:\n  id: projects\n  display_name: Projects\n  version: 1.0.0\n  description: Projects module.\n  handler: backend.handler:ProjectsModule\npermissions: []\nactions: []\ncapabilities: []\n",
+          "ui/index.js": "import DashboardPage from './pages/custom/DashboardPage.jsx';\n\nexport function register(registerComponent) {\n  registerComponent('DashboardPage', DashboardPage);\n}\n",
+          "ui/pages/custom/DashboardPage.jsx": "export default function DashboardPage() {\n  return <main><h1>Dashboard</h1></main>;\n}\n",
+          "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Dashboard\n",
+          "ui/route_manifest.json": "{\n  \"pages\": [\n    {\n      \"component\": \"DashboardPage\",\n      \"id\": \"dashboard\",\n      \"label\": \"Dashboard\",\n      \"path\": \"/dashboard\",\n      \"requiresAuth\": true\n    }\n  ]\n}\n"
+        }
+      },
+      "staged_snapshot": {
+        "workspace": {
+          "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Reports Dashboard\n"
+        }
+      },
+      "staging_result": {
+        "changed_files": [
+          {
+            "path": "ui/pages/dashboard.yaml",
+            "reason": "live worker output for staged refinement smoke",
+            "staged_path": "C:/Users/mbari/AppData/Local/Temp/tmpkde7yz1n/.refinement_staging/refinement-live-worker-smoke/req_refinement_live_worker_001/workspace/ui/pages/dashboard.yaml",
+            "status": "updated"
+          }
+        ],
+        "execution_mode": "scoped_staging",
+        "mutation_allowed": false,
+        "mutation_scope": "staging_only",
+        "request_id": "req_refinement_live_worker_001",
+        "result_path": "C:/Users/mbari/AppData/Local/Temp/tmpkde7yz1n/.refinement_staging/refinement-live-worker-smoke/req_refinement_live_worker_001/execution_result.json",
+        "source_mutated": false,
+        "staging_area": "C:/Users/mbari/AppData/Local/Temp/tmpkde7yz1n/.refinement_staging/refinement-live-worker-smoke/req_refinement_live_worker_001"
+      },
+      "status": "success",
+      "warnings": [
+        "manual live smoke skips persistent validation output; replay fixture captures the staged result"
+      ],
+      "worker_request": {
+        "app_id": "refinement-live-worker-smoke",
+        "artifact_key": "app_bundle",
+        "artifact_kind": "app_bundle",
+        "artifact_version_id": "av_refinement_live_worker_smoke_001",
+        "change_class": "patch",
+        "context_seed": {
+          "affected_bundle_paths": [
+            "ui/pages/dashboard.yaml"
+          ],
+          "refinement_lane": "ui_patch",
+          "request_id": "req_refinement_live_worker_001",
+          "scenario_name": "ui_patch"
+        },
+        "files": {
+          "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Dashboard\n"
+        },
+        "metadata": {
+          "affected_bundle_paths": [
+            "ui/pages/dashboard.yaml"
+          ],
+          "request_id": "req_refinement_live_worker_001",
+          "scenario_name": "ui_patch",
+          "smoke": "refinement_live_coding_worker"
+        },
+        "raw_user_request": "Change the dashboard title to Reports Dashboard.",
+        "requested_workflow_id": "smoke_workflow",
+        "source_surface": "refinement_live_coding_worker_smoke",
+        "start_preview": false,
+        "user_id": null,
+        "validation_strategy": "skip"
+      },
+      "worker_result": {
+        "changes": [
+          {
+            "new_content": "page_type: landing\ntitle: Reports Dashboard\n",
+            "path": "ui/pages/dashboard.yaml",
+            "reason": "live worker output for staged refinement smoke"
+          }
+        ],
+        "request_id": "req_refinement_live_worker_001",
+        "source": "live_worker",
+        "warnings": []
+      }
+    },
+    {
+      "app_id": "refinement-live-worker-smoke-module",
+      "artifact_store": {
+        "attempted": true,
+        "backend": "smoke_local_in_memory",
+        "created_version_count": 1,
+        "created_version_id": "av_refinement_live_worker_smoke_persisted"
+      },
+      "coding_llm_config": {
+        "model": "gpt-5.2-codex",
+        "temperature": 0.1
+      },
+      "coding_worker_result": {
+        "applied_files": {
+          "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\n\ndef list_projects():\n    return []\n\n\ndef archive_project(project_id):\n    \"\"\"No-op archive action for staged refinement smoke.\"\"\"\n    return {\"archived\": False, \"project_id\": project_id}\n"
+        },
+        "blocked_reason": null,
+        "eligible": true,
+        "error": null,
+        "execution_mode": "coding_worker",
+        "metadata": {
+          "applied_file_count": 1,
+          "applied_paths": [
+            "modules/projects/backend/service.py"
+          ],
+          "artifact_kind": "app_bundle",
+          "artifact_path": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmpl91v0jp8\\generated_refinements\\refinement-live-worker-smoke-module\\app_bundle\\app_bundle\\328fb9259d41\\artifact.zip",
+          "artifact_version_id": "av_refinement_live_worker_smoke_persisted",
+          "bundle_mode": "workspace_snapshot",
+          "change_class": "patch",
+          "selected_file_paths": [],
+          "tool_context_loaded": true,
+          "workspace_dir": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmpl91v0jp8\\generated_refinements\\refinement-live-worker-smoke-module\\app_bundle\\app_bundle\\328fb9259d41\\workspace"
+        },
+        "plan": {
+          "needs_human_review": false,
+          "owned_paths": [
+            "modules/projects/backend/service.py"
+          ],
+          "rationale": "Scoped addition of a no-op stub in the specified service file.",
+          "start_preview": false,
+          "summary": "Added a no-op archive_project stub to the projects service.",
+          "updated_files": {
+            "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\n\ndef list_projects():\n    return []\n\n\ndef archive_project(project_id):\n    \"\"\"No-op archive action for staged refinement smoke.\"\"\"\n    return {\"archived\": False, \"project_id\": project_id}\n"
+          },
+          "validation_commands": [],
+          "validation_strategy": "skip"
+        },
+        "provider": "control_plane_coding",
+        "status": "validated",
+        "validation_result": {
+          "errors": [],
+          "preview_url": null,
+          "success": true,
+          "validation_status": "skipped",
+          "validation_strategy": "skip",
+          "warnings": [
+            "manual live smoke skips persistent validation output; replay fixture captures the staged result"
+          ]
+        }
+      },
+      "expected_changed_paths": [
+        "modules/projects/backend/service.py"
+      ],
+      "failure_category": null,
+      "failure_detail": null,
+      "name": "module_backend",
+      "plan": {
+        "affected_bundle_paths": [
+          "modules/projects/backend/service.py"
+        ],
+        "affected_declarative_families": [
+          "app_bundle"
+        ],
+        "affected_workflows": [
+          "smoke_workflow"
+        ],
+        "app_id": "refinement-live-worker-smoke-module",
+        "artifact_kind": "app_bundle",
+        "change_class": "patch",
+        "execution_mode": "staged",
+        "generated_files_changed": false,
+        "human_review_required": false,
+        "mutation_allowed": false,
+        "next_step": "scoped_patch_candidate",
+        "output_workspace": "C:/Users/mbari/AppData/Local/Temp/tmpl91v0jp8/.refinement_staging/refinement-live-worker-smoke-module/req_refinement_live_worker_module_backend_001",
+        "profiles": {
+          "classifier": "raw_llm_config",
+          "codegen": null,
+          "planner_replanner": null,
+          "reviewer_validator": null
+        },
+        "refinement_lane": "feature_addition",
+        "request": "Add a short no-op archive_project action stub to the projects module service.",
+        "request_id": "req_refinement_live_worker_module_backend_001",
+        "scope_summary": "Manual live smoke for a module backend service comment or stub patch.",
+        "staging_area": "C:/Users/mbari/AppData/Local/Temp/tmpl91v0jp8/.refinement_staging/refinement-live-worker-smoke-module/req_refinement_live_worker_module_backend_001",
+        "target_workflow": "smoke_workflow",
+        "validation_plan": {
+          "items": [
+            {
+              "id": "route_component_validation",
+              "label": "Route/component validation",
+              "reason": "Required when refinement touches UI routes, pages, or experience surfaces.",
+              "required": false
+            },
+            {
+              "id": "ui_theme_primitive_validation",
+              "label": "UI theme/primitive validation",
+              "reason": "Required when refinement touches page schema, route manifest, or design surfaces.",
+              "required": false
+            },
+            {
+              "id": "module_contract_validation",
+              "label": "Module contract validation",
+              "reason": "Required when refinement touches module manifests, contracts, or backend handlers.",
+              "required": true
+            }
+          ]
+        },
+        "warnings": [
+          "Staged mode reserves a metadata path only; no app files are copied or mutated."
+        ],
+        "workflow_id": "smoke_workflow",
+        "workflow_sequence": "app_revision"
+      },
+      "request": "Add a short no-op archive_project action stub to the projects module service.",
+      "request_id": "req_refinement_live_worker_module_backend_001",
+      "source_file_unchanged": true,
+      "source_snapshot": {
+        "after": {
+          "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
+          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
+          "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
+          "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
+          "modules/projects/module.yaml": "schema_version: mozaiks.module.v1\nmodule:\n  id: projects\n  display_name: Projects\n  version: 1.0.0\n  description: Projects module.\n  handler: backend.handler:ProjectsModule\npermissions: []\nactions: []\ncapabilities: []\n",
+          "ui/index.js": "import DashboardPage from './pages/custom/DashboardPage.jsx';\n\nexport function register(registerComponent) {\n  registerComponent('DashboardPage', DashboardPage);\n}\n",
+          "ui/pages/custom/DashboardPage.jsx": "export default function DashboardPage() {\n  return <main><h1>Dashboard</h1></main>;\n}\n",
+          "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Dashboard\n",
+          "ui/route_manifest.json": "{\n  \"pages\": [\n    {\n      \"component\": \"DashboardPage\",\n      \"id\": \"dashboard\",\n      \"label\": \"Dashboard\",\n      \"path\": \"/dashboard\",\n      \"requiresAuth\": true\n    }\n  ]\n}\n"
+        },
+        "before": {
+          "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
+          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
+          "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
+          "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
+          "modules/projects/module.yaml": "schema_version: mozaiks.module.v1\nmodule:\n  id: projects\n  display_name: Projects\n  version: 1.0.0\n  description: Projects module.\n  handler: backend.handler:ProjectsModule\npermissions: []\nactions: []\ncapabilities: []\n",
+          "ui/index.js": "import DashboardPage from './pages/custom/DashboardPage.jsx';\n\nexport function register(registerComponent) {\n  registerComponent('DashboardPage', DashboardPage);\n}\n",
+          "ui/pages/custom/DashboardPage.jsx": "export default function DashboardPage() {\n  return <main><h1>Dashboard</h1></main>;\n}\n",
+          "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Dashboard\n",
+          "ui/route_manifest.json": "{\n  \"pages\": [\n    {\n      \"component\": \"DashboardPage\",\n      \"id\": \"dashboard\",\n      \"label\": \"Dashboard\",\n      \"path\": \"/dashboard\",\n      \"requiresAuth\": true\n    }\n  ]\n}\n"
+        }
+      },
+      "staged_snapshot": {
+        "workspace": {
+          "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\n\ndef list_projects():\n    return []\n\n\ndef archive_project(project_id):\n    \"\"\"No-op archive action for staged refinement smoke.\"\"\"\n    return {\"archived\": False, \"project_id\": project_id}\n"
+        }
+      },
+      "staging_result": {
+        "changed_files": [
+          {
+            "path": "modules/projects/backend/service.py",
+            "reason": "live worker output for staged refinement smoke",
+            "staged_path": "C:/Users/mbari/AppData/Local/Temp/tmpl91v0jp8/.refinement_staging/refinement-live-worker-smoke-module/req_refinement_live_worker_module_backend_001/workspace/modules/projects/backend/service.py",
+            "status": "updated"
+          }
+        ],
+        "execution_mode": "scoped_staging",
+        "mutation_allowed": false,
+        "mutation_scope": "staging_only",
+        "request_id": "req_refinement_live_worker_module_backend_001",
+        "result_path": "C:/Users/mbari/AppData/Local/Temp/tmpl91v0jp8/.refinement_staging/refinement-live-worker-smoke-module/req_refinement_live_worker_module_backend_001/execution_result.json",
+        "source_mutated": false,
+        "staging_area": "C:/Users/mbari/AppData/Local/Temp/tmpl91v0jp8/.refinement_staging/refinement-live-worker-smoke-module/req_refinement_live_worker_module_backend_001"
+      },
+      "status": "success",
+      "warnings": [
+        "manual live smoke skips persistent validation output; replay fixture captures the staged result"
+      ],
+      "worker_request": {
+        "app_id": "refinement-live-worker-smoke-module",
+        "artifact_key": "app_bundle",
+        "artifact_kind": "app_bundle",
+        "artifact_version_id": "av_refinement_live_worker_module_backend_001",
+        "change_class": "patch",
+        "context_seed": {
+          "affected_bundle_paths": [
+            "modules/projects/backend/service.py"
+          ],
+          "refinement_lane": "feature_addition",
+          "request_id": "req_refinement_live_worker_module_backend_001",
+          "scenario_name": "module_backend"
+        },
+        "files": {
+          "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n"
+        },
+        "metadata": {
+          "affected_bundle_paths": [
+            "modules/projects/backend/service.py"
+          ],
+          "request_id": "req_refinement_live_worker_module_backend_001",
+          "scenario_name": "module_backend",
+          "smoke": "refinement_live_coding_worker"
+        },
+        "raw_user_request": "Add a short no-op archive_project action stub to the projects module service.",
+        "requested_workflow_id": "smoke_workflow",
+        "source_surface": "refinement_live_coding_worker_smoke",
+        "start_preview": false,
+        "user_id": null,
+        "validation_strategy": "skip"
+      },
+      "worker_result": {
+        "changes": [
+          {
+            "new_content": "\"\"\"Projects service.\"\"\"\n\n\ndef list_projects():\n    return []\n\n\ndef archive_project(project_id):\n    \"\"\"No-op archive action for staged refinement smoke.\"\"\"\n    return {\"archived\": False, \"project_id\": project_id}\n",
+            "path": "modules/projects/backend/service.py",
+            "reason": "live worker output for staged refinement smoke"
+          }
+        ],
+        "request_id": "req_refinement_live_worker_module_backend_001",
+        "source": "live_worker",
+        "warnings": []
+      }
+    },
+    {
+      "app_id": "refinement-live-worker-smoke-integration",
+      "artifact_store": {
+        "attempted": true,
+        "backend": "smoke_local_in_memory",
+        "created_version_count": 1,
+        "created_version_id": "av_refinement_live_worker_smoke_persisted"
+      },
+      "coding_llm_config": {
+        "model": "gpt-5.2-codex",
+        "temperature": 0.1
+      },
+      "coding_worker_result": {
+        "applied_files": {
+          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n\n# Retry behavior: transient failures from the analytics provider should be retried\n# with backoff to avoid dropping events while preventing rapid retry storms.\n"
+        },
+        "blocked_reason": null,
+        "eligible": true,
+        "error": null,
+        "execution_mode": "coding_worker",
+        "metadata": {
+          "applied_file_count": 1,
+          "applied_paths": [
+            "backend/integrations/analytics_provider_client.py"
+          ],
+          "artifact_kind": "app_bundle",
+          "artifact_path": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmps0y1wlbb\\generated_refinements\\refinement-live-worker-smoke-integration\\app_bundle\\app_bundle\\9380a237e5b2\\artifact.zip",
+          "artifact_version_id": "av_refinement_live_worker_smoke_persisted",
+          "bundle_mode": "workspace_snapshot",
+          "change_class": "patch",
+          "selected_file_paths": [],
+          "tool_context_loaded": true,
+          "workspace_dir": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmps0y1wlbb\\generated_refinements\\refinement-live-worker-smoke-integration\\app_bundle\\app_bundle\\9380a237e5b2\\workspace"
+        },
+        "plan": {
+          "needs_human_review": false,
+          "owned_paths": [
+            "backend/integrations/analytics_provider_client.py"
+          ],
+          "rationale": "Request is a simple documentation comment update in the specified file.",
+          "start_preview": false,
+          "summary": "Added comment describing analytics provider retry behavior.",
+          "updated_files": {
+            "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n\n# Retry behavior: transient failures from the analytics provider should be retried\n# with backoff to avoid dropping events while preventing rapid retry storms.\n"
+          },
+          "validation_commands": [],
+          "validation_strategy": "skip"
+        },
+        "provider": "control_plane_coding",
+        "status": "validated",
+        "validation_result": {
+          "errors": [],
+          "preview_url": null,
+          "success": true,
+          "validation_status": "skipped",
+          "validation_strategy": "skip",
+          "warnings": [
+            "manual live smoke skips persistent validation output; replay fixture captures the staged result"
+          ]
+        }
+      },
+      "expected_changed_paths": [
+        "backend/integrations/analytics_provider_client.py"
+      ],
+      "failure_category": null,
+      "failure_detail": null,
+      "name": "integration_adapter",
+      "plan": {
+        "affected_bundle_paths": [
+          "backend/integrations/analytics_provider_client.py"
+        ],
+        "affected_declarative_families": [
+          "app_bundle"
+        ],
+        "affected_workflows": [
+          "smoke_workflow"
+        ],
+        "app_id": "refinement-live-worker-smoke-integration",
+        "artifact_kind": "app_bundle",
+        "change_class": "patch",
+        "execution_mode": "staged",
+        "generated_files_changed": false,
+        "human_review_required": false,
+        "mutation_allowed": false,
+        "next_step": "scoped_patch_candidate",
+        "output_workspace": "C:/Users/mbari/AppData/Local/Temp/tmps0y1wlbb/.refinement_staging/refinement-live-worker-smoke-integration/req_refinement_live_worker_integration_001",
+        "profiles": {
+          "classifier": "raw_llm_config",
+          "codegen": null,
+          "planner_replanner": null,
+          "reviewer_validator": null
+        },
+        "refinement_lane": "integration",
+        "request": "Add a comment explaining analytics_provider retry behavior in the analytics provider client.",
+        "request_id": "req_refinement_live_worker_integration_001",
+        "scope_summary": "Manual live smoke for an integration adapter comment-only patch.",
+        "staging_area": "C:/Users/mbari/AppData/Local/Temp/tmps0y1wlbb/.refinement_staging/refinement-live-worker-smoke-integration/req_refinement_live_worker_integration_001",
+        "target_workflow": "smoke_workflow",
+        "validation_plan": {
+          "items": [
+            {
+              "id": "route_component_validation",
+              "label": "Route/component validation",
+              "reason": "Required when refinement touches UI routes, pages, or experience surfaces.",
+              "required": false
+            },
+            {
+              "id": "ui_theme_primitive_validation",
+              "label": "UI theme/primitive validation",
+              "reason": "Required when refinement touches page schema, route manifest, or design surfaces.",
+              "required": false
+            },
+            {
+              "id": "module_contract_validation",
+              "label": "Module contract validation",
+              "reason": "Required when refinement touches module manifests, contracts, or backend handlers.",
+              "required": false
+            },
+            {
+              "id": "integration_readiness",
+              "label": "Integration readiness validation",
+              "reason": "Required when connector, adapter, or integration files are in scope.",
+              "required": true
+            }
+          ]
+        },
+        "warnings": [
+          "Staged mode reserves a metadata path only; no app files are copied or mutated."
+        ],
+        "workflow_id": "smoke_workflow",
+        "workflow_sequence": "app_revision"
+      },
+      "request": "Add a comment explaining analytics_provider retry behavior in the analytics provider client.",
+      "request_id": "req_refinement_live_worker_integration_001",
+      "source_file_unchanged": true,
+      "source_snapshot": {
+        "after": {
+          "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
+          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
+          "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
+          "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
+          "modules/projects/module.yaml": "schema_version: mozaiks.module.v1\nmodule:\n  id: projects\n  display_name: Projects\n  version: 1.0.0\n  description: Projects module.\n  handler: backend.handler:ProjectsModule\npermissions: []\nactions: []\ncapabilities: []\n",
+          "ui/index.js": "import DashboardPage from './pages/custom/DashboardPage.jsx';\n\nexport function register(registerComponent) {\n  registerComponent('DashboardPage', DashboardPage);\n}\n",
+          "ui/pages/custom/DashboardPage.jsx": "export default function DashboardPage() {\n  return <main><h1>Dashboard</h1></main>;\n}\n",
+          "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Dashboard\n",
+          "ui/route_manifest.json": "{\n  \"pages\": [\n    {\n      \"component\": \"DashboardPage\",\n      \"id\": \"dashboard\",\n      \"label\": \"Dashboard\",\n      \"path\": \"/dashboard\",\n      \"requiresAuth\": true\n    }\n  ]\n}\n"
+        },
+        "before": {
+          "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
+          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
+          "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
+          "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
+          "modules/projects/module.yaml": "schema_version: mozaiks.module.v1\nmodule:\n  id: projects\n  display_name: Projects\n  version: 1.0.0\n  description: Projects module.\n  handler: backend.handler:ProjectsModule\npermissions: []\nactions: []\ncapabilities: []\n",
+          "ui/index.js": "import DashboardPage from './pages/custom/DashboardPage.jsx';\n\nexport function register(registerComponent) {\n  registerComponent('DashboardPage', DashboardPage);\n}\n",
+          "ui/pages/custom/DashboardPage.jsx": "export default function DashboardPage() {\n  return <main><h1>Dashboard</h1></main>;\n}\n",
+          "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Dashboard\n",
+          "ui/route_manifest.json": "{\n  \"pages\": [\n    {\n      \"component\": \"DashboardPage\",\n      \"id\": \"dashboard\",\n      \"label\": \"Dashboard\",\n      \"path\": \"/dashboard\",\n      \"requiresAuth\": true\n    }\n  ]\n}\n"
+        }
+      },
+      "staged_snapshot": {
+        "workspace": {
+          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n\n# Retry behavior: transient failures from the analytics provider should be retried\n# with backoff to avoid dropping events while preventing rapid retry storms.\n"
+        }
+      },
+      "staging_result": {
+        "changed_files": [
+          {
+            "path": "backend/integrations/analytics_provider_client.py",
+            "reason": "live worker output for staged refinement smoke",
+            "staged_path": "C:/Users/mbari/AppData/Local/Temp/tmps0y1wlbb/.refinement_staging/refinement-live-worker-smoke-integration/req_refinement_live_worker_integration_001/workspace/backend/integrations/analytics_provider_client.py",
+            "status": "updated"
+          }
+        ],
+        "execution_mode": "scoped_staging",
+        "mutation_allowed": false,
+        "mutation_scope": "staging_only",
+        "request_id": "req_refinement_live_worker_integration_001",
+        "result_path": "C:/Users/mbari/AppData/Local/Temp/tmps0y1wlbb/.refinement_staging/refinement-live-worker-smoke-integration/req_refinement_live_worker_integration_001/execution_result.json",
+        "source_mutated": false,
+        "staging_area": "C:/Users/mbari/AppData/Local/Temp/tmps0y1wlbb/.refinement_staging/refinement-live-worker-smoke-integration/req_refinement_live_worker_integration_001"
+      },
+      "status": "success",
+      "warnings": [
+        "manual live smoke skips persistent validation output; replay fixture captures the staged result"
+      ],
+      "worker_request": {
+        "app_id": "refinement-live-worker-smoke-integration",
+        "artifact_key": "app_bundle",
+        "artifact_kind": "app_bundle",
+        "artifact_version_id": "av_refinement_live_worker_integration_001",
+        "change_class": "patch",
+        "context_seed": {
+          "affected_bundle_paths": [
+            "backend/integrations/analytics_provider_client.py"
+          ],
+          "refinement_lane": "integration",
+          "request_id": "req_refinement_live_worker_integration_001",
+          "scenario_name": "integration_adapter"
+        },
+        "files": {
+          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n"
+        },
+        "metadata": {
+          "affected_bundle_paths": [
+            "backend/integrations/analytics_provider_client.py"
+          ],
+          "request_id": "req_refinement_live_worker_integration_001",
+          "scenario_name": "integration_adapter",
+          "smoke": "refinement_live_coding_worker"
+        },
+        "raw_user_request": "Add a comment explaining analytics_provider retry behavior in the analytics provider client.",
+        "requested_workflow_id": "smoke_workflow",
+        "source_surface": "refinement_live_coding_worker_smoke",
+        "start_preview": false,
+        "user_id": null,
+        "validation_strategy": "skip"
+      },
+      "worker_result": {
+        "changes": [
+          {
+            "new_content": "\"\"\"Analytics provider client.\"\"\"\n\n# Retry behavior: transient failures from the analytics provider should be retried\n# with backoff to avoid dropping events while preventing rapid retry storms.\n",
+            "path": "backend/integrations/analytics_provider_client.py",
+            "reason": "live worker output for staged refinement smoke"
+          }
+        ],
+        "request_id": "req_refinement_live_worker_integration_001",
+        "source": "live_worker",
+        "warnings": []
+      }
+    },
+    {
+      "app_id": "refinement-live-worker-smoke-data-model",
+      "artifact_store": {
+        "attempted": true,
+        "backend": "smoke_local_in_memory",
+        "created_version_count": 1,
+        "created_version_id": "av_refinement_live_worker_smoke_persisted"
+      },
+      "coding_llm_config": {
+        "model": "gpt-5.2-codex",
+        "temperature": 0.1
+      },
+      "coding_worker_result": {
+        "applied_files": {
+          "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\n# TODO: project_phase will require a future migration; track once phases expand beyond draft.\nPROJECT_PHASE = \"draft\"\n"
+        },
+        "blocked_reason": null,
+        "eligible": true,
+        "error": null,
+        "execution_mode": "coding_worker",
+        "metadata": {
+          "applied_file_count": 1,
+          "applied_paths": [
+            "modules/projects/backend/schemas.py"
+          ],
+          "artifact_kind": "app_bundle",
+          "artifact_path": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmp0ao7hsr7\\generated_refinements\\refinement-live-worker-smoke-data-model\\app_bundle\\app_bundle\\0291e56b1dfb\\artifact.zip",
+          "artifact_version_id": "av_refinement_live_worker_smoke_persisted",
+          "bundle_mode": "workspace_snapshot",
+          "change_class": "patch",
+          "selected_file_paths": [],
+          "tool_context_loaded": true,
+          "workspace_dir": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmp0ao7hsr7\\generated_refinements\\refinement-live-worker-smoke-data-model\\app_bundle\\app_bundle\\0291e56b1dfb\\workspace"
+        },
+        "plan": {
+          "needs_human_review": false,
+          "owned_paths": [
+            "modules/projects/backend/schemas.py"
+          ],
+          "rationale": "Simple inline TODO comment added to the requested schema file without altering behavior.",
+          "start_preview": false,
+          "summary": "Add TODO comment about future migration for project_phase in projects schema.",
+          "updated_files": {
+            "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\n# TODO: project_phase will require a future migration; track once phases expand beyond draft.\nPROJECT_PHASE = \"draft\"\n"
+          },
+          "validation_commands": [],
+          "validation_strategy": "skip"
+        },
+        "provider": "control_plane_coding",
+        "status": "validated",
+        "validation_result": {
+          "errors": [],
+          "preview_url": null,
+          "success": true,
+          "validation_status": "skipped",
+          "validation_strategy": "skip",
+          "warnings": [
+            "manual live smoke skips persistent validation output; replay fixture captures the staged result"
+          ]
+        }
+      },
+      "expected_changed_paths": [
+        "modules/projects/backend/schemas.py"
+      ],
+      "failure_category": null,
+      "failure_detail": null,
+      "name": "data_model_comment",
+      "plan": {
+        "affected_bundle_paths": [
+          "modules/projects/backend/schemas.py"
+        ],
+        "affected_declarative_families": [
+          "app_bundle"
+        ],
+        "affected_workflows": [
+          "smoke_workflow"
+        ],
+        "app_id": "refinement-live-worker-smoke-data-model",
+        "artifact_kind": "app_bundle",
+        "change_class": "patch",
+        "execution_mode": "staged",
+        "generated_files_changed": false,
+        "human_review_required": true,
+        "mutation_allowed": false,
+        "next_step": "scoped_patch_candidate",
+        "output_workspace": "C:/Users/mbari/AppData/Local/Temp/tmp0ao7hsr7/.refinement_staging/refinement-live-worker-smoke-data-model/req_refinement_live_worker_data_model_001",
+        "profiles": {
+          "classifier": "raw_llm_config",
+          "codegen": null,
+          "planner_replanner": null,
+          "reviewer_validator": null
+        },
+        "refinement_lane": "data_model_migration",
+        "request": "Add a TODO comment in the projects schema explaining that project_phase will require a future migration.",
+        "request_id": "req_refinement_live_worker_data_model_001",
+        "scope_summary": "Manual live smoke for a data model documentation-only patch.",
+        "staging_area": "C:/Users/mbari/AppData/Local/Temp/tmp0ao7hsr7/.refinement_staging/refinement-live-worker-smoke-data-model/req_refinement_live_worker_data_model_001",
+        "target_workflow": "smoke_workflow",
+        "validation_plan": {
+          "items": [
+            {
+              "id": "route_component_validation",
+              "label": "Route/component validation",
+              "reason": "Required when refinement touches UI routes, pages, or experience surfaces.",
+              "required": false
+            },
+            {
+              "id": "ui_theme_primitive_validation",
+              "label": "UI theme/primitive validation",
+              "reason": "Required when refinement touches page schema, route manifest, or design surfaces.",
+              "required": false
+            },
+            {
+              "id": "module_contract_validation",
+              "label": "Module contract validation",
+              "reason": "Required when refinement touches module manifests, contracts, or backend handlers.",
+              "required": true
+            },
+            {
+              "id": "database_migration_review",
+              "label": "Database migration review",
+              "reason": "Required when database intent, migrations, or destructive data changes are in scope.",
+              "required": true
+            }
+          ]
+        },
+        "warnings": [
+          "Database migration review is required before mutation.",
+          "Human review is required before mutation.",
+          "Staged mode reserves a metadata path only; no app files are copied or mutated."
+        ],
+        "workflow_id": "smoke_workflow",
+        "workflow_sequence": "app_revision"
+      },
+      "request": "Add a TODO comment in the projects schema explaining that project_phase will require a future migration.",
+      "request_id": "req_refinement_live_worker_data_model_001",
+      "source_file_unchanged": true,
+      "source_snapshot": {
+        "after": {
+          "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
+          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
+          "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
+          "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
+          "modules/projects/module.yaml": "schema_version: mozaiks.module.v1\nmodule:\n  id: projects\n  display_name: Projects\n  version: 1.0.0\n  description: Projects module.\n  handler: backend.handler:ProjectsModule\npermissions: []\nactions: []\ncapabilities: []\n",
+          "ui/index.js": "import DashboardPage from './pages/custom/DashboardPage.jsx';\n\nexport function register(registerComponent) {\n  registerComponent('DashboardPage', DashboardPage);\n}\n",
+          "ui/pages/custom/DashboardPage.jsx": "export default function DashboardPage() {\n  return <main><h1>Dashboard</h1></main>;\n}\n",
+          "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Dashboard\n",
+          "ui/route_manifest.json": "{\n  \"pages\": [\n    {\n      \"component\": \"DashboardPage\",\n      \"id\": \"dashboard\",\n      \"label\": \"Dashboard\",\n      \"path\": \"/dashboard\",\n      \"requiresAuth\": true\n    }\n  ]\n}\n"
+        },
+        "before": {
+          "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
+          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
+          "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
+          "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
+          "modules/projects/module.yaml": "schema_version: mozaiks.module.v1\nmodule:\n  id: projects\n  display_name: Projects\n  version: 1.0.0\n  description: Projects module.\n  handler: backend.handler:ProjectsModule\npermissions: []\nactions: []\ncapabilities: []\n",
+          "ui/index.js": "import DashboardPage from './pages/custom/DashboardPage.jsx';\n\nexport function register(registerComponent) {\n  registerComponent('DashboardPage', DashboardPage);\n}\n",
+          "ui/pages/custom/DashboardPage.jsx": "export default function DashboardPage() {\n  return <main><h1>Dashboard</h1></main>;\n}\n",
+          "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Dashboard\n",
+          "ui/route_manifest.json": "{\n  \"pages\": [\n    {\n      \"component\": \"DashboardPage\",\n      \"id\": \"dashboard\",\n      \"label\": \"Dashboard\",\n      \"path\": \"/dashboard\",\n      \"requiresAuth\": true\n    }\n  ]\n}\n"
+        }
+      },
+      "staged_snapshot": {
+        "workspace": {
+          "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\n# TODO: project_phase will require a future migration; track once phases expand beyond draft.\nPROJECT_PHASE = \"draft\"\n"
+        }
+      },
+      "staging_result": {
+        "changed_files": [
+          {
+            "path": "modules/projects/backend/schemas.py",
+            "reason": "live worker output for staged refinement smoke",
+            "staged_path": "C:/Users/mbari/AppData/Local/Temp/tmp0ao7hsr7/.refinement_staging/refinement-live-worker-smoke-data-model/req_refinement_live_worker_data_model_001/workspace/modules/projects/backend/schemas.py",
+            "status": "updated"
+          }
+        ],
+        "execution_mode": "scoped_staging",
+        "mutation_allowed": false,
+        "mutation_scope": "staging_only",
+        "request_id": "req_refinement_live_worker_data_model_001",
+        "result_path": "C:/Users/mbari/AppData/Local/Temp/tmp0ao7hsr7/.refinement_staging/refinement-live-worker-smoke-data-model/req_refinement_live_worker_data_model_001/execution_result.json",
+        "source_mutated": false,
+        "staging_area": "C:/Users/mbari/AppData/Local/Temp/tmp0ao7hsr7/.refinement_staging/refinement-live-worker-smoke-data-model/req_refinement_live_worker_data_model_001"
+      },
+      "status": "success",
+      "warnings": [
+        "manual live smoke skips persistent validation output; replay fixture captures the staged result"
+      ],
+      "worker_request": {
+        "app_id": "refinement-live-worker-smoke-data-model",
+        "artifact_key": "app_bundle",
+        "artifact_kind": "app_bundle",
+        "artifact_version_id": "av_refinement_live_worker_data_model_001",
+        "change_class": "patch",
+        "context_seed": {
+          "affected_bundle_paths": [
+            "modules/projects/backend/schemas.py"
+          ],
+          "refinement_lane": "data_model_migration",
+          "request_id": "req_refinement_live_worker_data_model_001",
+          "scenario_name": "data_model_comment"
+        },
+        "files": {
+          "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n"
+        },
+        "metadata": {
+          "affected_bundle_paths": [
+            "modules/projects/backend/schemas.py"
+          ],
+          "request_id": "req_refinement_live_worker_data_model_001",
+          "scenario_name": "data_model_comment",
+          "smoke": "refinement_live_coding_worker"
+        },
+        "raw_user_request": "Add a TODO comment in the projects schema explaining that project_phase will require a future migration.",
+        "requested_workflow_id": "smoke_workflow",
+        "source_surface": "refinement_live_coding_worker_smoke",
+        "start_preview": false,
+        "user_id": null,
+        "validation_strategy": "skip"
+      },
+      "worker_result": {
+        "changes": [
+          {
+            "new_content": "\"\"\"Projects schemas.\"\"\"\n\n# TODO: project_phase will require a future migration; track once phases expand beyond draft.\nPROJECT_PHASE = \"draft\"\n",
+            "path": "modules/projects/backend/schemas.py",
+            "reason": "live worker output for staged refinement smoke"
+          }
+        ],
+        "request_id": "req_refinement_live_worker_data_model_001",
+        "source": "live_worker",
+        "warnings": []
+      }
+    },
+    {
+      "app_id": "refinement-live-worker-smoke-hosted",
+      "artifact_store": {
+        "attempted": true,
+        "backend": "smoke_local_in_memory",
+        "created_version_count": 1,
+        "created_version_id": "av_refinement_live_worker_smoke_persisted"
+      },
+      "coding_llm_config": {
+        "model": "gpt-5.2-codex",
+        "temperature": 0.1
+      },
+      "coding_worker_result": {
+        "applied_files": {
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n\n# Hosted analytics display mapping:\n# The service translates provider-specific metric identifiers into the\n# dashboard's canonical display labels so hosted deployments present\n# consistent analytics names regardless of the upstream provider.\n"
+        },
+        "blocked_reason": null,
+        "eligible": true,
+        "error": null,
+        "execution_mode": "coding_worker",
+        "metadata": {
+          "applied_file_count": 1,
+          "applied_paths": [
+            "modules/analytics_dashboard/backend/service.py"
+          ],
+          "artifact_kind": "app_bundle",
+          "artifact_path": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmpaum9y18m\\generated_refinements\\refinement-live-worker-smoke-hosted\\app_bundle\\app_bundle\\d8441c9c4272\\artifact.zip",
+          "artifact_version_id": "av_refinement_live_worker_smoke_persisted",
+          "bundle_mode": "workspace_snapshot",
+          "change_class": "patch",
+          "selected_file_paths": [],
+          "tool_context_loaded": true,
+          "workspace_dir": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmpaum9y18m\\generated_refinements\\refinement-live-worker-smoke-hosted\\app_bundle\\app_bundle\\d8441c9c4272\\workspace"
+        },
+        "plan": {
+          "needs_human_review": false,
+          "owned_paths": [
+            "modules/analytics_dashboard/backend/service.py"
+          ],
+          "rationale": "Scoped change adds the requested comment to the specified service file without altering behavior.",
+          "start_preview": false,
+          "summary": "Added explanatory comment about hosted analytics display mapping in analytics dashboard service.",
+          "updated_files": {
+            "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n\n# Hosted analytics display mapping:\n# The service translates provider-specific metric identifiers into the\n# dashboard's canonical display labels so hosted deployments present\n# consistent analytics names regardless of the upstream provider.\n"
+          },
+          "validation_commands": [],
+          "validation_strategy": "skip"
+        },
+        "provider": "control_plane_coding",
+        "status": "validated",
+        "validation_result": {
+          "errors": [],
+          "preview_url": null,
+          "success": true,
+          "validation_status": "skipped",
+          "validation_strategy": "skip",
+          "warnings": [
+            "manual live smoke skips persistent validation output; replay fixture captures the staged result"
+          ]
+        }
+      },
+      "expected_changed_paths": [
+        "modules/analytics_dashboard/backend/service.py"
+      ],
+      "failure_category": null,
+      "failure_detail": null,
+      "name": "hosted_facade",
+      "plan": {
+        "affected_bundle_paths": [
+          "modules/analytics_dashboard/backend/service.py"
+        ],
+        "affected_declarative_families": [
+          "app_bundle"
+        ],
+        "affected_workflows": [
+          "smoke_workflow"
+        ],
+        "app_id": "refinement-live-worker-smoke-hosted",
+        "artifact_kind": "app_bundle",
+        "change_class": "patch",
+        "execution_mode": "staged",
+        "generated_files_changed": false,
+        "human_review_required": false,
+        "mutation_allowed": false,
+        "next_step": "scoped_patch_candidate",
+        "output_workspace": "C:/Users/mbari/AppData/Local/Temp/tmpaum9y18m/.refinement_staging/refinement-live-worker-smoke-hosted/req_refinement_live_worker_hosted_001",
+        "profiles": {
+          "classifier": "raw_llm_config",
+          "codegen": null,
+          "planner_replanner": null,
+          "reviewer_validator": null
+        },
+        "refinement_lane": "hosted_capability_change",
+        "request": "Add a comment explaining hosted analytics display mapping in the analytics dashboard service.",
+        "request_id": "req_refinement_live_worker_hosted_001",
+        "scope_summary": "Manual live smoke for a hosted facade app-owned comment-only patch.",
+        "staging_area": "C:/Users/mbari/AppData/Local/Temp/tmpaum9y18m/.refinement_staging/refinement-live-worker-smoke-hosted/req_refinement_live_worker_hosted_001",
+        "target_workflow": "smoke_workflow",
+        "validation_plan": {
+          "items": [
+            {
+              "id": "route_component_validation",
+              "label": "Route/component validation",
+              "reason": "Required when refinement touches UI routes, pages, or experience surfaces.",
+              "required": true
+            },
+            {
+              "id": "ui_theme_primitive_validation",
+              "label": "UI theme/primitive validation",
+              "reason": "Required when refinement touches page schema, route manifest, or design surfaces.",
+              "required": true
+            },
+            {
+              "id": "module_contract_validation",
+              "label": "Module contract validation",
+              "reason": "Required when refinement touches module manifests, contracts, or backend handlers.",
+              "required": true
+            },
+            {
+              "id": "hosted_facade_validation",
+              "label": "Hosted capability facade validation",
+              "reason": "Required when hosted capability adapter, facade module, or page paths are in scope.",
+              "required": true
+            }
+          ]
+        },
+        "warnings": [
+          "Staged mode reserves a metadata path only; no app files are copied or mutated."
+        ],
+        "workflow_id": "smoke_workflow",
+        "workflow_sequence": "app_revision"
+      },
+      "request": "Add a comment explaining hosted analytics display mapping in the analytics dashboard service.",
+      "request_id": "req_refinement_live_worker_hosted_001",
+      "source_file_unchanged": true,
+      "source_snapshot": {
+        "after": {
+          "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
+          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
+          "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
+          "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
+          "modules/projects/module.yaml": "schema_version: mozaiks.module.v1\nmodule:\n  id: projects\n  display_name: Projects\n  version: 1.0.0\n  description: Projects module.\n  handler: backend.handler:ProjectsModule\npermissions: []\nactions: []\ncapabilities: []\n",
+          "ui/index.js": "import DashboardPage from './pages/custom/DashboardPage.jsx';\n\nexport function register(registerComponent) {\n  registerComponent('DashboardPage', DashboardPage);\n}\n",
+          "ui/pages/custom/DashboardPage.jsx": "export default function DashboardPage() {\n  return <main><h1>Dashboard</h1></main>;\n}\n",
+          "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Dashboard\n",
+          "ui/route_manifest.json": "{\n  \"pages\": [\n    {\n      \"component\": \"DashboardPage\",\n      \"id\": \"dashboard\",\n      \"label\": \"Dashboard\",\n      \"path\": \"/dashboard\",\n      \"requiresAuth\": true\n    }\n  ]\n}\n"
+        },
+        "before": {
+          "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
+          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
+          "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
+          "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
+          "modules/projects/module.yaml": "schema_version: mozaiks.module.v1\nmodule:\n  id: projects\n  display_name: Projects\n  version: 1.0.0\n  description: Projects module.\n  handler: backend.handler:ProjectsModule\npermissions: []\nactions: []\ncapabilities: []\n",
+          "ui/index.js": "import DashboardPage from './pages/custom/DashboardPage.jsx';\n\nexport function register(registerComponent) {\n  registerComponent('DashboardPage', DashboardPage);\n}\n",
+          "ui/pages/custom/DashboardPage.jsx": "export default function DashboardPage() {\n  return <main><h1>Dashboard</h1></main>;\n}\n",
+          "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Dashboard\n",
+          "ui/route_manifest.json": "{\n  \"pages\": [\n    {\n      \"component\": \"DashboardPage\",\n      \"id\": \"dashboard\",\n      \"label\": \"Dashboard\",\n      \"path\": \"/dashboard\",\n      \"requiresAuth\": true\n    }\n  ]\n}\n"
+        }
+      },
+      "staged_snapshot": {
+        "workspace": {
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n\n# Hosted analytics display mapping:\n# The service translates provider-specific metric identifiers into the\n# dashboard's canonical display labels so hosted deployments present\n# consistent analytics names regardless of the upstream provider.\n"
+        }
+      },
+      "staging_result": {
+        "changed_files": [
+          {
+            "path": "modules/analytics_dashboard/backend/service.py",
+            "reason": "live worker output for staged refinement smoke",
+            "staged_path": "C:/Users/mbari/AppData/Local/Temp/tmpaum9y18m/.refinement_staging/refinement-live-worker-smoke-hosted/req_refinement_live_worker_hosted_001/workspace/modules/analytics_dashboard/backend/service.py",
+            "status": "updated"
+          }
+        ],
+        "execution_mode": "scoped_staging",
+        "mutation_allowed": false,
+        "mutation_scope": "staging_only",
+        "request_id": "req_refinement_live_worker_hosted_001",
+        "result_path": "C:/Users/mbari/AppData/Local/Temp/tmpaum9y18m/.refinement_staging/refinement-live-worker-smoke-hosted/req_refinement_live_worker_hosted_001/execution_result.json",
+        "source_mutated": false,
+        "staging_area": "C:/Users/mbari/AppData/Local/Temp/tmpaum9y18m/.refinement_staging/refinement-live-worker-smoke-hosted/req_refinement_live_worker_hosted_001"
+      },
+      "status": "success",
+      "warnings": [
+        "manual live smoke skips persistent validation output; replay fixture captures the staged result"
+      ],
+      "worker_request": {
+        "app_id": "refinement-live-worker-smoke-hosted",
+        "artifact_key": "app_bundle",
+        "artifact_kind": "app_bundle",
+        "artifact_version_id": "av_refinement_live_worker_hosted_001",
+        "change_class": "patch",
+        "context_seed": {
+          "affected_bundle_paths": [
+            "modules/analytics_dashboard/backend/service.py"
+          ],
+          "refinement_lane": "hosted_capability_change",
+          "request_id": "req_refinement_live_worker_hosted_001",
+          "scenario_name": "hosted_facade"
+        },
+        "files": {
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n"
+        },
+        "metadata": {
+          "affected_bundle_paths": [
+            "modules/analytics_dashboard/backend/service.py"
+          ],
+          "request_id": "req_refinement_live_worker_hosted_001",
+          "scenario_name": "hosted_facade",
+          "smoke": "refinement_live_coding_worker"
+        },
+        "raw_user_request": "Add a comment explaining hosted analytics display mapping in the analytics dashboard service.",
+        "requested_workflow_id": "smoke_workflow",
+        "source_surface": "refinement_live_coding_worker_smoke",
+        "start_preview": false,
+        "user_id": null,
+        "validation_strategy": "skip"
+      },
+      "worker_result": {
+        "changes": [
+          {
+            "new_content": "\"\"\"Hosted analytics dashboard service.\"\"\"\n\n# Hosted analytics display mapping:\n# The service translates provider-specific metric identifiers into the\n# dashboard's canonical display labels so hosted deployments present\n# consistent analytics names regardless of the upstream provider.\n",
+            "path": "modules/analytics_dashboard/backend/service.py",
+            "reason": "live worker output for staged refinement smoke"
+          }
+        ],
+        "request_id": "req_refinement_live_worker_hosted_001",
+        "source": "live_worker",
+        "warnings": []
+      }
+    }
+  ],
+  "schema_version": "mozaiks.refinement_live_coding_worker_matrix.v1",
+  "success_count": 5
+}

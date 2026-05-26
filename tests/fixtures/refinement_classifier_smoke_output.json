@@ -224,7 +224,7 @@
     }
   ],
   "classifier_llm_config": {
-    "model": "gpt-4o-mini",
+    "model": "gpt-5-nano",
     "temperature": 0.0
   },
   "control_plane_profile": "default",
