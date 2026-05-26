@@ -71,6 +71,10 @@ This project follows a practical pre-1.0 changelog format:
 - Updated default control-plane LLM model from `gpt-4o-mini` to `gpt-5-nano`.
 - `subscriptions.yaml` now raises `ModuleLoadError` immediately on load;
   `ModuleLegacySubscriptionsManifest` removed.
+- Simplified public setup around the installed `mozaiks` CLI via `pipx`,
+  separating it from source checkout and standalone generated workspace setup.
+- Clarified quickstart CLI output and generated workspace docs so `.venv`
+  instructions are scoped to contributor repos or standalone app workspaces.
 
 ### Removed
 
