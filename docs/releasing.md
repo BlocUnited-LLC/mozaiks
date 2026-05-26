@@ -52,7 +52,8 @@ even if the build and GitHub release steps succeed.
 
 ## Documentation Impact
 
-Public install docs should present `pip install mozaiks` as the package path and
+Public install docs should present `pipx install mozaiks` as the preferred CLI
+path. Keep `pip install mozaiks` inside virtualenv/source-checkout contexts and
 keep the repo checkout path as the framework/developer mode.
 
 ## Notes

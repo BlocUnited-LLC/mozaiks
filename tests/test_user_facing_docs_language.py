@@ -14,6 +14,9 @@ def test_readme_uses_plain_tool_framing() -> None:
     readme = _read("README.md")
 
     assert "### Which Tool To Use" in readme
+    assert "pipx install mozaiks" in readme
+    assert "python -m venv .venv" not in readme
+    assert "python -m pip install mozaiks" not in readme
     assert "The **CLI** is just how you set up the" in readme
     assert "Most users can ignore it and start from the Console." in readme
     assert "developer entrypoint" not in readme

@@ -1,37 +1,46 @@
 # Getting Started
 
+## Prerequisites
+
+Install Python 3.11+ and Node.js 18+ before starting.
+
 ## Install Mozaiks
 
+Install Mozaiks as a CLI so it stays separate from the workspaces you create.
+
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install mozaiks
+python -m pip install --user pipx
+python -m pipx ensurepath
+pipx install mozaiks
 ```
+
+Open a new PowerShell if `mozaiks` is not found after `ensurepath`.
 
 ## Create Your Workspace
 
-Choose where the workspace folder should live on your computer and run:
+Choose where the workspace folder should live on your computer. From that
+parent folder, run:
 
 ```powershell
-mozaiks quickstart --dir .\{workspace name}
+mozaiks quickstart --dir .\mozaiks-workspace
 ```
 
 `quickstart` creates the workspace folder if it does not already exist and
-opens the local Console.
+opens the local Console. You do not need to create a `.venv` in the parent
+folder or inside the workspace for the normal Console path.
 
 ## Start Mozaiks
 
-`quickstart` opens the Console during first setup. It does not create a new
-workspace-local `.venv`; it uses the environment where `mozaiks` is installed.
+`quickstart` opens the Console during first setup.
 
-After that, if you want to start the same workspace again later, reactivate the
-same `.venv` you used to install Mozaiks, then run:
+To reopen the same workspace later, run:
 
 ```powershell
-cd .\{workspace name}
-.\scripts\run-console.ps1
+mozaiks console --dir .\mozaiks-workspace --open
 ```
+
+If you are contributing to Mozaiks itself or need to run generated workspace
+scripts directly, use [Local Setup](local-setup.md).
 
 Open the Console at:
 

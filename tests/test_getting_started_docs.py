@@ -13,6 +13,7 @@ def _read(relative_path: str) -> str:
 def test_getting_started_uses_user_facing_headings() -> None:
     doc = _read("docs/getting-started.md")
 
+    assert "## Prerequisites" in doc
     assert "## Install Mozaiks" in doc
     assert "## Create Your Workspace" in doc
     assert "## Start Mozaiks" in doc
@@ -25,21 +26,25 @@ def test_getting_started_uses_user_facing_headings() -> None:
 
 def test_getting_started_explains_how_to_start_again() -> None:
     doc = _read("docs/getting-started.md")
-    restart_prefix = "After that, if you want to start the same workspace again later"
-    restart_section = doc.split(restart_prefix, 1)[1]
+    normalized = " ".join(doc.split())
 
     assert "`quickstart` opens the Console during first setup." in doc
-    assert "workspace-local `.venv`" in doc
-    assert restart_prefix in doc
-    assert "run-console.ps1" in doc
+    assert "pipx install mozaiks" in doc
+    assert "mozaiks console --dir .\\mozaiks-workspace --open" in doc
+    assert "Local Setup" in normalized
+    assert "local-setup.md" in normalized
+    assert "run generated workspace scripts directly" in normalized
     assert "http://localhost:3000/" in doc
-    assert ".\\.venv\\Scripts\\Activate.ps1" not in restart_section
-    assert ".\\scripts\\run-console.ps1" in doc
+    assert "python -m venv .venv" not in doc
+    assert "python -m pip install mozaiks" not in doc
+    assert ".\\scripts\\run-console.ps1" not in doc
 
 
 def test_getting_started_clarifies_workspace_terms() -> None:
     doc = _read("docs/getting-started.md")
+    normalized = " ".join(doc.split())
 
     assert "creates the workspace folder if it does not already exist" in doc
+    assert "You do not need to create a `.venv` in the parent folder" in normalized
     assert "MongoDB is not required just to open the Console" in doc
     assert "builds will fail until" in doc

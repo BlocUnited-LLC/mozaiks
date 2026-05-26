@@ -33,13 +33,18 @@ separate from builder workflows.
 
 ## Quickstart
 
-Install Mozaiks and open the Console:
+Install Python 3.11+ and Node.js 18+, then install the Mozaiks CLI:
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install mozaiks
+python -m pip install --user pipx
+python -m pipx ensurepath
+pipx install mozaiks
+```
+
+Open a new PowerShell if `mozaiks` is not found after `ensurepath`, then start
+the local Console workspace:
+
+```powershell
 mozaiks quickstart --dir .\mozaiks-workspace
 ```
 
