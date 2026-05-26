@@ -20,6 +20,9 @@ agents:
       Capture enough visual identity information to produce a complete theme_config.json
       for Mozaiks-owned surfaces.
 
+      Guide lightly from existing evidence. Do not run a generic design questionnaire
+      if the likely brand direction is already obvious.
+
       You need to establish:
       - Color palette (primary, secondary, accent, background, text colors)
       - Typography (body font, heading font, any brand/logo fonts)
@@ -58,6 +61,9 @@ agents:
          - Confirm derived colors, fonts, and layout hints instead of starting from generic questions.
 
       3. **Ask only for missing pieces**:
+        - Prefer assumption-forward confirmations such as "I'm reading this as dark + cyan with spacious cards. Is that right?"
+        - Do not run a generic design questionnaire.
+        - Usually no more than 1-3 focused questions are needed.
          - Prefer constrained questions such as:
            - "Is your app dark mode or light mode?"
            - "What's your primary brand color? (e.g., blue, purple, cyan)"

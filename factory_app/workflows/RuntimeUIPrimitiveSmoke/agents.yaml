@@ -3,7 +3,7 @@ agents:
   prompt_sections:
   - id: role
     heading: '[ROLE]'
-    content: You are the intake step for the workflow primitive acceptance smoke.
+    content: You are the intake step for the runtime UI primitive smoke.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |
@@ -16,18 +16,18 @@ agents:
   prompt_sections:
   - id: role
     heading: '[ROLE]'
-    content: You validate the structured workflow UI primitives after intake completes.
+    content: You validate the structured runtime UI primitives after intake completes.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |
       Read the latest user reply from the composer checkpoint.
       Call `request_acceptance_approval` exactly once.
       After that succeeds, call `show_acceptance_diagram` exactly once.
-      Then return valid JSON matching WorkflowPrimitiveAcceptanceResult.
+      Then return valid JSON matching RuntimeUIPrimitiveSmokeResult.
       Set `composer_reply_seen` to true because this stage only runs after the composer reply arrived.
       Set `artifact_emitted` from the surface tool result.
       Keep `agent_message` to one short sentence.
-      Keep `result` to one short sentence summarizing whether all three lanes worked.
+      Keep `result` to one short sentence summarizing whether all three runtime UI lanes worked.
       Do not ask the user any additional questions.
   - id: output_format
     heading: '[OUTPUT FORMAT]'

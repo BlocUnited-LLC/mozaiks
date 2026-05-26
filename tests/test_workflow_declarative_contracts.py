@@ -34,7 +34,7 @@ def _write_minimal_orchestrator_and_agents(wf_dir: Path, workflow_name: str) -> 
     )
 
 
-def test_workflow_manager_rejects_legacy_agent_auto_tool_field(tmp_path: Path) -> None:
+def test_workflow_manager_rejects_removed_agent_auto_tool_field(tmp_path: Path) -> None:
     wf_dir = tmp_path / "FlowLegacyAutoToolField"
     wf_dir.mkdir(parents=True)
     _write_minimal_orchestrator_and_agents(wf_dir, "FlowLegacyAutoToolField")
@@ -140,7 +140,7 @@ def test_workflow_manager_rejects_invalid_hooks_contract(tmp_path: Path) -> None
     assert "hooks.yaml" in str(info.get("error") or "")
 
 
-def test_workflow_manager_rejects_legacy_context_variables_shape(tmp_path: Path) -> None:
+def test_workflow_manager_rejects_removed_context_variables_shape(tmp_path: Path) -> None:
     wf_dir = tmp_path / "FlowBadContext"
     wf_dir.mkdir(parents=True)
     _write_minimal_orchestrator_and_agents(wf_dir, "FlowBadContext")

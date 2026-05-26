@@ -1,5 +1,5 @@
 import logging
-from typing import Any, List, Dict
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -15,10 +15,10 @@ def _apply_system_message(agent: Any, message: str) -> None:
     elif hasattr(agent, "_system_message"):
         agent._system_message = message
     else:
-        setattr(agent, "_system_message", message)
-    setattr(agent, "_mozaiks_base_system_message", message)
+        agent._system_message = message
+    agent._mozaiks_base_system_message = message
 
-def inject_file_generation_instructions(agent, messages: List[Dict[str, Any]]) -> None:
+def inject_file_generation_instructions(agent, messages: list[dict[str, Any]]) -> None:
     """
     Injects comprehensive file generation best practices and compliance requirements
     into the agent's system message.
@@ -51,7 +51,7 @@ def inject_file_generation_instructions(agent, messages: List[Dict[str, Any]]) -
     - Use `\\"` for double quotes within strings.
     - Use `\\\\` for backslashes.
     - Use valid escape sequences like `\\n`, `\\t`, etc.
-    - **For JavaScript files, always use double quotes (`"`) for strings instead of single quotes (`'`) to ensure JSON compatibility.**
+    - **For JavaScript files, always use double quotes (`"`) for strings instead of single quotes (`'`) so JSON parsing stays deterministic.**
     - **Do not use invalid escape sequences like `\\'` inside JSON output.**
 - **Exact Formatting**: Generated files must be formatted for disk, without unnecessary modifications.
 - **Code Documentation Formatting**: At the top of every class, function, or method, include concise documentation (e.g., docstrings, JSDoc, or equivalent) describing its purpose, parameters, and return values where applicable.

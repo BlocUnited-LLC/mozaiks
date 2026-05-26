@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
 
 
-def _response_value(response: Dict[str, Any], key: str) -> Any:
+def _response_value(response: dict[str, Any], key: str) -> Any:
     data = response.get("data")
     if isinstance(data, dict) and key in data:
         return data.get(key)
     return response.get(key)
 
 
-async def request_acceptance_approval(context_variables: Any = None) -> Dict[str, Any]:
+async def request_acceptance_approval(context_variables: Any = None) -> dict[str, Any]:
     chat_id = None
     workflow_name = None
 
@@ -30,7 +30,7 @@ async def request_acceptance_approval(context_variables: Any = None) -> Dict[str
     payload = {
         "component_type": "ApprovalCard",
         "interaction_type": "ui_tool",
-        "title": "Approve the workflow primitive acceptance checkpoint",
+        "title": "Approve the runtime UI primitive smoke checkpoint",
         "summary": (
             "The composer reply was captured. Confirm the structured approval lane "
             "before the artifact viewer surface is emitted."

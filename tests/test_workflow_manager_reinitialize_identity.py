@@ -92,35 +92,16 @@ def test_initialize_workflows_preserves_manager_identity(tmp_path: Path) -> None
     assert stale_ref.get_config("FlowTwo")
 
 
-def test_initialize_workflows_supports_multiple_roots_with_first_root_precedence(tmp_path: Path) -> None:
+def test_initialize_workflows_rejects_multiple_roots(tmp_path: Path) -> None:
     local_root = tmp_path / "local"
     shared_root = tmp_path / "shared"
 
     _write_minimal_workflow(local_root, "LocalOnly")
     _write_minimal_workflow(shared_root, "SharedOnly")
-    _write_minimal_workflow(shared_root, "SharedOverride")
-    _write_minimal_workflow(local_root, "SharedOverride")
 
-    # Make the local override distinguishable.
-    (local_root / "SharedOverride" / "orchestrator.yaml").write_text(
-        "\n".join(
-            [
-                "workflow_name: SharedOverride",
-                "max_turns: 9",
-                "human_in_the_loop: false",
-                "workflow_startup_mode: AgentDriven",
-                "orchestration_pattern: DefaultPattern",
-                "initial_message: local override",
-                "initial_agent: DemoAgent",
-            ]
-        ),
-        encoding="utf-8",
-    )
-
-    _workflow_manager_mod.initialize_workflows(base_path=[str(local_root), str(shared_root)])
-    manager = _workflow_manager_mod.workflow_manager
-
-    assert manager.resolve_workflow_path("LocalOnly") == (local_root / "LocalOnly")
-    assert manager.resolve_workflow_path("SharedOnly") == (shared_root / "SharedOnly")
-    assert manager.resolve_workflow_path("SharedOverride") == (local_root / "SharedOverride")
-    assert manager.get_config("SharedOverride").get("initial_message") == "local override"
+    try:
+        _workflow_manager_mod.initialize_workflows(base_path=[str(local_root), str(shared_root)])
+    except ValueError as exc:
+        assert "one workflow root" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("initialize_workflows accepted multiple workflow roots")

@@ -5,6 +5,7 @@ workflow_startup_mode: AgentDriven
 orchestration_pattern: DefaultPattern
 initial_message_to_user: null
 initial_message: You are part of a collaborative effort to generate a multi-agent
-  workflow per AG2 (formerly autogen). InterviewAgent, greet the user and ask your
-  first clarifying question.
+  workflow per AG2 (formerly autogen). InterviewAgent, start from the current
+  context, guide the user with assumptions or suggestions, and ask only the most
+  important missing clarifying question.
 initial_agent: InterviewAgent

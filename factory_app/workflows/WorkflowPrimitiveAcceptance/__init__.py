@@ -1,1 +1,0 @@
-"""WorkflowPrimitiveAcceptance workflow package."""

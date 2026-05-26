@@ -1,0 +1,26 @@
+tools:
+- agent: ReviewAgent
+  file: tools/present_review_summary.py
+  function: present_review_summary
+  description: >
+    Auto-invoked on ReviewAgent's first turn. Reads build validation
+    context from context_variables and emits an AppReviewSummary
+    agentic UI artifact in the chat surface.
+  tool_type: UI_Surface
+  auto_tool_call: true
+  ui:
+    component: AppReviewSummary
+    mode: artifact
+    workflow_primitive: document_preview
+    realization: generated_component
+
+- agent: ReviewAgent
+  file: tools/submit_revision_request.py
+  function: submit_revision_request
+  description: >
+    Called by ReviewAgent after the user types a revision request or
+    after a successful promotion signal. Sets review_complete=true
+    and stores the user's request text in context_variables for the
+    refinement control plane.
+  tool_type: Agent_Tool
+  auto_tool_call: false

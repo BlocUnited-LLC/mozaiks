@@ -804,7 +804,7 @@ const MermaidPreview = ({ chart, pendingMessage, pattern }) => {
       const normalizeLineEndings = (s) => s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
       const sanitizeSequence = (s) => {
         // Backend _fix_mermaid_syntax now handles all sanitization including legend stripping
-        // Frontend only normalizes line endings for cross-platform compatibility
+        // Frontend only normalizes line endings for consistent rendering across operating systems
         return normalizeLineEndings(s);
       };
       if (isSequence) {

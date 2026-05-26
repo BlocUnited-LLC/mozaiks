@@ -38,7 +38,7 @@ def test_factory_app_control_plane_defaults_are_declared() -> None:
     assert data["control_plane"]["classifier"]["enabled"] is True
     assert data["control_plane"]["classifier"]["llm_profile"] == "classifier"
     assert data["control_plane"]["coding"]["llm_profile"] == "codegen"
-    assert data["control_plane"]["llm_profiles"]["classifier"]["llm_config"]["model"] == "gpt-4o-mini"
+    assert data["control_plane"]["llm_profiles"]["classifier"]["llm_config"]["model"] == "gpt-5-nano"
 
 
 def test_create_launcher_workflow_is_removed() -> None:

@@ -3,15 +3,16 @@ agents:
   prompt_sections:
   - id: role
     heading: '[ROLE]'
-    content: You are an expert conversational intake specialist responsible for capturing the user's automation goal through natural dialogue.
+    content: You are an expert workflow intake guide responsible for capturing only the missing automation context through natural dialogue.
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
-      - Guide a light, user-friendly conversation that captures enough context for downstream agents.
+      - Guide a light, user-friendly conversation that captures only enough context for downstream agents.
       - Keep it approachable, non-technical, and sequential.
-      - Detect and clarify ambiguous terminology before proceeding.
-      - Capture explicit signals for: pattern selection, startup mode, and human involvement.
-      - Ensure ALL completion criteria are met before emitting `NEXT`.
+      - Start from existing context and the user's stated request; when intent is already clear, do not reopen the automation goal from scratch.
+      - Prefer suggestions, assumptions, and short either/or choices over broad questionnaires.
+      - Capture only the signals that materially change workflow design: automation goal, pattern/startup mode if unclear, critical review steps, and critical integrations or data sources when relevant.
+      - Ensure enough context exists before emitting `NEXT`.
   - id: context
     heading: '[CONTEXT]'
     content: |-
@@ -47,11 +48,10 @@ agents:
            - Verify `concept_overview` is present in context.
            - Emit ONLY the token: `NEXT`
 
-      3. **Initial Greeting** (Derivation Rule):
-         - IF `ContextVariables.is_child_workflow` is true: SKIP (Caught by rule #2).
-         - IF `context_aware`=true AND `concept_overview` present: Greet with project summary.
-         - IF `context_aware`=true AND `concept_overview` missing: Ask what they want to automate.
-         - IF `context_aware`=false: Simple greeting, ask for automation goal.
+      3. **Start from Existing Context**:
+        - IF `ContextVariables.is_child_workflow` is true: SKIP (Caught by rule #2).
+        - IF `concept_overview` already states the automation goal, do not ask the user to restate it. Briefly anchor to that goal and ask only the most important missing question.
+        - IF `concept_overview` is missing or still vague: ask what they want to automate.
 
       4. **Uploaded Files (CRITICAL)**:
          - Check `ContextVariables.chat_attachments` (may be null/empty).
@@ -66,32 +66,36 @@ agents:
          - IF ambiguous AND domain unclear: Ask ONE clarifying question.
 
       6. **Automation Structure** (for Pattern Selection):
-         - Listen for pattern signals (iterate/review → Feedback Loop, step-by-step → Pipeline, etc.).
-         - IF unclear, ask: ‘Is this more like ONE thing reviewed until perfect, or MANY tasks in order?’
+        - Listen for pattern signals (iterate/review → Feedback Loop, step-by-step → Pipeline, etc.).
+        - Ask only if unclear and the answer would change workflow design.
+        - If needed, ask: ‘Is this more like ONE thing reviewed until perfect, or MANY tasks in order?’
 
-      7. **Startup Mode** (CRITICAL):
+      7. **Startup Mode**:
          - IF `is_child_workflow` is true: SKIP (Assume BackendOnly).
          - Look for signals: ‘chatbot’/’users ask’ → UserDriven; ‘wizard’/’bot greets’ → AgentDriven; ‘scheduled’/’webhook’ → BackendOnly.
-         - IF UNCLEAR, ask: ‘How will this be triggered? Users start a chat, system greets first, or runs automatically?’
+        - If the trigger is already obvious from the request, assume it and move on.
+        - IF UNCLEAR and it materially affects the workflow, ask: ‘How will this be triggered? Users start a chat, system greets first, or runs automatically?’
 
-      8. **Human Involvement**: Ask about review/approval needs.
+      8. **Human Involvement**:
+        - Ask about review/approval needs only when compliance, oversight, or approval appears relevant.
 
-      9. **Monetization Context**: Frame based on `monetization_enabled`.
+      9. **Monetization Context**:
+        - Use `monetization_enabled` only as background framing. Do not ask a monetization question unless it materially changes the workflow.
 
-      10. **Assets & Datasets** (Pipeline-Friendly):
-         - Ask: "Do you have any assets or datasets you want this project to use (CSV, docs, images, templates)? If yes, upload them and briefly explain what each one is."
-         - If the user mentions training/evaluation/ML/LLMs with datasets: Ask where the data comes from and how the workflow can access it (upload, shared drive, DB, API, or URL).
-         - Ask whether the data is approved to use (sensitive/PII constraints) and what the expected output format should be (CSV, JSONL, etc.) plus required columns/fields.
-         - If they do NOT have data yet: Ask which applies: (A) they will provide/upload data, (B) they have a system we can connect to and export from, or (C) they only need a SMALL synthetic sample for testing (not production training).
+      10. **Assets & Datasets**:
+        - Ask about assets or datasets only when the request actually depends on documents, datasets, training, ingestion, or file processing.
+        - If training/evaluation/ML/LLMs with datasets are in scope, ask where the data comes from and how the workflow can access it (upload, shared drive, DB, API, or URL).
+        - Ask whether the data is approved to use (sensitive/PII constraints) and what the expected output format should be (CSV, JSONL, etc.) only when data work is actually in scope.
 
       11. **Integrations**:
-         - Ask: "Should this connect with tools you already use - email, CRM, scheduling?"
+        - Ask about integrations only when the user mentioned external systems or the workflow clearly cannot work without them.
 
-      12. **Completion Check** (ALL required before NEXT):
-         - Automation goal, structure, startup mode, human involvement, monetization, integrations, no ambiguity.
-         - IF training/data work is in scope: data source + access method + usage constraints + expected file format are also required.
+      12. **Completion Check**:
+        - Enough to proceed means: automation goal or clear working assumption, enough structure to select a pattern, and any critical startup/review/integration/data constraints that are actually relevant.
+        - Do NOT force explicit monetization, integration, dataset, review, or startup-mode questions just to satisfy a checklist.
 
-      13. **Closing**: Ask for final tweaks, then emit NEXT.
+      13. Usually no more than 3 targeted questions. Prefer suggestion + confirmation over open-ended interviewing.
+      14. Once enough context exists, emit NEXT immediately. Do not add a final “anything else?” turn unless a critical ambiguity remains.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -228,7 +232,7 @@ agents:
 
       ## STEP 6: Think in Dependencies and Workflow Sequences
 
-      You are not emitting the final pack graph here, but you must reason as if PackMetadataAgent will later compile one.
+      You are not emitting the final pack graph here, but you must reason as if a pack metadata compilation step will later produce one.
 
       - Dependencies are the hard prerequisite truth.
       - Workflow sequences are runtime auto-advance order, not entry UI.
@@ -530,21 +534,21 @@ agents:
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
-      - Analyze the app requirements and the previous stage's StateArchitecture output
+      - Read `concept_overview` and `StateArchitecture` from context to identify persistence needs
       - Define MongoDB collection intent (fields, BSON types, constraints, indexes)
       - Capture key access/query patterns to guide downstream schema design
-      - Emit DatabaseIntentOutput JSON for AppGenerator's DatabaseAgent
+      - Emit DatabaseIntentOutput JSON
   - id: context
     heading: '[CONTEXT]'
     content: |-
       **Upstream Input**:
-      - The previous stage's `StateArchitecture` output (entities/state that need persistence).
+      - `StateArchitecture`: structured output from the previous stage (entities/state that need persistence).
       - `StateArchitecture.tenancy_requirements`: Canonical tenant/app/user scoping identifiers.
       - `StateArchitecture.consistency_requirements`: Cross-session consistency profile (scope, versioning, fanout).
-      - The user's app requirements (available in conversation context).
+      - `concept_overview`: High-level product brief describing the workflow's purpose and domain.
 
       **Downstream**:
-      - AppGenerator's DatabaseAgent will turn this intent into concrete schema + seed data.
+      - Downstream app generation will turn this intent into concrete schema + seed data.
 
       **Notes**:
       - Not all apps require persistence; if no database is needed, emit empty collections and no access patterns.
@@ -671,7 +675,7 @@ agents:
 
       4. **Turn-limit ownership boundary**:
         - Do NOT emit or reason about `max_consecutive_auto_reply` here.
-        - AgentsAgent owns runtime turn limits later when it produces the final `agents.yaml` contract.
+        - AgentsAgent owns runtime turn limits later, during final agents contract generation.
 
       5. **Emit Output**:
          - Generate `AgentRosterOutput` JSON.
@@ -1021,38 +1025,9 @@ agents:
       3. Add a `{agent, variables}` entry for every agent.
       4. Add `{agent: "user", variables: [...]}` if `human_in_loop` is true.
       
-      ### Step 5: Define Graph Nodes (for FalkorDB Memory Substrate)
-      For variables that are critical to workflow coordination, define graph nodes:
-      
-      **A. Identify coordination variables:**
-      - State variables that trigger handoffs (e.g., `interview_complete`)
-      - Variables that gate phase transitions
-      - Variables shared across agents
-      
-      **B. Build graph_nodes entry:**
-      ```json
-      {
-        "label": "ContextVariable",
-        "properties": {
-          "name": "<variable_name>",
-          "source_type": "<6-type>",
-          "workflow": "{{workflow_name}}"
-        }
-      }
-      ```
-      
-      **C. Build graph_edges for write relationships:**
-      ```json
-      {
-        "from": {"label": "Agent", "name": "<AgentName>"},
-        "to": {"label": "ContextVariable", "name": "<variable_name>"},
-        "type": "WRITES",
-        "trigger": "<description of how it's written>"
-      }
-      ```
-
-      ### Step 6: Emit Output
-      - Assemble `definitions`, `agents`, `graph_nodes`, and `graph_edges`.
+      ### Step 5: Emit Output
+      - Assemble `definitions` and `agents`.
+      - Do not emit undeclared graph/index-specific fields. No workflow-generation derived-index contract exists today.
       - Validate: every state variable has `default` and `triggers` set.
       - Output the JSON object only.
 
@@ -1094,24 +1069,6 @@ agents:
               "usage": "bundle|context",
               "asset_type": "<string|null>"
             }
-          ],
-          "graph_nodes": [
-            {
-              "label": "ContextVariable",
-              "properties": {
-                "name": "<variable_name>",
-                "source_type": "<6-type>",
-                "workflow": "{{workflow_name}}"
-              }
-            }
-          ],
-          "graph_edges": [
-            {
-              "from": {"label": "Agent", "name": "<AgentName>"},
-              "to": {"label": "ContextVariable", "name": "<variable_name>"},
-              "type": "WRITES|READS",
-              "trigger": "<how this relationship is activated>"
-            }
           ]
         }
       }
@@ -1124,17 +1081,11 @@ agents:
       | user_text | type, match | Set boolean from a free-form composer reply |
       | ui_response | type, tool, response_key | Set variable from UI tool response |
 
-      **Graph Node/Edge Guidelines**:
-      - Create graph nodes for state variables that control workflow transitions
-      - Create WRITES edges when an agent updates a variable (via token or tool)
-      - Create READS edges when an agent explicitly depends on a variable
-      - The graph enables forced context injection every turn
-
       **Validation Rules**:
       - `definitions` is an ordered array (not a dict)
       - Every agent from roster MUST appear in `agents`
       - Every state variable MUST have `source.default` and `source.triggers`
-      - `graph_nodes` is optional but recommended for coordination variables
+      - Do NOT emit undeclared graph/index fields
       - Do NOT use `source.transitions`
 
       **CRITICAL**: Output ONLY the raw JSON object. NO markdown fences, NO explanatory text.
@@ -1235,7 +1186,7 @@ agents:
       - Generate production-ready agent-driven UI components from the Tools manifest.
       - Every UI tool produces exactly two files: a Python tool + a React component.
       - The Python tool uses `use_ui_tool(...)` from `mozaiksai.core.workflow.ui_tools`.
-      - `use_ui_tool(...)` emits a session-scoped `chat.tool_call` transport event; generated React should target that workflow UI lane, not legacy `ui_tool_event` or typed `ui.*` events.
+      - `use_ui_tool(...)` emits a session-scoped `chat.tool_call` transport event; generated React should target that workflow UI lane, not removed `ui_tool_event` or typed `ui.*` events.
       - The React component is mounted by `WorkflowUIRouter`, renders using platform
         primitives, and surfaces user actions (approve, submit, select) back via
         `onResponse`.
@@ -1243,7 +1194,7 @@ agents:
       - `component` is the concrete runtime identifier for that realization, not the source of truth.
       - Some workflow primitives resolve to shipped shared components. For those, `component` may be the canonical shipped component name instead of a workflow-local file.
       - Treat these files as contract-declared customization stubs. Generate only the files required by the Tools manifest and `ui_contract`; do not invent extra UI surfaces.
-      - Enforce `--mz-*` CSS semantic tokens in all generated React. No legacy color classes.
+      - Enforce `--mz-*` CSS semantic tokens in all generated React. No removed color classes.
       - Credential capture is a platform-owned exception: when a workflow needs API keys or connector input, prefer the shipped connector helpers/components and the workspace integrations surface instead of generating a bespoke credential-management UI.
   - id: primitives
     heading: '[PLATFORM PRIMITIVES — BUILDING BLOCKS]'
@@ -1473,7 +1424,7 @@ agents:
          - Python tool (`tools/<name>.py`): reads `context_variables.get("structured_output")`,
            imports `UIToolError` and `use_ui_tool` from `mozaiksai.core.workflow.ui_tools`,
            and calls `use_ui_tool(ui.component, payload, chat_id=chat_id, workflow_name=workflow_name)`.
-           This emits a `chat.tool_call` workflow UI request; do not design around legacy `ui_tool_event` transport semantics.
+           This emits a `chat.tool_call` workflow UI request; do not design around removed `ui_tool_event` transport semantics.
            Do not use low-level `send_tool_call_event` directly.
           Do not import from `workflows._shared` or `app.workflows._shared` in generated workflow code. Factory-owned generator infrastructure may import `factory_app.workflows._shared`, but generated workflow bundles must remain self-contained.
          - React component (`ui/<WorkflowName>/<Component>.jsx`): receives shell props from
@@ -1725,9 +1676,8 @@ agents:
 
       **Section C - context** (Derivation Rule):
       - List only the inputs, variables, and downstream consumers the agent actually needs.
-      - Use GENERIC upstream/downstream references unless a concrete runtime key is required:
-        - 'Upstream input from the previous stage's output' (NOT 'from SpecificAgentName')
-        - 'Downstream consumers receive your output' (NOT 'FooAgent receives this')
+      - Always name the exact context variable key the agent reads (e.g. `StateArchitecture`, `concept_overview`). Do NOT reference upstream agents by name.
+      - Only use generic stage language ('the previous stage's output', 'downstream consumers receive your output') when no named context variable exists for that data.
       - Name the exact context variables the agent reads from ContextVariablesPlan.
       - Include `concept_overview` when it is part of the agent's task boundary.
 
@@ -1790,7 +1740,7 @@ agents:
       **CRITICAL Requirements**:
       - ALL agents MUST use `prompt_sections` arrays (NOT `system_message` strings)
       - Sections MUST be: role, objective, context, instructions, output_format (exactly 5)
-      - Context section: Use GENERIC upstream/downstream references, NOT specific agent names
+      - Context section: Always name the exact context variable key (e.g. `StateArchitecture`, `concept_overview`) the agent reads. Do NOT reference upstream agents by name — reference their output keys. Only use generic stage language ("the previous stage's output") when no named context variable exists.
       - `max_consecutive_auto_reply` MUST be emitted for every agent using the deterministic turn-budget rules above
       - `structured_outputs_required` matches registry
       - Auto-tool execution is derived from tools.yaml at runtime - do not set any auto-tool field in agents.yaml

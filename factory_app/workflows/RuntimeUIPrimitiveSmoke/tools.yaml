@@ -2,7 +2,7 @@ tools:
 - agent: ReviewAgent
   file: request_acceptance_approval.py
   function: request_acceptance_approval
-  description: Collect structured approval for the workflow primitive acceptance checkpoint.
+  description: Collect structured approval for the runtime UI primitive smoke checkpoint.
   tool_type: UI_Tool
   auto_tool_call: false
   ui:
@@ -24,7 +24,7 @@ tools:
       additionalProperties: true
     actions_schema:
     - id: approve
-      description: Accept the workflow primitive validation checkpoint.
+      description: Accept the runtime UI primitive smoke checkpoint.
       label: Approve
       variant: primary
       approved: true
@@ -56,7 +56,7 @@ tools:
 - agent: ReviewAgent
   file: show_acceptance_diagram.py
   function: show_acceptance_diagram
-  description: Emit the artifact viewer surface for the workflow primitive acceptance smoke.
+  description: Emit the artifact viewer surface for the runtime UI primitive smoke.
   tool_type: UI_Surface
   auto_tool_call: false
   ui:

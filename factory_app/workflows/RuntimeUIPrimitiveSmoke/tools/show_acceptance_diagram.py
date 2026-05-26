@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from mozaiksai.core.workflow.ui_tools import emit_ui_surface
 
 
-async def show_acceptance_diagram(context_variables: Any = None) -> Dict[str, Any]:
+async def show_acceptance_diagram(context_variables: Any = None) -> dict[str, Any]:
     chat_id = None
     workflow_name = None
 
@@ -27,8 +27,8 @@ async def show_acceptance_diagram(context_variables: Any = None) -> Dict[str, An
     payload = {
         "component_type": "DiagramViewer",
         "interaction_type": "ui_surface",
-        "title": "Workflow primitive acceptance sequence",
-        "summary": "The artifact viewer renders the canonical three-lane acceptance path.",
+        "title": "Runtime UI primitive smoke sequence",
+        "summary": "The artifact viewer renders the canonical three-lane runtime smoke path.",
         "diagram": "\n".join(
             [
                 "sequenceDiagram",

@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -42,7 +41,7 @@ def test_agentgenerator_change_skill_requires_workflow_impact_reporting() -> Non
     assert "workflow authoring contract affected" in skill
     assert "universal prompts or hooks affected" in skill
     assert "tests run" in skill
-    assert "compatibility risk" in skill
+    assert "contract drift risk" in skill
     assert "OSS Change Impact" in skill
 
 

@@ -1,0 +1,94 @@
+definitions:
+  build_registry_id:
+    type: string
+    description: >
+      ID of the hosted app_registry record for the build being reviewed.
+      Passed in from the preceding AppGenerator session via journey context.
+      Used by present_review_summary to display the build record and by
+      the Promote action to call app_registry.promote_build.
+    source:
+      type: state
+      default: null
+
+  bundle_path:
+    type: string
+    description: >
+      Absolute filesystem path to the staged generated app bundle under
+      generated/apps/{app_id}/{build_id}/app. Passed in from AppGenerator
+      context_variables. Used to seed artifact_root for revision requests.
+    source:
+      type: state
+      default: null
+
+  lifecycle_state:
+    type: string
+    description: >
+      Current lifecycle state of the app bundle. Expected value at
+      AppReview entry is "review". Set to "active" after successful promotion.
+    source:
+      type: state
+      default: review
+
+  app_validation_status:
+    type: string
+    description: >
+      Result of the build validation step run by AppGenerator.
+      One of: passed, failed, skipped. Displayed in the review summary.
+    source:
+      type: state
+      default: null
+
+  app_validation_strategy_used:
+    type: string
+    description: >
+      Validation strategy used by AppGenerator during this build.
+      One of: e2b, local, skip. Displayed in the review summary.
+    source:
+      type: state
+      default: null
+
+  app_validation_preview_url:
+    type: string
+    description: >
+      Optional sandbox preview URL produced when e2b or local npm
+      validation ran successfully. Surfaced as a clickable link in
+      the review summary.
+    source:
+      type: state
+      default: null
+
+  integration_tests_passed:
+    type: boolean
+    description: >
+      Whether integration checks passed during the build. Null when
+      integration checks were not run.
+    source:
+      type: state
+      default: null
+
+  review_complete:
+    type: boolean
+    description: >
+      Set to true by submit_revision_request or after successful promotion.
+      ReviewAgent emits DONE when this is true.
+    source:
+      type: computed
+      default: false
+
+  revision_submitted:
+    type: boolean
+    description: >
+      Set to true by submit_revision_request when the user has typed a
+      revision request. Guards against duplicate submission.
+    source:
+      type: computed
+      default: false
+
+  refinement_request:
+    type: string
+    description: >
+      The user's typed revision request, captured by submit_revision_request.
+      Forwarded to the refinement control plane to route the next build step.
+    source:
+      type: state
+      default: null

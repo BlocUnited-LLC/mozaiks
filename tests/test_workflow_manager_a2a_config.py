@@ -66,7 +66,7 @@ def test_workflow_manager_loads_optional_a2a_yaml(tmp_path: Path) -> None:
     assert entries[0].get("url") == "https://example.com/agents/planner"
 
 
-def test_workflow_manager_rejects_legacy_startup_mode_only(tmp_path: Path) -> None:
+def test_workflow_manager_rejects_removed_startup_mode_only(tmp_path: Path) -> None:
     wf_dir = tmp_path / "FlowLegacy"
     wf_dir.mkdir(parents=True)
 

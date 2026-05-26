@@ -4,6 +4,6 @@ human_in_the_loop: true
 workflow_startup_mode: AgentDriven
 orchestration_pattern: DefaultPattern
 initial_message_to_user: null
-initial_message: 'ValueInterviewAgent: start a focused interview. Propose a short list of monetizable niches and
-  ask them to pick one. Ask one question at a time.'
+initial_message: 'ValueInterviewAgent: guide the user to a concrete app direction. If the idea is vague, propose a
+  short list of grounded options and ask which is closest. Ask only the smallest missing question.'
 initial_agent: ValueInterviewAgent

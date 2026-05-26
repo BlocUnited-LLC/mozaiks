@@ -27,6 +27,10 @@ SURFACE_PRIMITIVES = {"Panel", "SurfaceCard"}
 VALID_PAGE_TYPES = frozenset({
     "record_list", "record_detail", "analytics_dashboard", "workflow_board",
     "activity_feed", "gallery", "wizard", "split_view", "settings", "landing",
+    # checkout_success is a recognized type but must be a custom_route_bundle —
+    # YAML primitive pages cannot express the query-param access and polling
+    # required by post-payment redirect flows.
+    "checkout_success",
 })
 VALID_EXTENSION_SLOTS = frozenset({
     "header", "empty_state", "hero", "sidebar", "actions_bar",
@@ -52,7 +56,7 @@ DEEP_IMPORT_FLAGS = (
 )
 VALID_CUSTOM_ROUTE_EXTENSIONS = {".jsx"}
 
-LEGACY_COLOR_PATTERNS = (
+REMOVED_COLOR_PATTERNS = (
     re.compile(r"\bbg-(gray|slate|zinc|neutral|stone|white|black)-"),
     re.compile(r"\btext-(gray|slate|zinc|neutral|stone|white|black)-"),
     re.compile(r"\bborder-(gray|slate|zinc|neutral|stone|white|black)-"),
@@ -78,6 +82,11 @@ RAW_PRIMARY_BUTTON_RE = re.compile(
     r")",
     re.DOTALL,
 )
+# Module API endpoint format: /api/modules/{module}/{action} with no extras.
+# Page section api_endpoint values must match this pattern — no query strings,
+# no extra path segments, no direct hosted-module or external routes.
+_API_ENDPOINT_RE = re.compile(r"^/api/modules/[^/?#]+/[^/?#]+$")
+
 CLASS_LITERAL_RE = re.compile(
     r"className\s*=\s*(?:"
     r"\"(?P<double>[^\"]*)\""
@@ -414,10 +423,10 @@ def audit_generated_react_files(
                 f"{filename} hardcodes color values; use semantic theme tokens instead."
             )
 
-        for pattern in LEGACY_COLOR_PATTERNS:
+        for pattern in REMOVED_COLOR_PATTERNS:
             if pattern.search(content):
                 warnings.append(
-                    f"{filename} uses legacy color utility classes; use semantic theme tokens instead."
+                    f"{filename} uses removed color utility classes; use semantic theme tokens instead."
                 )
                 break
 
@@ -621,6 +630,46 @@ def audit_page_schemas(
                 warnings.append(
                     f"{section_path}.primitive nests {primitive} inside {parent_surfaces[-1]}; avoid cards/panels inside cards/panels."
                 )
+
+            # Validate api_endpoint format: must be /api/modules/{module}/{action}.
+            # Check both the section-level field and the nested config field.
+            for _ep in (
+                section.get("api_endpoint"),
+                (section.get("config") or {}).get("api_endpoint"),
+            ):
+                if isinstance(_ep, str) and _ep.strip().startswith("/api/"):
+                    if not _API_ENDPOINT_RE.match(_ep.strip()):
+                        warnings.append(
+                            f"{section_path}.api_endpoint '{_ep}' does not match "
+                            "the required pattern '/api/modules/{{module}}/{{action}}'. "
+                            "Module API endpoints must use exactly this path format "
+                            "without query strings or extra path segments."
+                        )
+
+        # Wizard pages must contain at least one Form section.
+        # A wizard without a Form has no submission path to a module action and
+        # violates the archetype contract: ProgressTracker + Form + ActionButton.
+        # Only fire when sections are present; an empty sections list is a
+        # degenerate/stub schema that passes the type-enum check but is not a
+        # real page — the Form check cannot apply to it.
+        if page_type == "wizard" and primitive_counts and primitive_counts.get("Form", 0) == 0:
+            warnings.append(
+                f"{page_path} has page_type='wizard' but no Form section; "
+                "wizard pages must include at least one Form section with a "
+                "submit_action that binds to an app-owned module action."
+            )
+
+        # checkout_success pages must be custom React routes, not YAML primitives.
+        # Post-payment redirect flows require query-param access (session_id,
+        # order_id) and polling for payment confirmation — capabilities that
+        # YAML primitive pages cannot express. Use custom_route_bundle instead.
+        if page_type == "checkout_success" and isinstance(sections, list) and sections:
+            warnings.append(
+                f"{page_path} has page_type='checkout_success' with sections; "
+                "checkout_success pages must be custom React routes declared via "
+                "custom_route_bundle, not YAML primitive pages. Remove sections "
+                "and declare this page through custom_route_bundle in the build plan."
+            )
 
         summary_count = primitive_counts.get("SummaryStrip", 0)
         if summary_count > 1:

@@ -1,7 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any, List, Dict, Optional
+from typing import Any
 
 import yaml
 
@@ -67,7 +67,7 @@ def _load_pattern_guidance_text() -> str:
         return ""
 
 
-def _load_pattern_example_str(pattern_id: int, section_key: str = "WorkflowStrategy") -> Optional[str]:
+def _load_pattern_example_str(pattern_id: int, section_key: str = "WorkflowStrategy") -> str | None:
     """Load a pattern example from docs/pattern_examples.
 
     Supports YAML multi-doc examples (preferred) and JSON examples. For YAML, this
@@ -128,8 +128,8 @@ def _apply_pattern_guidance(agent, guidance: str) -> bool:
                         agent._system_message = recomposed
                     elif hasattr(agent, "update_system_message") and callable(agent.update_system_message):
                         agent.update_system_message(recomposed)
-                    setattr(agent, "_mozaiks_prompt_sections", sections)
-                    setattr(agent, "_mozaiks_base_system_message", recomposed)
+                    agent._mozaiks_prompt_sections = sections
+                    agent._mozaiks_base_system_message = recomposed
                     logger.debug(f"Applied pattern guidance via prompt section for {getattr(agent, 'name', 'unknown')}")
                     return True
                 except Exception as compose_err:
@@ -145,14 +145,14 @@ def _apply_pattern_guidance(agent, guidance: str) -> bool:
                 agent._system_message = updated
             elif hasattr(agent, "update_system_message") and callable(agent.update_system_message):
                 agent.update_system_message(updated)
-            setattr(agent, "_mozaiks_base_system_message", updated)
+            agent._mozaiks_base_system_message = updated
             logger.debug(f"Applied pattern guidance via string replacement for {getattr(agent, 'name', 'unknown')}")
             return True
 
         if hasattr(agent, "_system_message"):
             separator = "\n\n" if current_message else ""
             agent._system_message = f"{current_message}{separator}{normalized}".strip()
-            setattr(agent, "_mozaiks_base_system_message", agent._system_message)
+            agent._mozaiks_base_system_message = agent._system_message
             logger.debug(f"Appended pattern guidance to system_message for {getattr(agent, 'name', 'unknown')} (placeholder missing)" )
             return True
 
@@ -163,7 +163,7 @@ def _apply_pattern_guidance(agent, guidance: str) -> bool:
         logger.error(f"Unhandled error applying pattern guidance for {getattr(agent, 'name', 'unknown')}: {err}", exc_info=True)
         return False
 
-def _get_pattern_from_context(agent) -> Dict[str, Any]:
+def _get_pattern_from_context(agent) -> dict[str, Any]:
     """Extract the active pattern from cached PatternSelection.
 
     PatternSelection is produced by PatternAgent and cached via the `pattern_selection`
@@ -205,7 +205,7 @@ def _get_pattern_from_context(agent) -> Dict[str, Any]:
         current_index = data.get("current_workflow_index")
         index = current_index if isinstance(current_index, int) and current_index >= 0 else 0
 
-        selected_workflow: Optional[Dict[str, Any]] = None
+        selected_workflow: dict[str, Any] | None = None
         if index < len(workflows) and isinstance(workflows[index], dict):
             selected_workflow = workflows[index]
         if selected_workflow is None:
@@ -247,7 +247,7 @@ def _get_pattern_from_context(agent) -> Dict[str, Any]:
         return {}
 
 
-def _get_upstream_context(agent, key: str) -> Dict[str, Any]:
+def _get_upstream_context(agent, key: str) -> dict[str, Any]:
     """Retrieve a specific upstream output from context variables."""
     try:
         if not hasattr(agent, '_context_variables') and not hasattr(agent, 'context_variables'):
@@ -268,7 +268,7 @@ def _get_upstream_context(agent, key: str) -> Dict[str, Any]:
         return {}
 
 
-def inject_workflow_strategy_guidance(agent, messages: List[Dict[str, Any]]) -> None:
+def inject_workflow_strategy_guidance(agent, messages: list[dict[str, Any]]) -> None:
     """
     AG2 update_agent_state hook for WorkflowStrategyAgent.
     Injects comprehensive pattern-specific guidance into system message.
@@ -699,7 +699,7 @@ IF you set `human_in_loop: false`, the workflow will run autonomously.
     except Exception as e:
         logger.error(f"Error in inject_workflow_strategy_guidance: {e}", exc_info=True)
 
-def inject_workflow_architect_guidance(agent, messages: List[Dict[str, Any]]) -> None:
+def inject_workflow_architect_guidance(agent, messages: list[dict[str, Any]]) -> None:
     """
   AG2 update_agent_state hook for WorkflowArchitectAgent.
   Injects pattern-specific workflow-wide context variables and lifecycle hooks.
@@ -1425,7 +1425,7 @@ def inject_workflow_architect_guidance(agent, messages: List[Dict[str, Any]]) ->
         logger.error(f"Error in inject_workflow_architect_guidance: {e}", exc_info=True)
 
 
-def inject_agent_tools_file_generator_guidance(agent, messages: List[Dict[str, Any]]) -> None:
+def inject_agent_tools_file_generator_guidance(agent, messages: list[dict[str, Any]]) -> None:
     """
     AG2 update_agent_state hook for AgentToolsFileGenerator.
     Injects pattern-specific agent tool generation guidance.
@@ -1964,7 +1964,7 @@ def inject_agent_tools_file_generator_guidance(agent, messages: List[Dict[str, A
 
 
 def _to_snake_case(value: str) -> str:
-    cleaned: List[str] = []
+    cleaned: list[str] = []
     last_was_sep = False
     for char in str(value or "").strip().lower():
         if char.isalnum():
@@ -2137,7 +2137,7 @@ export default function {component_name}({{
     return json.dumps(example, indent=2)
 
 
-def inject_ui_file_generator_guidance(agent, messages: List[Dict[str, Any]]) -> None:
+def inject_ui_file_generator_guidance(agent, messages: list[dict[str, Any]]) -> None:
     """
     AG2 update_agent_state hook for UIFileGenerator.
     Injects pattern-specific UI tool generation guidance.
@@ -2188,9 +2188,9 @@ def inject_ui_file_generator_guidance(agent, messages: List[Dict[str, Any]]) -> 
         contract_rules = (
             "[UI FILE GENERATOR CONTRACT]\\n"
             "- Use `from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool` for generated Python UI tools.\\n"
-            "- Do not import legacy `app.modules.ui_tools` or `app.plugins.ui_tools` helpers.\\n"
+            "- Do not import removed `app.modules.ui_tools` or `app.plugins.ui_tools` helpers.\\n"
             "- Do not call low-level `send_tool_call_event` directly, or subscribe via `useAppEventBus` in generated React.\\n"
-            "- `use_ui_tool(...)` emits a session-scoped `chat.tool_call`; generated React should assume the shell mounts it from that workflow UI lane, not from legacy `ui_tool_event` transport semantics.\\n"
+            "- `use_ui_tool(...)` emits a session-scoped `chat.tool_call`; generated React should assume the shell mounts it from that workflow UI lane, not from removed `ui_tool_event` transport semantics.\\n"
             "- Generated React components are mounted by `WorkflowUIRouter` and receive props like `payload`, `onResponse`, `onCancel`, `toolName`, `toolCallId`, `workflowName`, and `componentId`.\\n"
             "- `ToolsManifest.ui.workflow_primitive` is the canonical interaction pattern, and `ToolsManifest.ui.realization` declares whether the component is shell-owned, direct shipped, a workflow wrapper, or a generated custom surface.\\n"
             "- If `ui.realization`=`shipped_component`, do not generate custom React for it; those shipped shared components already exist in `chat-ui`.\\n"
@@ -2225,7 +2225,7 @@ def inject_ui_file_generator_guidance(agent, messages: List[Dict[str, Any]]) -> 
         logger.error(f"Error in inject_ui_file_generator_guidance: {e}", exc_info=True)
 
 
-def inject_handoffs_guidance(agent, messages: List[Dict[str, Any]]) -> None:
+def inject_handoffs_guidance(agent, messages: list[dict[str, Any]]) -> None:
     """
     AG2 update_agent_state hook for HandoffsAgent.
     Injects pattern-specific handoff rules into system message.
@@ -2590,7 +2590,7 @@ def inject_handoffs_guidance(agent, messages: List[Dict[str, Any]]) -> None:
 
 
 
-def inject_structured_outputs_guidance(agent, messages: List[Dict[str, Any]]) -> None:
+def inject_structured_outputs_guidance(agent, messages: list[dict[str, Any]]) -> None:
     """
     AG2 update_agent_state hook for StructuredOutputsAgent.
     Injects pattern-specific structured output schema generation guidance.
@@ -2896,7 +2896,7 @@ def inject_structured_outputs_guidance(agent, messages: List[Dict[str, Any]]) ->
         logger.error(f"Error in inject_structured_outputs_guidance: {e}", exc_info=True)
 
 
-def inject_context_variables_guidance(agent, messages: List[Dict[str, Any]]) -> None:
+def inject_context_variables_guidance(agent, messages: list[dict[str, Any]]) -> None:
     """
     AG2 update_agent_state hook for ContextVariablesAgent.
     Injects pattern-specific context variable planning guidance.
@@ -3118,7 +3118,7 @@ def inject_context_variables_guidance(agent, messages: List[Dict[str, Any]]) -> 
         logger.error(f"Error in inject_context_variables_guidance: {e}", exc_info=True)
 
 
-def inject_agents_agent_guidance(agent, messages: List[Dict[str, Any]]) -> None:
+def inject_agents_agent_guidance(agent, messages: list[dict[str, Any]]) -> None:
     """
     AG2 update_agent_state hook for AgentsAgent.
     Injects pattern-specific runtime agent configuration guidance.
@@ -3440,7 +3440,7 @@ def inject_agents_agent_guidance(agent, messages: List[Dict[str, Any]]) -> None:
         logger.error(f"Error in inject_agents_agent_guidance: {e}", exc_info=True)
 
 
-def inject_hook_agent_guidance(agent, messages: List[Dict[str, Any]]) -> None:
+def inject_hook_agent_guidance(agent, messages: list[dict[str, Any]]) -> None:
     """
     AG2 update_agent_state hook for HookAgent.
     Injects pattern-specific system hook generation guidance.
@@ -3608,7 +3608,7 @@ def inject_hook_agent_guidance(agent, messages: List[Dict[str, Any]]) -> None:
         logger.error(f"Error in inject_hook_agent_guidance: {e}", exc_info=True)
 
 
-def inject_orchestrator_guidance(agent, messages: List[Dict[str, Any]]) -> None:
+def inject_orchestrator_guidance(agent, messages: list[dict[str, Any]]) -> None:
     """
     AG2 update_agent_state hook for OrchestratorAgent.
     Injects pattern-specific orchestration configuration guidance.
@@ -3773,7 +3773,7 @@ def inject_orchestrator_guidance(agent, messages: List[Dict[str, Any]]) -> None:
         logger.error(f"Error in inject_orchestrator_guidance: {e}", exc_info=True)
 
 
-def inject_project_overview_guidance(agent, messages: List[Dict[str, Any]]) -> None:
+def inject_project_overview_guidance(agent, messages: list[dict[str, Any]]) -> None:
     """
     AG2 update_agent_state hook for ProjectOverviewAgent.
     Injects pattern-specific Mermaid sequence diagram examples.

@@ -1,8 +1,8 @@
 registry:
-  ReviewAgent: WorkflowPrimitiveAcceptanceResult
+  ReviewAgent: RuntimeUIPrimitiveSmokeResult
 
 models:
-  WorkflowPrimitiveAcceptanceResult:
+  RuntimeUIPrimitiveSmokeResult:
     type: model
     fields:
       agent_message:
@@ -10,7 +10,7 @@ models:
         description: User-facing completion message.
       result:
         type: str
-        description: One-sentence acceptance summary for the workflow UI primitive lanes.
+        description: One-sentence smoke summary for the runtime UI primitive lanes.
       composer_reply_seen:
         type: bool
         description: Whether the composer-routed human reply checkpoint completed.

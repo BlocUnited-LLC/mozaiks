@@ -117,7 +117,7 @@ def test_build_ui_file_generator_example_uses_canonical_runtime_contract() -> No
     assert "artifactDesignSystem" not in react_file["content"]
 
 
-def test_inject_ui_file_generator_guidance_replaces_legacy_examples() -> None:
+def test_inject_ui_file_generator_guidance_replaces_removed_examples() -> None:
     agent = _Agent()
 
     update_agent_state_pattern.inject_ui_file_generator_guidance(agent, [])
