@@ -22,13 +22,14 @@ opens the local Console.
 
 ## Start Mozaiks
 
-`quickstart` opens the Console during first setup.
+`quickstart` opens the Console during first setup. It does not create a new
+workspace-local `.venv`; it uses the environment where `mozaiks` is installed.
 
-After that, if you want to start the same workspace again later, run:
+After that, if you want to start the same workspace again later, reactivate the
+same `.venv` you used to install Mozaiks, then run:
 
 ```powershell
 cd .\{workspace name}
-.\.venv\Scripts\Activate.ps1
 .\scripts\run-console.ps1
 ```
 
