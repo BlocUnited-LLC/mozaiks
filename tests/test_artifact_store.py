@@ -1,11 +1,10 @@
 from __future__ import annotations
 
+import sys
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-import sys
 
 from tests.import_utils import import_module_directly
 
@@ -263,6 +262,58 @@ async def test_accept_artifact_version_supersedes_prior_current_version() -> Non
     update_one_query, update_one_doc = versions_coll.update_one.await_args.args
     assert update_one_query["_id"] == "av_child"
     assert update_one_doc["$set"]["lifecycle_status"] == ArtifactLifecycleStatus.CURRENT.value
+
+
+@pytest.mark.asyncio
+async def test_accept_artifact_version_can_persist_commit_metadata() -> None:
+    store = ArtifactStore.__new__(ArtifactStore)
+    versions_coll = MagicMock()
+    current_raw = {
+        "_id": "av_child",
+        "app_id": "app-1",
+        "artifact_kind": "app_bundle",
+        "artifact_key": "primary",
+        "version_number": 2,
+        "parent_version_id": "av_parent",
+        "lineage_root_id": "av_parent",
+        "source_workflow": "AppGenerator",
+        "source_chat_id": "chat-1",
+        "canonical_inputs_version": {},
+        "lifecycle_status": ArtifactLifecycleStatus.DRAFT.value,
+        "validation_status": ArtifactValidationStatus.PASSED.value,
+        "files_manifest": [],
+        "commit_metadata": {"metadata": {"refinement": {"request_id": "req-1"}}},
+    }
+    refreshed_raw = dict(current_raw)
+    refreshed_raw["lifecycle_status"] = ArtifactLifecycleStatus.CURRENT.value
+    refreshed_raw["commit_metadata"] = {
+        "metadata": {
+            "refinement": {"request_id": "req-1"},
+            "acceptance": {
+                "accepted_by": "operator-1",
+                "accepted_at": "2026-05-22T00:00:00Z",
+                "refinement_review_status": "promotion_ready",
+                "request_id": "req-1",
+            },
+        }
+    }
+    versions_coll.find_one = AsyncMock(side_effect=[current_raw, refreshed_raw])
+    versions_coll.update_many = AsyncMock()
+    versions_coll.update_one = AsyncMock()
+    store._coll = AsyncMock(return_value=versions_coll)
+
+    accepted = await store.accept_artifact_version(
+        app_id="app-1",
+        artifact_version_id="av_child",
+        commit_metadata=refreshed_raw["commit_metadata"],
+    )
+
+    assert accepted is not None
+    update_one_query, update_one_doc = versions_coll.update_one.await_args.args
+    assert update_one_query["_id"] == "av_child"
+    commit_metadata = update_one_doc["$set"]["commit_metadata"]
+    assert commit_metadata["metadata"]["refinement"]["request_id"] == "req-1"
+    assert commit_metadata["metadata"]["acceptance"]["accepted_by"] == "operator-1"
 
 
 @pytest.mark.asyncio

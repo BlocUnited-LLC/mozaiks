@@ -7,10 +7,11 @@ CLI and by the hosted Mozaiks product. It adds Studio shell routes and
 workflow triggering on top of the headless platform host.
 """
 
+import stat
 import zipfile
 from datetime import UTC, datetime
 from difflib import unified_diff
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
@@ -23,7 +24,11 @@ from mozaiksai.hosts.bootstrap import configure_repo_host_defaults
 configure_repo_host_defaults("studio")
 
 from logs.logging_config import get_workflow_logger
-from mozaiksai.control_plane import get_orchestration_control_harness
+from mozaiksai.control_plane import (
+    AcceptedStagedAppBundleArtifactVersionError,
+    accept_staged_refinement_artifact_version,
+    get_orchestration_control_harness,
+)
 from mozaiksai.control_plane.app_context import get_current_app_context_summary
 from mozaiksai.control_plane.app_context_override import (
     AppContextPolicyOverrideDecision,
@@ -54,11 +59,11 @@ from mozaiksai.core.artifacts import (
     get_artifact_store,
 )
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
+from mozaiksai.control_plane.review import load_refinement_review_record
 from mozaiksai.core.runtime.app.console_summary import (
     build_app_overview_summary,
     build_apps_summary,
     build_build_section,
-    build_build_summary,
     build_integrations_summary,
     get_missing_console_surfaces,
     load_build_state_from_db,
@@ -81,6 +86,7 @@ from mozaiksai.core.workflow.generator_support.connector_service import (
     store_connector,
     update_connector_metadata,
 )
+from mozaiksai.core.workflow.paths import candidate_app_workflows_roots
 from mozaiksai.hosts import platform as platform_app
 from mozaiksai.hosts.platform import (
     build_shell_config,
@@ -96,6 +102,26 @@ _BUNDLE_MAX_TOTAL_BYTES = 2_000_000
 _BUNDLE_MAX_SINGLE_FILE_BYTES = 250_000
 _DIFF_PREVIEW_MAX_LINES = 120
 _DIFF_PREVIEW_MAX_CHARS = 12_000
+_RESTORE_SECRET_PATH_TERMS = (
+    ".env",
+    "secret",
+    "secrets",
+    "vault",
+    "credential",
+    "credentials",
+    "private_key",
+    "private-key",
+    "id_rsa",
+    "id_dsa",
+    ".pem",
+    ".key",
+)
+_RESTORE_SKIP_FILENAMES = {
+    "refinement_plan.json",
+    "affected_paths.json",
+    "refinement_review.json",
+    "execution_result.json",
+}
 
 
 def _get_app_registry_service() -> AppRegistryService:
@@ -110,6 +136,55 @@ def _normalize_bundle_entry_name(name: str) -> Optional[str]:
     if any(part == ".." for part in parts):
         return None
     return "/".join(parts)
+
+
+def _restore_entry_name(name: str) -> tuple[str | None, str | None]:
+    raw = str(name or "").strip()
+    if not raw:
+        return None, "Empty path."
+    if "\x00" in raw:
+        return None, "Path contains a null byte."
+    if PureWindowsPath(raw).is_absolute() or PureWindowsPath(raw).drive:
+        return None, "Absolute or drive-qualified paths are not allowed."
+    if raw.startswith(("/", "\\", "//", "\\\\")) or PurePosixPath(raw).is_absolute():
+        return None, "Absolute paths are not allowed."
+
+    normalized = raw.replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    parts = [part for part in PurePosixPath(normalized).parts if part not in ("", ".")]
+    if not parts or any(part == ".." for part in parts):
+        return None, "Path traversal is not allowed."
+
+    relative_path = "/".join(parts)
+    lowered = relative_path.lower()
+    if any(term in lowered for term in _RESTORE_SECRET_PATH_TERMS):
+        return relative_path, "Secret-sensitive paths are not restored."
+    basename = PurePosixPath(relative_path).name.lower()
+    if (
+        basename in _RESTORE_SKIP_FILENAMES
+        or lowered.startswith("backups/")
+        or "/backups/" in lowered
+        or any(segment == "backups" for segment in PurePosixPath(relative_path).parts)
+    ):
+        return relative_path, "Staging metadata and backups are not restored."
+    return relative_path, None
+
+
+def _zipinfo_is_symlink(info: zipfile.ZipInfo) -> bool:
+    mode = (info.external_attr >> 16) & 0o170000
+    return mode == stat.S_IFLNK
+
+
+def _contains_symlink_component(root: Path, relative_path: str) -> bool:
+    if root.is_symlink():
+        return True
+    current = root
+    for part in PurePosixPath(relative_path).parts:
+        current = current / part
+        if current.exists() and current.is_symlink():
+            return True
+    return False
 
 
 def _strip_shared_root_prefix(entries: list[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
@@ -171,20 +246,111 @@ def _artifact_bundle_path_from_version(version) -> Optional[Path]:  # noqa: ANN0
     return path if path.exists() else None
 
 
+def _version_metadata(version) -> dict[str, Any]:
+    commit_metadata = getattr(version, "commit_metadata", None)
+    metadata = getattr(commit_metadata, "metadata", None)
+    if isinstance(metadata, dict):
+        return dict(metadata)
+    if isinstance(commit_metadata, dict):
+        payload = commit_metadata.get("metadata")
+        if isinstance(payload, dict):
+            return dict(payload)
+    return {}
+
+
+def _refinement_metadata_from_version(version) -> Optional[dict[str, Any]]:  # noqa: ANN001
+    metadata = _version_metadata(version)
+    refinement = metadata.get("refinement")
+    if isinstance(refinement, dict):
+        return refinement
+    return None
+
+
+def _load_refinement_review_record_for_version(version):  # noqa: ANN001
+    refinement = _refinement_metadata_from_version(version)
+    if refinement is None:
+        return None
+    staging_area = str(refinement.get("staging_area") or "").strip()
+    if not staging_area:
+        return None
+    try:
+        return load_refinement_review_record(staging_area)
+    except FileNotFoundError:
+        return None
+
+
+def _refinement_acceptance_ready(version) -> bool:  # noqa: ANN001
+    refinement = _refinement_metadata_from_version(version)
+    if refinement is None:
+        return True
+    review_record = _load_refinement_review_record_for_version(version)
+    review_snapshot = refinement.get("review")
+    if not isinstance(review_snapshot, dict):
+        return False
+    return bool(
+        review_record is not None
+        and review_record.status == "promotion_ready"
+        and review_record.promotion_allowed is True
+        and str(review_snapshot.get("status") or "").strip() == "promotion_ready"
+        and review_snapshot.get("promotion_allowed") is True
+    )
+
+
 def _resolve_bundle_restore_target(version) -> Path:  # noqa: ANN001
     app_root = resolve_app_root()
-    if version.artifact_kind == "workflow_bundle":
-        target_dir = app_root / "workflows"
-        target_dir.mkdir(parents=True, exist_ok=True)
-        return target_dir
-    if version.artifact_kind == "app_bundle":
-        return app_root
-    raise HTTPException(status_code=400, detail=f"Unsupported artifact kind for restore: {version.artifact_kind}")
+    if version.artifact_kind != "app_bundle":
+        raise HTTPException(status_code=400, detail=f"Unsupported artifact kind for restore: {version.artifact_kind}")
+    app_root.mkdir(parents=True, exist_ok=True)
+    return app_root
 
 
-def _restore_bundle_to_target(*, zip_path: Path, target_dir: Path) -> None:
+def _restore_bundle_to_target(*, zip_path: Path, target_dir: Path) -> dict[str, list[str]]:
+    restored: list[str] = []
+    skipped: list[str] = []
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_root = target_dir.resolve()
+
     with zipfile.ZipFile(zip_path, "r") as archive:
-        archive.extractall(target_dir)
+        planned: list[tuple[zipfile.ZipInfo, str]] = []
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            if _zipinfo_is_symlink(info):
+                skipped.append(info.filename)
+                continue
+            safe_name, reason = _restore_entry_name(info.filename)
+            if safe_name is None:
+                raise HTTPException(status_code=400, detail=f"Unsafe artifact archive entry: {info.filename} ({reason})")
+            if reason is not None:
+                skipped.append(safe_name)
+                continue
+            if _contains_symlink_component(target_root, safe_name):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Restore target contains a symlinked component for archive entry: {safe_name}",
+                )
+            planned.append((info, safe_name))
+
+        if not planned:
+            raise HTTPException(status_code=400, detail="Artifact bundle did not contain any restorable files.")
+
+        for info, safe_name in planned:
+            destination = (target_root / safe_name).resolve()
+            if not destination.is_relative_to(target_root):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Archive entry escapes restore target: {safe_name}",
+                )
+            if destination.exists() and destination.is_symlink():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Refusing to write through a symlinked target path: {safe_name}",
+                )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(archive.read(info.filename))
+            restored.append(safe_name)
+
+    return {"restored": sorted(restored), "skipped": sorted(skipped)}
 
 
 def _build_diff_preview(*, path: str, before: Optional[str], after: Optional[str]) -> str:
@@ -304,6 +470,7 @@ async def _build_artifact_review_payload(
     can_accept = (
         version.lifecycle_status == ArtifactLifecycleStatus.DRAFT
         and version.validation_status in {ArtifactValidationStatus.PASSED, ArtifactValidationStatus.SKIPPED}
+        and _refinement_acceptance_ready(version)
     )
     can_reject = version.lifecycle_status == ArtifactLifecycleStatus.DRAFT
     can_promote = (
@@ -571,36 +738,6 @@ def _plan_from_operator_payload(payload: Dict[str, Any]) -> RefinementExecutionP
     except ValidationError:
         return RefinementDryRunPlan.model_validate(payload)
 
-_SECRET_RESPONSE_KEYS = {"secret_value", "secret", "api_key", "apikey", "token", "password"}
-
-
-def _redact_secret_fields(value: Any) -> Any:
-    if isinstance(value, dict):
-        redacted: Dict[str, Any] = {}
-        for key, item in value.items():
-            if str(key).strip().lower() in _SECRET_RESPONSE_KEYS:
-                continue
-            redacted[key] = _redact_secret_fields(item)
-        return redacted
-    if isinstance(value, list):
-        return [_redact_secret_fields(item) for item in value]
-    return value
-
-
-def _redact_connector_record(record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    if not isinstance(record, dict):
-        return None
-    enriched = dict(record)
-    if not isinstance(enriched.get("health"), dict):
-        enriched["health"] = compute_connector_health(enriched, checked_by="manual")
-    return _redact_secret_fields(enriched)
-
-
-def _redact_secret_result(result: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    if not isinstance(result, dict):
-        return None
-    return _redact_secret_fields(result)
-
 
 @app.get("/api/studio/apps/{app_id}/context")
 async def get_studio_app_context_status(
@@ -761,6 +898,9 @@ async def create_studio_app_context_policy_override(
             "app_context_policy_override": override.model_dump(mode="json"),
             "applied_plan": applied_plan.model_dump(mode="json") if applied_plan is not None else None,
             "mutation_allowed": False,
+        }
+    )
+
 
 @app.post("/api/studio/integrations/connectors")
 async def create_or_update_integration_connector(
@@ -989,7 +1129,7 @@ async def get_build_artifact_bundle(
         "generated_files": generated_files,
         "skipped_files": skipped_files,
         "workbench": {
-            "title": f"Artifact Workbench Â· {version.artifact_key} v{version.version_number}",
+            "title": f"Artifact Workbench · {version.artifact_key} v{version.version_number}",
             "description": "Inspect a persisted artifact bundle and launch scoped coding refinement from explicit file scope.",
             "artifact_version_id": version.id,
             "artifact_kind": version.artifact_kind,
@@ -1042,7 +1182,28 @@ async def accept_build_artifact_version(
     if version.validation_status not in {ArtifactValidationStatus.PASSED, ArtifactValidationStatus.SKIPPED}:
         raise HTTPException(status_code=409, detail="Only validated artifact versions can be accepted.")
 
-    accepted = await artifact_store.accept_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
+    refinement_metadata = _refinement_metadata_from_version(version)
+    refinement_review_record = _load_refinement_review_record_for_version(version)
+    if refinement_metadata is not None and refinement_review_record is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Staged refinement drafts require a promotion_ready review record before acceptance.",
+        )
+    if refinement_review_record is not None:
+        try:
+            accepted_result = await accept_staged_refinement_artifact_version(
+                app_id=app_id,
+                draft_artifact_version_id=artifact_version_id,
+                review_record=refinement_review_record,
+                request_id=refinement_review_record.request_id,
+                artifact_store=artifact_store,
+                accepted_by=principal.user_id,
+            )
+        except (AcceptedStagedAppBundleArtifactVersionError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        accepted = accepted_result.artifact_version
+    else:
+        accepted = await artifact_store.accept_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
     if accepted is None:
         raise HTTPException(status_code=404, detail=f"Artifact version not found: {artifact_version_id}")
 
@@ -1122,6 +1283,8 @@ async def promote_build_artifact_version(
         raise HTTPException(status_code=404, detail=f"Artifact version not found: {artifact_version_id}")
     if version.lifecycle_status != ArtifactLifecycleStatus.CURRENT:
         raise HTTPException(status_code=409, detail="Only accepted current artifact versions can be promoted.")
+    if version.artifact_kind != "app_bundle":
+        raise HTTPException(status_code=400, detail=f"Unsupported artifact kind for restore: {version.artifact_kind}")
     if version.validation_status not in {ArtifactValidationStatus.PASSED, ArtifactValidationStatus.SKIPPED}:
         raise HTTPException(status_code=409, detail="Only validated artifact versions can be promoted.")
 
@@ -1131,10 +1294,18 @@ async def promote_build_artifact_version(
             status_code=400,
             detail="This artifact version has no restorable file path. Only versions generated after artifact persistence was added can be promoted.",
         )
+    if not version.files_manifest:
+        raise HTTPException(
+            status_code=400,
+            detail="Artifact versions must include a file manifest before promotion.",
+        )
+    refinement_metadata = _refinement_metadata_from_version(version)
 
     target_dir = _resolve_bundle_restore_target(version)
     try:
-        _restore_bundle_to_target(zip_path=zip_path, target_dir=target_dir)
+        restore_summary = _restore_bundle_to_target(zip_path=zip_path, target_dir=target_dir)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to promote artifact: {exc}") from exc
 
@@ -1156,11 +1327,14 @@ async def promote_build_artifact_version(
         artifact_store=artifact_store,
     )
     logger.info(
-        "Promoted app_id=%s artifact_version_id=%s (%s/%s)",
+        "Promoted app_id=%s artifact_version_id=%s (%s/%s) restored=%s skipped=%s refinement_request_id=%s",
         app_id,
         artifact_version_id,
         version.artifact_kind,
         version.artifact_key,
+        len(restore_summary["restored"]),
+        len(restore_summary["skipped"]),
+        str((refinement_metadata or {}).get("request_id") or "").strip() or None,
     )
     return {
         "promoted": True,
@@ -1170,6 +1344,8 @@ async def promote_build_artifact_version(
         "artifact_key": version.artifact_key,
         "target_path": str(target_dir),
         "restart_required": True,
+        "restored_files": restore_summary["restored"],
+        "skipped_files": restore_summary["skipped"],
         **payload,
     }
 
@@ -1190,7 +1366,6 @@ async def revert_to_artifact_version(
     app root. Returns restart_required=True because the platform host reads from
     disk at startup.
     """
-    import zipfile as _zipfile
     from pathlib import Path as _Path
 
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -1220,7 +1395,7 @@ async def revert_to_artifact_version(
     app_root = resolve_app_root()
 
     if version.artifact_kind == "workflow_bundle":
-        target_dir = app_root / "workflows"
+        target_dir = candidate_app_workflows_roots(app_root)[0]
         target_dir.mkdir(parents=True, exist_ok=True)
     elif version.artifact_kind == "app_bundle":
         target_dir = app_root
@@ -1228,8 +1403,9 @@ async def revert_to_artifact_version(
         raise HTTPException(status_code=400, detail=f"Cannot revert artifact kind: {version.artifact_kind}")
 
     try:
-        with _zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(target_dir)
+        _restore_bundle_to_target(zip_path=zip_path, target_dir=target_dir)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to extract artifact: {exc}") from exc
 

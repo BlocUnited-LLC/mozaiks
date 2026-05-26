@@ -39,7 +39,16 @@ def _artifact_version(
     parent_version_id: str | None = None,
     lifecycle_status: ArtifactLifecycleStatus = ArtifactLifecycleStatus.DRAFT,
     validation_status: ArtifactValidationStatus = ArtifactValidationStatus.PASSED,
+    files_manifest: list[dict[str, object]] | None = None,
 ) -> ArtifactVersionDoc:
+    resolved_manifest = files_manifest
+    if resolved_manifest is None:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            resolved_manifest = [
+                {"path": info.filename, "size_bytes": info.file_size}
+                for info in archive.infolist()
+                if not info.is_dir()
+            ]
     return ArtifactVersionDoc.model_validate(
         {
             "_id": artifact_version_id,
@@ -54,7 +63,7 @@ def _artifact_version(
             "canonical_inputs_version": {},
             "lifecycle_status": lifecycle_status.value,
             "validation_status": validation_status.value,
-            "files_manifest": [],
+            "files_manifest": resolved_manifest,
             "commit_metadata": ArtifactCommitMetadata(
                 message="Generated artifact",
                 source_workflow="AppGenerator",
@@ -415,7 +424,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch)
     ]
 
 
-def test_studio_trigger_endpoint_rejects_legacy_top_level_refinement_fields(monkeypatch):
+def test_studio_trigger_endpoint_rejects_removed_top_level_refinement_fields(monkeypatch):
     from mozaiksai.core.auth import reset_auth_adapter
 
     monkeypatch.setenv("AUTH_ENABLED", "false")

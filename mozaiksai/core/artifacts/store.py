@@ -533,6 +533,7 @@ class ArtifactStore:
         *,
         app_id: str,
         artifact_version_id: str,
+        commit_metadata: Optional[Dict[str, Any] | ArtifactCommitMetadata] = None,
     ) -> Optional[ArtifactVersionDoc]:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
@@ -543,6 +544,17 @@ class ArtifactStore:
             return None
         target = ArtifactVersionDoc.model_validate(raw)
         now = _utc_now()
+        updates: Dict[str, Any] = {
+            "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
+            "updated_at": now,
+        }
+        if commit_metadata is not None:
+            commit_doc = (
+                commit_metadata
+                if isinstance(commit_metadata, ArtifactCommitMetadata)
+                else ArtifactCommitMetadata.model_validate(commit_metadata)
+            )
+            updates["commit_metadata"] = commit_doc.model_dump(mode="python")
 
         await versions.update_many(
             {
@@ -561,12 +573,7 @@ class ArtifactStore:
         )
         await versions.update_one(
             {"_id": target.id, **build_app_scope_filter(resolved_app_id)},
-            {
-                "$set": {
-                    "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
-                    "updated_at": now,
-                }
-            },
+            {"$set": updates},
         )
         refreshed = await versions.find_one({"_id": target.id, **build_app_scope_filter(resolved_app_id)})
         return ArtifactVersionDoc.model_validate(refreshed) if isinstance(refreshed, dict) else target
