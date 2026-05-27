@@ -123,7 +123,7 @@ Mozaiks after that.
 python -m mozaiks quickstart --dir .\mozaiks-workspace
 python -m mozaiks studio --dir .\mozaiks-workspace --open
 python -m mozaiks studio --dir .\mozaiks-workspace --json
-python -m mozaiks onboard --dir .\mozaiks-workspace --full
+python -m mozaiks onboard --dir .\mozaiks-workspace
 ```
 
 `quickstart` is the preferred local command. The lower-level `studio` command is

@@ -16,7 +16,7 @@ import AppStudioHero, {
 } from './AppStudioChrome.jsx'
 import { getAppStudioSnapshot } from './appStudioDataHelpers.js'
 import {
-  getAppJourneyLabel,
+  getControlPlaneStatusLabel,
   getApprovalStateLabel,
   getPlanStateLabel,
   getRuntimeHealthLabel,
@@ -51,13 +51,14 @@ export default function AppOverviewPage() {
   const cfReport = latestArtifact?.commit_metadata?.metadata?.carry_forward_report || null
   const latestRun = snapshot.runs[0] || null
   const workflowNames = getWorkflowNames(snapshot)
-  const nextStep = snapshot.summary?.next_step || 'Continue from the highest-priority build or runtime signal.'
+  const controlPlane = snapshot.summary?.ai?.control_plane || {}
+  const nextStep = snapshot.summary?.home?.next_step || 'Continue from the highest-priority build or runtime signal.'
   const summaryItems = [
     {
-      id: 'journey',
-      label: 'Journey',
-      value: getAppJourneyLabel(snapshot.app.journey),
-      detail: getRuntimeReadinessLabel(snapshot.summary.workspace?.runtime_readiness),
+      id: 'control-plane',
+      label: 'Control Plane',
+      value: getControlPlaneStatusLabel(controlPlane),
+      detail: controlPlane.profile ? `Profile: ${controlPlane.profile}` : getRuntimeReadinessLabel(snapshot.summary.workspace?.runtime_readiness),
     },
     {
       id: 'workflows',

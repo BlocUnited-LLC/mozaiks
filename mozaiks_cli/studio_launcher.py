@@ -16,6 +16,7 @@ from mozaiks_cli.workspace import resolve_active_app_root
 from mozaiksai.resources import (
     resolve_chat_ui_root,
     resolve_factory_app_root,
+    resolve_factory_workflows_root,
     resolve_web_shell_root,
 )
 
@@ -31,6 +32,10 @@ def _workspace_env(workspace_root: Path, *, host: str) -> dict[str, str]:
     factory_app_root = resolve_factory_app_root()
     if factory_app_root is not None:
         env.setdefault("MOZAIKS_FACTORY_APP_PATH", str(factory_app_root))
+
+    factory_workflows_root = resolve_factory_workflows_root()
+    if host == "studio" and factory_workflows_root is not None:
+        env.setdefault("MOZAIKS_WORKFLOWS_PATH", str(factory_workflows_root))
 
     web_shell_root = resolve_web_shell_root()
     if web_shell_root is not None:

@@ -14,6 +14,7 @@ def run(args) -> None:
 
     workspace_root = resolve_workspace_root(getattr(args, "directory", None))
     app_root = resolve_active_app_root(workspace_root)
+
     missing_surfaces = get_missing_studio_surfaces(app_root)
     if missing_surfaces:
         print(f"Error: no valid Mozaiks scaffold found in {workspace_root}")
@@ -22,6 +23,9 @@ def run(args) -> None:
             print(f"  - {rel_path}")
         print("Run 'mozaiks onboard --dir <workspace>' to create/configure a scaffold first.")
         return
+
+    from mozaiks_cli.commands.sync_agent_guidance import auto_sync_agent_guidance
+    auto_sync_agent_guidance(workspace_root)
 
     if getattr(args, "open_studio", False):
         result = launch_studio(
@@ -55,15 +59,22 @@ def _print_app_overview(summary: dict) -> None:
     admin = summary["admin"]
     workspace = summary["workspace"]
     home = summary["home"]
+    control_plane = ai.get("control_plane") or {}
+    control_plane_state = "enabled" if control_plane.get("enabled") else "disabled"
+    control_plane_profile = control_plane.get("profile")
+    control_plane_label = (
+        f"{control_plane_state} ({control_plane_profile})"
+        if control_plane_profile
+        else control_plane_state
+    )
 
     print("App Overview\n")
     print(f"Workspace:         {summary['studio']['workspace_root']}")
     print(f"Route:             {summary['studio']['route']}")
     print(f"Local Only:        {summary['studio']['local_only']}")
     print(f"App:               {app['name']}")
-    print(f"Journey:           {app['journey'] or 'not configured'}")
-    print(f"First Goal:        {app['first_goal'] or 'not configured'}")
     print(f"Provider / Model:  {ai['provider'] or 'not configured'} / {ai['model'] or 'not configured'}")
+    print(f"Control Plane:     {control_plane_label}")
     print(f"Theme:             {theme['primary'] or 'not configured'}")
     print(f"Tagline:           {theme['tagline'] or 'not configured'}")
     print(f"Admins:            {', '.join(admin['admins']) if admin['admins'] else 'none'}")

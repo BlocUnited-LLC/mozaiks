@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from mozaiks_cli.commands.init import (
+from mozaiks_cli.agent_guidance import (
     AGENT_GUIDANCE_BEGIN,
     AGENT_GUIDANCE_END,
     build_agent_guidance_files,
@@ -171,6 +171,37 @@ def _count_statuses(statuses: list[GuidanceStatus]) -> dict[str, int]:
     for status in statuses:
         counts[status.status] = counts.get(status.status, 0) + 1
     return counts
+
+
+def auto_sync_agent_guidance(workspace_root: Path) -> None:
+    """Silently update managed agent guidance blocks when the package version changes.
+
+    Called automatically by workspace-facing commands so builders do not need to
+    remember ``mozaiks sync-agent-guidance --update`` after upgrading Mozaiks.
+    Any failure is swallowed to avoid blocking host startup.
+    """
+    try:
+        from mozaiks_cli.workspace import is_framework_repo_root, resolve_active_app_root
+
+        workspace_root = workspace_root.resolve()
+        # Don't auto-sync inside the framework repo itself — it has its own guidance.
+        if is_framework_repo_root(workspace_root):
+            return
+        app_root = resolve_active_app_root(workspace_root)
+        if not (app_root / "app.json").exists():
+            return
+        app_name, preset = _resolve_app_identity(workspace_root)
+        statuses = sync_agent_guidance(
+            workspace_root=workspace_root,
+            app_name=app_name,
+            preset=preset,
+            mode="update",
+        )
+        updated = [s for s in statuses if s.status in {"updated", "created"}]
+        if updated:
+            print(f"[mozaiks] Agent guidance refreshed ({len(updated)} file(s) updated).")
+    except Exception:
+        pass
 
 
 def _is_within_workspace(workspace_root: Path, path: Path) -> bool:

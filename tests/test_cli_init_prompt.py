@@ -32,9 +32,17 @@ def test_init_command_prompts_for_name_when_missing(monkeypatch, tmp_path) -> No
 
     target_dir = tmp_path / "prompted-app"
     app_json = _load_json(target_dir / "app" / "app.json")
+    ai_json = _load_json(target_dir / "app" / "config" / "ai.json")
+    shell_json = _load_json(target_dir / "app" / "config" / "shell.json")
     assert app_json["appName"] == "prompted-app"
+    assert ai_json["workflows"]["entry_point"] == "ValueEngine"
+    assert ai_json["control_plane"]["enabled"] is True
+    assert "app_context" not in ai_json
     assert (target_dir / "app" / "config" / "ai.json").exists()
     assert (target_dir / "app" / "config" / "shell.json").exists()
+    assert shell_json["header"]["actions"]
+    assert shell_json["notifications"]["show"] is True
+    assert shell_json["shortcuts"]["footer"] == ["legal", "terms", "cookies"]
     assert (target_dir / "app" / "brand" / "theme_config.json").exists()
     assert (target_dir / "app" / "ui" / "route_manifest.json").exists()
     assert (target_dir / "requirements.txt").exists()
@@ -90,6 +98,7 @@ def test_init_command_starter_scaffold_seeds_entry_workflow(tmp_path) -> None:
     ai_json = _load_json(target_dir / "app" / "config" / "ai.json")
     assert ai_json["chat"]["chat_startup_mode"] == "workflow"
     assert ai_json["workflows"]["entry_point"] == "HelloWorkflow"
+    assert ai_json["control_plane"]["enabled"] is True
     assert (target_dir / "workflows" / "HelloWorkflow" / "orchestrator.yaml").exists()
 
 
@@ -104,7 +113,8 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     )
 
     requirements = (target_dir / "requirements.txt").read_text(encoding="utf-8")
-    assert requirements.strip() == f"mozaiks=={init_command._current_mozaiks_version()}"
+    assert f"mozaiks=={init_command._current_mozaiks_version()}" in requirements
+    assert "App-specific dependencies" in requirements
 
     env_example = (target_dir / ".env.example").read_text(encoding="utf-8")
     assert "OPENAI_API_KEY=" in env_example
@@ -165,6 +175,7 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     assert "service.py" in modules_rule
 
     expected_skills = {
+        "add-branding",
         "add-module",
         "add-page",
         "create-workflow",

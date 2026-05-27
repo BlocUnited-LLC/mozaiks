@@ -493,13 +493,19 @@ export function buildStudioDemoAppSummary(appId) {
         .replace(/\b\w/g, (match) => match.toUpperCase()),
       updated_at: app?.updated_at,
       created_at: app?.created_at,
-      journey: app?.status === 'draft' ? 'greenfield_app' : 'refinement',
-      first_goal: 'Operate the next lifecycle step from a clean app-scoped Studio.',
-      host_owned_summary: 'Shared runtime, auth, and deployment substrate remain host-owned.',
     },
     ai: {
       provider: 'openai',
       model: 'gpt-5-nano',
+      control_plane: {
+        enabled: true,
+        profile: 'default',
+        classifier_enabled: true,
+        classifier_llm_profile: 'classifier',
+        coding_enabled: true,
+        coding_llm_profile: 'codegen',
+        llm_profile_count: 6,
+      },
     },
     theme: {
       primary: 'cyan',

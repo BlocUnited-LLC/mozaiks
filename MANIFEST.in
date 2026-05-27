@@ -1,3 +1,4 @@
+recursive-include mozaiks_cli/agent_guidance *.md
 recursive-include factory_app/app *
 recursive-include factory_app/capability_packs *
 recursive-include factory_app/workflows *

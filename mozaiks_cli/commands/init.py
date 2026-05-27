@@ -5,10 +5,12 @@ import json
 import re
 import shutil
 import sys
+from copy import deepcopy
 from pathlib import Path
 
+from mozaiks_cli.agent_guidance import build_agent_guidance_files
 from mozaiks_cli.workspace import is_framework_repo_root
-from mozaiksai.resources import resolve_factory_brand_root
+from mozaiksai.resources import resolve_factory_app_root, resolve_factory_brand_root
 
 # Tier definitions
 TIER_PRESETS = {
@@ -45,11 +47,6 @@ TIER_PRESETS = {
         "chat_ui": True,
     },
 }
-
-AGENT_GUIDANCE_BLOCK_NAME = "agent-guidance"
-AGENT_GUIDANCE_BEGIN = f"<!-- BEGIN MOZAIKS MANAGED: {AGENT_GUIDANCE_BLOCK_NAME} -->"
-AGENT_GUIDANCE_END = f"<!-- END MOZAIKS MANAGED: {AGENT_GUIDANCE_BLOCK_NAME} -->"
-
 
 def run(args):
     """Execute the init command."""
@@ -227,6 +224,7 @@ def _create_bundle_scaffold(
     backend_adapters_dir = backend_dir / "adapters"
     backend_security_dir = backend_dir / "security"
     backend_routes_dir = backend_dir / "routes"
+    shared_persistence_dir = app_root / "shared_persistence"
     modules_dir = app_root / "modules"
     workflows_dir = target_dir / "workflows"
     brand_dir = app_root / "brand"
@@ -256,6 +254,7 @@ def _create_bundle_scaffold(
             "secrets",
             "payments",
         )),
+        shared_persistence_dir,
         modules_dir,
         workflows_dir,
         brand_dir,
@@ -295,8 +294,17 @@ def _create_bundle_scaffold(
     _write_json(config_dir / "shell.json", _build_shell_config(app_name))
     print("Created app/config/shell.json")
 
+    _write_text(config_dir / "secrets.yaml", _secrets_yaml_placeholder())
+    print("Created app/config/secrets.yaml")
+
+    _write_json(config_dir / "shared_persistence.json", _shared_persistence_placeholder())
+    print("Created app/config/shared_persistence.json")
+
     _write_backend_support_stubs(backend_dir)
     print("Created app/backend support stubs")
+
+    _write_text(shared_persistence_dir / "__init__.py", '"""Shared persistence helpers — declared in app/config/shared_persistence.json."""\n')
+    print("Created app/shared_persistence/")
 
     _copy_default_brand_bundle(brand_dir, app_name)
     print("Created app/brand from factory_app default brand")
@@ -345,43 +353,21 @@ def _create_agent_guidance_scaffold(*, target_dir: Path, app_name: str, preset: 
         _write_text(path, content)
 
 
-def build_agent_guidance_files(app_name: str, preset: str) -> dict[Path, str]:
-    """Return the app-local coding-agent guidance files for an app workspace."""
-    raw_files = {
-        Path("AGENTS.md"): _generated_agents_md(app_name, preset),
-        Path("CLAUDE.md"): _generated_claude_md(app_name, preset),
-        Path(".claude/rules/app-bundle.md"): _generated_claude_rule_app_bundle(),
-        Path(".claude/rules/docs.md"): _generated_claude_rule_docs(),
-        Path(".claude/rules/frontend.md"): _generated_claude_rule_frontend(),
-        Path(".claude/rules/modules.md"): _generated_claude_rule_modules(),
-        Path(".claude/rules/workflows.md"): _generated_claude_rule_workflows(),
-        Path(".claude/skills/add-module/SKILL.md"): _generated_skill_add_module(),
-        Path(".claude/skills/add-page/SKILL.md"): _generated_skill_add_page(),
-        Path(".claude/skills/create-workflow/SKILL.md"): _generated_skill_create_workflow(),
-        Path(".claude/skills/docs-maintenance/SKILL.md"): _generated_skill_docs_maintenance(),
-        Path(".claude/skills/setup/SKILL.md"): _generated_skill_setup(),
-    }
-    return {
-        relative_path: _with_agent_guidance_managed_block(content)
-        for relative_path, content in raw_files.items()
-    }
-
-
-def _with_agent_guidance_managed_block(content: str) -> str:
-    """Wrap generated content in a managed block while preserving skill frontmatter."""
-    normalized = content.strip()
-    prefix = ""
-    body = normalized
-    if normalized.startswith("---\n"):
-        closing_index = normalized.find("\n---\n", 4)
-        if closing_index != -1:
-            prefix = normalized[: closing_index + len("\n---\n")].rstrip() + "\n\n"
-            body = normalized[closing_index + len("\n---\n") :].strip()
-    return f"{prefix}{AGENT_GUIDANCE_BEGIN}\n{body}\n{AGENT_GUIDANCE_END}\n"
-
-
 def _requirements_txt() -> str:
-    return f"""mozaiks=={_current_mozaiks_version()}
+    return f"""\
+# Mozaiks framework — version pin for standalone installs and deploys.
+# If you already have mozaiks installed, pip will skip this line.
+mozaiks=={_current_mozaiks_version()}
+
+# App-specific dependencies — add packages your modules and integrations need.
+# Examples:
+#   stripe>=8.0.0
+#   boto3>=1.34.0
+#   azure-identity>=1.16.0
+#   azure-keyvault-secrets>=4.8.0
+#   sendgrid>=6.11.0
+#   twilio>=9.0.0
+#   PyNaCl>=1.5.0
 """
 
 
@@ -422,414 +408,6 @@ app/backend/**/*.py[cod]
 logs/
 generated/
 .pytest_cache/
-"""
-
-
-def _generated_agents_md(app_name: str, preset: str) -> str:
-    return f"""# AGENTS.md
-
-Coding-agent guidance for `{app_name}`.
-
-This is a standalone Mozaiks app workspace created with the `{preset}` preset.
-It consumes the published `mozaiks` framework package from `requirements.txt`.
-Do not assume a sibling checkout of the Mozaiks framework repository exists.
-
-## Standalone Workspace Setup
-
-Use this setup when this app workspace is being developed as its own repo.
-The `.venv` belongs inside this workspace.
-
-```powershell
-python -m venv .venv
-.\\.venv\\Scripts\\Activate.ps1
-python -m pip install -r requirements.txt
-Copy-Item .env.example .env
-```
-
-Set `MONGO_URI` before running Studio. Set `OPENAI_API_KEY` before running real workflows.
-
-## Run
-
-```powershell
-.\\scripts\\run-studio.ps1 -ForceStop
-```
-
-Two-terminal mode:
-
-```powershell
-.\\scripts\\run-backend.ps1 -ForceStop
-.\\scripts\\run-frontend.ps1 -ForceStop
-```
-
-## Workspace Boundary
-
-This repo owns app-specific behavior only:
-
-- `app/app.json` - app identity and runtime flags
-- `app/config/` - AI, shell, and app config
-- `app/config/secrets.yaml` - optional names-only secret management contract; never stores raw values
-- `app/brand/` - app branding assets and theme config
-- `app/backend/` - optional app-owned support code such as thin integrations, provider adapters, security helpers, and app-level routes
-- `app/modules/` - deterministic app capabilities
-- `app/config/shared_persistence.json` and `app/shared_persistence/` - optional stable shared/existing database contract helpers
-- `workflows/` - app-local AI workflows
-- `app/ui/` - app pages, route manifest, and custom UI registration
-- `generated/` - staged generator output awaiting review/promotion
-- `scripts/` - local launch wrappers around the installed `mozaiks` package
-
-Framework/runtime changes belong in the upstream Mozaiks framework repository,
-not in this app workspace.
-
-## Development Rules
-
-- Keep modules deterministic and contract-declared.
-- Keep `backend/handler.py` thin; put business logic in `service.py` and data access in `repo.py`.
-- Put app-owned external API clients in `app/backend/integrations/`, provider-specific implementation boundaries in `app/backend/adapters/`, provider-neutral auth/secret helpers in `app/backend/security/`, and app-level routes in `app/backend/routes/` only when needed. Common adapter areas include `auth/`, `source_control/`, `deployment/`, `dns/`, `registrar/`, `cloud/`, `storage/`, `secrets/`, and `payments/` when the code is provider mechanics rather than product state.
-- Do not put business actions, lifecycle state, emitted events, or persistence authority in app-level backend support code; modules own those behaviors.
-- Use `app/config/secrets.yaml` only as a names-only contract for secret provider/vault policy, env handles, and secret names. Never store raw API keys, tokens, passwords, connection strings, private keys, or webhook secrets in source.
-- Prefer declarative page schemas before custom React.
-- Mount custom React only through `app/ui/route_manifest.json` and `app/ui/index.js`.
-- Keep shell/navigation changes in `app/config/shell.json`.
-- Do not edit generated artifacts in place until they are intentionally promoted into `app/`.
-- Update docs when setup, runtime behavior, module contracts, workflows, or UI surfaces change.
-
-Scoped rules live in `.claude/rules/`. Claude-specific task skills live in
-`.claude/skills/`.
-"""
-
-
-def _generated_claude_md(app_name: str, preset: str) -> str:
-    return f"""# CLAUDE.md
-
-This file guides Claude Code when working in `{app_name}`.
-
-Read `AGENTS.md` first. This is a generated Mozaiks app workspace using the
-`{preset}` preset, not the Mozaiks framework source repository.
-
-## Core Principle
-
-Keep app logic inside the canonical app workspace:
-
-```text
-app/
-  app.json
-  config/
-  brand/
-  backend/  # optional integrations/adapters/security/routes support code
-  modules/
-  ui/
-workflows/
-```
-
-Use the installed `mozaiks` package for runtime, CLI, Studio, factory bundle,
-and web shell behavior.
-
-## Where To Put Work
-
-| Work | Location |
-|------|----------|
-| App identity/config | `app/app.json`, `app/config/` |
-| Shell, navigation, footer, mobile chrome | `app/config/shell.json` |
-| Secret management contract, names only | `app/config/secrets.yaml` |
-| Branding/theme assets | `app/brand/` |
-| App-owned external clients | `app/backend/integrations/<service>_client.py` |
-| App-owned provider adapters | `app/backend/adapters/<area>/<provider>.py` |
-| App-specific auth provider mechanics | `app/backend/adapters/auth/<provider>.py` |
-| Provider-neutral auth/secret helpers | `app/backend/security/` |
-| App-level routes, only when needed | `app/backend/routes/` |
-| Shared persistence helpers, only with `config/shared_persistence.json` | `app/shared_persistence/` |
-| Deterministic app capabilities | `app/modules/<module_id>/` |
-| AI workflow behavior | `workflows/<WorkflowName>/` |
-| Declarative pages | `app/ui/pages/` |
-| Custom React pages/components | `app/ui/pages/custom/`, `app/ui/components/`, `app/ui/index.js` |
-| Staged generated output | `generated/` |
-| Local process wrappers | `scripts/` |
-
-## Do Not
-
-- Do not vendor or edit Mozaiks framework internals in this app repo.
-- Do not hardcode workflow names inside module business logic.
-- Do not bypass module contracts with undeclared routes or side channels.
-- Do not put business logic directly in `backend/handler.py`.
-- Do not turn provider adapters into modules or put module business state in `app/backend/`.
-- Do not copy framework runtime auth into the app; generic auth belongs in the installed `mozaiks` package.
-- Do not put raw secret values in `app/config/secrets.yaml`; it is a names-only contract.
-- Do not use custom React when a declarative page schema is sufficient.
-- Do not mutate generated artifacts without review/promotion.
-
-## Validation
-
-For non-trivial changes, run the narrowest practical checks:
-
-```powershell
-.\\scripts\\run-studio.ps1 -DryRun
-.\\scripts\\run-backend.ps1 -DryRun
-.\\scripts\\run-frontend.ps1 -DryRun
-```
-
-Then run the app or targeted tests relevant to the touched area.
-
-## Rules And Skills
-
-Use `.claude/rules/` for path-scoped guidance and `.claude/skills/` for common
-tasks such as modules, pages, workflows, setup, and docs maintenance.
-"""
-
-
-def _generated_claude_rule_app_bundle() -> str:
-    return """---
-paths:
-  - "app/app.json"
-  - "app/config/**"
-  - "app/brand/**"
-  - "scripts/**"
----
-
-# App Bundle Rules
-
-This workspace is a standalone Mozaiks app that consumes the installed
-`mozaiks` package.
-
-## Ownership
-
-- app-specific config belongs in `app/`
-- local process wrappers belong in `scripts/`
-- framework/runtime changes belong upstream in Mozaiks, not here
-
-## Shell And Config
-
-- shell, navigation, footer, mobile chrome, shortcuts, and route-level chrome
-  behavior belong in `app/config/shell.json`
-- AI startup behavior belongs in `app/config/ai.json`
-- secret requirements and vault/provider policy belong in `app/config/secrets.yaml`
-  when needed; store names and handles only, never raw secret values
-- app identity and auth flags belong in `app/app.json`
-
-Keep config declarative and app-agnostic where possible.
-"""
-
-
-def _generated_claude_rule_docs() -> str:
-    return """---
-paths:
-  - "*.md"
-  - "docs/**/*.md"
----
-
-# Docs Rules
-
-Use these rules when editing Markdown in this app workspace.
-
-- Keep setup commands aligned with `requirements.txt` and `scripts/`.
-- Document any new required environment variable in `.env.example`.
-- Prefer focused docs updates near the changed behavior.
-- Use lowercase kebab-case for new docs files unless a convention filename is required.
-- Keep framework/internal Mozaiks details out of app docs unless the app developer must know them.
-"""
-
-
-def _generated_claude_rule_frontend() -> str:
-    return """---
-paths:
-  - "app/ui/**"
-  - "app/config/shell.json"
----
-
-# Frontend Rules
-
-Use declarative UI before custom code.
-
-## Placement
-
-- declarative pages: `app/ui/pages/`
-- custom pages: `app/ui/pages/custom/`
-- reusable custom components: `app/ui/components/`
-- route registration: `app/ui/route_manifest.json`
-- component registration: `app/ui/index.js`
-- shell/navigation/chrome: `app/config/shell.json`
-
-## Constraints
-
-- Do not create custom React for simple forms, lists, tables, dashboards, or detail views when page schemas can express the surface.
-- Keep custom UI mounted through declared routes and registries.
-- Keep mobile and desktop chrome behavior in shell config rather than hardcoded per-page conditionals.
-- Avoid framework-specific imports that assume a local Mozaiks source checkout.
-"""
-
-
-def _generated_claude_rule_modules() -> str:
-    return """---
-paths:
-  - "app/modules/**"
----
-
-# Module Rules
-
-Modules are deterministic app capabilities.
-
-Canonical module shape:
-
-```text
-app/modules/{module_id}/
-  module.yaml
-  runtime_extensions.yaml        # optional
-  contracts/                     # optional companion manifests
-  backend/
-    handler.py
-    service.py                   # recommended for business logic
-    repo.py                      # recommended for data access
-    policy.py                    # recommended for multi-tenant scoping
-    schemas.py                   # recommended for typed payloads/docs
-```
-
-## Rules
-
-- `module.yaml` declares actions and capabilities.
-- `backend/handler.py` stays thin: validate/dispatch/return only.
-- Business logic belongs in `service.py`.
-- MongoDB/data access belongs in `repo.py`.
-- Tenant/user scoping belongs in `policy.py`.
-- Typed payloads and document shapes belong in `schemas.py`.
-- Publish domain events through declared contracts; do not hardcode workflow starts in module code.
-- Use `runtime_extensions.yaml` for API routers or startup services only when the module needs them.
-"""
-
-
-def _generated_claude_rule_workflows() -> str:
-    return """---
-paths:
-  - "workflows/**"
----
-
-# Workflow Rules
-
-Workflows are app-local AI behavior.
-
-Canonical workflow shape:
-
-```text
-workflows/{WorkflowName}/
-  orchestrator.yaml
-  agents.yaml
-  handoffs.yaml
-  context_variables.yaml
-  structured_outputs.yaml
-  tools.yaml
-  hooks.yaml
-  ui_config.yaml
-  tools/
-  ui/
-```
-
-## Rules
-
-- Keep workflow configuration declarative and structured-output-first.
-- Put reasoning in agent prompts and structured outputs.
-- Keep tools deterministic: persist, validate, emit events, or call declared APIs.
-- Do not put classification/inference heuristics in tools.
-- Use declared triggers and handoffs instead of hardcoded runtime assumptions.
-- Keep workflow-specific UI under the workflow `ui/` folder only when the workflow needs an artifact surface.
-"""
-
-
-def _generated_skill_add_module() -> str:
-    return """---
-name: add-module
-description: Add or update a deterministic Mozaiks app module in this generated app workspace.
-argument-hint: "[module goal]"
-disable-model-invocation: true
----
-
-Complete this module task: $ARGUMENTS
-
-1. Read `AGENTS.md` and `.claude/rules/modules.md`.
-2. Create or update `app/modules/<module_id>/module.yaml`.
-3. Keep `backend/handler.py` thin.
-4. Put business logic in `backend/service.py`.
-5. Put persistence in `backend/repo.py`.
-6. Add `backend/policy.py` and `backend/schemas.py` when the module reads/writes scoped data.
-7. Add `runtime_extensions.yaml` only for declared API routers or startup services.
-8. Update docs and `.env.example` for new setup requirements.
-"""
-
-
-def _generated_skill_add_page() -> str:
-    return """---
-name: add-page
-description: Add or update a Mozaiks app page, preferring declarative page schemas before custom React.
-argument-hint: "[page goal]"
-disable-model-invocation: true
----
-
-Complete this page task: $ARGUMENTS
-
-1. Read `AGENTS.md` and `.claude/rules/frontend.md`.
-2. Prefer a declarative page under `app/ui/pages/`.
-3. Use custom React under `app/ui/pages/custom/` only when the declarative schema cannot express the surface.
-4. Register routes in `app/ui/route_manifest.json`.
-5. Register custom components in `app/ui/index.js`.
-6. Put shell/navigation/mobile chrome changes in `app/config/shell.json`.
-7. Check desktop and mobile layout behavior before finishing.
-"""
-
-
-def _generated_skill_create_workflow() -> str:
-    return """---
-name: create-workflow
-description: Add or update an app-local Mozaiks workflow in this generated app workspace.
-argument-hint: "[workflow goal]"
-disable-model-invocation: true
----
-
-Complete this workflow task: $ARGUMENTS
-
-1. Read `AGENTS.md` and `.claude/rules/workflows.md`.
-2. Create or update `workflows/<WorkflowName>/`.
-3. Keep workflow YAML structured-output-first and deterministic.
-4. Put reasoning in agent prompts and structured outputs.
-5. Keep tools simple: persist, validate, emit events, or call declared APIs.
-6. Add UI artifact config only when the workflow needs a visual artifact.
-7. Update docs if startup behavior, triggers, or required env vars change.
-"""
-
-
-def _generated_skill_docs_maintenance() -> str:
-    return """---
-name: docs-maintenance
-description: Update app workspace docs safely when setup, modules, workflows, UI, or runtime behavior changes.
-argument-hint: "[docs task]"
-disable-model-invocation: true
----
-
-Complete this docs task: $ARGUMENTS
-
-1. Keep README setup aligned with `requirements.txt`, `.env.example`, and `scripts/`.
-2. Document new required environment variables in `.env.example`.
-3. Prefer focused docs edits near the changed behavior.
-4. Use lowercase kebab-case for new docs files unless a convention filename is required.
-5. Remove stale instructions that assume a sibling Mozaiks framework checkout.
-"""
-
-
-def _generated_skill_setup() -> str:
-    return """---
-name: setup
-description: Set up and verify this generated Mozaiks app workspace locally.
-argument-hint: "[optional setup issue]"
-disable-model-invocation: true
----
-
-Help set up this app workspace.
-
-1. Create and activate a workspace-local `.venv`.
-2. Run `python -m pip install -r requirements.txt`.
-3. Copy `.env.example` to `.env`.
-4. Set `OPENAI_API_KEY` and `MONGO_URI`.
-5. Run `.\\scripts\\run-studio.ps1 -DryRun`.
-6. Start with `.\\scripts\\run-studio.ps1 -ForceStop`.
-7. If needed, run backend/frontend separately with `run-backend.ps1` and `run-frontend.ps1`.
-
-Do not require a sibling checkout of the Mozaiks framework repository.
 """
 
 
@@ -890,13 +468,14 @@ This workspace includes app-local guidance for coding agents:
 Those files describe this generated app boundary. They intentionally do not copy
 the full Mozaiks framework repository rules.
 
-To check for newer guidance after upgrading `mozaiks`:
+Mozaiks refreshes managed guidance blocks automatically when workspace commands
+run after an installed package upgrade. To inspect guidance status manually:
 
 ```powershell
 mozaiks sync-agent-guidance --dir . --check
 ```
 
-Safe update options:
+Manual repair options:
 
 ```powershell
 mozaiks sync-agent-guidance --dir . --write-missing
@@ -1278,50 +857,82 @@ if ($ForceStop) {
 """
 
 
-def _build_ai_config(app_name: str, *, starter: bool) -> dict:
+def _load_factory_ai_config() -> dict:
+    factory_root = resolve_factory_app_root()
+    if factory_root is None:
+        raise FileNotFoundError("Unable to resolve the packaged factory_app root.")
+
+    config_path = factory_root / "app" / "config" / "ai.json"
+    if not config_path.exists():
+        raise FileNotFoundError(f"Factory AI config not found: {config_path}")
+
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Factory AI config must be a JSON object: {config_path}")
+    if not isinstance(payload.get("control_plane"), dict):
+        raise ValueError(f"Factory AI config must declare control_plane: {config_path}")
+    return payload
+
+
+def _load_factory_shell_config() -> dict:
+    factory_root = resolve_factory_app_root()
+    if factory_root is None:
+        raise FileNotFoundError("Unable to resolve the packaged factory_app root.")
+
+    config_path = factory_root / "app" / "config" / "shell.json"
+    if not config_path.exists():
+        raise FileNotFoundError(f"Factory shell config not found: {config_path}")
+
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Factory shell config must be a JSON object: {config_path}")
+    return payload
+
+
+def build_default_ai_config(app_name: str, *, starter: bool = False) -> dict:
+    """Build the canonical app-level AI config from the first-party Studio contract."""
+    factory_ai = _load_factory_ai_config()
+    ask = deepcopy(factory_ai.get("ask") or {})
+    chat = deepcopy(factory_ai.get("chat") or {})
+    workflows = deepcopy(factory_ai.get("workflows") or {})
+
+    ask.setdefault(
+        "ask_mode_prompt",
+        (
+            f"You are the Mozaiks assistant for {app_name}. Help users shape, generate, "
+            "connect, and refine apps in Mozaiks Studio using the shared builder workflows."
+        ),
+    )
+    ask.setdefault("ask_context_variables", None)
+
+    chat["chat_startup_mode"] = "workflow" if starter else (chat.get("chat_startup_mode") or "ask")
+    workflows["entry_point"] = "HelloWorkflow" if starter else (workflows.get("entry_point") or "ValueEngine")
+    workflows.setdefault("resume_policy", "last_active_then_oldest_then_entry_point")
+
     return {
-        "ask": {
-            "ask_mode_prompt": (
-                f"You are the assistant for {app_name}. Help the app builder clarify what "
-                "workflows, modules, and pages they actually need before generating them."
-            ),
-            "ask_context_variables": None,
-        },
-        "chat": {
-            "chat_startup_mode": "workflow" if starter else "ask",
-        },
-        "workflows": {
-            "entry_point": "HelloWorkflow" if starter else None,
-            "resume_policy": "last_active_then_oldest_then_entry_point",
-        },
+        "ask": ask,
+        "chat": chat,
+        "workflows": workflows,
+        "control_plane": deepcopy(factory_ai["control_plane"]),
     }
+
+
+def _build_ai_config(app_name: str, *, starter: bool) -> dict:
+    return build_default_ai_config(app_name, starter=starter)
+
+
+def build_default_shell_config(app_name: str) -> dict:
+    """Build the canonical app-level shell config from the first-party Studio contract."""
+    factory_shell = _load_factory_shell_config()
+    shell_config = deepcopy(factory_shell)
+    logo = shell_config.get("header", {}).get("logo")
+    if isinstance(logo, dict):
+        logo["alt"] = f"{app_name} logo"
+    return shell_config
 
 
 def _build_shell_config(app_name: str) -> dict:
-    return {
-        "header": {
-            "logo": {
-                "src": None,
-                "wordmark": None,
-                "alt": f"{app_name} logo",
-                "href": "/",
-            },
-            "pages": [],
-            "actions": [],
-        },
-        "profile": {
-            "show": False,
-            "menu": [],
-        },
-        "notifications": {
-            "show": False,
-            "emptyText": "No notifications yet",
-        },
-        "footer": {
-            "links": [],
-            "visible": True,
-        },
-    }
+    return build_default_shell_config(app_name)
 
 
 def _resolve_default_brand_template_dir() -> Path:
@@ -1365,6 +976,38 @@ def _copy_default_brand_bundle(brand_dir: Path, app_name: str) -> None:
             shutil.copy2(child, destination)
 
     _write_json(brand_dir / "theme_config.json", _load_default_brand_theme_config(app_name))
+
+
+def _secrets_yaml_placeholder() -> str:
+    return """\
+# app/config/secrets.yaml — names-only secret management contract.
+# Declare secret names, env handles, and provider policy here.
+# NEVER store raw API keys, tokens, passwords, connection strings, or
+# private keys in this file. Use environment variables or a vault provider.
+#
+# provider: env   # env | vault | aws_secrets_manager | azure_key_vault | gcp_secret_manager
+# secrets:
+#   - name: OPENAI_API_KEY
+#     env_handle: OPENAI_API_KEY
+#     description: "OpenAI API key for AI workflows"
+#   - name: MONGO_URI
+#     env_handle: MONGO_URI
+#     description: "MongoDB connection URI"
+provider: env
+secrets: []
+"""
+
+
+def _shared_persistence_placeholder() -> dict:
+    return {
+        "enabled": False,
+        "description": (
+            "Shared persistence helpers for stable shared or existing database collections. "
+            "Set enabled to true and declare collections when this app has a shared "
+            "database layer outside of module-owned collections."
+        ),
+        "collections": [],
+    }
 
 
 def _write_backend_support_stubs(backend_dir: Path) -> None:
@@ -1559,8 +1202,15 @@ Custom full-page React routes belong in `ui/pages/custom/` and are mounted only 
 
 
 def _ui_component_registry_index() -> str:
-    return """export function register() {
-  // Register custom React surfaces here only when declarative config is not enough.
+    return """import { registerAdminComponents } from '@mozaiks/factory-admin'
+
+export function register(registerComponent) {
+  // Studio management components — always registered so the /apps dashboard
+  // and admin portal are available when running in Studio mode.
+  registerAdminComponents(registerComponent)
+
+  // Register app-specific custom React surfaces here when declarative config
+  // is not enough. Use app/ui/pages/custom/ for full-page custom routes.
 }
 """
 

@@ -65,8 +65,8 @@ def create_parser():
         description=(
             "Bootstrap a workspace with minimal defaults and launch Studio. "
             "This is the recommended path for people building apps through the shared "
-            "factory_app workflows. Use 'onboard --full' or the lower-level commands "
-            "only when you need detailed workspace configuration or framework control."
+            "factory_app workflows. Use the lower-level commands only when you need "
+            "explicit workspace configuration or framework control."
         ),
     )
     quickstart_parser.add_argument(
@@ -85,17 +85,6 @@ def create_parser():
         "--name",
         default=None,
         help="App name to store in the scaffold (default: workspace folder name)",
-    )
-    quickstart_parser.add_argument(
-        "--journey",
-        choices=["greenfield_app", "brownfield_app"],
-        default=None,
-        help="Builder track to store as the initial Studio context",
-    )
-    quickstart_parser.add_argument(
-        "--goal",
-        default=None,
-        help="Optional first goal to seed into Studio context",
     )
     quickstart_parser.add_argument(
         "--provider",
@@ -226,17 +215,6 @@ def create_parser():
         help="Override the app name during onboarding",
     )
     onboard_parser.add_argument(
-        "--journey",
-        choices=["greenfield_app", "brownfield_app"],
-        default=None,
-        help="Onboarding track to configure",
-    )
-    onboard_parser.add_argument(
-        "--goal",
-        default=None,
-        help="First thing the app should help with",
-    )
-    onboard_parser.add_argument(
         "--provider",
         choices=["anthropic", "openai", "local", "other"],
         default=None,
@@ -248,41 +226,9 @@ def create_parser():
         help="Default model name",
     )
     onboard_parser.add_argument(
-        "--tagline",
-        default=None,
-        help="Brand tagline to store in theme_config.json",
-    )
-    onboard_parser.add_argument(
-        "--theme-primary",
-        choices=["cyan", "teal", "blue", "emerald", "slate", "amber", "rose"],
-        default=None,
-        help="Primary brand color token",
-    )
-    onboard_parser.add_argument(
-        "--admin-email",
-        default=None,
-        help="Admin email to write into the active app root app.json admins list",
-    )
-    onboard_parser.add_argument(
-        "--existing-url",
-        default=None,
-        help="Existing app URL for the brownfield_app track",
-    )
-    onboard_parser.add_argument(
-        "--host-owned-summary",
-        default=None,
-        help="Summary of what should remain host-owned during augmentation",
-    )
-    onboard_parser.add_argument(
         "--non-interactive",
         action="store_true",
         help="Use current config and provided flags without prompting",
-    )
-    onboard_parser.add_argument(
-        "--full",
-        dest="full_setup",
-        action="store_true",
-        help="Collect detailed product, branding, and admin configuration instead of the minimal Studio-first setup",
     )
     onboard_parser.add_argument(
         "--open-studio",
@@ -445,8 +391,9 @@ def create_parser():
         help="Safely sync app-local coding-agent guidance",
         description=(
             "Check or apply the generated AGENTS.md, CLAUDE.md, and .claude guidance "
-            "for an app workspace. By default this only checks. Existing custom files "
-            "are not overwritten unless --force is used."
+            "for an app workspace. Workspace commands refresh managed blocks automatically; "
+            "use this command for manual inspection or repair. By default this only checks. "
+            "Existing custom files are not overwritten unless --force is used."
         ),
     )
     sync_parser.add_argument(

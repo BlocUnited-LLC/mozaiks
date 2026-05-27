@@ -50,3 +50,19 @@ def test_mongo_preflight_accepts_alias(monkeypatch, tmp_path) -> None:
     )
 
     assert calls == [("mongodb://localhost:27017/mozaiks", 1500)]
+
+
+def test_studio_env_uses_factory_workflows_for_studio_host(monkeypatch, tmp_path) -> None:
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    (app_root / "app.json").write_text('{"appName": "Studio App"}\n', encoding="utf-8")
+    (tmp_path / "workflows").mkdir()
+    monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+
+    env = studio_launcher._workspace_env(tmp_path, host="studio")
+
+    assert env["MOZAIKS_APP_WORKSPACE_PATH"] == str(app_root.resolve())
+    assert env["PLATFORM_PATH"] == str(app_root.resolve())
+    assert env["MOZAIKS_WORKFLOWS_PATH"].endswith("factory_app\\workflows") or env[
+        "MOZAIKS_WORKFLOWS_PATH"
+    ].endswith("factory_app/workflows")

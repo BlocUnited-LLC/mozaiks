@@ -65,12 +65,6 @@ export const APP_BUILD_STATUSES = new Set(
 
 export const APP_READY_STATUSES = new Set(['deploying', 'active', 'archived'])
 
-const JOURNEY_LABELS = {
-  brownfield_app: 'Existing App',
-  greenfield_app: 'New App',
-  refinement: 'Refinement',
-}
-
 const RUNTIME_READINESS_LABELS = {
   no_workflows: 'No workflows configured',
   workflows_present_no_entry_point: 'Workflow entry point still needs setup',
@@ -181,8 +175,8 @@ export function getAppPrimaryAction(app) {
   }
 }
 
-export function getAppJourneyLabel(journey) {
-  return JOURNEY_LABELS[String(journey || '').trim()] || 'App Studio'
+export function getControlPlaneStatusLabel(controlPlane) {
+  return controlPlane?.enabled ? 'Enabled' : 'Disabled'
 }
 
 export function getRuntimeReadinessLabel(value) {

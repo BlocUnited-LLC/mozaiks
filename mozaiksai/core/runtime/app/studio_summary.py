@@ -97,8 +97,8 @@ def build_app_overview_summary(
     theme_config = _read_json(_resolve_theme_config_path(app_root))
     ui_route_manifest = _read_json(_resolve_ui_route_manifest_path(app_root))
 
-    onboarding = app_config.get("onboarding") or {}
     llm = ai_config.get("llm") or {}
+    control_plane = _summarize_control_plane(ai_config.get("control_plane"))
     identity = theme_config.get("identity") or {}
     workflow_names = _list_workflows(app_root)
     workflow_count = len(workflow_names)
@@ -119,15 +119,12 @@ def build_app_overview_summary(
             "id": app_id,
             "name": app_config.get("appName") or app_root.name,
             "preset": app_config.get("preset") or "unknown",
-            "journey": onboarding.get("journey"),
-            "first_goal": onboarding.get("first_goal"),
-            "existing_app_url": onboarding.get("existing_app_url"),
-            "host_owned_summary": onboarding.get("host_owned_summary"),
         },
         "ai": {
             "provider": llm.get("provider"),
             "model": llm.get("model"),
             "api_billed": llm.get("provider") in {"anthropic", "openai"},
+            "control_plane": control_plane,
         },
         "theme": {
             "primary": (theme_config.get("theme") or {}).get("primary"),
@@ -153,11 +150,12 @@ def build_app_overview_summary(
         },
         "home": {
             "next_step": _recommend_next_step(
-                onboarding=onboarding,
                 provider=llm.get("provider"),
                 model=llm.get("model"),
                 admins=admins,
                 workflow_count=workflow_count,
+                entry_point=entry_point,
+                control_plane=control_plane,
             )
         },
     }
@@ -751,24 +749,41 @@ def _runtime_readiness(workflow_count: int, entry_point: str | None) -> str:
     return "entry_point_configured"
 
 
+def _summarize_control_plane(raw: object) -> dict[str, Any]:
+    config = raw if isinstance(raw, dict) else {}
+    classifier = config.get("classifier") if isinstance(config.get("classifier"), dict) else {}
+    coding = config.get("coding") if isinstance(config.get("coding"), dict) else {}
+    profiles = config.get("llm_profiles") if isinstance(config.get("llm_profiles"), dict) else {}
+    return {
+        "enabled": bool(config.get("enabled")),
+        "profile": config.get("profile") if isinstance(config.get("profile"), str) else None,
+        "classifier_enabled": bool(classifier.get("enabled")),
+        "classifier_llm_profile": classifier.get("llm_profile") if isinstance(classifier.get("llm_profile"), str) else None,
+        "coding_enabled": bool(coding.get("enabled")),
+        "coding_llm_profile": coding.get("llm_profile") if isinstance(coding.get("llm_profile"), str) else None,
+        "llm_profile_count": len(profiles),
+    }
+
+
 def _recommend_next_step(
     *,
-    onboarding: dict,
     provider: str | None,
     model: str | None,
     admins: list[str],
     workflow_count: int,
+    entry_point: str | None,
+    control_plane: dict[str, Any],
 ) -> str:
-    if not onboarding.get("journey") or not onboarding.get("first_goal"):
-        return "Run 'mozaiks onboard' so Studio has product intent, provider defaults, and admin bootstrap."
     if not provider or not model:
         return "Confirm your default provider and model in app/config/ai.json before starting build work."
+    if not control_plane.get("enabled"):
+        return "Enable the control_plane block in app/config/ai.json before using Studio build and refinement flows."
     if not admins:
-        return "Add a local admin identity with 'mozaiks onboard --admin-email <email>' so app.json grants admin access."
+        return "Add a local admin identity in app/app.json admins before relying on admin-gated Studio surfaces."
     if workflow_count == 0:
-        if onboarding.get("journey") == "brownfield_app":
-            return "Connect the first host-owned surface or submit the first build request from this workspace."
-        return "Submit the first build request or add the first workflow before you expand the app surface."
+        return "Open Studio and submit the first build request; shared builder workflows run from the factory workflow pack."
+    if not entry_point:
+        return "Set workflows.entry_point in app/config/ai.json before starting runtime workflow sessions."
     return "Review the current workspace state and make the next approved build request from the app overview."
 
 

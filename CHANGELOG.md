@@ -14,14 +14,52 @@ This project follows a practical pre-1.0 changelog format:
 
 ## 0.1.7 - 2026-05-27
 
+### Added
+
+- Packaged app-workspace coding-agent guidance as real `.md` files inside
+  `mozaiks_cli/agent_guidance/` — included in the pip wheel. Rules and skill
+  stubs for app-bundle, docs, frontend, modules, and workflows are no longer
+  string literals in the init command.
+- Mozaiks-managed guidance blocks are now automatically refreshed on
+  `mozaiks serve` and `mozaiks studio` startup so builders get updated guidance
+  after a package upgrade without running `mozaiks sync-agent-guidance` manually.
+- Generated workspace scaffolds now include `app/config/secrets.yaml`
+  (names-only secret contract with inline comments), `app/config/shared_persistence.json`
+  (disabled placeholder), and `app/shared_persistence/` directory.
+- Generated workspace scaffolds now seed a complete `app/config/shell.json`
+  with full navigation, chrome, and shortcuts blocks sourced from the factory
+  app template — matching the layout the Studio shell expects on first run.
+
+### Changed
+
+- Generated `requirements.txt` now includes commented examples for
+  app-specific dependencies (e.g. Stripe, Twilio) to clarify that `mozaiks`
+  itself is not listed there — it is a platform-level install, not an
+  app-level dependency.
+- Getting Started doc clarified that `.\my-workspace` is the name of the
+  folder created during quickstart; added a tip showing `--dir .` for users
+  already inside their workspace directory.
+- Getting Started doc updated to explain MongoDB as a required database with
+  a Docker one-liner as the recommended local setup path.
+- Updated contact email in `pyproject.toml`.
+
 ### Fixed
 
+- Fixed MongoDB startup warning (`Index already exists with a different name:
+  gc_ent_user_created`) that appeared on every server start. The persistence
+  manager now performs a drop-then-create rename migration
+  (`gc_ent_user_created` → `gc_app_user_created`,
+  `gc_counter_ent_user` → `gc_counter_app_user`) instead of attempting a
+  conflicting `create_index` call.
+- Fixed Vite import resolution for `clsx`, `tailwind-merge`,
+  `class-variance-authority`, `@radix-ui/*`, `marked`, `dompurify`, and
+  `react-icons` when `mozaiks_chat_ui` is installed as a pip package. Added
+  `resolve.alias` entries to `vite.config.js` matching the existing pattern
+  for `react`, `lucide-react`, and `monaco-editor`.
 - Added missing `chat-ui` peer dependencies (`clsx`, `tailwind-merge`,
-  `class-variance-authority`, `@radix-ui/*`) to `web_shell/package.json` so the
-  Studio frontend starts without Vite import errors on a fresh `pip install`.
-- Updated contact email in `pyproject.toml`.
-- Getting Started doc now explains MongoDB as a required database with a Docker
-  one-liner as the recommended setup path.
+  `class-variance-authority`, `@radix-ui/*`) to `web_shell/package.json` so
+  the Studio frontend starts without Vite import errors on a fresh install.
+
 
 ## 0.1.6 - 2026-05-27
 

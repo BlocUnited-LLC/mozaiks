@@ -26,6 +26,9 @@ def run(args) -> None:
         print("Expected app/app.json or app.json in the workspace directory.")
         sys.exit(1)
 
+    from mozaiks_cli.commands.sync_agent_guidance import auto_sync_agent_guidance
+    auto_sync_agent_guidance(workspace)
+
     app_module = _HOST_MODULES.get(host)
     if not app_module:
         print(f"Error: unknown host '{host}'. Choices: {', '.join(_HOST_MODULES)}")

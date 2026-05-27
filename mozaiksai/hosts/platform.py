@@ -58,7 +58,7 @@ from mozaiksai.core.runtime.persistence import (
 )
 from mozaiksai.core.session.launcher import create_routed_chat_session, launch_transition, validate_context_for_workflow
 from mozaiksai.core.workflow.paths import candidate_app_workflows_roots, resolve_active_app_root
-from mozaiksai.resources import resolve_factory_brand_root
+from mozaiksai.resources import resolve_factory_app_root, resolve_factory_brand_root
 from mozaiksai.core.admin.registry import load_admin_registry, build_admin_shell_routes
 from mozaiksai.core.profile.discovery import load_profile_panels
 
@@ -1012,7 +1012,8 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
     ai_path = app_root / "config" / "ai.json"
 
     shell_surface = _normalize_shell_surface(surface)
-    result: dict = {"chat_startup_mode": "ask", "landing_spot": "/"}
+    is_studio = shell_surface == "studio"
+    result: dict = {"chat_startup_mode": "ask", "landing_spot": "/apps" if is_studio else "/"}
     app_manifest = _load_app_manifest()
     shell_shortcuts: dict[str, Any] | None = None
     shell_navigation: dict[str, Any] | None = None
@@ -1030,10 +1031,11 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
                 if isinstance(value, str) and value.strip():
                     result["appId"] = value.strip()
                     break
-            startup = app_manifest.get("startup") if isinstance(app_manifest.get("startup"), dict) else {}
-            landing_spot = startup.get("landing_spot")
-            if isinstance(landing_spot, str) and landing_spot.startswith("/"):
-                result["landing_spot"] = landing_spot
+            if not is_studio:
+                startup = app_manifest.get("startup") if isinstance(app_manifest.get("startup"), dict) else {}
+                landing_spot = startup.get("landing_spot")
+                if isinstance(landing_spot, str) and landing_spot.startswith("/"):
+                    result["landing_spot"] = landing_spot
     except Exception as exc:
         logger.warning("[shell-config] Could not read app startup config: %s", exc)
 
@@ -1075,6 +1077,20 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
             pages.extend(loader(app_root))
         except Exception as exc:
             logger.warning("[shell-config] Could not read %s: %s", label, exc)
+
+    # In Studio mode, also load routes from the factory_app bundle when the
+    # active workspace is a different app root. Studio routes (surfaces: [studio])
+    # are declared in factory_app/app/ui/route_manifest.json and are not present
+    # in a freshly scaffolded workspace's route manifest.
+    if is_studio:
+        factory_root = resolve_factory_app_root()
+        if factory_root is not None:
+            factory_app_bundle = factory_root / "app"
+            if factory_app_bundle.resolve() != app_root.resolve():
+                try:
+                    pages.extend(_load_ui_route_manifest_pages(factory_app_bundle))
+                except Exception as exc:
+                    logger.warning("[shell-config] Could not read factory route manifest: %s", exc)
 
     if pages:
         result["pages"] = _dedupe_and_sort_pages([

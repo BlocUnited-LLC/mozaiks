@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from mozaiks_cli import agent_guidance
 from mozaiks_cli.commands import init_command, sync_agent_guidance_command
 from mozaiks_cli.main import create_parser
 
@@ -35,6 +36,7 @@ def test_sync_agent_guidance_write_missing_creates_guidance(tmp_path) -> None:
     assert (workspace / "AGENTS.md").exists()
     assert (workspace / "CLAUDE.md").exists()
     assert (workspace / ".claude" / "rules" / "modules.md").exists()
+    assert (workspace / ".claude" / "skills" / "add-branding" / "SKILL.md").exists()
     assert (workspace / ".claude" / "skills" / "setup" / "SKILL.md").exists()
 
     current_statuses = sync_agent_guidance_command.sync_agent_guidance(
@@ -47,6 +49,8 @@ def test_sync_agent_guidance_write_missing_creates_guidance(tmp_path) -> None:
 
 
 def test_generated_agent_guidance_declares_app_backend_support_lane() -> None:
+    assert init_command.build_agent_guidance_files is agent_guidance.build_agent_guidance_files
+
     files = init_command.build_agent_guidance_files("Backend Lane App", "integrated")
 
     agents = files[Path("AGENTS.md")]
@@ -71,6 +75,15 @@ def test_generated_agent_guidance_declares_app_backend_support_lane() -> None:
     assert "Secret management contract, names only" in claude
     assert "app/config/secrets.yaml" in claude
     assert "workflows/<WorkflowName>/" in claude
+    assert Path(".claude/skills/add-branding/SKILL.md") in files
+    assert "Studio/factory-generated modules and workflows" in claude
+    assert "refreshed automatically by workspace commands" in agents
+
+
+def test_package_manifest_includes_agent_guidance_templates() -> None:
+    manifest = Path("MANIFEST.in").read_text(encoding="utf-8")
+
+    assert "recursive-include mozaiks_cli/agent_guidance *.md" in manifest
 
 
 def test_sync_agent_guidance_write_missing_preserves_unmanaged_files(tmp_path) -> None:
@@ -141,4 +154,34 @@ def test_sync_agent_guidance_force_overwrites_unmanaged_files(tmp_path) -> None:
     agents = agents_path.read_text(encoding="utf-8")
     assert "custom only" not in agents
     assert "Forced App" in agents
-    assert init_command.AGENT_GUIDANCE_BEGIN in agents
+    assert agent_guidance.AGENT_GUIDANCE_BEGIN in agents
+
+
+def test_auto_sync_agent_guidance_updates_managed_blocks(tmp_path, capsys) -> None:
+    workspace = tmp_path / "workspace"
+    init_command.create_scaffold(
+        target_dir=workspace,
+        preset="chat",
+        app_name="Managed App",
+        starter=False,
+    )
+    agents_path = workspace / "AGENTS.md"
+    stale = agents_path.read_text(encoding="utf-8").replace(
+        "Do not assume a sibling checkout",
+        "STALE PACKAGE GUIDANCE",
+    )
+    agents_path.write_text(stale, encoding="utf-8")
+
+    sync_agent_guidance_command.auto_sync_agent_guidance(workspace)
+
+    output = capsys.readouterr().out
+    updated = agents_path.read_text(encoding="utf-8")
+    assert "Agent guidance refreshed" in output
+    assert "Do not assume a sibling checkout" in updated
+    assert "STALE PACKAGE GUIDANCE" not in updated
+
+
+def test_auto_sync_agent_guidance_skips_non_app_workspace(tmp_path) -> None:
+    sync_agent_guidance_command.auto_sync_agent_guidance(tmp_path)
+
+    assert not (tmp_path / "AGENTS.md").exists()

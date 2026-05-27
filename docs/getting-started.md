@@ -46,6 +46,9 @@ $env:OPENAI_API_KEY="sk-..."
 
 ## 4. Create your workspace and open Studio
 
+Run this from a parent folder (e.g. your `Desktop` or `Projects` directory).
+Replace `my-workspace` with whatever you want to name your app folder:
+
 ```powershell
 python -m mozaiks quickstart --dir .\my-workspace
 ```
@@ -64,10 +67,21 @@ In-progress builds stay in **Apps** so you can always pick up where you left off
 
 ## Coming back to an existing workspace
 
+Run these from the **parent** folder of your workspace (wherever you ran `quickstart`):
+
 ```powershell
 docker start mozaiks-mongo   # if MongoDB isn't already running
 python -m mozaiks studio --dir .\my-workspace --open
 ```
+
+Replace `.\my-workspace` with the name of the folder that was created during quickstart.
+
+!!! tip "Already inside your workspace folder?"
+    If you `cd`'d into the workspace directory first, use `--dir .` instead:
+
+    ```powershell
+    python -m mozaiks studio --dir . --open
+    ```
 
 ## Troubleshooting
 

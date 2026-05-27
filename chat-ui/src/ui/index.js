@@ -1,18 +1,11 @@
 /**
- * @mozaiks/chat-ui/ui — cross-platform UI layer
+ * @mozaiks/chat-ui/ui — web UI primitives layer
  *
- * Components and screens built on React Native primitives.
- * On web: react-native-web translates them to DOM.
- * On native: react-native renders them natively.
- *
- * Import from here in both app/ (web) and clients/mobile/ (native).
+ * Web-safe presentational primitives for Studio, app pages, and custom routes.
+ * React Native screen components (MessageBubble, ChatScreen, etc.) are in
+ * ui/screens/, ui/components/, and ui/navigation/ but are not exported here
+ * to keep the web bundle free of react-native dependencies.
  */
-
-export { default as MessageBubble } from './components/MessageBubble';
-export { default as MessageInput } from './components/MessageInput';
-export { default as ConversationListScreen } from './screens/ConversationListScreen';
-export { default as ChatScreen } from './screens/ChatScreen';
-export { default as RootNavigator } from './navigation';
 
 export {
   ActionButton,

@@ -87,5 +87,7 @@ def test_app_overview_page_fetches_summary_endpoint() -> None:
     hook_source = _read("factory_app/app/admin/pages/useAppStudioData.js")
     assert "/api/studio/overview" in hook_source
     assert "App Overview" in source
+    assert "Control Plane" in source
+    assert "getAppJourneyLabel" not in source
     assert "next_step" in source
     assert "WorkspaceLayout" in source

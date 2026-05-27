@@ -275,6 +275,18 @@ export default defineConfig(({ mode }) => {
       'lucide-react': path.resolve(__dirname, 'node_modules/lucide-react'),
       '@monaco-editor/react': path.resolve(__dirname, 'node_modules/@monaco-editor/react'),
       'monaco-editor': path.resolve(__dirname, 'node_modules/monaco-editor'),
+      'clsx': path.resolve(__dirname, 'node_modules/clsx'),
+      'tailwind-merge': path.resolve(__dirname, 'node_modules/tailwind-merge'),
+      'class-variance-authority': path.resolve(__dirname, 'node_modules/class-variance-authority'),
+      '@radix-ui/react-dialog': path.resolve(__dirname, 'node_modules/@radix-ui/react-dialog'),
+      '@radix-ui/react-progress': path.resolve(__dirname, 'node_modules/@radix-ui/react-progress'),
+      '@radix-ui/react-select': path.resolve(__dirname, 'node_modules/@radix-ui/react-select'),
+      '@radix-ui/react-slot': path.resolve(__dirname, 'node_modules/@radix-ui/react-slot'),
+      '@radix-ui/react-tabs': path.resolve(__dirname, 'node_modules/@radix-ui/react-tabs'),
+      '@radix-ui/react-tooltip': path.resolve(__dirname, 'node_modules/@radix-ui/react-tooltip'),
+      'marked': path.resolve(__dirname, 'node_modules/marked'),
+      'dompurify': path.resolve(__dirname, 'node_modules/dompurify'),
+      'react-icons': path.resolve(__dirname, 'node_modules/react-icons'),
 
       // ── Platform extension alias (PLATFORM_PATH-driven) ─────────────────
       // App.jsx imports: import { register } from '@platform/extensions'

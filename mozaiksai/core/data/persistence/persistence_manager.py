@@ -148,19 +148,15 @@ class PersistenceManager:
                 general_indexes = await general_coll.list_indexes().to_list(length=None)
                 general_index_names = [idx["name"] for idx in general_indexes]
                 app_user_created_keys = [("app_id", 1), ("user_id", 1), ("created_at", -1)]
-                if "gc_ent_user_created" not in general_index_names:
-                    await general_coll.create_index(
-                        app_user_created_keys,
-                        name="gc_ent_user_created",
-                    )
+                if "gc_ent_user_created" in general_index_names and "gc_app_user_created" not in general_index_names:
+                    # Rename: drop the old name so the canonical name can be created.
+                    await general_coll.drop_index("gc_ent_user_created")
+                    await general_coll.create_index(app_user_created_keys, name="gc_app_user_created")
+                    logger.debug("Migrated gc_ent_user_created → gc_app_user_created")
+                elif "gc_app_user_created" not in general_index_names and "gc_ent_user_created" not in general_index_names:
+                    await general_coll.create_index(app_user_created_keys, name="gc_app_user_created")
                     logger.debug("Created general chat app/user index")
 
-                if "gc_app_user_created" not in general_index_names and not _has_index_with_keys(general_indexes, app_user_created_keys):
-                    await general_coll.create_index(
-                        app_user_created_keys,
-                        name="gc_app_user_created",
-                    )
-                    logger.debug("Created general chat app/user index")
                 if "gc_status" not in general_index_names:
                     await general_coll.create_index("status", name="gc_status")
                     logger.debug("Created general chat status index")
@@ -169,21 +165,14 @@ class PersistenceManager:
                 counter_indexes = await counter_coll.list_indexes().to_list(length=None)
                 counter_names = [idx["name"] for idx in counter_indexes]
                 app_user_counter_keys = [("app_id", 1), ("user_id", 1)]
-                if "gc_counter_ent_user" not in counter_names:
-                    await counter_coll.create_index(
-                        app_user_counter_keys,
-                        name="gc_counter_ent_user",
-                        unique=True,
-                    )
+                if "gc_counter_ent_user" in counter_names and "gc_counter_app_user" not in counter_names:
+                    # Rename: drop the old name so the canonical name can be created.
+                    await counter_coll.drop_index("gc_counter_ent_user")
+                    await counter_coll.create_index(app_user_counter_keys, name="gc_counter_app_user", unique=True)
+                    logger.debug("Migrated gc_counter_ent_user → gc_counter_app_user")
+                elif "gc_counter_app_user" not in counter_names and "gc_counter_ent_user" not in counter_names:
+                    await counter_coll.create_index(app_user_counter_keys, name="gc_counter_app_user", unique=True)
                     logger.debug("Created general chat counter unique index")
-
-                if "gc_counter_app_user" not in counter_names and not _has_index_with_keys(counter_indexes, app_user_counter_keys):
-                    await counter_coll.create_index(
-                        app_user_counter_keys,
-                        name="gc_counter_app_user",
-                        unique=True,
-                    )
-                    logger.debug("Created general chat app counter unique index")
             except Exception as e:  # pragma: no cover
                 logger.warning(f"Index ensure issue: {e}")
 

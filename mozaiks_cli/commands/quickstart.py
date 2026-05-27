@@ -21,17 +21,9 @@ def run(args) -> None:
             directory=str(workspace_root),
             preset=getattr(args, "preset", "chat"),
             name=getattr(args, "name", None),
-            journey=getattr(args, "journey", None),
-            goal=getattr(args, "goal", None),
             provider=getattr(args, "provider", None),
             model=getattr(args, "model", None),
-            tagline=None,
-            theme_primary=None,
-            admin_email=None,
-            existing_url=None,
-            host_owned_summary=None,
             non_interactive=True,
-            full_setup=False,
             open_studio=True,
             backend_port=int(getattr(args, "backend_port", 8000)),
             frontend_port=int(getattr(args, "frontend_port", 3000)),
@@ -42,11 +34,9 @@ def run(args) -> None:
 
 def _print_intro(workspace_root: Path) -> None:
     print(f"Quickstart workspace: {workspace_root}")
-    print("Mode: builder")
-    print("Install mode: CLI-managed")
     print(
-        "This path bootstraps the workspace with minimal defaults and opens Studio. "
-        "No workspace .venv is required for the normal Studio path.\n"
+        "Bootstrapping workspace and opening Studio. "
+        "Use Studio to create your first app.\n"
     )
 
 
@@ -58,7 +48,7 @@ def _print_environment_warnings(args) -> None:
         warnings.append(
             "MongoDB is required to start Studio. If MONGO_URI is not set, the generated workspace "
             "uses mongodb://localhost:27017/mozaiks; make sure local MongoDB is running or set MONGO_URI "
-            "to a reachable MongoDB URI."
+            "to a reachable MongoDB Atlas/local URI."
         )
 
     if provider == "openai" and not os.environ.get("OPENAI_API_KEY"):

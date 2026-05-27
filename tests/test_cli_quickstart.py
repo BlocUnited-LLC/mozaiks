@@ -56,8 +56,6 @@ def test_quickstart_bootstraps_workspace_and_launches_studio(monkeypatch, tmp_pa
             directory=str(target_dir),
             preset="chat",
             name="Quickstart Atlas",
-            journey="greenfield_app",
-            goal="Define the first live operations workflow",
             provider="openai",
             model="gpt-4.1",
             backend_port=8010,
@@ -69,14 +67,19 @@ def test_quickstart_bootstraps_workspace_and_launches_studio(monkeypatch, tmp_pa
     captured = capsys.readouterr()
     app_json = _load_json(target_dir / "app" / "app.json")
     ai_json = _load_json(target_dir / "app" / "config" / "ai.json")
+    shell_json = _load_json(target_dir / "app" / "config" / "shell.json")
 
-    assert "Mode: builder" in captured.out
-    assert "Install mode: CLI-managed" in captured.out
-    assert "No workspace .venv is required" in captured.out
+    assert "Quickstart workspace:" in captured.out
+    assert "Bootstrapping workspace and opening Studio" in captured.out
     assert app_json["appName"] == "Quickstart Atlas"
-    assert app_json["onboarding"]["journey"] == "greenfield_app"
+    assert "onboarding" not in app_json
     assert ai_json["llm"]["provider"] == "openai"
     assert ai_json["llm"]["model"] == "gpt-4.1"
+    assert ai_json["workflows"]["entry_point"] == "ValueEngine"
+    assert ai_json["control_plane"]["enabled"] is True
+    assert "app_context" not in ai_json
+    assert shell_json["header"]["actions"]
+    assert shell_json["notifications"]["show"] is True
     assert launched["workspace_root"] == target_dir
     assert launched["backend_port"] == 8010
     assert launched["frontend_port"] == 3010

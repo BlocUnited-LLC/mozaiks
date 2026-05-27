@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from mozaiks_cli.commands import init_command
 from tests.import_utils import import_module_directly
 
 _workflow_manager_mod = import_module_directly("mozaiksai.core.workflow.workflow_manager")
@@ -39,6 +40,16 @@ def test_factory_app_control_plane_defaults_are_declared() -> None:
     assert data["control_plane"]["classifier"]["llm_profile"] == "classifier"
     assert data["control_plane"]["coding"]["llm_profile"] == "codegen"
     assert data["control_plane"]["llm_profiles"]["classifier"]["llm_config"]["model"] == "gpt-5-nano"
+
+
+def test_generated_ai_config_uses_factory_control_plane_defaults() -> None:
+    ai_path = Path(__file__).resolve().parents[1] / "factory_app" / "app" / "config" / "ai.json"
+    factory_data = json.loads(ai_path.read_text(encoding="utf-8"))
+    generated_data = init_command.build_default_ai_config("Generated App")
+
+    assert generated_data["workflows"]["entry_point"] == "ValueEngine"
+    assert generated_data["control_plane"] == factory_data["control_plane"]
+    assert "app_context" not in generated_data
 
 
 def test_create_launcher_workflow_is_removed() -> None:
