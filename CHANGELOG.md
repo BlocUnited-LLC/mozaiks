@@ -12,20 +12,29 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+## 0.1.6 - 2026-05-27
+
 ### Changed
 
 - Replaced the public first-run install path with `pip install mozaiks` followed
-  by `python -m mozaiks ...`; the `mozaiks` command is now documented as an
-  optional shortcut only.
-- Standardized the public browser product and launch command around Studio:
+  by `python -m mozaiks ...`; the `mozaiks` command is documented as an optional
+  shortcut only. Getting Started, README, and Local Setup updated accordingly.
+- Standardized all public launch references around Studio:
   `python -m mozaiks studio --dir <workspace> --open`.
+- Docs use tabbed contract snippets and collapsible troubleshooting blocks for
+  cleaner navigation (Getting Started, Add Workflows, Add a Page).
+- Runtime data integrity policy in Add a Module is now a visible warning block.
 
 ### Fixed
 
-- Added a package-level `python -m mozaiks` entrypoint and installed-wheel smoke
-  checks so PATH refresh issues do not block the recommended Windows flow.
-- Added Studio MongoDB preflight diagnostics so missing or unreachable MongoDB
-  reports a clear setup error instead of a generic backend startup failure.
+- Added `mozaiks/__init__.py` and `mozaiks/__main__.py` so `python -m mozaiks`
+  works immediately after `pip install mozaiks` without a PATH refresh on any OS.
+- Release CI smoke now verifies both `mozaiks --version` and
+  `python -m mozaiks --version` from the installed wheel.
+- MongoDB preflight added to Studio launcher: missing or unreachable MongoDB
+  reports a clear diagnostic error instead of a generic backend startup failure.
+- Corrected `open_console` → `open_studio` flag name in `quickstart` and
+  `onboard` commands so `quickstart` reliably opens Studio on first run.
 
 ## 0.1.5 - 2026-05-26
 
