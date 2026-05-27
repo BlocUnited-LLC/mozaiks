@@ -11,7 +11,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [
-    {name = "BlocUnited LLC", email = "mike@blocunited.com"}
+    {name = "BlocUnited LLC", email = "info@blocunited.com"}
 ]
 classifiers = [
     "Development Status :: 4 - Beta",

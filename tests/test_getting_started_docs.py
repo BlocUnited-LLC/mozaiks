@@ -14,9 +14,10 @@ def test_getting_started_uses_user_facing_headings() -> None:
 
     assert "## Prerequisites" in doc
     assert "## 1. Install" in doc
-    assert "## 2. Set environment variables" in doc
-    assert "## 3. Create your workspace and open Studio" in doc
-    assert "## 4. Build your first app" in doc
+    assert "## 2. Start MongoDB" in doc
+    assert "## 3. Set environment variables" in doc
+    assert "## 4. Create your workspace and open Studio" in doc
+    assert "## 5. Build your first app" in doc
 
     assert "## Reopen Studio" not in doc
     assert "## Two-Step Mental Model" not in doc

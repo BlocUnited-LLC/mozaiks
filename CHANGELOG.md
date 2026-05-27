@@ -12,6 +12,17 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+## 0.1.7 - 2026-05-27
+
+### Fixed
+
+- Added missing `chat-ui` peer dependencies (`clsx`, `tailwind-merge`,
+  `class-variance-authority`, `@radix-ui/*`) to `web_shell/package.json` so the
+  Studio frontend starts without Vite import errors on a fresh `pip install`.
+- Updated contact email in `pyproject.toml`.
+- Getting Started doc now explains MongoDB as a required database with a Docker
+  one-liner as the recommended setup path.
+
 ## 0.1.6 - 2026-05-27
 
 ### Changed
