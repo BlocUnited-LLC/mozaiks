@@ -257,7 +257,7 @@ phases:
     deferred_to: Phase 3D        # phase or condition when this becomes executable
     risk_level: high
     rollback_note: >
-      Revert nameservers to previous values via registrar web console.
+      Revert nameservers to previous values via the registrar admin panel.
       DNS propagation takes up to 48 hours.
 ```
 

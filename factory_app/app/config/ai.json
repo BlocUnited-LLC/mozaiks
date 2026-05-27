@@ -1,6 +1,6 @@
 {
   "ask": {
-    "ask_mode_prompt": "You are the Mozaiks assistant. Help users shape, generate, connect, and refine apps in the Mozaiks Console using the shared builder workflows.",
+    "ask_mode_prompt": "You are the Mozaiks assistant. Help users shape, generate, connect, and refine apps in Mozaiks Studio using the shared builder workflows.",
     "ask_context_variables": null
   },
   "chat": {

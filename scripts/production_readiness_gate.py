@@ -30,7 +30,7 @@ PYTEST_GATE_TARGETS = [
     "tests/test_structured_output_runtime_contracts.py",
     "tests/test_ui_surface_taxonomy.py",
     "tests/test_mobile_surface_contracts.py",
-    "tests/test_mozaiks_host_smoke.py",
+    "tests/test_studio_host_smoke.py",
 ]
 
 QUICK_PYTEST_TARGETS = [
@@ -39,7 +39,7 @@ QUICK_PYTEST_TARGETS = [
     "tests/test_hosted_pack_template_expansion.py",
     "tests/test_mozaikspay_hosted_pack_contract.py",
     "tests/test_production_readiness_gate.py",
-    "tests/test_mozaiks_host_smoke.py",
+    "tests/test_studio_host_smoke.py",
 ]
 
 SOURCE_HYGIENE_SUFFIXES = {

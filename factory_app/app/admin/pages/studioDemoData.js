@@ -19,8 +19,8 @@ const DEMO_APPS = [
   },
   {
     build_registry_id: 'demo_appreg_revenue-review',
-    app_id: 'revenue-review-console',
-    name: 'Revenue Review Console',
+    app_id: 'revenue-review-studio',
+    name: 'Revenue Review Studio',
     description: 'Finance review before release and deployment setup.',
     status: 'review',
     created_at: '2025-01-27T15:45:00Z',
@@ -28,8 +28,8 @@ const DEMO_APPS = [
   },
   {
     build_registry_id: 'demo_appreg_partner-deploy',
-    app_id: 'partner-delivery-console',
-    name: 'Partner Delivery Console',
+    app_id: 'partner-delivery-studio',
+    name: 'Partner Delivery Studio',
     description: 'Partner rollout, managed deployment, and release checks.',
     status: 'deploying',
     created_at: '2025-01-19T08:00:00Z',
@@ -37,8 +37,8 @@ const DEMO_APPS = [
   },
   {
     build_registry_id: 'demo_appreg_member-growth',
-    app_id: 'member-growth-console',
-    name: 'Member Growth Console',
+    app_id: 'member-growth-studio',
+    name: 'Member Growth Studio',
     description: 'Live growth insights, campaign prompts, and operator alerts.',
     status: 'active',
     created_at: '2025-01-10T13:10:00Z',
@@ -97,14 +97,14 @@ const DEMO_RUNTIME_SUMMARY = {
 }
 
 const DEMO_APP_CONNECTORS = {
-  'member-growth-console': [
+  'member-growth-studio': [
     { service: 'stripe', display_name: 'Stripe', secret_available: true, status: 'active' },
     { service: 'slack', display_name: 'Slack', secret_available: true, status: 'active' },
   ],
   'support-ops-assistant': [
     { service: 'salesforce', display_name: 'Salesforce', secret_available: true, status: 'active' },
   ],
-  'revenue-review-console': [
+  'revenue-review-studio': [
     { service: 'stripe', display_name: 'Stripe', secret_available: false, status: 'metadata_only' },
   ],
   'campaign-revision-workbench': [
@@ -127,21 +127,21 @@ const DEMO_USAGE_BY_APP = {
     tool_calls: 2710,
     errors: 3,
   },
-  'revenue-review-console': {
+  'revenue-review-studio': {
     tokens_used: 126000,
     llm_cost_usd: 301.22,
     workflow_runs: 1400,
     tool_calls: 5230,
     errors: 1,
   },
-  'partner-delivery-console': {
+  'partner-delivery-studio': {
     tokens_used: 348000,
     llm_cost_usd: 912.4,
     workflow_runs: 4210,
     tool_calls: 13220,
     errors: 4,
   },
-  'member-growth-console': {
+  'member-growth-studio': {
     tokens_used: 1842000,
     llm_cost_usd: 4825.33,
     workflow_runs: 18240,
@@ -172,21 +172,21 @@ const DEMO_BILLING_BY_APP = {
     active_customers: 18,
     failed_payments: 1,
   },
-  'revenue-review-console': {
+  'revenue-review-studio': {
     total_revenue_usd: 24800,
     mrr_usd: 4100,
     arr_usd: 49200,
     active_customers: 26,
     failed_payments: 2,
   },
-  'partner-delivery-console': {
+  'partner-delivery-studio': {
     total_revenue_usd: 52400,
     mrr_usd: 9200,
     arr_usd: 110400,
     active_customers: 54,
     failed_payments: 1,
   },
-  'member-growth-console': {
+  'member-growth-studio': {
     total_revenue_usd: 184200,
     mrr_usd: 27800,
     arr_usd: 333600,
@@ -223,7 +223,7 @@ const DEMO_DEPLOYMENT_BY_APP = {
     storage_gb: 2,
     uptime_percent: null,
   },
-  'revenue-review-console': {
+  'revenue-review-studio': {
     deployment_label: 'Review',
     failed: false,
     domain_count: 0,
@@ -233,17 +233,17 @@ const DEMO_DEPLOYMENT_BY_APP = {
     storage_gb: 4,
     uptime_percent: null,
   },
-  'partner-delivery-console': {
+  'partner-delivery-studio': {
     deployment_label: 'Deploying',
     failed: false,
     domain_count: 1,
-    domains: ['partner-console-preview.mozaiks.app'],
+    domains: ['partner-studio-preview.mozaiks.app'],
     environment: 'Staging',
     bandwidth_gb: 180,
     storage_gb: 22,
     uptime_percent: 99.3,
   },
-  'member-growth-console': {
+  'member-growth-studio': {
     deployment_label: 'Live',
     failed: false,
     domain_count: 2,
@@ -294,7 +294,7 @@ const DEMO_USERS_BY_APP = {
       { id: 'sup_sop_1', label: 'SLA escalation', detail: '2 unresolved support escalations in the last 7 days.' },
     ],
   },
-  'revenue-review-console': {
+  'revenue-review-studio': {
     total_users: 64,
     active_users: 37,
     new_users: 5,
@@ -312,7 +312,7 @@ const DEMO_USERS_BY_APP = {
       { id: 'sup_rev_1', label: 'Billing inquiry', detail: '1 plan question waiting on finance configuration.' },
     ],
   },
-  'partner-delivery-console': {
+  'partner-delivery-studio': {
     total_users: 204,
     active_users: 163,
     new_users: 21,
@@ -330,7 +330,7 @@ const DEMO_USERS_BY_APP = {
       { id: 'sup_partner_1', label: 'Provisioning ticket', detail: 'Preview environment access issue resolved today.' },
     ],
   },
-  'member-growth-console': {
+  'member-growth-studio': {
     total_users: 2480,
     active_users: 1824,
     new_users: 206,
@@ -375,14 +375,14 @@ const DEMO_ACTIVITY_BY_APP = {
     { id: 'act_support_1', title: 'Build brief updated', detail: 'Escalation flow changes were saved to the current Build request.', timestamp: '1 hour ago' },
     { id: 'act_support_2', title: 'Validation ready', detail: 'Build output is ready for review before deploy.', timestamp: 'Yesterday' },
   ],
-  'revenue-review-console': [
+  'revenue-review-studio': [
     { id: 'act_revenue_1', title: 'Review requested', detail: 'Finance release review is waiting on operator approval.', timestamp: '34 minutes ago' },
   ],
-  'partner-delivery-console': [
+  'partner-delivery-studio': [
     { id: 'act_partner_1', title: 'Preview deployment started', detail: 'Deployment is provisioning the current release candidate.', timestamp: '18 minutes ago' },
     { id: 'act_partner_2', title: 'Domain assigned', detail: 'Preview domain attached to the latest environment.', timestamp: 'Today' },
   ],
-  'member-growth-console': [
+  'member-growth-studio': [
     { id: 'act_growth_1', title: 'Usage spike detected', detail: 'Campaign scoring workflows crossed the daily run threshold.', timestamp: '12 minutes ago' },
     { id: 'act_growth_2', title: 'Customer billing synced', detail: 'Billing data refreshed from the managed billing integration.', timestamp: '1 hour ago' },
   ],
@@ -394,9 +394,9 @@ const DEMO_ACTIVITY_BY_APP = {
 const DEMO_WORKFLOWS_BY_APP = {
   'client-intake-copilot': ['ValueEngine'],
   'support-ops-assistant': ['AppGenerator', 'TicketTriageWorkflow', 'EscalationWorkflow'],
-  'revenue-review-console': ['ReviewWorkflow', 'ReportsWorkflow'],
-  'partner-delivery-console': ['DeployWorkflow', 'PartnerSyncWorkflow', 'PayoutOpsWorkflow'],
-  'member-growth-console': ['GrowthScoringWorkflow', 'CampaignReviewWorkflow', 'RetentionSignalsWorkflow'],
+  'revenue-review-studio': ['ReviewWorkflow', 'ReportsWorkflow'],
+  'partner-delivery-studio': ['DeployWorkflow', 'PartnerSyncWorkflow', 'PayoutOpsWorkflow'],
+  'member-growth-studio': ['GrowthScoringWorkflow', 'CampaignReviewWorkflow', 'RetentionSignalsWorkflow'],
   'campaign-revision-workbench': ['RevisionWorkflow'],
 }
 
@@ -405,14 +405,14 @@ const DEMO_RUNS_BY_APP = {
     { chat_id: 'run_support_1', workflow_name: 'TicketTriageWorkflow', user_id: 'tanya@example.com', agent_turns: 42, tool_calls: 184, errors: 1, prompt_tokens: 12400, completion_tokens: 3800, cost: 32.1, runtime_sec: 182.3, ended_at: null, started_at: '2025-02-05T17:20:00Z', status: 0 },
     { chat_id: 'run_support_2', workflow_name: 'EscalationWorkflow', user_id: 'luis@example.com', agent_turns: 18, tool_calls: 61, errors: 0, prompt_tokens: 6400, completion_tokens: 2200, cost: 16.7, runtime_sec: 94.2, ended_at: '2025-02-05T16:10:00Z', started_at: '2025-02-05T15:58:00Z', status: 1 },
   ],
-  'revenue-review-console': [
+  'revenue-review-studio': [
     { chat_id: 'run_revenue_1', workflow_name: 'ReviewWorkflow', user_id: 'kelsey@example.com', agent_turns: 14, tool_calls: 44, errors: 1, prompt_tokens: 9200, completion_tokens: 2800, cost: 21.6, runtime_sec: 75.8, ended_at: '2025-02-05T15:42:00Z', started_at: '2025-02-05T15:30:00Z', status: 1 },
   ],
-  'partner-delivery-console': [
+  'partner-delivery-studio': [
     { chat_id: 'run_partner_1', workflow_name: 'DeployWorkflow', user_id: 'mina@example.com', agent_turns: 22, tool_calls: 73, errors: 0, prompt_tokens: 13200, completion_tokens: 4100, cost: 28.9, runtime_sec: 133.4, ended_at: null, started_at: '2025-02-05T18:02:00Z', status: 0 },
     { chat_id: 'run_partner_2', workflow_name: 'PartnerSyncWorkflow', user_id: 'devin@example.com', agent_turns: 31, tool_calls: 117, errors: 0, prompt_tokens: 18800, completion_tokens: 5200, cost: 42.8, runtime_sec: 188.1, ended_at: '2025-02-05T14:32:00Z', started_at: '2025-02-05T14:08:00Z', status: 1 },
   ],
-  'member-growth-console': [
+  'member-growth-studio': [
     { chat_id: 'run_growth_1', workflow_name: 'GrowthScoringWorkflow', user_id: 'nora@example.com', agent_turns: 94, tool_calls: 320, errors: 2, prompt_tokens: 64000, completion_tokens: 18000, cost: 182.5, runtime_sec: 421.6, ended_at: null, started_at: '2025-02-05T18:10:00Z', status: 0 },
     { chat_id: 'run_growth_2', workflow_name: 'CampaignReviewWorkflow', user_id: 'sean@example.com', agent_turns: 63, tool_calls: 245, errors: 1, prompt_tokens: 48100, completion_tokens: 12100, cost: 135.9, runtime_sec: 305.4, ended_at: '2025-02-05T15:11:00Z', started_at: '2025-02-05T14:42:00Z', status: 1 },
     { chat_id: 'run_growth_3', workflow_name: 'RetentionSignalsWorkflow', user_id: 'ariel@example.com', agent_turns: 28, tool_calls: 102, errors: 0, prompt_tokens: 15400, completion_tokens: 4200, cost: 38.2, runtime_sec: 141.5, ended_at: '2025-02-05T12:15:00Z', started_at: '2025-02-05T12:01:00Z', status: 1 },
@@ -448,24 +448,24 @@ const DEMO_BUILD_HISTORY_BY_APP = {
     { id: 'artifact_support_1', version_number: 4, lifecycle_status: 'current', validation_status: 'passed', artifact_key: 'app_bundle', created_at: '2025-02-05T15:03:00Z', commit_metadata: { metadata: { artifact_path: 'generated/apps/support-ops-assistant/4/app.zip' } } },
     { id: 'artifact_support_0', version_number: 3, lifecycle_status: 'draft', validation_status: 'passed', artifact_key: 'app_bundle', created_at: '2025-02-04T19:14:00Z', commit_metadata: { metadata: { artifact_path: 'generated/apps/support-ops-assistant/3/app.zip' } } },
   ],
-  'revenue-review-console': [
-    { id: 'artifact_revenue_1', version_number: 2, lifecycle_status: 'draft', validation_status: 'passed', artifact_key: 'app_bundle', created_at: '2025-02-05T14:00:00Z', commit_metadata: { metadata: { artifact_path: 'generated/apps/revenue-review-console/2/app.zip' } } },
+  'revenue-review-studio': [
+    { id: 'artifact_revenue_1', version_number: 2, lifecycle_status: 'draft', validation_status: 'passed', artifact_key: 'app_bundle', created_at: '2025-02-05T14:00:00Z', commit_metadata: { metadata: { artifact_path: 'generated/apps/revenue-review-studio/2/app.zip' } } },
   ],
-  'partner-delivery-console': [
-    { id: 'artifact_partner_2', version_number: 6, lifecycle_status: 'current', validation_status: 'passed', artifact_key: 'app_bundle', created_at: '2025-02-05T17:32:00Z', commit_metadata: { metadata: { artifact_path: 'generated/apps/partner-delivery-console/6/app.zip' } } },
-    { id: 'artifact_partner_1', version_number: 5, lifecycle_status: 'current', validation_status: 'passed', artifact_key: 'app_bundle', created_at: '2025-02-03T12:40:00Z', commit_metadata: { metadata: { artifact_path: 'generated/apps/partner-delivery-console/5/app.zip' } } },
+  'partner-delivery-studio': [
+    { id: 'artifact_partner_2', version_number: 6, lifecycle_status: 'current', validation_status: 'passed', artifact_key: 'app_bundle', created_at: '2025-02-05T17:32:00Z', commit_metadata: { metadata: { artifact_path: 'generated/apps/partner-delivery-studio/6/app.zip' } } },
+    { id: 'artifact_partner_1', version_number: 5, lifecycle_status: 'current', validation_status: 'passed', artifact_key: 'app_bundle', created_at: '2025-02-03T12:40:00Z', commit_metadata: { metadata: { artifact_path: 'generated/apps/partner-delivery-studio/5/app.zip' } } },
   ],
-  'member-growth-console': [
-    { id: 'artifact_growth_3', version_number: 11, lifecycle_status: 'current', validation_status: 'passed', artifact_key: 'app_bundle', created_at: '2025-02-05T18:05:00Z', commit_metadata: { metadata: { artifact_path: 'generated/apps/member-growth-console/11/app.zip' } } },
-    { id: 'artifact_growth_2', version_number: 10, lifecycle_status: 'current', validation_status: 'passed', artifact_key: 'app_bundle', created_at: '2025-02-02T13:22:00Z', commit_metadata: { metadata: { artifact_path: 'generated/apps/member-growth-console/10/app.zip' } } },
-    { id: 'artifact_growth_1', version_number: 9, lifecycle_status: 'draft', validation_status: 'passed', artifact_key: 'app_bundle', created_at: '2025-01-29T08:30:00Z', commit_metadata: { metadata: { artifact_path: 'generated/apps/member-growth-console/9/app.zip' } } },
+  'member-growth-studio': [
+    { id: 'artifact_growth_3', version_number: 11, lifecycle_status: 'current', validation_status: 'passed', artifact_key: 'app_bundle', created_at: '2025-02-05T18:05:00Z', commit_metadata: { metadata: { artifact_path: 'generated/apps/member-growth-studio/11/app.zip' } } },
+    { id: 'artifact_growth_2', version_number: 10, lifecycle_status: 'current', validation_status: 'passed', artifact_key: 'app_bundle', created_at: '2025-02-02T13:22:00Z', commit_metadata: { metadata: { artifact_path: 'generated/apps/member-growth-studio/10/app.zip' } } },
+    { id: 'artifact_growth_1', version_number: 9, lifecycle_status: 'draft', validation_status: 'passed', artifact_key: 'app_bundle', created_at: '2025-01-29T08:30:00Z', commit_metadata: { metadata: { artifact_path: 'generated/apps/member-growth-studio/9/app.zip' } } },
   ],
   'campaign-revision-workbench': [
     { id: 'artifact_campaign_1', version_number: 5, lifecycle_status: 'draft', validation_status: 'failed', artifact_key: 'app_bundle', created_at: '2025-02-05T11:18:00Z', commit_metadata: { metadata: { artifact_path: 'generated/apps/campaign-revision-workbench/5/app.zip' } } },
   ],
 }
 
-export function isConsoleDemoModeEnabled() {
+export function isStudioDemoModeEnabled() {
   return Boolean(
     typeof import.meta !== 'undefined'
       && import.meta.env?.DEV
@@ -473,11 +473,11 @@ export function isConsoleDemoModeEnabled() {
   )
 }
 
-export function buildConsoleDemoApps() {
+export function buildStudioDemoApps() {
   return DEMO_APPS.map((app) => ({ ...app }))
 }
 
-export function buildConsoleDemoAppSummary(appId) {
+export function buildStudioDemoAppSummary(appId) {
   const app = DEMO_APPS.find((entry) => entry.app_id === appId) || DEMO_APPS[0]
   const workflows = DEMO_WORKFLOWS_BY_APP[app?.app_id] || []
   return {
@@ -494,7 +494,7 @@ export function buildConsoleDemoAppSummary(appId) {
       updated_at: app?.updated_at,
       created_at: app?.created_at,
       journey: app?.status === 'draft' ? 'greenfield_app' : 'refinement',
-      first_goal: 'Operate the next lifecycle step from a clean app-scoped console.',
+      first_goal: 'Operate the next lifecycle step from a clean app-scoped Studio.',
       host_owned_summary: 'Shared runtime, auth, and deployment substrate remain host-owned.',
     },
     ai: {
@@ -523,7 +523,7 @@ export function buildConsoleDemoAppSummary(appId) {
     home: {
       next_step:
         app?.status === 'active'
-          ? 'Use the app console to review runtime health, revenue, integrations, and operations.'
+          ? 'Use the app Studio to review runtime health, revenue, integrations, and operations.'
           : app?.status === 'deploying'
             ? 'Complete deployment checks, then hand this app into live operation.'
             : 'Continue Build to move this app toward its next lifecycle gate.',
@@ -531,7 +531,7 @@ export function buildConsoleDemoAppSummary(appId) {
   }
 }
 
-export function buildConsoleDemoRuntimeSummary() {
+export function buildStudioDemoRuntimeSummary() {
   return JSON.parse(JSON.stringify({
     ...DEMO_RUNTIME_SUMMARY,
     runtime_integrations: DEMO_RUNTIME_SUMMARY.integrations,
@@ -540,26 +540,26 @@ export function buildConsoleDemoRuntimeSummary() {
   }))
 }
 
-export function listConsoleDemoAppConnectors(appId) {
+export function listStudioDemoAppConnectors(appId) {
   return (DEMO_APP_CONNECTORS[appId] || []).map((connector) => ({ ...connector }))
 }
 
-export function getConsoleDemoUsageRecord(appId) {
+export function getStudioDemoUsageRecord(appId) {
   const record = DEMO_USAGE_BY_APP[appId]
   return record ? { ...record } : null
 }
 
-export function getConsoleDemoBillingRecord(appId) {
+export function getStudioDemoBillingRecord(appId) {
   const record = DEMO_BILLING_BY_APP[appId]
   return record ? { ...record } : null
 }
 
-export function getConsoleDemoDeploymentRecord(appId) {
+export function getStudioDemoDeploymentRecord(appId) {
   const record = DEMO_DEPLOYMENT_BY_APP[appId]
   return record ? { ...record, domains: [...(record.domains || [])] } : null
 }
 
-export function getConsoleDemoUsersRecord(appId) {
+export function getStudioDemoUsersRecord(appId) {
   const record = DEMO_USERS_BY_APP[appId]
   return record
     ? {
@@ -571,23 +571,23 @@ export function getConsoleDemoUsersRecord(appId) {
     : null
 }
 
-export function getConsoleDemoActivity(appId) {
+export function getStudioDemoActivity(appId) {
   return (DEMO_ACTIVITY_BY_APP[appId] || []).map((entry) => ({ ...entry }))
 }
 
-export function getConsoleDemoWorkflowNames(appId) {
+export function getStudioDemoWorkflowNames(appId) {
   return [...(DEMO_WORKFLOWS_BY_APP[appId] || [])]
 }
 
-export function getConsoleDemoRuns(appId) {
+export function getStudioDemoRuns(appId) {
   return (DEMO_RUNS_BY_APP[appId] || []).map((run) => ({ ...run }))
 }
 
-export function getConsoleDemoSessions(appId) {
+export function getStudioDemoSessions(appId) {
   return (DEMO_SESSIONS_BY_APP[appId] || []).map((session) => ({ ...session }))
 }
 
-export function getConsoleDemoBuildHistory(appId) {
+export function getStudioDemoBuildHistory(appId) {
   return {
     artifact_versions: (DEMO_BUILD_HISTORY_BY_APP[appId] || []).map((version) => ({
       ...version,
@@ -597,8 +597,8 @@ export function getConsoleDemoBuildHistory(appId) {
   }
 }
 
-export function getConsoleDemoAdminStats(appId) {
-  const usage = getConsoleDemoUsageRecord(appId)
+export function getStudioDemoAdminStats(appId) {
+  const usage = getStudioDemoUsageRecord(appId)
   if (!usage) {
     return {
       active_chats: 0,
@@ -623,7 +623,7 @@ export function getConsoleDemoAdminStats(appId) {
   }
 }
 
-export function getConsoleDemoWorkspaceRuns() {
+export function getStudioDemoWorkspaceRuns() {
   return Object.entries(DEMO_RUNS_BY_APP).flatMap(([appId, runs]) => {
     const app = DEMO_APPS.find((entry) => entry.app_id === appId)
     return runs.map((run) => ({
@@ -634,8 +634,8 @@ export function getConsoleDemoWorkspaceRuns() {
   })
 }
 
-export function getConsoleDemoWorkspaceStats() {
-  const runs = getConsoleDemoWorkspaceRuns()
+export function getStudioDemoWorkspaceStats() {
+  const runs = getStudioDemoWorkspaceRuns()
 
   return {
     active_chats: runs.filter((run) => !run.ended_at).length,
@@ -649,4 +649,4 @@ export function getConsoleDemoWorkspaceStats() {
   }
 }
 
-export default buildConsoleDemoApps
+export default buildStudioDemoApps

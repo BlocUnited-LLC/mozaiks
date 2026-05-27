@@ -40,7 +40,7 @@ Avoid:
 
 The closest language family is:
 
-- console
+- studio
 - build
 - deploy
 - operations
@@ -53,7 +53,7 @@ The closest language family is:
 | Layer | Audience | Purpose | Examples |
 | --- | --- | --- | --- |
 | Customer-facing product language | end users, admins, operators | navigation, UI copy, onboarding | `Apps`, `Build`, `Deploy`, `Usage`, `Operations`, `Integrations`, `Admin` |
-| Restrained branded language | product marketing, onboarding, shell descriptors | light thematic cohesion | `Mozaiks Console` |
+| Restrained branded language | product marketing, onboarding, shell descriptors | light thematic cohesion | `Mozaiks Studio` |
 | Internal engineering language | runtime contributors, framework engineers | implementation boundaries and repo ownership | `factory_app`, `Studio host`, `workflow_sequence` |
 | Runtime and operational language | runtime engineers, observability surfaces, internal docs | transport, orchestration, persistence, telemetry | `control_plane`, `artifact_version`, `revision_context`, `journey` |
 
@@ -64,10 +64,10 @@ These are the preferred visible terms.
 | Term | Use For | Notes |
 | --- | --- | --- |
 | `Mozaiks` | the overall product | product name |
-| `Mozaiks Console` | shell descriptor in onboarding/help/marketing | not required as a nav item |
+| `Mozaiks Studio` | browser product for creating and managing apps | canonical visible product term |
 | `Workspace` | the tenant/account context | not the name of the app builder |
 | `Apps` | the multi-app directory and default landing area | canonical workspace landing area |
-| `App Console` | the single-app management context | prose and IA term, not necessarily a literal heading on every screen |
+| `App Studio` | the single-app management context | prose and IA term, not necessarily a literal heading on every screen |
 | `Build` | app creation and revision surface | canonical creation and revision surface |
 | `Deploy` | hosting, rollout, environments, release state | separate from build |
 | `Usage` | spend, tokens, API consumption, aggregate metrics | use for measured consumption |
@@ -78,7 +78,7 @@ These are the preferred visible terms.
 | `Admin` | privileged management surface | user-facing name for the admin shell |
 
 Host apps may add commercial terms such as billing when they expose a
-host-owned capability. The OSS factory console does not reserve or hardcode a
+host-owned capability. The OSS factory Studio does not reserve or hardcode a
 billing route.
 
 ## Restrained Branded Language
@@ -87,7 +87,7 @@ Only a small amount of thematic language should remain visible.
 
 Allowed:
 
-- `Mozaiks Console`
+- `Mozaiks Studio`
 - launch-oriented or operational subtitles in empty states and onboarding
 - subtle language around coordination, orchestration, and readiness
 
@@ -101,8 +101,8 @@ Not recommended as primary navigation:
 - `Mission`
 - `Command` as a nav label
 
-`Console` is the preferred branded structural term because it feels operational
-and premium without obscuring the product function.
+`Studio` is the preferred branded structural term because it names the browser
+product without introducing a second concept beside the Studio host.
 
 ## Internal Engineering Vocabulary
 
@@ -112,7 +112,6 @@ implementation contracts.
 | Internal Term | Meaning |
 | --- | --- |
 | `factory_app` | first-party workspace that co-locates the app bundle, builder workflows, and first-party harness pack |
-| `Studio` | host/composition term for the management interface layer |
 | `Studio host` | `mozaiksai.hosts.studio` runtime composition |
 | `Control Plane` | runtime orchestration and refinement routing subsystem |
 | `workflow_sequence` | internal workflow-sequencing contract |
@@ -143,7 +142,6 @@ product term. Example: expose `Build review` or `Needs revision`, not
 Do not use these as visible product concepts:
 
 - `Hub`
-- `Studio` as a top-level product area
 - `Factory App`
 - `Control Plane`
 - `workflow_sequence`
@@ -152,7 +150,6 @@ Do not use these as visible product concepts:
 Preferred replacements:
 
 - `Hub` -> `Apps`
-- `Studio` -> `Build`
 - `Adapters` -> `Integrations`
 - `Activity` -> `Operations` when the scope is health, incidents, runtime state, or deployment state
 
@@ -163,7 +160,7 @@ to when there is any chance of ambiguity.
 
 Examples:
 
-- "Studio is an internal host/composition term."
+- "Studio is the browser product; Studio host is the runtime composition term."
 - "Hosting is the customer-facing surface for managed rollout posture."
 - "Control Plane is runtime infrastructure, not a customer-facing dashboard."
 

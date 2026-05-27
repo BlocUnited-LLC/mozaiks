@@ -9,7 +9,7 @@ Coverage:
 
  CarryForwardReportPanel (full panel — AppOverviewPage, 13 tests):
   1.  CarryForwardReportPanel.jsx file exists
-  2.  Panel and StatusPill imported from ConsoleShared
+  2.  Panel and StatusPill imported from StudioShared
   3.  No hardcoded hex/rgb/hsl colors
   4.  No local primitive clones
   5.  AppOverviewPage imports CarryForwardReportPanel
@@ -24,7 +24,7 @@ Coverage:
 
  CarryForwardReportSummary (compact — AppBuildHistoryPage, 10 tests):
  14.  CarryForwardReportSummary.jsx file exists
- 15.  StatusPill imported from ConsoleShared (no Panel — compact)
+ 15.  StatusPill imported from StudioShared (no Panel — compact)
  16.  No hardcoded hex/rgb colors
  17.  No local primitive clones
  18.  Returns null when report absent
@@ -39,11 +39,11 @@ Coverage:
  25.  Imports CarryForwardReportSummary
  26.  Conditionally mounts CarryForwardReportSummary when cfReport present
  27.  Shows "No carry-forward" notice when report absent
- 28.  Imports from ConsoleShared
+ 28.  Imports from StudioShared
  29.  No hardcoded colors
  30.  Uses buildHistory from snapshot
  31.  AppOverviewPage carry-forward behavior still intact (regression)
- 32.  ConsolePage.jsx routes /activity to AppBuildHistoryPage
+ 32.  StudioPage.jsx routes /activity to AppBuildHistoryPage
  33.  admin/index.js registers AppBuildHistoryPage
 """
 from __future__ import annotations
@@ -57,7 +57,7 @@ _PANEL_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "CarryForw
 _SUMMARY_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "CarryForwardReportSummary.jsx"
 _HISTORY_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "AppBuildHistoryPage.jsx"
 _OVERVIEW_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "AppOverviewPage.jsx"
-_CONSOLE_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "ConsolePage.jsx"
+_CONSOLE_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "StudioPage.jsx"
 _INDEX_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "index.js"
 
 
@@ -97,9 +97,9 @@ def test_carry_forward_report_panel_file_exists():
 
 def test_panel_imports_from_console_shared():
     src = _panel_src()
-    # Must import from the canonical ConsoleShared adapter, not re-declare primitives
-    assert "ConsoleShared" in src, (
-        "CarryForwardReportPanel must import from ConsoleShared.jsx (shared primitives)"
+    # Must import from the canonical StudioShared adapter, not re-declare primitives
+    assert "StudioShared" in src, (
+        "CarryForwardReportPanel must import from StudioShared.jsx (shared primitives)"
     )
     # Panel and StatusPill are the expected imports for this component
     assert "Panel" in src
@@ -302,13 +302,13 @@ def test_carry_forward_report_summary_file_exists():
 
 
 # ---------------------------------------------------------------------------
-# 15. StatusPill from ConsoleShared — no Panel (compact, not a full panel)
+# 15. StatusPill from StudioShared — no Panel (compact, not a full panel)
 # ---------------------------------------------------------------------------
 
 def test_summary_imports_status_pill_from_console_shared():
     src = _summary_src()
-    assert "ConsoleShared" in src, (
-        "CarryForwardReportSummary must import from ConsoleShared.jsx"
+    assert "StudioShared" in src, (
+        "CarryForwardReportSummary must import from StudioShared.jsx"
     )
     assert "StatusPill" in src
 
@@ -320,7 +320,7 @@ def test_summary_does_not_wrap_in_panel():
         "CarryForwardReportSummary is a compact component and should not use the Panel wrapper"
     )
     # Verify it's only StatusPill imported, not Panel
-    import_match = re.search(r"from.*ConsoleShared.*import\s*\{([^}]+)\}", src)
+    import_match = re.search(r"from.*StudioShared.*import\s*\{([^}]+)\}", src)
     if import_match:
         imports = import_match.group(1)
         assert "Panel" not in imports, (
@@ -509,13 +509,13 @@ def test_history_page_shows_no_report_notice():
 
 
 # ---------------------------------------------------------------------------
-# 28. Imports from ConsoleShared
+# 28. Imports from StudioShared
 # ---------------------------------------------------------------------------
 
 def test_history_page_imports_from_console_shared():
     src = _history_src()
-    assert "ConsoleShared" in src, (
-        "AppBuildHistoryPage must import from ConsoleShared.jsx (shared primitives)"
+    assert "StudioShared" in src, (
+        "AppBuildHistoryPage must import from StudioShared.jsx (shared primitives)"
     )
     assert "Panel" in src
     assert "StatusPill" in src
@@ -558,16 +558,16 @@ def test_overview_carry_forward_panel_still_mounted():
 
 
 # ---------------------------------------------------------------------------
-# 32. ConsolePage routes /activity to AppBuildHistoryPage
+# 32. StudioPage routes /activity to AppBuildHistoryPage
 # ---------------------------------------------------------------------------
 
 def test_console_page_routes_activity_to_build_history():
     src = _CONSOLE_PATH.read_text(encoding="utf-8")
     assert "AppBuildHistoryPage" in src, (
-        "ConsolePage must import and route to AppBuildHistoryPage"
+        "StudioPage must import and route to AppBuildHistoryPage"
     )
     assert "activity" in src, (
-        "ConsolePage must match /activity path"
+        "StudioPage must match /activity path"
     )
 
 

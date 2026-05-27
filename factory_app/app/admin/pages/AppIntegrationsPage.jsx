@@ -6,14 +6,14 @@ import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ActionButton,
   API_BASE,
-  ConsoleInlineEmptyState,
+  StudioInlineEmptyState,
   StatusPill,
   Panel,
   SurfaceCard,
-  ConsoleSlideOver,
-  ConsoleLoadingState,
-  ConsoleErrorState,
-} from '../../ui/components/ConsoleShared.jsx'
+  StudioSlideOver,
+  StudioLoadingState,
+  StudioErrorState,
+} from '../../ui/components/StudioShared.jsx'
 
 
 const EMPTY_FORM_STATE = {
@@ -297,7 +297,7 @@ function AdapterEditorOverlay({
   )
 
   return (
-    <ConsoleSlideOver open={open} title={title} description={description} onClose={onClose} footer={footer}>
+    <StudioSlideOver open={open} title={title} description={description} onClose={onClose} footer={footer}>
       <div className="space-y-5">
         <div>
           <label className="block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -364,7 +364,7 @@ function AdapterEditorOverlay({
           />
         </div>
       </div>
-    </ConsoleSlideOver>
+    </StudioSlideOver>
   )
 }
 
@@ -506,8 +506,8 @@ export default function AppIntegrationsPage() {
     }
   }
 
-  if (loading) return <ConsoleLoadingState label="Loading Integrations…" />
-  if (error || !data) return <ConsoleErrorState title="Integrations Unavailable" message={error || 'No integration data returned.'} />
+  if (loading) return <StudioLoadingState label="Loading Integrations…" />
+  if (error || !data) return <StudioErrorState title="Integrations Unavailable" message={error || 'No integration data returned.'} />
 
   const vaultAdapter = data?.runtime_integrations?.connector_vault || data?.integrations?.connector_vault || null
   const connectors = Array.isArray(data.app_connectors) ? data.app_connectors : []
@@ -650,7 +650,7 @@ export default function AppIntegrationsPage() {
             subtitle="Track which services are registered for this app and whether their reusable credentials are already stored."
           >
             {connectors.length === 0 ? (
-              <ConsoleInlineEmptyState
+              <StudioInlineEmptyState
                 title="No integrations registered yet"
                 description="Add an email provider, analytics service, CRM, storage provider, or another external service when this app depends on it."
               />
@@ -687,7 +687,7 @@ export default function AppIntegrationsPage() {
                   </div>
                 </SurfaceCard>
               )) : (
-                <ConsoleInlineEmptyState
+                <StudioInlineEmptyState
                   title="No workflow-linked integrations"
                   description="Connector usage will appear here once workflows or agents declare an external service dependency."
                 />

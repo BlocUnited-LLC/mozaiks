@@ -104,12 +104,12 @@ def test_build_shell_config_preserves_requiresrole_route_metadata(
         tmp_path,
         route_manifest_pages=[
             {
-                "id": "workspace-console",
+                "id": "workspace-studio",
                 "label": "Apps",
                 "path": "/apps",
-                "component": "ConsolePage",
+                "component": "StudioPage",
                 "order": 1,
-                "navigation": {"scope": "local", "group": "workspace-console", "icon": "apps", "order": 0},
+                "navigation": {"scope": "local", "group": "workspace-studio", "icon": "apps", "order": 0},
                 "meta": {"requiresAuth": True, "requiresRole": "admin"},
             }
         ],

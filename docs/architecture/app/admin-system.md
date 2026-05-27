@@ -1,10 +1,10 @@
 # Admin System
 
 Mozaiks Studio does not expose a separate customer-facing `/admin` page in the
-first-party console. The Admin Portal entry for Studio routes to `/apps`, which
+first-party Studio. The Admin Portal entry for Studio routes to `/apps`, which
 is the workspace app-management surface.
 
-The production app console keeps these pages visible instead:
+App Studio keeps these pages visible instead:
 
 ```text
 /apps/:appId/overview
@@ -17,13 +17,13 @@ The production app console keeps these pages visible instead:
 Framework-owned admin composition remains internal and host-owned. Build,
 Health, Usage, and Integrations are product surfaces; they are not admin
 sections. Hosted deployments may provide billing or hosting surfaces through
-their own workspace routes or capability packs; the OSS factory console does
+their own workspace routes or capability packs; the OSS factory Studio does
 not hardcode those hosted product routes.
 
 Terminology note:
 
 - use `Health` as the visible product section name for runtime posture,
-  workflow reliability, and app health in the production console
+  workflow reliability, and app health in Studio
 - keep `operations` as an internal admin taxonomy when framework-owned admin
   panels need a bounded section for incidents, logs, or runtime state
 
@@ -52,7 +52,7 @@ The admin system has four distinct layers. Keep them separate:
 4. An optional connected app backend may contribute app-business panels through
   `GET {app_backend_url}/api/admin/config`.
 
-AdminPortal should resolve section rendering from those contracts. Console
+AdminPortal should resolve section rendering from those contracts. Studio
 workspace/app navigation is a separate `WorkspaceLayout` concern and must not
 be mutated by module admin panels.
 
@@ -66,7 +66,7 @@ auth role model.
 Runtime/operator panels are framework-owned defaults surfaced by same-host
 `/api/admin/*` endpoints. Feature panels and app-business panels use their own
 contracts described above. The same-host `/api/admin/*` endpoints are internal
-framework APIs; Console pages may consume their data, but customer-facing copy
+framework APIs; Studio pages may consume their data, but customer-facing copy
 should not expose "Admin" as a product section.
 
 That means:
@@ -88,7 +88,7 @@ Example:
 
 Generated app hosts may still mount framework-owned admin panels through
 `AdminPortal`, but generators must not create a separate app-admin page, route
-family, page schema, or admin React shell for the Studio console.
+family, page schema, or admin React shell for Studio.
 
 ## Built-In Section Registry
 
@@ -115,8 +115,8 @@ Implementation rule:
 - runtime/platform code owns the canonical section metadata
 - frontend admin rendering must derive section routing from that canonical
   metadata or from a payload resolved from it
-- Console navigation stays deterministic and product-scoped; admin panels do
-  not add, rename, or reorder Console nav items
+- Studio navigation stays deterministic and product-scoped; admin panels do
+  not add, rename, or reorder Studio nav items
 
 First-party Studio admin registry entries must declare `surfaces: [studio]` so
 they do not leak into the generic platform shell. Generated app admin registries

@@ -84,7 +84,7 @@ def test_app_shell_uses_single_app_ui_registration_barrel() -> None:
 
 def test_app_overview_page_fetches_summary_endpoint() -> None:
     source = _read("factory_app/app/admin/pages/AppOverviewPage.jsx")
-    hook_source = _read("factory_app/app/admin/pages/useAppConsoleData.js")
+    hook_source = _read("factory_app/app/admin/pages/useAppStudioData.js")
     assert "/api/studio/overview" in hook_source
     assert "App Overview" in source
     assert "next_step" in source

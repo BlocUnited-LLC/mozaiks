@@ -68,7 +68,7 @@ def _build_tasks() -> list[dict]:
 def _base_plan() -> dict:
     return {
         "agent_message": "Planned the app.",
-        "app_kind": "operations-console",
+        "app_kind": "operations-studio",
         "pages": [
             {
                 "name": "Notifications",

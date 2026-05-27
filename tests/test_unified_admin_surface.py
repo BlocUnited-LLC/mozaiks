@@ -61,10 +61,10 @@ def test_platform_shell_registers_admin_section_routes() -> None:
     for path in ["/apps/:appId/overview", "/apps/:appId/users", "/apps/:appId/usage"]:
         assert path in registry_source
 
-    # The first-party console does not expose a standalone /admin page.
+    # The first-party Studio does not expose a standalone /admin page.
     assert "path: /admin" not in registry_source
     assert "surfaces: [studio]" in registry_source
-    # /apps/:appId/admin is not a valid path — overview uses the app console route.
+    # /apps/:appId/admin is not a valid path — overview uses the app Studio route.
     assert "/apps/:appId/admin" not in registry_source
 
     assert '"component": "AdminPortal"' in platform_source

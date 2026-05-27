@@ -3,24 +3,24 @@ import { useParams } from 'react-router-dom'
 
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
-  ConsoleErrorState,
-  ConsoleInlineEmptyState,
-  ConsoleLoadingState,
+  StudioErrorState,
+  StudioInlineEmptyState,
+  StudioLoadingState,
   Panel,
   StatusPill,
-} from '../../ui/components/ConsoleShared.jsx'
-import AppConsoleHero, { formatCompactNumber, formatDateTimeLabel } from './AppConsoleChrome.jsx'
-import { getAppConsoleSnapshot, sumBy } from './appConsoleDataHelpers.js'
-import { buildHealthState, formatPercentValue } from './consoleHealthModel.js'
-import { useAppConsoleData } from './useAppConsoleData.js'
+} from '../../ui/components/StudioShared.jsx'
+import AppStudioHero, { formatCompactNumber, formatDateTimeLabel } from './AppStudioChrome.jsx'
+import { getAppStudioSnapshot, sumBy } from './appStudioDataHelpers.js'
+import { buildHealthState, formatPercentValue } from './studioHealthModel.js'
+import { useAppStudioData } from './useAppStudioData.js'
 
 export default function AppHealthPage() {
   const { appId = 'workspace-app' } = useParams()
-  const { data, loading, error, dataMode } = useAppConsoleData(appId)
-  const snapshot = useMemo(() => getAppConsoleSnapshot(appId, data, dataMode), [appId, data, dataMode])
+  const { data, loading, error, dataMode } = useAppStudioData(appId)
+  const snapshot = useMemo(() => getAppStudioSnapshot(appId, data, dataMode), [appId, data, dataMode])
 
-  if (loading) return <ConsoleLoadingState label="Loading app health…" />
-  if (error || !data?.summary) return <ConsoleErrorState title="Health Unavailable" message={error || 'No health summary returned.'} />
+  if (loading) return <StudioLoadingState label="Loading app health…" />
+  if (error || !data?.summary) return <StudioErrorState title="Health Unavailable" message={error || 'No health summary returned.'} />
 
   const latestArtifact = snapshot.buildHistory[0] || null
   const averageLatency = snapshot.runs.length > 0
@@ -50,7 +50,7 @@ export default function AppHealthPage() {
   return (
     <WorkspaceLayout>
       <div className="space-y-6">
-        <AppConsoleHero
+        <AppStudioHero
           appId={appId}
           summary={snapshot.summary}
           dataMode={dataMode}
@@ -137,7 +137,7 @@ export default function AppHealthPage() {
                 ))}
               </div>
             ) : (
-              <ConsoleInlineEmptyState
+              <StudioInlineEmptyState
                 title="No integrations connected yet"
                 description="Integration health will appear here once this app starts depending on external services."
               />

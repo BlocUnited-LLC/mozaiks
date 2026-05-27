@@ -2,7 +2,7 @@
 
 Mozaiks has a tag-driven release workflow.
 
-Keep versions pre-`1.0.0` until the repo contracts, CLI UX, and Console-first
+Keep versions pre-`1.0.0` until the repo contracts, CLI UX, and Studio-first
 builder flow settle. A `0.x` release is the honest signal to users that
 breaking changes can still happen.
 
@@ -52,13 +52,10 @@ even if the build and GitHub release steps succeed.
 
 ## Documentation Impact
 
-Public install docs should present the pipx-managed CLI path. Use
-`python -m pipx install mozaiks` in first-run instructions because
-`python -m pipx ensurepath` may not make the `pipx` command visible in the
-current PowerShell session. Keep opening a new PowerShell as troubleshooting
-for `mozaiks` not being recognized, not as a mandatory step. Keep `pip install
-mozaiks` inside virtualenv/source-checkout contexts and keep the repo checkout
-path as the framework/developer mode.
+Public install docs should present `pip install mozaiks` followed by
+`python -m mozaiks ...` so PATH mechanics stay out of the main onboarding flow.
+The `mozaiks` command can be mentioned as an optional shortcut only.
+Keep source-checkout setup separate as the framework/developer mode.
 
 ## Notes
 

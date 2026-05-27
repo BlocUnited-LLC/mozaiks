@@ -88,7 +88,7 @@ nav:
   - Get Started:
       - Getting Started: getting-started.md
   - Guides:
-      - Use the Console: guides/console/01-overview.md
+      - Use Studio: guides/studio/01-overview.md
       - Add Workflows: guides/adding-workflows/01-overview.md
       - Add a Module: guides/adding-modules/01-overview.md
       - Add a Page: guides/adding-pages/01-overview.md
@@ -163,7 +163,7 @@ nav:
           - Shared Workflow Infrastructure: architecture/builder/shared-workflow-infrastructure.md
           - Builder Execution Model: architecture/builder/builder-execution-model.md
           - End-to-End Build Lifecycle: architecture/builder/end-to-end-build-lifecycle.md
-          - Console Product Model: architecture/builder/console-product-model.md
+          - Studio Product Model: architecture/builder/studio-product-model.md
           - Database Intent and Revision: architecture/builder/database-intent-and-revision-contract.md
           - AppGenerator Output Assembly: architecture/builder/appgenerator-output-assembly-contract.md
           - AgentGenerator Output Assembly: architecture/builder/agentgenerator-output-assembly-contract.md

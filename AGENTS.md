@@ -4,17 +4,16 @@ Repository-level guidance for coding agents working in this repo.
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md) and [CLAUDE.md](CLAUDE.md) first.
 
-This repo uses layered FastAPI hosts as the canonical server composition:
+This repo uses layered FastAPI hosts as the canonical OSS server composition:
 - `mozaiksai.hosts.runtime`
 - `mozaiksai.hosts.platform`
 - `mozaiksai.hosts.studio`
-- `mozaiksai.hosts.mozaiks`
 
 `mozaiksai.hosts.runtime` is the execution substrate. `mozaiksai.hosts.platform`
 is the headless app host. `mozaiksai.hosts.studio` is the Studio management
 interface host — the shared management layer for both local and hosted
-deployments. `mozaiksai.hosts.mozaiks` is the hosted Mozaiks product host —
-extends Studio, does not replace it.
+deployments. Hosted product repos compose their own app-local hosts on top of
+Studio; this OSS repo does not own a hosted-product FastAPI host.
 
 Start via the CLI:
 
@@ -103,7 +102,6 @@ Canonical ownership:
 | `mozaiksai.hosts.runtime` / `mozaiksai` | AI execution substrate, sessions, transport, persistence, workflow execution |
 | `mozaiksai.hosts.platform` | Headless app host: modules, pages, shell config, admin, actions, routing |
 | `mozaiksai.hosts.studio` | Studio management interface host — shared management layer (local and hosted) |
-| `mozaiksai.hosts.mozaiks` | Hosted Mozaiks product host — extends Studio with hosted-only capabilities |
 | `mozaiksai.hosts.bootstrap` | Repo-local path defaults (CWD-relative; no-ops when not in repo checkout) |
 | `mozaiks_cli/` | CLI / developer interface — parallel to Studio, not a subset of it |
 | `factory_app/workflows/` | Factory layer — shared builder/generator workflows (AppGenerator, AgentGenerator, DesignDocs, ValueEngine) |

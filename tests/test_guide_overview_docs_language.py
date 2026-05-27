@@ -39,7 +39,6 @@ def test_add_pages_guide_uses_plain_route_language() -> None:
 def test_branding_guide_avoids_internal_studio_framing() -> None:
     doc = _read("docs/guides/custom-brand-integration/01-overview.md")
 
-    assert "first-party Console bundle" in doc
     assert "## What Branding Does Not Control" in doc
     assert "admin ownership and behavior" in doc
     assert "first-party Studio bundle" not in doc

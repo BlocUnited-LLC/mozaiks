@@ -63,24 +63,16 @@ needed. Routes appear at `/api/modules/{name}/{action_id}`.
 
 ## Runtime Data Integrity
 
-Modules own runtime facts. UI primitives should only render values returned by
-module actions, so module services must not manufacture fake product data.
+!!! warning "Never return fake data from module actions"
+    Modules own runtime facts. UI primitives render whatever the module returns —
+    there is no safety net that catches invented data.
 
-For generated and hand-authored modules:
-
-- do not return sample, demo, mock, fake, placeholder, or random records from
-  runtime actions
-- do not hardcode KPI counts, balances, totals, percentages, or status trends
-- do not leave `TODO`, `NotImplemented`, or "in production" branches in module
-  runtime paths
-- compute `*_summary`, `*_stats`, `*_metrics`, and `get_*_count` values from
-  `repo.py` / MongoDB queries
-- return honest empty values such as `0`, `[]`, or `null` when no data exists
-- return trend/change fields only when the module queries a real historical
-  comparison or metrics snapshot; otherwise return `null` or omit the field
-
-This keeps pages and admin panels reusable: `SummaryStrip` and `Metric` render
-module output, while modules remain responsible for truth and provenance.
+    - Do not return sample, demo, mock, fake, placeholder, or random records
+    - Do not hardcode KPI counts, balances, totals, percentages, or status trends
+    - Do not leave `TODO`, `NotImplemented`, or "in production" branches in runtime paths
+    - Compute `*_summary`, `*_stats`, `*_metrics`, and `get_*_count` from `repo.py` / MongoDB queries
+    - Return honest empty values such as `0`, `[]`, or `null` when no data exists
+    - Return trend/change fields only when a real historical comparison is queried; otherwise return `null` or omit the field
 
 ## Minimum `module.yaml`
 
@@ -270,7 +262,7 @@ Valid `section` values: `overview`, `users`, `billing`, `usage`, `activity`,
 
 The admin runtime auto-discovers `contracts/admin.yaml` at startup — no registration
 step needed. Panels appear inside the framework-owned admin surface under the
-declared section. They are not Console app portfolio pages.
+declared section. They are not Studio app portfolio pages.
 
 ## Read Next
 

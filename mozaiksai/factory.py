@@ -7,7 +7,6 @@ tests. In the canonical architecture, the preferred host entrypoints are in
 - ``mozaiksai.hosts.runtime``   — runtime substrate host
 - ``mozaiksai.hosts.platform``  — headless app host
 - ``mozaiksai.hosts.studio``    — local/private Studio management host
-- ``mozaiksai.hosts.mozaiks``   — hosted product host
 
 Use ``create_mozaiks_app()`` when you explicitly want only the runtime substrate
 as a mountable FastAPI sub-application.
@@ -64,7 +63,7 @@ def create_mozaiks_app(
 
     Note:
         This is a convenience factory for the runtime layer only. For the
-        canonical four-host entrypoints, import from ``mozaiksai.hosts`` or
+        canonical host entrypoints, import from ``mozaiksai.hosts`` or
         use ``mozaiks serve`` from the CLI.
     """
     # Resolve paths

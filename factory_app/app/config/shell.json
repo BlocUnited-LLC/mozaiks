@@ -20,7 +20,7 @@
         "variants": [
           {
             "when": { "surface": "workflow_session" },
-            "label": "Open Console",
+            "label": "Open Studio",
             "icon": "settings.svg",
             "pathTemplate": "/apps/{appId}",
             "fallbackPath": "/apps",

@@ -3,26 +3,26 @@ import { useParams } from 'react-router-dom'
 
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
-  ConsoleErrorState,
-  ConsoleLoadingState,
+  StudioErrorState,
+  StudioLoadingState,
   Panel,
   StatusPill,
-} from '../../ui/components/ConsoleShared.jsx'
+} from '../../ui/components/StudioShared.jsx'
 import CarryForwardReportPanel from './CarryForwardReportPanel.jsx'
-import AppConsoleHero, {
+import AppStudioHero, {
   formatCompactNumber,
   formatCurrencyValue,
   formatDateTimeLabel,
-} from './AppConsoleChrome.jsx'
-import { getAppConsoleSnapshot } from './appConsoleDataHelpers.js'
+} from './AppStudioChrome.jsx'
+import { getAppStudioSnapshot } from './appStudioDataHelpers.js'
 import {
   getAppJourneyLabel,
   getApprovalStateLabel,
   getPlanStateLabel,
   getRuntimeHealthLabel,
   getRuntimeReadinessLabel,
-} from './appConsoleModel.js'
-import { useAppConsoleData } from './useAppConsoleData.js'
+} from './appStudioModel.js'
+import { useAppStudioData } from './useAppStudioData.js'
 
 
 function getWorkflowNames(snapshot) {
@@ -40,11 +40,11 @@ function validationTone(value) {
 
 export default function AppOverviewPage() {
   const { appId = 'workspace-app' } = useParams()
-  const { data, loading, error, dataMode } = useAppConsoleData(appId)
-  const snapshot = useMemo(() => getAppConsoleSnapshot(appId, data, dataMode), [appId, data, dataMode])
+  const { data, loading, error, dataMode } = useAppStudioData(appId)
+  const snapshot = useMemo(() => getAppStudioSnapshot(appId, data, dataMode), [appId, data, dataMode])
 
-  if (loading) return <ConsoleLoadingState label="Loading App Overview…" />
-  if (error || !data?.summary) return <ConsoleErrorState title="App Overview Unavailable" message={error || 'No summary returned.'} />
+  if (loading) return <StudioLoadingState label="Loading App Overview…" />
+  if (error || !data?.summary) return <StudioErrorState title="App Overview Unavailable" message={error || 'No summary returned.'} />
 
   const build = data.buildState?.build || {}
   const latestArtifact = snapshot.buildHistory[0] || null
@@ -82,7 +82,7 @@ export default function AppOverviewPage() {
   return (
     <WorkspaceLayout>
       <div className="space-y-6">
-        <AppConsoleHero
+        <AppStudioHero
           appId={appId}
           summary={data.summary}
           dataMode={dataMode}
@@ -136,7 +136,7 @@ export default function AppOverviewPage() {
               {workflowNames.length > 0 ? workflowNames.map((workflowName) => (
                 <div key={workflowName} className="rounded-2xl border border-border/42 bg-card/30 px-4 py-4">
                   <div className="font-semibold text-foreground">{workflowName}</div>
-                  <div className="mt-1 text-sm text-muted-foreground">Available to the current app console workflow set.</div>
+                  <div className="mt-1 text-sm text-muted-foreground">Available to the current app Studio workflow set.</div>
                 </div>
               )) : (
                 <div className="rounded-2xl border border-dashed border-border/42 bg-background/24 px-4 py-6 text-sm text-muted-foreground">

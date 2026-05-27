@@ -8,7 +8,6 @@ import yaml
 
 from tests.import_utils import import_module_directly
 
-
 ui_surface_taxonomy = import_module_directly("mozaiksai.core.workflow.ui_surface_taxonomy")
 ui_primitives = import_module_directly("mozaiksai.core.workflow.ui_primitives")
 
@@ -103,10 +102,10 @@ def test_frontend_surface_docs_reference_taxonomy() -> None:
     assert "`transition`" in doc
 
 
-def test_global_primitives_own_reusable_console_patterns() -> None:
+def test_global_primitives_own_reusable_studio_patterns() -> None:
     registry = _read("chat-ui/src/ui/page-renderer/PrimitiveRegistry.js")
     schemas = _read("chat-ui/src/ui/page-renderer/primitive_schemas.json")
-    console_shared = _read("factory_app/app/ui/components/ConsoleShared.jsx")
+    studio_shared = _read("factory_app/app/ui/components/StudioShared.jsx")
 
     for primitive_name in (
         "StatusPill",
@@ -121,12 +120,12 @@ def test_global_primitives_own_reusable_console_patterns() -> None:
         assert primitive_name in registry
         assert f'"{primitive_name}"' in schemas
 
-    assert "from '@mozaiks/chat-ui/ui'" in console_shared
-    assert "export function StatusPill" not in console_shared
-    assert "export function SurfaceCard" not in console_shared
-    assert "export function Metric" not in console_shared
-    assert not (_workspace() / "factory_app/app/admin/pages/ConsoleShared.jsx").exists()
-    assert not (_workspace() / "factory_app/app/admin/pages/ConsolePrimitives.jsx").exists()
+    assert "from '@mozaiks/chat-ui/ui'" in studio_shared
+    assert "export function StatusPill" not in studio_shared
+    assert "export function SurfaceCard" not in studio_shared
+    assert "export function Metric" not in studio_shared
+    assert not (_workspace() / "factory_app/app/admin/pages/StudioShared.jsx").exists()
+    assert not (_workspace() / "factory_app/app/admin/pages/StudioPrimitives.jsx").exists()
 
 
 def test_component_primitive_guidance_uses_public_ui_import() -> None:

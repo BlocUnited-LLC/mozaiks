@@ -60,8 +60,8 @@ const deriveSurface = ({ pathname, searchParams, route, shellMode }) => {
   if (pathname === '/chat' || pathname.startsWith('/chat/') || pathname === '/app' || pathname.startsWith('/app/')) {
     return 'workflow_session';
   }
-  if (group === 'app-console' || (pathname.startsWith('/apps/') && pathname !== '/apps/new')) return 'app_console';
-  if (group === 'workspace-console' || pathname === '/apps') return 'console';
+  if (group === 'app-studio' || (pathname.startsWith('/apps/') && pathname !== '/apps/new')) return 'app_studio';
+  if (group === 'workspace-studio' || pathname === '/apps') return 'studio';
   if (route?.transition || route?.sequence) return 'transition';
   if (shellMode === 'conversation') return 'workflow_session';
   if (shellMode === 'public') return 'public';

@@ -1305,7 +1305,7 @@ def _normalize_shell_page_entry(entry: dict, *, order_fallback: int) -> Optional
     if isinstance(entry.get("navigation"), dict):
         nav = entry["navigation"]
         page["meta"]["navigation"] = nav
-        # If the page declares a navigation group (workspace-console, app-console,
+        # If the page declares a navigation group (workspace-studio, app-studio,
         # etc.), it must participate in shell navigation — mark appShell=True so
         # WorkspaceLayout and other layout-aware components can find it.
         if isinstance(nav.get("group"), str) and nav["group"].strip():
@@ -3267,7 +3267,7 @@ async def list_notifications(
     Query params:
         status: "all" | "unread" | "read"  (default: "all")
         limit:  1–200  (default: 50)
-        app_id: explicit app scope override for operator console use
+        app_id: explicit app scope override for Studio use
     """
     bounded_limit = max(1, min(int(limit), 200))
     query: Dict[str, Any] = {}

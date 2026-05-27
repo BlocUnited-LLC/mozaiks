@@ -1,7 +1,7 @@
 /**
  * factory_app/app/admin — admin portal UI registration.
  *
- * All console and admin portal pages are co-located here, separate from
+ * All Studio and admin portal pages are co-located here, separate from
  * user-facing app pages in app/ui/. The admin portal is platform-owned
  * (rendered through AdminPortal / AdminWorkspaceLayout) and declared via
  * admin/admin_registry.yaml. This barrel registers the custom page
@@ -14,7 +14,7 @@
 import { lazy } from 'react'
 
 const AdminPage          = lazy(() => import('@mozaiks/chat-ui/pages/AdminPage.jsx'))
-const ConsolePage        = lazy(() => import('./pages/ConsolePage.jsx'))
+const StudioPage        = lazy(() => import('./pages/StudioPage.jsx'))
 const AppsPage           = lazy(() => import('./pages/AppsPage.jsx'))
 const WorkspaceUsagePage = lazy(() => import('./pages/WorkspaceUsagePage.jsx'))
 const WorkspaceHealthPage  = lazy(() => import('./pages/WorkspaceHealthPage.jsx'))
@@ -29,15 +29,15 @@ export function registerAdminComponents(registerComponent) {
   if (typeof registerComponent !== 'function') return
 
   registerComponent('AdminPortal', AdminPage, {
-    description: 'Unified admin shell — app, module, and runtime/operator panels. Platform-management surface registered by the workspace console.',
+    description: 'Unified admin shell — app, module, and runtime/operator panels. Platform-management surface registered by Studio.',
   })
 
-  registerComponent('ConsolePage', ConsolePage, {
-    description: 'Workspace console shell — internal router for the first-party app directory and app-console surfaces.',
+  registerComponent('StudioPage', StudioPage, {
+    description: 'Studio shell — internal router for the first-party app directory and app management surfaces.',
   })
 
   registerComponent('AppsPage', AppsPage, {
-    description: 'Apps directory — shows app records for the current user and routes into the app console per app.',
+    description: 'Apps directory — shows app records for the current user and routes into app Studio per app.',
   })
 
   registerComponent('WorkspaceUsagePage', WorkspaceUsagePage, {

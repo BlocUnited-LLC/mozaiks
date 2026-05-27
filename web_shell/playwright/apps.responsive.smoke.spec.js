@@ -38,8 +38,8 @@ const appsPayload = {
     },
     {
       build_registry_id: 'demo_partner_delivery',
-      app_id: 'partner-delivery-console',
-      name: 'Partner Delivery Console',
+      app_id: 'partner-delivery-studio',
+      name: 'Partner Delivery Studio',
       description: 'Partner rollout, managed deployment, and release checks.',
       status: 'deploying',
       created_at: '2025-01-19T08:00:00Z',
@@ -47,8 +47,8 @@ const appsPayload = {
     },
     {
       build_registry_id: 'demo_member_growth',
-      app_id: 'member-growth-console',
-      name: 'Member Growth Console',
+      app_id: 'member-growth-studio',
+      name: 'Member Growth Studio',
       description: 'Live growth insights, campaign prompts, and operator alerts.',
       status: 'active',
       created_at: '2025-01-10T13:10:00Z',
@@ -62,7 +62,7 @@ function getWorkspaceApp(appId = APP_ID) {
   return appsPayload.apps.find((app) => app.app_id === appId) ?? appsPayload.apps[0];
 }
 
-function buildAppConsolePayload(appId = APP_ID) {
+function buildAppStudioPayload(appId = APP_ID) {
   const app = getWorkspaceApp(appId);
 
   return {
@@ -296,7 +296,7 @@ function buildAppConsolePayload(appId = APP_ID) {
 
 function buildWorkspaceRunsPayload() {
   const runs = appsPayload.apps.flatMap((app) => {
-    const payload = buildAppConsolePayload(app.app_id);
+    const payload = buildAppStudioPayload(app.app_id);
     return (payload.runs?.runs || []).map((run) => ({
       ...run,
       app_id: app.app_id,
@@ -310,7 +310,7 @@ function buildWorkspaceRunsPayload() {
   };
 }
 
-async function mockConsoleApis(page) {
+async function mockStudioApis(page) {
   await page.route('**/api/shell-config', async (route) => {
     await route.fulfill({
       status: 200,
@@ -361,7 +361,7 @@ async function mockConsoleApis(page) {
 
   await page.route('**/api/studio/overview?**', async (route) => {
     const url = new URL(route.request().url());
-    const payload = buildAppConsolePayload(url.searchParams.get('app_id') || APP_ID);
+    const payload = buildAppStudioPayload(url.searchParams.get('app_id') || APP_ID);
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -371,7 +371,7 @@ async function mockConsoleApis(page) {
 
   await page.route('**/api/admin/stats*', async (route) => {
     const url = new URL(route.request().url());
-    const payload = buildAppConsolePayload(url.searchParams.get('app_id') || APP_ID);
+    const payload = buildAppStudioPayload(url.searchParams.get('app_id') || APP_ID);
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -382,7 +382,7 @@ async function mockConsoleApis(page) {
   await page.route('**/api/admin/runs*', async (route) => {
     const url = new URL(route.request().url());
     const appId = url.searchParams.get('app_id');
-    const payload = appId ? buildAppConsolePayload(appId).runs : buildWorkspaceRunsPayload();
+    const payload = appId ? buildAppStudioPayload(appId).runs : buildWorkspaceRunsPayload();
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -392,7 +392,7 @@ async function mockConsoleApis(page) {
 
   await page.route('**/api/admin/sessions?**', async (route) => {
     const url = new URL(route.request().url());
-    const payload = buildAppConsolePayload(url.searchParams.get('app_id') || APP_ID);
+    const payload = buildAppStudioPayload(url.searchParams.get('app_id') || APP_ID);
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -402,7 +402,7 @@ async function mockConsoleApis(page) {
 
   await page.route('**/api/studio/build?**', async (route) => {
     const url = new URL(route.request().url());
-    const payload = buildAppConsolePayload(url.searchParams.get('app_id') || APP_ID);
+    const payload = buildAppStudioPayload(url.searchParams.get('app_id') || APP_ID);
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -412,7 +412,7 @@ async function mockConsoleApis(page) {
 
   await page.route('**/api/studio/build/history?**', async (route) => {
     const url = new URL(route.request().url());
-    const payload = buildAppConsolePayload(url.searchParams.get('app_id') || APP_ID);
+    const payload = buildAppStudioPayload(url.searchParams.get('app_id') || APP_ID);
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -422,7 +422,7 @@ async function mockConsoleApis(page) {
 
   await page.route('**/api/studio/integrations?**', async (route) => {
     const url = new URL(route.request().url());
-    const payload = buildAppConsolePayload(url.searchParams.get('app_id') || APP_ID);
+    const payload = buildAppStudioPayload(url.searchParams.get('app_id') || APP_ID);
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -463,7 +463,7 @@ async function captureIntegrationsQa(page, testInfo, name, findings) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await mockConsoleApis(page);
+  await mockStudioApis(page);
 });
 
 test('apps route stays responsive across desktop and mobile widths', async ({ page }) => {
@@ -480,10 +480,10 @@ test('apps route stays responsive across desktop and mobile widths', async ({ pa
   expect(viewport).not.toBeNull();
 
   if (viewport.width < 768) {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
     await expect(page.getByRole('columnheader', { name: 'Updated' })).toBeHidden();
     await expect(main.getByRole('button', { name: 'Continue Build' }).first()).toBeVisible();
-    await expect(main.getByRole('button', { name: 'Open Console' }).first()).toBeVisible();
+    await expect(main.getByRole('button', { name: 'Open Studio' }).first()).toBeVisible();
 
     const widgetButton = page.locator('.widget-safe-bottom button').first();
     await expect(widgetButton).toBeVisible();
@@ -491,11 +491,11 @@ test('apps route stays responsive across desktop and mobile widths', async ({ pa
     expect(widgetBox).not.toBeNull();
     expect(widgetBox.width).toBeLessThanOrEqual(52);
   } else {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
     await expect(page.getByRole('columnheader', { name: 'Updated' })).toBeVisible();
     await expect(page.getByRole('columnheader', { name: 'Action' })).toBeVisible();
     await expect(main.getByRole('row', { name: /Campaign Revision Workbench/i }).first()).toBeVisible();
-    await expect(main.getByRole('row', { name: /Partner Delivery Console/i }).first()).toBeVisible();
+    await expect(main.getByRole('row', { name: /Partner Delivery Studio/i }).first()).toBeVisible();
 
     const widgetButton = page.locator('.widget-safe-bottom button').first();
     await expect(widgetButton).toBeVisible();
@@ -542,12 +542,12 @@ test('workspace usage route stays responsive across desktop and mobile widths', 
   expect(viewport).not.toBeNull();
 
   if (viewport.width < 768) {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
   } else {
     await expect(main.getByRole('columnheader', { name: 'App' })).toBeVisible();
     await expect(main.getByRole('columnheader', { name: 'Input tok.' })).toBeVisible();
     await expect(main.getByRole('row', { name: /Campaign Revision Workbench/i }).first()).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
   }
 });
 
@@ -565,13 +565,13 @@ test('workspace health route stays responsive across desktop and mobile widths',
   expect(viewport).not.toBeNull();
 
   if (viewport.width < 768) {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
   } else {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
   }
 });
 
-test('app console root redirects to overview', async ({ page }) => {
+test('app Studio root redirects to overview', async ({ page }) => {
   await page.goto(`/apps/${APP_ID}`);
 
   await expect(page).toHaveURL(new RegExp(`/apps/${APP_ID}/overview$`));
@@ -594,9 +594,9 @@ test('app overview route stays responsive across desktop and mobile widths', asy
   expect(viewport).not.toBeNull();
 
   if (viewport.width < 768) {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
   } else {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
   }
 });
 
@@ -771,9 +771,9 @@ test('app integrations route stays responsive across desktop and mobile widths',
   expect(viewport).not.toBeNull();
 
   if (viewport.width < 768) {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
   } else {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
   }
 
   await captureIntegrationsQa(page, testInfo, 'add-integration-overlay', {
@@ -801,9 +801,9 @@ test('app usage route stays responsive across desktop and mobile widths', async 
   expect(viewport).not.toBeNull();
 
   if (viewport.width < 768) {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
   } else {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
   }
 });
 
@@ -821,9 +821,9 @@ test('app health route stays responsive across desktop and mobile widths', async
   expect(viewport).not.toBeNull();
 
   if (viewport.width < 768) {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
   } else {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
   }
 });
 
@@ -842,15 +842,15 @@ test('app users route stays responsive across desktop and mobile widths', async 
   expect(viewport).not.toBeNull();
 
   if (viewport.width < 768) {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
   } else {
-    await expect(page.getByRole('button', { name: 'Open console navigation' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
   }
 });
 
-test('mobile app console navigation keeps route transitions stable', async ({ page }) => {
+test('mobile app Studio navigation keeps route transitions stable', async ({ page }) => {
   const viewport = page.viewportSize();
-  test.skip(!viewport || viewport.width >= 768, 'Mobile app-console navigation smoke only applies to the mobile project.');
+  test.skip(!viewport || viewport.width >= 768, 'Mobile app-studio navigation smoke only applies to the mobile project.');
 
   await page.goto(`/apps/${APP_ID}/overview`);
   const main = page.locator('main');
@@ -873,9 +873,9 @@ test('mobile app console navigation keeps route transitions stable', async ({ pa
   ];
 
   for (const routeCheck of routeChecks) {
-    await page.getByRole('button', { name: 'Open console navigation' }).click();
+    await page.getByRole('button', { name: 'Open Studio navigation' }).click();
 
-    const navigation = page.getByRole('navigation', { name: 'App Console navigation' });
+    const navigation = page.getByRole('navigation', { name: 'App Studio navigation' });
     await expect(navigation).toBeVisible();
     await navigation.locator(`a[href="${routeCheck.href}"]`).click();
 
@@ -885,9 +885,9 @@ test('mobile app console navigation keeps route transitions stable', async ({ pa
   }
 });
 
-test('mobile workspace console navigation keeps route transitions stable', async ({ page }) => {
+test('mobile workspace Studio navigation keeps route transitions stable', async ({ page }) => {
   const viewport = page.viewportSize();
-  test.skip(!viewport || viewport.width >= 768, 'Mobile workspace-console navigation smoke only applies to the mobile project.');
+  test.skip(!viewport || viewport.width >= 768, 'Mobile workspace-studio navigation smoke only applies to the mobile project.');
 
   await page.goto('/apps');
   const main = page.locator('main');
@@ -910,7 +910,7 @@ test('mobile workspace console navigation keeps route transitions stable', async
   ];
 
   for (const routeCheck of routeChecks) {
-    await page.getByRole('button', { name: 'Open console navigation' }).click();
+    await page.getByRole('button', { name: 'Open Studio navigation' }).click();
 
     const navigation = page.getByRole('navigation', { name: 'Workspace navigation' });
     await expect(navigation).toBeVisible();

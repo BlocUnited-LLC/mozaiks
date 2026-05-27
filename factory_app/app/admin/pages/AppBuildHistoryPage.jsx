@@ -3,16 +3,16 @@ import { useParams } from 'react-router-dom'
 
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
-  ConsoleErrorState,
-  ConsoleInlineEmptyState,
-  ConsoleLoadingState,
+  StudioErrorState,
+  StudioInlineEmptyState,
+  StudioLoadingState,
   Panel,
   StatusPill,
-} from '../../ui/components/ConsoleShared.jsx'
+} from '../../ui/components/StudioShared.jsx'
 import CarryForwardReportSummary from './CarryForwardReportSummary.jsx'
-import AppConsoleHero, { formatDateTimeLabel } from './AppConsoleChrome.jsx'
-import { getAppConsoleSnapshot } from './appConsoleDataHelpers.js'
-import { useAppConsoleData } from './useAppConsoleData.js'
+import AppStudioHero, { formatDateTimeLabel } from './AppStudioChrome.jsx'
+import { getAppStudioSnapshot } from './appStudioDataHelpers.js'
+import { useAppStudioData } from './useAppStudioData.js'
 
 
 function validationTone(status) {
@@ -30,11 +30,11 @@ function lifecycleTone(status) {
 
 export default function AppBuildHistoryPage() {
   const { appId = 'workspace-app' } = useParams()
-  const { data, loading, error, dataMode } = useAppConsoleData(appId)
-  const snapshot = useMemo(() => getAppConsoleSnapshot(appId, data, dataMode), [appId, data, dataMode])
+  const { data, loading, error, dataMode } = useAppStudioData(appId)
+  const snapshot = useMemo(() => getAppStudioSnapshot(appId, data, dataMode), [appId, data, dataMode])
 
-  if (loading) return <ConsoleLoadingState label="Loading build history…" />
-  if (error || !data?.summary) return <ConsoleErrorState title="Build History Unavailable" message={error || 'No summary returned.'} />
+  if (loading) return <StudioLoadingState label="Loading build history…" />
+  if (error || !data?.summary) return <StudioErrorState title="Build History Unavailable" message={error || 'No summary returned.'} />
 
   const buildHistory = snapshot.buildHistory || []
   const latestArtifact = buildHistory[0] || null
@@ -68,7 +68,7 @@ export default function AppBuildHistoryPage() {
   return (
     <WorkspaceLayout>
       <div className="space-y-6">
-        <AppConsoleHero
+        <AppStudioHero
           appId={appId}
           summary={data.summary}
           dataMode={dataMode}
@@ -83,7 +83,7 @@ export default function AppBuildHistoryPage() {
           subtitle="Each entry is a saved build artifact. Expand carry-forward to see module preservation decisions."
         >
           {buildHistory.length === 0 ? (
-            <ConsoleInlineEmptyState
+            <StudioInlineEmptyState
               title="No build versions yet"
               description="Build history will appear here after the first successful AppGenerator run."
             />

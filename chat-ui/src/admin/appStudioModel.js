@@ -27,13 +27,13 @@ const APP_LIFECYCLE_META = {
     tone: 'primary',
     label: 'Deploying',
     primaryAction: 'overview',
-    primaryActionLabel: 'Open App Console',
+    primaryActionLabel: 'Open App Studio',
   },
   active: {
     tone: 'success',
     label: 'Active',
     primaryAction: 'overview',
-    primaryActionLabel: 'Open App Console',
+    primaryActionLabel: 'Open App Studio',
   },
   needs_revision: {
     tone: 'warning',
@@ -45,7 +45,7 @@ const APP_LIFECYCLE_META = {
     tone: 'default',
     label: 'Archived',
     primaryAction: 'overview',
-    primaryActionLabel: 'Open App Console',
+    primaryActionLabel: 'Open App Studio',
   },
 }
 
@@ -91,7 +91,7 @@ const APPROVAL_STATE_LABELS = {
 }
 
 const GENERIC_APP_NAMES = new Set(['new app', 'untitled app', 'untitled'])
-const DEFAULT_DRAFT_DESCRIPTION = 'Capture the first app brief, then keep the app moving from the console overview.'
+const DEFAULT_DRAFT_DESCRIPTION = 'Capture the first app brief, then keep the app moving from the Studio overview.'
 
 export function normalizeAppStatus(status) {
   const normalized = String(status || '').trim()
@@ -166,7 +166,7 @@ export function isAppDeployReady(status) {
   return ['review', 'configuring', 'deploying', 'active'].includes(normalizeAppStatus(status))
 }
 
-export function getAppConsoleDestination(app) {
+export function getAppStudioDestination(app) {
   const appId = encodeURIComponent(app?.app_id || app?.id || '')
   if (!appId) return '/apps'
   return `/apps/${appId}/overview`
@@ -177,12 +177,12 @@ export function getAppPrimaryAction(app) {
   return {
     kind: lifecycle.primaryAction,
     label: lifecycle.primaryActionLabel,
-    href: getAppConsoleDestination(app),
+    href: getAppStudioDestination(app),
   }
 }
 
 export function getAppJourneyLabel(journey) {
-  return JOURNEY_LABELS[String(journey || '').trim()] || 'App Console'
+  return JOURNEY_LABELS[String(journey || '').trim()] || 'App Studio'
 }
 
 export function getRuntimeReadinessLabel(value) {
@@ -257,16 +257,16 @@ export function getAppSectionMessage(status, section) {
     return isAppInBuild(normalized)
       ? 'Usage reporting will expand as this app moves closer to production.'
       : normalized === 'archived'
-        ? 'Archived apps keep their latest usage context available in the App Console.'
-        : 'Open the App Console for detailed token, cost, and runtime usage.'
+        ? 'Archived apps keep their latest usage context available in App Studio.'
+        : 'Open App Studio for detailed token, cost, and runtime usage.'
   }
 
   if (area === 'operations') {
     return isAppInBuild(normalized)
       ? 'Use Overview and Hosting to resolve pending readiness, rollout, or configuration work.'
       : normalized === 'archived'
-        ? 'Open the App Console to review archived operational history and prior incidents.'
-        : 'Open Hosting or Usage from the App Console for runtime posture and production detail.'
+        ? 'Open App Studio to review archived operational history and prior incidents.'
+        : 'Open Hosting or Usage from App Studio for runtime posture and production detail.'
   }
 
   if (area === 'billing') {
@@ -280,13 +280,13 @@ export function getAppSectionMessage(status, section) {
   if (area === 'settings') {
     return isAppInBuild(normalized)
       ? 'Use Integrations, Billing, and Hosting to keep the current production setup visible as work progresses.'
-      : 'Open the App Console to review the production-facing controls that are already live for this app.'
+      : 'Open App Studio to review the production-facing controls that are already live for this app.'
   }
 
   return getLifecycleGuidance(normalized)
 }
 
-export function formatConsoleDate(
+export function formatStudioDate(
   value,
   fallback = 'Not available',
   options = { month: 'short', day: 'numeric', year: 'numeric' },
@@ -297,7 +297,7 @@ export function formatConsoleDate(
   return parsed.toLocaleDateString(undefined, options)
 }
 
-export function formatConsoleDateTime(value, fallback = 'Not available') {
+export function formatStudioDateTime(value, fallback = 'Not available') {
   if (!value) return fallback
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return fallback
@@ -312,7 +312,7 @@ export function getAppRecordSnapshot(app) {
     lifecycleTone: lifecycle.tone,
     deploymentHealth: getDeploymentHealthLabel(lifecycle.status),
     hostingState: getHostingStateLabel(lifecycle.status),
-    updatedLabel: formatConsoleDateTime(app?.updated_at || app?.created_at, 'Just created'),
+    updatedLabel: formatStudioDateTime(app?.updated_at || app?.created_at, 'Just created'),
     guidance: getLifecycleGuidance(lifecycle.status),
     primaryAction: getAppPrimaryAction(app),
   }

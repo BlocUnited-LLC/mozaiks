@@ -1,6 +1,6 @@
 # mozaiksai — Runtime Substrate
 
-`mozaiksai` is the reusable AI execution substrate in the four-host Mozaiks
+`mozaiksai` is the reusable AI execution substrate in the layered Mozaiks
 architecture.
 
 Canonical host entrypoints live in `mozaiksai/hosts/`:
@@ -8,7 +8,6 @@ Canonical host entrypoints live in `mozaiksai/hosts/`:
 - `mozaiksai/hosts/runtime.py` — runtime substrate host
 - `mozaiksai/hosts/platform.py` — headless app host layered on the runtime
 - `mozaiksai/hosts/studio.py` — local/private Studio management host layered on the platform
-- `mozaiksai/hosts/mozaiks.py` — hosted product host layered on Studio
 
 Start via the CLI:
 
@@ -17,8 +16,8 @@ mozaiks serve .               # platform host (default)
 mozaiks serve . --host studio # Studio management host
 ```
 
-This package owns the runtime layer only. It does not own page serving, shell
-composition, Studio routes, or hosted product behavior.
+This package owns the reusable runtime and host substrate. Hosted products
+compose app-local hosts on top of Studio instead of adding product hosts here.
 
 ## What This Layer Owns
 

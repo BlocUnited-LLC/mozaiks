@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import { Panel, StatusPill } from '../../ui/components/ConsoleShared.jsx'
+import { Panel, StatusPill } from '../../ui/components/StudioShared.jsx'
 import { _isSensitivePath, _sanitizePaths } from './_carry_forward_redact.js'
 
 function _sanitizeKeys(obj) {

@@ -2,7 +2,7 @@
  * factory_app/app/ui — first-party workspace UI registration barrel.
  *
  * User-facing app pages (declarative schemas, custom app routes) live here.
- * Admin and console pages are co-located with the admin portal under app/admin/
+ * Studio admin pages are co-located with the admin portal under app/admin/
  * and registered via registerAdminComponents from that module.
  */
 

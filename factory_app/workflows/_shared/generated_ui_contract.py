@@ -465,20 +465,20 @@ def audit_generated_react_files(
                 f"{filename} uses dashboard-style naming ({component_name}); generated UI should describe the actual task or product surface."
             )
 
-        # Layout shell contract: admin/pages/ files are workspace/app console
-        # surfaces and must use WorkspaceLayout or AppConsoleLayout (from
+        # Layout shell contract: admin/pages/ files are workspace/app Studio
+        # surfaces and must use WorkspaceLayout or AppStudioLayout (from
         # @mozaiks/chat-ui/workspace), NOT PageFrame.
         # ui/pages/custom/ files are user-facing app pages and must use
         # PageFrame (from @mozaiks/chat-ui), NOT WorkspaceLayout.
         is_admin_page = "admin/pages/" in filename
         is_custom_route = "ui/pages/custom/" in filename
         uses_page_frame = "PageFrame" in content
-        uses_workspace_layout = "WorkspaceLayout" in content or "AppConsoleLayout" in content
+        uses_workspace_layout = "WorkspaceLayout" in content or "AppStudioLayout" in content
 
         if is_admin_page and uses_page_frame and not uses_workspace_layout:
             warnings.append(
-                f"{filename} is a workspace/app console page but uses PageFrame; "
-                "use WorkspaceLayout (or AppConsoleLayout) from @mozaiks/chat-ui/workspace so the sidebar renders."
+                f"{filename} is a workspace/app Studio page but uses PageFrame; "
+                "use WorkspaceLayout (or AppStudioLayout) from @mozaiks/chat-ui/workspace so the sidebar renders."
             )
 
         if is_custom_route and uses_workspace_layout and not uses_page_frame:

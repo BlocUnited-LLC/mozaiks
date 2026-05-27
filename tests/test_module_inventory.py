@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import copy
 
-import pytest
-
 from factory_app.control_plane.tools._module_inventory import (
     ModuleInventoryEntry,
     classify_module_carry_forward,
@@ -535,7 +533,7 @@ module:
   id: app_registry
   display_name: App Registry
   version: 1.0.0
-  description: Durable app records and lifecycle state for the Mozaiks Console.
+  description: Durable app records and lifecycle state for Mozaiks Studio.
   owner: app
   visibility: private
   handler: backend.handler:AppRegistryModule

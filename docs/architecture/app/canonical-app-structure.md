@@ -415,7 +415,7 @@ That is enough to prove the product shape without drowning the user in schema.
 
 ## Current Repo Reality
 
-This repo now treats `factory_app/app/` as the first-party Console app bundle served by the Studio host.
+This repo now treats `factory_app/app/` as the first-party Studio app bundle served by the Studio host.
 Hosted product workspaces are expected to live outside this repo and consume
 the same contract.
 

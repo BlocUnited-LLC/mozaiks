@@ -1,7 +1,7 @@
 # Shell System
 
 This is the canonical frontend shell contract for generated apps and the
-first-party Mozaiks Console.
+first-party Mozaiks Studio.
 
 ## Ownership
 
@@ -41,7 +41,7 @@ Generated apps author only this compact shell surface:
         "variants": [
           {
             "when": { "surface": "workflow_session" },
-            "label": "Open Console",
+            "label": "Open Studio",
             "pathTemplate": "/apps/{appId}",
             "fallbackPath": "/apps",
             "variant": "secondary"
@@ -87,7 +87,7 @@ guidance for generated apps. It is not loaded by the runtime and is not copied
 into app bundles.
 
 AppGenerator may select an `AppBuildPlan.shell_preset_hint` such as
-`product_app`, `workspace_console`, `public_plus_app`, `conversation_app`, or
+`product_app`, `workspace_studio`, `public_plus_app`, `conversation_app`, or
 `flow_app`. AppSchemaAgent then compiles that hint into the normal runtime
 artifacts:
 
@@ -214,14 +214,14 @@ header and mobile shell chrome.
 
 Supported variant context:
 
-- `surface`: `console`, `app_console`, `workflow_session`, `transition`, `public`, or `page`
+- `surface`: `studio`, `app_studio`, `workflow_session`, `transition`, `public`, or `page`
 - `shellMode`: `standard`, `workspace`, `conversation`, `focused`, `immersive`, or `public`
 - `workflow_sequence`: a workflow sequence id such as `build`
 - `transition`: a transition id
 - `has_active_app`: `true` or `false`
 
 Use variants for semantic shell behavior, not path patches. For example, the
-factory `Create App` shell action becomes `Open Console` while the user is in a
+factory `Create App` shell action becomes `Open Studio` while the user is in a
 workflow session:
 
 ```json
@@ -233,7 +233,7 @@ workflow session:
   "variants": [
     {
       "when": { "surface": "workflow_session" },
-      "label": "Open Console",
+      "label": "Open Studio",
       "pathTemplate": "/apps/{appId}",
       "fallbackPath": "/apps"
     }
@@ -241,7 +241,7 @@ workflow session:
 }
 ```
 
-`pathTemplate` supports `{appId}` for app-scoped console targets. When the
+`pathTemplate` supports `{appId}` for app-scoped Studio targets. When the
 active app id is unavailable, `fallbackPath` is used.
 
 ## Generation Rules

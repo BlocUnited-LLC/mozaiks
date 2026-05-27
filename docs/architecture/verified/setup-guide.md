@@ -34,10 +34,10 @@ host files:
 
 ```bash
 # Builder path
-mozaiks quickstart --dir ./mozaiks-workspace
+python -m mozaiks quickstart --dir ./mozaiks-workspace
 
-# Or launch the Console against an existing workspace
-mozaiks console --dir ./mozaiks-workspace --open
+# Or launch Studio against an existing workspace
+python -m mozaiks studio --dir ./mozaiks-workspace --open
 ``` 
 
 Use this mode when you want the layered repo architecture as-is.
@@ -139,7 +139,7 @@ builder workflows are not stored inside that app root.
 
 ```text
 factory_app/
-├── app/                        # first-party Console app bundle served by the Studio host
+├── app/                        # first-party Studio app bundle served by the Studio host
 └── workflows/
     ├── extended_orchestration/
     │   └── extension_registry.json

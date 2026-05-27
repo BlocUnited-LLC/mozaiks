@@ -12,22 +12,25 @@ Use one setup path at a time:
 
 | Path | Use When | Environment |
 | --- | --- | --- |
-| Public CLI install | You want to create and use local Mozaiks workspaces | `pipx` owns the hidden CLI environment; run `mozaiks quickstart` and `mozaiks console` |
-| Repo contributor setup | You are changing Mozaiks itself | `.venv` lives inside the `mozaiks/` repo; run repo scripts like `.\scripts\run-console.ps1` |
-| Standalone workspace setup | A generated app workspace is being developed as its own repo | `.venv` lives inside that app workspace; run that workspace's `.\scripts\run-console.ps1` |
+| Public package install | You want to create and use local Mozaiks workspaces | Python owns the installed package; run `python -m mozaiks quickstart` and `python -m mozaiks studio` |
+| Repo contributor setup | You are changing Mozaiks itself | `.venv` lives inside the `mozaiks/` repo; run repo scripts like `.\scripts\run-studio.ps1` |
+| Standalone workspace setup | A generated app workspace is being developed as its own repo | `.venv` lives inside that app workspace; run that workspace's `.\scripts\run-studio.ps1` |
 
 Do not create a shared `.venv` in the parent folder that contains multiple
-repos. Put the environment in the repo or workspace that owns it, or use `pipx`
-for the public CLI path.
+repos. Put the environment in the repo or workspace that owns it. For the
+public package path, install Mozaiks into the Python environment you normally
+use for command-line tools.
 
-The Console requires MongoDB at startup. Use a local MongoDB server or set
-`MONGO_URI` to a reachable MongoDB Atlas/local URI before launching it.
+Studio requires MongoDB at startup. Docker Desktop is not required. Use
+MongoDB Atlas, a native local MongoDB server, or Docker only if you prefer
+containerized MongoDB. Set `MONGO_URI` to the reachable database before
+launching Studio.
 
 ## Prerequisites
 
 - Python 3.11+
 - Node.js 18+
-- MongoDB locally or MongoDB Atlas
+- MongoDB Atlas or a local MongoDB server
 - one LLM provider key, usually `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`
 
 Check local tools:
@@ -57,7 +60,7 @@ cd mozaiks
 ```
 
 It installs the local package in editable mode, starts the local Mozaiks
-services, and opens the Console.
+services, and opens Studio.
 
 ## Manual Editable Setup
 
@@ -84,10 +87,10 @@ Use Anthropic instead of OpenAI if preferred:
 $env:ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-Start the repo development Console:
+Start the repo development Studio:
 
 ```powershell
-.\scripts\run-console.ps1
+.\scripts\run-studio.ps1
 ```
 
 Open:
@@ -104,26 +107,26 @@ Use the CLI for local-machine tasks:
 - start or reopen the backend/frontend processes
 - inspect status or run diagnostics
 
-Use the Console for product tasks:
+Use Studio for product tasks:
 
 - create apps
 - continue builds
 - review staged artifacts
 - open app-specific pages and tools
 
-The CLI gets the local install running. The Console is where you actually use
+The CLI gets the local install running. Studio is where you actually use
 Mozaiks after that.
 
 ## Useful Commands
 
 ```powershell
-mozaiks quickstart --dir .\mozaiks-workspace
-mozaiks console --dir .\mozaiks-workspace --open
-mozaiks console --dir .\mozaiks-workspace --json
-mozaiks onboard --dir .\mozaiks-workspace --full
+python -m mozaiks quickstart --dir .\mozaiks-workspace
+python -m mozaiks studio --dir .\mozaiks-workspace --open
+python -m mozaiks studio --dir .\mozaiks-workspace --json
+python -m mozaiks onboard --dir .\mozaiks-workspace --full
 ```
 
-`quickstart` is the preferred local command. The lower-level `console` command is
+`quickstart` is the preferred local command. The lower-level `studio` command is
 mainly useful when you need explicit ports, JSON status output, or process
 debugging.
 
@@ -135,7 +138,7 @@ not the public package install path.
 Single-command start (opens a backend terminal + runs frontend here):
 
 ```powershell
-.\scripts\run-console.ps1
+.\scripts\run-studio.ps1
 ```
 
 Or start each service manually in separate terminals:
@@ -156,18 +159,18 @@ Terminal 2 — frontend:
 These scripts use the repo-local `factory_app/app`, `factory_app/workflows`, and
 `web_shell/` sources. The backend script can start local Docker Compose infra for
 Mongo and Keycloak. Use them when you are changing Mozaiks itself or debugging
-the Console stack.
+the Studio stack.
 
 ## Runtime-Only Path
 
-If you only want the app runtime and not the Console setup flow:
+If you only want the app runtime and not the Studio setup flow:
 
 ```powershell
 mozaiks init chat --name my-app --dir .\my-app
 mozaiks serve .\my-app --host platform
 ```
 
-Most new users should use the Console path instead.
+Most new users should use the Studio path instead.
 
 ## Generated Output
 
@@ -182,7 +185,7 @@ app.
 
 ## Troubleshooting
 
-### Console does not open
+### Studio does not open
 
 Check:
 
@@ -207,7 +210,7 @@ Set the provider key matching the model/provider you selected:
 Use a different backend/frontend port:
 
 ```powershell
-mozaiks console --dir .\mozaiks-workspace --open --backend-port 8001 --frontend-port 3001
+python -m mozaiks studio --dir .\mozaiks-workspace --open --backend-port 8001 --frontend-port 3001
 ```
 
 Or stop the existing local process before restarting.

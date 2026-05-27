@@ -17,42 +17,27 @@
 
 ---
 
-## What Is Mozaiks?
-
-Mozaiks is an open-source AI app factory for building, running, and iterating on
-AI-native software products.
-
-It brings together four things that usually live in separate tools:
-
-- **Mozaiks Console** for creating apps, continuing builds, and managing them.
-- **AI workflow orchestration powered by AG2** for planning, tool use, human
-  review, and generation.
-- **Generated app files** with modules, pages, workflows, config, and brand
-  assets.
-- **Validation checks** that review the generated output before it becomes the
-  active app.
-
-The goal is not to generate a throwaway demo. Mozaiks creates production-shaped
-output, validates it, and keeps the app-building flow separate from the app
-runtime.
+Mozaiks is an open-source AI app builder. Describe what you want to build,
+and Mozaiks plans it, generates the app files, and walks you through review —
+all inside a chat interface.
 
 ---
 
-## 🎨 See It In Action
+## See It In Action
 
 <div align="center" markdown>
 
-### 💬 Embeddable Floating Widget
+### Embeddable Floating Widget
 
 <video controls muted loop playsinline width="700">
   <source src="assets/widgetAction_compressed.mp4" type="video/mp4">
 </video>
 
-*Drop a floating assistant anywhere in your app - click the button to expand/collapse the chat interface*
+*Drop a floating assistant anywhere in your app*
 
 ---
 
-### 🔀 Dual-Mode Interface
+### Dual-Mode Interface
 
 | Workflow Mode | Ask Mode |
 |:---:|:---:|
@@ -63,18 +48,15 @@ runtime.
 
 ---
 
-## Where to Start
-
-Install Mozaiks, open the Console, and click `Create App`. Mozaiks then guides
-you through planning, generation, review, and revision inside the chat.
+## Get Started
 
 <div class="grid cards" markdown>
 
--   :material-rocket-launch: **Install and Create Your First App**
+-   :material-rocket-launch: **Build Your First App**
 
     ---
 
-    Install Mozaiks, open the Console, and build your first app in minutes.
+    Install Mozaiks, open Studio, and create your first app in minutes.
 
     [:octicons-arrow-right-24: Get Started](getting-started.md)
 
@@ -82,31 +64,31 @@ you through planning, generation, review, and revision inside the chat.
 
     ---
 
-    Use this only when you need connector secrets, auth, or deployment settings.
+    Connector secrets, auth, and deployment settings.
 
     [:octicons-arrow-right-24: Configuration](user-configuration.md)
 
--   :material-sitemap: **Add a Workflow to Your App**
+-   :material-sitemap: **Add a Workflow**
 
     ---
 
-    Extend an app workspace with a custom AG2 workflow.
+    Extend an app with a custom AI workflow.
 
     [:octicons-arrow-right-24: Add Workflows](guides/adding-workflows/01-overview.md)
 
--   :material-view-dashboard-outline: **Customize Your App Shell**
+-   :material-view-dashboard-outline: **Customize Branding**
 
     ---
 
-    Change branding, layout chrome, auth, and shell behavior without touching core runtime code.
+    Change themes, navigation, and shell behavior.
 
-    [:octicons-arrow-right-24: App Shell & Branding](guides/custom-brand-integration/01-overview.md)
+    [:octicons-arrow-right-24: Branding](guides/custom-brand-integration/01-overview.md)
 
 -   :material-source-branch: **Contributing**
 
     ---
 
-    Working on the framework, factory workflows, or Console? Start here.
+    Working on the framework itself? Start here.
 
     [:octicons-arrow-right-24: Contributing](contributing/index.md)
 

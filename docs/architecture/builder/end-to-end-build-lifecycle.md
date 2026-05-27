@@ -5,7 +5,7 @@
 This document defines the canonical lifecycle across:
 
 - Mozaiks CLI
-- the internal Studio host, its visible workspace console, and the workflow-owned build sequence
+- the internal Studio host, its visible Studio surface, and the workflow-owned build sequence
 - `factory_app`
 - the active app workspace
 - generated artifacts
@@ -13,21 +13,21 @@ This document defines the canonical lifecycle across:
 
 Terminology note:
 
-- `Studio` remains the current internal host name
-- `mozaiks console` is the current public CLI command for opening the Console
+- `Studio` is the browser product and `studio` is the host/composition name
+- `mozaiks studio` is the current public CLI command for opening Studio
 - customer-facing UX should prefer `Apps`, `Usage`, `Health`, and
-  `Integrations` for the OSS factory console; hosted deployments may add their
+  `Integrations` for the OSS factory Studio; hosted deployments may add their
   own provider-owned billing or hosting sections
 - `Build` refers to the workflow-owned agent sequence for create and
-  refinement, not a required persistent console page
-- when this document says `Studio` in ownership terms, it means the host and
-  management composition layer, not a required visible product label
+  refinement, not a required persistent Studio page
+- when this document says `Studio host`, it means the management composition
+  layer serving the Studio product
 
 The current system has the right primitives, but the lifecycle is not explicit
 enough. That leads to confusion about:
 
 - whether `init` creates a real app or just a scaffold
-- whether the workspace console and workflow-owned build sequence are operating
+- whether Studio and the workflow-owned build sequence are operating
   on the active workspace or on staged artifacts
 - when `factory_app` should mutate the live app root
 - how generated output becomes the app that later runs
@@ -54,8 +54,8 @@ promotion
   -> explicit copy of approved artifacts into a runnable app root
 ```
 
-In current code, the CLI creates the workspace scaffold and launches the
-Console. The Console creates apps and manages build/review work inside that
+In current code, the CLI creates the workspace scaffold and launches
+Studio. Studio creates apps and manages build/review work inside that
 workspace.
 
 The generator should stage first and promote second.
@@ -112,14 +112,14 @@ Recommended commands:
 - `mozaiks init <preset>` for explicit/dev scaffolding
 - `mozaiks onboard` may create this implicitly when missing
 
-## Phase 2: Workspace Console Launch
+## Phase 2: Studio Launch
 
 This phase starts the host and opens the management UI.
 
 Owned by:
 
 - CLI for process launch
-- Console for lifecycle management UI
+- Studio for lifecycle management UI
 
 Responsibilities:
 
@@ -130,7 +130,7 @@ Responsibilities:
 
 Recommended command:
 
-- `mozaiks console --open`
+- `mozaiks studio --open`
 
 This is the current user-facing command path. Customer-facing UX should normalize to
 `Apps` as the landing surface and route build/refinement through the
@@ -158,7 +158,7 @@ Responsibilities:
 
 - allocate `build_registry_id`
 - associate `app_id`, `user_id`, app name, and initial status
-- expose build status to the `Apps` directory, app console summaries, and the
+- expose build status to the `Apps` directory, app Studio summaries, and the
   workflow-owned build sequence
 
 Important rule:
@@ -378,7 +378,7 @@ Use these terms consistently.
 
 | Object | Meaning |
 | --- | --- |
-| `workspace root` | Local folder selected by CLI or the current workspace console host. |
+| `workspace root` | Local folder selected by CLI or the current Studio host. |
 | `app root` | The runnable app bundle directory, usually `<workspace>/app`. |
 | `build_registry_id` | Hosted control-plane/build-tracking record id. |
 | `app_id` | Logical app identity used across workflows and artifacts. |
@@ -409,8 +409,8 @@ The CLI should expose two different paths.
 For most users:
 
 1. `mozaiks onboard`
-2. `mozaiks console --open`
-3. launch the build workflow sequence from the workspace or app console
+2. `mozaiks studio --open`
+3. launch the build workflow sequence from Studio
 4. review staged artifacts
 5. promote/export/deploy
 
@@ -443,7 +443,7 @@ Should:
 Should not:
 
 - imply that generation already happened
-- launch the Console automatically unless explicitly requested by a flag
+- launch Studio automatically unless explicitly requested by a flag
 
 ### `mozaiks onboard`
 
@@ -451,16 +451,16 @@ Should:
 
 - configure environment and product intent defaults
 - create a scaffold when missing
-- optionally offer to open the Console immediately
+- optionally offer to open Studio immediately
 
-### `mozaiks console`
+### `mozaiks studio`
 
 Should:
 
 - become the primary entrypoint for actual building
 - start backend + frontend together
 - open the browser
-- route the user into the current app or workspace console and launch the
+- route the user into the current app or workspace Studio surface and launch the
   workflow-owned build sequence from there
 
 ### `mozaiks gen`
@@ -481,17 +481,17 @@ These are the remaining lifecycle gaps.
 1. There is no explicit user-facing contract saying that the scaffold is only a
    shell and that generated output stages separately.
 2. The preferred public path still feels too dev-script-centric.
-3. Promotion exists conceptually, but workspace-console/CLI responsibilities
+3. Promotion exists conceptually, but Studio/CLI responsibilities
    around it are not yet the dominant UX.
 4. External hosted product workspaces should consume the same staged
   build/promotion lifecycle instead of inventing a second builder path.
-5. `mozaiks gen`, `mozaiks onboard`, and `mozaiks console` still need one
+5. `mozaiks gen`, `mozaiks onboard`, and `mozaiks studio` still need one
    coherent story rather than three adjacent tools.
 
 ## Recommended Next Changes
 
 1. Make `mozaiks onboard` the primary first-run command.
-2. Add `mozaiks console --open` as the standard builder launch command.
+2. Add `mozaiks studio --open` as the standard builder launch command.
 3. Teach onboarding and Apps/Build status surfaces to explain:
    - scaffold
    - staged build

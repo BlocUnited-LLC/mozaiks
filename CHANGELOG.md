@@ -12,6 +12,21 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Changed
+
+- Replaced the public first-run install path with `pip install mozaiks` followed
+  by `python -m mozaiks ...`; the `mozaiks` command is now documented as an
+  optional shortcut only.
+- Standardized the public browser product and launch command around Studio:
+  `python -m mozaiks studio --dir <workspace> --open`.
+
+### Fixed
+
+- Added a package-level `python -m mozaiks` entrypoint and installed-wheel smoke
+  checks so PATH refresh issues do not block the recommended Windows flow.
+- Added Studio MongoDB preflight diagnostics so missing or unreachable MongoDB
+  reports a clear setup error instead of a generic backend startup failure.
+
 ## 0.1.5 - 2026-05-26
 
 ### Added
@@ -40,7 +55,7 @@ This project follows a practical pre-1.0 changelog format:
   `POST /api/workflows/trigger` with `trigger_source="refinement"`, routing
   through the control plane into the appropriate revision workflow sequence
   (e.g. `app_surface_revision`) and switching the chat session in-place.
-- Added build history page and carry-forward audit panel in the admin console.
+- Added build history page and carry-forward audit panel in the admin portal.
   Each artifact entry renders a `CarryForwardReportSummary`; the full panel is
   accessible at `/apps/:id/activity`.
 - Added `promote_build` action to the `app_registry` module: validates
@@ -170,7 +185,7 @@ This project follows a practical pre-1.0 changelog format:
 - Hardened generated-app persistence docs/tests and documented production
   `required` startup mode.
 - Hardened UI/design-system contracts, shared workflow infrastructure, and
-  route/docs alignment for the OSS factory console.
+  route/docs alignment for the OSS factory Studio.
 - `IntegrationPlannerAgent` no longer defaults to embed/bridge — prefers `native_migration` when `mozaiks_authored_app` is true, storage is file_store, or app is internal tooling.
 - Tightened generated UI quality-gate enforcement for custom React surfaces: docs/tests fixture paths are ignored, semantic token/class usage is covered by dedicated tests, and AppGenerator guidance now explicitly requires semantic Button variants backed by `app/brand/theme_config.json` and shared primitives.
 - Aligned OSS frontend architecture docs, frontend rules, and add-page skill guidance with the generated UI gate: semantic tokens/variants are allowed, hardcoded hex/rgb and direct font-family styling are disallowed, local primitive clones and raw primary buttons are disallowed, and docs/tests fixture paths are excluded from generated React audit scope.
@@ -184,14 +199,14 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
-- Consolidated first-party console ownership under `factory_app/app/admin/pages/` and `factory_app/app/admin/index.js`, removing the duplicate console surface path.
-- Updated workspace console navigation to derive from route-manifest metadata (`meta.navigation.group`, `meta.navigation.icon`) instead of hardcoded sidebar arrays in `WorkspaceLayout`.
-- Aligned route manifest contracts so workspace and app console routes declare explicit navigation inclusion/grouping semantics.
+- Consolidated first-party Studio ownership under `factory_app/app/admin/pages/` and `factory_app/app/admin/index.js`.
+- Updated workspace Studio navigation to derive from route-manifest metadata (`meta.navigation.group`, `meta.navigation.icon`) instead of hardcoded sidebar arrays in `WorkspaceLayout`.
+- Aligned route manifest contracts so workspace and app Studio routes declare explicit navigation inclusion/grouping semantics.
 
 ### Fixed
 
-- Fixed active admin console page imports to resolve shared `ConsoleShared` primitives from the canonical `factory_app/app/ui/components/` location.
-- Regenerated packaging manifest metadata (`mozaiks.egg-info/SOURCES.txt`) to remove stale references to deleted console paths.
+- Fixed active admin portal page imports to resolve shared `StudioShared` primitives from the canonical `factory_app/app/ui/components/` location.
+- Regenerated packaging manifest metadata (`mozaiks.egg-info/SOURCES.txt`) to match the current Studio files.
 
 ## 0.1.1 - 2026-05-14
 
@@ -202,13 +217,13 @@ This project follows a practical pre-1.0 changelog format:
 - Added `mozaiks sync-agent-guidance` to safely check, create, or update generated coding-agent guidance in existing app workspaces.
 - Added AppGenerator UI primitive catalog injection, generated UI quality gates, and generated UI acceptance coverage so agents target shipped primitives instead of hallucinated UI components.
 - Added module-contract quality checks and canonical module contract guidance for generated modules.
-- Added Studio Console/App Console UX surfaces for app portfolio management, shell actions, notifications, and generated app lifecycle visibility.
+- Added Studio/app management UX surfaces for app portfolio management, shell actions, notifications, and generated app lifecycle visibility.
 
 ### Changed
 
 - Updated OSS setup docs to distinguish public package usage, source checkout dogfooding, and framework development.
 - Reorganized public architecture docs around app, module system, workflows, frontend UI, builder, and MozaiksAI runtime sections.
-- Updated factory app UI primitives, shell branding, and Console copy toward the production-grade app-management model.
+- Updated factory app UI primitives, shell branding, and Studio copy toward the production-grade app-management model.
 - Aligned AppGenerator prompts, hooks, and structured-output guidance with the canonical module and generated UI contracts.
 
 ### Fixed

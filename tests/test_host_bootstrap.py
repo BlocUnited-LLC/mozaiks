@@ -59,26 +59,6 @@ def test_studio_host_uses_external_workspace_root_when_provided(monkeypatch, tmp
     assert workflow_root.parent.name == "factory_app"
 
 
-def test_mozaiks_host_selects_app_workflow_root(monkeypatch, tmp_path) -> None:
-    """mozaiks host should bind to one app workflow root when the app provides one."""
-    workspace_root = tmp_path / "mozaiks-app"
-    app_root = workspace_root / "app"
-    app_workflows = workspace_root / "workflows"
-    app_root.mkdir(parents=True)
-    app_workflows.mkdir(parents=True)
-    (app_root / "app.json").write_text('{"appName": "Mozaiks App"}', encoding="utf-8")
-
-    monkeypatch.setenv("PLATFORM_PATH", str(app_root))
-    monkeypatch.delenv("MOZAIKS_FACTORY_APP_PATH", raising=False)
-    monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
-    monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
-
-    configure_repo_host_defaults("mozaiks")
-
-    workflow_root = Path(os.environ["MOZAIKS_WORKFLOWS_PATH"]).resolve()
-    assert workflow_root == app_workflows.resolve()
-
-
 def test_platform_host_uses_workspace_root_workflows_when_present(monkeypatch, tmp_path) -> None:
     workspace_root = tmp_path / "external-workspace"
     app_root = workspace_root / "app"

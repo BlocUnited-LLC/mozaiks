@@ -4,7 +4,7 @@ This is the authoritative architecture reference. If other docs contradict this 
 
 ## What This Repo Is
 
-This repo is the **canonical Mozaiks repo** — the AI runtime, app host, frontend surfaces, Studio management interface, hosted product host, and generated app artifact contracts for Mozaiks apps.
+This repo is the **canonical Mozaiks repo** — the AI runtime, app host, frontend surfaces, Studio management interface, hosted product contracts, and generated app artifact contracts for Mozaiks apps.
 
 Deterministic app behavior is owned by app bundles hosted by `mozaiksai.hosts.platform`, generated module contracts, or optional external/generated app backends connected through the generic `AppBackendPort` contract in `mozaiksai/core/ports/app_backend.py`.
 
@@ -32,7 +32,6 @@ mozaiks/                           # Canonical Mozaiks repo
 ├── mozaiksai/hosts/runtime.py     # Runtime substrate host
 ├── mozaiksai/hosts/platform.py    # Headless app host
 ├── mozaiksai/hosts/studio.py      # Local/private Studio management/create host
-├── mozaiksai/hosts/mozaiks.py     # Hosted Mozaiks product host
 └── docs/                          # Source-of-truth documentation
 ```
 
@@ -87,8 +86,8 @@ See [docs/architecture/foundations/distribution-and-workspace-model.md](docs/arc
 - `mozaiksai.hosts.runtime` — reusable execution substrate
 - `mozaiksai.hosts.platform` — canonical headless app host for pages, modules, shell config, admin, actions, and app routing
 - `mozaiksai.hosts.studio` — Studio management interface host; the shared management layer used by both local and hosted deployments
-- `mozaiksai.hosts.mozaiks` — hosted Mozaiks product host; extends Studio with hosted-only capabilities
 - `factory_app/app` — first-party Studio app bundle; hosted product workspaces consume the same `app/` contract from outside this repo
+- Hosted product workspaces compose app-local hosts on top of Studio; the OSS repo does not own a hosted-product FastAPI host
 
 Customer-facing terminology follows a different layer:
 
@@ -103,7 +102,7 @@ Customer-facing terminology follows a different layer:
 1. **Framework/platform mode** — `mozaiksai.hosts.runtime`, `mozaiksai.hosts.platform`, `mozaiksai/`, `chat-ui/`, `web_shell/`, repo-local infrastructure/packaging
 2. **Factory mode** — `factory_app/workflows/`, `factory_app/control_plane/` — the builder/generator workflows, agent configs, structured outputs, and control plane pack
 3. **Studio mode** — `mozaiksai.hosts.studio`, `factory_app/app/ui/pages/custom/studio/`, `factory_app/app/admin/`, `factory_app/app/modules/factory_control_plane/`, `chat-ui/src/admin/` — the management interface that surfaces Factory capabilities
-4. **Mozaiks App / product mode** — `mozaiksai.hosts.mozaiks` and contracts that external hosted product workspaces consume
+4. **Hosted product contract mode** — contracts that external hosted product workspaces consume; concrete hosted-product hosts live in those product workspaces
 
 ---
 
@@ -118,12 +117,12 @@ Runtime (AI substrate)
    <- Platform (app shell / app host)
       <- Factory (builder / generator)
          <- Studio (management interface)
-            <- Mozaiks App (hosted product)
+            <- Hosted product workspace (external app-local host)
 ```
 
 **CLI and Studio are parallel interfaces**, not a chain. CLI owns developer tooling (filesystem, scaffolding, process management). Studio owns the management surface (workspace status, build lifecycle, artifacts, run history, config). CLI must not become a dependency of Studio, Platform, or Runtime.
 
-**Mozaiks App extends Studio** — it does not fork it. Hosted-only capabilities layer on top through the `@platform/extensions` mechanism.
+**Hosted products extend Studio** — they do not fork it. Hosted-only capabilities layer on top through an app-local host plus the `@platform/extensions` mechanism.
 
 The visible product model on top of those hosts is:
 
@@ -155,7 +154,7 @@ See [docs/architecture/modules-systems/framework-capability-classification.md](d
 
 **Must not own:**
 - Shell config, pages, themes, or transitions
-- workspace-console or Build routes
+- workspace-studio or Build routes
 - Admin app-shell routes or product-shell UI composition
 - Generator or refinement behavior
 - App manifest loading for app-host composition
@@ -266,7 +265,7 @@ Note: `factory_app/` as a directory co-locates the Factory layer (`workflows/`, 
 - Anything that belongs in Studio — Mozaiks App inherits Studio, it does not fork it
 - Runtime execution logic
 
-**Key files:** `mozaiksai.hosts.mozaiks`, external hosted product workspaces
+**Key files:** external hosted product workspaces; the OSS repo provides Studio as the base host but does not define a hosted-product FastAPI host.
 
 **Generator and workflow root rules:**
 
@@ -291,7 +290,7 @@ Hosted product modules are the deterministic business layer of a hosted product 
 **Owns:**
 - Scaffold generation: `mozaiks init`, `mozaiks onboard`, `mozaiks add`
 - Process management: starting/stopping the local server
-- Workspace diagnostics: `mozaiks console`
+- Workspace diagnostics: `mozaiks studio`
 - Offline generation: `mozaiks gen` — a developer convenience, not the canonical build lifecycle
 
 **Must not own:**
@@ -451,12 +450,12 @@ Registered in `chat-ui/src/registry/coreComponents.js` — every app gets them a
 
 ### Platform-Management Surfaces
 
-The admin portal and console pages are **not** core `chat-ui` primitives. They are platform-management surfaces registered by Studio and inherited by Mozaiks App. Components are registered through `factory_app/app/admin/index.js` (imported by `factory_app/app/ui/index.js`) and declared in the Studio route manifest and `admin/admin_registry.yaml`:
+The admin portal and Studio pages are **not** core `chat-ui` primitives. They are platform-management surfaces registered by Studio and inherited by Mozaiks App. Components are registered through `factory_app/app/admin/index.js` (imported by `factory_app/app/ui/index.js`) and declared in the Studio route manifest and `admin/admin_registry.yaml`:
 
 | Component | Route | Purpose |
 |-----------|-------|---------|
 | `AdminPortal` | `/admin` and `/apps/:appId/*` | Unified admin shell — app-business panels, module panels, runtime/operator panels |
-| Console pages (`ConsolePage`, `AppsPage`, etc.) | `/apps/*` | First-party workspace and per-app console surfaces in `factory_app/app/admin/pages/` |
+| Studio pages (`StudioPage`, `AppsPage`, etc.) | `/apps/*` | First-party workspace and per-app Studio surfaces in `factory_app/app/admin/pages/` |
 
 `AdminPortal` separates authority internally:
 - **App-business admin panels** — from `app_backend_url/api/admin/*` using `mozaiks.admin.app_backend.v1`

@@ -33,10 +33,10 @@ presets:
         primary: global
         settings: profile
         legal: footer
-  workspace_console:
+  workspace_studio:
     description: Dense multi-resource management surface with persistent side navigation.
     select_when:
-    - Internal tools, admin consoles, CRMs, operations centers, or workspace managers.
+    - Internal tools, admin portals, CRMs, operations centers, or workspace managers.
     - Users repeatedly switch between resource lists, settings, and operational views.
     shell_policy:
       desktop:

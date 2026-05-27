@@ -15,10 +15,10 @@ import {
 } from '@mozaiks/chat-ui/ui';
 
 /**
- * Factory Console UI adapter.
+ * Factory Studio UI adapter.
  *
  * Reusable visual primitives are owned by chat-ui. This file only keeps
- * Factory-local aliases and tiny adapters used by first-party Console screens.
+ * Factory-local aliases and tiny adapters used by first-party Studio screens.
  */
 
 export const API_BASE =
@@ -59,7 +59,7 @@ export function ActionButton({
   );
 }
 
-export const ConsoleInlineEmptyState = InlineEmptyState;
-export const ConsoleSlideOver = SlideOver;
-export const ConsoleLoadingState = LoadingState;
-export const ConsoleErrorState = ErrorState;
+export const StudioInlineEmptyState = InlineEmptyState;
+export const StudioSlideOver = SlideOver;
+export const StudioLoadingState = LoadingState;
+export const StudioErrorState = ErrorState;

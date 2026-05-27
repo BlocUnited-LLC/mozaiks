@@ -183,7 +183,7 @@ archetypes:
         deferred_to: Phase 3D
         risk_level: high
         rollback_note: >
-          Revert to previous state via the operator web console.
+          Revert to previous state via the operator admin panel.
           Allow up to 48 hours for propagation.
       rule: >
         A tool call returning WRITE_NOT_IMPLEMENTED or similar error is a signal

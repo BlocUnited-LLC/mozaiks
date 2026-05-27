@@ -228,7 +228,7 @@
       ],
       "appearance_hint": null
     },
-    "shell_preset_hint": "workspace_console",
+    "shell_preset_hint": "workspace_studio",
     "external_integrations": [],
     "event_flows": [],
     "agent_backend_required": false,

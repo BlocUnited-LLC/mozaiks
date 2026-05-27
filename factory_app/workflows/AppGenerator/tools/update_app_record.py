@@ -2,7 +2,7 @@
 update_app_record — called at the end of the AppGenerator pipeline.
 
 Updates the app lifecycle record to 'review' once the bundle is written, so the
-Console reflects a completed build that is ready for inspection.
+Studio reflects a completed build that is ready for inspection.
 
 Best-effort: never raises.
 """
@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +21,7 @@ async def update_build_status(
     *,
     build_registry_id: str,
     status: str,
-    bundle_path: Optional[str] = None,
+    bundle_path: str | None = None,
 ) -> None:
     """Update a hosted build-registry record status. Best-effort — never raises."""
     record_id = str(build_registry_id or "")

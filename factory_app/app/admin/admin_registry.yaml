@@ -1,15 +1,15 @@
 schema_version: mozaiks.admin.registry.v1
 
-# Factory app admin portal — declares all admin pages for the Mozaiks platform console.
+# Factory app admin portal — declares all admin pages for Mozaiks Studio.
 #
-# scope: workspace  — platform-operator nav (visible from the top-level console)
+# scope: workspace  — platform-operator nav (visible from the top-level Studio)
 # scope: app        — per-app nav (visible when browsing a specific app's admin)
 #
 # Modules declare which page their panels attach to via the `page` field in
 # modules/{module}/contracts/admin.yaml.
 
 pages:
-  # ── Workspace-level (platform console) ────────────────────────────────────
+  # ── Workspace-level (Studio) ──────────────────────────────────────────────
   - id: apps
     label: Apps
     path: /apps

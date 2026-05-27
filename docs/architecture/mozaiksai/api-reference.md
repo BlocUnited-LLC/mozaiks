@@ -23,7 +23,6 @@ The current web shell and platform primarily rely on:
 - `mozaiksai/hosts/runtime.py`
 - `mozaiksai/hosts/platform.py`
 - `mozaiksai/hosts/studio.py`
-- `mozaiksai/hosts/mozaiks.py`
 - `mozaiksai/core/transport/`
 - `mozaiksai/core/workflow/`
 

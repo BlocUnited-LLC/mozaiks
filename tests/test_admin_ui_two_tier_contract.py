@@ -9,7 +9,7 @@ tiers of admin UI in Mozaiks:
 
   Tier 2 — Custom operator React pages
             ui/route_manifest.json + admin/pages/{Page}.jsx + admin/index.js
-            Full-page workspace-console routes outside AdminPortal.
+            Full-page workspace-studio routes outside AdminPortal.
 
 These tests check static content only — no imports, no side effects.
 """

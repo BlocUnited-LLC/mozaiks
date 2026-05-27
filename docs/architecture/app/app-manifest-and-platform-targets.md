@@ -14,7 +14,7 @@ It should not dump low-level platform configuration onto the user.
 
 The canonical target is a self-contained app workspace with `app/app.json`
 inside the app repository. In this repo, `factory_app/app/app.json` is the
-first-party Console app bundle manifest served by the Studio host that follows that same contract.
+first-party Studio app bundle manifest served by the Studio host that follows that same contract.
 
 ## The Right Mental Model
 

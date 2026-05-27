@@ -20,7 +20,7 @@ From the repo root:
 
 ```powershell
 npm --prefix web_shell install
-.\scripts\run-console.ps1
+.\scripts\run-studio.ps1
 ```
 
 That starts:

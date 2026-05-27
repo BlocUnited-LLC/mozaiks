@@ -331,7 +331,7 @@ def _create_standard_consumer_files(
     _write_text(target_dir / "README.md", _generated_app_readme(app_name, preset))
     _write_text(scripts_dir / "run-backend.ps1", _run_backend_ps1())
     _write_text(scripts_dir / "run-frontend.ps1", _run_frontend_ps1())
-    _write_text(scripts_dir / "run-console.ps1", _run_console_ps1())
+    _write_text(scripts_dir / "run-studio.ps1", _run_studio_ps1())
     _create_agent_guidance_scaffold(target_dir=target_dir, app_name=app_name, preset=preset)
 
     print("Created root consumer files: requirements.txt, .env.example, README.md, AGENTS.md, CLAUDE.md, scripts/, .claude/")
@@ -446,12 +446,12 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Set `MONGO_URI` before running the Console. Set `OPENAI_API_KEY` before running real workflows.
+Set `MONGO_URI` before running Studio. Set `OPENAI_API_KEY` before running real workflows.
 
 ## Run
 
 ```powershell
-.\\scripts\\run-console.ps1 -ForceStop
+.\\scripts\\run-studio.ps1 -ForceStop
 ```
 
 Two-terminal mode:
@@ -521,8 +521,8 @@ app/
 workflows/
 ```
 
-Use the installed `mozaiks` package for runtime, CLI, the Console host
-(`studio` internally), factory bundle, and web shell behavior.
+Use the installed `mozaiks` package for runtime, CLI, Studio, factory bundle,
+and web shell behavior.
 
 ## Where To Put Work
 
@@ -562,7 +562,7 @@ Use the installed `mozaiks` package for runtime, CLI, the Console host
 For non-trivial changes, run the narrowest practical checks:
 
 ```powershell
-.\\scripts\\run-console.ps1 -DryRun
+.\\scripts\\run-studio.ps1 -DryRun
 .\\scripts\\run-backend.ps1 -DryRun
 .\\scripts\\run-frontend.ps1 -DryRun
 ```
@@ -825,8 +825,8 @@ Help set up this app workspace.
 2. Run `python -m pip install -r requirements.txt`.
 3. Copy `.env.example` to `.env`.
 4. Set `OPENAI_API_KEY` and `MONGO_URI`.
-5. Run `.\\scripts\\run-console.ps1 -DryRun`.
-6. Start with `.\\scripts\\run-console.ps1 -ForceStop`.
+5. Run `.\\scripts\\run-studio.ps1 -DryRun`.
+6. Start with `.\\scripts\\run-studio.ps1 -ForceStop`.
 7. If needed, run backend/frontend separately with `run-backend.ps1` and `run-frontend.ps1`.
 
 Do not require a sibling checkout of the Mozaiks framework repository.
@@ -851,18 +851,18 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Set `MONGO_URI` before running the Console. Set `OPENAI_API_KEY` before running real workflows.
+Set `MONGO_URI` before running Studio. Set `OPENAI_API_KEY` before running real workflows.
 
-## Run the Console
+## Run Studio
 
 ```powershell
-.\\scripts\\run-console.ps1 -ForceStop
+.\\scripts\\run-studio.ps1 -ForceStop
 ```
 
-Equivalent CLI command:
+Equivalent package command:
 
 ```powershell
-mozaiks console --dir . --open
+python -m mozaiks studio --dir . --open
 ```
 
 ## Two-Terminal Mode
@@ -1185,10 +1185,10 @@ npm --prefix $webShellRoot run dev -- --host $BindHost --port $Port --strictPort
 """
 
 
-def _run_console_ps1() -> str:
+def _run_studio_ps1() -> str:
     return r"""<#
 .SYNOPSIS
-  Start the full Mozaiks Console stack for this app workspace.
+  Start the full Mozaiks Studio stack for this app workspace.
 #>
 
 param(
@@ -1232,7 +1232,7 @@ function Stop-Listeners {
 
     foreach ($procId in $procIds) {
       if (-not $procId -or $procId -eq 0) { continue }
-      Write-Host "[console] ForceStop: stopping PID $procId on port $port" -ForegroundColor Yellow
+      Write-Host "[studio] ForceStop: stopping PID $procId on port $port" -ForegroundColor Yellow
       Stop-Process -Id ([int]$procId) -Force -ErrorAction Stop
     }
   }
@@ -1249,7 +1249,7 @@ Remove-Item Env:MOZAIKS_CHAT_UI_PATH -ErrorAction SilentlyContinue
 
 $mozaiksCmd = Resolve-Mozaiks
 $argsList = @(
-  "console",
+  "studio",
   "--dir",
   $Workspace,
   "--backend-port",
@@ -1263,8 +1263,8 @@ if ($NoBrowser) {
   $argsList += "--open"
 }
 
-Write-Host "[console] Workspace: $Workspace" -ForegroundColor DarkCyan
-Write-Host "[console] Command: $mozaiksCmd $($argsList -join ' ')" -ForegroundColor Cyan
+Write-Host "[studio] Workspace: $Workspace" -ForegroundColor DarkCyan
+Write-Host "[studio] Command: $mozaiksCmd $($argsList -join ' ')" -ForegroundColor Cyan
 
 if ($DryRun) {
   return
@@ -1489,12 +1489,12 @@ def _show_next_steps(target_dir: Path, preset: str, starter: bool) -> None:
     print("  3. .\\.venv\\Scripts\\Activate.ps1")
     print("  4. python -m pip install -r requirements.txt")
     print("  5. Copy-Item .env.example .env, then set OPENAI_API_KEY and MONGO_URI")
-    print("  6. Open the Console: .\\scripts\\run-console.ps1 -ForceStop")
+    print("  6. Open Studio: .\\scripts\\run-studio.ps1 -ForceStop")
     if starter:
         print("  7. Replace workflows/HelloWorkflow only after you confirm the real product behavior")
     else:
-        print("  7. Use the Console to generate the first real workflows/modules instead of hand-populating the scaffold")
-    print("  8. Optional CLI equivalent: mozaiks console --dir . --open")
+        print("  7. Use Studio to generate the first real workflows/modules instead of hand-populating the scaffold")
+    print("  8. Optional package command: python -m mozaiks studio --dir . --open")
     if features.get("admin"):
         print("  9. Confirm admin access in app/app.json admins")
 

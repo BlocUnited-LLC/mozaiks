@@ -124,7 +124,7 @@ function validateReactImports(failures) {
       message: 'imports primitive source files directly; use the public @mozaiks/chat-ui/ui entrypoint.',
     },
     {
-      pattern: /ConsolePrimitives/g,
+      pattern: /StudioPrimitives/g,
       message: 'references a factory-local primitive catalog; shared primitives belong in chat-ui/src/ui/primitives.',
     },
   ];

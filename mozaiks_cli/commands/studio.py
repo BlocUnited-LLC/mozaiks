@@ -1,20 +1,20 @@
-"""mozaiks console - Inspect or launch the Mozaiks Console for an app workspace."""
+"""mozaiks studio - Inspect or launch Mozaiks Studio for an app workspace."""
 
 from __future__ import annotations
 
 import json
 
-from mozaiks_cli.console_launcher import launch_console
+from mozaiks_cli.studio_launcher import launch_studio
 from mozaiks_cli.workspace import resolve_active_app_root, resolve_workspace_root
 
 
 def run(args) -> None:
-    """Execute the console command."""
-    from mozaiksai.core.runtime.app import build_app_overview_summary, get_missing_console_surfaces
+    """Execute the studio command."""
+    from mozaiksai.core.runtime.app import build_app_overview_summary, get_missing_studio_surfaces
 
     workspace_root = resolve_workspace_root(getattr(args, "directory", None))
     app_root = resolve_active_app_root(workspace_root)
-    missing_surfaces = get_missing_console_surfaces(app_root)
+    missing_surfaces = get_missing_studio_surfaces(app_root)
     if missing_surfaces:
         print(f"Error: no valid Mozaiks scaffold found in {workspace_root}")
         print("Missing required files:")
@@ -23,21 +23,21 @@ def run(args) -> None:
         print("Run 'mozaiks onboard --dir <workspace>' to create/configure a scaffold first.")
         return
 
-    if getattr(args, "open_console", False):
-        result = launch_console(
+    if getattr(args, "open_studio", False):
+        result = launch_studio(
             workspace_root=workspace_root,
             backend_port=int(getattr(args, "backend_port", 8000)),
             frontend_port=int(getattr(args, "frontend_port", 3000)),
             open_browser=not bool(getattr(args, "no_browser", False)),
         )
-        print("Console launched.\n")
+        print("Studio launched.\n")
         print(f"Backend: {result['backend_url']}")
-        if result["console_url"]:
-            print(f"Console: {result['console_url']}")
+        if result["studio_url"]:
+            print(f"Studio: {result['studio_url']}")
         elif result["frontend_available"]:
             print(f"Frontend: {result['frontend_url']}")
         else:
-            print("Frontend shell unavailable; backend is running but the browser Console is not available in this environment.")
+            print("Frontend shell unavailable; backend is running but Studio is not available in this environment.")
         return
 
     summary = build_app_overview_summary(app_root, surface="cli-home", local_only=True)
@@ -57,9 +57,9 @@ def _print_app_overview(summary: dict) -> None:
     home = summary["home"]
 
     print("App Overview\n")
-    print(f"Workspace:         {summary['console']['workspace_root']}")
-    print(f"Route:             {summary['console']['route']}")
-    print(f"Local Only:        {summary['console']['local_only']}")
+    print(f"Workspace:         {summary['studio']['workspace_root']}")
+    print(f"Route:             {summary['studio']['route']}")
+    print(f"Local Only:        {summary['studio']['local_only']}")
     print(f"App:               {app['name']}")
     print(f"Journey:           {app['journey'] or 'not configured'}")
     print(f"First Goal:        {app['first_goal'] or 'not configured'}")
@@ -73,5 +73,5 @@ def _print_app_overview(summary: dict) -> None:
     print(f"Runtime Readiness: {workspace['runtime_readiness']}")
     print("\nNext Step:")
     print(f"  {home['next_step']}")
-    print("\nUse 'mozaiks console --json' for machine-readable output.")
-    print("Launch the full management interface with: mozaiks console --dir <workspace> --open")
+    print("\nUse 'python -m mozaiks studio --json' for machine-readable output.")
+    print("Launch Studio with: python -m mozaiks studio --dir <workspace> --open")

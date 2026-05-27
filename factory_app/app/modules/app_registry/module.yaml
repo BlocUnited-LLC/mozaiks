@@ -3,7 +3,7 @@ module:
   id: app_registry
   display_name: App Registry
   version: 1.0.0
-  description: Durable app records and lifecycle state for the Mozaiks Console.
+  description: Durable app records and lifecycle state for Mozaiks Studio.
   owner: app
   visibility: private
   handler: backend.handler:AppRegistryModule

@@ -9,9 +9,9 @@ Mozaiks has three user-visible layers and one internal infrastructure layer.
 
 1. `Mozaiks`
    - the overall product
-2. `Workspace Console`
+2. `Workspace Studio`
    - the multi-app account or tenant management surface
-3. `App Console`
+3. `App Studio`
    - the single-app management surface
 4. internal runtime systems
    - workflows, sessions, artifacts, control plane, and orchestration state
@@ -39,7 +39,7 @@ Does not own as a visible concept:
 - workflow execution internals
 - control-plane routing details
 
-### Workspace Console
+### Workspace Studio
 
 The multi-app management surface for one workspace or tenant.
 
@@ -52,7 +52,7 @@ Owns:
 - host-provided billing or commercial controls when the host exposes them
 - workspace-level settings and team controls
 
-### App Console
+### App Studio
 
 The single-app management surface entered after selecting an app.
 
@@ -99,14 +99,14 @@ Definitions:
 - `Usage` is cross-app consumption and spend.
 - `Operations` is cross-app health, incidents, failures, and runtime status.
 - Host apps may add billing or commercial controls as proprietary workspace
-  surfaces. They are not required OSS factory console routes.
+  surfaces. They are not required OSS factory Studio routes.
 - `Settings` is workspace, team, permissions, and defaults.
 
 `Workspace` is the context label, not the primary nav title.
 
 ### App-Level Navigation
 
-Recommended app console sections:
+Recommended app Studio sections:
 
 - `Overview`
 - `Build`
@@ -167,13 +167,13 @@ should be simpler:
 
 ```text
 Mozaiks
-  -> Workspace Console
+  -> Workspace Studio
      -> Apps
      -> Usage
      -> Operations
      -> Settings
 
-  -> App Console
+  -> App Studio
      -> Overview
      -> Build
      -> Deploy
@@ -189,7 +189,7 @@ Mozaiks
 
 | Surface | User-visible role | Internal owner |
 | --- | --- | --- |
-| Workspace Console | multi-app management | Studio host + first-party app bundle today |
+| Workspace Studio | multi-app management | Studio host + first-party app bundle today |
 | Build | creation and revision experience | first-party builder workflows + runtime harness |
 | Admin | privileged app management | framework-owned admin shell |
 | App pages | generated or app-authored product UI | app workspace |
@@ -200,7 +200,6 @@ Mozaiks
 These should not appear as top-level product areas:
 
 - `Hub`
-- `Studio`
 - `Control Plane`
 - `Factory App`
 
@@ -216,8 +215,8 @@ The standard user path should be:
 
 The system should feel like one coherent platform:
 
-- the Workspace Console manages many apps
-- the App Console manages one app
+- Workspace Studio manages many apps
+- App Studio manages one app
 - Build evolves the app
 - Admin governs the app
 - runtime orchestration stays behind the scenes

@@ -1,6 +1,6 @@
 # Add Workflows
 
-Most users should start in the Console with `Create App`. Add a workflow
+Most users should start in Studio with `Create App`. Add a workflow
 directly only when you are extending Mozaiks or adding an app-owned workflow.
 
 ## Before You Start
@@ -61,200 +61,176 @@ included only when the workflow needs them.
 
 ## Contract Snippets
 
-These snippets show the shape of each file. They are intentionally small - use
+These snippets show the shape of each file. They are intentionally small — use
 them as contract references, not as full workflow examples.
 
-### `orchestrator.yaml`
+=== "orchestrator.yaml"
 
-```yaml
-workflow_name: IntakeWorkflow
-max_turns: 20
-human_in_the_loop: true
-workflow_startup_mode: AgentDriven
-orchestration_pattern: Pipeline
-initial_agent: IntakeAgent
-initial_message: "Start with IntakeAgent."
-initial_message_to_user: null
-triggers:
-  - type: chat
-    description: Start from the chat UI.
-```
+    ```yaml
+    workflow_name: IntakeWorkflow
+    max_turns: 20
+    human_in_the_loop: true
+    workflow_startup_mode: AgentDriven
+    orchestration_pattern: Pipeline
+    initial_agent: IntakeAgent
+    initial_message: "Start with IntakeAgent."
+    initial_message_to_user: null
+    triggers:
+      - type: chat
+        description: Start from the chat UI.
+    ```
 
-`initial_message` is a hidden runtime seed. Use `initial_message_to_user` only
-when the workflow needs a visible startup message.
+    `initial_message` is a hidden runtime seed. Use `initial_message_to_user` only
+    when the workflow needs a visible startup message.
 
-### `context_variables.yaml`
+=== "context_variables.yaml"
 
-```yaml
-definitions:
-  intake_complete:
-    type: boolean
-    description: True when the intake agent has enough information.
-    source:
-      type: state
-      default: false
-  user_goal:
-    type: string
-    description: The user's requested outcome.
-    source:
-      type: state
-      default: null
+    ```yaml
+    definitions:
+      intake_complete:
+        type: boolean
+        description: True when the intake agent has enough information.
+        source:
+          type: state
+          default: false
+      user_goal:
+        type: string
+        description: The user's requested outcome.
+        source:
+          type: state
+          default: null
 
-agents:
-  IntakeAgent:
-    variables: [user_goal, intake_complete]
-  GeneratorAgent:
-    variables: [user_goal]
-```
+    agents:
+      IntakeAgent:
+        variables: [user_goal, intake_complete]
+      GeneratorAgent:
+        variables: [user_goal]
+    ```
 
-Keep shared state explicit. Do not rely on prompt-only memory for values that a
-later agent, tool, or UI surface must consume.
+    Keep shared state explicit. Do not rely on prompt-only memory for values that a
+    later agent, tool, or UI surface must consume.
 
-### `structured_outputs.yaml`
+=== "structured_outputs.yaml"
 
-```yaml
-registry:
-  IntakeAgent: null
-  GeneratorAgent: BuildPlan
+    ```yaml
+    registry:
+      IntakeAgent: null
+      GeneratorAgent: BuildPlan
 
-models:
-  BuildPlan:
-    type: model
-    description: The deterministic plan emitted by the generator agent.
-    fields:
-      title:
-        type: str
-        description: Short name for the generated plan.
-      tasks:
-        type: list
-        items: str
-        description: Ordered implementation tasks.
-```
+    models:
+      BuildPlan:
+        type: model
+        description: The deterministic plan emitted by the generator agent.
+        fields:
+          title:
+            type: str
+            description: Short name for the generated plan.
+          tasks:
+            type: list
+            items: str
+            description: Ordered implementation tasks.
+    ```
 
-Conversational agents usually map to `null`. Generator agents map to a strict
-model and should set `structured_outputs_required: true` in `agents.yaml`.
+    Conversational agents usually map to `null`. Generator agents map to a strict
+    model and should set `structured_outputs_required: true` in `agents.yaml`.
 
-### `agents.yaml`
+=== "agents.yaml"
 
-```yaml
-agents:
-  - name: IntakeAgent
-    structured_outputs_required: false
-    max_consecutive_auto_reply: 5
-    prompt_sections:
-      - id: role
-        heading: "[ROLE]"
-        content: Ask focused questions until the user's goal is clear.
+    ```yaml
+    agents:
+      - name: IntakeAgent
+        structured_outputs_required: false
+        max_consecutive_auto_reply: 5
+        prompt_sections:
+          - id: role
+            heading: "[ROLE]"
+            content: Ask focused questions until the user's goal is clear.
 
-  - name: GeneratorAgent
-    structured_outputs_required: true
-    max_consecutive_auto_reply: 3
-    prompt_sections:
-      - id: role
-        heading: "[ROLE]"
-        content: Produce only the BuildPlan structured output.
-```
+      - name: GeneratorAgent
+        structured_outputs_required: true
+        max_consecutive_auto_reply: 3
+        prompt_sections:
+          - id: role
+            heading: "[ROLE]"
+            content: Produce only the BuildPlan structured output.
+    ```
 
-Put reasoning instructions in prompts. Put auto-tool behavior in `tools.yaml`,
-not in `agents.yaml`.
+    Put reasoning instructions in prompts. Put auto-tool behavior in `tools.yaml`,
+    not in `agents.yaml`.
 
-### `handoffs.yaml`
+=== "handoffs.yaml"
 
-```yaml
-handoff_rules:
-  - source_agent: user
-    target_agent: IntakeAgent
-    handoff_type: condition
-    condition_type: string_llm
-    condition: When the user starts or answers an intake question.
-    transition_target: AgentTarget
+    ```yaml
+    handoff_rules:
+      - source_agent: user
+        target_agent: IntakeAgent
+        handoff_type: condition
+        condition_type: string_llm
+        condition: When the user starts or answers an intake question.
+        transition_target: AgentTarget
 
-  - source_agent: IntakeAgent
-    target_agent: GeneratorAgent
-    handoff_type: condition
-    condition_type: string_llm
-    condition: When intake_complete is true.
-    transition_target: AgentTarget
+      - source_agent: IntakeAgent
+        target_agent: GeneratorAgent
+        handoff_type: condition
+        condition_type: string_llm
+        condition: When intake_complete is true.
+        transition_target: AgentTarget
 
-  - source_agent: GeneratorAgent
-    target_agent: user
-    handoff_type: after_work
-    transition_target: RevertToUserTarget
-```
+      - source_agent: GeneratorAgent
+        target_agent: user
+        handoff_type: after_work
+        transition_target: RevertToUserTarget
+    ```
 
-Handoffs should describe deterministic routing. Avoid broad "do whatever is
-best next" conditions.
+    Handoffs should describe deterministic routing. Avoid broad "do whatever is
+    best next" conditions.
 
-### `tools.yaml`
+=== "tools.yaml"
 
-```yaml
-tools:
-  - agent: GeneratorAgent
-    file: save_build_plan.py
-    function: save_build_plan
-    description: Persist the generated plan.
-    tool_type: Agent_Tool
-    auto_tool_call: true
+    ```yaml
+    tools:
+      - agent: GeneratorAgent
+        file: save_build_plan.py
+        function: save_build_plan
+        description: Persist the generated plan.
+        tool_type: Agent_Tool
+        auto_tool_call: true
 
-  - agent: GeneratorAgent
-    file: show_build_plan.py
-    function: show_build_plan
-    description: Render the generated plan in the chat stream.
-    tool_type: UI_Surface
-    auto_tool_call: true
-    ui:
-      component: BuildPlanCard
-      mode: artifact
+      - agent: GeneratorAgent
+        file: show_build_plan.py
+        function: show_build_plan
+        description: Render the generated plan in the chat stream.
+        tool_type: UI_Surface
+        auto_tool_call: true
+        ui:
+          component: BuildPlanCard
+          mode: artifact
 
-lifecycle_tools: []
-```
+    lifecycle_tools: []
+    ```
 
-Choose the smallest tool type that matches the job:
+    Choose the smallest tool type that matches the job:
 
-| Tool type | Use when | UI contract |
-|-----------|----------|-------------|
-| `Agent_Tool` | The workflow needs backend-only work such as saving files, calling app APIs, or transforming structured output. | No `ui` block. |
-| `UI_Surface` | The workflow needs to show a one-way artifact in the chat stream. | Requires `ui.component` and `ui.mode`. |
-| `UI_Tool` | The workflow needs a user decision or structured user input from a React component. | Requires `ui.component`, `ui.mode`, and `ui_contract`. |
+    | Tool type | Use when | UI contract |
+    |-----------|----------|-------------|
+    | `Agent_Tool` | Backend-only work: saving files, calling app APIs, transforming structured output. | No `ui` block. |
+    | `UI_Surface` | Show a one-way artifact in the chat stream. | Requires `ui.component` and `ui.mode`. |
+    | `UI_Tool` | User decision or structured input from a React component. | Requires `ui.component`, `ui.mode`, and `ui_contract`. |
 
-Use `UI_Tool` sparingly. Most generated artifacts should be `UI_Surface`; most
-backend actions should be `Agent_Tool`.
+    Use `UI_Tool` sparingly. Most generated artifacts should be `UI_Surface`; most
+    backend actions should be `Agent_Tool`.
 
-```yaml
-tools:
-  - agent: ReviewAgent
-    file: request_approval.py
-    function: request_approval
-    description: Ask the user to approve or request changes.
-    tool_type: UI_Tool
-    auto_tool_call: false
-    ui:
-      component: ApprovalCard
-      mode: inline
-    ui_contract:
-      surface_kind: agent_tool
-      actions_schema:
-        - id: approve
-          label: Approve
-          variant: primary
-          approved: true
-        - id: request_changes
-          label: Request Changes
-          variant: secondary
-          approved: false
-```
+=== "ui_config.yaml"
 
-### `ui_config.yaml`
+    ```yaml
+    visual_agents:
+      - IntakeAgent
+      - GeneratorAgent
+      - user
+    ```
 
-```yaml
-visual_agents:
-  - IntakeAgent
-  - GeneratorAgent
-  - user
-```
-
-Only visual agents stream user-visible messages and UI-bearing outputs through
-the websocket.
+    Only visual agents stream user-visible messages and UI-bearing outputs through
+    the websocket.
 
 ## Implementation Snippets
 

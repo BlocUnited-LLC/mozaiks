@@ -1,20 +1,20 @@
 import { useEffect, useState } from 'react'
 
-import { API_BASE } from './consoleApi.js'
+import { API_BASE } from './studioApi.js'
 import {
-  buildConsoleDemoAppSummary,
-  getConsoleDemoActivity,
-  getConsoleDemoAdminStats,
-  getConsoleDemoBuildHistory,
-  getConsoleDemoRuns,
-  getConsoleDemoSessions,
-  getConsoleDemoWorkflowNames,
-  isConsoleDemoModeEnabled,
-} from './consoleDemoData.js'
+  buildStudioDemoAppSummary,
+  getStudioDemoActivity,
+  getStudioDemoAdminStats,
+  getStudioDemoBuildHistory,
+  getStudioDemoRuns,
+  getStudioDemoSessions,
+  getStudioDemoWorkflowNames,
+  isStudioDemoModeEnabled,
+} from './studioDemoData.js'
 
 function buildDemoBuildState(appId, summary) {
   const lifecycleState = summary?.app?.lifecycle_state || 'draft'
-  const workflowNames = getConsoleDemoWorkflowNames(appId)
+  const workflowNames = getStudioDemoWorkflowNames(appId)
   const baseBrief =
     lifecycleState === 'active'
       ? 'Refine the live app without disrupting runtime operations.'
@@ -74,20 +74,20 @@ function buildDemoBuildState(appId, summary) {
 }
 
 function buildDemoPayload(appId) {
-  const summary = buildConsoleDemoAppSummary(appId)
+  const summary = buildStudioDemoAppSummary(appId)
   return {
     summary,
-    stats: getConsoleDemoAdminStats(appId),
-    runs: { runs: getConsoleDemoRuns(appId), total: getConsoleDemoRuns(appId).length },
-    sessions: { sessions: getConsoleDemoSessions(appId), total: getConsoleDemoSessions(appId).length },
+    stats: getStudioDemoAdminStats(appId),
+    runs: { runs: getStudioDemoRuns(appId), total: getStudioDemoRuns(appId).length },
+    sessions: { sessions: getStudioDemoSessions(appId), total: getStudioDemoSessions(appId).length },
     buildState: { build: buildDemoBuildState(appId, summary) },
-    buildHistory: getConsoleDemoBuildHistory(appId),
+    buildHistory: getStudioDemoBuildHistory(appId),
     integrations: null,
-    activity: getConsoleDemoActivity(appId),
+    activity: getStudioDemoActivity(appId),
   }
 }
 
-export function useAppConsoleData(appId) {
+export function useAppStudioData(appId) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -95,7 +95,7 @@ export function useAppConsoleData(appId) {
 
   useEffect(() => {
     let cancelled = false
-    const demoMode = isConsoleDemoModeEnabled()
+    const demoMode = isStudioDemoModeEnabled()
 
     async function load() {
       try {
@@ -150,7 +150,7 @@ export function useAppConsoleData(appId) {
             setDataMode('demo')
             setError(null)
           } else {
-            setError(err instanceof Error ? err.message : 'App Console data could not be loaded.')
+            setError(err instanceof Error ? err.message : 'App Studio data could not be loaded.')
           }
         }
       } finally {
@@ -173,4 +173,4 @@ export function useAppConsoleData(appId) {
   }
 }
 
-export default useAppConsoleData
+export default useAppStudioData

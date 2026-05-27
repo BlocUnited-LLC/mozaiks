@@ -5,7 +5,7 @@ import {
   getAppRecordSnapshot,
   isAppInBuild,
   normalizeAppStatus,
-} from './appConsoleModel.js'
+} from './appStudioModel.js'
 
 function parseTimestamp(value) {
   if (!value) return 0

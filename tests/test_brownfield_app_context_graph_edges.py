@@ -38,7 +38,7 @@ def _discovery_output() -> dict:
     return {
         "request_intent": "brownfield_app",
         "existing_product_spec": {
-            "app_name": "Operations Console",
+            "app_name": "Operations Studio",
             "app_description": "Internal work-order operations app.",
             "tech_stack": "React, Node.js, PostgreSQL",
             "hosting_environment": "container platform",
@@ -106,11 +106,11 @@ def _discovery_output() -> dict:
 
 def _context() -> dict:
     return {
-        "app_id": "ops_console",
+        "app_id": "ops_studio",
         "chat_id": "chat_ops_001",
         "repo_summary": {
-            "repo_path": "repos/ops-console",
-            "repo_name": "ops-console",
+            "repo_path": "repos/ops-studio",
+            "repo_name": "ops-studio",
             "git_ref": "main",
             "checksum": "sha256:repo123",
         },

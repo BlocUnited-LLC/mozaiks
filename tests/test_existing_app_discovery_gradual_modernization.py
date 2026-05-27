@@ -349,7 +349,7 @@ def test_save_artifacts_keeps_decomposition_context_evidence_without_disk_persis
         structured_output={
             "request_intent": "brownfield_app",
             "existing_product_spec": {
-                "app_name": "ops-console",
+                "app_name": "ops-studio",
                 "app_description": "DNS migration tool",
                 "tech_stack": "TypeScript, Express",
                 "auth_model": "none",
@@ -391,7 +391,7 @@ def test_save_artifacts_keeps_decomposition_context_evidence_without_disk_persis
                 "storage_migration_required": True,
                 "new_adapters_required": ["cloudflare"],
                 "auth_delegation_model": "platform_keycloak_jwt",
-                "ui_surface_preference": "admin_console",
+                "ui_surface_preference": "admin_studio",
                 "ai_accessible_capabilities": [],
                 "initial_workflows": ["DnsProviderMigration"],
                 "ecosystem_bindings": [],
@@ -582,7 +582,7 @@ def test_mozaiks_authored_app_from_high_density_vocabulary() -> None:
     """mozaiks_authored_app is True when multiple vocab terms appear many times (no .yaml structure needed)."""
     mod = _load_preload("high_density_vocab")
 
-    # Simulate a TypeScript file using Mozaiks vocabulary heavily (like ops-console)
+    # Simulate a TypeScript file using Mozaiks vocabulary heavily (like ops-studio)
     # Each term appears > 10 times
     source = ("contractKind " * 15) + ("module-action " * 12) + ("workflow-preparation " * 11)
 
@@ -612,7 +612,7 @@ def test_mozaiks_authored_app_false_for_low_density_vocabulary() -> None:
 
 
 def test_cloudflare_detected_via_connector_class_name() -> None:
-    """Cloudflare detected from CloudflareConnector class name — covers ops-console pattern."""
+    """Cloudflare detected from CloudflareConnector class name — covers ops-studio pattern."""
     mod = _load_preload("cloudflare_class")
     source = """
 export class CloudflareConnector implements InfraConnector<DnsZone> {

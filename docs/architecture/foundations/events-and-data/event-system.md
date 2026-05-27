@@ -188,9 +188,11 @@ Workflow-trigger resolution stays platform-owned: modules publish validated
 `domain.*`, `platform.*`, or `hosted.*` events, and the platform host resolves them to
 workflow sessions without module code importing workflow internals.
 
-### Studio And Mozaiks Product
+### Studio And Hosted Products
 
-`mozaiksai/hosts/studio.py` and `mozaiksai/hosts/mozaiks.py` may own product-layer events for hosted-only concerns such as build lifecycle, marketplace, collaboration, and billing.
+`mozaiksai/hosts/studio.py` may own Studio lifecycle events. External hosted
+product workspaces may own product-layer events for hosted-only concerns such
+as marketplace, collaboration, billing, and deployment.
 
 These are product facts, not universal runtime assumptions. Product-layer modules publish `hosted.*` events and stay out of generated app bundles unless the hosted product explicitly includes them.
 

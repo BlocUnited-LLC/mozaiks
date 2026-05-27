@@ -2,7 +2,7 @@
   "pages": [
     {
       "path": "/apps/new",
-      "component": "ConsolePage",
+      "component": "StudioPage",
       "label": "Create App",
       "order": 3,
       "meta": {
@@ -11,7 +11,7 @@
         "title": "Create App",
         "appShell": true,
         "navigation": {
-          "group": "workspace-console",
+          "group": "workspace-studio",
           "include": false
         }
       }
@@ -27,7 +27,7 @@
         "title": "Apps",
         "appShell": true,
         "navigation": {
-          "group": "workspace-console",
+          "group": "workspace-studio",
           "scope": "local",
           "icon": "apps"
         }
@@ -44,7 +44,7 @@
         "title": "Usage",
         "appShell": true,
         "navigation": {
-          "group": "workspace-console",
+          "group": "workspace-studio",
           "scope": "local",
           "icon": "chart"
         }
@@ -61,7 +61,7 @@
         "title": "Health",
         "appShell": true,
         "navigation": {
-          "group": "workspace-console",
+          "group": "workspace-studio",
           "scope": "local",
           "icon": "pulse"
         }
@@ -69,16 +69,16 @@
     },
     {
       "path": "/apps/:appId",
-      "component": "ConsolePage",
-      "label": "App Console",
+      "component": "StudioPage",
+      "label": "App Studio",
       "order": 19,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
-        "title": "App Console",
+        "title": "App Studio",
         "appShell": true,
         "navigation": {
-          "group": "app-console",
+          "group": "app-studio",
           "include": false
         }
       }
@@ -94,7 +94,7 @@
         "title": "App Overview",
         "appShell": true,
         "navigation": {
-          "group": "app-console",
+          "group": "app-studio",
           "scope": "local",
           "icon": "dashboard"
         }
@@ -111,7 +111,7 @@
         "title": "App Health",
         "appShell": true,
         "navigation": {
-          "group": "app-console",
+          "group": "app-studio",
           "scope": "local",
           "icon": "pulse"
         }
@@ -128,7 +128,7 @@
         "title": "Users",
         "appShell": true,
         "navigation": {
-          "group": "app-console",
+          "group": "app-studio",
           "scope": "local",
           "icon": "users"
         }
@@ -145,7 +145,7 @@
         "title": "Integrations",
         "appShell": true,
         "navigation": {
-          "group": "app-console",
+          "group": "app-studio",
           "scope": "local",
           "icon": "plug"
         }
@@ -162,7 +162,7 @@
         "title": "Usage",
         "appShell": true,
         "navigation": {
-          "group": "app-console",
+          "group": "app-studio",
           "scope": "local",
           "icon": "chart"
         }

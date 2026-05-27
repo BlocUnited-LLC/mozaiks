@@ -40,8 +40,8 @@ def test_shell_header_and_widget_stay_mobile_tolerant() -> None:
     assert 'pb-24 md:pb-10 lg:pb-0' in layout_source
     assert "function WorkspaceMobileNavTrigger" in layout_source
     assert "<AdminTopbar" not in layout_source
-    assert "Open console navigation" in layout_source
-    assert "Console navigation" in layout_source
+    assert "Open Studio navigation" in layout_source
+    assert "Studio navigation" in layout_source
     assert "bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)]" in layout_source
     assert "max-h-[82dvh]" in layout_source
     assert "top-24 w-[min" not in layout_source
@@ -93,7 +93,7 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert "workspace health route stays responsive across desktop and mobile widths" in smoke_source
     assert "workspace billing route stays responsive across desktop and mobile widths" not in smoke_source
     assert "workspace hosting route stays responsive across desktop and mobile widths" not in smoke_source
-    assert "app console root redirects to overview" in smoke_source
+    assert "app Studio root redirects to overview" in smoke_source
     assert "app overview route stays responsive across desktop and mobile widths" in smoke_source
     assert "app health route stays responsive across desktop and mobile widths" in smoke_source
     assert "app integrations route stays responsive across desktop and mobile widths" in smoke_source
@@ -101,14 +101,14 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert "app billing route stays responsive across desktop and mobile widths" not in smoke_source
     assert "app users route stays responsive across desktop and mobile widths" in smoke_source
     assert "app hosting route stays responsive across desktop and mobile widths" not in smoke_source
-    assert "mobile app console navigation keeps route transitions stable" in smoke_source
-    assert "mobile workspace console navigation keeps route transitions stable" in smoke_source
+    assert "mobile app Studio navigation keeps route transitions stable" in smoke_source
+    assert "mobile workspace Studio navigation keeps route transitions stable" in smoke_source
     assert "/api/studio/overview" in smoke_source
     assert "npx playwright install --with-deps chromium" in ci_source
     assert "npm run test:responsive-smoke" in ci_source
 
 
-def test_factory_app_console_routes_are_all_covered_by_smoke() -> None:
+def test_factory_app_studio_routes_are_all_covered_by_smoke() -> None:
     manifest = json.loads(_read("factory_app/app/ui/route_manifest.json"))
     smoke_source = _read("web_shell/playwright/apps.responsive.smoke.spec.js")
     console_components = {
@@ -120,7 +120,7 @@ def test_factory_app_console_routes_are_all_covered_by_smoke() -> None:
         "AppsPage": "apps route stays responsive across desktop and mobile widths",
         "WorkspaceUsagePage": "workspace usage route stays responsive across desktop and mobile widths",
         "WorkspaceHealthPage": "workspace health route stays responsive across desktop and mobile widths",
-        "ConsolePage": "app console root redirects to overview",
+        "StudioPage": "app Studio root redirects to overview",
         "AppOverviewPage": "app overview route stays responsive across desktop and mobile widths",
         "AppHealthPage": "app health route stays responsive across desktop and mobile widths",
         "AppUsersPage": "app users route stays responsive across desktop and mobile widths",
@@ -138,10 +138,10 @@ def test_factory_app_console_routes_are_all_covered_by_smoke() -> None:
         assert title in smoke_source
 
     assert console_components == route_components | {
-        "AppConsoleChrome",
+        "AppStudioChrome",
         "CreateAppRedirectPage",
         "RefinementControls",
-        # ConsolePage-routed pages (no component: in admin_registry; routed via path matching)
+        # StudioPage-routed pages (no component: in admin_registry; routed via path matching)
         "AppBuildHistoryPage",
         # Sub-components used by route-backed pages (not directly route-backed)
         "CarryForwardReportSummary",
@@ -161,15 +161,15 @@ def test_factory_app_react_files_are_classified() -> None:
         if page.get("component") and page["component"] != "AdminPortal"
     }
     support_files = {
-        "factory_app/app/admin/pages/AppConsoleChrome.jsx",
+        "factory_app/app/admin/pages/AppStudioChrome.jsx",
         "factory_app/app/admin/pages/CreateAppRedirectPage.jsx",
         "factory_app/app/admin/pages/RefinementControls.jsx",
-        # ConsolePage-routed pages (no component: in admin_registry; routed via path matching)
+        # StudioPage-routed pages (no component: in admin_registry; routed via path matching)
         "factory_app/app/admin/pages/AppBuildHistoryPage.jsx",
         # Carry-forward display sub-components (used by route-backed pages)
         "factory_app/app/admin/pages/CarryForwardReportSummary.jsx",
         "factory_app/app/admin/pages/CarryForwardReportPanel.jsx",
-        "factory_app/app/ui/components/ConsoleShared.jsx",
+        "factory_app/app/ui/components/StudioShared.jsx",
         "factory_app/app/ui/components/HarnessDecisionCard.jsx",
         "factory_app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",
         # AppReview workflow agentic UI artifact — emitted by present_review_summary auto-tool

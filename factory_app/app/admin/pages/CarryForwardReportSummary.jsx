@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import { StatusPill } from '../../ui/components/ConsoleShared.jsx'
+import { StatusPill } from '../../ui/components/StudioShared.jsx'
 import { _isSensitivePath, _sanitizePaths } from './_carry_forward_redact.js'
 
 // ---------------------------------------------------------------------------

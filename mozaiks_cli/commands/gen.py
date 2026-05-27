@@ -5,9 +5,9 @@ This is a terminal shortcut for bootstrapping workflows or apps from a prompt.
 It is a convenience, not the canonical build lifecycle.
 
 The canonical build lifecycle — artifact review, diff, run history, promotion,
-and build state management — belongs to the Console. This command should not expand
+and build state management — belongs to Studio. This command should not expand
 to duplicate those surfaces. If you need to review output, compare versions,
-track history, or promote artifacts, use the Console.
+track history, or promote artifacts, use Studio.
 
 Usage:
     mozaiks gen workflow --prompt "description of what you want"
@@ -429,7 +429,7 @@ def _setup_environment(repo_root: Path, staging_workflows: Path):
 # ── Runner ─────────────────────────────────────────────────────────
 
 def _resolve_workspace_app_id(repo_root: Path) -> str:
-    """Read appId from the active workspace app.json so CLI artifacts share the Console namespace."""
+    """Read appId from the active workspace app.json so CLI artifacts share the Studio namespace."""
     explicit_root = os.environ.get("PLATFORM_PATH")
     workspace_root = Path(explicit_root).resolve() if explicit_root else Path.cwd().resolve()
     app_root = resolve_active_app_root(workspace_root)
@@ -608,7 +608,7 @@ def run(args):
             _print_info("  # Review and customise the generated files")
             if mode == "app":
                 _print_info("  Promote the generated app bundle into an active app root before running it")
-                _print_info("  Open the Console: mozaiks console --dir . --open")
+                _print_info("  Open Studio: python -m mozaiks studio --dir . --open")
             return 0
         else:
             _print_error(f"Generation failed: {result.get('error', 'Unknown error')}")

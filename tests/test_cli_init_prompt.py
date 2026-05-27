@@ -45,7 +45,7 @@ def test_init_command_prompts_for_name_when_missing(monkeypatch, tmp_path) -> No
     assert (target_dir / "CLAUDE.md").exists()
     assert (target_dir / ".claude" / "rules" / "modules.md").exists()
     assert (target_dir / ".claude" / "skills" / "add-module" / "SKILL.md").exists()
-    assert (target_dir / "scripts" / "run-console.ps1").exists()
+    assert (target_dir / "scripts" / "run-studio.ps1").exists()
     assert (target_dir / "scripts" / "run-backend.ps1").exists()
     assert (target_dir / "scripts" / "run-frontend.ps1").exists()
     assert (target_dir / "app" / "modules" / "README.md").exists()
@@ -121,8 +121,8 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     assert "Standalone Workspace Setup" in readme
     assert "The `.venv` belongs inside this workspace." in readme
     assert "python -m pip install -r requirements.txt" in readme
-    assert "Set `MONGO_URI` before running the Console." in readme
-    assert "mozaiks console --dir . --open" in readme
+    assert "Set `MONGO_URI` before running Studio." in readme
+    assert "python -m mozaiks studio --dir . --open" in readme
     assert "installed `mozaiks` package" in readme
     assert "Coding Agent Guidance" in readme
 
@@ -176,7 +176,7 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     }
     setup_skill = (target_dir / ".claude" / "skills" / "setup" / "SKILL.md").read_text(encoding="utf-8")
     assert "workspace-local `.venv`" in setup_skill
-    assert "run-console.ps1" in setup_skill
+    assert "run-studio.ps1" in setup_skill
 
     backend_script = (target_dir / "scripts" / "run-backend.ps1").read_text(encoding="utf-8")
     assert "mozaiksai.hosts.platform:app" in backend_script
@@ -186,6 +186,6 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     assert "resolve_web_shell_root" in frontend_script
     assert "npm --prefix" in frontend_script
 
-    console_script = (target_dir / "scripts" / "run-console.ps1").read_text(encoding="utf-8")
-    assert '"console"' in console_script
-    assert '"--dir"' in console_script
+    studio_script = (target_dir / "scripts" / "run-studio.ps1").read_text(encoding="utf-8")
+    assert '"studio"' in studio_script
+    assert '"--dir"' in studio_script

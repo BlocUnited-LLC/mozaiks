@@ -60,12 +60,12 @@ from mozaiksai.core.artifacts import (
 )
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.control_plane.review import load_refinement_review_record
-from mozaiksai.core.runtime.app.console_summary import (
+from mozaiksai.core.runtime.app.studio_summary import (
     build_app_overview_summary,
     build_apps_summary,
     build_build_section,
     build_integrations_summary,
-    get_missing_console_surfaces,
+    get_missing_studio_surfaces,
     load_build_state_from_db,
     save_build_state_to_db,
 )
@@ -523,7 +523,7 @@ def _resolve_studio_scope(
 
 
 @app.get("/api/shell-config")
-async def get_console_shell_config():
+async def get_studio_shell_config():
     return await build_shell_config(surface="studio")
 
 
@@ -534,7 +534,7 @@ async def get_app_overview(
 ):
     resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     app_root = resolve_app_root()
-    missing_surfaces = get_missing_console_surfaces(app_root)
+    missing_surfaces = get_missing_studio_surfaces(app_root)
     if missing_surfaces:
         raise HTTPException(
             status_code=500,
@@ -563,7 +563,7 @@ async def get_workspace_apps(
 ):
     _, user_id = _resolve_studio_scope(principal)
     app_root = resolve_app_root()
-    missing_surfaces = get_missing_console_surfaces(app_root)
+    missing_surfaces = get_missing_studio_surfaces(app_root)
     if missing_surfaces:
         raise HTTPException(
             status_code=500,
@@ -1434,7 +1434,7 @@ async def get_build_surface(
 ):
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     app_root = resolve_app_root()
-    missing_surfaces = get_missing_console_surfaces(app_root)
+    missing_surfaces = get_missing_studio_surfaces(app_root)
     if missing_surfaces:
         raise HTTPException(
             status_code=500,
@@ -1452,7 +1452,7 @@ async def get_build_surface(
             local_only=True,
             app_record=record,
         )
-        home_summary["console"] = {**home_summary["console"], "surface": "shell-build", "route": f"/apps/{app_id}/build"}
+        home_summary["studio"] = {**home_summary["studio"], "surface": "shell-build", "route": f"/apps/{app_id}/build"}
         return {
             **home_summary,
             "build": build_build_section(home_summary, build_state),
@@ -1486,7 +1486,7 @@ async def save_build_surface(
         raise HTTPException(status_code=400, detail="change_class is only valid when request_kind is 'refinement'")
 
     app_root = resolve_app_root()
-    missing_surfaces = get_missing_console_surfaces(app_root)
+    missing_surfaces = get_missing_studio_surfaces(app_root)
     if missing_surfaces:
         raise HTTPException(
             status_code=500,
@@ -1513,7 +1513,7 @@ async def save_build_surface(
             local_only=True,
             app_record=record if isinstance(record, dict) else None,
         )
-        home_summary["console"] = {**home_summary["console"], "surface": "shell-build", "route": f"/apps/{app_id}/build"}
+        home_summary["studio"] = {**home_summary["studio"], "surface": "shell-build", "route": f"/apps/{app_id}/build"}
         return {
             **home_summary,
             "build": build_build_section(home_summary, build_state),

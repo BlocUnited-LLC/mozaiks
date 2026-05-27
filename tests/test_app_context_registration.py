@@ -138,7 +138,7 @@ def _source_ref() -> SourceRef:
 
 def _inventory() -> ApplicationInventory:
     return ApplicationInventory(
-        app_id="ops_console",
+        app_id="ops_studio",
         source_refs=[_source_ref()],
         routes=[SurfaceRef(surface_id="orders", kind="route", location="/orders")],
         api_endpoints=[
@@ -165,7 +165,7 @@ def _artifact_refs(suffix: str = "1") -> dict[str, str]:
 
 def test_builds_brownfield_app_context_version_from_artifact_refs() -> None:
     context_version = build_brownfield_app_context_version(
-        app_id="ops_console",
+        app_id="ops_studio",
         artifact_version_refs=_artifact_refs(),
         source_refs=[_source_ref()],
         ownership_boundaries=_ownership(),
@@ -189,7 +189,7 @@ def test_missing_required_artifact_refs_fail_clearly() -> None:
 
     with pytest.raises(ValueError, match="risk_report"):
         build_brownfield_app_context_version(
-            app_id="ops_console",
+            app_id="ops_studio",
             artifact_version_refs=refs,
             source_refs=[_source_ref()],
             ownership_boundaries=_ownership(),
@@ -200,7 +200,7 @@ def test_missing_required_artifact_refs_fail_clearly() -> None:
 async def test_registers_app_context_version_as_artifact_kind() -> None:
     store = _MemoryArtifactStore()
     context_version = build_brownfield_app_context_version(
-        app_id="ops_console",
+        app_id="ops_studio",
         artifact_version_refs=_artifact_refs(),
         source_refs=[_source_ref()],
         ownership_boundaries=_ownership(),
@@ -224,7 +224,7 @@ async def test_registers_app_context_version_as_artifact_kind() -> None:
 async def test_current_context_selection_can_be_set_and_retrieved() -> None:
     store = _MemoryArtifactStore()
     context_version = build_brownfield_app_context_version(
-        app_id="ops_console",
+        app_id="ops_studio",
         artifact_version_refs=_artifact_refs(),
         source_refs=[_source_ref()],
         ownership_boundaries=_ownership(),
@@ -233,15 +233,15 @@ async def test_current_context_selection_can_be_set_and_retrieved() -> None:
     )
     registered = await register_app_context_version(context_version, artifact_store=store)
 
-    assert await get_current_app_context_version(app_id="ops_console", artifact_store=store) is None
+    assert await get_current_app_context_version(app_id="ops_studio", artifact_store=store) is None
 
     current_artifact = await set_current_app_context_version(
-        app_id="ops_console",
+        app_id="ops_studio",
         artifact_version_id=registered.artifact_version.id,
         artifact_store=store,
     )
     current_context = await get_current_app_context_version(
-        app_id="ops_console",
+        app_id="ops_studio",
         artifact_store=store,
     )
 
@@ -254,7 +254,7 @@ async def test_current_context_selection_can_be_set_and_retrieved() -> None:
 async def test_new_current_context_supersedes_prior_current_context() -> None:
     store = _MemoryArtifactStore()
     first = build_brownfield_app_context_version(
-        app_id="ops_console",
+        app_id="ops_studio",
         artifact_version_refs=_artifact_refs("1"),
         source_refs=[_source_ref()],
         ownership_boundaries=_ownership(),
@@ -262,7 +262,7 @@ async def test_new_current_context_supersedes_prior_current_context() -> None:
         context_version_id="ctx_ops_1",
     )
     second = build_brownfield_app_context_version(
-        app_id="ops_console",
+        app_id="ops_studio",
         artifact_version_refs=_artifact_refs("2"),
         source_refs=[_source_ref()],
         ownership_boundaries=_ownership(),
@@ -281,7 +281,7 @@ async def test_new_current_context_supersedes_prior_current_context() -> None:
         make_current=True,
     )
     current_context = await get_current_app_context_version(
-        app_id="ops_console",
+        app_id="ops_studio",
         artifact_store=store,
     )
 
@@ -294,7 +294,7 @@ async def test_new_current_context_supersedes_prior_current_context() -> None:
 def test_brownfield_registration_references_context_version_id() -> None:
     registration = BrownfieldRegistration(
         registration_id="reg_ops",
-        app_id="ops_console",
+        app_id="ops_studio",
         source_refs=[_source_ref()],
         context_version_id="ctx_ops_1",
     )

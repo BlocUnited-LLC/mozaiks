@@ -1,8 +1,8 @@
 /**
- * ConsolePage — internal router for first-party app-console paths.
+ * StudioPage — internal router for first-party Studio paths.
  *
  * Mirrors the admin portal pattern: one registered component can handle the
- * first-party app-console subtree, with sub-routing done via location.pathname.
+ * first-party app management subtree, with sub-routing done via location.pathname.
  */
 
 import { Navigate, useLocation } from 'react-router-dom'
@@ -14,7 +14,7 @@ import AppIntegrationsPage from './AppIntegrationsPage.jsx'
 import CreateAppRedirectPage from './CreateAppRedirectPage.jsx'
 
 
-export default function ConsolePage() {
+export default function StudioPage() {
   const location = useLocation()
 
   if (/^\/apps\/[^/]+$/.test(location.pathname)) {

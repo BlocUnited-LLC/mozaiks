@@ -3,10 +3,10 @@ import importlib.util
 from pathlib import Path
 
 
-def _load_console_summary_module():
+def _load_studio_summary_module():
     workspace = Path(__file__).resolve().parents[1]
-    file_path = workspace / "mozaiksai/core/runtime/app/console_summary.py"
-    spec = importlib.util.spec_from_file_location("tests.console_summary_module", file_path)
+    file_path = workspace / "mozaiksai/core/runtime/app/studio_summary.py"
+    spec = importlib.util.spec_from_file_location("tests.studio_summary_module", file_path)
     module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
     spec.loader.exec_module(module)
@@ -14,7 +14,7 @@ def _load_console_summary_module():
 
 
 def test_integrations_summary_always_includes_connector_vault(monkeypatch) -> None:
-    console_summary = _load_console_summary_module()
+    studio_summary = _load_studio_summary_module()
 
     async def fake_connector_backend_summary():
         return {
@@ -27,9 +27,9 @@ def test_integrations_summary_always_includes_connector_vault(monkeypatch) -> No
         }
 
     monkeypatch.delenv("AZURE_KEY_VAULT_NAME", raising=False)
-    monkeypatch.setattr(console_summary, "get_connector_backend_summary", fake_connector_backend_summary)
+    monkeypatch.setattr(studio_summary, "get_connector_backend_summary", fake_connector_backend_summary)
 
-    summary = asyncio.run(console_summary.build_integrations_summary())
+    summary = asyncio.run(studio_summary.build_integrations_summary())
 
     assert "connector_vault" in summary["integrations"]
     assert summary["integrations"]["connector_vault"]["kind"] == "vault"
@@ -38,7 +38,7 @@ def test_integrations_summary_always_includes_connector_vault(monkeypatch) -> No
 
 
 def test_integrations_summary_includes_connector_health_counts(monkeypatch) -> None:
-    console_summary = _load_console_summary_module()
+    studio_summary = _load_studio_summary_module()
 
     async def fake_connector_backend_summary():
         return {
@@ -73,10 +73,10 @@ def test_integrations_summary_includes_connector_health_counts(monkeypatch) -> N
             },
         ]
 
-    monkeypatch.setattr(console_summary, "get_connector_backend_summary", fake_connector_backend_summary)
-    monkeypatch.setattr(console_summary, "list_connectors", fake_list_connectors)
+    monkeypatch.setattr(studio_summary, "get_connector_backend_summary", fake_connector_backend_summary)
+    monkeypatch.setattr(studio_summary, "list_connectors", fake_list_connectors)
 
-    summary = asyncio.run(console_summary.build_integrations_summary(app_id="app_1"))
+    summary = asyncio.run(studio_summary.build_integrations_summary(app_id="app_1"))
 
     assert summary["connector_summary"]["configured"] == 1
     assert summary["connector_summary"]["not_configured"] == 1

@@ -13,9 +13,6 @@ Branding is split across a few app-owned files:
 - `app/config/shell.json` for shell content and navigation chrome
 - `app/app.json` for startup route and auth intent, not raw theme tokens
 
-In this repo, the first-party Console bundle follows the same contract under
-`factory_app/app/`.
-
 ## What Branding Does Not Control
 
 Do not put these concerns into branding files:

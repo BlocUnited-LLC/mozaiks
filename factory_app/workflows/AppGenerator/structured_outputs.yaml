@@ -1501,7 +1501,7 @@ models:
         values:
         - workspace
         - app
-        description: workspace pages appear in the global console nav; app pages appear in the per-app admin portal nav.
+        description: workspace pages appear in the global Studio nav; app pages appear in the per-app admin portal nav.
 
   AdminRegistry:
     type: model
@@ -4140,7 +4140,7 @@ models:
     type: literal
     values:
     - create_app
-    - open_console
+    - open_studio
     - open_notifications
     - open_settings
     - open_profile
@@ -4149,8 +4149,8 @@ models:
   AppShellActionSurface:
     type: literal
     values:
-    - console
-    - app_console
+    - studio
+    - app_studio
     - workflow_session
     - transition
     - public
@@ -4510,7 +4510,7 @@ models:
         - AppShellChromeModePatch
         - 'null'
         default: null
-        description: Optional override for dense dashboards, module workspaces, admin consoles, or profile workspaces.
+        description: Optional override for dense dashboards, module workspaces, admin portals, or profile workspaces.
       conversation:
         type: union
         variants:

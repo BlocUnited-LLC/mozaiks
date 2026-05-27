@@ -7,12 +7,12 @@ import {
 } from '@mozaiks/chat-ui/ui'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
-  ConsoleErrorState,
-  ConsoleLoadingState,
+  StudioErrorState,
+  StudioLoadingState,
   StatusPill,
-} from '../../ui/components/ConsoleShared.jsx'
-import { WorkspaceConsoleHero, formatCompactNumber, formatCurrencyValue } from './AppConsoleChrome.jsx'
-import { useWorkspaceConsoleData } from './useWorkspaceConsoleData.js'
+} from '../../ui/components/StudioShared.jsx'
+import { WorkspaceStudioHero, formatCompactNumber, formatCurrencyValue } from './AppStudioChrome.jsx'
+import { useWorkspaceStudioData } from './useWorkspaceStudioData.js'
 
 
 function buildAppRows(runs, appNameMap) {
@@ -61,7 +61,7 @@ function buildAppRows(runs, appNameMap) {
 }
 
 export default function WorkspaceUsagePage() {
-  const { apps, workspaceStats, workspaceRuns, loading, error, dataMode } = useWorkspaceConsoleData('Workspace usage could not be loaded.')
+  const { apps, workspaceStats, workspaceRuns, loading, error, dataMode } = useWorkspaceStudioData('Workspace usage could not be loaded.')
   const [searchValue, setSearchValue] = useState('')
 
   const appNameMap = useMemo(() => {
@@ -203,13 +203,13 @@ export default function WorkspaceUsagePage() {
     },
   ]
 
-  if (loading) return <ConsoleLoadingState label="Loading workspace usage…" />
-  if (error) return <ConsoleErrorState title="Workspace Usage Unavailable" message={error} />
+  if (loading) return <StudioLoadingState label="Loading workspace usage…" />
+  if (error) return <StudioErrorState title="Workspace Usage Unavailable" message={error} />
 
   return (
     <WorkspaceLayout>
       <div className="space-y-6">
-        <WorkspaceConsoleHero
+        <WorkspaceStudioHero
           title="Usage"
           subtitle="Track workspace metering, model spend, and workflow activity."
           actions={[{ id: 'export-csv', label: 'Export CSV' }]}

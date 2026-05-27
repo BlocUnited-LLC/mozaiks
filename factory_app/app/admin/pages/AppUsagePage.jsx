@@ -3,15 +3,15 @@ import { useParams } from 'react-router-dom'
 
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
-  ConsoleErrorState,
-  ConsoleInlineEmptyState,
-  ConsoleLoadingState,
+  StudioErrorState,
+  StudioInlineEmptyState,
+  StudioLoadingState,
   Panel,
   StatusPill,
-} from '../../ui/components/ConsoleShared.jsx'
-import { AppConsoleHero, formatCompactNumber, formatCurrencyValue } from './AppConsoleChrome.jsx'
-import { getAppConsoleSnapshot, sumBy } from './appConsoleDataHelpers.js'
-import { useAppConsoleData } from './useAppConsoleData.js'
+} from '../../ui/components/StudioShared.jsx'
+import { AppStudioHero, formatCompactNumber, formatCurrencyValue } from './AppStudioChrome.jsx'
+import { getAppStudioSnapshot, sumBy } from './appStudioDataHelpers.js'
+import { useAppStudioData } from './useAppStudioData.js'
 
 function formatShortDate(iso) {
   if (!iso) return '—'
@@ -125,7 +125,7 @@ function WorkflowGroupRow({ group, expanded, onToggle }) {
 
 export default function AppUsagePage() {
   const { appId = 'workspace-app' } = useParams()
-  const { data, loading, error, dataMode } = useAppConsoleData(appId)
+  const { data, loading, error, dataMode } = useAppStudioData(appId)
   const [expandedWorkflows, setExpandedWorkflows] = useState(new Set())
 
   const toggleExpand = (workflowName) => {
@@ -136,10 +136,10 @@ export default function AppUsagePage() {
     })
   }
 
-  if (loading) return <ConsoleLoadingState label="Loading app usage…" />
-  if (error || !data) return <ConsoleErrorState title="Usage Unavailable" message={error || 'No usage data returned.'} />
+  if (loading) return <StudioLoadingState label="Loading app usage…" />
+  if (error || !data) return <StudioErrorState title="Usage Unavailable" message={error || 'No usage data returned.'} />
 
-  const snapshot = getAppConsoleSnapshot(appId, data, dataMode)
+  const snapshot = getAppStudioSnapshot(appId, data, dataMode)
   const totalInputTokens = Number(snapshot.stats.total_prompt_tokens || 0)
   const totalOutputTokens = Number(snapshot.stats.total_completion_tokens || 0)
   const totalTokens = Number(snapshot.usageRecord?.tokens_used || 0) || totalInputTokens + totalOutputTokens
@@ -172,7 +172,7 @@ export default function AppUsagePage() {
   return (
     <WorkspaceLayout>
       <div className="space-y-6">
-        <AppConsoleHero
+        <AppStudioHero
           appId={appId}
           summary={snapshot.summary}
           dataMode={dataMode}
@@ -216,7 +216,7 @@ export default function AppUsagePage() {
               </table>
             </div>
           ) : (
-            <ConsoleInlineEmptyState
+            <StudioInlineEmptyState
               title="No usage breakdown available yet"
               description="This view becomes informative once the app has tracked runtime traffic across one or more workflows."
             />
@@ -240,7 +240,7 @@ export default function AppUsagePage() {
                 ))}
               </div>
             ) : (
-              <ConsoleInlineEmptyState
+              <StudioInlineEmptyState
                 title="Cost drivers appear after runtime usage begins"
                 description="Once the app is actively serving requests, this panel will highlight the workflows behind the largest cost footprint."
               />
@@ -262,7 +262,7 @@ export default function AppUsagePage() {
                   ))}
                 </div>
               ) : (
-                <ConsoleInlineEmptyState
+                <StudioInlineEmptyState
                   title="No error trend yet"
                   description="Once usage accumulates, this panel will show where workflow failures are concentrating."
                 />

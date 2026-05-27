@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from importlib import import_module
 
-
-CANONICAL_MOZAIKS_ROUTES = {
+CANONICAL_STUDIO_ROUTES = {
     ("GET", "/api/health"),
     ("GET", "/api/events/metrics"),
     ("GET", "/health/active-runs"),
@@ -49,7 +48,7 @@ CANONICAL_MOZAIKS_ROUTES = {
     ("WS", "/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}"),
 }
 
-REMOVED_LEGACY_ROUTES = {
+REMOVED_RUNTIME_ROUTES = {
     ("GET", "/"),
     ("GET", "/favicon.ico"),
     ("GET", "/.well-known/appspecific/com.chrome.devtools.json"),
@@ -73,13 +72,13 @@ def _public_routes(app) -> set[tuple[str, str]]:
     return routes
 
 
-def test_mozaiks_host_contains_canonical_routes():
-    mozaiks_routes = _public_routes(import_module("mozaiksai.hosts.mozaiks").app)
+def test_studio_host_contains_canonical_routes():
+    studio_routes = _public_routes(import_module("mozaiksai.hosts.studio").app)
 
-    assert CANONICAL_MOZAIKS_ROUTES <= mozaiks_routes
+    assert CANONICAL_STUDIO_ROUTES <= studio_routes
 
 
-def test_mozaiks_host_does_not_restore_removed_routes():
-    mozaiks_routes = _public_routes(import_module("mozaiksai.hosts.mozaiks").app)
+def test_studio_host_does_not_restore_removed_routes():
+    studio_routes = _public_routes(import_module("mozaiksai.hosts.studio").app)
 
-    assert not (REMOVED_LEGACY_ROUTES & mozaiks_routes)
+    assert not (REMOVED_RUNTIME_ROUTES & studio_routes)

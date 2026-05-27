@@ -33,11 +33,11 @@ def test_quickstart_parser_accepts_builder_flags() -> None:
     assert args.no_browser is True
 
 
-def test_quickstart_bootstraps_workspace_and_launches_console(monkeypatch, tmp_path, capsys) -> None:
+def test_quickstart_bootstraps_workspace_and_launches_studio(monkeypatch, tmp_path, capsys) -> None:
     target_dir = tmp_path / "quickstart-app"
     launched = {}
 
-    def fake_launch_console(*, workspace_root, backend_port, frontend_port, open_browser):
+    def fake_launch_studio(*, workspace_root, backend_port, frontend_port, open_browser):
         launched["workspace_root"] = workspace_root
         launched["backend_port"] = backend_port
         launched["frontend_port"] = frontend_port
@@ -45,11 +45,11 @@ def test_quickstart_bootstraps_workspace_and_launches_console(monkeypatch, tmp_p
         return {
             "backend_url": f"http://localhost:{backend_port}",
             "frontend_url": f"http://localhost:{frontend_port}",
-            "console_url": f"http://localhost:{frontend_port}/apps",
+            "studio_url": f"http://localhost:{frontend_port}/apps",
             "frontend_available": True,
         }
 
-    monkeypatch.setattr("mozaiks_cli.commands.onboard.launch_console", fake_launch_console)
+    monkeypatch.setattr("mozaiks_cli.commands.onboard.launch_studio", fake_launch_studio)
 
     quickstart_command.run(
         Namespace(

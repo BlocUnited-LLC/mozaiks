@@ -5,7 +5,7 @@ wrapper. Persistent storage is therefore a first-class runtime contract.
 
 ## Core Rule
 
-- Durable persistence is required for the workspace console and the
+- Durable persistence is required for Studio and the
   workflow-owned build sequence,
   `factory_app`, multi-stage build workflows, refinement, and revision history.
 - In-memory execution is only acceptable for smoke tests, demos, or simple
@@ -69,7 +69,7 @@ Rules:
 - MongoDB stores connector metadata, status, timestamps, and ownership only.
 - Raw API keys and refresh tokens are stored in the connector vault backend or
   remain ephemeral for the current session.
-- the workspace console, Build, Integrations, and Admin surfaces may manage
+- Studio, Build, Integrations, and Admin surfaces may manage
   connector metadata even when no vault is configured.
 - when a vault backend is configured, the visible Integrations surface may
   create, rotate, and delete durable connector secrets while keeping MongoDB

@@ -19,7 +19,7 @@ AppGenerator emits deterministic app-bundle artifacts for persistent app UI:
 The artifact split is strict:
 
 - `app.json` defines app identity, targets, auth intent, and startup behavior such as `startup.landing_spot`.
-- `admin/admin_registry.yaml` declares all admin portal pages for the app's operator console. Module panels reference these page ids via the `page` field in `modules/{module}/contracts/admin.yaml`.
+- `admin/admin_registry.yaml` declares all admin portal pages for the app's Studio management surface. Module panels reference these page ids via the `page` field in `modules/{module}/contracts/admin.yaml`.
 - `ui/pages/*.yaml` define persistent page structure and route ownership.
 - `brand/theme_config.json` defines visual tokens, shared primitives, and semantic `ui.chat` / `ui.shell` / `ui.page` styling.
 - `config/shell.json` defines compact app-wide shell behavior: header logo/actions, canonical shortcuts, navigation policy, non-page-owned navigation items, and chrome mode defaults.

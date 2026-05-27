@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 
@@ -9,7 +7,7 @@ import pytest
 async def test_studio_shell_config_injects_studio_routes():
     from mozaiksai.hosts import studio as studio_app
 
-    shell_config = await studio_app.get_console_shell_config()
+    shell_config = await studio_app.get_studio_shell_config()
     page_paths = {page.get("path") for page in shell_config.get("pages", [])}
     header_paths = {
         page.get("path")
@@ -30,7 +28,7 @@ async def test_studio_shell_config_injects_studio_routes():
     assert "/apps/:appId/deploy" not in page_paths
     assert "/apps/:appId/admin" not in page_paths
     assert "/profile" in page_paths
-    # admin_registry.yaml declares operations and settings as app-scope admin pages
+    # admin_registry.yaml declares operations and settings as app-scope admin pages.
     assert "/apps/:appId/operations" in page_paths
     assert "/apps/:appId/settings" in page_paths
     assert "/apps" not in header_paths
@@ -40,15 +38,16 @@ async def test_studio_shell_config_injects_studio_routes():
     assert studio_pages["/apps"]["meta"]["requiresRole"] == "admin"
 
 
-def test_mozaiks_app_composes_studio_host():
-    from mozaiksai.hosts import mozaiks as mozaiks_app
+def test_studio_host_composes_platform_host():
+    from mozaiksai.hosts import platform as platform_app
     from mozaiksai.hosts import studio as studio_app
 
-    assert mozaiks_app.app is studio_app.app
+    assert studio_app.app is platform_app.app
 
 
 def test_studio_endpoints_work_without_auth_user_id(monkeypatch):
     from fastapi.testclient import TestClient
+
     from mozaiksai.core.auth import reset_auth_adapter
     from mozaiksai.hosts import studio as studio_app
 
@@ -117,8 +116,8 @@ def test_runtime_cors_uses_declared_frontend_origins(monkeypatch):
 
 
 def test_notification_count_query_uses_platform_notification_intents():
-    from mozaiksai.hosts import platform as platform_app
     from mozaiksai.core.auth.dependencies import UserPrincipal
+    from mozaiksai.hosts import platform as platform_app
 
     principal = UserPrincipal(
         user_id="user_1",
@@ -141,8 +140,9 @@ def test_notification_count_query_uses_platform_notification_intents():
     }
 
 
-def test_mozaiks_dashboard_uses_canonical_module_route():
+def test_product_dashboard_uses_canonical_module_route():
     from tests.import_utils import active_app_root
+
     app_root = active_app_root()
     dashboard_path = app_root / "ui" / "pages" / "custom" / "Dashboard.jsx"
     if not dashboard_path.exists():
@@ -187,7 +187,7 @@ triggers:
                     "capability_id": "tasks.review",
                     "context": {"task_id": "payload.task_id"},
                 },
-                "orchestrator_path": str((workflow_dir / "orchestrator.yaml")),
+                "orchestrator_path": str(workflow_dir / "orchestrator.yaml"),
             }
         ]
     }
@@ -267,17 +267,14 @@ async def test_platform_host_invokes_capability_route_into_workflow_session():
 
 @pytest.mark.asyncio
 async def test_platform_host_loads_app_zero_product_modules(monkeypatch):
-    from mozaiksai.hosts import platform as platform_app
     from mozaiksai.core.runtime.app.loader import AppLoader
-
+    from mozaiksai.hosts import platform as platform_app
     from tests.import_utils import active_app_root
+
     monkeypatch.setenv("PLATFORM_PATH", str(active_app_root()))
     load_result = await AppLoader.load(str(platform_app.resolve_app_root()))
     loaded_modules = {module.name: type(module.handler).__name__ for module in load_result.modules}
 
-    # Product workspaces include communications + investor_marketplace.
-    # Factory app includes factory_control_plane. Skip product-specific assertion
-    # when running against the factory app workspace.
     product_modules = {"communications", "investor_marketplace"}
     if "factory_control_plane" in loaded_modules:
         pytest.skip("Factory app workspace includes shared modules but is not the product workspace")

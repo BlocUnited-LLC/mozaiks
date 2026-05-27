@@ -42,7 +42,7 @@ function buildPathForPage(path, appId) {
 }
 
 function routeIdFromPath(path) {
-  return path.replace(/^\//, '').replace(/[:/]+/g, '-').replace(/-+/g, '-') || 'console'
+  return path.replace(/^\//, '').replace(/[:/]+/g, '-').replace(/-+/g, '-') || 'studio'
 }
 
 function resolveIcon(iconHint) {
@@ -50,7 +50,7 @@ function resolveIcon(iconHint) {
 }
 
 function buildNavGroupsFromPages(pages, appId = null) {
-  const group = appId ? 'app-console' : 'workspace-console'
+  const group = appId ? 'app-studio' : 'workspace-studio'
   const items = (Array.isArray(pages) ? pages : [])
     .filter((page) => page && page.meta?.appShell)
     .filter((page) => resolvePageNavigation(page).group === group)
@@ -61,7 +61,7 @@ function buildNavGroupsFromPages(pages, appId = null) {
       if (!path) return null
       return {
         id: navigation.id || page.id || page.component || routeIdFromPath(page.path),
-        label: navigation.label || page.label || 'Console',
+        label: navigation.label || page.label || 'Studio',
         path,
         icon: resolveIcon(navigation.icon),
         exact: true,
@@ -119,7 +119,7 @@ function getActiveNavItem(navGroups, location) {
 
 function WorkspaceSidebar({ appId = null, navGroups, onNavigate = null, surface = 'sidebar' }) {
   const location = useLocation()
-  const navigationLabel = appId ? 'App Console navigation' : 'Workspace navigation'
+  const navigationLabel = appId ? 'App Studio navigation' : 'Workspace navigation'
   const surfaceClass =
     surface === 'sheet'
       ? 'rounded-2xl border border-border/45 bg-background/76 p-3'
@@ -138,7 +138,7 @@ function WorkspaceSidebar({ appId = null, navGroups, onNavigate = null, surface 
             </svg>
             All Apps
           </Link>
-          <div className="mt-3 truncate text-sm font-semibold text-foreground">App Console</div>
+          <div className="mt-3 truncate text-sm font-semibold text-foreground">App Studio</div>
         </div>
       ) : (
         <div className="mb-5 flex items-center gap-3 px-2 pt-1">
@@ -146,7 +146,7 @@ function WorkspaceSidebar({ appId = null, navGroups, onNavigate = null, surface 
             M
           </div>
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-foreground">Mozaiks Console</div>
+            <div className="truncate text-sm font-semibold text-foreground">Mozaiks Studio</div>
             <div className="truncate text-xs text-muted-foreground/84">Manage your apps</div>
           </div>
         </div>
@@ -189,17 +189,17 @@ function WorkspaceSidebar({ appId = null, navGroups, onNavigate = null, surface 
   )
 }
 
-function WorkspaceMobileNavTrigger({ onOpenMenu, activeLabel = 'Console' }) {
+function WorkspaceMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio' }) {
   return (
     <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)] left-4 z-[56] lg:hidden">
       <button
         type="button"
         onClick={onOpenMenu}
         className="inline-flex h-11 max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full border border-border/45 bg-background/90 px-4 text-foreground shadow-lg shadow-black/15 backdrop-blur-md transition hover:bg-muted/35"
-        aria-label="Open console navigation"
+        aria-label="Open Studio navigation"
       >
         <MenuGlyph />
-        <span className="text-sm font-semibold">Console</span>
+        <span className="text-sm font-semibold">Studio</span>
         <span className="max-w-[9rem] truncate border-l border-border pl-2 text-xs font-medium text-muted-foreground">
           {activeLabel}
         </span>
@@ -215,7 +215,7 @@ export function WorkspaceLayout({ children }) {
   const appId = resolveAppId(location.pathname)
   const navGroups = useMemo(() => buildNavGroupsFromPages(pages, appId), [pages, appId])
   const activeNav = useMemo(() => getActiveNavItem(navGroups, location), [navGroups, location])
-  const activeLabel = activeNav.item?.label || activeNav.group?.label || 'Console'
+  const activeLabel = activeNav.item?.label || activeNav.group?.label || 'Studio'
 
   return (
     <div className="min-h-full flex-1 bg-background">
@@ -231,7 +231,7 @@ export function WorkspaceLayout({ children }) {
             <button
               type="button"
               className="absolute inset-0 bg-black/50"
-              aria-label="Close console navigation"
+              aria-label="Close Studio navigation"
               onClick={() => setMobileOpen(false)}
             />
             <div className="absolute inset-x-0 bottom-0 max-h-[82dvh] overflow-y-auto rounded-t-3xl border border-border bg-card/95 p-3 pb-[calc(env(safe-area-inset-bottom,0px)+6.25rem)] shadow-2xl backdrop-blur-md">
@@ -249,7 +249,7 @@ export function WorkspaceLayout({ children }) {
                       All Apps
                     </Link>
                   ) : (
-                    <div className="truncate text-sm font-semibold text-foreground">Console navigation</div>
+                    <div className="truncate text-sm font-semibold text-foreground">Studio navigation</div>
                   )}
                   <div className="truncate text-xs text-muted-foreground">{activeLabel}</div>
                 </div>
@@ -257,7 +257,7 @@ export function WorkspaceLayout({ children }) {
                   type="button"
                   onClick={() => setMobileOpen(false)}
                   className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card text-foreground transition hover:bg-muted"
-                  aria-label="Close console navigation"
+                  aria-label="Close Studio navigation"
                 >
                   <CloseGlyph />
                 </button>

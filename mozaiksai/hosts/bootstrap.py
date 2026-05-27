@@ -39,7 +39,7 @@ def configure_repo_host_defaults(host: str) -> None:
     or through the host-specific app/factory defaults below.
     """
     normalized_host = str(host or "").strip().lower()
-    if normalized_host not in {"platform", "studio", "mozaiks"}:
+    if normalized_host not in {"platform", "studio"}:
         return
 
     external_workspace_root = str(os.getenv("MOZAIKS_APP_WORKSPACE_PATH") or "").strip()
@@ -66,10 +66,6 @@ def configure_repo_host_defaults(host: str) -> None:
 
     if normalized_host == "studio":
         selected_root: Path | None = factory_workflows_root or app_workflows_root
-        if selected_root is not None:
-            os.environ["MOZAIKS_WORKFLOWS_PATH"] = str(selected_root)
-    elif normalized_host == "mozaiks":
-        selected_root = app_workflows_root if (app_workflows_root is not None and app_workflows_root.is_dir()) else factory_workflows_root
         if selected_root is not None:
             os.environ["MOZAIKS_WORKFLOWS_PATH"] = str(selected_root)
     else:

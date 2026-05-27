@@ -29,7 +29,7 @@ export function formatDateTimeLabel(value, fallback = 'Not available') {
   }
 }
 
-export function AppConsoleHero({
+export function AppStudioHero({
   title,
   subtitle,
   actions = null,
@@ -47,7 +47,7 @@ export function AppConsoleHero({
   )
 }
 
-export function WorkspaceConsoleHero({
+export function WorkspaceStudioHero({
   title,
   subtitle,
   actions = null,
@@ -71,4 +71,4 @@ export function WorkspaceConsoleHero({
   )
 }
 
-export default AppConsoleHero
+export default AppStudioHero

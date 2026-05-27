@@ -472,7 +472,7 @@ agents:
             "experience_goals": ["<string>"],
             "appearance_hint": "<string|null>"
           },
-          "shell_preset_hint": "product_app | workspace_console | public_plus_app | conversation_app | flow_app | null",
+          "shell_preset_hint": "product_app | workspace_studio | public_plus_app | conversation_app | flow_app | null",
           "external_integrations": [
             { "name": "<string>", "kind": "<string>", "purpose": "<string>" }
           ],
@@ -810,7 +810,7 @@ agents:
         - set `page_files[*].registry_key` to the exact `route_manifest[*].component` value
         - default-export the React component imported by the generated `ui/index.js` registry barrel
         - never rely on implicit custom page discovery; `ui/route_manifest.json`, `ui/pages/custom/*.jsx`, and `ui/index.js` registration must be emitted together
-        - use `PageFrame` from `@mozaiks/chat-ui` — this applies to user-facing custom route pages in `ui/pages/custom/` only; do NOT use `PageFrame` for workspace/app console pages in `admin/pages/`
+        - use `PageFrame` from `@mozaiks/chat-ui` — this applies to user-facing custom route pages in `ui/pages/custom/` only; do NOT use `PageFrame` for workspace/app Studio pages in `admin/pages/`
         - call module actions using `moduleAction` imported from `../../ui/lib/moduleApi.js` — this file is guaranteed to be in the generated bundle; do NOT hardcode API base URLs or write raw fetch calls directly in page components
         - Workflow/tool UI surfaces must use `useChatUI()` / shipped adapters instead of hardcoded API base URLs; app custom route pages must use the generated `moduleAction` helper above
         - handle module action errors by catching `err.error_code` to branch on specific backend states (e.g. `RECORD_NOT_FOUND`, `VALIDATION_FAILED`, `ALREADY_EXISTS`) — the generated moduleApi.js preserves structured error fields on thrown errors so catch blocks can inspect them without parsing raw response text
@@ -829,7 +829,7 @@ agents:
       - App and feature admin surfaces are declared by `modules/{pack_name}/contracts/admin.yaml`. Module panels reference page ids from `admin/admin_registry.yaml` via the `page` field — module contract generation handles this automatically.
       - Do NOT add full-page custom route ownership fields such as `component`, `registry_key`, or `renderer` to `admin/admin_registry.yaml`. Full-page custom routes belong in `ui/route_manifest.json` + `ui/pages/custom/*.jsx` + `ui/index.js`.
       - If a custom admin React component is genuinely needed (`renderer: custom_component`), its stub path belongs in a declared module/admin JS stub and must be registered through `ui/index.js`; it is NOT owned by `custom_route_bundle` and is NOT declared as a full-page route in `admin/admin_registry.yaml`.
-      - Admin console pages in `admin/pages/` are workspace/app console surfaces: they MUST use `WorkspaceLayout` (or `AppConsoleLayout`) from `@mozaiks/chat-ui/workspace` — NEVER `PageFrame`. Using `PageFrame` in an admin console page hides the sidebar and breaks the console layout.
+      - Admin portal pages in `admin/pages/` are workspace/app Studio surfaces: they MUST use `WorkspaceLayout` (or `AppStudioLayout`) from `@mozaiks/chat-ui/workspace` — NEVER `PageFrame`. Using `PageFrame` in an admin portal page hides the sidebar and breaks the Studio layout.
       - Never model admin surfaces as user-facing pages, declarative page schemas, or `manifest.pages` entries.
   - id: instructions
     heading: '[INSTRUCTIONS]'
@@ -2252,7 +2252,7 @@ agents:
       `admin/admin_registry.yaml` for a generated app bundle.
 
       The admin registry declares all admin portal pages — both workspace-scope pages
-      (visible from the operator console) and app-scope pages (visible in the per-app
+      (visible from the Studio) and app-scope pages (visible in the per-app
       admin portal). Module admin panels reference these page ids via the `page` field
       in `modules/{module}/contracts/admin.yaml`.
   - id: objective

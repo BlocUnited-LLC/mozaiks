@@ -47,5 +47,5 @@ Deployment and shared-hosting environments may also need:
 - production MongoDB settings
 - vault settings for connector secrets
 
-These are operator settings. They are not required for the first local Console
+These are operator settings. They are not required for the first local Studio
 run.

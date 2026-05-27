@@ -88,7 +88,6 @@ Typical characteristics:
 
 Current examples:
 
-- `mozaiksai/hosts/mozaiks.py`
 - external hosted product workspaces consuming the `app/` contract
 
 Rule:
@@ -122,10 +121,9 @@ Rule:
 | core `chat-ui/` primitives | Universal substrate | reusable shell/UI substrate |
 | `factory_app/` | Framework-owned optional capability | first-party factory workspace |
 | `mozaiksai/hosts/studio.py` | Framework-owned optional capability | control-plane host |
-| `factory_app/app/admin/pages/` | Framework-owned optional capability | Workspace console UI |
+| `factory_app/app/admin/pages/` | Framework-owned optional capability | Workspace Studio UI |
 | `chat-ui/src/admin/` | Framework-owned optional capability | platform-management UI owned by Studio |
 | `mozaiks_cli/` | Framework-owned optional capability | developer interface |
-| `mozaiksai/hosts/mozaiks.py` | Product-specific consumer | hosted product layer on top of Studio |
 | external hosted product workspaces | Product-specific consumer | hosted workspace and product assets |
 | `generated/` | Generated/transient output | staged build output |
 

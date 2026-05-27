@@ -168,7 +168,7 @@ the thing that makes the notification system exist.
 
 Generated app hosts have one visible admin route family rendered through the
 `AdminPortal` shell surface. Studio does not expose a standalone `/admin` page;
-its Admin Portal entry is the Apps console at `/apps`.
+its Admin Portal entry is the Apps surface at `/apps`.
 
 Authority is separated by panel source:
 

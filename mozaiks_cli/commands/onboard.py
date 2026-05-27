@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from mozaiks_cli.commands.init import create_scaffold
-from mozaiks_cli.console_launcher import launch_console
+from mozaiks_cli.studio_launcher import launch_studio
 from mozaiks_cli.workspace import (
     is_framework_repo_root,
     resolve_active_app_root,
@@ -273,25 +273,25 @@ def run(args) -> None:
         admin_email=admin_email,
         full_setup=collect_extended_setup,
     )
-    should_open_console = bool(getattr(args, "open_console", False))
-    if not should_open_console and should_prompt:
-        should_open_console = _prompt_yes_no(
-            label="Open the Console now?",
+    should_open_studio = bool(getattr(args, "open_studio", False))
+    if not should_open_studio and should_prompt:
+        should_open_studio = _prompt_yes_no(
+            label="Open Studio now?",
             default=True,
             should_prompt=should_prompt,
         )
 
-    if should_open_console:
-        result = launch_console(
+    if should_open_studio:
+        result = launch_studio(
             workspace_root=workspace_root,
             backend_port=int(getattr(args, "backend_port", 8000)),
             frontend_port=int(getattr(args, "frontend_port", 3000)),
             open_browser=not bool(getattr(args, "no_browser", False)),
         )
-        print("\nConsole launched.")
+        print("\nStudio launched.")
         print(f"  Backend: {result['backend_url']}")
-        if result["console_url"]:
-            print(f"  Console: {result['console_url']}")
+        if result["studio_url"]:
+            print(f"  Studio: {result['studio_url']}")
         elif result["frontend_available"]:
             print(f"  Frontend: {result['frontend_url']}")
         else:
@@ -543,13 +543,13 @@ def _show_next_steps(
     print("\nNext Steps:")
     print(f"  1. Review {app_root / 'app.json'} and confirm the onboarding summary")
     print(f"  2. Confirm your default AI provider and model in {app_root / 'config' / 'ai.json'}")
-    print(f"  3. Open the Console with: mozaiks console --dir \"{workspace_root}\" --open")
+    print(f"  3. Open Studio with: python -m mozaiks studio --dir \"{workspace_root}\" --open")
     if journey == "brownfield_app":
-        print("  4. Use the Console to bridge the first host-owned surface before attempting broader generation")
+        print("  4. Use Studio to bridge the first host-owned surface before attempting broader generation")
     else:
-        print("  4. Use the Console build workflow to define the first real product surface")
+        print("  4. Use the Studio build workflow to define the first real product surface")
     if first_goal:
-        print("  5. Optional seed prompt for the Console:")
+        print("  5. Optional seed prompt for Studio:")
         print(f"     {first_goal}")
     if not full_setup:
         print("  6. Optional: run `mozaiks onboard --full` later for detailed brand/admin setup")

@@ -4,7 +4,7 @@
  * Nav is fully API-driven: pages come from GET /api/admin/config `pages` array,
  * which is loaded from app/admin/admin_registry.yaml at runtime.
  *
- * Workspace-scope pages (scope: workspace) build the top-level console nav.
+ * Workspace-scope pages (scope: workspace) build the top-level Studio nav.
  * App-scope pages (scope: app) build the per-app nav when appId is present.
  *
  * No hardcoded nav items or section taxonomies.
@@ -58,7 +58,7 @@ function buildAppPath(appId, templatePath) {
 /**
  * Build nav groups from the registry pages array.
  * When appId is present, show app-scope pages with appId substituted into paths.
- * Otherwise, show workspace-scope pages as the top-level console nav.
+ * Otherwise, show workspace-scope pages as the top-level Studio nav.
  */
 function buildNavGroups(adminPages, appId) {
   if (!adminPages?.length) {
@@ -137,7 +137,7 @@ function AdminSidebar({ adminPages = null, onNavigate = null, navGroups: provide
   const appId = resolveAppId(location.pathname)
   const derivedNavGroups = useMemo(() => buildNavGroups(adminPages, appId), [adminPages, appId])
   const navGroups = providedNavGroups || derivedNavGroups
-  const navigationLabel = appId ? 'App Console navigation' : 'Workspace navigation'
+  const navigationLabel = appId ? 'App Studio navigation' : 'Workspace navigation'
   const surfaceClass =
     surface === 'sheet'
       ? 'rounded-2xl border border-border/45 bg-background/76 p-3'
@@ -156,7 +156,7 @@ function AdminSidebar({ adminPages = null, onNavigate = null, navGroups: provide
             </svg>
             All Apps
           </Link>
-          <div className="mt-3 truncate text-sm font-semibold text-foreground">App Console</div>
+          <div className="mt-3 truncate text-sm font-semibold text-foreground">App Studio</div>
         </div>
       ) : (
         <div className="mb-5 flex items-center gap-3 px-2 pt-1">
@@ -164,7 +164,7 @@ function AdminSidebar({ adminPages = null, onNavigate = null, navGroups: provide
             M
           </div>
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-foreground">Mozaiks Console</div>
+            <div className="truncate text-sm font-semibold text-foreground">Mozaiks Studio</div>
             <div className="truncate text-xs text-muted-foreground/84">Manage your apps</div>
           </div>
         </div>
@@ -207,17 +207,17 @@ function AdminSidebar({ adminPages = null, onNavigate = null, navGroups: provide
   )
 }
 
-function AdminMobileNavTrigger({ onOpenMenu, activeLabel = 'Console' }) {
+function AdminMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio' }) {
   return (
     <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)] left-4 z-[56] lg:hidden">
       <button
         type="button"
         onClick={onOpenMenu}
         className="inline-flex h-11 max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full border border-border/45 bg-background/90 px-4 text-foreground shadow-lg shadow-black/15 backdrop-blur-md transition hover:bg-muted/35"
-        aria-label="Open console navigation"
+        aria-label="Open Studio navigation"
       >
         <MenuGlyph />
-        <span className="text-sm font-semibold">Console</span>
+        <span className="text-sm font-semibold">Studio</span>
         <span className="max-w-[9rem] truncate border-l border-border pl-2 text-xs font-medium text-muted-foreground">
           {activeLabel}
         </span>
@@ -232,7 +232,7 @@ export function AdminWorkspaceLayout({ children, adminPages = null }) {
   const appId = resolveAppId(location.pathname)
   const navGroups = useMemo(() => buildNavGroups(adminPages, appId), [adminPages, appId])
   const activeNav = useMemo(() => getActiveNavItem(navGroups, location), [navGroups, location])
-  const activeLabel = activeNav.item?.label || activeNav.group?.label || 'Console'
+  const activeLabel = activeNav.item?.label || activeNav.group?.label || 'Studio'
 
   return (
     <div className="min-h-full flex-1 bg-background">
@@ -248,7 +248,7 @@ export function AdminWorkspaceLayout({ children, adminPages = null }) {
             <button
               type="button"
               className="absolute inset-0 bg-black/50"
-              aria-label="Close console navigation"
+              aria-label="Close Studio navigation"
               onClick={() => setMobileOpen(false)}
             />
             <div className="absolute inset-x-0 bottom-0 max-h-[82dvh] overflow-y-auto rounded-t-3xl border border-border bg-card/95 p-3 pb-[calc(env(safe-area-inset-bottom,0px)+6.25rem)] shadow-2xl backdrop-blur-md">
@@ -266,7 +266,7 @@ export function AdminWorkspaceLayout({ children, adminPages = null }) {
                       All Apps
                     </Link>
                   ) : (
-                    <div className="truncate text-sm font-semibold text-foreground">Console navigation</div>
+                    <div className="truncate text-sm font-semibold text-foreground">Studio navigation</div>
                   )}
                   <div className="truncate text-xs text-muted-foreground">{activeLabel}</div>
                 </div>
@@ -274,7 +274,7 @@ export function AdminWorkspaceLayout({ children, adminPages = null }) {
                   type="button"
                   onClick={() => setMobileOpen(false)}
                   className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card text-foreground transition hover:bg-muted"
-                  aria-label="Close console navigation"
+                  aria-label="Close Studio navigation"
                 >
                   <CloseGlyph />
                 </button>

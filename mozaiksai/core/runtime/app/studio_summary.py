@@ -70,7 +70,7 @@ APP_LIFECYCLE_LABELS = {
 }
 
 
-def get_missing_console_surfaces(app_root: Path) -> list[str]:
+def get_missing_studio_surfaces(app_root: Path) -> list[str]:
     app_prefix = "app"
     theme_rel = f"{app_prefix}/brand/theme_config.json"
     ui_rel = f"{app_prefix}/ui/route_manifest.json"
@@ -109,7 +109,7 @@ def build_app_overview_summary(
     app_id = app_config.get("appId") or app_root.name
 
     summary = {
-        "console": {
+        "studio": {
             "surface": surface,
             "local_only": local_only,
             "workspace_root": str(app_root),
@@ -135,8 +135,8 @@ def build_app_overview_summary(
             "logo_alt": ((shell_config.get("header") or {}).get("logo") or {}).get("alt"),
         },
         "shell": {
-            "header_page_count": len(((shell_config.get("header") or {}).get("pages") or [])),
-            "header_action_count": len(((shell_config.get("header") or {}).get("actions") or [])),
+            "header_page_count": len((shell_config.get("header") or {}).get("pages") or []),
+            "header_action_count": len((shell_config.get("header") or {}).get("actions") or []),
         },
         "admin": {
             "enabled": True,
@@ -164,8 +164,8 @@ def build_app_overview_summary(
     if app_record:
         lifecycle_state = str(app_record.get("lifecycle_state") or "draft")
         record_app_id = str(app_record.get("app_id") or app_id)
-        summary["console"] = {
-            **summary["console"],
+        summary["studio"] = {
+            **summary["studio"],
             "route": f"/apps/{record_app_id}/overview",
         }
         summary["app"] = {
@@ -196,7 +196,7 @@ def build_apps_summary(
     summary = build_app_overview_summary(app_root, surface=surface, local_only=local_only)
     apps = [build_app_list_entry(record) for record in list(app_records or [])]
     return {
-        "console": {**summary.get("console", {}), "surface": surface, "route": "/apps"},
+        "studio": {**summary.get("studio", {}), "surface": surface, "route": "/apps"},
         "apps": apps,
         "metrics": build_apps_metrics(apps),
     }
@@ -272,7 +272,7 @@ def build_build_summary(
     )
     build_state = _normalize_build_state({})
     app_id = str((summary.get("app") or {}).get("id") or app_root.name)
-    summary["console"] = {**summary["console"], "surface": surface, "route": f"/apps/{app_id}/build"}
+    summary["studio"] = {**summary["studio"], "surface": surface, "route": f"/apps/{app_id}/build"}
     summary["build"] = build_build_section(summary, build_state)
     return summary
 
@@ -294,7 +294,7 @@ def build_app_list_entry(app_record: dict[str, Any]) -> dict[str, Any]:
         "lifecycle_label": APP_LIFECYCLE_LABELS.get(lifecycle_state, lifecycle_state.title()),
         "created_at": app_record.get("created_at"),
         "updated_at": app_record.get("updated_at"),
-        "created_label": _format_console_timestamp_label(app_record.get("updated_at"), fallback="Just created"),
+        "created_label": _format_studio_timestamp_label(app_record.get("updated_at"), fallback="Just created"),
         "destination": destination,
     }
 
@@ -760,7 +760,7 @@ def _recommend_next_step(
     workflow_count: int,
 ) -> str:
     if not onboarding.get("journey") or not onboarding.get("first_goal"):
-        return "Run 'mozaiks onboard' so the app console has product intent, provider defaults, and admin bootstrap."
+        return "Run 'mozaiks onboard' so Studio has product intent, provider defaults, and admin bootstrap."
     if not provider or not model:
         return "Confirm your default provider and model in app/config/ai.json before starting build work."
     if not admins:
@@ -772,7 +772,7 @@ def _recommend_next_step(
     return "Review the current workspace state and make the next approved build request from the app overview."
 
 
-def _format_console_timestamp_label(value: object, *, fallback: str) -> str:
+def _format_studio_timestamp_label(value: object, *, fallback: str) -> str:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return fallback
@@ -780,7 +780,7 @@ def _format_console_timestamp_label(value: object, *, fallback: str) -> str:
 
 def _recommend_lifecycle_next_step(lifecycle_state: str) -> str:
     if lifecycle_state == "draft":
-        return "Capture the first build brief, then start the build from the app console."
+        return "Capture the first build brief, then start the build from the app Studio."
     if lifecycle_state == "building":
         return "Continue the build conversation and review artifacts as they land."
     if lifecycle_state == "review":
@@ -790,9 +790,9 @@ def _recommend_lifecycle_next_step(lifecycle_state: str) -> str:
     if lifecycle_state == "deploying":
         return "Monitor deployment progress and verify the runtime comes online cleanly."
     if lifecycle_state == "active":
-        return "Open the app console to monitor usage, operations, and ongoing refinements."
+        return "Open the app Studio to monitor usage, operations, and ongoing refinements."
     if lifecycle_state == "needs_revision":
         return "Return to Build to resolve the outstanding revision before continuing."
     if lifecycle_state == "archived":
         return "This app is archived. Reopen it only if you intend to resume management or refinement."
-    return "Review the app console to continue the next appropriate lifecycle step."
+    return "Review the app Studio to continue the next appropriate lifecycle step."

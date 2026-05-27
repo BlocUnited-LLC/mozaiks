@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
-import { API_BASE } from './consoleApi.js'
-import { buildConsoleDemoApps, isConsoleDemoModeEnabled } from './consoleDemoData.js'
+import { API_BASE } from './studioApi.js'
+import { buildStudioDemoApps, isStudioDemoModeEnabled } from './studioDemoData.js'
 
 export function useWorkspaceApps(errorFallback = 'Workspace apps could not be loaded.') {
   const [apps, setApps] = useState([])
@@ -12,7 +12,7 @@ export function useWorkspaceApps(errorFallback = 'Workspace apps could not be lo
 
   useEffect(() => {
     let cancelled = false
-    const demoMode = isConsoleDemoModeEnabled()
+    const demoMode = isStudioDemoModeEnabled()
 
     async function load() {
       try {
@@ -23,7 +23,7 @@ export function useWorkspaceApps(errorFallback = 'Workspace apps could not be lo
 
         if (!cancelled) {
           const useDemoApps = demoMode && liveApps.length === 0
-          setApps(useDemoApps ? buildConsoleDemoApps() : liveApps)
+          setApps(useDemoApps ? buildStudioDemoApps() : liveApps)
           setMetrics(payload.metrics && typeof payload.metrics === 'object' ? payload.metrics : {})
           setDataMode(useDemoApps ? 'demo' : 'live')
           setError(null)
@@ -31,7 +31,7 @@ export function useWorkspaceApps(errorFallback = 'Workspace apps could not be lo
       } catch (err) {
         if (!cancelled) {
           if (demoMode) {
-            setApps(buildConsoleDemoApps())
+            setApps(buildStudioDemoApps())
             setMetrics({})
             setDataMode('demo')
             setError(null)

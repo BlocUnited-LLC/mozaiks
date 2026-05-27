@@ -21,7 +21,7 @@ AI-native software products.
 
 It brings together three things that usually live in separate tools:
 
-- **Mozaiks Console** for creating apps, continuing builds, and managing them.
+- **Mozaiks Studio** for creating apps, continuing builds, and managing them.
 - **AI workflow orchestration powered by AG2** for planning, tool use, human
   review, and generation.
 - **Generated app files** with modules, pages, workflows, config, and brand
@@ -33,48 +33,61 @@ separate from builder workflows.
 
 ## Quickstart
 
-Install Python 3.11+, Node.js 18+, and MongoDB. MongoDB must be running
-locally or `MONGO_URI` must point to MongoDB Atlas before the Console can start.
+Install Python 3.11+ and Node.js 18+. Studio also needs a reachable MongoDB
+database for workspace state. Docker Desktop is not required; use MongoDB Atlas,
+a local MongoDB install, or Docker only if that is how you prefer to run MongoDB.
 
-Install the Mozaiks CLI:
-
-```powershell
-python -m pip install --user pipx
-python -m pipx ensurepath
-python -m pipx install mozaiks
-```
-
-Start the local Console workspace:
+Install Mozaiks:
 
 ```powershell
-mozaiks quickstart --dir .\mozaiks-workspace
+pip install mozaiks
 ```
 
-If Windows says `mozaiks` is not recognized, open a new PowerShell and retry
-the `mozaiks quickstart` command. That just means PowerShell has not loaded the
-PATH update from `ensurepath` yet.
+Configure MongoDB before opening Studio:
+
+```powershell
+# Local MongoDB
+$env:MONGO_URI="mongodb://localhost:27017/mozaiks"
+
+# Or MongoDB Atlas
+$env:MONGO_URI="<your MongoDB connection string>"
+```
+
+Set an LLM key before running real builds:
+
+```powershell
+$env:OPENAI_API_KEY="sk-..."
+```
+
+Then start Mozaiks:
+
+```powershell
+python -m mozaiks quickstart --dir .\mozaiks-workspace
+```
+
+This creates `.\mozaiks-workspace` and starts the local Studio.
 
 Then open `http://localhost:3000/apps` and click `Create App`.
 
 `.\mozaiks-workspace` is the local workspace folder Mozaiks uses for generated
 output, config, and launch scripts. It is not the app itself. The app is
-created later from inside the Console.
+created later from inside Studio.
 
 ### Which Tool To Use
 
-The **Console** is the browser product for creating apps, continuing builds,
+The **Studio** is the browser product for creating apps, continuing builds,
 reviewing artifacts, and managing apps. The **CLI** is just how you set up the
-local workspace, start processes, run diagnostics, and open the Console.
+local workspace, start processes, run diagnostics, and open Studio.
 
-If you see `studio`, it is just the internal server name behind the Console.
-Most users can ignore it and start from the Console.
+`studio` is also the host name used internally for that same browser product.
+Most users can start from Studio and ignore the host details.
 
 Want to contribute? See the [Contributing guide](https://docs.mozaiks.ai/contributing/).
 
 Main repo layout:
 
 - `web_shell/` - local Vite shell host source
-- `factory_app/app/` - first-party Console app bundle and default brand assets
+- `factory_app/app/` - first-party Studio app bundle and default brand assets
 - `factory_app/workflows/` - shared builder workflow root
 
 ---

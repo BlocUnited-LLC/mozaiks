@@ -43,7 +43,7 @@ def _workspace_env(workspace_root: Path, *, host: str) -> dict[str, str]:
     try:
         from dotenv import load_dotenv
     except ImportError as exc:
-        raise RuntimeError("python-dotenv is required to launch the Console from the CLI.") from exc
+        raise RuntimeError("python-dotenv is required to launch Studio from the CLI.") from exc
 
     env_file = workspace_root / ".env"
     env_example = workspace_root / ".env.example"
@@ -125,12 +125,12 @@ def _ping_mongo_uri(uri: str, *, timeout_ms: int) -> None:
 
 def _assert_mongo_ready(env: dict[str, str], *, workspace_root: Path) -> None:
     uri = _mongo_uri_from_env(env)
-    rerun_command = f'mozaiks console --dir "{workspace_root}" --open'
+    rerun_command = f'python -m mozaiks studio --dir "{workspace_root}" --open'
     env_path = workspace_root / ".env"
 
     if not uri:
         raise RuntimeError(
-            "MongoDB is required to start the Mozaiks Console.\n"
+            "MongoDB is required to start Mozaiks Studio.\n"
             f"Set MONGO_URI in your shell or in {env_path}, then rerun:\n"
             f"  {rerun_command}\n"
             "For a local MongoDB server, use: mongodb://localhost:27017/mozaiks"
@@ -141,7 +141,7 @@ def _assert_mongo_ready(env: dict[str, str], *, workspace_root: Path) -> None:
     except Exception as exc:
         safe_uri = _redact_mongo_uri(uri)
         raise RuntimeError(
-            "MongoDB is required to start the Mozaiks Console.\n"
+            "MongoDB is required to start Mozaiks Studio.\n"
             f"Could not connect to MONGO_URI ({safe_uri}).\n"
             "Start MongoDB locally, or set MONGO_URI to a reachable MongoDB Atlas/local URI "
             f"in {env_path}, then rerun:\n"
@@ -178,7 +178,7 @@ def _resolve_backend_app_module(preferred_host: str) -> str:
     return "mozaiksai.hosts.studio:app"
 
 
-def launch_console(
+def launch_studio(
     *,
     workspace_root: Path,
     backend_port: int = 8000,
@@ -194,7 +194,7 @@ def launch_console(
 
     backend_url = f"http://localhost:{backend_port}/api/health"
     frontend_url = f"http://localhost:{frontend_port}/"
-    console_url = f"http://localhost:{frontend_port}/apps"
+    studio_url = f"http://localhost:{frontend_port}/apps"
 
     backend_process = None
     if not _http_ready(backend_url):
@@ -220,7 +220,7 @@ def launch_console(
     if frontend_available and not _http_ready(frontend_url):
         npm_cmd = shutil.which("npm")
         if not npm_cmd:
-            raise RuntimeError("npm is required to launch the Console frontend.")
+            raise RuntimeError("npm is required to launch the Studio frontend.")
 
         assert web_shell_root is not None
         node_modules_dir = web_shell_root / "node_modules"
@@ -252,12 +252,12 @@ def launch_console(
             raise RuntimeError("Frontend did not become ready in time.")
 
     if open_browser and frontend_available:
-        webbrowser.open(console_url)
+        webbrowser.open(studio_url)
 
     return {
         "backend_url": f"http://localhost:{backend_port}",
         "frontend_url": f"http://localhost:{frontend_port}" if frontend_available else None,
-        "console_url": console_url if frontend_available else None,
+        "studio_url": studio_url if frontend_available else None,
         "backend_started": backend_process is not None,
         "frontend_started": frontend_process is not None,
         "backend_pid": backend_process.pid if backend_process is not None else None,

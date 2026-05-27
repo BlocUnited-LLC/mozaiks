@@ -21,9 +21,9 @@ contributor guidance.
   `mozaiksai.hosts.studio`, app/module/page/shell/admin contracts, `chat-ui/`,
   CLI developer tooling, `factory_app/workflows/`, `factory_app/control_plane/`,
   and `factory_app/app/` as the first-party builder/reference app workspace.
-- Hosted product capability: `mozaiksai.hosts.mozaiks`, hosted-only
-  collaboration/billing/marketplace/deployment surfaces, and proprietary
-  hosted packs or engines consumed from outside this OSS repo.
+- Hosted product capability: app-local hosted product hosts outside this OSS
+  repo, hosted-only collaboration/billing/marketplace/deployment surfaces, and
+  proprietary hosted packs or engines consumed from outside this OSS repo.
 
 ## Ownership Boundaries
 

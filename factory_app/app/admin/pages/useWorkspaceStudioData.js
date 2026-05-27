@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react'
 
-import { API_BASE } from './consoleApi.js'
+import { API_BASE } from './studioApi.js'
 import {
-  buildConsoleDemoApps,
-  getConsoleDemoWorkspaceRuns,
-  getConsoleDemoWorkspaceStats,
-  isConsoleDemoModeEnabled,
-} from './consoleDemoData.js'
+  buildStudioDemoApps,
+  getStudioDemoWorkspaceRuns,
+  getStudioDemoWorkspaceStats,
+  isStudioDemoModeEnabled,
+} from './studioDemoData.js'
 
-export function useWorkspaceConsoleData(errorFallback = 'Workspace console data could not be loaded.') {
+export function useWorkspaceStudioData(errorFallback = 'Workspace Studio data could not be loaded.') {
   const [apps, setApps] = useState([])
   const [metrics, setMetrics] = useState({})
   const [workspaceStats, setWorkspaceStats] = useState({})
@@ -19,7 +19,7 @@ export function useWorkspaceConsoleData(errorFallback = 'Workspace console data 
 
   useEffect(() => {
     let cancelled = false
-    const demoMode = isConsoleDemoModeEnabled()
+    const demoMode = isStudioDemoModeEnabled()
 
     async function load() {
       try {
@@ -41,18 +41,18 @@ export function useWorkspaceConsoleData(errorFallback = 'Workspace console data 
         const useDemoApps = demoMode && liveApps.length === 0
 
         if (!cancelled) {
-          setApps(useDemoApps ? buildConsoleDemoApps() : liveApps)
+          setApps(useDemoApps ? buildStudioDemoApps() : liveApps)
           setMetrics(appsPayload.metrics && typeof appsPayload.metrics === 'object' ? appsPayload.metrics : {})
           setWorkspaceStats(
             useDemoApps
-              ? getConsoleDemoWorkspaceStats()
+              ? getStudioDemoWorkspaceStats()
               : statsPayload && typeof statsPayload === 'object'
                 ? statsPayload
                 : {},
           )
           setWorkspaceRuns(
             useDemoApps
-              ? getConsoleDemoWorkspaceRuns()
+              ? getStudioDemoWorkspaceRuns()
               : Array.isArray(runsPayload?.runs)
                 ? runsPayload.runs
                 : [],
@@ -63,10 +63,10 @@ export function useWorkspaceConsoleData(errorFallback = 'Workspace console data 
       } catch (err) {
         if (!cancelled) {
           if (demoMode) {
-            setApps(buildConsoleDemoApps())
+            setApps(buildStudioDemoApps())
             setMetrics({})
-            setWorkspaceStats(getConsoleDemoWorkspaceStats())
-            setWorkspaceRuns(getConsoleDemoWorkspaceRuns())
+            setWorkspaceStats(getStudioDemoWorkspaceStats())
+            setWorkspaceRuns(getStudioDemoWorkspaceRuns())
             setDataMode('demo')
             setError(null)
           } else {
@@ -95,4 +95,4 @@ export function useWorkspaceConsoleData(errorFallback = 'Workspace console data 
   }
 }
 
-export default useWorkspaceConsoleData
+export default useWorkspaceStudioData

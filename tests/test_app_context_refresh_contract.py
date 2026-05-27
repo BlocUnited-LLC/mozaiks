@@ -137,7 +137,7 @@ def _source_ref() -> SourceRef:
     return SourceRef(
         source_ref_id="src_repo",
         kind=SourceRefKind.REPO,
-        uri="https://example.invalid/ops-console.git",
+        uri="https://example.invalid/ops-studio.git",
         ref="main",
         checksum="sha256:source",
     )
@@ -146,7 +146,7 @@ def _source_ref() -> SourceRef:
 def _stale_brownfield_summary() -> AppContextSummary:
     context_version = AppContextVersion(
         context_version_id="ctx_ops_stale",
-        app_id="ops_console",
+        app_id="ops_studio",
         mode=AppContextMode.BROWNFIELD,
         source_refs=[_source_ref()],
         stale_status=AppContextStaleStatus.STALE,
@@ -157,7 +157,7 @@ def _stale_brownfield_summary() -> AppContextSummary:
 
 def _missing_summary() -> AppContextSummary:
     return AppContextSummary(
-        app_id="ops_console",
+        app_id="ops_studio",
         available=False,
         warnings=[APP_CONTEXT_MISSING_WARNING],
     )
@@ -174,7 +174,7 @@ def _refresh_block_policy(summary: AppContextSummary) -> AppContextPolicyResult:
 
 def test_can_create_context_refresh_request() -> None:
     request = ContextRefreshRequest(
-        app_id="ops_console",
+        app_id="ops_studio",
         current_context_version_id="ctx_ops_stale",
         reason="Refresh before data model migration.",
         source_refs=[_source_ref()],
@@ -182,7 +182,7 @@ def test_can_create_context_refresh_request() -> None:
         refresh_scope=ContextRefreshScope.DISCOVERY_INDEXING,
     )
 
-    assert request.app_id == "ops_console"
+    assert request.app_id == "ops_studio"
     assert request.current_context_version_id == "ctx_ops_stale"
     assert request.source_refs[0].kind is SourceRefKind.REPO
     assert request.requested_by == "user_1"
@@ -190,7 +190,7 @@ def test_can_create_context_refresh_request() -> None:
 
 def test_can_create_context_refresh_plan() -> None:
     plan = ContextRefreshPlan(
-        app_id="ops_console",
+        app_id="ops_studio",
         current_context_version_id="ctx_ops_stale",
         target_source_refs=[_source_ref()],
         required_inputs=list(CONTEXT_REFRESH_REQUIRED_INPUTS),
@@ -203,7 +203,7 @@ def test_can_create_context_refresh_plan() -> None:
 
 def test_refresh_result_contract_records_new_context() -> None:
     result = ContextRefreshResult(
-        app_id="ops_console",
+        app_id="ops_studio",
         previous_context_version_id="ctx_old",
         new_context_version_id="ctx_new",
         stale_resolved=True,
@@ -223,7 +223,7 @@ def test_refresh_result_contract_records_new_context() -> None:
 
 def test_plan_lists_expected_canonical_brownfield_artifacts() -> None:
     plan = ContextRefreshPlan(
-        app_id="ops_console",
+        app_id="ops_studio",
         current_context_version_id="ctx_ops_stale",
         target_source_refs=[_source_ref()],
     )
@@ -244,7 +244,7 @@ def test_block_requires_context_refresh_policy_can_build_refresh_plan() -> None:
 
     assert policy.decision is AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH
     assert plan.current_context_version_id == "ctx_ops_stale"
-    assert plan.target_source_refs[0].uri == "https://example.invalid/ops-console.git"
+    assert plan.target_source_refs[0].uri == "https://example.invalid/ops-studio.git"
     assert plan.mutation_allowed is False
     assert plan.workflow_sequence == BROWNFIELD_DISCOVERY_REFRESH_SEQUENCE
 
@@ -256,7 +256,7 @@ def test_missing_app_context_can_build_refresh_plan_with_warnings() -> None:
     plan = build_context_refresh_plan(
         policy_result=policy,
         app_context_summary=summary,
-        app_id="ops_console",
+        app_id="ops_studio",
     )
 
     assert plan.current_context_version_id is None
@@ -277,7 +277,7 @@ def test_refresh_request_can_be_built_from_policy_and_summary() -> None:
         refresh_scope=ContextRefreshScope.SOURCE_REF_RESCAN,
     )
 
-    assert request.app_id == "ops_console"
+    assert request.app_id == "ops_studio"
     assert request.current_context_version_id == "ctx_ops_stale"
     assert request.reason == "High-risk refinement requires current app-context evidence."
     assert request.refresh_scope is ContextRefreshScope.SOURCE_REF_RESCAN
@@ -314,7 +314,7 @@ async def test_refresh_plan_does_not_change_current_context() -> None:
     store = _MemoryArtifactStore()
     context_version = AppContextVersion(
         context_version_id="ctx_ops_stale",
-        app_id="ops_console",
+        app_id="ops_studio",
         mode=AppContextMode.BROWNFIELD,
         source_refs=[_source_ref()],
         stale_status=AppContextStaleStatus.STALE,
@@ -326,7 +326,7 @@ async def test_refresh_plan_does_not_change_current_context() -> None:
         make_current=True,
     )
     before = await get_current_app_context_version(
-        app_id="ops_console",
+        app_id="ops_studio",
         artifact_store=store,
     )
     assert before is not None
@@ -337,7 +337,7 @@ async def test_refresh_plan_does_not_change_current_context() -> None:
         app_context_summary=summary,
     )
     after = await get_current_app_context_version(
-        app_id="ops_console",
+        app_id="ops_studio",
         artifact_store=store,
     )
 

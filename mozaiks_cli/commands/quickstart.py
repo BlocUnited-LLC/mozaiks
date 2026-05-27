@@ -32,7 +32,7 @@ def run(args) -> None:
             host_owned_summary=None,
             non_interactive=True,
             full_setup=False,
-            open_console=True,
+            open_studio=True,
             backend_port=int(getattr(args, "backend_port", 8000)),
             frontend_port=int(getattr(args, "frontend_port", 3000)),
             no_browser=bool(getattr(args, "no_browser", False)),
@@ -45,8 +45,8 @@ def _print_intro(workspace_root: Path) -> None:
     print("Mode: builder")
     print("Install mode: CLI-managed")
     print(
-        "This path bootstraps the workspace with minimal defaults and opens the Console. "
-        "No workspace .venv is required for the normal Console path.\n"
+        "This path bootstraps the workspace with minimal defaults and opens Studio. "
+        "No workspace .venv is required for the normal Studio path.\n"
     )
 
 
@@ -56,7 +56,7 @@ def _print_environment_warnings(args) -> None:
 
     if not os.environ.get("MONGO_URI"):
         warnings.append(
-            "MongoDB is required to start the Console. If MONGO_URI is not set, the generated workspace "
+            "MongoDB is required to start Studio. If MONGO_URI is not set, the generated workspace "
             "uses mongodb://localhost:27017/mozaiks; make sure local MongoDB is running or set MONGO_URI "
             "to a reachable MongoDB URI."
         )

@@ -122,4 +122,7 @@ def _show_next_steps(feature_or_preset, app_root_label: str):
         print("  - Chat UI will be available at root path")
         print(f"  - Configure branding in {app_root_label}/brand/ and shell behavior in {app_root_label}/config/shell.json")
 
-    print("\nRestart the active host to apply changes, such as `mozaiks serve . --host platform` or `mozaiks console --open`.")
+    print(
+        "\nRestart the active host to apply changes, such as "
+        "`python -m mozaiks serve . --host platform` or `python -m mozaiks studio --open`."
+    )

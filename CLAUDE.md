@@ -4,13 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Read [ARCHITECTURE.md](ARCHITECTURE.md) first.** That file is the source of truth for how the system works.
 
-This repo uses layered FastAPI hosts as the canonical server composition:
+This repo uses layered FastAPI hosts as the canonical OSS server composition:
 - `mozaiksai.hosts.runtime`
 - `mozaiksai.hosts.platform`
 - `mozaiksai.hosts.studio`
-- `mozaiksai.hosts.mozaiks`
 
-`mozaiksai.hosts.studio` is the Studio management interface host and the default local run target. Studio is the shared management layer — available in both local and hosted deployments. `mozaiksai.hosts.mozaiks` is the hosted Mozaiks product host — it extends Studio, not replaces it.
+`mozaiksai.hosts.studio` is the Studio management interface host and the default local run target. Studio is the shared management layer — available in both local and hosted deployments. Hosted product repos compose their own app-local hosts on top of Studio; this OSS repo does not own a hosted-product FastAPI host.
 
 **CLI and Studio are parallel interfaces**, not a superset chain. CLI owns developer tooling (filesystem, scaffolding, process management). Studio owns the management interface (workspace status, build lifecycle, artifacts, run history, config). Do not conflate them.
 
@@ -48,7 +47,7 @@ Working modes:
 1. **Framework/platform mode** — work on runtime, platform host, app shell contracts, package/install flows, and repo-local infrastructure
 2. **Factory mode** — work on `factory_app/workflows/`, `factory_app/control_plane/` — builder/generator workflows, agent configs, structured outputs, control plane pack
 3. **Studio mode** — work on `mozaiksai/hosts/studio.py`, `factory_app/app/ui/pages/custom/studio/`, `factory_app/app/admin/`, `factory_app/app/modules/factory_control_plane/`, `chat-ui/src/admin/` — the management interface that surfaces Factory capabilities
-4. **Hosted product mode** — work on `mozaiksai/hosts/mozaiks.py` and contracts that external hosted product workspaces consume
+4. **Hosted product contract mode** — work on contracts that external hosted product workspaces consume; concrete hosted-product hosts live in those product workspaces
 
 ## Contributor Guidance Operating System
 
@@ -169,7 +168,7 @@ Deterministic app behavior belongs in generated app/module contracts hosted by `
 | AG2 tool function | `mozaiksai/core/workflow/` |
 | First-party Studio bundle | `factory_app/app/` |
 | First-party Studio UI (Studio management) | `factory_app/app/ui/pages/custom/studio/` |
-| First-party admin/console pages | `factory_app/app/admin/pages/` |
+| First-party admin/Studio pages | `factory_app/app/admin/pages/` |
 | Admin portal registry | `factory_app/app/admin/admin_registry.yaml` |
 | Shared factory workflows | `factory_app/workflows/` |
 | Generated app/workflow artifacts | `generated/` |

@@ -1,4 +1,4 @@
-import { getRuntimeReadinessLabel, normalizeAppStatus } from './appConsoleModel.js'
+import { getRuntimeReadinessLabel, normalizeAppStatus } from './appStudioModel.js'
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max)

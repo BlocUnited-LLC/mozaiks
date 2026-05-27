@@ -43,7 +43,7 @@ def test_shell_presets_catalog_exists_and_has_required_presets() -> None:
 
     for preset_id in (
         "product_app",
-        "workspace_console",
+        "workspace_studio",
         "public_plus_app",
         "conversation_app",
         "flow_app",
@@ -79,7 +79,7 @@ def test_shell_preset_hook_injects_prompt_time_guidance() -> None:
         assert "prompt-time guidance only" in agent.system_message
         assert "not runtime artifacts" in agent.system_message
         assert "shell_preset_hint" in agent.system_message
-        assert "workspace_console" in agent.system_message
+        assert "workspace_studio" in agent.system_message
         assert "AppPageSchema.navigation" in agent.system_message
         assert "Do not emit preset ids into generated app files" in agent.system_message
 

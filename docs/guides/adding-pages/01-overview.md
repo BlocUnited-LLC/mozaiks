@@ -107,58 +107,60 @@ navigation:
 Use `scope: global` for primary destinations. Use `scope: local` for
 workspace/module subsections that belong in local nav, not the global shell.
 
-## Example: Dashboard
+## Examples
 
-```yaml
-name: dashboard
-title: Dashboard
-layout: grid
-shell_mode: workspace
+=== "Dashboard"
 
-sections:
-  - id: header
-    primitive: PageHeader
-    config:
-      title: Dashboard
-      subtitle: Monitor current activity.
+    ```yaml
+    name: dashboard
+    title: Dashboard
+    layout: grid
+    shell_mode: workspace
 
-  - id: summary
-    primitive: SummaryStrip
-    config:
-      api_endpoint: /api/modules/orders/stats
-      items:
-        - { label: Orders, value_key: total }
+    sections:
+      - id: header
+        primitive: PageHeader
+        config:
+          title: Dashboard
+          subtitle: Monitor current activity.
 
-  - id: recent-orders
-    title: Recent Orders
-    primitive: ResourceTable
-    config:
-      api_endpoint: /api/modules/orders/list_orders
-      columns:
-        - { key: id,     label: Order ID }
-        - { key: status, label: Status, type: status }
-        - { key: total,  label: Total }
-```
+      - id: summary
+        primitive: SummaryStrip
+        config:
+          api_endpoint: /api/modules/orders/stats
+          items:
+            - { label: Orders, value_key: total }
 
-## Example: Form Page
+      - id: recent-orders
+        title: Recent Orders
+        primitive: ResourceTable
+        config:
+          api_endpoint: /api/modules/orders/list_orders
+          columns:
+            - { key: id,     label: Order ID }
+            - { key: status, label: Status, type: status }
+            - { key: total,  label: Total }
+    ```
 
-```yaml
-name: new-customer
-title: New Customer
-layout: full-width
-shell_mode: focused
+=== "Form Page"
 
-sections:
-  - id: customer-form
-    title: Customer Details
-    primitive: Form
-    config:
-      fields:
-        - { name: name,  label: Full Name, type: text,  required: true }
-        - { name: email, label: Email,     type: email, required: true }
-      submitLabel: Create Customer
-      api_endpoint: /api/modules/customers/create_customer
-```
+    ```yaml
+    name: new-customer
+    title: New Customer
+    layout: full-width
+    shell_mode: focused
+
+    sections:
+      - id: customer-form
+        title: Customer Details
+        primitive: Form
+        config:
+          fields:
+            - { name: name,  label: Full Name, type: text,  required: true }
+            - { name: email, label: Email,     type: email, required: true }
+          submitLabel: Create Customer
+          api_endpoint: /api/modules/customers/create_customer
+    ```
 
 ## Custom React Route
 

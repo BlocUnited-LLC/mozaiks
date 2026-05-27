@@ -45,7 +45,6 @@ Current seed in this repo:
 - `mozaiksai/hosts/runtime.py`
 - `mozaiksai/hosts/platform.py`
 - `mozaiksai/hosts/studio.py`
-- `mozaiksai/hosts/mozaiks.py`
 
 Long-term use:
 
@@ -89,7 +88,7 @@ Canonical target:
 
 Current implementation state:
 
-- `factory_app/app/` is the current first-party Console app bundle served by the Studio host
+- `factory_app/app/` is the current first-party Studio app bundle served by the Studio host
 - shared builder workflows live under `factory_app/workflows/`
 - the Studio host binds to the shared builder workflow root at
   `factory_app/workflows/`
@@ -150,14 +149,14 @@ hosted-product/
 
 Current implemented state in this repo:
 
-- `factory_app/app/` is the first-party Console app bundle served by the Studio host
+- `factory_app/app/` is the first-party Studio app bundle served by the Studio host
 - hosted product workspaces are expected to live outside this repo
 
 ## How Apps Should Be Created
 
 The canonical creation flow is:
 
-1. the workspace console or CLI creates a build request
+1. Studio or the CLI creates a build request
 2. shared generation core runs the builder workflows
 3. artifacts are written to a generated/staging area
 4. validation and review happen

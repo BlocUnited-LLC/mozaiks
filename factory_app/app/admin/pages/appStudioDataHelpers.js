@@ -1,9 +1,9 @@
 import {
-  getConsoleDemoDeploymentRecord,
-  getConsoleDemoBillingRecord,
-  getConsoleDemoUsageRecord,
-  getConsoleDemoUsersRecord,
-} from './consoleDemoData.js'
+  getStudioDemoDeploymentRecord,
+  getStudioDemoBillingRecord,
+  getStudioDemoUsageRecord,
+  getStudioDemoUsersRecord,
+} from './studioDemoData.js'
 
 export function toArray(value) {
   return Array.isArray(value) ? value : []
@@ -29,7 +29,7 @@ export function groupBy(items, getKey, buildInitialValue, mergeValue) {
   return Array.from(groups.values())
 }
 
-export function getAppConsoleSnapshot(appId, data, dataMode = 'live') {
+export function getAppStudioSnapshot(appId, data, dataMode = 'live') {
   const summary = data?.summary || {}
   const app = summary.app || {}
   const stats = data?.stats || {}
@@ -56,10 +56,10 @@ export function getAppConsoleSnapshot(appId, data, dataMode = 'live') {
     runtimeIntegrations,
     connectorSummary,
     lifecycleState: app.lifecycle_state || 'draft',
-    usersRecord: demoEnabled ? getConsoleDemoUsersRecord(appId) : null,
-    usageRecord: demoEnabled ? getConsoleDemoUsageRecord(appId) : null,
-    billingRecord: demoEnabled ? getConsoleDemoBillingRecord(appId) : null,
-    deploymentRecord: demoEnabled ? getConsoleDemoDeploymentRecord(appId) : null,
+    usersRecord: demoEnabled ? getStudioDemoUsersRecord(appId) : null,
+    usageRecord: demoEnabled ? getStudioDemoUsageRecord(appId) : null,
+    billingRecord: demoEnabled ? getStudioDemoBillingRecord(appId) : null,
+    deploymentRecord: demoEnabled ? getStudioDemoDeploymentRecord(appId) : null,
   }
 }
 

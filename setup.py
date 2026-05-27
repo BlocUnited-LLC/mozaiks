@@ -2,9 +2,9 @@ from pathlib import Path
 
 from setuptools import find_namespace_packages, find_packages, setup
 
-
 PACKAGE_PREFIXES = (
     "mozaiksai",
+    "mozaiks",
     "mozaiks_cli",
     "logs",
     "factory_app",

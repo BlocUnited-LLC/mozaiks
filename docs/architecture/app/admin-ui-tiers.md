@@ -2,7 +2,7 @@
 
 Mozaiks admin surfaces come in two tiers with distinct ownership, file contracts,
 and use cases. Choosing the wrong tier is a common source of misregistered
-components and broken console layouts.
+components and broken Studio layouts.
 
 ---
 
@@ -95,7 +95,7 @@ panels:
 
 ## Tier 2 — Custom Operator React Pages
 
-**What it is:** Full-page workspace-console routes registered in the component
+**What it is:** Full-page workspace-studio routes registered in the component
 registry. These are standalone React pages — not panels inside AdminPortal.
 They own their own route, render the full workspace chrome, and are mounted
 independently of the AdminPortal panel system.
@@ -113,9 +113,9 @@ Tier 1 panel primitive system. Use sparingly — Tier 1 is the default.
 | `admin/index.js` | Registers the component by `registry_key` so the runtime mounts it |
 
 **Chrome rule:** Pages in `admin/pages/` MUST use `WorkspaceLayout` or
-`AppConsoleLayout` from `@mozaiks/chat-ui/workspace`. Never use `PageFrame` —
+`AppStudioLayout` from `@mozaiks/chat-ui/workspace`. Never use `PageFrame` —
 `PageFrame` is for user-facing pages in `ui/pages/custom/` only. Using
-`PageFrame` in an admin page hides the workspace sidebar and breaks the console
+`PageFrame` in an admin page hides the workspace sidebar and breaks the Studio
 layout.
 
 **Generator rule:** AppGenerator does not generate Tier 2 operator pages by

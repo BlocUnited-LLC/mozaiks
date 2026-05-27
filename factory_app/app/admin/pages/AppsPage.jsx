@@ -14,19 +14,19 @@ import {
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ActionButton,
-  ConsoleErrorState,
-  ConsoleLoadingState,
-  ConsoleSlideOver,
+  StudioErrorState,
+  StudioLoadingState,
+  StudioSlideOver,
   StatusPill,
-} from '../../ui/components/ConsoleShared.jsx'
-import { WorkspaceConsoleHero, formatCompactNumber } from './AppConsoleChrome.jsx'
-import buildWorkspacePortfolio from './workspaceConsoleModel.js'
+} from '../../ui/components/StudioShared.jsx'
+import { WorkspaceStudioHero, formatCompactNumber } from './AppStudioChrome.jsx'
+import buildWorkspacePortfolio from './workspaceStudioModel.js'
 import { useWorkspaceApps } from './useWorkspaceApps.js'
 
 
 function formatPrimaryActionLabel(action) {
-  if (!action?.label) return 'Open Console'
-  return action.label === 'Open App Console' ? 'Open Console' : action.label
+  if (!action?.label) return 'Open Studio'
+  return action.label === 'Open App Studio' ? 'Open Studio' : action.label
 }
 
 function getPrimaryActionPresentation(action) {
@@ -209,10 +209,10 @@ function AppsTable({ rows, onOpen }) {
 
 function ImportAppOverlay({ open, onClose, onImport }) {
   return (
-    <ConsoleSlideOver
+    <StudioSlideOver
       open={open}
       title="Import App"
-      description="Register an existing application so Mozaiks can route discovery and refinement from the console."
+      description="Register an existing application so Mozaiks can route discovery and refinement from Studio."
       onClose={onClose}
     >
       <Form
@@ -237,7 +237,7 @@ function ImportAppOverlay({ open, onClose, onImport }) {
         onCancel={onClose}
         onSubmit={onImport}
       />
-    </ConsoleSlideOver>
+    </StudioSlideOver>
   )
 }
 
@@ -285,15 +285,15 @@ export default function AppsPage() {
     }
   }
 
-  if (loading) return <ConsoleLoadingState label="Loading your apps…" />
-  if (error) return <ConsoleErrorState title="Could not load apps" message={error} />
+  if (loading) return <StudioLoadingState label="Loading your apps…" />
+  if (error) return <StudioErrorState title="Could not load apps" message={error} />
 
   return (
     <WorkspaceLayout>
       <div className="space-y-6">
-        <WorkspaceConsoleHero
+        <WorkspaceStudioHero
           title="Apps"
-          subtitle="Manage your apps, continue builds, and open app consoles."
+          subtitle="Manage your apps, continue builds, and open app Studio."
           actions={[
             { id: 'create', label: 'Create App' },
             { id: 'import', label: 'Import App', variant: 'outline' },

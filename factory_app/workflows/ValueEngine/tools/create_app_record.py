@@ -1,7 +1,7 @@
 """
 create_app_record — called at the start of the ValueEngine pipeline.
 
-Creates or reopens an app lifecycle record for the current user so the Console
+Creates or reopens an app lifecycle record for the current user so Studio
 immediately shows the app as building while the factory pipeline runs.
 
 Best-effort: never raises. If the app_registry module is not installed this
@@ -12,14 +12,14 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 _API_BASE = os.getenv("MOZAIKSAI_URL") or os.getenv("VITE_API_URL") or "http://localhost:8000"
 
 
-def _set_context_value(context_variables: Optional[Any], key: str, value: Any) -> None:
+def _set_context_value(context_variables: Any | None, key: str, value: Any) -> None:
     if context_variables is None:
         return
     try:
@@ -35,7 +35,7 @@ def _set_context_value(context_variables: Optional[Any], key: str, value: Any) -
         return
 
 
-async def _call_module(action: str, payload: dict) -> Optional[dict]:
+async def _call_module(action: str, payload: dict) -> dict | None:
     try:
         import httpx
         url = f"{_API_BASE}/api/modules/app_registry/{action}"
@@ -48,7 +48,7 @@ async def _call_module(action: str, payload: dict) -> Optional[dict]:
     return None
 
 
-async def create_app_record(context_variables: Optional[Any] = None) -> dict:
+async def create_app_record(context_variables: Any | None = None) -> dict:
     """
     Create or reopen an app lifecycle record with status 'building'.
     Called by the on_workflow_start hook in ValueEngine.

@@ -66,14 +66,14 @@ def test_appshell_auto_inferred_when_navigation_group_present(monkeypatch, tmp_p
 
     pages = [
         {
-            "id": "workspace-console",
+            "id": "workspace-studio",
             "label": "Apps",
             "path": "/apps",
-            "component": "ConsolePage",
+            "component": "StudioPage",
             "order": 1,
             "navigation": {
                 "scope": "local",
-                "group": "workspace-console",
+                "group": "workspace-studio",
                 "icon": "apps",
                 "order": 0,
             },
@@ -132,7 +132,7 @@ def test_explicit_appshell_false_not_overridden(monkeypatch, tmp_path: Path) -> 
             "order": 5,
             "navigation": {
                 "scope": "local",
-                "group": "workspace-console",
+                "group": "workspace-studio",
             },
             "meta": {"requiresAuth": True, "appShell": False},
         }

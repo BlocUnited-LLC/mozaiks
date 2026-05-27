@@ -4,9 +4,9 @@ import { useNavigate } from 'react-router-dom'
 import {
   API_BASE,
   ActionButton,
-  ConsoleErrorState,
-  ConsoleLoadingState,
-} from '../../ui/components/ConsoleShared.jsx'
+  StudioErrorState,
+  StudioLoadingState,
+} from '../../ui/components/StudioShared.jsx'
 
 
 export default function CreateAppRedirectPage() {
@@ -41,7 +41,7 @@ export default function CreateAppRedirectPage() {
   if (error) {
     return (
       <div className="space-y-4">
-        <ConsoleErrorState title="Create App Failed" message={error} />
+        <StudioErrorState title="Create App Failed" message={error} />
         <div className="flex justify-center">
           <ActionButton variant="secondary" onClick={() => navigate('/apps')}>
             Return to Apps
@@ -51,5 +51,5 @@ export default function CreateAppRedirectPage() {
     )
   }
 
-  return <ConsoleLoadingState label="Creating a draft app…" />
+  return <StudioLoadingState label="Creating a draft app…" />
 }

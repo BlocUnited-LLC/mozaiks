@@ -146,6 +146,10 @@ jobs:
           . .pkg-venv/bin/activate
           mozaiks --version
           mozaiks quickstart --help
+          cd /tmp
+          python -m mozaiks --version
+          python -m mozaiks studio --help
+          python -m mozaiks quickstart --help
 
       - name: Verify packaged resources
         run: |

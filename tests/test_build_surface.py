@@ -12,7 +12,7 @@ def _read(relative_path: str) -> str:
 
 
 def test_runtime_exposes_build_summary_helper() -> None:
-    source = _read("mozaiksai/core/runtime/app/console_summary.py")
+    source = _read("mozaiksai/core/runtime/app/studio_summary.py")
     assert "def build_build_summary" in source
     assert "def build_apps_summary" in source
     assert "def build_build_section" in source
@@ -55,8 +55,8 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     assert '"path": "/apps/:appId/settings"' not in manifest_source
     assert '"surfaces": ["studio"]' in manifest_source
     assert '"requiresRole": "admin"' in manifest_source
-    assert '"group": "workspace-console"' in manifest_source
-    assert '"group": "app-console"' in manifest_source
+    assert '"group": "workspace-studio"' in manifest_source
+    assert '"group": "app-studio"' in manifest_source
     assert '"icon": "apps"' in manifest_source
     assert '"icon": "dashboard"' in manifest_source
 
@@ -91,22 +91,22 @@ def test_core_components_do_not_register_build_page() -> None:
     assert "AppBuildPage" not in source
 
 
-def test_removed_console_pages_are_deleted_from_factory_app() -> None:
+def test_removed_custom_studio_pages_are_deleted_from_factory_app() -> None:
     workspace = _workspace()
 
-    # Old stale pages must not exist anywhere
+    # Studio management pages live under admin/pages/, not custom app UI routes.
     for relative_path in (
-        "factory_app/app/ui/pages/custom/console/AppBuildPage.jsx",
-        "factory_app/app/ui/pages/custom/console/AppDeployPage.jsx",
-        "factory_app/app/ui/pages/custom/console/AppOperationsPage.jsx",
-        "factory_app/app/ui/pages/custom/console/AppSettingsPage.jsx",
-        "factory_app/app/ui/pages/custom/console/WorkspaceOperationsPage.jsx",
-        "factory_app/app/ui/pages/custom/console/WorkspaceSettingsPage.jsx",
+        "factory_app/app/ui/pages/custom/studio/AppBuildPage.jsx",
+        "factory_app/app/ui/pages/custom/studio/AppDeployPage.jsx",
+        "factory_app/app/ui/pages/custom/studio/AppOperationsPage.jsx",
+        "factory_app/app/ui/pages/custom/studio/AppSettingsPage.jsx",
+        "factory_app/app/ui/pages/custom/studio/WorkspaceOperationsPage.jsx",
+        "factory_app/app/ui/pages/custom/studio/WorkspaceSettingsPage.jsx",
     ):
         assert not (workspace / relative_path).exists()
 
-    # Entire old console directory has been replaced by admin/pages/
-    assert not (workspace / "factory_app/app/ui/pages/custom/console").exists()
+    # The custom app UI route tree must not own Studio management pages.
+    assert not (workspace / "factory_app/app/ui/pages/custom/studio").exists()
 
     # Active pages live under admin/pages/
     assert (workspace / "factory_app/app/admin/pages/AppHealthPage.jsx").exists()
@@ -153,22 +153,22 @@ def test_apps_page_fetches_workspace_apps_endpoint() -> None:
     hook_source = _read("factory_app/app/admin/pages/useWorkspaceApps.js")
     layout_source = _read("chat-ui/src/workspace/WorkspaceLayout.jsx")
     assert "/api/studio/apps" in hook_source
-    assert "Mozaiks Console" in layout_source
+    assert "Mozaiks Studio" in layout_source
     assert "Import App" in source
     assert "/apps/new" in source
     assert "row.primaryAction?.href" in source
 
 
-def test_workspace_layout_links_console_and_hosting_sections() -> None:
+def test_workspace_layout_links_studio_and_hosting_sections() -> None:
     source = _read("chat-ui/src/workspace/WorkspaceLayout.jsx")
     manifest_source = _read("factory_app/app/ui/route_manifest.json")
     assert "Admin Dashboard" not in source
-    assert "Mozaiks Console" in source
+    assert "Mozaiks Studio" in source
     assert "Developer" not in source
     assert "Studio Navigation" not in source
     assert "Browse sections" not in source
-    assert "Mozaiks Console" in source
-    assert "App Console" in source
+    assert "Mozaiks Studio" in source
+    assert "App Studio" in source
     assert '"label": "Users"' in manifest_source
     assert '"label": "Billing"' not in manifest_source
     assert '"label": "Health"' in manifest_source
@@ -194,29 +194,29 @@ def test_workspace_layout_links_console_and_hosting_sections() -> None:
     assert '"path": "/apps/:appId/operations"' not in manifest_source
     assert '"path": "/apps/:appId/settings"' not in manifest_source
     assert "WorkspaceLayout" in source
-    assert "Open console navigation" in source
-    assert "Console navigation" in source
+    assert "Open Studio navigation" in source
+    assert "Studio navigation" in source
     assert "lg:hidden" in source
     assert "lg:block" in source
     assert "description:" not in source
 
 
-def test_admin_console_pages_use_workspace_layout_not_page_frame() -> None:
-    """Every file in factory_app/app/admin/pages/ is a workspace/app console surface.
-    It must import WorkspaceLayout (or AppConsoleLayout) and must NOT use PageFrame
+def test_admin_studio_pages_use_workspace_layout_not_page_frame() -> None:
+    """Every file in factory_app/app/admin/pages/ is a workspace/app Studio surface.
+    It must import WorkspaceLayout (or AppStudioLayout) and must NOT use PageFrame
     as the root layout shell, or the sidebar will be missing at runtime."""
     admin_pages_dir = _workspace() / "factory_app" / "app" / "admin" / "pages"
     violations = []
     for jsx_file in sorted(admin_pages_dir.glob("*.jsx")):
         source = jsx_file.read_text(encoding="utf-8")
-        has_workspace_layout = "WorkspaceLayout" in source or "AppConsoleLayout" in source
+        has_workspace_layout = "WorkspaceLayout" in source or "AppStudioLayout" in source
         has_page_frame_as_root = (
             "PageFrame" in source and not has_workspace_layout
         )
         if has_page_frame_as_root:
             violations.append(jsx_file.name)
     assert not violations, (
-        f"Admin console pages use PageFrame instead of WorkspaceLayout — "
+        f"Admin portal pages use PageFrame instead of WorkspaceLayout — "
         f"sidebar will be missing at runtime: {violations}. "
         "Import WorkspaceLayout from @mozaiks/chat-ui/workspace instead."
     )
@@ -320,9 +320,9 @@ def test_integrations_page_uses_shared_primitives_for_health_ui() -> None:
     assert "StatusPill" in source
     assert "SurfaceCard" in source
     assert "Panel" in source
-    assert "ConsoleInlineEmptyState" in source
-    assert "ConsoleLoadingState" in source
-    assert "ConsoleErrorState" in source
+    assert "StudioInlineEmptyState" in source
+    assert "StudioLoadingState" in source
+    assert "StudioErrorState" in source
     assert "function StatusPill" not in source
     assert "function MetricTile" not in source
     assert "function StatCard" not in source

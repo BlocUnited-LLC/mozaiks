@@ -2,20 +2,20 @@ import { useMemo, useState } from 'react'
 
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
-  ConsoleErrorState,
-  ConsoleInlineEmptyState,
-  ConsoleLoadingState,
+  StudioErrorState,
+  StudioInlineEmptyState,
+  StudioLoadingState,
   Panel,
   StatusPill,
-} from '../../ui/components/ConsoleShared.jsx'
-import { WorkspaceConsoleHero, formatCompactNumber } from './AppConsoleChrome.jsx'
-import { buildHealthState, formatPercentValue } from './consoleHealthModel.js'
-import { getConsoleDemoDeploymentRecord, getConsoleDemoUsageRecord } from './consoleDemoData.js'
-import buildWorkspacePortfolio from './workspaceConsoleModel.js'
-import { useWorkspaceConsoleData } from './useWorkspaceConsoleData.js'
+} from '../../ui/components/StudioShared.jsx'
+import { WorkspaceStudioHero, formatCompactNumber } from './AppStudioChrome.jsx'
+import { buildHealthState, formatPercentValue } from './studioHealthModel.js'
+import { getStudioDemoDeploymentRecord, getStudioDemoUsageRecord } from './studioDemoData.js'
+import buildWorkspacePortfolio from './workspaceStudioModel.js'
+import { useWorkspaceStudioData } from './useWorkspaceStudioData.js'
 
 export default function WorkspaceHealthPage() {
-  const { apps, loading, error, dataMode } = useWorkspaceConsoleData('Workspace health could not be loaded.')
+  const { apps, loading, error, dataMode } = useWorkspaceStudioData('Workspace health could not be loaded.')
   const [searchValue, setSearchValue] = useState('')
 
   const portfolio = useMemo(() => buildWorkspacePortfolio(apps), [apps])
@@ -23,8 +23,8 @@ export default function WorkspaceHealthPage() {
     return portfolio.rows
       .map((row) => {
         const appId = row.app?.app_id || row.app?.id || row.id
-        const deploymentRecord = dataMode === 'demo' ? getConsoleDemoDeploymentRecord(appId) : null
-        const usageRecord = dataMode === 'demo' ? getConsoleDemoUsageRecord(appId) : null
+        const deploymentRecord = dataMode === 'demo' ? getStudioDemoDeploymentRecord(appId) : null
+        const usageRecord = dataMode === 'demo' ? getStudioDemoUsageRecord(appId) : null
         const health = buildHealthState({
           status: row.status,
           totalErrors: Number(usageRecord?.errors || 0),
@@ -58,19 +58,19 @@ export default function WorkspaceHealthPage() {
     { id: 'average', label: 'Average Health', value: `${averageHealth}/100`, detail: 'Portfolio health score' },
   ]
 
-  if (loading) return <ConsoleLoadingState label="Loading workspace health…" />
-  if (error) return <ConsoleErrorState title="Workspace Health Unavailable" message={error} />
+  if (loading) return <StudioLoadingState label="Loading workspace health…" />
+  if (error) return <StudioErrorState title="Workspace Health Unavailable" message={error} />
 
   return (
     <WorkspaceLayout>
       <div className="space-y-6">
-        <WorkspaceConsoleHero
+        <WorkspaceStudioHero
           title="Health"
           subtitle="See which apps are healthy, which ones are drifting, and where the next app-level intervention should happen."
           summaryItems={summaryItems}
         />
 
-        <Panel eyebrow="Portfolio health" title="Health by app" subtitle="Search the current portfolio and keep the overall health of each app visible without opening each console.">
+        <Panel eyebrow="Portfolio health" title="Health by app" subtitle="Search the current portfolio and keep the overall health of each app visible without opening each app.">
           <div className="mb-4">
             <input
               type="search"
@@ -126,7 +126,7 @@ export default function WorkspaceHealthPage() {
               ))}
             </div>
           ) : (
-            <ConsoleInlineEmptyState
+            <StudioInlineEmptyState
               title="No apps match this health search"
               description="Adjust the search term to bring portfolio health back into view."
             />

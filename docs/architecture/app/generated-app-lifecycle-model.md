@@ -11,7 +11,7 @@ appears in the product.
 
 - Create a persistent app record immediately.
 - Treat workflow runs as execution details, not the app lifecycle itself.
-- Allow incomplete apps to exist visibly in the Workspace Console.
+- Allow incomplete apps to exist visibly in Workspace Studio.
 - Keep `Build` as the primary surface for incomplete or revising apps.
 - Preserve context and history across revisions.
 - Let downstream surfaces become available progressively as the app matures.
@@ -24,8 +24,8 @@ appears in the product.
 | `building` | workflows are actively producing or revising outputs | `Open Build` | Apps, Overview, Build |
 | `review` | generated outputs are ready for approval, comparison, or revision choice | `Review Changes` | Apps, Overview, Build |
 | `configuring` | app needs integrations, hosting, permissions, or environment setup | `Configure App` | Overview, Build, Deploy, Integrations, Settings |
-| `deployed` | deployment completed, app is installed or published but may still be stabilizing | `Open Overview` | All app-console sections |
-| `active` | app is live and operating normally | `Open Overview` | All app-console sections |
+| `deployed` | deployment completed, app is installed or published but may still be stabilizing | `Open Overview` | All app-studio sections |
+| `active` | app is live and operating normally | `Open Overview` | All app-studio sections |
 | `needs_revision` | an upstream change, validation failure, or user request requires follow-up | `Resume Build` | Apps, Overview, Build, Operations |
 | `archived` | app is intentionally inactive but retained | `View Details` | Overview, Settings |
 
@@ -141,7 +141,7 @@ draft | active | deployed | needs_revision
 - `needs_revision`: show warning state and route back to Build
 - `archived`: de-emphasize in default lists
 
-### In The App Console
+### In App Studio
 
 - `Overview` should always exist, even for `draft`
 - `Build` is primary for `draft`, `building`, `review`, and `needs_revision`

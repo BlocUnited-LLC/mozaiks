@@ -4,15 +4,15 @@ import { useParams } from 'react-router-dom'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ActionButton,
-  ConsoleErrorState,
-  ConsoleInlineEmptyState,
-  ConsoleLoadingState,
+  StudioErrorState,
+  StudioInlineEmptyState,
+  StudioLoadingState,
   Panel,
   StatusPill,
-} from '../../ui/components/ConsoleShared.jsx'
-import { AppConsoleHero, formatCompactNumber } from './AppConsoleChrome.jsx'
-import { buildSubscriptionMix, getAppConsoleSnapshot, toArray } from './appConsoleDataHelpers.js'
-import { useAppConsoleData } from './useAppConsoleData.js'
+} from '../../ui/components/StudioShared.jsx'
+import { AppStudioHero, formatCompactNumber } from './AppStudioChrome.jsx'
+import { buildSubscriptionMix, getAppStudioSnapshot, toArray } from './appStudioDataHelpers.js'
+import { useAppStudioData } from './useAppStudioData.js'
 
 function downloadUsersCsv(appId, rows) {
   const headers = ['name', 'email', 'segment', 'status', 'subscription', 'last_seen']
@@ -33,14 +33,14 @@ function downloadUsersCsv(appId, rows) {
 
 export default function AppUsersPage() {
   const { appId = 'workspace-app' } = useParams()
-  const { data, loading, error, dataMode } = useAppConsoleData(appId)
+  const { data, loading, error, dataMode } = useAppStudioData(appId)
   const [searchValue, setSearchValue] = useState('')
   const [selectedUserId, setSelectedUserId] = useState(null)
 
-  if (loading) return <ConsoleLoadingState label="Loading app users…" />
-  if (error || !data) return <ConsoleErrorState title="Users Unavailable" message={error || 'No user data returned.'} />
+  if (loading) return <StudioLoadingState label="Loading app users…" />
+  if (error || !data) return <StudioErrorState title="Users Unavailable" message={error || 'No user data returned.'} />
 
-  const snapshot = getAppConsoleSnapshot(appId, data, dataMode)
+  const snapshot = getAppStudioSnapshot(appId, data, dataMode)
   const usersRecord = snapshot.usersRecord
   const users = toArray(usersRecord?.users)
   const filteredUsers = users.filter((user) => {
@@ -63,7 +63,7 @@ export default function AppUsersPage() {
   return (
     <WorkspaceLayout>
       <div className="space-y-6">
-        <AppConsoleHero
+        <AppStudioHero
           appId={appId}
           summary={snapshot.summary}
           dataMode={dataMode}
@@ -148,7 +148,7 @@ export default function AppUsersPage() {
                 </table>
               </div>
             ) : (
-              <ConsoleInlineEmptyState
+              <StudioInlineEmptyState
                 title="No user records yet"
                 description="User profiles, segments, subscriptions, and support history will populate here once the app is live enough to accumulate real usage."
               />
@@ -178,7 +178,7 @@ export default function AppUsersPage() {
                   </div>
                 </div>
               ) : (
-                <ConsoleInlineEmptyState
+                <StudioInlineEmptyState
                   title="No profiles to inspect yet"
                   description="Once users exist, selecting a row in the table will keep a lightweight app-scoped profile visible here."
                 />
@@ -196,7 +196,7 @@ export default function AppUsersPage() {
                   ))}
                 </div>
               ) : (
-                <ConsoleInlineEmptyState
+                <StudioInlineEmptyState
                   title="Segments appear once user records exist"
                   description="Segment distribution will surface here when the app starts accumulating user profiles."
                 />
@@ -214,7 +214,7 @@ export default function AppUsersPage() {
                   ))}
                 </div>
               ) : (
-                <ConsoleInlineEmptyState
+                <StudioInlineEmptyState
                   title="Subscription data is not populated yet"
                   description="This section will start to matter once billing or plan assignment becomes part of the live app workflow."
                 />
@@ -238,7 +238,7 @@ export default function AppUsersPage() {
                 ))}
               </div>
             ) : (
-              <ConsoleInlineEmptyState
+              <StudioInlineEmptyState
                 title="No recent user activity"
                 description="User-facing activity will appear here after the app has live users, subscription changes, or support events."
               />
@@ -256,7 +256,7 @@ export default function AppUsersPage() {
                 ))}
               </div>
             ) : (
-              <ConsoleInlineEmptyState
+              <StudioInlineEmptyState
                 title="No support history recorded"
                 description="Support events and subscription interventions will show up here once this app has live user operations."
               />

@@ -189,7 +189,7 @@ def test_review_ui_quality_blocks_custom_route_theme_contract_violations() -> No
             "app_ui_quality_warnings": [],
             "app_schema_ready": True,
             "app_manifest": {
-                "app_name": "Operations Console",
+                "app_name": "Operations Studio",
                 "default_route": "/operations",
                 "pages": [],
                 "custom_routes": ["operations"],

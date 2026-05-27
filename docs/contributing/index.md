@@ -2,7 +2,7 @@
 
 Mozaiks is open source under the MIT license. This section is for people working
 on the framework itself — changing runtime code, adding factory workflows,
-improving the Console, or maintaining the release pipeline.
+improving Studio, or maintaining the release pipeline.
 
 If you are building an app with Mozaiks, you do not need this section.
 Start with [Getting Started](../getting-started.md) instead.

@@ -99,7 +99,7 @@ def _discovery_output() -> dict:
     return {
         "request_intent": "brownfield_app",
         "existing_product_spec": {
-            "app_name": "Operations Console",
+            "app_name": "Operations Studio",
             "app_description": "Internal work-order operations app.",
             "app_url": "https://ops.example.invalid",
             "tech_stack": "React, Node.js, PostgreSQL",
@@ -161,7 +161,7 @@ def _discovery_output() -> dict:
             "storage_migration_required": True,
             "new_adapters_required": ["email_gateway"],
             "auth_delegation_model": "user_token_forwarding",
-            "ui_surface_preference": "admin_console",
+            "ui_surface_preference": "admin_studio",
             "ai_accessible_capabilities": [],
             "initial_workflows": ["WorkOrderSummary"],
             "ecosystem_bindings": [],
@@ -182,11 +182,11 @@ def _discovery_output() -> dict:
 
 def _context() -> dict:
     return {
-        "app_id": "ops_console",
+        "app_id": "ops_studio",
         "chat_id": "chat_ops_001",
         "repo_summary": {
-            "repo_path": "repos/ops-console",
-            "repo_name": "ops-console",
+            "repo_path": "repos/ops-studio",
+            "repo_name": "ops-studio",
             "git_ref": "main",
             "checksum": "sha256:repo123",
             "source": "local_repo",
@@ -207,7 +207,7 @@ def test_mapper_derives_canonical_brownfield_contracts_without_secret_values() -
     )
     payloads = artifacts.as_artifact_payloads()
 
-    assert artifacts.application_inventory.app_id == "ops_console"
+    assert artifacts.application_inventory.app_id == "ops_studio"
     assert artifacts.application_inventory.routes[0].location == "/work-orders"
     assert artifacts.application_inventory.data_entities[0].label == "WorkOrder"
     assert artifacts.integration_inventory[0].integration_id == "email_gateway"
@@ -277,7 +277,7 @@ def test_save_step_persists_draft_artifact_versions_and_preserves_existing_conte
     result = asyncio.run(save_module.save_existing_app_artifacts(context_variables=context))
 
     assert result["success"] is True
-    assert context["existing_product_spec"]["app_name"] == "Operations Console"
+    assert context["existing_product_spec"]["app_name"] == "Operations Studio"
     assert context["capability_specs"][0]["capability_id"] == "work_order_triage"
     assert context["agent_augmentation_plan"]["adoption_level"] == "gradual_modernization"
     assert context["existing_app_discovery_artifact"]["request_intent"] == "brownfield_app"
@@ -298,7 +298,7 @@ def test_save_step_persists_draft_artifact_versions_and_preserves_existing_conte
     ]
     assert context["app_context_version"]["mode"] == "brownfield"
     assert context["app_context_version"]["stale_status"] == "current"
-    assert context["application_inventory"]["app_id"] == "ops_console"
+    assert context["application_inventory"]["app_id"] == "ops_studio"
     assert context["ownership_boundary"]["ownership_boundaries"]
     assert context["integration_inventory"]["integrations"][0]["secret_required"] is True
 

@@ -314,7 +314,7 @@ def test_generated_ui_contract_ignores_docs_and_tests_fixtures() -> None:
     assert warnings == []
 
 
-def test_admin_console_page_using_page_frame_is_flagged() -> None:
+def test_admin_studio_page_using_page_frame_is_flagged() -> None:
     """admin/pages/ files must use WorkspaceLayout, not PageFrame."""
     warnings = audit_generated_react_files(
         [
@@ -330,16 +330,16 @@ def test_admin_console_page_using_page_frame_is_flagged() -> None:
                 ),
             }
         ],
-        source_label="generated admin console React",
+        source_label="generated admin portal React",
         require_jsx=True,
     )
 
-    assert any("workspace/app console page" in w and "WorkspaceLayout" in w for w in warnings), (
+    assert any("workspace/app Studio page" in w and "WorkspaceLayout" in w for w in warnings), (
         f"Expected layout shell warning for admin/pages/ using PageFrame, got: {warnings}"
     )
 
 
-def test_admin_console_page_using_workspace_layout_is_clean() -> None:
+def test_admin_studio_page_using_workspace_layout_is_clean() -> None:
     """admin/pages/ files using WorkspaceLayout must not trigger the layout warning."""
     warnings = audit_generated_react_files(
         [
@@ -355,11 +355,11 @@ def test_admin_console_page_using_workspace_layout_is_clean() -> None:
                 ),
             }
         ],
-        source_label="generated admin console React",
+        source_label="generated admin portal React",
         require_jsx=True,
     )
 
-    assert not any("workspace/app console page" in w for w in warnings), (
+    assert not any("workspace/app Studio page" in w for w in warnings), (
         f"Unexpected layout shell warning for correct admin/pages/ usage: {warnings}"
     )
 

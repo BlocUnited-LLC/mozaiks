@@ -1,6 +1,6 @@
 # UI Quality Checklist
 
-Use this checklist when reviewing first-party console screens and generated UI from
+Use this checklist when reviewing first-party Studio screens and generated UI from
 `AppGenerator` or `AgentGenerator`.
 
 Surface ownership is defined in
@@ -12,8 +12,8 @@ transition UI.
 Canonical reusable UI primitives live in `chat-ui/src/ui/primitives` and are
 exposed to page schemas through `PrimitiveRegistry.js` and
 `primitive_schemas.json`. App-specific files may compose those primitives, but
-must not become a hidden second primitive catalog. First-party console adapters
-such as `ConsoleShared.jsx` are not primitive ownership points.
+must not become a hidden second primitive catalog. First-party Studio adapters
+such as `StudioShared.jsx` are not primitive ownership points.
 Generated custom-route React lives under `app/ui/pages/custom/*.jsx` through
 the typed `custom_route_bundle.page_files` contract. App-level helper
 components should be introduced only through an explicit future contract, not by
@@ -78,7 +78,7 @@ Avoid these defaults unless the product requirement explicitly calls for them:
 - fake charts
 - decorative activity feeds
 - dashboard-style card grids
-- repeated scope labels like `Workspace`, `Console`, `App Console`, or `Lifecycle`
+- repeated scope labels like `Workspace`, `Studio`, `App Studio`, or `Lifecycle`
 - stacked helper subtitles that explain obvious UI
 - multiple status pills for the same object
 - summary panels that are larger than the data they contain
@@ -106,7 +106,7 @@ Use `factory_app/app/ui/pages/notifications.yaml` as the current first-party
 declarative page example. It owns a distinct task: a full notifications inbox
 for alerts that do not fit in the header dropdown.
 
-Do not add declarative pages that duplicate an existing first-class Console
+Do not add declarative pages that duplicate an existing first-class Studio
 surface. `/apps` is the app portfolio and app lifecycle surface; a separate app
 registry page creates product confusion.
 
