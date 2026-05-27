@@ -67,9 +67,9 @@ def test_onboard_command_updates_scaffold_surfaces_non_interactively(tmp_path) -
         assert "journey" not in str(ai_json["ask"])
 
 
-def test_onboard_command_refreshes_legacy_shell_placeholder(tmp_path) -> None:
-    target_dir = tmp_path / "legacy-shell-app"
-    init_command.run(Namespace(preset="chat", name="legacy-shell-app", directory=str(target_dir), starter=False))
+def test_onboard_command_refreshes_blank_shell_placeholder(tmp_path) -> None:
+    target_dir = tmp_path / "blank-shell-app"
+    init_command.run(Namespace(preset="chat", name="blank-shell-app", directory=str(target_dir), starter=False))
 
     shell_path = target_dir / "app" / "config" / "shell.json"
     shell_path.write_text(
@@ -79,7 +79,7 @@ def test_onboard_command_refreshes_legacy_shell_placeholder(tmp_path) -> None:
                     "logo": {
                         "src": None,
                         "wordmark": None,
-                        "alt": "legacy-shell-app logo",
+                        "alt": "blank-shell-app logo",
                         "href": "/",
                     },
                     "pages": [],
@@ -154,7 +154,7 @@ def test_onboard_command_refreshes_legacy_shell_placeholder(tmp_path) -> None:
     onboard_command.run(
         Namespace(
             directory=str(target_dir),
-            name="Legacy Shell App",
+            name="Blank Shell App",
             provider="anthropic",
             model="claude-sonnet-4-5",
             non_interactive=True,
