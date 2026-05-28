@@ -88,7 +88,6 @@ nav:
   - Get Started:
       - Getting Started: getting-started.md
   - Guides:
-      - Use Studio: guides/studio/01-overview.md
       - Add Workflows: guides/adding-workflows/01-overview.md
       - Add a Module: guides/adding-modules/01-overview.md
       - Add a Page: guides/adding-pages/01-overview.md
