@@ -47,17 +47,11 @@ are available. A minimal example:
 
 ## Shell Chrome Modes
 
-Individual pages declare a `shell_mode` in their YAML:
+Each page declares its own `shell_mode` — this controls whether the header,
+footer, and local nav are shown. See [Add a Page](../adding-pages/01-overview.md#shell-mode)
+for the full mode reference.
 
-```yaml
-shell_mode: workspace     # dense dashboard or admin surface
-shell_mode: conversation  # chat or inbox thread
-shell_mode: focused       # onboarding, checkout, review flow
-shell_mode: immersive     # full-viewport canvas or media
-shell_mode: public        # unauthenticated or marketing route
-```
-
-Override app-wide mode defaults in `shell.json` only when the per-page
+Override app-wide defaults for a mode in `shell.json` only when the per-page
 declaration is not enough.
 
 ## Startup Route
