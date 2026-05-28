@@ -15,17 +15,10 @@ pip install mozaiks
 ## 2. Start MongoDB
 
 Mozaiks requires a database to store your apps, build history, and workspace
-state. The easiest way to start one is with the following command — it runs in
-the background, no separate terminal needed:
+state. The easiest way to start one is via a docker using the following command:
 
 ```powershell
 docker run -d --name mozaiks-mongo -p 27017:27017 mongo:7
-```
-
-You only need to do this once. If you restart your PC, bring it back with:
-
-```powershell
-docker start mozaiks-mongo
 ```
 
 !!! note "Don't want Docker?"
@@ -46,7 +39,6 @@ $env:OPENAI_API_KEY="sk-..."
 
 ## 4. Create your workspace and open Studio
 
-Run this from a parent folder (e.g. your `Desktop` or `Projects` directory).
 Replace `my-workspace` with whatever you want to name your app folder:
 
 ```powershell
@@ -65,21 +57,10 @@ Studio in your browser at `http://localhost:3000`.
 
 In-progress builds stay in **Apps** so you can always pick up where you left off.
 
-## Coming back to an existing workspace
-
-Run these from the **parent** folder of your workspace (wherever you ran `quickstart`):
-
-```powershell
-docker start mozaiks-mongo   # if MongoDB isn't already running
-python -m mozaiks studio --dir .\my-workspace --open
-```
-
-Replace `.\my-workspace` with the name of the folder that was created during quickstart.
-
-!!! tip "Already inside your workspace folder?"
-    If you `cd`'d into the workspace directory first, use `--dir .` instead:
-
+!!! tip "Coming back to an existing workspace"
     ```powershell
+    cd .\my-workspace
+    docker start mozaiks-mongo   # bring MongoDB back up if your PC restarted
     python -m mozaiks studio --dir . --open
     ```
 
