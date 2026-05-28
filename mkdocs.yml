@@ -88,6 +88,7 @@ nav:
   - Get Started:
       - Getting Started: getting-started.md
   - Guides:
+      - Overview: guides/index.md
       - Add Workflows: guides/adding-workflows/01-overview.md
       - Add a Module: guides/adding-modules/01-overview.md
       - Add a Page: guides/adding-pages/01-overview.md
@@ -182,8 +183,7 @@ nav:
               - Workflow UI Primitive Catalog: architecture/frontend/ui-system/workflow-ui-primitive-catalog.md
               - Transition UI Primitives: architecture/frontend/ui-system/transition-ui-primitives.md
               - UI System Quality Gates: architecture/frontend/ui-system/ui-system-quality-gates.md
-              - UI Quality Checklist: guides/ui-and-brand/ui-quality-checklist.md
-      - Other:
+              - Other:
           - Keycloak Auth: architecture/keycloak-auth.md
           - Mobile Client Contract: architecture/mobile-client-contract.md
           - Orchestration and Decomposition: architecture/orchestration-and-decomposition.md

@@ -1,38 +1,71 @@
-# App Shell And Branding
+# App Shell & Branding
 
-Use this guide when you need to change the visible shell identity of a Mozaiks
-app without changing core runtime code.
+Customize the visible identity of your Mozaiks app using declarative config files —
+no runtime code changes needed.
 
-## What Branding Owns
+## Key Files
 
-Branding is split across a few app-owned files:
+| File | Controls |
+|------|----------|
+| `app/brand/theme_config.json` | Colors, fonts, spacing, dark/light mode |
+| `app/brand/assets/` | Logos and icons |
+| `app/brand/fonts/` | Custom local fonts |
+| `app/config/shell.json` | Navigation, chrome modes, shortcuts, header/footer/profile |
+| `app/app.json` | App name, startup route, auth intent |
 
-- `app/brand/theme_config.json` for visual tokens and theme inputs
-- `app/brand/assets/` for logos and icons
-- `app/brand/fonts/` for local fonts
-- `app/config/shell.json` for shell content and navigation chrome
-- `app/app.json` for startup route and auth intent, not raw theme tokens
+## Theme
 
-## What Branding Does Not Control
+Edit `app/brand/theme_config.json` to set your color palette, font family, and
+border radius. These tokens flow into the shell and all generated UI surfaces.
 
-Do not put these concerns into branding files:
+## Assets
 
-- workflow logic
-- module business rules
-- runtime startup wiring
-- admin ownership and behavior
+Place logos and icons under `app/brand/assets/`. Reference them in
+`theme_config.json` or `shell.json`. Custom fonts go under `app/brand/fonts/`.
 
-## Typical Changes
+## Shell Navigation
 
-Common branding tasks include:
+`app/config/shell.json` controls where navigation appears and which shortcuts
+are available. A minimal example:
 
-- updating logos and icons
-- adjusting theme tokens
-- changing the startup route
-- choosing shell chrome modes and app-wide placement policy
+```json
+{
+  "navigation": {
+    "policy": {
+      "desktop": { "global": "header", "local": "sidebar" },
+      "mobile": { "global": "bottomBar", "local": "sheet" }
+    }
+  },
+  "shortcuts": {
+    "header": ["dashboard"],
+    "profile": ["profile", "settings", "signout"],
+    "mobile": ["dashboard", "create", "profile"],
+    "footer": ["terms", "privacy"]
+  }
+}
+```
 
-## Read Next
+## Shell Chrome Modes
 
-- [Platform Authoring](../../architecture/app/platform-authoring.md)
-- [App Manifest And Platform Targets](../../architecture/app/app-manifest-and-platform-targets.md)
-- [Getting Started](../../getting-started.md)
+Individual pages declare a `shell_mode` in their YAML:
+
+```yaml
+shell_mode: workspace     # dense dashboard or admin surface
+shell_mode: conversation  # chat or inbox thread
+shell_mode: focused       # onboarding, checkout, review flow
+shell_mode: immersive     # full-viewport canvas or media
+shell_mode: public        # unauthenticated or marketing route
+```
+
+Override app-wide mode defaults in `shell.json` only when the per-page
+declaration is not enough.
+
+## Startup Route
+
+Set the landing page in `app/app.json`:
+
+```json
+{
+  "startupRoute": "/dashboard"
+}
+```
