@@ -60,14 +60,6 @@ all inside a chat interface.
 
     [:octicons-arrow-right-24: Get Started](getting-started.md)
 
--   :material-tune-variant: **Configuration Reference**
-
-    ---
-
-    Connector secrets, auth, and deployment settings.
-
-    [:octicons-arrow-right-24: Configuration](user-configuration.md)
-
 -   :material-sitemap: **Add a Workflow**
 
     ---
