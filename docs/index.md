@@ -68,6 +68,22 @@ all inside a chat interface.
 
     [:octicons-arrow-right-24: Add Workflows](guides/adding-workflows/01-overview.md)
 
+-   :material-puzzle-outline: **Add a Module**
+
+    ---
+
+    Add a self-contained backend capability to your app.
+
+    [:octicons-arrow-right-24: Add a Module](guides/adding-modules/01-overview.md)
+
+-   :material-file-document-outline: **Add a Page**
+
+    ---
+
+    Add new pages and routes to your app workspace.
+
+    [:octicons-arrow-right-24: Add a Page](guides/adding-pages/01-overview.md)
+
 -   :material-view-dashboard-outline: **Customize Branding**
 
     ---
