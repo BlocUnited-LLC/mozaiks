@@ -1,12 +1,20 @@
 # Platform Intelligence
 
-Mozaiks has two layers that make the build and refinement UX intent-aware
-without turning every workflow into a giant decision tree.
+Platform Intelligence is how Mozaiks understands both the request and the app
+before it decides what to do next.
+
+It gives Mozaiks two capabilities before any workflow or coding step runs:
+
+- it decides what kind of request this is and what path to take
+- it decides which code, contracts, and files actually matter for that request
+
+That is what makes refinement feel deliberate instead of improvised.
 
 ## The Control-Plane Harness
 
 When a user sends a message like "fix this dashboard" or "add export controls",
-Mozaiks cannot handle that as normal chat. The request needs:
+Mozaiks routes that through its structured refinement path instead of treating
+it as ordinary chat. The request needs:
 
 - context about what was already built
 - a classification of how big the change is
@@ -14,6 +22,12 @@ Mozaiks cannot handle that as normal chat. The request needs:
 
 That is the job of the **control-plane harness**. It sits above workflow-local
 AG2 execution and processes checkpoint events before any workflow runs.
+
+In one sentence: the harness decides what should happen next.
+
+That means it classifies the request, chooses the right workflow sequence or
+coding path, and decides whether Mozaiks should auto-patch, ask for
+clarification, or restart from a higher-level planning step.
 
 ```text
 User request
@@ -37,6 +51,9 @@ Scope selection and coding decisions require knowing which files matter. Mozaiks
 builds a deterministic **context graph** — a snapshot of the workspace that maps
 files, modules, pages, workflows, agents, tools, symbols, and configs to their
 relationships.
+
+In one sentence: the context graph gives the harness and coding worker the
+smallest useful slice of the workspace.
 
 ```text
 deterministic syntax extraction
@@ -63,7 +80,13 @@ retrieval later, but they are not the source of truth.
 
 ## How They Work Together
 
-The two paths diverge at classification.
+The clean mental model is:
+
+- the harness decides **what kind of change this is**
+- the context graph helps decide **which code to look at**, when scoped coding
+  is needed
+
+From there, the flow diverges based on classification.
 
 **Feature / design / core changes** — harness routes deterministically:
 
@@ -99,8 +122,17 @@ The coding worker never sees the whole workspace. It sees the files the context
 graph ranked highest for the request, plus their graph neighbors (imports,
 declarations, related modules).
 
+So the end-to-end flow is:
+
+1. harness decides the route
+2. context graph scopes the code when patch-level refinement is needed
+3. workflow or coding worker executes the chosen path
+
 ## Read More
 
-- [Control-Plane Harness Architecture](../../architecture/workflows/control-plane-harness-architecture.md)
-- [Refinement Control Plane](../../architecture/workflows/refinement-control-plane.md)
-- [Context Graph and Code Intelligence](../../architecture/foundations/context-graph-and-code-intelligence.md)
+- [Harness Architecture](./02-harness-architecture.md)
+- [Context Graph](./03-context-graph.md)
+- [Refinement Control Plane](./04-refinement-control-plane.md)
+
+For the full canonical contracts, each guide page links back to the deeper
+Architecture documentation.
