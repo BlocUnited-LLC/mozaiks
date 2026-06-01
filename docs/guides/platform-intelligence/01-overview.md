@@ -1,44 +1,49 @@
-# Code Context
+# Mozaiks Harness
 
-When you ask Mozaiks to change something in your app, you are not prompting a
-generic coding assistant. You are asking a platform that already knows what your
-app is made of.
+The Mozaiks Harness is the layer between what you ask and what the agent does.
 
-Mozaiks keeps a live map of your app — every module, page, workflow, contract,
-and data schema — and uses it to figure out exactly what a request means before
-anything runs. That is what makes the difference between a tool that makes
-its best guess and a platform that makes targeted, accurate changes.
+A generic AI agent runs free against your files — it reads code, infers
+structure, and makes its best guess at what to change. The Mozaiks Harness does
+something fundamentally different: it takes your request, classifies what kind
+of change it is, maps it to the contracts your app was built from, scopes the
+relevant surface, and directs a targeted worker. The AI is not guessing. It is
+operating against a known map.
 
-## What You Actually Get
+That is what a harness is: not raw AI capability, but AI that is directed,
+constrained, and purposeful.
 
-Most coding tools work at the file level. They read code, infer structure, and
-hope they got the right files. Mozaiks works at the contract level.
+## What The Harness Knows
 
-Because every app Mozaiks generates is built from explicit contracts —
-`module.yaml`, `data_contract`, page bindings, workflow tools — the platform
-already understands the semantic structure of your app. When you ask for a
-change, it reads contracts, not HTML.
+Every app Mozaiks generates is built from explicit contracts — `module.yaml`,
+`data_contract`, page bindings, workflow tools. The Harness keeps a live map of
+those contracts and uses it before anything runs.
 
-In practice, this means:
+When you ask for a change, the Harness already knows:
 
-- changes stay scoped to the right part of the app instead of drifting
-- the platform can show you why a file was included in a change
-- your existing build state is preserved unless a full rebuild is actually
-  necessary
+- what modules exist and what actions they expose
+- what pages are bound to which module actions
+- what data schemas underpin each module
+- what workflows are active and where they connect
+
+So when you say "add export controls to the projects table," the Harness
+recognizes `projects` as a module, identifies `module_action` as the contract
+surface that needs updating, resolves the complete set of files that surface
+requires, and generates each one in dependency order. A generic tool would have
+to guess all of that.
 
 ## How It Works In Practice
 
-Every request goes through two quick steps before any code changes.
+Every request goes through two steps before any code changes.
 
 **Step 1: classify the request.**
-Mozaiks decides whether this is a patch, a design change, a feature request, or
-a concept-level change. That determines the path — a scoped code fix, a workflow
-re-entry, or something larger.
+The Harness decides whether this is a patch, a design change, a feature
+request, or a concept-level change. That determines the path — a scoped code
+fix, a workflow re-entry, or something larger.
 
 **Step 2: scope the context.**
-For patches and targeted fixes, Mozaiks builds a compact view of the files and
-contracts most likely to be affected. The coding worker gets that scoped view —
-not the whole workspace.
+For patches and targeted fixes, the Harness builds a compact view of the files
+and contracts most likely to be affected. The coding worker gets that scoped
+view — not the whole workspace.
 
 **Adding a feature:**
 
@@ -50,7 +55,7 @@ You: "Add export controls to the projects table"
 → workflow runs with routing context already set
 ```
 
-Mozaiks re-enters the right workflow with context already loaded. You do not
+The Harness re-enters the right workflow with context already loaded. You do not
 have to re-describe the app.
 
 **Fixing a bug:**
@@ -64,21 +69,24 @@ You: "Fix the broken column header in the projects table"
 → auto-patches or asks to clarify if confidence is low
 ```
 
-Mozaiks knows `projects` is a module, `column header` maps to the page YAML
-binding, and the relevant files are the module handler, the page schema, and
-their neighbors. A generic coding tool would have to guess all of that.
+## What Makes This Different
 
-## Why This Matters For Building
+No other tool can do this because no other tool generated the app from contracts
+in the first place.
 
-This changes what iteration actually feels like.
+Cursor, Copilot, and Claude Code help humans write software faster. They produce
+code that an AI must reverse-engineer to change accurately. The Mozaiks Harness
+operates against the contracts that were the inputs to generation — so every
+change is a contract-level operation, not a file-level guess.
 
-Instead of re-describing your app every time you want to change something, you
-just describe the change. Mozaiks already has the map. It uses that map to make
-the smallest accurate change, validate it against the contracts, and keep
-everything else intact.
+In practice:
+
+- changes stay scoped to the right part of the app instead of drifting
+- your existing build state is preserved at every level above the change
+- you do not re-describe the app every time you want to change something
 
 See [Refinement Control Plane](./04-refinement-control-plane.md) for how
-Mozaiks decides what level of change a request actually requires.
+the Harness decides what level of change a request actually requires.
 
 ---
 

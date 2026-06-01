@@ -94,7 +94,7 @@ nav:
       - Add a Page: guides/adding-pages/01-overview.md
       - App Shell & Branding: guides/custom-brand-integration/01-overview.md
       - Platform Intelligence:
-          - Code Context: guides/platform-intelligence/01-overview.md
+          - Mozaiks Harness: guides/platform-intelligence/01-overview.md
           - Refinement Control Plane: guides/platform-intelligence/04-refinement-control-plane.md
   - Architecture:
       - Overview: architecture/index.md
