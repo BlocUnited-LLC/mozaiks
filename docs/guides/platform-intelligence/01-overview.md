@@ -1,127 +1,143 @@
-# Mozaiks Harness
+# Mozaiks Control Plane
 
-The Mozaiks Harness is the intelligence layer that sits between your request and
-the agent that acts on it.
+The Mozaiks control plane is the intelligence layer that sits between your
+request and workflow execution.
 
-A generic AI coding tool reads your files, infers structure, and guesses what to
-change. The Mozaiks Harness does not guess — it operates against the contracts
-your app was built from. Every app Mozaiks generates is defined by explicit
-contracts: `module.yaml`, `data_contract`, page bindings, workflow tools. The
-Harness keeps a live map of those contracts and uses it to classify, scope, and
-direct every change request before any code runs.
+When you say "fix this page," "add export controls," or "restart this from
+concept," Mozaiks does not drop a generic coding agent into your repo and hope
+for the best. The control plane interprets the request, checks the current
+artifact state, decides the smallest valid next step, and only then routes into
+scoped coding or workflow re-entry.
 
-No other tool can do this because no other tool generated the app from contracts
-in the first place.
+That is the umbrella. The harness is one part of it, not the whole thing.
 
-## What The Harness Is Made Of
+## Current Implementation
 
-The Harness is not a single AI call. It is a pipeline of specialized components,
-each with a defined job.
+Today, in the first-party builder experience, the control plane is made up of
+three layers working together.
 
-### Context Graph
+### 1. Runtime Layer
 
-The Context Graph is the live map of your app. It is built from the contracts
-and code already in the app — every module, page, workflow, data schema, and
-binding is a node. Relationships between them are edges: imports, action
-bindings, workflow handoffs, data dependencies.
+`mozaiksai/control_plane/` is the canonical runtime package. It owns the
+control-plane runtime, contracts, loaders, ports, checkpoint dispatch, and the
+first-party implementations that do the actual work.
 
-Every other component in the Harness reads from this graph. It is why the
-Harness can answer "what files does changing this module action affect?" without
-scanning the whole workspace.
+Key runtime components:
 
-### Classifier
+- `LLMChangeClassifier` classifies requests as `patch`, `design`, `feature`, or
+  `core`
+- `RefinementTriggerRouteResolver` maps that classification to a workflow
+  sequence such as `app_revision` or `full_rebuild`
+- `ArtifactScopeProposer` scopes patch requests to the smallest relevant file set
+- `ContractSurfacePlanner` builds ordered contract-surface plans for `feature`
+  and `design` changes
+- `SurfaceRegenerationWorker` executes those surfaces in dependency order
+- `ScopedRefinementCodingWorker` handles patch-level coding against a scoped
+  slice
+- `FirstPartyHarnessDecisionPolicy` turns the result into a user-facing decision:
+  auto-apply, confirm, clarify, or restart
 
-Every request you make is classified before anything else runs. The Classifier
-reads your request against the current app context and assigns one of four
-change classes:
+### 2. Declarative Pack
 
-- `patch` — a small, localized fix
-- `design` — a visual or structural change without a new capability
-- `feature` — a new capability within the same product direction
-- `core` — a concept-level change that affects the product fundamentally
+`factory_app/control_plane/` is the first-party declarative pack that tells the
+runtime how to behave.
 
-The classification determines which path the Harness takes next.
+Current anchors:
 
-### Refinement Router
+- `factory_app/app/config/ai.json` enables the control plane and selects LLM
+  profiles such as `classifier`, `codegen`, and `reviewer_validator`
+- `factory_app/control_plane/config/control_plane.yaml` declares routes,
+  checkpoints, prompts, and tool bindings
+- `factory_app/workflows/extended_orchestration/extension_registry.json`
+  defines the workflow sequences that routing decisions can re-enter
 
-The Router takes the classification and the current artifact state and picks the
-right workflow sequence: `app_revision`, `design_revision`, `theme_revision`,
-`full_rebuild`, and so on. It uses which parts of the build are stale to decide
-the smallest valid re-entry point — so a `design` change never triggers a full
-concept rebuild.
+This matters because the control plane is not hardcoded as one giant router. The
+runtime executes a declarative pack.
 
-### Scope Proposer
+### 3. Context Inputs
 
-For `patch` class changes, the Scope Proposer queries the Context Graph to
-identify the smallest relevant set of files. The coding worker gets that scoped
-slice — not the whole workspace. This is what keeps patch changes fast and
-contained.
+The control plane also depends on the current app context.
 
-### Contract Surface Planner
+- the revision context and artifact summary tools provide persisted build state
+- the Context Graph provides the live map of modules, pages, schemas,
+  workflows, and bindings
+- the artifact dependency graph in `extension_registry.json` tells the router
+  what downstream artifact families are affected
 
-For `feature` and `design` class changes, the Contract Surface Planner takes
-over. Instead of selecting files by proximity, it identifies which contract
-surfaces need updating and in what dependency order:
+This is why Mozaiks can make contract-level decisions instead of file-level
+guesses.
 
+## Where The Harness Fits
+
+In the current implementation, the harness is the execution shell declared in
+`control_plane.yaml`:
+
+```yaml
+harness:
+  implementation: mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness
 ```
-data_schema → module_action → page_binding
-```
 
-If you add a new field to a module, the data schema is updated first, then the
-action handler, then the page that exposes it — each step seeing the output of
-the previous one.
+That harness coordinates the control-plane checkpoints and policies. It is the
+runtime shell that runs the control-plane flow. It is not the same thing as the
+entire control plane.
 
-### Surface Regeneration Worker
+So the clean mental model is:
 
-The Surface Regeneration Worker executes the Contract Surface Plan
-surface-by-surface, accumulating file outputs as it goes. Later surfaces always
-see the updated files from earlier ones. This is what makes targeted
-regeneration accurate instead of just fast.
+- **control plane** = the full intelligence layer
+- **harness** = the runtime shell inside that layer
+- **refinement control plane** = the post-generation change path the control
+  plane owns
 
-### Coding Worker
-
-For `patch` changes, the Coding Worker runs against the scoped file set the
-Scope Proposer identified. It does not touch anything outside that scope.
-
-### Harness Decision Policy
-
-Before the Harness applies any change, the Decision Policy checks confidence.
-High-confidence changes are auto-applied. Medium-confidence changes are
-presented for your confirmation first. Low-confidence changes prompt for
-clarification. You always see the proposed scope before anything is written.
-
----
-
-## How It All Flows
+## How A Request Moves Through The Control Plane
 
 ```text
 Your request
-  → Classifier assigns change class (patch / design / feature / core)
-  → Refinement Router selects workflow sequence or coding path
-  → Context Graph queried for relevant contracts and files
-  → Scope Proposer (patch) or Contract Surface Planner (feature / design)
-      builds the targeted work set
-  → Coding Worker or Surface Regeneration Worker executes
-  → Harness Decision Policy: auto-apply, confirm, or clarify
+  → change classifier assigns patch / design / feature / core
+  → route resolver selects a workflow sequence or scoped coding path
+  → patch requests go to scope proposal + coding worker
+  → feature/design requests go to contract-surface planning + regeneration
+  → decision policy decides auto-apply, confirm, clarify, or restart
 ```
 
-For a `feature` request like "add export controls to the projects table," the
-Harness identifies `projects` as a module, maps `module_action` as the contract
-surface, resolves the full dependency chain
-(`module.yaml → handler.py → service.py → schemas.py → page YAML`), and
-generates each in dependency order. A generic agent would have to guess all of
-that.
+Two concrete examples:
 
-For a `patch` request like "fix the broken column header in the projects table,"
-the Harness queries the Context Graph, scopes to the page binding and its
-nearest module contract, runs the Coding Worker against only those files, and
-auto-applies if confidence is high.
+**Patch request**
+
+```text
+"Fix the broken column header in the projects table"
+
+→ classify: patch
+→ query Context Graph for likely page/module scope
+→ run scoped coding worker against only those files
+→ auto-apply or ask to confirm depending on confidence
+```
+
+**Feature request**
+
+```text
+"Add export controls to the projects table"
+
+→ classify: feature
+→ route: app_revision
+→ plan contract surfaces in dependency order
+→ regenerate affected surfaces without rerunning the full build
+```
+
+## Why This Exists
+
+Most AI tools help humans write software faster. The Mozaiks control plane helps
+Mozaiks change generated software at the right level.
+
+Because the app was generated from contracts in the first place, the control
+plane can classify change intent, reason about artifact ownership, preserve the
+current build state, and choose the smallest accurate next step.
+
+See [Refinement Control Plane](./04-refinement-control-plane.md) for the
+refinement-specific path inside this system.
 
 ---
 
-## Read More
+**Architecture references**
 
-- [Refinement Control Plane](./04-refinement-control-plane.md) — how the four
-  change classes work and what each one means for your build
 - [Control-Plane Harness Architecture](../../architecture/workflows/control-plane-harness-architecture.md)
 - [Context Graph and Code Intelligence](../../architecture/foundations/context-graph-and-code-intelligence.md)

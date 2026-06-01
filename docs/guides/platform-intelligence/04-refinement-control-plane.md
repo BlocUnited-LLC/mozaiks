@@ -1,12 +1,17 @@
 # Refinement Control Plane
 
-Generating your app is the starting point. The refinement control plane is what
-makes every change after that accurate and fast.
+If [Mozaiks Control Plane](./01-overview.md) is the umbrella, the refinement
+control plane is the post-generation path inside it.
 
-When you ask Mozaiks to change something — rename a field, restructure a page,
-add a feature, rethink the product direction — you should not have to re-run
-everything from scratch. Mozaiks figures out how large the change really is and
-does only what the change actually requires.
+This is the part that takes an existing app or artifact, interprets a change
+request, and decides the smallest safe next step. In the current first-party
+implementation, that path is checkpoint/control-plane re-entry driven by
+`app/config/ai.json` and the selected `control_plane.yaml` pack — not a
+separate dedicated `RefinementWorkflow`.
+
+When you ask Mozaiks to rename a field, restructure a page, add a feature, or
+rethink the product direction, the refinement control plane decides how big the
+change really is and does only what the change requires.
 
 ## The Four Types of Change
 
