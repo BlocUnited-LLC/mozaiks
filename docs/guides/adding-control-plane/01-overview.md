@@ -1,26 +1,10 @@
 # Add the Control Plane
 
-Add the control plane when an app needs to understand a change request, choose
-the right next path, and refine existing app artifacts without treating every
-edit like a full rebuild.
+Mozaiks does not just generate apps. It knows how to change them intelligently after generation.
 
-Use this guide when you want Mozaiks to:
+When you ask for a change, Mozaiks does not treat every request like a blind code edit. It understands whether you are asking for a tiny patch, a design adjustment, a new capability, or a concept-level pivot. It routes to the smallest accurate next step, preserves everything above the change, and only regenerates what actually needs to move.
 
-- classify change requests as `patch`, `design`, `feature`, or `core`
-- route a request into the right workflow sequence or scoped coding path
-- scope the work to the smallest relevant contracts and files
-- preserve the current build state while still allowing targeted refinement
-
-The control plane is not one file. In the current first-party builder app, it is
-defined by three declarative surfaces:
-
-## File Structure
-
-```text
-factory_app/app/config/ai.json
-factory_app/control_plane/config/control_plane.yaml
-factory_app/workflows/extended_orchestration/extension_registry.json
-```
+This is the Mozaiks Control Plane.
 
 ## Schema Shapes
 
@@ -36,6 +20,17 @@ This file turns the control plane on and selects the model profiles it uses.
 
 ```json
 {
+  "ask": {
+    "ask_mode_prompt": "You are the Mozaiks assistant. Help users shape, generate, connect, and refine apps in Mozaiks Studio using the shared builder workflows.",
+    "ask_context_variables": null
+  },
+  "chat": {
+    "chat_startup_mode": "ask"
+  },
+  "workflows": {
+    "entry_point": "ValueEngine",
+    "resume_policy": "last_active_then_oldest_then_entry_point"
+  },
   "control_plane": {
     "enabled": true,
     "profile": "default",
@@ -53,6 +48,45 @@ This file turns the control plane on and selects the model profiles it uses.
   }
 }
 ```
+
+The `ask`, `chat`, and `workflows` sections are the other top-level shapes in
+this file.
+
+### `ask`
+
+The `ask` section sets the prompt used for the shared Studio assistant entry.
+
+```json
+"ask": {
+  "ask_mode_prompt": "You are the Mozaiks assistant. Help users shape, generate, connect, and refine apps in Mozaiks Studio using the shared builder workflows.",
+  "ask_context_variables": null
+}
+```
+
+### `chat`
+
+The `chat` section chooses the startup mode for the shared chat experience.
+
+```json
+"chat": {
+  "chat_startup_mode": "ask"
+}
+```
+
+### `workflows`
+
+The `workflows` section sets the default workflow entry point and the resume
+policy.
+
+```json
+"workflows": {
+  "entry_point": "ValueEngine",
+  "resume_policy": "last_active_then_oldest_then_entry_point"
+}
+```
+
+Together, `ask`, `chat`, and `workflows` define the non-control-plane runtime
+surfaces that sit around the control plane in the same app config file.
 
 ## `factory_app/control_plane/config/control_plane.yaml`
 
