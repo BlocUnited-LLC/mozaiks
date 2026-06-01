@@ -169,7 +169,7 @@ nav:
           - Builder Execution Model: architecture/builder/builder-execution-model.md
           - End-to-End Build Lifecycle: architecture/builder/end-to-end-build-lifecycle.md
           - Studio Product Model: architecture/builder/studio-product-model.md
-          - Database Intent and Revision: architecture/builder/database-intent-and-revision-contract.md
+          - Data Contract and Revision: architecture/builder/data-contract-and-revision-contract.md
           - AppGenerator Output Assembly: architecture/builder/appgenerator-output-assembly-contract.md
           - AgentGenerator Output Assembly: architecture/builder/agentgenerator-output-assembly-contract.md
           - App-Backend Admin Contract: architecture/builder/app-backend-admin-contract.md
@@ -188,7 +188,6 @@ nav:
               - Workflow UI Primitive Catalog: architecture/frontend/ui-system/workflow-ui-primitive-catalog.md
               - Transition UI Primitives: architecture/frontend/ui-system/transition-ui-primitives.md
               - UI System Quality Gates: architecture/frontend/ui-system/ui-system-quality-gates.md
-              - Other:
           - Keycloak Auth: architecture/keycloak-auth.md
           - Mobile Client Contract: architecture/mobile-client-contract.md
           - Orchestration and Decomposition: architecture/orchestration-and-decomposition.md
